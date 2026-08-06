@@ -722,6 +722,7 @@ impl Engine {
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if relates.is_empty() {
             return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
                 errors_suppressed: 0,
                 applied: true,
                 results: Vec::new(),
@@ -833,6 +834,7 @@ impl Engine {
                 })
                 .collect();
             return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
                 errors_suppressed: suppressed,
                 applied: false,
                 results,
@@ -912,7 +914,8 @@ impl Engine {
             .filter(|p| matches!(p.action, RelateAction::Removed))
             .map(|p| p.to.clone())
             .collect();
-        super::gc_orphan_stubs_among(&mut self.store, removed_targets.iter());
+        let orphan_stubs_removed =
+            super::gc_orphan_stubs_among(&mut self.store, removed_targets.iter());
 
         self.invalidate_communities();
         self.invalidate_search_indexes();
@@ -936,6 +939,7 @@ impl Engine {
             .collect();
 
         Ok(crate::ops::BatchResult {
+                orphan_stubs_removed,
             errors_suppressed: 0,
             applied: true,
             results,

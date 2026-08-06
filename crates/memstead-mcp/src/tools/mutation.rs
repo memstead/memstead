@@ -277,10 +277,10 @@ pub struct PatchInput {
     pub all: Option<bool>,
 }
 
-/// Parameters for memstead_relate.
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+/// One relation operation in `memstead_relate`'s list.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RelateParams {
+pub struct RelateOpInput {
     #[schemars(description = "Full source entity ID")]
     pub from: String,
     #[schemars(description = "Full target entity ID")]
@@ -297,6 +297,17 @@ pub struct RelateParams {
     )]
     #[serde(default)]
     pub description: Option<String>,
+}
+
+/// Parameters for memstead_relate — a list of relation operations
+/// applied atomically. The single-relation call is a list of one.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelateParams {
+    #[schemars(
+        description = "Relation operations, applied atomically in order — all-or-nothing in one commit per touched mem. Each entry is `{from, to, type, remove?, description?}` with per-entry validation identical to a single call; later entries validate against the graph state produced by earlier ones (an acyclic check sees edges added earlier in the list). A single failing entry refuses the WHOLE list and the refusal reports every failing entry."
+    )]
+    pub relations: Vec<RelateOpInput>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
 }

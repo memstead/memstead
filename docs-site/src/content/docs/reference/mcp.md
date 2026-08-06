@@ -1011,7 +1011,7 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
 
 **Flavour:** lean + full
 
-Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead_schema` — relationship vocabulary and shape live there (see server instructions). Type names are case-insensitive; stored canonically as UPPER_SNAKE_CASE. Unknown rel-types return `INVALID_REL_TYPE` with `details.allowed` (each `{name, when_to_use}`) and nearest-match `suggestion`. Shape pinned via `source_types` / `target_types` — add-path violations return `INVALID_REL_SHAPE` with `details.rel_type`, `details.from_type`, `details.to_type`, `details.allowed_source_types`, `details.allowed_target_types`, `suggestion`. Remove skips shape validation; existing violations surface via `memstead_health`. Pass `remove: true` to delete an edge. Source (`from`) must be real; target (`to`) may be auto-stubbed (wiki-link slug grammar — malformed ids return `INVALID_ENTITY_ID` with `details.id` / `details.reason`). Cross-mem edges policy-gated by `cross_mem_links` / `default_cross_links`: denial returns `CROSS_MEM_LINK_NOT_ALLOWED`; absent ReadOnly targets return `CROSS_MEM_TARGET_NOT_FOUND`; cross-different-schema edges undeclared in `cross_mem_relationships` return `CROSS_MEM_EDGE_NOT_DECLARED`. Auto-stubs into an uncreated mem emit `CROSS_MEM_TARGET_MEM_UNCREATED`. Cycle-closing edges on `acyclic: true` types return `RELATIONSHIP_CYCLE` with `details.rel_type`, `details.from`, `details.to`, `details.existing_path`, `details.path_truncated`. Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, empty `commit_sha`). Optional `note` — see server instructions. Response `_hash` is next mutation's `expected_hash`. Edges never move files — entities live at `{mem}/{slug}.md`. On `remove: true`, a stub whose last incoming edge dropped is GC'd and listed in `orphan_stubs_removed`; surviving body wiki-links refuse with `RELATION_HAS_BODY_LINKS` (`details.body_links` — drop them via `memstead_update` and retry).
+Connect entities with typed edges — a list of relation operations applied atomically. `relations` carries one or more `{from, to, type, remove?, description?}` entries; the whole list is all-or-nothing in ONE commit per touched mem, per-entry validation identical to a single operation, in-order semantics (later entries validate against the state earlier entries produced; an acyclic check sees edges added earlier in the list). A single-relation call is a list of one. Pre-fetch the mem's schema via `memstead_schema` (see server instructions). Type names case-insensitive; stored UPPER_SNAKE_CASE. One failing entry refuses the WHOLE list — nothing commits, every failing entry reported: a list of one surfaces its entry's own typed code top-level (`INVALID_REL_TYPE` with `details.allowed` + `suggestion`, `INVALID_REL_SHAPE`, `CROSS_MEM_LINK_NOT_ALLOWED`, `CROSS_MEM_TARGET_NOT_FOUND`, `RELATIONSHIP_CYCLE` with `details.existing_path`, `INVALID_ENTITY_ID`); larger lists wrap under `BATCH_REFUSED` with `details.entries[]` of `{index, from, to, rel_type, code, message, details}` (`errors_suppressed` counts envelopes past the cap). Remove skips shape validation. Per entry: `remove: true` deletes; `from` must be real; `to` may auto-stub (`AUTO_STUB_CREATED`; into an uncreated mem: `CROSS_MEM_TARGET_MEM_UNCREATED`). Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, `action: "noop"`). Response: `results[]` in submission order, each `{from, to, rel_type, action, source, _hash}` — `_hash` is that source's next `expected_hash`; top-level `commit_sha` (empty when all no-op), `warnings`, `orphan_stubs_removed` (stubs GC'd when a removed edge was their last referrer; surviving body wiki-links refuse `RELATION_HAS_BODY_LINKS`). Optional `note` rides every entry. Edges never move files.
 
 **Hints:** `read_only` = false, `destructive` = false, `idempotent` = true, `open_world` = false
 
@@ -1019,21 +1019,51 @@ Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead
 
 ```json
 {
+  "$defs": {
+    "RelateOpInput": {
+      "additionalProperties": false,
+      "description": "One relation operation in `memstead_relate`'s list.",
+      "properties": {
+        "description": {
+          "default": null,
+          "description": "Optional per-edge description applied on add. Validated against the rel-type's `per_edge_description` posture in the pinned schema: `forbidden` (default) rejects a non-empty description with `DESCRIPTION_NOT_PERMITTED`; `required` rejects its absence with `MISSING_REQUIRED_DESCRIPTION`; `optional` accepts both. Empty / whitespace-only strings normalise to absent before validation. Ignored on the remove path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "description": "Full source entity ID",
+          "type": "string"
+        },
+        "remove": {
+          "description": "Set true to remove the relationship instead of creating it",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "to": {
+          "description": "Full target entity ID",
+          "type": "string"
+        },
+        "type": {
+          "description": "Relationship type. Canonical form is UPPER_SNAKE_CASE (USES, PART_OF, DEPENDS_ON) and is what the engine stores; case-insensitive inputs (`uses`, `Part_Of`) are accepted and echoed back in the response as their canonical form. The JSON Schema `pattern` advertises `^[A-Za-z][A-Za-z_]*$` for client-side validators; the engine enforces the same character set independently — characters outside it return `INVALID_REL_TYPE` at the engine boundary regardless of whether the client pre-filters.",
+          "pattern": "^[A-Za-z][A-Za-z_]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "type": "object"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "description": {
-      "default": null,
-      "description": "Optional per-edge description applied on add. Validated against the rel-type's `per_edge_description` posture in the pinned schema: `forbidden` (default) rejects a non-empty description with `DESCRIPTION_NOT_PERMITTED`; `required` rejects its absence with `MISSING_REQUIRED_DESCRIPTION`; `optional` accepts both. Empty / whitespace-only strings normalise to absent before validation. Ignored on the remove path.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "from": {
-      "description": "Full source entity ID",
-      "type": "string"
-    },
     "note": {
       "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
       "type": [
@@ -1041,27 +1071,16 @@ Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead
         "null"
       ]
     },
-    "remove": {
-      "description": "Set true to remove the relationship instead of creating it",
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "to": {
-      "description": "Full target entity ID",
-      "type": "string"
-    },
-    "type": {
-      "description": "Relationship type. Canonical form is UPPER_SNAKE_CASE (USES, PART_OF, DEPENDS_ON) and is what the engine stores; case-insensitive inputs (`uses`, `Part_Of`) are accepted and echoed back in the response as their canonical form. The JSON Schema `pattern` advertises `^[A-Za-z][A-Za-z_]*$` for client-side validators; the engine enforces the same character set independently — characters outside it return `INVALID_REL_TYPE` at the engine boundary regardless of whether the client pre-filters.",
-      "pattern": "^[A-Za-z][A-Za-z_]*$",
-      "type": "string"
+    "relations": {
+      "description": "Relation operations, applied atomically in order — all-or-nothing in one commit per touched mem. Each entry is `{from, to, type, remove?, description?}` with per-entry validation identical to a single call; later entries validate against the graph state produced by earlier ones (an acyclic check sees edges added earlier in the list). A single failing entry refuses the WHOLE list and the refusal reports every failing entry.",
+      "items": {
+        "$ref": "#/$defs/RelateOpInput"
+      },
+      "type": "array"
     }
   },
   "required": [
-    "from",
-    "to",
-    "type"
+    "relations"
   ],
   "type": "object"
 }

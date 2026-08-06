@@ -829,6 +829,7 @@ impl Engine {
 
         if creates.is_empty() {
             return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
                 errors_suppressed: 0,
                 applied: true,
                 results: Vec::new(),
@@ -993,6 +994,7 @@ impl Engine {
                 })
                 .collect();
             return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
                 errors_suppressed: suppressed,
                 applied: false,
                 results,
@@ -1116,6 +1118,7 @@ impl Engine {
             })
             .collect();
         Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
             errors_suppressed: 0,
             applied: true,
             results,

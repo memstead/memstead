@@ -43,6 +43,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **`memstead_relate` is a list of relation operations, applied
+  atomically.** Breaking parameter-shape change: the tool now takes
+  `relations: [{from, to, type, remove?, description?}, ...]` plus an
+  optional shared `note` — the whole list is all-or-nothing in one
+  commit per touched mem, with per-entry validation identical to a
+  single operation and in-order semantics (later entries validate
+  against the state earlier entries produced). One failing entry
+  refuses the whole list and the refusal reports every failing entry:
+  a list of one surfaces its entry's own typed code top-level; larger
+  lists wrap under `BATCH_REFUSED` with per-entry envelopes. The
+  response is a plural `results[]` envelope (per entry: from, to,
+  rel_type, action, source, `_hash`) with top-level `commit_sha`,
+  `warnings`, and `orphan_stubs_removed`; a list of one routes through
+  the single-op engine path, so it behaves exactly like the historical
+  single call modulo envelope plurality. Both server flavours. The
+  batch-relate CLI command and the pinned MCP batch-tool abstentions
+  are unchanged — atomicity arrives as the list form, never a second
+  tool. `BatchResult` additionally reports `orphan_stubs_removed`
+  (also visible on the CLI batch envelope).
 - **Mem curation reaches MCP.** `memstead_mem_create` gains optional
   `title`, `description`, and `subject` parameters (applied at
   creation through the same setters the CLI verbs use), and the new

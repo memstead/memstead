@@ -843,19 +843,23 @@ fn full_memstead_relate_returns_typed_success_envelope() {
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "from": from, "to": to, "type": "USES" }),
+        json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on relate success");
+    let entry = body
+        .get("results")
+        .and_then(|r| r.get(0))
+        .expect("plural envelope carries results[0]");
     assert_eq!(
-        body.get("from").and_then(Value::as_str),
+        entry.get("from").and_then(Value::as_str),
         Some(from.as_str()),
         "relate `from` drifted: {body}"
     );
     assert_eq!(
-        body.get("to").and_then(Value::as_str),
+        entry.get("to").and_then(Value::as_str),
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
@@ -864,7 +868,7 @@ fn full_memstead_relate_returns_typed_success_envelope() {
     // `alias_target_rel_type` pointer; this test pins the envelope
     // shape, not the rel-type specifically.
     assert_eq!(
-        body.get("rel_type").and_then(Value::as_str),
+        entry.get("rel_type").and_then(Value::as_str),
         Some("USES"),
         "full relate `rel_type` drifted: {body}"
     );
@@ -1059,7 +1063,7 @@ fn full_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": target, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": target, "type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
 
@@ -1466,7 +1470,7 @@ fn full_memstead_entity_structured_relationships_carry_typed_shape() {
     let (to, _) = create_and_get_id_hash(&mut harness, "Rel Target");
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "from": from, "to": to, "type": "PART_OF" }),
+        json!({ "relations": [{ "from": from, "to": to, "type": "PART_OF" }] }),
     );
 
     let result = harness.call_tool("memstead_entity", json!({ "id": from }));
@@ -1556,7 +1560,7 @@ fn full_auto_stub_then_update_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": stub_id, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
     let body = relate
@@ -1610,7 +1614,7 @@ fn full_rename_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": stub_id, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
     );
 
     let rename = harness.call_tool(
@@ -1653,12 +1657,12 @@ fn full_relate_from_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": stub_id, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
     );
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "from": stub_id, "to": source, "type": "USES" }),
+        json!({ "relations": [{ "from": stub_id, "to": source, "type": "USES" }] }),
     );
     let is_error = result
         .get("isError")
@@ -2085,12 +2089,10 @@ fn full_memstead_relate_with_forbidden_description_emits_typed_envelope() {
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({
-            "from": from,
+        json!({ "relations": [{ "from": from,
             "to": to,
             "type": "REFERENCES",
-            "description": "should be refused",
-        }),
+            "description": "should be refused" }] }),
     );
     let is_error = result
         .get("isError")

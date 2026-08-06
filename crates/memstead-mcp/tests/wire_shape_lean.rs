@@ -737,27 +737,31 @@ fn lean_memstead_relate_returns_typed_success_envelope() {
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "from": from, "to": to, "type": "USES" }),
+        json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on relate success");
+    let entry = body
+        .get("results")
+        .and_then(|r| r.get(0))
+        .expect("plural envelope carries results[0]");
     assert_eq!(
-        body.get("from").and_then(Value::as_str),
+        entry.get("from").and_then(Value::as_str),
         Some(from.as_str()),
         "relate `from` drifted: {body}"
     );
     assert_eq!(
-        body.get("to").and_then(Value::as_str),
+        entry.get("to").and_then(Value::as_str),
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
     // **Drift recorded:** lean names the field `type`; full names it `rel_type`.
     assert_eq!(
-        body.get("type").and_then(Value::as_str),
+        entry.get("rel_type").and_then(Value::as_str),
         Some("USES"),
-        "lean relate `type` drifted: {body}"
+        "lean relate `rel_type` drifted: {body}"
     );
     assert!(
         body.get("rel_type").is_none(),
@@ -950,7 +954,7 @@ fn lean_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": target, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": target, "type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
 
@@ -1031,7 +1035,7 @@ fn lean_auto_stub_then_update_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": stub_id, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
     let body = relate
@@ -1091,7 +1095,7 @@ fn lean_rename_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": stub_id, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
     );
 
     let rename = harness.call_tool(
@@ -1134,12 +1138,12 @@ fn lean_relate_from_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "from": source, "to": stub_id, "type": "USES" }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
     );
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "from": stub_id, "to": source, "type": "USES" }),
+        json!({ "relations": [{ "from": stub_id, "to": source, "type": "USES" }] }),
     );
     let is_error = result
         .get("isError")

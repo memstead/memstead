@@ -25,7 +25,7 @@ use crate::error_envelope::{tool_error, tool_error_with_payload};
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams, ReloadParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
+    CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams, UpdateParams,
 };
 
 /// The MCP server wrapping the Engine.
@@ -2656,7 +2656,9 @@ impl McpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Connect two entities with a typed edge. Pre-fetch the mem's schema via `memstead_schema` — relationship vocabulary and shape live there (see server instructions). Type names are case-insensitive; stored canonically as UPPER_SNAKE_CASE. Unknown rel-types return `INVALID_REL_TYPE` with `details.allowed` (each `{name, when_to_use}`) and nearest-match `suggestion`. Shape pinned via `source_types` / `target_types` — add-path violations return `INVALID_REL_SHAPE` with `details.rel_type`, `details.from_type`, `details.to_type`, `details.allowed_source_types`, `details.allowed_target_types`, `suggestion`. Remove skips shape validation; existing violations surface via `memstead_health`. Pass `remove: true` to delete an edge. Source (`from`) must be real; target (`to`) may be auto-stubbed (wiki-link slug grammar — malformed ids return `INVALID_ENTITY_ID` with `details.id` / `details.reason`). Cross-mem edges policy-gated by `cross_mem_links` / `default_cross_links`: denial returns `CROSS_MEM_LINK_NOT_ALLOWED`; absent ReadOnly targets return `CROSS_MEM_TARGET_NOT_FOUND`; cross-different-schema edges undeclared in `cross_mem_relationships` return `CROSS_MEM_EDGE_NOT_DECLARED`. Auto-stubs into an uncreated mem emit `CROSS_MEM_TARGET_MEM_UNCREATED`. Cycle-closing edges on `acyclic: true` types return `RELATIONSHIP_CYCLE` with `details.rel_type`, `details.from`, `details.to`, `details.existing_path`, `details.path_truncated`. Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, empty `commit_sha`). Optional `note` — see server instructions. Response `_hash` is next mutation's `expected_hash`. Edges never move files — entities live at `{mem}/{slug}.md`. On `remove: true`, a stub whose last incoming edge dropped is GC'd and listed in `orphan_stubs_removed`; surviving body wiki-links refuse with `RELATION_HAS_BODY_LINKS` (`details.body_links` — drop them via `memstead_update` and retry).",
+        description = "Connect entities with typed edges — a list of relation operations applied atomically. `relations` carries one or more `{from, to, type, remove?, description?}` entries; the whole list is all-or-nothing in ONE commit per touched mem, per-entry validation identical to a single operation, in-order semantics (later entries validate against the state earlier entries produced; an acyclic check sees edges added earlier in the list). A single-relation call is a list of one. Pre-fetch the mem's schema via `memstead_schema` (see server instructions). Type names case-insensitive; stored UPPER_SNAKE_CASE. One failing entry refuses the WHOLE list — nothing commits, every failing entry reported: a list of one surfaces its entry's own typed code top-level (`INVALID_REL_TYPE` with `details.allowed` + `suggestion`, `INVALID_REL_SHAPE`, `CROSS_MEM_LINK_NOT_ALLOWED`, `CROSS_MEM_TARGET_NOT_FOUND`, `RELATIONSHIP_CYCLE` with `details.existing_path`, `INVALID_ENTITY_ID`); larger lists wrap under `BATCH_REFUSED` with `details.entries[]` of `{index, from, to, rel_type, code, message, details}` (`errors_suppressed` counts envelopes past the cap). Remove skips shape validation. Per entry: `remove: true` deletes; `from` must be real; `to` may auto-stub (`AUTO_STUB_CREATED`; into an uncreated mem: `CROSS_MEM_TARGET_MEM_UNCREATED`). Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, `action: \"noop\"`). Response: `results[]` in submission order, each `{from, to, rel_type, action, source, _hash}` — `_hash` is that source's next `expected_hash`; top-level `commit_sha` (empty when all no-op), `warnings`, `orphan_stubs_removed` (stubs GC'd when a removed edge was their last referrer; surviving body wiki-links refuse `RELATION_HAS_BODY_LINKS`). Optional `note` rides every entry. Edges never move files.",
+
+
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -2668,83 +2670,251 @@ impl McpServer {
         if let Some(err) = validate_note(p.note.as_deref()) {
             return err;
         }
-        let from = EntityId::canonical(&p.from);
-        let to = EntityId::canonical(&p.to);
-        let mem_for_anchor = from.mem().to_string();
-        let remove = p.remove.unwrap_or(false);
+        if p.relations.is_empty() {
+            let msg = "relations must carry at least one operation";
+            return tool_error_with_payload(
+                "INVALID_INPUT",
+                msg,
+                envelope(
+                    "INVALID_INPUT",
+                    msg.to_string(),
+                    serde_json::json!({ "message": msg }),
+                ),
+            );
+        }
 
-        // Wire JSON mirrors full's `RelateResult` shape — the unified
-        // outcome's `action` field is intentionally not in the wire
-        // body; consumers branch on `commit_sha.is_empty()`.
-        // `orphan_stubs_removed` is wired through from the engine outcome onto
-        // the wire response so a relate-remove that GC's the last-
-        // referrer stub surfaces the gone id without a follow-up
-        // `memstead_search(stub: true)` poll.
+        // The whole list is one engine batch: all-or-nothing in one
+        // commit per touched mem, in-order validation, report-all
+        // refusals. A list of one routes through the same path and
+        // carries the same per-entry body today's single call did.
+        let ops: Vec<(memstead_base::RelateEntityArgs, Option<String>)> = p
+            .relations
+            .iter()
+            .map(|op| {
+                (
+                    memstead_base::RelateEntityArgs {
+                        source: EntityId::canonical(&op.from),
+                        target: EntityId::canonical(&op.to),
+                        rel_type: op.r#type.clone(),
+                        remove: op.remove.unwrap_or(false),
+                        expected_hash: None,
+                        description: op.description.clone(),
+                    },
+                    p.note.clone(),
+                )
+            })
+            .collect();
+        let mem_for_anchor = ops[0].0.source.mem().to_string();
+
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
-        let args = memstead_base::RelateEntityArgs {
-            source: from.clone(),
-            target: to.clone(),
-            rel_type: p.r#type.clone(),
-            remove,
-            expected_hash: None,
-            description: p.description.clone(),
-        };
         let client = self.client.get().cloned();
-        match engine.relate_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
-            Ok(outcome) => {
-                let mut body = serde_json::json!({
-                    "from": outcome.from.to_string(),
-                    "to": outcome.to.to_string(),
-                    "rel_type": outcome.rel_type,
-                    "source": outcome.source,
-                    "_hash": outcome.content_hash,
-                    "commit_sha": outcome.commit_sha,
-                    // Auto-stub creation surfaces through the typed
-                    // `AUTO_STUB_CREATED` entry in `warnings[]` — the
-                    // deprecated top-level `stub_warning: Option<String>`
-                    // field was retired in Item 03 so every diagnostic
-                    // follows the uniform `{ code, message, details }`
-                    // shape and agents iterating warnings catch the
-                    // stub-creation fact without special-casing.
-                    "warnings": outcome.warnings,
-                });
-                // Surface the `orphan_stubs_removed` field on every
-                // relate response (always present, possibly empty) so
-                // agents calling `memstead_relate(remove: true)` learn
-                // which stub entities the engine GC'd when the removed
-                // edge was the last referrer — without polling
-                // `memstead_search(stub: true)` afterwards. The shape is
-                // always-emit so consumers branch uniformly on the
-                // field; add paths and no-op removes carry an empty
-                // array.
-                body["orphan_stubs_removed"] = serde_json::json!(
-                    outcome
-                        .orphan_stubs_removed
-                        .iter()
-                        .map(|i| i.to_string())
-                        .collect::<Vec<_>>()
-                );
-                attach_durability(&mut body, &engine, outcome.from.mem());
-                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
-                let res = json_response(&body);
-                match mem_schema_ref_unified(&engine, &mem_for_anchor) {
-                    Some(s) => with_mem_schema_anchor(res, &s),
-                    None => res,
+
+        // A list of one routes through the single-op engine path so it
+        // behaves byte-identically to the historical single call —
+        // full error enrichment (recovery payloads, message text),
+        // full warning parity — wrapped in the same plural envelope
+        // larger lists produce.
+        if p.relations.len() == 1 {
+            let (args, note) = {
+                let mut it = ops.into_iter();
+                it.next().expect("len checked above")
+            };
+            return match engine.relate_entity(args, Actor::Agent, client.as_ref(), note.as_deref())
+            {
+                Ok(outcome) => {
+                    let action = match outcome.action {
+                        memstead_base::RelateAction::Added => "added",
+                        memstead_base::RelateAction::Removed => "removed",
+                        memstead_base::RelateAction::NoOpAlreadyPresent
+                        | memstead_base::RelateAction::NoOpAbsent => "noop",
+                    };
+                    let mut body = serde_json::json!({
+                        "results": [{
+                            "from": outcome.from.to_string(),
+                            "to": outcome.to.to_string(),
+                            "rel_type": outcome.rel_type,
+                            "action": action,
+                            "source": outcome.source,
+                            "_hash": outcome.content_hash,
+                        }],
+                        "commit_sha": outcome.commit_sha,
+                        "warnings": outcome.warnings,
+                        "orphan_stubs_removed": outcome
+                            .orphan_stubs_removed
+                            .iter()
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>(),
+                    });
+                    attach_durability(&mut body, &engine, outcome.from.mem());
+                    attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                    let res = json_response(&body);
+                    match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+                        Some(sr) => with_mem_schema_anchor(res, &sr),
+                        None => res,
+                    }
                 }
-            }
+                Err(e) => {
+                    let notices = engine.take_mem_changed_notices();
+                    let warnings = notices_as_reload_warnings(&notices);
+                    attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
+                }
+            };
+        }
+
+        // Snapshot which targets are absent pre-call so applied
+        // auto-stubs can surface the same AUTO_STUB_CREATED warning
+        // the single call emitted.
+        let absent_targets: std::collections::HashSet<String> = p
+            .relations
+            .iter()
+            .filter(|op| !op.remove.unwrap_or(false))
+            .map(|op| EntityId::canonical(&op.to))
+            .filter(|to| engine.store().get(to).is_none())
+            .map(|to| to.to_string())
+            .collect();
+        let result = match engine.batch_relate(ops, Actor::Agent, client.as_ref()) {
+            Ok(r) => r,
             Err(e) => {
-                // The notice already rode `structured_content` here;
-                // the text channel lacked the `MEM_RELOADED` line a
-                // successful response carries. A mutation reloads inside
-                // the engine, so reconstruct the warning from the
-                // drained notices to match the success channel split —
-                // collision (`HASH_MISMATCH`) is the path drift matters
-                // most, since it lands on the very entity being written.
                 let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
-                attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
+                return attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices);
             }
+        };
+
+        if !result.applied {
+            // Report-all refusal: nothing committed; every failing
+            // entry ships its typed envelope. A list of one surfaces
+            // its single entry's own code top-level so error-branching
+            // callers keep working; larger lists wrap under
+            // BATCH_REFUSED with per-entry envelopes in
+            // `details.entries`.
+            let entries: Vec<serde_json::Value> = result
+                .results
+                .iter()
+                .zip(p.relations.iter())
+                .enumerate()
+                .map(|(i, (entry, op))| {
+                    let mut e = serde_json::json!({
+                        "index": i,
+                        "from": op.from,
+                        "to": op.to,
+                        "rel_type": op.r#type,
+                        "action": entry.action,
+                    });
+                    if let Some(err) = &entry.error {
+                        e["code"] = serde_json::json!(err.code);
+                        e["message"] = serde_json::json!(err.message);
+                        e["details"] = err.details.clone();
+                    }
+                    e
+                })
+                .collect();
+            let notices = engine.take_mem_changed_notices();
+            let drift = notices_as_reload_warnings(&notices);
+            let msg = format!(
+                "batch refused — {} of {} operation(s) failed, nothing committed",
+                result.failed,
+                p.relations.len(),
+            );
+            let payload = envelope(
+                "BATCH_REFUSED",
+                msg.clone(),
+                serde_json::json!({
+                    "entries": entries,
+                    "failed": result.failed,
+                    "errors_suppressed": result.errors_suppressed,
+                }),
+            );
+            return attach_drift_to_error(
+                tool_error_with_payload("BATCH_REFUSED", &msg, payload),
+                &drift,
+                notices,
+            );
+        }
+
+        // Applied: enrich every entry with the same fields today's
+        // single response carried — canonical rel_type comes back via
+        // the store edge, `source` labels body_link vs explicit, and
+        // `_hash` is the source entity's post-commit hash (the next
+        // valid expected_hash for that entity). Noop entries
+        // additionally synthesize the typed no-op warning the single
+        // call emitted (DUPLICATE_RELATIONSHIP / NO_SUCH_RELATIONSHIP).
+        let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+        let entries: Vec<serde_json::Value> = result
+            .results
+            .iter()
+            .zip(p.relations.iter())
+            .map(|(entry, op)| {
+                let from = EntityId::canonical(&op.from);
+                let to = EntityId::canonical(&op.to);
+                let canonical_type = op.r#type.to_uppercase();
+                if entry.action == "noop" {
+                    if op.remove.unwrap_or(false) {
+                        warnings.push(memstead_base::ops::WarningHint::NoSuchRelationship {
+                            rel_type: canonical_type.clone(),
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    } else {
+                        warnings.push(memstead_base::ops::WarningHint::DuplicateRelationship {
+                            rel_type: canonical_type.clone(),
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    }
+                }
+                if !op.remove.unwrap_or(false)
+                    && absent_targets.contains(&to.to_string())
+                    && engine.store().get(&to).map(|e| e.stub).unwrap_or(false)
+                {
+                    warnings.push(memstead_base::ops::WarningHint::AutoStubCreated {
+                        stub_id: to.clone(),
+                    });
+                }
+                let source_label = engine
+                    .store()
+                    .outgoing(&from)
+                    .iter()
+                    .find(|e| e.target == to && e.rel_type.eq_ignore_ascii_case(&op.r#type))
+                    .map(|e| match e.source {
+                        memstead_base::EdgeSource::BodyLink => "body_link",
+                        memstead_base::EdgeSource::Hierarchy => "hierarchy",
+                        memstead_base::EdgeSource::Explicit => "explicit",
+                    })
+                    .unwrap_or("explicit");
+                let hash = engine
+                    .store()
+                    .get(&from)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "from": from.to_string(),
+                    "to": to.to_string(),
+                    "rel_type": canonical_type,
+                    "action": entry.action,
+                    "source": source_label,
+                    "_hash": hash,
+                })
+            })
+            .collect();
+
+        let mut body = serde_json::json!({
+            "results": entries,
+            "commit_sha": result.commit_sha,
+            "warnings": warnings,
+            "orphan_stubs_removed": result
+                .orphan_stubs_removed
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>(),
+        });
+        attach_durability(&mut body, &engine, mem_for_anchor.as_str());
+        attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+        let res = json_response(&body);
+        match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+            Some(s) => with_mem_schema_anchor(res, &s),
+            None => res,
         }
     }
 
@@ -4828,13 +4998,15 @@ mod tests {
 
         let relate = |from: &str, to: &str| {
             let r = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: from.to_string(),
                 to: to.to_string(),
                 r#type: "USES".to_string(),
                 remove: None,
                 description: None,
-                note: None,
-            }));
+            }],
+            note: None,
+        }));
             assert!(
                 !r.is_error.unwrap_or(false),
                 "relate {from}->{to}: {}",
@@ -4976,13 +5148,15 @@ mod tests {
         };
         let relate = |from: &str, to: &str| {
             let r = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: from.to_string(),
                 to: to.to_string(),
                 r#type: "USES".to_string(),
                 remove: None,
                 description: None,
-                note: None,
-            }));
+            }],
+            note: None,
+        }));
             assert!(
                 !r.is_error.unwrap_or(false),
                 "relate {from}->{to}: {}",
@@ -5120,11 +5294,13 @@ mod tests {
         mk("A1");
         mk("A2");
         let r = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--a1".to_string(),
-            to: "specs--a2".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
-            description: None,
+            relations: vec![RelateOpInput {
+                from: "specs--a1".to_string(),
+                to: "specs--a2".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
         }));
         assert!(!r.is_error.unwrap_or(false), "relate: {}", extract_text(&r));
@@ -7645,12 +7821,14 @@ write_rules: []
         // INVALID_REL_TYPE: relate with a vocabulary that doesn't
         // exist on the strict-mode default schema.
         let bad_rel = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "TOTALLY_MADE_UP_REL".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "TOTALLY_MADE_UP_REL".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(bad_rel.is_error.unwrap_or(false));
         let body = bad_rel.structured_content.unwrap();
@@ -7937,24 +8115,28 @@ write_rules: []
 
         // INVALID_REL_TYPE — relate with a vocabulary the schema rejects.
         let bad_rel_type = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "TOTALLY_MADE_UP_REL".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "TOTALLY_MADE_UP_REL".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert_text_carries_code(&bad_rel_type, "INVALID_REL_TYPE");
 
         // INVALID_ENTITY_ID — relate with a target id that violates
         // the wiki-link grammar.
         let bad_id = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--bad target with spaces!!".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--bad target with spaces!!".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert_text_carries_code(&bad_id, "INVALID_ENTITY_ID");
 
@@ -8118,12 +8300,14 @@ write_rules: []
         );
 
         let remove = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--body-link-source".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "REFERENCES".to_string(),
-            remove: Some(true),
+            relations: vec![RelateOpInput {
+                from: "specs--body-link-source".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "REFERENCES".to_string(),
+                remove: Some(true),
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             remove.is_error.unwrap_or(false),
@@ -8442,13 +8626,15 @@ write_rules: []
             // does not trip `INVALID_ENTITY_ID` — the wiki-link
             // grammar regex accepts the wider character class.
             let relate = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: expected_id.clone(),
                 r#type: "USES".to_string(),
                 remove: None,
-                note: None,
                 description: None,
-            }));
+            }],
+            note: None,
+        }));
             assert!(
                 !relate.is_error.unwrap_or(false),
                 "{label} relate to native-script id must succeed: {}",
@@ -8579,12 +8765,14 @@ write_rules: []
         // seeds entity-a and entity-b, both with USES in the schema's
         // declared vocabulary.
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -8610,12 +8798,14 @@ write_rules: []
         // reading the text channel can recover the recovery payload
         // without parsing structured_content.
         let stub_relate = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--ghost-x".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--ghost-x".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(!stub_relate.is_error.unwrap_or(false));
         let stub_text = extract_text(&stub_relate);
@@ -8790,12 +8980,14 @@ write_rules: []
         // a relate to a different stub target.
         let stub_id = "specs--future-decision";
         let _stub_relate = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: stub_id.to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: stub_id.to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         // Seed
         // identity + purpose so the spec lands; stub adoption still
@@ -10384,13 +10576,14 @@ write_rules: []
 
         // Add another cross-cluster edge via memstead_relate.
         let add = server.memstead_relate(Parameters(crate::tools::mutation::RelateParams {
-            from: "bridge--beta-hub".to_string(),
-            to: "bridge--alpha-hub".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
-
+            relations: vec![RelateOpInput {
+                from: "bridge--beta-hub".to_string(),
+                to: "bridge--alpha-hub".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !add.is_error.unwrap_or(false),
@@ -11081,13 +11274,14 @@ write_rules: []
     fn test_memstead_relate() {
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "DEPENDS_ON".to_string(),
-            remove: None,
-
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "DEPENDS_ON".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -11096,7 +11290,7 @@ write_rules: []
         );
         let text = extract_text(&result);
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(json["rel_type"], "DEPENDS_ON");
+        assert_eq!(json["results"][0]["rel_type"], "DEPENDS_ON");
     }
 
     #[test]
@@ -11107,25 +11301,27 @@ write_rules: []
         let (server, _tmp) = setup_dual_test_engine();
         // a DEPENDS_ON b is fine.
         let first = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "DEPENDS_ON".to_string(),
-            remove: None,
-
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "DEPENDS_ON".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(!first.is_error.unwrap_or(false));
         // b DEPENDS_ON a closes a cycle and must reject with the
         // structured envelope.
         let cycle = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-b".to_string(),
-            to: "specs--entity-a".to_string(),
-            r#type: "DEPENDS_ON".to_string(),
-            remove: None,
-
+            relations: vec![RelateOpInput {
+                from: "specs--entity-b".to_string(),
+                to: "specs--entity-a".to_string(),
+                r#type: "DEPENDS_ON".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             cycle.is_error.unwrap_or(false),
@@ -11159,12 +11355,14 @@ write_rules: []
     fn relate_self_loop_refuses_on_propagating_rel_type() {
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-a".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-a".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11191,12 +11389,14 @@ write_rules: []
     fn relate_cross_mem_surfaces_typed_envelope() {
         let (server, _tmp) = setup_two_mem_engine();
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "alpha--alpha-root".to_string(),
-            to: "beta--beta-root".to_string(),
-            r#type: "REFERENCES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "alpha--alpha-root".to_string(),
+                to: "beta--beta-root".to_string(),
+                r#type: "REFERENCES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11279,23 +11479,27 @@ write_rules: []
         // REFERENCES) — explicit relate to the schema's pointer rel-
         // type is refused under `manual_authoring: forbidden`.
         let _ = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--ghost-target".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--ghost-target".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         // Step 2: now relate FROM the stub — must surface
         // STUB_CANNOT_RELATE rather than the cryptic UnknownType
         // envelope.
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--ghost-target".to_string(),
-            to: "specs--entity-a".to_string(),
-            r#type: "USES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--ghost-target".to_string(),
+                to: "specs--entity-a".to_string(),
+                r#type: "USES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11386,12 +11590,14 @@ write_rules: []
     fn relate_rejects_malformed_target_id_with_typed_envelope() {
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--bad@chars$here".to_string(),
-            r#type: "REFERENCES".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--bad@chars$here".to_string(),
+                r#type: "REFERENCES".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11468,12 +11674,14 @@ write_rules: []
         }));
 
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "software-mem--source-spec".to_string(),
-            to: "software-mem--target-spec".to_string(),
-            r#type: "OWNS".to_string(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: "software-mem--source-spec".to_string(),
+                to: "software-mem--target-spec".to_string(),
+                r#type: "OWNS".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11540,12 +11748,14 @@ write_rules: []
 
         // Remove the existing shape-violating edge — must succeed.
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "software-mem--legacy-spec".to_string(),
-            to: "software-mem--legacy-target".to_string(),
-            r#type: "OWNS".to_string(),
-            remove: Some(true),
+            relations: vec![RelateOpInput {
+                from: "software-mem--legacy-spec".to_string(),
+                to: "software-mem--legacy-target".to_string(),
+                r#type: "OWNS".to_string(),
+                remove: Some(true),
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -12131,13 +12341,14 @@ write_rules: []
 
         // First call — establishes the edge cleanly.
         let first = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "DEPENDS_ON".to_string(),
-            remove: None,
-
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "DEPENDS_ON".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !first.is_error.unwrap_or(false),
@@ -12159,13 +12370,14 @@ write_rules: []
 
         // Second call — same edge, must succeed AND emit the typed warning.
         let second = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "DEPENDS_ON".to_string(),
-            remove: None,
-
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "DEPENDS_ON".to_string(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !second.is_error.unwrap_or(false),
@@ -12193,13 +12405,14 @@ write_rules: []
 
         // No DEPENDS_ON edge exists from a→b yet; removing it is a no-op.
         let result = server.memstead_relate(Parameters(RelateParams {
-            from: "specs--entity-a".to_string(),
-            to: "specs--entity-b".to_string(),
-            r#type: "DEPENDS_ON".to_string(),
-            remove: Some(true),
-
+            relations: vec![RelateOpInput {
+                from: "specs--entity-a".to_string(),
+                to: "specs--entity-b".to_string(),
+                r#type: "DEPENDS_ON".to_string(),
+                remove: Some(true),
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -14173,13 +14386,15 @@ write_rules: []
         fn memstead_relate_response_carries_anchor() {
             let (server, _tmp) = setup_dual_test_engine();
             let result = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
                 r#type: "USES".to_string(),
                 remove: None,
-                note: None,
                 description: None,
-            }));
+            }],
+            note: None,
+        }));
             assert!(
                 !result.is_error.unwrap_or(false),
                 "{}",
@@ -14220,13 +14435,15 @@ write_rules: []
             let (server, _tmp) = setup_dual_test_engine();
             // Create a stub by relating to a non-existent target.
             let _ = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--stub-target".to_string(),
                 r#type: "USES".to_string(),
                 remove: None,
-                note: None,
                 description: None,
-            }));
+            }],
+            note: None,
+        }));
 
             let result = server.memstead_entity(Parameters(EntityParams {
                 id: "specs--stub-target".to_string(),
@@ -15705,13 +15922,15 @@ write_rules: []
             let (server, _tmp) = setup_dual_test_engine();
             // Typo: PART_O instead of PART_OF
             let result = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
                 r#type: "PART_O".to_string(),
                 remove: None,
-                note: None,
                 description: None,
-            }));
+            }],
+            note: None,
+        }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("INVALID_REL_TYPE"));
             let allowed = env["details"]["allowed"]
@@ -15738,13 +15957,15 @@ write_rules: []
             let (server, _tmp) = setup_dual_test_engine();
             // Spaces are syntactically illegal.
             let result = server.memstead_relate(Parameters(RelateParams {
+            relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
                 r#type: "alt rel type".to_string(),
                 remove: None,
-                note: None,
                 description: None,
-            }));
+            }],
+            note: None,
+        }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("INVALID_REL_TYPE"));
             assert!(

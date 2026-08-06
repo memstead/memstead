@@ -1447,6 +1447,17 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_relate" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
+            // List-form envelope: refusal wrapper + per-entry fields.
+            "BATCH_REFUSED",
+            "details.entries",
+            "errors_suppressed",
+            "results",
+            "action",
+            "expected_hash",
+            // Auto-stub + description-posture codes cited literally.
+            "AUTO_STUB_CREATED",
+            "DESCRIPTION_NOT_PERMITTED",
+            "MISSING_REQUIRED_DESCRIPTION",
             "warnings",
             "commit_sha",
             // Warning codes referenced literally in the description.

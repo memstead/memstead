@@ -2428,6 +2428,13 @@ pub struct BatchResult {
     pub errors_suppressed: usize,
     /// Count of failed items when refused (≥1); `0` when applied.
     pub failed: usize,
+    /// Ids of stub entities GC'd because a removed edge in this batch
+    /// was their last incoming reference — the batch sibling of the
+    /// single relate response's `orphan_stubs_removed`. Empty (and
+    /// serde-omitted) for batch-create / batch-update and for batches
+    /// that removed nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub orphan_stubs_removed: Vec<EntityId>,
     /// The single batch commit SHA when the batch applied and produced
     /// at least one write — an honest `memstead_changes_since` cursor /
     /// revert handle for the whole batch. Empty when the batch was

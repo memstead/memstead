@@ -37,7 +37,7 @@ use std::path::Path;
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
+    CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams, UpdateParams,
 };
 
 /// MCP server backed by the unified [`memstead_base::Engine`].
@@ -1324,59 +1324,203 @@ impl FilesystemMcpServer {
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {
+        if p.relations.is_empty() {
+            return tool_error("INVALID_INPUT", "relations must carry at least one operation");
+        }
         let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
-        // Relate is hash-stable: the source's content_hash does not
-        // change under add/remove. The mem-repo tool surface omits
-        // `expected_hash` for relate, so we pass `None` and let the
-        // engine's single-writer assumption stand.
-        let args = RelateEntityArgs {
-            source: EntityId(p.from),
-            expected_hash: None,
-            rel_type: p.r#type,
-            target: EntityId(p.to),
-            remove: p.remove.unwrap_or(false),
-            description: p.description,
-        };
-        match engine.relate_entity(args, actor, client.as_ref(), p.note.as_deref()) {
-            Ok(outcome) => {
-                let action = match outcome.action {
-                    RelateAction::Added => "added",
-                    RelateAction::Removed => "removed",
-                    RelateAction::NoOpAlreadyPresent => "no_op_already_present",
-                    RelateAction::NoOpAbsent => "no_op_absent",
-                };
-                // Typed warnings ride out on `outcome.warnings` —
-                // open-mode admissions, duplicate-add no-ops,
-                // remove-nonexistent no-ops, and auto-stub creation
-                // (the `AUTO_STUB_CREATED` entry retired the
-                // deprecated top-level `stub_warning` field in Item
-                // 03). WarningHint's Serialize impl produces the
-                // `{ code, message, details }` envelope shared with
-                // the mem-repo `RelateResult`.
-                // Surface `orphan_stubs_removed` so the lean surface
-                // matches full on the relate response shape.
-                let durable = mem_is_durable(&engine, outcome.from.mem());
-                let body = serde_json::json!({
-                    "from": outcome.from.to_string(),
-                    "to": outcome.to.to_string(),
-                    "type": outcome.rel_type,
-                    "action": action,
-                    "source": outcome.source,
-                    "_hash": outcome.content_hash,
-                    "commit_sha": outcome.commit_sha,
-                    "durable": durable,
-                    "warnings": outcome.warnings,
-                    "orphan_stubs_removed": outcome
-                        .orphan_stubs_removed
-                        .iter()
-                        .map(|i| i.to_string())
-                        .collect::<Vec<_>>(),
-                });
-                json_response(&body)
-            }
-            Err(e) => engine_op_error(e),
+        // Relate is hash-stable on the section bodies but the
+        // Relationships section regenerates, so `_hash` per entry is
+        // read back post-commit. `expected_hash` is omitted on relate
+        // across both flavours.
+        let ops: Vec<(RelateEntityArgs, Option<String>)> = p
+            .relations
+            .iter()
+            .map(|op| {
+                (
+                    RelateEntityArgs {
+                        source: EntityId::canonical(&op.from),
+                        expected_hash: None,
+                        rel_type: op.r#type.clone(),
+                        target: EntityId::canonical(&op.to),
+                        remove: op.remove.unwrap_or(false),
+                        description: op.description.clone(),
+                    },
+                    p.note.clone(),
+                )
+            })
+            .collect();
+        let anchor_mem = ops[0].0.source.mem().to_string();
+
+        // A list of one routes through the single-op engine path —
+        // byte-identical semantics to the historical single call,
+        // wrapped in the same plural envelope larger lists produce.
+        if p.relations.len() == 1 {
+            let (args, note) = {
+                let mut it = ops.into_iter();
+                it.next().expect("len checked above")
+            };
+            return match engine.relate_entity(args, actor, client.as_ref(), note.as_deref()) {
+                Ok(outcome) => {
+                    let action = match outcome.action {
+                        RelateAction::Added => "added",
+                        RelateAction::Removed => "removed",
+                        RelateAction::NoOpAlreadyPresent | RelateAction::NoOpAbsent => "noop",
+                    };
+                    let durable = mem_is_durable(&engine, outcome.from.mem());
+                    let body = serde_json::json!({
+                        "results": [{
+                            "from": outcome.from.to_string(),
+                            "to": outcome.to.to_string(),
+                            "rel_type": outcome.rel_type,
+                            "action": action,
+                            "source": outcome.source,
+                            "_hash": outcome.content_hash,
+                        }],
+                        "commit_sha": outcome.commit_sha,
+                        "durable": durable,
+                        "warnings": outcome.warnings,
+                        "orphan_stubs_removed": outcome
+                            .orphan_stubs_removed
+                            .iter()
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>(),
+                    });
+                    json_response(&body)
+                }
+                Err(e) => engine_op_error(e),
+            };
         }
+
+        // Snapshot which targets are absent pre-call so applied
+        // auto-stubs can surface the same AUTO_STUB_CREATED warning
+        // the single call emitted.
+        let absent_targets: std::collections::HashSet<String> = p
+            .relations
+            .iter()
+            .filter(|op| !op.remove.unwrap_or(false))
+            .map(|op| EntityId::canonical(&op.to))
+            .filter(|to| engine.store().get(to).is_none())
+            .map(|to| to.to_string())
+            .collect();
+        let result = match engine.batch_relate(ops, actor, client.as_ref()) {
+            Ok(r) => r,
+            Err(e) => return engine_op_error(e),
+        };
+
+        if !result.applied {
+            // Report-all refusal — nothing committed. A list of one
+            // surfaces its entry's own typed envelope; larger lists
+            // wrap under BATCH_REFUSED with per-entry envelopes.
+            let entries: Vec<serde_json::Value> = result
+                .results
+                .iter()
+                .zip(p.relations.iter())
+                .enumerate()
+                .map(|(i, (entry, op))| {
+                    let mut e = serde_json::json!({
+                        "index": i,
+                        "from": op.from,
+                        "to": op.to,
+                        "rel_type": op.r#type,
+                        "action": entry.action,
+                    });
+                    if let Some(err) = &entry.error {
+                        e["code"] = serde_json::json!(err.code);
+                        e["message"] = serde_json::json!(err.message);
+                        e["details"] = err.details.clone();
+                    }
+                    e
+                })
+                .collect();
+            let msg = format!(
+                "batch refused — {} of {} operation(s) failed, nothing committed",
+                result.failed,
+                p.relations.len(),
+            );
+            return tool_error_with_details(
+                "BATCH_REFUSED",
+                &msg,
+                Some(serde_json::json!({
+                    "entries": entries,
+                    "failed": result.failed,
+                    "errors_suppressed": result.errors_suppressed,
+                })),
+            );
+        }
+
+        let durable = mem_is_durable(&engine, anchor_mem.as_str());
+        let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+        let entries: Vec<serde_json::Value> = result
+            .results
+            .iter()
+            .zip(p.relations.iter())
+            .map(|(entry, op)| {
+                let from = EntityId::canonical(&op.from);
+                let to = EntityId::canonical(&op.to);
+                let canonical_type = op.r#type.to_uppercase();
+                if entry.action == "noop" {
+                    if op.remove.unwrap_or(false) {
+                        warnings.push(memstead_base::ops::WarningHint::NoSuchRelationship {
+                            rel_type: canonical_type.clone(),
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    } else {
+                        warnings.push(memstead_base::ops::WarningHint::DuplicateRelationship {
+                            rel_type: canonical_type.clone(),
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    }
+                }
+                if !op.remove.unwrap_or(false)
+                    && absent_targets.contains(&to.to_string())
+                    && engine.store().get(&to).map(|e| e.stub).unwrap_or(false)
+                {
+                    warnings.push(memstead_base::ops::WarningHint::AutoStubCreated {
+                        stub_id: to.clone(),
+                    });
+                }
+                let source_label = engine
+                    .store()
+                    .outgoing(&from)
+                    .iter()
+                    .find(|e| e.target == to && e.rel_type.eq_ignore_ascii_case(&op.r#type))
+                    .map(|e| match e.source {
+                        memstead_base::EdgeSource::BodyLink => "body_link",
+                        memstead_base::EdgeSource::Hierarchy => "hierarchy",
+                        memstead_base::EdgeSource::Explicit => "explicit",
+                    })
+                    .unwrap_or("explicit");
+                let hash = engine
+                    .store()
+                    .get(&from)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "from": from.to_string(),
+                    "to": to.to_string(),
+                    "rel_type": canonical_type,
+                    "action": entry.action,
+                    "source": source_label,
+                    "_hash": hash,
+                })
+            })
+            .collect();
+
+        let body = serde_json::json!({
+            "results": entries,
+            "commit_sha": result.commit_sha,
+            "durable": durable,
+            "warnings": warnings,
+            "orphan_stubs_removed": result
+                .orphan_stubs_removed
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>(),
+        });
+        json_response(&body)
     }
 
     #[tool(
@@ -2702,28 +2846,39 @@ mod tests {
         let (to, _) = seed_via_mcp(&server, "Target");
 
         let added = server.memstead_relate(Parameters(RelateParams {
-            from: from.clone(),
-            to: to.clone(),
-            r#type: "USES".into(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: from.clone(),
+                to: to.clone(),
+                r#type: "USES".into(),
+                remove: None,
+                description: None,
+            }],
             note: Some("first".into()),
-            description: None,
         }));
         assert!(!added.is_error.unwrap_or(false));
-        assert_eq!(added.structured_content.unwrap()["action"], "added");
+        assert_eq!(
+            added.structured_content.unwrap()["results"][0]["action"],
+            "added"
+        );
 
         let dup = server.memstead_relate(Parameters(RelateParams {
-            from,
-            to,
-            r#type: "USES".into(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: from.clone(),
+                to: to.clone(),
+                r#type: "USES".into(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(!dup.is_error.unwrap_or(false));
-        assert_eq!(
-            dup.structured_content.unwrap()["action"],
-            "no_op_already_present"
+        let dup_body = dup.structured_content.unwrap();
+        assert_eq!(dup_body["results"][0]["action"], "noop");
+        assert!(
+            dup_body["warnings"].as_array().is_some_and(|w| w
+                .iter()
+                .any(|x| x["code"] == "DUPLICATE_RELATIONSHIP")),
+            "duplicate add must warn typed: {dup_body}"
         );
     }
 
@@ -2741,12 +2896,14 @@ mod tests {
         let (to, _) = seed_via_mcp(&server, "Target");
 
         let result = server.memstead_relate(Parameters(RelateParams {
-            from,
-            to,
-            r#type: "TOTALLY_MADE_UP".into(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: from.clone(),
+                to: to.clone(),
+                r#type: "TOTALLY_MADE_UP".into(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -2766,12 +2923,14 @@ mod tests {
         let (from, _) = seed_via_mcp(&server, "Source");
 
         let result = server.memstead_relate(Parameters(RelateParams {
-            from,
-            to: "other--thing".into(),
-            r#type: "USES".into(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: from.clone(),
+                to: "other--thing".into(),
+                r#type: "USES".into(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         assert_eq!(
@@ -3368,12 +3527,14 @@ mod tests {
 
         // Add a relation.
         server.memstead_relate(Parameters(RelateParams {
-            from: from.clone(),
-            to,
-            r#type: "USES".into(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: from.clone(),
+                to: to.clone(),
+                r#type: "USES".into(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
 
         // Read with include_relations.
@@ -3649,12 +3810,14 @@ mod tests {
         let (b, _) = seed_via_mcp(&server, "Beta");
         // Edge so the cluster has structure to discuss.
         server.memstead_relate(Parameters(RelateParams {
-            from: a.clone(),
-            to: b.clone(),
-            r#type: "USES".into(),
-            remove: None,
+            relations: vec![RelateOpInput {
+                from: a.clone(),
+                to: b.clone(),
+                r#type: "USES".into(),
+                remove: None,
+                description: None,
+            }],
             note: None,
-            description: None,
         }));
 
         let result = server.memstead_overview(Parameters(OverviewParams {
