@@ -578,6 +578,51 @@ fn read_blob_string_for_schemas(
     })
 }
 
+/// Read one file from a sealed schema package on the `__MEMSTEAD`
+/// ref: the blob at `schemas/<name>@<version>/<rel>`. Returns
+/// `Ok(None)` when the ref, the package subtree, or the file is
+/// absent — absence is a normal state (e.g. the install-provenance
+/// stamp only exists for path-sourced installs), never an error.
+/// Read-only.
+pub fn read_schema_file_from_memstead_ref(
+    gitdir: &Path,
+    name: &str,
+    version: &str,
+    rel: &str,
+) -> Result<Option<Vec<u8>>, MemsteadRefError> {
+    let repo = gix::open(gitdir).map_err(|e| MemsteadRefError::GixOpen(e.to_string()))?;
+    let memstead_ref = match repo
+        .try_find_reference("refs/heads/__MEMSTEAD")
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
+    {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+    let id = memstead_ref
+        .into_fully_peeled_id()
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
+    let commit = id
+        .object()
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
+        .try_into_commit()
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
+    let tree = commit
+        .tree()
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
+    let path = format!("schemas/{name}@{version}/{rel}");
+    let entry = match tree
+        .lookup_entry_by_path(path.as_str())
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?
+    {
+        Some(e) if e.mode().is_blob() => e,
+        _ => return Ok(None),
+    };
+    let object = entry
+        .object()
+        .map_err(|e| MemsteadRefError::GitTree(e.to_string()))?;
+    Ok(Some(object.data.clone()))
+}
+
 /// Read a per-mem config from `__MEMSTEAD:mems/<mem>/config.json`.
 ///
 /// Mirrors [`crate::mem_repo_config::read_config_at_gitdir`]'s
@@ -1337,6 +1382,69 @@ mod tests {
             entries2
                 .iter()
                 .any(|e| e == "schemas/other@2.0.0/schema.yaml")
+        );
+    }
+
+    /// `read_schema_file_from_memstead_ref` round-trips a file written
+    /// by `write_schema_to_memstead_ref` (the install-provenance stamp
+    /// being the consumer), and absence — of the file, the package, or
+    /// the ref — is `Ok(None)`, never an error.
+    #[test]
+    fn read_schema_file_round_trips_and_absence_is_none() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+
+        // Absent ref → None.
+        assert!(
+            read_schema_file_from_memstead_ref(&gitdir, "tiny", "0.1.0", "install-provenance.json")
+                .unwrap()
+                .is_none()
+        );
+
+        let stamp = br#"{"authoring_path":"/tmp/somewhere/tiny"}"#.to_vec();
+        let files = vec![
+            (
+                "schema.yaml".to_string(),
+                b"name: tiny\nversion: 0.1.0\n".to_vec(),
+            ),
+            ("install-provenance.json".to_string(), stamp.clone()),
+        ];
+        write_schema_to_memstead_ref(&gitdir, "tiny", "0.1.0", &files).unwrap();
+
+        // Present file round-trips byte-exact (via the ops hook too).
+        assert_eq!(
+            read_schema_file_from_memstead_ref(&gitdir, "tiny", "0.1.0", "install-provenance.json")
+                .unwrap()
+                .as_deref(),
+            Some(stamp.as_slice())
+        );
+        assert_eq!(
+            (crate::storage::FULL_GIT_BRANCH_OPS.read_schema_file)(
+                &gitdir,
+                "tiny",
+                "0.1.0",
+                "install-provenance.json"
+            )
+            .unwrap()
+            .as_deref(),
+            Some(stamp.as_slice())
+        );
+
+        // Absent file in a present package → None; absent package → None.
+        assert!(
+            read_schema_file_from_memstead_ref(&gitdir, "tiny", "0.1.0", "no-such-file.json")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            read_schema_file_from_memstead_ref(
+                &gitdir,
+                "ghost",
+                "9.9.9",
+                "install-provenance.json"
+            )
+            .unwrap()
+            .is_none()
         );
     }
 

@@ -1768,6 +1768,161 @@ community:
         assert_eq!(engine.mem_names(), vec!["specs"]);
     }
 
+    /// Authoring-drift health axis (plan 10): a STAMPED sealed schema
+    /// reports a missing authoring package and (separately) a diverged
+    /// one; an unmodified package, a cosmetic-only difference (editor
+    /// header comment lines), and an unstamped seal produce NO
+    /// finding; and the checks alter neither copy.
+    #[test]
+    fn health_reports_authoring_drift_for_stamped_schemas_only() {
+        use crate::engine::test_helpers::write_schema_files_with_default_type;
+
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let manifest = r#"name: authored
+version: 0.1.0
+description: an authored-in-workspace test schema
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        // Sealed copy at the fixed install location; authoring copy in
+        // the working tree.
+        let sealed_root = tmp.path().join(".memstead").join("schemas");
+        write_schema_files_with_default_type(&sealed_root, "authored@0.1.0", manifest, &["doc"]);
+        let author_root = tmp.path().join("author");
+        write_schema_files_with_default_type(&author_root, "authored@0.1.0", manifest, &["doc"]);
+        let authoring_dir = author_root.join("authored@0.1.0");
+        let sealed_dir = sealed_root.join("authored@0.1.0");
+        // The install-time stamp: the seal records where it came from.
+        let stamp_path = sealed_dir.join(memstead_schema::INSTALL_PROVENANCE_FILE);
+        std::fs::write(
+            &stamp_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "authoring_path": authoring_dir.display().to_string(),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let memstead = tmp.path().join(".memstead");
+        std::fs::write(
+            memstead.join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "specs".to_string(),
+            schema: Some(SchemaRef::new("authored", semver::Version::new(0, 1, 0))),
+            storage: MountStorage::Folder { path: mem_dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                tmp.path(),
+                &crate::workspace::Workspace {
+                    mounts: vec![mount],
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let engine = Engine::from_workspace_root(tmp.path()).expect("workspace boots");
+        let drift_codes = |e: &Engine| -> Vec<String> {
+            e.health()
+                .warnings
+                .iter()
+                .filter(|w| w.code().starts_with("SCHEMA_AUTHORING_SOURCE_"))
+                .map(|w| w.code().to_string())
+                .collect()
+        };
+
+        // Unmodified authoring package: no finding, and the check
+        // touched neither copy.
+        let sealed_before = std::fs::read(sealed_dir.join("schema.yaml")).unwrap();
+        let author_before = std::fs::read(authoring_dir.join("schema.yaml")).unwrap();
+        assert_eq!(drift_codes(&engine), Vec::<String>::new());
+        assert_eq!(
+            std::fs::read(sealed_dir.join("schema.yaml")).unwrap(),
+            sealed_before,
+            "health must not touch the sealed copy"
+        );
+        assert_eq!(
+            std::fs::read(authoring_dir.join("schema.yaml")).unwrap(),
+            author_before,
+            "health must not touch the authoring copy"
+        );
+
+        // Cosmetic-only difference (the CLI-injected editor-header
+        // line + a comment): still no finding — parsed equivalence,
+        // never raw bytes.
+        std::fs::write(
+            authoring_dir.join("schema.yaml"),
+            format!(
+                "# yaml-language-server: $schema=../../.memstead/meta-schemas/schema-manifest.json\n# cosmetic comment\n{manifest}"
+            ),
+        )
+        .unwrap();
+        assert_eq!(drift_codes(&engine), Vec::<String>::new());
+
+        // Semantic change: DIVERGED, naming schema, version, and the
+        // pinning mems.
+        std::fs::write(
+            authoring_dir.join("schema.yaml"),
+            manifest.replace(
+                "an authored-in-workspace test schema",
+                "a semantically different description",
+            ),
+        )
+        .unwrap();
+        let warnings = engine.health().warnings;
+        let diverged = warnings
+            .iter()
+            .find(|w| w.code() == "SCHEMA_AUTHORING_SOURCE_DIVERGED")
+            .expect("semantic change must surface as DIVERGED");
+        let d = serde_json::to_value(diverged).unwrap();
+        assert_eq!(d["details"]["schema_ref"], "authored@0.1.0");
+        assert_eq!(d["details"]["mems"], serde_json::json!(["specs"]));
+
+        // Authoring package gone: the DIFFERENT finding — MISSING.
+        std::fs::remove_dir_all(&authoring_dir).unwrap();
+        let warnings = engine.health().warnings;
+        let missing = warnings
+            .iter()
+            .find(|w| w.code() == "SCHEMA_AUTHORING_SOURCE_MISSING")
+            .expect("vanished authoring package must surface as MISSING");
+        let m = serde_json::to_value(missing).unwrap();
+        assert_eq!(m["details"]["schema_ref"], "authored@0.1.0");
+        assert_eq!(m["details"]["mems"], serde_json::json!(["specs"]));
+        assert_eq!(
+            m["details"]["stamped_path"],
+            authoring_dir.display().to_string()
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.code() == "SCHEMA_AUTHORING_SOURCE_DIVERGED"),
+            "missing and diverged are distinct findings"
+        );
+
+        // No stamp → no finding, even with the package still gone.
+        std::fs::remove_file(&stamp_path).unwrap();
+        assert_eq!(drift_codes(&engine), Vec::<String>::new());
+    }
+
     #[test]
     fn from_workspace_root_propagates_mem_management_settings() {
         // workspace.toml carries [mem_management] rules; the file

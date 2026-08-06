@@ -1016,7 +1016,119 @@ impl Engine {
                     workspace_root: root.display().to_string(),
                 });
         }
+        // Authoring-drift axis: for every pinned schema whose sealed
+        // copy carries an install-provenance stamp, report a MISSING
+        // authoring package (stamped path gone) or a DIVERGED one
+        // (present but no longer parsed-equivalent to the seal).
+        // Unstamped schemas — sealed pre-stamp, built-ins, archive
+        // installs — produce no finding. Read-only on both copies.
+        summary.warnings.extend(self.authoring_drift_findings());
         summary
+    }
+
+    /// Compute the authoring-drift findings for every stamped pinned
+    /// schema. See the call site in [`Self::health`] for the axis
+    /// contract; returns an empty list when no workspace root is set
+    /// (ad-hoc mount-list engines have no authoring tree to check).
+    fn authoring_drift_findings(&self) -> Vec<WarningHint> {
+        let Some(root) = self.workspace_root.as_deref() else {
+            return Vec::new();
+        };
+        // Group pinning mems by (name, version) — BTreeMap for a
+        // deterministic finding order.
+        let mut pins: std::collections::BTreeMap<(String, String), Vec<String>> =
+            std::collections::BTreeMap::new();
+        for (mem, schema) in &self.schemas {
+            let (name, version) = schema.id();
+            pins.entry((name.to_string(), version.to_string()))
+                .or_default()
+                .push(mem.clone());
+        }
+        let mut out = Vec::new();
+        for ((name, version), mut mems) in pins {
+            mems.sort();
+            let Some(stamped_path) = self.read_install_provenance(root, &name, &version) else {
+                continue;
+            };
+            let schema_ref = format!("{name}@{version}");
+            let authoring = std::path::Path::new(&stamped_path);
+            if !authoring.is_dir() {
+                out.push(WarningHint::SchemaAuthoringSourceMissing {
+                    schema_ref,
+                    stamped_path,
+                    mems,
+                });
+                continue;
+            }
+            let sealed = self
+                .schemas
+                .get(&mems[0])
+                .expect("mems collected from self.schemas keys")
+                .clone();
+            match memstead_schema::load_schema_from_dir(authoring) {
+                Err(e) => out.push(WarningHint::SchemaAuthoringSourceDiverged {
+                    schema_ref,
+                    stamped_path,
+                    mems,
+                    detail: format!("the authoring package no longer loads: {e}"),
+                }),
+                Ok(authored) => {
+                    if schema_parsed_fingerprint(&authored) != schema_parsed_fingerprint(&sealed) {
+                        out.push(WarningHint::SchemaAuthoringSourceDiverged {
+                            schema_ref,
+                            stamped_path,
+                            mems,
+                            detail: "the parsed authoring package differs from the sealed copy \
+                                     the engine runs on"
+                                .to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Read the install-provenance stamp for a sealed schema package,
+    /// checking the folder location first
+    /// (`.memstead/schemas/<name>@<version>/`) and falling back to the
+    /// `__MEMSTEAD:schemas/` ref via the git-branch ops bundle when
+    /// wired. `None` when no stamp exists anywhere — the normal state
+    /// for pre-stamp seals, built-ins, and archive installs.
+    fn read_install_provenance(&self, root: &Path, name: &str, version: &str) -> Option<String> {
+        let folder_stamp = root
+            .join(".memstead")
+            .join("schemas")
+            .join(format!("{name}@{version}"))
+            .join(memstead_schema::INSTALL_PROVENANCE_FILE);
+        let bytes = if folder_stamp.is_file() {
+            std::fs::read(&folder_stamp).ok()
+        } else {
+            let ops = self.git_branch_ops()?;
+            let gitdir = self
+                .mounts
+                .iter()
+                .find_map(|m| match &m.mount.storage {
+                    crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
+                        Some(gitdir.clone())
+                    }
+                    _ => None,
+                })
+                .or_else(|| {
+                    let g = root.join("mem-repo").join(".git");
+                    g.is_dir().then_some(g)
+                })?;
+            (ops.read_schema_file)(
+                &gitdir,
+                name,
+                version,
+                memstead_schema::INSTALL_PROVENANCE_FILE,
+            )
+            .ok()
+            .flatten()
+        }?;
+        let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        v.get("authoring_path")?.as_str().map(String::from)
     }
 
     /// Engine-wide [`crate::ops::Status`] across every mount — the graph
@@ -1382,6 +1494,27 @@ fn observe_path_anchor(
         crate::anchor::resolve_anchor(anchor, &observation),
         current_hash,
     ))
+}
+
+/// Deterministic fingerprint of a PARSED schema for the
+/// authoring-drift equivalence check. Compares semantic content, never
+/// raw bytes: YAML comments (the CLI-injected editor-header lines) and
+/// whitespace vanish at parse time, and `Schema.types` — a `HashMap`
+/// with nondeterministic iteration order — is rendered sorted by type
+/// name so two loads of equivalent packages always fingerprint alike.
+fn schema_parsed_fingerprint(schema: &memstead_schema::Schema) -> String {
+    let mut keys: Vec<&String> = schema.types.keys().collect();
+    keys.sort();
+    let types: Vec<String> = keys
+        .iter()
+        .map(|k| format!("{k}={:?}", schema.types[k.as_str()]))
+        .collect();
+    format!(
+        "{:?}|{}|{}",
+        schema.manifest,
+        schema.version,
+        types.join(";")
+    )
 }
 
 fn anchor_references_path(anchor: &crate::anchor::Anchor, path: &str) -> bool {

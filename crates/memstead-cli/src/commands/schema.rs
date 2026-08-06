@@ -682,7 +682,23 @@ fn resolve_source(
                 .with_details(json!({ "path": source, "error": e.to_string() }))
             })?;
         let (name, version) = schema.id();
-        let files = collect_dir_package(as_path)?;
+        let mut files = collect_dir_package(as_path)?;
+        // Stamp the seal with its authoring provenance: the canonical
+        // path this package was installed from. Detection basis for
+        // the authoring-drift health axis; only path-sourced installs
+        // get one (a built-in or archive source has no authoring dir).
+        // The stamp stays workspace-local — package collectors and the
+        // export paths exclude it by name.
+        let authoring_path = as_path
+            .canonicalize()
+            .unwrap_or_else(|_| as_path.to_path_buf());
+        files.push(memstead_schema::SchemaSourceFile {
+            archive_path: memstead_schema::INSTALL_PROVENANCE_FILE.to_string(),
+            bytes: serde_json::to_vec_pretty(&json!({
+                "authoring_path": authoring_path.display().to_string(),
+            }))
+            .expect("provenance stamp serialises"),
+        });
         Ok((SchemaRef::new(name, version), files))
     } else {
         // Name source — resolve against the built-in catalogue.

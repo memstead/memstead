@@ -684,6 +684,31 @@ pub enum WarningHint {
     /// creation, to whoever is actually acting; never a refusal —
     /// folder mems are a supported storage class.
     FolderMemProvenance { mem: String },
+    /// Authoring-drift health axis: a pinned schema's sealed copy
+    /// carries an install-provenance stamp, and the authoring path it
+    /// names is GONE from the working tree. Distinct from
+    /// [`WarningHint::SchemaAuthoringSourceDiverged`] — a missing
+    /// package and a diverged one need different actions. Only
+    /// stamped schemas are checked: on git-branch workspaces the
+    /// authoring folder is typically absent for unstamped seals, so a
+    /// naive existence check would warn on healthy workspaces.
+    SchemaAuthoringSourceMissing {
+        schema_ref: String,
+        stamped_path: String,
+        mems: Vec<String>,
+    },
+    /// Authoring-drift health axis: the stamped authoring path exists
+    /// but its package no longer parses EQUIVALENT to the sealed copy
+    /// the engine runs on (parsed-schema comparison, never raw bytes —
+    /// editor-header comment lines and serialisation reordering do not
+    /// trip it). `detail` says how: a load failure's message, or the
+    /// parsed-difference marker.
+    SchemaAuthoringSourceDiverged {
+        schema_ref: String,
+        stamped_path: String,
+        mems: Vec<String>,
+        detail: String,
+    },
     /// A `## Relationships` row was followed by trailing content that
     /// did not match the canonical em-dash delimiter (` — `, U+2014
     /// framed by spaces) — ASCII `--`, ASCII `-`, en-dash U+2013, or
@@ -1410,6 +1435,34 @@ impl fmt::Display for WarningHint {
                  synthetic placeholder, and the content is not durable \
                  until the surrounding repository commits it."
             ),
+            WarningHint::SchemaAuthoringSourceMissing {
+                schema_ref,
+                stamped_path,
+                mems,
+            } => write!(
+                f,
+                "schema '{schema_ref}' (pinned by {}) was installed from \
+                 '{stamped_path}', and that authoring package is no longer \
+                 there. The engine keeps running on its sealed copy — \
+                 nothing is broken — but the source the seal came from is \
+                 gone: restore or move back the package, or re-install \
+                 from its new location to re-stamp.",
+                mems.join(", ")
+            ),
+            WarningHint::SchemaAuthoringSourceDiverged {
+                schema_ref,
+                stamped_path,
+                mems,
+                detail,
+            } => write!(
+                f,
+                "schema '{schema_ref}' (pinned by {}) no longer matches \
+                 its authoring package at '{stamped_path}': {detail}. The \
+                 engine keeps running on its sealed copy; if the authoring \
+                 change is intended, bump the version and `memstead schema \
+                 install` it.",
+                mems.join(", ")
+            ),
             WarningHint::MemFilesNotDeleted {
                 mem,
                 reason,
@@ -1524,6 +1577,8 @@ impl WarningHint {
             Self::MemFilesNotDeleted { .. } => "MEM_FILES_NOT_DELETED",
             Self::MemReattachedAfterUnregister { .. } => "MEM_REATTACHED_AFTER_UNREGISTER",
             Self::FolderMemProvenance { .. } => "FOLDER_MEM_PROVENANCE",
+            Self::SchemaAuthoringSourceMissing { .. } => "SCHEMA_AUTHORING_SOURCE_MISSING",
+            Self::SchemaAuthoringSourceDiverged { .. } => "SCHEMA_AUTHORING_SOURCE_DIVERGED",
             Self::AmbiguousDescriptionDelimiter { .. } => "AMBIGUOUS_DESCRIPTION_DELIMITER",
             Self::ParseMissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",
             Self::ParseDescriptionNotPermitted { .. } => "DESCRIPTION_NOT_PERMITTED",
@@ -1990,6 +2045,26 @@ impl WarningHint {
                 "ledger": ".memstead/changelog.jsonl",
                 "commit_sha": "synthetic placeholder (no version control)",
                 "durability": "content persists only when the surrounding repository commits it",
+            }),
+            Self::SchemaAuthoringSourceMissing {
+                schema_ref,
+                stamped_path,
+                mems,
+            } => serde_json::json!({
+                "schema_ref": schema_ref,
+                "stamped_path": stamped_path,
+                "mems": mems,
+            }),
+            Self::SchemaAuthoringSourceDiverged {
+                schema_ref,
+                stamped_path,
+                mems,
+                detail,
+            } => serde_json::json!({
+                "schema_ref": schema_ref,
+                "stamped_path": stamped_path,
+                "mems": mems,
+                "detail": detail,
             }),
             Self::AmbiguousDescriptionDelimiter {
                 from,

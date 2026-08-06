@@ -18,6 +18,20 @@
 //! pin; a name collision at the wrong version falls through rather than
 //! silently embedding a mismatched schema.
 
+/// Filename of the install-time provenance stamp `memstead schema
+/// install` writes INTO the sealed package when the install source was
+/// an authoring directory: `{"authoring_path": "<canonical path>"}`.
+/// The stamp is the detection basis for the authoring-drift health
+/// axis — a schema without one (sealed pre-stamp, built-in, name- or
+/// archive-sourced install) is simply not checked, because a guessed
+/// provenance is worse than an absent one. The stamp is workspace-
+/// local by design: every package collector in this module reads
+/// selectively (`schema.yaml`, `types/*.yaml`, `mem-template.json`,
+/// `README.md`) and therefore never picks it up, and the git-ref
+/// export path excludes it by name — a published `.mem` archive never
+/// carries another machine's filesystem path.
+pub const INSTALL_PROVENANCE_FILE: &str = "install-provenance.json";
+
 use std::path::{Path, PathBuf};
 
 use crate::builtins::builtin_schemas_dir;

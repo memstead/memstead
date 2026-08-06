@@ -215,6 +215,9 @@ fn schema_files_from_memstead_ref(
                     bytes: b.bytes,
                 })
         })
+        // The install-provenance stamp is workspace-local (it names a
+        // path on THIS machine); a published archive must not carry it.
+        .filter(|f| f.archive_path != memstead_schema::INSTALL_PROVENANCE_FILE)
         .collect();
     if !files.iter().any(|f| f.archive_path == "schema.yaml") {
         return None;

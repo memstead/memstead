@@ -42,7 +42,9 @@ pub use manifest::{
     SchemaManifest,
 };
 pub use schema::Schema;
-pub use source::{SchemaSourceError, SchemaSourceFile, collect_schema_source};
+pub use source::{
+    INSTALL_PROVENANCE_FILE, SchemaSourceError, SchemaSourceFile, collect_schema_source,
+};
 pub use types::{
     FieldType, Filterable, MetadataFieldDef, RequiredCardinality, RequiredOutgoing, SectionDef,
     Serialization, TypeDefinition, TypeExample, derive_section_key,

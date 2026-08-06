@@ -37,11 +37,13 @@ pub struct Args {
     pub limit: usize,
 
     /// Exit non-zero (1) when any included Tier-2 warning kind has
-    /// present violations. The output is rendered first, then the
-    /// non-zero exit fires. Today only `missing_required_outgoing`
-    /// participates; new Tier-2 codes opt in additively without
-    /// breaking the flag's semantics. With no Tier-2 `--include`
-    /// token, `--strict` is a no-op.
+    /// present violations, or when the always-on authoring-drift axis
+    /// reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` /
+    /// `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in).
+    /// The output is rendered first, then the non-zero exit fires.
+    /// Include-gated participation today: `missing_required_outgoing`;
+    /// new Tier-2 codes opt in additively without breaking the flag's
+    /// semantics.
     #[arg(long)]
     pub strict: bool,
 }
@@ -213,24 +215,49 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         obj.insert("untagged_entities".into(), untagged);
     }
 
-    // Typed warnings array — agents see `UNKNOWN_INCLUDE_KEY` here in
-    // the same shape MCP emits on `warnings[]`. Empty when every key
-    // resolved.
-    if !include_warnings.is_empty() {
-        let warning_payload: Vec<serde_json::Value> = include_warnings
-            .iter()
-            .map(|(key, allowed)| {
-                json!({
-                    "code": "UNKNOWN_INCLUDE_KEY",
-                    "message": format!(
-                        "unknown include key: \"{key}\". Allowed: {}",
-                        allowed.join(", ")
-                    ),
-                    "details": { "key": key, "allowed": allowed },
-                })
-            })
-            .collect();
+    // Typed warnings array — engine-level health warnings (load-time
+    // drift, the authoring-drift axis, …) in the same `{code, message,
+    // details}` shape MCP emits on `warnings[]`, plus any
+    // `UNKNOWN_INCLUDE_KEY` request warnings. Previously the CLI
+    // rendered only the include-key warnings, leaving engine warnings
+    // MCP-only — the blindness the authoring-drift axis exists to fix
+    // was measured through exactly this gap.
+    let mut warning_payload: Vec<serde_json::Value> = health
+        .warnings
+        .iter()
+        .filter_map(|w| serde_json::to_value(w).ok())
+        .collect();
+    warning_payload.extend(include_warnings.iter().map(|(key, allowed)| {
+        json!({
+            "code": "UNKNOWN_INCLUDE_KEY",
+            "message": format!(
+                "unknown include key: \"{key}\". Allowed: {}",
+                allowed.join(", ")
+            ),
+            "details": { "key": key, "allowed": allowed },
+        })
+    }));
+    if !warning_payload.is_empty() {
         obj.insert("warnings".into(), json!(warning_payload));
+    }
+
+    // Authoring-drift findings participate in `--strict`
+    // unconditionally (no `--include` opt-in): they are
+    // default-visible warnings, and the axis exists because a
+    // `health --strict` run stayed silent on a vanished authoring
+    // source.
+    let authoring_drift = health
+        .warnings
+        .iter()
+        .filter(|w| {
+            matches!(
+                w.code(),
+                "SCHEMA_AUTHORING_SOURCE_MISSING" | "SCHEMA_AUTHORING_SOURCE_DIVERGED"
+            )
+        })
+        .count();
+    if authoring_drift > 0 {
+        strict_violations.push(("schema_authoring_drift", authoring_drift));
     }
 
     if ctx.json {

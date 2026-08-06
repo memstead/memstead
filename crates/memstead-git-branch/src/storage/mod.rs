@@ -73,6 +73,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     export_to_bytes: export_to_bytes_dispatch,
     prune_residue: prune_residue_dispatch,
     write_schema: write_schema_dispatch,
+    read_schema_file: read_schema_file_dispatch,
 };
 
 /// Dispatcher for `Engine::install_schema` on git-branch workspaces.
@@ -92,6 +93,25 @@ fn write_schema_dispatch(
                 gitdir.display(),
             ))
         })
+}
+
+/// Dispatcher for the authoring-drift health axis: read one file from
+/// a sealed package on the `__MEMSTEAD:schemas/` ref. Absence is
+/// `Ok(None)`, never an error.
+fn read_schema_file_dispatch(
+    gitdir: &std::path::Path,
+    name: &str,
+    version: &str,
+    rel: &str,
+) -> Result<Option<Vec<u8>>, memstead_base::backend::BackendError> {
+    crate::storage_memstead::read_schema_file_from_memstead_ref(gitdir, name, version, rel).map_err(
+        |e| {
+            memstead_base::backend::BackendError::Other(format!(
+                "schema file read from __MEMSTEAD ref at {}: {e}",
+                gitdir.display(),
+            ))
+        },
+    )
 }
 
 /// Dispatcher for

@@ -365,7 +365,7 @@ Health summary (orphans, stubs, stale entities, missing fields)
 * `--limit <LIMIT>` — Max rows for `most_connected` and `tag_distribution` (default: 10)
 
   Default value: `10`
-* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations. The output is rendered first, then the non-zero exit fires. Today only `missing_required_outgoing` participates; new Tier-2 codes opt in additively without breaking the flag's semantics. With no Tier-2 `--include` token, `--strict` is a no-op
+* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations, or when the always-on authoring-drift axis reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` / `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in). The output is rendered first, then the non-zero exit fires. Include-gated participation today: `missing_required_outgoing`; new Tier-2 codes opt in additively without breaking the flag's semantics
 
 
 

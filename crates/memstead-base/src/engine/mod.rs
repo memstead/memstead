@@ -436,6 +436,18 @@ pub type GitBranchWriteSchemaFn = fn(
     files: &[(String, Vec<u8>)],
 ) -> Result<String, BackendError>;
 
+/// Read one file from a sealed schema package on the workspace's
+/// `__MEMSTEAD:schemas/<name>@<version>/` ref. `Ok(None)` when the
+/// ref, package, or file is absent — absence is a normal state (the
+/// install-provenance stamp only exists for path-sourced installs).
+/// Read-only; the authoring-drift health axis is the consumer.
+pub type GitBranchReadSchemaFileFn = fn(
+    gitdir: &Path,
+    name: &str,
+    version: &str,
+    rel: &str,
+) -> Result<Option<Vec<u8>>, BackendError>;
+
 /// Bundle of git-branch-specific op dispatchers. Installed on the
 /// engine at full boot. Each field is one ops-method that previously
 /// lived on the `MemBackend` trait; moving them off the trait keeps
@@ -454,6 +466,7 @@ pub struct GitBranchOps {
     pub export_to_bytes: GitBranchExportToBytesFn,
     pub prune_residue: GitBranchPruneResidueFn,
     pub write_schema: GitBranchWriteSchemaFn,
+    pub read_schema_file: GitBranchReadSchemaFileFn,
 }
 
 impl std::fmt::Debug for Engine {

@@ -20,6 +20,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `memstead schema install <path>` (message and
   `details.install_hint`). A reported autonomous loop burned five
   rounds and a server restart on the old one-sentence message.
+- **Health reports authoring drift for installed schemas.** `memstead
+  schema install` from a package directory now stamps the sealed copy
+  with the authoring path it was installed from
+  (`install-provenance.json`, workspace-local — never exported into
+  `.mem` archives). A health run then reports, per stamped pinned
+  schema, when the authoring package is MISSING from the working tree
+  (`SCHEMA_AUTHORING_SOURCE_MISSING`) and separately when it is
+  present but no longer parses equivalent to the sealed copy
+  (`SCHEMA_AUTHORING_SOURCE_DIVERGED`) — parsed-schema comparison,
+  never raw bytes, so editor-header comment lines and serialisation
+  cosmetics never trip it. Both findings participate in `health
+  --strict` with no `--include` opt-in. Unstamped schemas — sealed
+  before this change, built-ins, archive installs — produce no
+  finding (no backfill: a guessed provenance is worse than an absent
+  one). The CLI `health` command now also renders engine-level
+  warnings (previously MCP-only), which is the surface this axis
+  ships on.
 - **Folder mems say what provenance means, at creation.** Creating a
   mem on storage without version control (a folder mount — via
   `memstead_mem_create`, `memstead mem init` with folder storage, or
