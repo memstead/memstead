@@ -1550,6 +1550,18 @@ impl EngineError {
     /// and other non-agent consumers.
     pub fn prose_render(&self) -> String {
         match self {
+            // The echoed conforming `example` is the highest-leverage
+            // part of a format refusal — inline it on the text channel
+            // too, not only under `details.example`.
+            EngineError::SectionFormatRefused { violation, .. } => {
+                let base = self.to_string();
+                match violation.example() {
+                    Some(example) => {
+                        format!("{base}\nA conforming example:\n{}", example.trim_end())
+                    }
+                    None => base,
+                }
+            }
             EngineError::HasIncomingRefs { id, referrers } => {
                 let inline = render_referrers_inline(referrers);
                 format!(

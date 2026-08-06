@@ -522,6 +522,16 @@ impl SectionFormatViolation {
         }
     }
 
+    /// The declared conforming example, when the violation carries one.
+    pub fn example(&self) -> Option<&str> {
+        match self {
+            Self::ContentMismatch { example, .. }
+            | Self::ItemPatternMismatch { example, .. }
+            | Self::TableColumns { example, .. } => example.as_deref(),
+            Self::SetextReserved { .. } => None,
+        }
+    }
+
     /// One-line human rendering for refusal message text.
     pub fn describe(&self) -> String {
         match self {

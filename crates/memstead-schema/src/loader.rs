@@ -782,10 +782,16 @@ fn name_shape(name: &str) -> Result<(), &'static str> {
 fn compile_section_formats(td: &mut TypeDefinition) {
     use crate::content_expr::ContentExpr;
     for section in &mut td.sections {
+        // A non-default severity only deserializes from an explicit
+        // declaration, so a lone `format_severity: warn` without
+        // `content` is detectable — and would otherwise load and be
+        // silently ignored (`format_severity: block` alone equals the
+        // default and is inherently a no-op).
         let declares_any = section.content.is_some()
             || section.item_pattern.is_some()
             || section.table.is_some()
-            || section.example.is_some();
+            || section.example.is_some()
+            || section.format_severity != crate::types::ConstraintSeverity::Block;
         if !declares_any {
             continue;
         }
@@ -866,18 +872,38 @@ fn compile_section_formats(td: &mut TypeDefinition) {
 /// NOT — the recorded `format_problems` surface as health findings
 /// instead, and the defective declaration is never enforced.
 pub fn check_section_formats(schema: &crate::Schema) -> Result<(), SchemaLoadError> {
+    // Aggregate EVERY defective section across every type — the
+    // refusal names all offenders, never the first only. `type_name`
+    // / `section` carry the first offender; entries beyond it are
+    // prefixed with their own type/section inside `problems`.
+    let mut first: Option<(String, String)> = None;
+    let mut problems: Vec<String> = Vec::new();
     for td in schema.types.values() {
         for section in &td.sections {
-            if !section.format_problems.is_empty() {
-                return Err(SchemaLoadError::InvalidSectionFormat {
-                    type_name: td.name.clone(),
-                    section: section.key.clone(),
-                    problems: section.format_problems.clone(),
-                });
+            if section.format_problems.is_empty() {
+                continue;
+            }
+            if first.is_none() {
+                first = Some((td.name.clone(), section.key.clone()));
+                problems.extend(section.format_problems.iter().cloned());
+            } else {
+                problems.extend(
+                    section
+                        .format_problems
+                        .iter()
+                        .map(|p| format!("[{}.{}] {p}", td.name, section.key)),
+                );
             }
         }
     }
-    Ok(())
+    match first {
+        Some((type_name, section)) => Err(SchemaLoadError::InvalidSectionFormat {
+            type_name,
+            section,
+            problems,
+        }),
+        None => Ok(()),
+    }
 }
 
 fn validate_type(

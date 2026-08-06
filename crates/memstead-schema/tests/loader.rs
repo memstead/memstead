@@ -2098,3 +2098,29 @@ fn builtin_planning_bump_declares_bullet_lists() {
         assert!(section.format_problems.is_empty());
     }
 }
+
+/// Gap fixes after the plan-08 grading round: a lone
+/// `format_severity: warn` (no `content`) is a declaration and must
+/// not load silently ignored; and the install refusal aggregates
+/// EVERY defective section across types, not the first only.
+#[test]
+fn section_format_lone_severity_and_cross_section_aggregation_refuse() {
+    // Lone warn severity — detectable (block alone equals the default).
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    format_severity: warn\n",
+    );
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
+    memstead_schema::check_section_formats(&schema).expect_err("lone severity must refuse");
+
+    // Two defective sections: both named in ONE refusal.
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: extra\n    heading: Extra\n    required: false\n    search_weight: 1.0\n    catch_all: false\n    write_rules: []\n    content: \"nope\"\n  - key: body\n    heading: Body\n    required: true\n    content: \"alsonope\"\n",
+    );
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
+    let err = memstead_schema::check_section_formats(&schema).expect_err("must refuse");
+    let msg = err.to_string();
+    assert!(msg.contains("nope"), "{msg}");
+    assert!(msg.contains("alsonope"), "second section's problem named too: {msg}");
+}

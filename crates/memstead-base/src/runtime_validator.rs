@@ -126,7 +126,7 @@ pub enum ValidationError {
     /// (`### ` and below) are allowed — the parser anchors only on
     /// level 2.
     #[error(
-        "section '{section}' content contains an embedded `^## ` heading line '{embedded_heading}' — \
+        "section '{section}' content contains an embedded reserved (`# ` / `## `) heading line '{embedded_heading}' — \
          the compose-then-reparse pipeline would split the value at that heading; use `### ` or \
          deeper for sub-headings"
     )]
@@ -502,7 +502,7 @@ impl ValidationError {
                 section,
                 embedded_heading,
             } => format!(
-                "section '{section}' content contains an embedded `## ` heading line '{embedded_heading}' — use `### ` or deeper for sub-headings"
+                "section '{section}' content contains an embedded reserved (`# ` / `## `) heading line '{embedded_heading}' — use `### ` or deeper for sub-headings"
             ),
             ValidationError::SectionContentControlByte {
                 section,

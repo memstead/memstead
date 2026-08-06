@@ -599,9 +599,19 @@ impl Engine {
             if def.format_severity != memstead_schema::ConstraintSeverity::Block {
                 continue;
             }
-            let Some(body) = entity_for_render.sections.get(def.key.as_str()) else {
-                continue;
-            };
+            // Absent-as-empty: the generator renders every declared
+            // section heading (empty body when omitted), so the
+            // format judges the state that actually lands on disk —
+            // an expression that does not admit the empty sequence
+            // makes its section effectively required (declare a `?`
+            // or `*` form to admit omission). Without this, an
+            // omitting create passes while health flags the same
+            // on-disk state — write path and health must agree.
+            let body = entity_for_render
+                .sections
+                .get(def.key.as_str())
+                .map(String::as_str)
+                .unwrap_or("");
             if let Some(first) = crate::section_format::check_section_format(def, body)
                 .into_iter()
                 .next()
@@ -5503,13 +5513,32 @@ write_rules: []
         // Warn-tier section: nonconforming content commits.
         let outcome = engine
             .create_entity(
-                plan_create_args("Plan D", None, Some("kein listenpunkt\n")),
+                plan_create_args(
+                    "Plan D",
+                    Some("### Phase 1\n- **Kickoff** — 2026-09-01\n"),
+                    Some("kein listenpunkt\n"),
+                ),
                 actor,
                 Some(&client),
                 None,
             )
             .unwrap();
         assert!(!outcome.commit_sha.is_empty(), "warn tier never refuses");
+
+        // Absent-as-empty: omitting the block-tier section refuses
+        // exactly like an explicit empty body — the generator renders
+        // the empty heading either way, and write path and health
+        // must agree about that on-disk state. `+` does not admit the
+        // empty sequence, so the section is effectively required.
+        let err = engine
+            .create_entity(
+                plan_create_args("Plan E", None, None),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "SECTION_CONTENT_MISMATCH");
     }
 
     /// Composed-body rule on update: an append whose delta is
@@ -5601,7 +5630,11 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mut engine = format_engine(&tmp);
         let (actor, client) = cli_actor();
-        let mut args = plan_create_args("Plan H", None, None);
+        let mut args = plan_create_args(
+            "Plan H",
+            Some("### Phase 1\n- **Kickoff** — 2026-09-01\n"),
+            None,
+        );
         args.sections
             .insert("body".to_string(), "intro\n# Injected Title\ntail".to_string());
         let err = engine
