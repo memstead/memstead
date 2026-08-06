@@ -1816,6 +1816,20 @@ impl WarningHint {
                 mem: "plan-example".into(),
                 unregistered_at: "2026-05-17T08:43:29Z".into(),
             },
+            WarningHint::FolderMemProvenance {
+                mem: "plan-example".into(),
+            },
+            WarningHint::SchemaAuthoringSourceMissing {
+                schema_ref: "authored@0.1.0".into(),
+                stamped_path: "/workspace/authored".into(),
+                mems: vec!["specs".into()],
+            },
+            WarningHint::SchemaAuthoringSourceDiverged {
+                schema_ref: "authored@0.1.0".into(),
+                stamped_path: "/workspace/authored".into(),
+                mems: vec!["specs".into()],
+                detail: "the parsed authoring package differs from the sealed copy".into(),
+            },
             WarningHint::AmbiguousDescriptionDelimiter {
                 from: EntityId("specs--example-source".into()),
                 rel_type: "OTHER".into(),
