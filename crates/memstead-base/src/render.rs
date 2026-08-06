@@ -663,8 +663,8 @@ pub struct ListResultEnvelope<'a> {
 }
 
 /// Build the structured `memstead_entity` envelope. Identity fields
-/// (`_hash`, `id`, `mem`, `type`, `_stub_kind`) come from the parsed
-/// `Entity` and live at the top level. Every schema-declared frontmatter
+/// (`_hash`, `id`, `mem`, `type`, `title`, `_stub_kind`) come from the
+/// parsed `Entity` and live at the top level. Every schema-declared frontmatter
 /// key surfaces under a nested `metadata: {...}` map — its single home.
 /// Read a metadata
 /// value as `envelope.metadata.<key>`; generic consumers iterate the map
@@ -719,6 +719,14 @@ pub fn build_entity_envelope(
     envelope.insert(
         "type".to_string(),
         serde_json::Value::String(entity.entity_type.clone()),
+    );
+    // The `# H1` display title. Structural identity like `id`/`mem`/
+    // `type`, so it lives top-level next to them; before this slot the
+    // structured envelope had no title at all and consumers had to
+    // parse the rendered markdown's H1 to recover it.
+    envelope.insert(
+        "title".to_string(),
+        serde_json::Value::String(entity.title.clone()),
     );
 
     // Metadata has exactly one home on the envelope — the nested

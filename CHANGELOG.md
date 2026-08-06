@@ -36,6 +36,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **`memstead export --format json` — the bulk read.** One CLI
+  invocation, one engine boot, emits the complete non-stub entity set
+  as a single JSON document on stdout (`format: "memstead-export/v1"`),
+  grouped per mem: per entity the same structured envelope
+  `memstead entity --json` produces (id, type, title, metadata,
+  sections, relationships with edge source, `_hash`), per group the
+  mem's schema pin, `read_only` marker, and entity count.
+  Backend-uniform (git-branch and folder mems), observably read-only.
+  `--mem <name>` selects one mem (read-only mounts included when named);
+  omitting it exports every writable mem, read-mems excluded. External
+  projections and check scripts consume this instead of per-entity CLI
+  calls (which pay the engine boot each) or raw git against the
+  mem-repo. `--output` combined with `--format json` refuses
+  (`INVALID_INPUT`) — the document goes to stdout. Deliberately
+  CLI-only: the MCP abstention for `memstead_export` stands (a bulk
+  dump into an agent context is an anti-feature; agents use
+  `memstead_search`/`memstead_entity`).
+- **The structured entity envelope carries `title`.** `memstead entity
+  --json` and MCP `memstead_entity` now surface the `# H1` display
+  title as a top-level field next to `id`/`mem`/`type` — previously
+  consumers had to parse the rendered markdown to recover it. Additive.
 - **Health includes carry what health knows.** Three closures on the
   health surface. (1) `HealthIssue` gains a structured `code`
   (`MISSING`, `SECTION_HEADING_MISMATCH`, `UNDECLARED_RELATIONSHIP`,

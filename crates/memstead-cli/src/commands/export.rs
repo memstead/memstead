@@ -7,7 +7,8 @@ use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
 
-/// Export the write mem as markdown (in place) or as a portable `.mem` archive.
+/// Export the write mem as markdown (in place), as a portable `.mem`
+/// archive, or as a structured JSON document on stdout.
 ///
 /// `--format markdown` is supported only on folder-backed mems; use
 /// `--format mem` for archive export on git-branch backends. Targeting
@@ -15,17 +16,27 @@ use crate::setup::{CliContext, CliEngine};
 /// `MARKDOWN_EXPORT_UNSUPPORTED_BACKEND`; workspace-wide markdown export
 /// in a mixed-backend workspace completes the folder mounts and lists
 /// the declined mounts under `skipped_mounts`.
+///
+/// `--format json` is the bulk read: one engine boot emits the complete
+/// entity set — per entity the same structured envelope `memstead entity
+/// --json` produces — grouped per mem, backend-uniform, observably
+/// read-only. External projections and check scripts consume this
+/// instead of per-entity CLI calls (which pay the engine boot per
+/// entity) or raw git against the mem-repo.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Output format. `markdown` regenerates the mem directory in place
     /// (folder-backed mems only); `mem` writes a portable `.mem` zip
-    /// suitable for sharing (every backend).
+    /// suitable for sharing (every backend); `json` prints every
+    /// non-stub entity of the selected mem(s) as one structured JSON
+    /// document on stdout (every backend, read-only).
     #[arg(long, value_enum, default_value_t = Format::Markdown)]
     pub format: Format,
 
     /// Output path for `--format mem`. Defaults to `./<name>-<version>.mem`
     /// in the current directory, matching the "external vs cache filename"
-    /// convention for portable mem archives. Ignored for `--format markdown`.
+    /// convention for portable mem archives. Ignored for `--format markdown`;
+    /// refused for `--format json` (that document goes to stdout).
     #[arg(long, short = 'o', value_name = "PATH")]
     pub output: Option<PathBuf>,
 
@@ -33,7 +44,10 @@ pub struct Args {
     /// this argument runs a workspace-wide export and reports any
     /// declined mounts under `skipped_mounts`. For `--format mem`,
     /// required when more than one write mem is loaded; defaults to
-    /// the first writable mem otherwise.
+    /// the first writable mem otherwise. For `--format json`, omitting
+    /// it exports every writable mem; naming a read-only mount exports
+    /// that mount (read-mems are excluded from the workspace-wide
+    /// default — they are someone else's published content).
     #[arg(long = "mem", value_name = "NAME")]
     pub mem_name: Option<String>,
 }
@@ -44,14 +58,20 @@ pub enum Format {
     Markdown,
     /// Write a `.mem` zip archive to `--output`.
     Mem,
+    /// Print the full entity set as one JSON document on stdout.
+    Json,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    if matches!(args.format, Format::Json) {
+        return run_json(ctx, args);
+    }
     match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => match args.format {
             Format::Markdown => run_markdown(ctx, &engine, args.mem_name.as_deref()),
             Format::Mem => run_mem(ctx, &engine, args),
+            Format::Json => unreachable!("dispatched to run_json above"),
         },
         CliEngine::Filesystem(engine) => match args.format {
             // `--format markdown` regenerates files in place. The
@@ -66,8 +86,116 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             )
             .into()),
             Format::Mem => run_mem_filesystem(ctx, &engine, args),
+            Format::Json => unreachable!("dispatched to run_json above"),
         },
     }
+}
+
+/// Version marker on the `--format json` document, following the
+/// `workspace-dump/v0` convention: consumers assert the marker before
+/// parsing so a future shape change fails loudly instead of silently.
+const JSON_EXPORT_FORMAT: &str = "memstead-export/v1";
+
+/// `--format json` — the bulk read. Backend-uniform (both engine
+/// flavours serve it via [`CliEngine::base`]) and observably read-only:
+/// pure store iteration, no engine mutation path is touched. Each
+/// entity rides as the same structured envelope `memstead entity --json`
+/// emits (plus mem-level grouping), so a consumer parses one entity
+/// shape across both surfaces. Entities are sorted by id within each
+/// mem for deterministic output; stubs are excluded (they are
+/// unresolved references, not content).
+fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    // `-o` only means something for archive export. Refusing beats
+    // silently ignoring: an operator who passed `-o dump.json` would
+    // otherwise wait on a file that never appears.
+    if args.output.is_some() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--output applies only to --format mem — the JSON document goes to stdout; redirect it instead",
+        )
+        .into());
+    }
+
+    let cli_engine = ctx.cli_engine()?;
+    let engine = cli_engine.base();
+
+    let all_names: Vec<String> = engine.mem_names().into_iter().map(String::from).collect();
+    // Named mem: any loaded mount qualifies, read-only included — an
+    // explicit name is the opt-in. Workspace-wide default: writable
+    // mems only; read-only mounts are someone else's published content.
+    let selected: Vec<String> = match &args.mem_name {
+        Some(name) => {
+            if !all_names.iter().any(|n| n == name) {
+                return Err(CliError::new(
+                    ExitKind::NotFound,
+                    "UNKNOWN_MEM",
+                    format!(
+                        "unknown mem '{name}' — loaded mems: {}",
+                        all_names.join(", ")
+                    ),
+                )
+                .with_details(json!({ "mem": name, "loaded": all_names }))
+                .into());
+            }
+            vec![name.clone()]
+        }
+        None => all_names
+            .iter()
+            .filter(|n| engine.mem_router().is_writable(n))
+            .cloned()
+            .collect(),
+    };
+
+    let mut mems = serde_json::Map::new();
+    for mem_name in &selected {
+        // The authoritative schema pin lives in the mem's own config;
+        // carried once at the group level rather than per entity.
+        let schema_pin = engine
+            .mem_configs_named()
+            .find(|(name, _)| name == mem_name)
+            .and_then(|(_, c)| c.schema.as_ref())
+            .map(|s| s.to_string());
+
+        let mut entities: Vec<&memstead_base::Entity> = engine
+            .store()
+            .all_entities()
+            .filter(|e| !e.stub && e.mem == *mem_name)
+            .collect();
+        entities.sort_by(|a, b| a.id.as_ref().cmp(b.id.as_ref()));
+
+        let envelopes: Vec<serde_json::Value> = entities
+            .iter()
+            .map(|entity| {
+                let body = memstead_base::render::render_entity_markdown(entity, None);
+                let tokens = memstead_base::chunking::estimate_tokens(&body);
+                let outgoing = engine.store().outgoing(&entity.id);
+                memstead_base::render::build_entity_envelope(
+                    entity, tokens, None, None, None, outgoing,
+                )
+            })
+            .collect();
+
+        let mut group = serde_json::Map::new();
+        if let Some(s) = schema_pin {
+            group.insert("schema".to_string(), json!(s));
+        }
+        group.insert(
+            "read_only".to_string(),
+            json!(!engine.mem_router().is_writable(mem_name)),
+        );
+        group.insert("entity_count".to_string(), json!(envelopes.len()));
+        group.insert(
+            "entities".to_string(),
+            serde_json::Value::Array(envelopes),
+        );
+        mems.insert(mem_name.clone(), serde_json::Value::Object(group));
+    }
+
+    print_json(&json!({
+        "format": JSON_EXPORT_FORMAT,
+        "mems": mems,
+    }))
 }
 
 #[cfg(feature = "mem-repo")]

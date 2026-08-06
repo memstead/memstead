@@ -861,3 +861,353 @@ fn mem_title_and_subject_lifecycle() {
         .success()
         .stdout(contains("- `sender-mem`"));
 }
+
+// ---------------------------------------------------------------------------
+// `export --format json` — the bulk read (one engine boot, whole entity set)
+// ---------------------------------------------------------------------------
+
+/// Section bodies written into the JSON-export fixture. Named consts so
+/// the byte-faithful assertions below compare against the exact same
+/// strings the fixture wrote — a round-trip check, not a re-typing.
+const DELTA_IDENTITY: &str = "Multi-section fixture entity for the JSON bulk export.\n\nSecond paragraph with `inline code` and *emphasis* to make the\nround-trip non-trivial.";
+const DELTA_PURPOSE: &str = "Verifies byte-faithful section content, metadata, relationships\n(including a cross-mem edge), and `_hash` in one document.";
+const GAMMA_IDENTITY: &str = "Cross-mem edge target living in the second writable mem.";
+
+/// Two writable git-branch mems in one workspace: `sender-mem` holding
+/// `delta` (multi-section body, metadata, an explicit cross-mem USES
+/// edge into `second-mem--gamma`) and `second-mem` holding `gamma`.
+fn make_json_export_workspace(root: &Path) {
+    let sender = root.join("sender-mem");
+    let second = root.join("second-mem");
+    for dir in [&sender, &second] {
+        let store = dir.join(".memstead");
+        fs::create_dir_all(&store).unwrap();
+        fs::write(
+            store.join("config.json"),
+            r#"{ "version": "1.0.0", "schema": "default@1.0.0" }"#,
+        )
+        .unwrap();
+    }
+
+    let delta_body = format!(
+        "---\ntype: spec\ncreated_date: 2026-02-01\nlast_modified: 2026-02-01\nlevel: M1\n---\n# Delta\n\n## Identity\n\n{DELTA_IDENTITY}\n\n## Purpose\n\n{DELTA_PURPOSE}\n\n## Relationships\n\n- **USES**: [[second-mem--gamma]]\n"
+    );
+    let gamma_body = format!(
+        "---\ntype: spec\ncreated_date: 2026-02-02\nlast_modified: 2026-02-02\nlevel: M0\n---\n# Gamma\n\n## Identity\n\n{GAMMA_IDENTITY}\n"
+    );
+    fs::write(sender.join("delta.md"), &delta_body).unwrap();
+    fs::write(second.join("gamma.md"), &gamma_body).unwrap();
+
+    init_real_mem_repo_from_disk(root, &[(&sender, "sender-mem"), (&second, "second-mem")]);
+    commit_mem_branch(root, "sender-mem", &[("delta.md", &delta_body)]);
+    commit_mem_branch(root, "second-mem", &[("gamma.md", &gamma_body)]);
+}
+
+/// Run `export --format json` (plus `extra` args) and parse stdout.
+fn export_json(root: &Path, extra: &[&str]) -> serde_json::Value {
+    let out = memstead()
+        .current_dir(root)
+        .args(["export", "--format", "json"])
+        .args(extra)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&out).expect("--format json must emit one valid JSON document")
+}
+
+/// Criterion 1 (git-branch leg): one invocation, one document, every
+/// non-stub entity with id / type / title / metadata / sections /
+/// relationships / `_hash` — section bodies byte-identical to what the
+/// fixture wrote, the cross-mem edge present with its full target id.
+#[test]
+fn export_json_git_branch_round_trips_values() {
+    let tmp = TempDir::new().unwrap();
+    make_json_export_workspace(tmp.path());
+
+    let doc = export_json(tmp.path(), &["--mem", "sender-mem"]);
+    assert_eq!(doc["format"], "memstead-export/v1");
+
+    let group = &doc["mems"]["sender-mem"];
+    assert_eq!(group["schema"], "default@1.0.0");
+    assert_eq!(group["read_only"], false);
+    assert_eq!(group["entity_count"], 1);
+
+    let entities = group["entities"].as_array().expect("entities array");
+    let delta = entities
+        .iter()
+        .find(|e| e["id"] == "sender-mem--delta")
+        .expect("delta must be exported");
+    assert_eq!(delta["type"], "spec");
+    assert_eq!(delta["title"], "Delta");
+    assert_eq!(delta["mem"], "sender-mem");
+    assert_eq!(delta["metadata"]["level"], "M1");
+    assert_eq!(delta["metadata"]["created_date"], "2026-02-01");
+    assert_eq!(
+        delta["sections"]["identity"], DELTA_IDENTITY,
+        "identity section must round-trip byte-faithfully; got {}",
+        delta["sections"]["identity"]
+    );
+    assert_eq!(delta["sections"]["purpose"], DELTA_PURPOSE);
+
+    let rels = delta["relationships"].as_array().expect("relationships");
+    let uses = rels
+        .iter()
+        .find(|r| r["rel_type"] == "USES")
+        .expect("cross-mem USES edge must be exported");
+    assert_eq!(uses["target"], "second-mem--gamma");
+
+    // The engine's `_hash` contract: sha-256 truncated to 16 hex chars
+    // (`entity::parser::compute_hash`) — the same value optimistic
+    // locking compares against.
+    let hash = delta["_hash"].as_str().expect("_hash string");
+    assert_eq!(hash.len(), 16, "truncated sha-256 hex expected; got {hash}");
+    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+/// Criterion 2: the workspace-wide form (no `--mem`) contains every
+/// writable mem, grouped, from one invocation. The cross-mem target's
+/// stub in `sender-mem`'s namespace must NOT surface as an entity
+/// anywhere (non-stub contract).
+#[test]
+fn export_json_workspace_wide_groups_every_writable_mem() {
+    let tmp = TempDir::new().unwrap();
+    make_json_export_workspace(tmp.path());
+
+    let doc = export_json(tmp.path(), &[]);
+    let mems = doc["mems"].as_object().expect("mems object");
+    assert!(mems.contains_key("sender-mem"), "sender-mem group missing");
+    assert!(mems.contains_key("second-mem"), "second-mem group missing");
+
+    let gamma = mems["second-mem"]["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "second-mem--gamma")
+        .expect("gamma must be exported in its own group");
+    assert_eq!(gamma["title"], "Gamma");
+    assert_eq!(gamma["sections"]["identity"], GAMMA_IDENTITY);
+
+    for (name, group) in mems {
+        for e in group["entities"].as_array().unwrap() {
+            assert!(
+                e.get("_stub_kind").is_none(),
+                "stub leaked into export group `{name}`: {e}"
+            );
+        }
+    }
+}
+
+/// Criterion 3: a read-only mount is included when named via `--mem`
+/// (with `read_only: true`) and absent from the workspace-wide default.
+#[test]
+fn export_json_read_only_mount_named_vs_default() {
+    let _guard = cache_guard().lock().unwrap();
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = sender_mem.join("sender-mem-1.0.0.mem");
+    memstead()
+        .current_dir(sender.path())
+        .args(["export", "--format", "mem", "-o"])
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .arg("install")
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+
+    // Workspace-wide: only the writable receiver mem.
+    let wide = memstead()
+        .current_dir(receiver.path())
+        .args(["export", "--format", "json"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let wide: serde_json::Value = serde_json::from_slice(&wide).unwrap();
+    let mems = wide["mems"].as_object().unwrap();
+    assert!(
+        !mems.contains_key("sender-mem"),
+        "read-only mount must be absent from the workspace-wide default; got {:?}",
+        mems.keys().collect::<Vec<_>>()
+    );
+    assert!(mems.contains_key("receiver-mem"));
+
+    // Named: the read-only mount exports, marked read_only.
+    let named = memstead()
+        .current_dir(receiver.path())
+        .args(["export", "--format", "json", "--mem", "sender-mem"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let named: serde_json::Value = serde_json::from_slice(&named).unwrap();
+    let group = &named["mems"]["sender-mem"];
+    assert_eq!(group["read_only"], true);
+    let ids: Vec<&str> = group["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        ids.contains(&"sender-mem--alpha") && ids.contains(&"sender-mem--beta"),
+        "named RO export must carry the mount's entities; got {ids:?}"
+    );
+}
+
+/// Criterion 4 (git-branch leg): the mem-repo's refs are identical
+/// before and after the export — the command is observably read-only.
+#[test]
+fn export_json_leaves_mem_repo_refs_untouched() {
+    let tmp = TempDir::new().unwrap();
+    make_json_export_workspace(tmp.path());
+    let gitdir = tmp.path().join("mem-repo").join(".git");
+
+    let refs = |label: &str| -> String {
+        let out = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(&gitdir)
+            .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+            .output()
+            .unwrap_or_else(|e| panic!("git for-each-ref ({label}): {e}"));
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    let before = refs("before");
+    assert!(
+        before.contains("refs/heads/sender-mem"),
+        "fixture must have seeded the branch; got: {before}"
+    );
+    let _ = export_json(tmp.path(), &[]);
+    let after = refs("after");
+    assert_eq!(before, after, "export must not move any mem-repo ref");
+}
+
+/// Criteria 1 + 4 (folder-mem legs): the same invocation shape serves a
+/// folder-backed mount — backend-uniform, byte-faithful — and no
+/// mem-content file changes on disk.
+#[test]
+fn export_json_folder_mem_round_trips_and_mutates_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let store = root.join(".memstead");
+    fs::create_dir_all(store.join("state")).unwrap();
+    fs::write(
+        store.join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    fs::write(
+        store.join("state").join("mounts.json"),
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    )
+    .unwrap();
+    let mem_dir = root.join("engine-mem");
+    fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    let epsilon_body = format!(
+        "---\ntype: spec\ncreated_date: 2026-02-03\nlast_modified: 2026-02-03\nlevel: M0\n---\n# Epsilon\n\n## Identity\n\n{DELTA_IDENTITY}\n\n## Purpose\n\n{DELTA_PURPOSE}\n"
+    );
+    fs::write(mem_dir.join("epsilon.md"), &epsilon_body).unwrap();
+
+    // Snapshot every mem-content file before the export.
+    let snapshot = |label: &str| -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<(String, Vec<u8>)> = walk_files(&mem_dir)
+            .into_iter()
+            .map(|p| {
+                let rel = p.strip_prefix(&mem_dir).unwrap().to_string_lossy().into_owned();
+                let bytes = fs::read(&p).unwrap_or_else(|e| panic!("read {p:?} ({label}): {e}"));
+                (rel, bytes)
+            })
+            .collect();
+        files.sort();
+        files
+    };
+    let before = snapshot("before");
+
+    let doc = export_json(root, &["--mem", "engine"]);
+    let group = &doc["mems"]["engine"];
+    assert_eq!(group["read_only"], false);
+    let epsilon = group["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "engine--epsilon")
+        .expect("epsilon must be exported from the folder mount");
+    assert_eq!(epsilon["title"], "Epsilon");
+    assert_eq!(epsilon["sections"]["identity"], DELTA_IDENTITY);
+    assert_eq!(epsilon["sections"]["purpose"], DELTA_PURPOSE);
+
+    let after = snapshot("after");
+    assert_eq!(before, after, "export must not change any mem-content file");
+}
+
+/// Recursively collect every file under `dir`.
+fn walk_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let p = entry.unwrap().path();
+        if p.is_dir() {
+            out.extend(walk_files(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Criterion 5: unknown mem refuses with the existing typed not-found
+/// code; `-o` (a `--format mem`-only flag) combined with `--format json`
+/// refuses rather than silently ignoring; neither leaf is INTERNAL.
+#[test]
+fn export_json_refusals_are_typed() {
+    let tmp = TempDir::new().unwrap();
+    make_json_export_workspace(tmp.path());
+
+    let unknown = memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--format", "json", "--mem", "no-such-mem"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let unknown = String::from_utf8(unknown).unwrap();
+    assert!(unknown.contains("UNKNOWN_MEM"), "got: {unknown}");
+    assert!(!unknown.contains("INTERNAL"), "got: {unknown}");
+
+    let with_output = memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--format", "json", "-o", "dump.json"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let with_output = String::from_utf8(with_output).unwrap();
+    assert!(with_output.contains("INVALID_INPUT"), "got: {with_output}");
+    assert!(!with_output.contains("INTERNAL"), "got: {with_output}");
+    assert!(
+        !tmp.path().join("dump.json").exists(),
+        "refusal must not have written the file"
+    );
+}
