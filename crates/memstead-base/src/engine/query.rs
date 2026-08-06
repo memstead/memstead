@@ -938,6 +938,12 @@ impl Engine {
         crate::ops::health::collect_constraint_findings(&self.store, mem_filter, &self.schemas)
     }
 
+    /// Defective section-format declarations the loaded schemas carry
+    /// (lenient boot recorded them; install would have refused).
+    pub fn schema_format_defects(&self) -> Vec<crate::ops::health::SchemaFormatDefect> {
+        crate::ops::health::collect_schema_format_defects(&self.schemas)
+    }
+
     /// Conformance-axis integrity findings for one mem — which
     /// entities a write would refuse under the effective schema, and
     /// why. `target_schema = None` lints against the mem's current

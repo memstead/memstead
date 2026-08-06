@@ -1985,7 +1985,10 @@ fn section_format_malformed_declaration_names_all_offenders() {
         "  - key: body\n    heading: Body\n    required: true\n",
         "  - key: body\n    heading: Body\n    required: true\n    content: \"bulletList\"\n    item_pattern: '([unclosed'\n    table:\n      columns: []\n",
     );
-    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    // Lenient at load (a sealed schema keeps booting) — the refusal
+    // fires on the install / strict-validation path.
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("boot-lenient load");
+    let err = memstead_schema::check_section_formats(&schema).expect_err("install must refuse");
     let SchemaLoadError::InvalidSectionFormat { section, problems, .. } = &err else {
         panic!("expected InvalidSectionFormat, got: {err}");
     };
@@ -2006,35 +2009,40 @@ fn section_format_cross_field_legality() {
         "  - key: body\n    heading: Body\n    required: true\n",
         "  - key: body\n    heading: Body\n    required: true\n    content: \"paragraph list\"\n    item_pattern: '.+'\n",
     );
-    load(&minimal_manifest(), &[("sample", &both)]).expect_err("both kinds must fail");
+    let schema = load(&minimal_manifest(), &[("sample", &both)]).expect("lenient load");
+    memstead_schema::check_section_formats(&schema).expect_err("both kinds must fail");
 
     // Neither → refuse.
     let neither = minimal_type().replace(
         "  - key: body\n    heading: Body\n    required: true\n",
         "  - key: body\n    heading: Body\n    required: true\n    content: \"table\"\n    item_pattern: '.+'\n",
     );
-    load(&minimal_manifest(), &[("sample", &neither)]).expect_err("neither kind must fail");
+    let schema = load(&minimal_manifest(), &[("sample", &neither)]).expect("lenient load");
+    memstead_schema::check_section_formats(&schema).expect_err("neither kind must fail");
 
     // table block without `table` in content → refuse.
     let t = minimal_type().replace(
         "  - key: body\n    heading: Body\n    required: true\n",
         "  - key: body\n    heading: Body\n    required: true\n    content: \"paragraph\"\n    table:\n      columns: [Name]\n",
     );
-    load(&minimal_manifest(), &[("sample", &t)]).expect_err("table without table must fail");
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
+    memstead_schema::check_section_formats(&schema).expect_err("table without table must fail");
 
     // item_pattern without content → refuse.
     let t = minimal_type().replace(
         "  - key: body\n    heading: Body\n    required: true\n",
         "  - key: body\n    heading: Body\n    required: true\n    item_pattern: '.+'\n",
     );
-    load(&minimal_manifest(), &[("sample", &t)]).expect_err("pattern without content must fail");
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
+    memstead_schema::check_section_formats(&schema).expect_err("pattern without content must fail");
 
     // column_patterns naming an undeclared column → refuse.
     let t = minimal_type().replace(
         "  - key: body\n    heading: Body\n    required: true\n",
         "  - key: body\n    heading: Body\n    required: true\n    content: \"table\"\n    table:\n      columns: [Name]\n      column_patterns:\n        Datum: '\\d+'\n",
     );
-    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown column must fail");
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
+    memstead_schema::check_section_formats(&schema).expect_err("unknown column must fail");
 }
 
 /// Reserved heading depths refuse at load through the expression
@@ -2048,10 +2056,45 @@ fn section_format_heading_depth_one_and_two_refuse_at_load() {
                 "  - key: body\n    heading: Body\n    required: true\n    content: \"heading({depth}) paragraph\"\n"
             ),
         );
-        let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+        let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
+        let err =
+            memstead_schema::check_section_formats(&schema).expect_err("install must refuse");
         assert!(
             err.to_string().contains("3–6"),
             "names the reserved range: {err}"
         );
+    }
+}
+
+/// The builtin `planning` bump (plan 08, criterion 8): 0.1.0 stays
+/// untouched; 0.2.0 declares `content: "list(bullet)"` on the
+/// bullet-prescribing sections, compiled at load.
+#[test]
+fn builtin_planning_bump_declares_bullet_lists() {
+    let schemas = memstead_schema::builtins::load_builtin_schemas().expect("builtins load");
+    let planning: Vec<_> = schemas
+        .iter()
+        .filter(|s| s.manifest.name == "planning")
+        .collect();
+    let versions: Vec<String> = planning.iter().map(|s| s.version.to_string()).collect();
+    assert!(versions.contains(&"0.1.0".to_string()), "{versions:?}");
+    assert!(versions.contains(&"0.2.0".to_string()), "{versions:?}");
+
+    let v1 = planning.iter().find(|s| s.version.to_string() == "0.1.0").unwrap();
+    let v2 = planning.iter().find(|s| s.version.to_string() == "0.2.0").unwrap();
+    let pros_v1 = &v1.types["option"].sections.iter().find(|s| s.key == "pros").unwrap();
+    assert!(pros_v1.content.is_none(), "0.1.0 stays undeclared");
+    for (ty, key) in [
+        ("option", "pros"),
+        ("option", "cons"),
+        ("goal", "in_scope"),
+        ("goal", "out_of_scope"),
+        ("decision", "consequences"),
+        ("risk", "mitigations"),
+    ] {
+        let section = v2.types[ty].sections.iter().find(|s| s.key == key).unwrap();
+        assert_eq!(section.content.as_deref(), Some("list(bullet)"), "{ty}.{key}");
+        assert!(section.compiled_content.is_some(), "{ty}.{key} compiled");
+        assert!(section.format_problems.is_empty());
     }
 }

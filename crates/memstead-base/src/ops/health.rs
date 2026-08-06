@@ -837,6 +837,11 @@ pub struct ConstraintFindingReport {
     pub entity_type: String,
     pub mem: String,
     pub violations: Vec<UnsatisfiedConstraint>,
+    /// Standing violations of the entity's declared section formats
+    /// (plan 08) — additive: consumers of the pre-format shape see an
+    /// absent key, never an empty list.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub format_violations: Vec<crate::section_format::SectionFormatViolation>,
 }
 
 /// Collect every non-stub entity whose declared `constraints` its
@@ -854,8 +859,11 @@ pub fn collect_constraint_findings(
     mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
 ) -> Vec<ConstraintFindingReport> {
     use memstead_schema::ConstraintDef;
-    let mut by_entity: std::collections::BTreeMap<String, Vec<UnsatisfiedConstraint>> =
-        Default::default();
+    type Bucket = (
+        Vec<UnsatisfiedConstraint>,
+        Vec<crate::section_format::SectionFormatViolation>,
+    );
+    let mut by_entity: std::collections::BTreeMap<String, Bucket> = Default::default();
 
     for entity in store.all_entities() {
         if entity.stub {
@@ -872,6 +880,28 @@ pub fn collect_constraint_findings(
         let Some(td) = mem_schema.types.get(entity.entity_type.as_str()) else {
             continue;
         };
+
+        // Section-format sweep (plan 08) — standing violations of a
+        // declared markdown shape, every severity (block-tier
+        // pre-existing violations are health findings too; the next
+        // write of the section is the sanctioned repair point).
+        for def in &td.sections {
+            if def.compiled_content.is_none() {
+                continue;
+            }
+            let Some(body) = entity.sections.get(def.key.as_str()) else {
+                continue;
+            };
+            let violations = crate::section_format::check_section_format(def, body);
+            if !violations.is_empty() {
+                by_entity
+                    .entry(entity.id.0.clone())
+                    .or_default()
+                    .1
+                    .extend(violations);
+            }
+        }
+
         if td.constraints.is_empty() {
             continue;
         }
@@ -882,6 +912,7 @@ pub fn collect_constraint_findings(
             by_entity
                 .entry(entity.id.0.clone())
                 .or_default()
+                .0
                 .extend(violations);
         }
 
@@ -911,7 +942,7 @@ pub fn collect_constraint_findings(
                 {
                     continue;
                 }
-                by_entity.entry(tainted.0.clone()).or_default().push(
+                by_entity.entry(tainted.0.clone()).or_default().0.push(
                     UnsatisfiedConstraint::StatusPropagation {
                         field: field.clone(),
                         value: value.clone(),
@@ -926,7 +957,7 @@ pub fn collect_constraint_findings(
 
     let mut out: Vec<ConstraintFindingReport> = by_entity
         .into_iter()
-        .filter_map(|(id, violations)| {
+        .filter_map(|(id, (violations, format_violations))| {
             let id = crate::entity::EntityId(id);
             let entity = store.get(&id)?;
             Some(ConstraintFindingReport {
@@ -935,6 +966,7 @@ pub fn collect_constraint_findings(
                 entity_type: entity.entity_type.clone(),
                 mem: entity.mem.clone(),
                 violations,
+                format_violations,
             })
         })
         .collect();
@@ -991,6 +1023,52 @@ fn reach_transitively(
         }
     }
     reached
+}
+
+/// A defective section-format declaration a loaded schema carries
+/// (recorded by the lenient boot path; install would have refused).
+/// Surfaced under the health `constraints` include so a sealed schema
+/// with a bad declaration is visible without bricking boot.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SchemaFormatDefect {
+    pub schema: String,
+    pub type_name: String,
+    pub section: String,
+    pub problems: Vec<String>,
+}
+
+/// Collect the defective section-format declarations across the
+/// mounted mems' pinned schemas, deduplicated per schema ref,
+/// deterministic order.
+pub fn collect_schema_format_defects(
+    mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
+) -> Vec<SchemaFormatDefect> {
+    let mut seen: std::collections::BTreeSet<String> = Default::default();
+    let mut out = Vec::new();
+    let mut schemas: Vec<&Arc<memstead_schema::Schema>> = mem_schemas.values().collect();
+    schemas.sort_by_key(|s| (s.manifest.name.clone(), s.version.clone()));
+    for schema in schemas {
+        let schema_ref = format!("{}@{}", schema.manifest.name, schema.version);
+        if !seen.insert(schema_ref.clone()) {
+            continue;
+        }
+        for td in schema.types.values() {
+            for section in &td.sections {
+                if !section.format_problems.is_empty() {
+                    out.push(SchemaFormatDefect {
+                        schema: schema_ref.clone(),
+                        type_name: td.name.clone(),
+                        section: section.key.clone(),
+                        problems: section.format_problems.clone(),
+                    });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| {
+        (&a.schema, &a.type_name, &a.section).cmp(&(&b.schema, &b.type_name, &b.section))
+    });
+    out
 }
 
 /// One entity's unsatisfied `required_outgoing` blocks, surfaced from

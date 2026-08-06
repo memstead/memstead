@@ -243,34 +243,77 @@ fn check_unknown_sections(
     Ok(())
 }
 
+/// The engine-side format declaration for the auto-managed
+/// `## Relationships` section — the first consumer of the shared
+/// section-format mechanism (plan 08). The Relationships section is
+/// engine-managed, not a schema `SectionDef`, so the declaration
+/// lives here: an optional bullet list (empty sections are legal)
+/// whose items carry the canonical relation-line shape. Replaces the
+/// pre-plan hand-rolled per-line regex scan — one format-check
+/// implementation in the tree.
+fn relationships_format_def() -> &'static memstead_schema::SectionDef {
+    static DEF: OnceLock<memstead_schema::SectionDef> = OnceLock::new();
+    DEF.get_or_init(|| {
+        let content = "list(bullet)?";
+        memstead_schema::SectionDef {
+            key: "relationships".to_string(),
+            heading: "Relationships".to_string(),
+            required: false,
+            search_weight: 0.0,
+            catch_all: false,
+            write_rules: vec![],
+            description: None,
+            content: Some(content.to_string()),
+            item_pattern: Some(r"\*\*[A-Z_]+\*\*:\s*\[\[[^\]]+\]\](\s*—.*)?".to_string()),
+            table: None,
+            example: Some("- **USES**: [[target-name]]".to_string()),
+            format_severity: memstead_schema::ConstraintSeverity::Block,
+            compiled_content: Some(
+                memstead_schema::content_expr::ContentExpr::parse(content)
+                    .expect("engine-side declaration is valid"),
+            ),
+            format_problems: Vec::new(),
+        }
+    })
+}
+
 fn check_relationships_syntax(body: &str, path: &str) -> Result<(), ValidationError> {
+    // Extract the `## Relationships` section body (code fences
+    // masked so an embedded `## Relationships` inside a fence cannot
+    // open the section).
     let masked = mask_code_blocks(body);
+    let mut section = String::new();
     let mut in_rel = false;
     for line in masked.lines() {
         if line.starts_with("## ") {
             in_rel = line.strip_prefix("## ").map(str::trim) == Some("Relationships");
             continue;
         }
-        if !in_rel {
-            continue;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() || !trimmed.starts_with('-') {
-            continue;
-        }
-        if !relationship_line_regex().is_match(trimmed) {
-            return Err(ValidationError::InvalidRelationshipLine {
-                path: path.to_string(),
-                line: trimmed.to_string(),
-            });
+        if in_rel {
+            section.push_str(line);
+            section.push('\n');
         }
     }
+    if section.trim().is_empty() {
+        return Ok(());
+    }
+    if let Some(v) =
+        crate::section_format::check_section_format(relationships_format_def(), &section)
+            .into_iter()
+            .next()
+    {
+        let line = match &v {
+            crate::section_format::SectionFormatViolation::ItemPatternMismatch {
+                text, ..
+            } => text.clone(),
+            other => other.describe(),
+        };
+        return Err(ValidationError::InvalidRelationshipLine {
+            path: path.to_string(),
+            line,
+        });
+    }
     Ok(())
-}
-
-fn relationship_line_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^-\s+\*\*[A-Z_]+\*\*:\s*\[\[[^\]]+\]\](\s*—.*)?$").unwrap())
 }
 
 fn check_relationship_types(entity: &Entity, path: &str) -> Result<(), ValidationError> {

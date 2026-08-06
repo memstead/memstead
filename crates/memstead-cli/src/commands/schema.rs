@@ -196,6 +196,7 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
     // the user's `schema validate` if a template edit ever breaks it.
     if let Err(e) = memstead_schema::loader::load_schema_from_dir(&pkg_dir)
         .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
+        .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
     {
         return Err(CliError::new(
             ExitKind::Generic,
@@ -524,6 +525,7 @@ fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
     match memstead_schema::loader::load_schema_from_dir(&args.path)
         .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
         .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
+        .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
     {
         Ok(schema) => {
             let (name, version) = schema.id();
@@ -679,6 +681,7 @@ fn resolve_source(
         let schema = memstead_schema::load_schema_from_dir(as_path)
             .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
             .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
+        .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,
@@ -936,10 +939,17 @@ mod tests {
     /// `name@version` is accepted; an unknown name refuses typed.
     #[test]
     fn resolve_builtin_ref_handles_name_pin_and_unknown() {
-        let bare = resolve_builtin_ref("planning").expect("planning resolves");
-        assert_eq!(bare.name, "planning");
+        // `software` ships a single version, so the bare name
+        // resolves; `planning` ships two since the 0.2.0
+        // section-format bump, so its bare name is ambiguous by
+        // design and both pins resolve explicitly.
+        let bare = resolve_builtin_ref("software").expect("software resolves");
+        assert_eq!(bare.name, "software");
         let pinned = resolve_builtin_ref("planning@0.1.0").expect("explicit pin resolves");
-        assert_eq!(pinned, bare);
+        assert_eq!(pinned.name, "planning");
+        assert_eq!(pinned.version.to_string(), "0.1.0");
+        resolve_builtin_ref("planning@0.2.0").expect("bumped pin resolves");
+        resolve_builtin_ref("planning").expect_err("bare planning is ambiguous");
         let err = resolve_builtin_ref("not-a-builtin").expect_err("unknown name refuses");
         assert_eq!(
             err.downcast_ref::<CliError>().unwrap().code,
@@ -951,7 +961,8 @@ mod tests {
     /// its `mem-template.json`.
     #[test]
     fn resolve_source_for_builtin_includes_schema_and_template() {
-        let (schema_ref, files) = resolve_source("planning").expect("planning source collects");
+        let (schema_ref, files) =
+            resolve_source("planning@0.1.0").expect("planning source collects");
         assert_eq!(schema_ref.name, "planning");
         let paths: Vec<&str> = files.iter().map(|f| f.archive_path.as_str()).collect();
         assert!(paths.contains(&"schema.yaml"), "got {paths:?}");

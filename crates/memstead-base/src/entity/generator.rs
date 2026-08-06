@@ -483,11 +483,13 @@ mod tests {
     /// catch-all (which pre-fix silently absorbed and re-headed it).
     #[test]
     fn planning_goal_scope_sections_roundtrip() {
+        // Pinned: the builtin ships two planning versions since the
+        // 0.2.0 section-format bump, so a bare-name lookup is
+        // ambiguous by design.
         let reg = memstead_schema::SchemaRegistry::builtin();
         let planning = reg
-            .resolve_by_name("planning")
-            .expect("unambiguous")
-            .expect("planning is a built-in");
+            .get("planning", &semver::Version::new(0, 1, 0))
+            .expect("planning@0.1.0 is a built-in");
         let goal = planning.get_type("goal").expect("goal type exists");
 
         let mut metadata = IndexMap::new();

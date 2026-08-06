@@ -527,6 +527,13 @@ pub fn compose_health(
             .map(|r| serde_json::to_value(&r).unwrap())
             .collect();
         obj.insert("constraints".into(), serde_json::json!(arr));
+        let defects = engine.schema_format_defects();
+        if !defects.is_empty() {
+            obj.insert(
+                "schema_format_defects".into(),
+                serde_json::to_value(&defects).unwrap(),
+            );
+        }
     }
     if include.iter().any(|s| s == "tags") {
         let (distribution, folded, untagged) =

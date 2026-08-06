@@ -2295,6 +2295,7 @@ mod tests {
                 example: None,
                 format_severity: memstead_schema::ConstraintSeverity::Block,
                 compiled_content: None,
+                format_problems: Vec::new(),
             }],
             metadata_fields: vec![],
             title_weight: 1.0,
@@ -3290,6 +3291,14 @@ sections:
       columns: [Name, Datum]
       column_patterns:
         Datum: '\d{4}-\d{2}-\d{2}'
+  - key: belege
+    heading: Belege
+    required: false
+    search_weight: 5.0
+    catch_all: false
+    write_rules: []
+    content: "paragraph+"
+    item_pattern: '(?<quelle>\S[^|]*?) \| (?<aussage>.+)'
 metadata_fields: []
 title_weight: 100.0
 text_fields:
@@ -3338,6 +3347,9 @@ write_rules: []
                     .as_str()
                     .is_some()
             );
+            let belege = secs.iter().find(|s| s["key"] == "belege").unwrap();
+            assert_eq!(belege["content"], "paragraph+");
+            assert!(belege["item_pattern"].as_str().unwrap().contains("quelle"));
             let body = secs.iter().find(|s| s["key"] == "body").unwrap();
             assert!(
                 body.get("content").is_none() && body.get("format_severity").is_none(),

@@ -89,6 +89,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         most_connected_with_titles,
         missing_required_outgoing,
         constraint_findings,
+        schema_format_defects,
         tag_distribution,
         dangling_links,
         findings,
@@ -227,6 +228,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "constraints".into(),
             serde_json::to_value(&constraint_findings)?,
         );
+        // Defective section-format declarations (lenient boot):
+        // additive key, present only when defects exist.
+        if !schema_format_defects.is_empty() {
+            strict_violations.push(("schema_format_defects", schema_format_defects.len()));
+            obj.insert(
+                "schema_format_defects".into(),
+                serde_json::to_value(&schema_format_defects)?,
+            );
+        }
     }
     if include.iter().any(|s| s == "dangling_links") {
         let arr: Vec<serde_json::Value> = dangling_links
@@ -555,6 +565,9 @@ struct GatheredHealth {
     /// Standing violations of declared schema `constraints`
     /// (`--include constraints`), empty otherwise.
     constraint_findings: Vec<ConstraintFindingReport>,
+    /// Defective section-format declarations the loaded schemas carry
+    /// (rides the `constraints` include), empty otherwise.
+    schema_format_defects: Vec<memstead_base::ops::health::SchemaFormatDefect>,
     /// `Some(...)` when the caller asked for `--include tags`,
     /// `None` otherwise. The triple is `(distribution, folded,
     /// untagged)` mirroring `collect_tag_distribution`'s return
@@ -641,6 +654,7 @@ fn gather_mem_repo(
         |limit| engine_most_connected_mem_repo(engine, limit),
         || engine.missing_required_outgoing(None),
         || engine.constraint_findings(None),
+        || engine.schema_format_defects(),
     );
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
@@ -662,6 +676,7 @@ fn gather_filesystem(
         |limit| engine_most_connected_filesystem(engine, limit),
         || engine.missing_required_outgoing(None),
         || engine.constraint_findings(None),
+        || engine.schema_format_defects(),
     );
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
@@ -725,6 +740,7 @@ fn gather_from_store(
     most_connected_fn: impl FnOnce(usize) -> Vec<MostConnectedRow>,
     missing_required_outgoing_fn: impl FnOnce() -> Vec<MissingRequiredOutgoingReport>,
     constraint_findings_fn: impl FnOnce() -> Vec<ConstraintFindingReport>,
+    schema_format_defects_fn: impl FnOnce() -> Vec<memstead_base::ops::health::SchemaFormatDefect>,
 ) -> GatheredHealth {
     let real_count = store.all_entities().filter(|e| !e.stub).count();
     let orphan_ids: Vec<(EntityId, String)> = memstead_base::graph::query::find_orphans(store)
@@ -747,6 +763,11 @@ fn gather_from_store(
     };
     let constraint_findings = if include.iter().any(|s| s == "constraints") {
         constraint_findings_fn()
+    } else {
+        Vec::new()
+    };
+    let schema_format_defects = if include.iter().any(|s| s == "constraints") {
+        schema_format_defects_fn()
     } else {
         Vec::new()
     };
@@ -780,6 +801,7 @@ fn gather_from_store(
         most_connected_with_titles,
         missing_required_outgoing,
         constraint_findings,
+        schema_format_defects,
         tag_distribution,
         dangling_links,
         config_entries: None,

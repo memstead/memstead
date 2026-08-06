@@ -984,6 +984,7 @@ mod check_tests {
             compiled_content: Some(
                 memstead_schema::content_expr::ContentExpr::parse(content).unwrap(),
             ),
+            format_problems: Vec::new(),
         }
     }
 
@@ -1145,6 +1146,38 @@ mod check_tests {
         assert_eq!(*row_line, Some(3));
     }
 
+    /// The plenum coordinate grammar (plan criterion 9): the
+    /// seven-times-duplicated two-halves Belegzeile — machine
+    /// coordinate `<quelle>:<dokument>:<von>-<bis>:<hash12>:<hash12>`,
+    /// ` | `, then the public Fundstelle — expressed as a declaration,
+    /// without a line of project Python.
+    #[test]
+    fn plenum_coordinate_grammar_is_declarable() {
+        let d = def(
+            "paragraph+",
+            Some(
+                r"(?<quelle>[a-z]+):(?<dokument>[^:|]+):(?<von>\d+)-(?<bis>\d+):(?<dokument_hash>[0-9a-f]{12}):(?<span_hash>[0-9a-f]{12}) \| (?<fundstelle>.+)",
+            ),
+            None,
+            None,
+        );
+        let ok = "btp:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 | 2022-01-26 · Tino Chrupalla · https://dserver.bundestag.de/btp/20/20013.pdf
+";
+        assert!(
+            check_section_format(&d, ok).is_empty(),
+            "{:?}",
+            check_section_format(&d, ok)
+        );
+        // Missing span hash — the checker's regex class, declared.
+        let bad = "btp:20/13/073:4559-4985:09b80726ef42 | 2022-01-26 · Chrupalla · https://example.org
+";
+        assert_eq!(check_section_format(&d, bad).len(), 1);
+        // Missing the two-halves separator.
+        let bad = "btp:20/13/073:4559-4985:09b80726ef42:0a582b1c5530 2022-01-26
+";
+        assert_eq!(check_section_format(&d, bad).len(), 1);
+    }
+
     #[test]
     fn setext_reserved_headings_refuse_in_checked_sections() {
         let d = def("paragraph+", None, None, None);
@@ -1181,6 +1214,7 @@ mod check_tests {
             example: None,
             format_severity: ConstraintSeverity::Block,
             compiled_content: None,
+            format_problems: Vec::new(),
         };
         assert!(check_section_format(&d, "anything\n=====\n\n- mixed\n* markers\n").is_empty());
     }

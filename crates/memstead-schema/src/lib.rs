@@ -35,7 +35,8 @@ pub use config::{
 };
 pub use loader::{
     HeadingKeyViolation, SchemaLoadError, check_reserved_metadata_keys,
-    check_section_heading_roundtrip, load_schema_from_dir, load_schema_from_memory,
+    check_section_formats, check_section_heading_roundtrip, load_schema_from_dir,
+    load_schema_from_memory,
 };
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,

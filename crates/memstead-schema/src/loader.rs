@@ -690,7 +690,7 @@ fn load_with_context(
         merged.extend(base_metadata::suffix_fields());
         td.metadata_fields = merged;
 
-        compile_section_formats(&mut td)?;
+        compile_section_formats(&mut td);
         validate_type(&td, &rel_names, &available_rels)?;
 
         // Resolve edge_weights: start with schema defaults, apply overrides.
@@ -773,11 +773,13 @@ fn name_shape(name: &str) -> Result<(), &'static str> {
 }
 
 /// Validate and compile the section-format declarations of a type
-/// (plan 08). Loader honesty: every malformed declaration refuses at
-/// load with `InvalidSectionFormat` naming ALL problems of the
-/// section; a valid `content` expression is compiled once and cached
-/// on the section (`compiled_content`).
-fn compile_section_formats(td: &mut TypeDefinition) -> Result<(), SchemaLoadError> {
+/// (plan 08). LENIENT at load: problems are recorded on the section
+/// (`format_problems`) instead of refusing, so a sealed schema
+/// carrying a bad declaration keeps loading — install and strict
+/// validation refuse via [`check_section_formats`], and a defective
+/// declaration is never enforced (`compiled_content` stays `None`). A
+/// valid `content` expression is compiled once and cached.
+fn compile_section_formats(td: &mut TypeDefinition) {
     use crate::content_expr::ContentExpr;
     for section in &mut td.sections {
         let declares_any = section.content.is_some()
@@ -848,14 +850,32 @@ fn compile_section_formats(td: &mut TypeDefinition) -> Result<(), SchemaLoadErro
             }
         }
 
-        if !problems.is_empty() {
-            return Err(SchemaLoadError::InvalidSectionFormat {
-                type_name: td.name.clone(),
-                section: section.key.clone(),
-                problems,
-            });
+        if problems.is_empty() {
+            section.compiled_content = compiled;
+        } else {
+            section.format_problems = problems;
         }
-        section.compiled_content = compiled;
+    }
+}
+
+/// Refuse a schema whose section-format declarations are defective —
+/// the install / strict-validation half of the loader-honesty rule.
+/// Same posture as [`check_reserved_metadata_keys`]: install and
+/// strict validation call this and refuse (naming EVERY problem of
+/// the first defective section); boot and sealed-schema loads must
+/// NOT — the recorded `format_problems` surface as health findings
+/// instead, and the defective declaration is never enforced.
+pub fn check_section_formats(schema: &crate::Schema) -> Result<(), SchemaLoadError> {
+    for td in schema.types.values() {
+        for section in &td.sections {
+            if !section.format_problems.is_empty() {
+                return Err(SchemaLoadError::InvalidSectionFormat {
+                    type_name: td.name.clone(),
+                    section: section.key.clone(),
+                    problems: section.format_problems.clone(),
+                });
+            }
+        }
     }
     Ok(())
 }

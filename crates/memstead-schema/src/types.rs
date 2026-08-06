@@ -359,9 +359,21 @@ pub struct SectionDef {
     pub format_severity: ConstraintSeverity,
     /// The compiled `content` expression — populated by the loader
     /// (parse once, match per write). Skipped in serialization so the
-    /// on-disk form round-trips.
+    /// on-disk form round-trips. `None` when no format is declared OR
+    /// the declaration is defective (see `format_problems`).
     #[serde(skip)]
     pub compiled_content: Option<crate::content_expr::ContentExpr>,
+    /// Problems the loader found in this section's format declaration.
+    /// Same posture as the reserved-metadata-key check: install and
+    /// strict validation refuse on these
+    /// ([`crate::loader::check_section_formats`]); boot and
+    /// sealed-schema loads do NOT — a sealed schema carrying a bad
+    /// declaration keeps loading (refusing at boot would brick the
+    /// workspace) and the defect surfaces as a health finding. A
+    /// defective declaration is never enforced (`compiled_content`
+    /// stays `None`).
+    #[serde(skip)]
+    pub format_problems: Vec<String>,
 }
 
 fn severity_is_block(s: &ConstraintSeverity) -> bool {

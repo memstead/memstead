@@ -43,6 +43,39 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **Section content format: schemas declare a section's markdown
+  shape.** A schema section can carry `content` — a flat expression
+  over the mdast block vocabulary (`"(heading(3) list(bullet))+"`,
+  operators: sequence, name-alternation, `+ * ?`) — plus
+  `item_pattern` (a regex over list items with lazy continuations
+  joined, or over paragraph source lines; named groups name the parts
+  in refusals), `table` (`columns` pins header names and order,
+  `column_patterns` per-cell regexes — judged on the REAL source cell
+  count that GFM would silently pad or truncate), `example` (echoed
+  verbatim in every format refusal), and `format_severity`
+  (`block` default / `warn`). Enforcement uses a real CommonMark
+  parser (`pulldown-cmark`, no default features), so the validator
+  agrees with the renderer on lazy continuations, mixed bullet
+  markers, code blocks containing `- ` lines, and malformed GFM
+  delimiter rows. Create judges every written section; update judges
+  each touched section on its COMPOSED body; block-tier refuses
+  pre-commit with `SECTION_CONTENT_MISMATCH` (found sequence,
+  `failed_at` line, `expected_next`, the example) /
+  `SECTION_ITEM_PATTERN_MISMATCH` / `INVALID_TABLE_COLUMNS`; standing
+  violations of any tier ride `health --include constraints`. Reserved
+  headings: `^# ` joins `^## ` as a write-time refusal in every
+  section; setext h1/h2 refuse inside format-checked sections; a
+  `heading(1)`/`heading(2)` declaration refuses at load. Loader
+  honesty with sealed leniency: install and strict validation refuse a
+  malformed declaration naming EVERY problem; an already-sealed schema
+  carrying one keeps loading, the defect surfaces under
+  `schema_format_defects` in health, and the declaration is never
+  enforced. The `memstead_schema` response renders every declaration
+  at both verbosity levels. First consumer: the auto-managed
+  Relationships section's line shape is now enforced through this
+  mechanism (the hand-rolled strict-validator check is gone), and the
+  built-in `planning` schema adopts `content: "list(bullet)"` on its
+  bullet-prescribing sections as version 0.2.0 (0.1.0 unchanged).
 - **The constraint vocabulary: schemas declare what is unhealthy to
   keep.** A type can now declare `constraints` in its schema YAML —
   five forms: `requires_when` ("`status: checked` requires

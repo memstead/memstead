@@ -1685,6 +1685,11 @@ impl FilesystemMcpServer {
             if wants_constraints {
                 value["constraints"] = serde_json::to_value(engine.constraint_findings(None))
                     .unwrap_or(serde_json::Value::Null);
+                let defects = engine.schema_format_defects();
+                if !defects.is_empty() {
+                    value["schema_format_defects"] =
+                        serde_json::to_value(defects).unwrap_or(serde_json::Value::Null);
+                }
             }
             return json_response(&value);
         }
