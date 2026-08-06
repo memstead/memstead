@@ -22,6 +22,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead init`↴](#memstead-init)
 * [`memstead quickstart`↴](#memstead-quickstart)
 * [`memstead install`↴](#memstead-install)
+* [`memstead uninstall`↴](#memstead-uninstall)
 * [`memstead link`↴](#memstead-link)
 * [`memstead publish`↴](#memstead-publish)
 * [`memstead unpublish`↴](#memstead-unpublish)
@@ -127,7 +128,8 @@ Exit codes:
 * `export` — Export the write mem as markdown (in place) or as a portable `.mem` archive
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
-* `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry
+* `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal
+* `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it
 * `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
 * `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
@@ -442,7 +444,7 @@ One-command cold start: workspace + default-schema mem + seed entity + MCP wirin
 
 ## `memstead install`
 
-Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry
+Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal
 
 **Usage:** `memstead install [OPTIONS] <PATH or SCOPE/NAME>`
 
@@ -452,10 +454,19 @@ Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from th
 
 ###### **Options:**
 
-* `--mem <NAME>` — Which writable mem to register this read-mem into (by name). Defaults to the first writable mem when omitted.
-
-   This flag selects the *host* mem — the writable workspace mem that will list the archive in its read-mems set. It does NOT rename the archive's internal mem; the archive's internal name is the canonical identity used by all cross-mem references and shadow checks.
 * `--registry <URL>` — Registry URL for `<scope>/<name>` installs. Ignored for local paths. Overrides `MEMSTEAD_REGISTRY`; defaults to https://memstead.io
+
+
+
+## `memstead uninstall`
+
+Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it
+
+**Usage:** `memstead uninstall <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — The installed read-mem's name (the archive's internal name, as shown by `memstead mem list`)
 
 
 

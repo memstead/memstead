@@ -1583,3 +1583,367 @@ fn mem_rename_read_only_mount_refuses() {
     );
     assert!(!stderr.contains("INTERNAL"), "INTERNAL leaked: {stderr}");
 }
+
+// ---------------------------------------------------------------------------
+// Read-mems as workspace-level mounts: install / uninstall / migration
+// ---------------------------------------------------------------------------
+
+/// Export `sender-mem` as an archive and return its path (fixture half
+/// shared by the mount-model tests).
+fn export_sender_archive(sender_root: &Path, sender_mem: &Path) -> std::path::PathBuf {
+    let archive = sender_mem.join("sender-mem-1.0.0.mem");
+    memstead()
+        .current_dir(sender_root)
+        .args(["export", "--format", "mem", "-o"])
+        .arg(&archive)
+        .assert()
+        .success();
+    archive
+}
+
+/// Criterion 1: install produces a workspace-level read-only mount —
+/// `mem list` shows it with `read_only`, `mounts.json` carries the
+/// archive mount, and no writable mem's config gains a `readMems` key.
+#[test]
+fn install_registers_workspace_read_only_mount() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = export_sender_archive(sender.path(), &sender_mem);
+
+    memstead()
+        .current_dir(receiver.path())
+        .arg("install")
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("registered as a workspace-level read-only mount"));
+
+    memstead()
+        .current_dir(receiver.path())
+        .args(["mem", "list"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("`sender-mem` (read_only)"));
+    memstead()
+        .current_dir(receiver.path())
+        .args(["overview"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("sender-mem"));
+
+    let mounts =
+        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    assert!(
+        mounts.contains(r#""sender-mem""#) && mounts.contains(r#""archive""#),
+        "mounts.json must carry the archive mount; got:\n{mounts}"
+    );
+
+    // No writable mem's config gained a readMems entry.
+    let cfg = memstead_git_branch::mem_repo_config::read_config(receiver.path(), "receiver-mem")
+        .expect("receiver config readable");
+    assert!(
+        cfg.read_mems.is_empty(),
+        "install must not write readMems; got {:?}",
+        cfg.read_mems
+    );
+}
+
+/// Criterion 2 + parity (fresh-install leg of criterion 5): uninstall
+/// removes the mount (searchability gone), the cache copy survives, a
+/// re-install re-registers cleanly, and reads against the installed
+/// read-mem work — search hit plus a cross-mem wiki-link into it.
+#[test]
+fn uninstall_round_trip_cache_survives_and_reads_have_parity() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = export_sender_archive(sender.path(), &sender_mem);
+
+    memstead()
+        .current_dir(receiver.path())
+        .arg("install")
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+
+    // Reads: search reaches the installed content; a writable entity
+    // may hold a cross-mem wiki-link into the read-mem (grant first —
+    // same policy gate as before the model change).
+    memstead()
+        .current_dir(receiver.path())
+        .args(["search", "Alpha"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("sender-mem--alpha"));
+    memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["workspace", "grant-cross-link", "receiver-mem", "sender-mem"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .args([
+            "create",
+            "--mem",
+            "receiver-mem",
+            "--title",
+            "Bridge",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Links into [[sender-mem--alpha]] from the writable side.",
+            "--section",
+            "purpose=Cross-mem parity probe.",
+        ])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .args(["entity", "receiver-mem--bridge"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("[[sender-mem--alpha]]"));
+
+    // Uninstall refuses while the bridge edge exists (incoming-refs
+    // gate), then succeeds once the referrer is gone.
+    memstead()
+        .current_dir(receiver.path())
+        .arg("uninstall")
+        .arg("sender-mem")
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .failure()
+        .stderr(contains("MEM_HAS_INCOMING_REFS"))
+        .stderr(contains("receiver-mem--bridge"));
+    memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .args(["delete", "receiver-mem--bridge"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .arg("uninstall")
+        .arg("sender-mem")
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("archive copy retained"));
+
+    // Mount gone, cache copy survives.
+    memstead()
+        .current_dir(receiver.path())
+        .args(["search", "Alpha"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(predicates::prelude::PredicateBooleanExt::not(contains(
+            "sender-mem--alpha",
+        )));
+    let cached: Vec<_> = fs::read_dir(cache.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("sender-mem-") && n.ends_with(".mem"))
+        .collect();
+    assert_eq!(cached.len(), 1, "cache copy must survive uninstall: {cached:?}");
+
+    // Re-install re-registers from the surviving cache copy.
+    memstead()
+        .current_dir(receiver.path())
+        .arg("install")
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("already in cache"))
+        .stdout(contains("registered as a workspace-level read-only mount"));
+}
+
+/// Criterion 3 + the pre-migration leg of criterion 5: a workspace with
+/// legacy `readMems` entries boots, migrates them to mounts, removes
+/// the legacy key, and surfaces one warning naming the migrated mems; a
+/// second boot is silent; reads (search + cross-mem link) behave
+/// identically on the migrated fixture.
+#[test]
+fn legacy_read_mems_config_migrates_at_boot() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = export_sender_archive(sender.path(), &sender_mem);
+
+    // Seed the global cache without touching the receiver workspace
+    // (the legacy fixture must be the FIRST thing the receiver sees).
+    unsafe {
+        std::env::set_var("MEMSTEAD_MEM_CACHE", cache.path());
+    }
+    let cached = memstead_git_branch::mem_cache::install_to_cache(&archive, &[]).unwrap();
+    unsafe {
+        std::env::remove_var("MEMSTEAD_MEM_CACHE");
+    }
+
+    // Write the legacy readMems registration into the receiver's config
+    // through the engine-owned writer — the exact shape the pre-mount
+    // installer produced.
+    let mut cfg =
+        memstead_git_branch::mem_repo_config::read_config(receiver.path(), "receiver-mem")
+            .expect("receiver config readable");
+    cfg.read_mems.insert(
+        "sender-mem".to_string(),
+        memstead_schema::config::ReadMemSpec {
+            source: memstead_schema::config::ReadMemSource::Local,
+            cache_key: Some(cached.cache_key.clone()),
+        },
+    );
+    let mut bytes = serde_json::to_vec_pretty(&cfg).unwrap();
+    bytes.push(b'\n');
+    memstead_git_branch::mem_repo_config::commit_config(
+        receiver.path(),
+        "receiver-mem",
+        &bytes,
+        &memstead_git_branch::vcs::CommitContext::internal(),
+        "test: legacy readMems fixture",
+    )
+    .unwrap();
+
+    // Boot 1: migration runs — warning names the mem, mounts.json gains
+    // the archive mount, the legacy key is gone.
+    let health = memstead()
+        .current_dir(receiver.path())
+        .args(["--json", "health"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let health = String::from_utf8(health).unwrap();
+    assert!(
+        health.contains("READ_MEMS_MIGRATED_TO_MOUNTS") && health.contains("sender-mem"),
+        "boot must surface the migration warning naming the mem; got:\n{health}"
+    );
+    let mounts =
+        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    assert!(
+        mounts.contains(r#""sender-mem""#),
+        "migrated mount must persist; got:\n{mounts}"
+    );
+    let cfg_after =
+        memstead_git_branch::mem_repo_config::read_config(receiver.path(), "receiver-mem")
+            .unwrap();
+    assert!(
+        cfg_after.read_mems.is_empty(),
+        "legacy key must be removed; got {:?}",
+        cfg_after.read_mems
+    );
+
+    // Boot 2: silent (the source key is gone).
+    let health2 = memstead()
+        .current_dir(receiver.path())
+        .args(["--json", "health"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let health2 = String::from_utf8(health2).unwrap();
+    assert!(
+        !health2.contains("READ_MEMS_MIGRATED_TO_MOUNTS"),
+        "second boot must not re-warn; got:\n{health2}"
+    );
+
+    // Parity on the migrated fixture: search + cross-mem link resolve
+    // exactly as on a fresh install.
+    memstead()
+        .current_dir(receiver.path())
+        .args(["search", "Alpha"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("sender-mem--alpha"));
+    memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["workspace", "grant-cross-link", "receiver-mem", "sender-mem"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .args([
+            "create",
+            "--mem",
+            "receiver-mem",
+            "--title",
+            "Bridge",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Links into [[sender-mem--alpha]] post-migration.",
+            "--section",
+            "purpose=Migration parity probe.",
+        ])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .args(["entity", "receiver-mem--bridge"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("[[sender-mem--alpha]]"));
+}
+
+/// Criterion 4 remainder: uninstalling an unknown name and a writable
+/// mem refuse typed and side-effect-free; no INTERNAL on any refusal.
+#[test]
+fn uninstall_refusals_are_typed_and_effect_free() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let receiver = TempDir::new().unwrap();
+    let _receiver_mem = make_receiver_mem(receiver.path());
+
+    let mounts_before =
+        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+
+    for (name, code) in [("no-such-mem", "UNKNOWN_MEM"), ("receiver-mem", "MEM_NOT_READ_ONLY")] {
+        let out = memstead()
+            .current_dir(receiver.path())
+            .arg("uninstall")
+            .arg(name)
+            .assert()
+            .failure()
+            .get_output()
+            .stderr
+            .clone();
+        let stderr = String::from_utf8(out).unwrap();
+        assert!(stderr.contains(code), "expected {code}; got: {stderr}");
+        assert!(!stderr.contains("INTERNAL"), "INTERNAL leaked: {stderr}");
+    }
+
+    let mounts_after =
+        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    assert_eq!(mounts_before, mounts_after, "refusals must not touch mount state");
+}

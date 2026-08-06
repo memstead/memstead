@@ -43,6 +43,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **Read-mems are ordinary read-only mounts, and `memstead uninstall`
+  exists.** Installed read-mems no longer attach to a host writable
+  mem's config — `memstead install` (and the MCP server's `--read-mem`
+  boot flag) registers the archive as a workspace-level mount with
+  `capability: read_only` and its content-addressed cache path, ending
+  the one structural special case in the mount model. The `--mem` host
+  flag is gone. `memstead uninstall <name>` removes the registration
+  symmetrically — the global cache copy survives by default, and a
+  re-install re-registers without a download; it refuses while writable
+  entities still hold edges into the read-mem
+  (`MEM_HAS_INCOMING_REFS`), and refuses writable mems
+  (`MEM_NOT_READ_ONLY`). **Breaking config migration:** workspaces
+  whose configs still carry legacy `readMems` entries migrate one-way
+  at boot — the entries become mounts, the legacy key is removed
+  through the engine's own config writers, and one
+  `READ_MEMS_MIGRATED_TO_MOUNTS` warning names what moved; a second
+  boot is silent. Search and cross-mem references into read-mems
+  behave identically before and after.
 - **A mem can be renamed.** `memstead mem rename <old> <new>` performs
   a complete rename across every surface that carries the name: entity
   ids re-prefix (ids derive from the mount name), every cross-mem edge

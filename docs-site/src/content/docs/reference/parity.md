@@ -80,6 +80,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `quickstart`
 - `review-mark`
 - `schema`
+- `uninstall`
 - `unpublish`
 
 ### Unaligned — UniFFI
