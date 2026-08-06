@@ -25,7 +25,10 @@ for (const root of memDirs) {
   const dirName = resolved.split('/').pop() || 'specs';
   const result = checkBashCommand(command, dirName);
   if (result.action === 'block') {
-    process.stdout.write(
+    // stderr, not stdout: Claude Code's exit-2 hook contract feeds
+    // STDERR back to the agent as the block reason — a message on
+    // stdout is dropped and the agent sees an empty "hook error".
+    process.stderr.write(
       `BLOCKED: Do not modify entity files via shell commands. Use Memstead MCP tools (memstead_create, memstead_update, memstead_delete) to mutate entities. ${result.reason}\n`,
     );
     process.exit(2);

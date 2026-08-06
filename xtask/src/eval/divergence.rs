@@ -92,6 +92,12 @@ impl Campaign {
         if self.rounds == 0 {
             bail!("campaign.json declares zero rounds");
         }
+        // One guard covers both consumers: the reader battery and the
+        // integrity audit each run `trials` sessions per arm — at zero
+        // they would run nothing yet still push a degenerate checkpoint.
+        if self.trials == 0 {
+            bail!("campaign.json declares zero trials");
+        }
         let in_range = |rs: &[usize], label: &str| -> Result<()> {
             if let Some(&bad) = rs.iter().find(|&&r| r < 1 || r > self.rounds) {
                 bail!(
@@ -2241,6 +2247,30 @@ mod tests {
             cost_cap_tokens: 20_000_000,
         };
         assert!(c.validate().is_err());
+    }
+
+    /// At `trials: 0` the reader battery and integrity audit would run
+    /// zero sessions yet still push a degenerate checkpoint — validation
+    /// refuses, naming the field; the committed `trials: 3` shape stays
+    /// valid (covered by `loads_campaign_models_and_both_tell_lists`,
+    /// whose fixture passes `Package::load`'s validate call).
+    #[test]
+    fn validate_refuses_zero_trials() {
+        let c = Campaign {
+            rounds: 10,
+            hurry_rounds: vec![],
+            reader_checkpoints: vec![],
+            integrity_audit_rounds: vec![],
+            trials: 0,
+            writer_allowance_full_tokens: 8000,
+            writer_allowance_hurry_tokens: 4000,
+            reader_budget_tokens: 8000,
+            usd_per_output_token: 0.000025,
+            contamination_threshold: 0.5,
+            cost_cap_tokens: 20_000_000,
+        };
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("zero trials"), "{err}");
     }
 
     /// Group an integer with thousands commas, matching how `bands.md` writes

@@ -25,7 +25,10 @@ for (const root of memDirs) {
   const resolved = resolve(root);
   const result = checkEditTarget(filePath, resolved, existsSync(resolved));
   if (result.action === 'block') {
-    process.stdout.write(
+    // stderr, not stdout: Claude Code's exit-2 hook contract feeds
+    // STDERR back to the agent as the block reason — a message on
+    // stdout is dropped and the agent sees an empty "hook error".
+    process.stderr.write(
       `BLOCKED: Do not edit entity files directly. Use Memstead MCP tools (memstead_create, memstead_update, memstead_delete) to mutate entities. ${result.reason}\n`,
     );
     process.exit(2);

@@ -8,6 +8,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Plugin guard hooks now block with their designed message.** The
+  entity-edit, entity-bash, and ingest deny hooks wrote their
+  `BLOCKED: …` reason to stdout — but Claude Code's exit-2 hook
+  contract feeds **stderr** back to the agent, so the agent saw an
+  empty "hook error" instead of the message (the blocks themselves
+  always held). The reason now lands on stderr, unchanged in wording.
+  A new invocation self-test executes all four `hooks.json` command
+  strings exactly as written (shell + `CLAUDE_PLUGIN_ROOT` env) with
+  violating and benign inputs, so neither the command strings nor the
+  message channel can rot unobserved again.
 - **The engine stops losing events and moving hashes on wall-clock
   boundaries.** Three determinism defects, each fixed at the
   mechanism. (1) Folder-mem drift cursors strictly advance per

@@ -41,7 +41,10 @@ if (!denyPaths.length) process.exit(0);
 for (const c of candidates) {
   const reason = checkCandidate(c, cwd, workspaceRoot, denyPaths);
   if (reason) {
-    process.stdout.write(`BLOCKED: ${reason}\nPath/pattern: ${c}\n`);
+    // stderr, not stdout: Claude Code's exit-2 hook contract feeds
+    // STDERR back to the agent as the block reason — a message on
+    // stdout is dropped and the agent sees an empty "hook error".
+    process.stderr.write(`BLOCKED: ${reason}\nPath/pattern: ${c}\n`);
     process.exit(2);
   }
 }
