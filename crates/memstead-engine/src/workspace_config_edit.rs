@@ -705,6 +705,61 @@ pub enum ScrubbedEntry {
 
 // --- internal helpers ---------------------------------------------------
 
+/// Rename every occurrence of mem `old` in the workspace's
+/// `[cross_mem_links]` table — as a granting key and inside named
+/// allowlist arrays — to `new`. The mem-rename counterpart of the
+/// grant/revoke pair: a pure key/value rewrite with none of their
+/// conflict semantics. A missing `workspace.toml` or absent
+/// `[cross_mem_links]` table is a no-op (nothing names the mem).
+/// Returns whether anything changed on disk.
+pub fn rename_mem_in_cross_links(
+    workspace_root: &Path,
+    old: &str,
+    new: &str,
+) -> Result<bool, WorkspaceEditError> {
+    let (path, mut doc) = match load(workspace_root) {
+        Ok(pair) => pair,
+        Err(WorkspaceEditError::WorkspaceNotInitialised { .. }) => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let Some(table) = doc.get_mut("cross_mem_links").and_then(Item::as_table_mut) else {
+        return Ok(false);
+    };
+
+    let mut changed = false;
+    // Value rewrite: any named allowlist entry equal to `old`.
+    for (_key, item) in table.iter_mut() {
+        if let Item::Value(Value::Array(arr)) = item {
+            let mut next = Array::new();
+            let mut arr_changed = false;
+            for v in arr.iter() {
+                match v.as_str() {
+                    Some(s) if s == old => {
+                        next.push(new);
+                        arr_changed = true;
+                    }
+                    _ => next.push(v.clone()),
+                }
+            }
+            if arr_changed {
+                *item = Item::Value(Value::Array(next));
+                changed = true;
+            }
+        }
+    }
+    // Key rewrite: `old` as a granting mem. toml_edit has no key
+    // rename; remove + reinsert preserves the value.
+    if let Some(value) = table.remove(old) {
+        table.insert(new, value);
+        changed = true;
+    }
+
+    if changed {
+        save(&path, &doc)?;
+    }
+    Ok(changed)
+}
+
 fn ensure_table<'a>(doc: &'a mut DocumentMut, name: &str) -> &'a mut Table {
     if !doc.contains_key(name) {
         let mut t = Table::new();

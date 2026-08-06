@@ -1211,3 +1211,375 @@ fn export_json_refusals_are_typed() {
         "refusal must not have written the file"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `mem rename` — complete rename across every name-bearing surface
+// ---------------------------------------------------------------------------
+
+/// Build a two-mem workspace end-to-end through the CLI: `alpha` (two
+/// entities, one full-id self-reference wiki-link, one anchor) and
+/// `beta` (one entity with a cross-mem edge and a cross-mem wiki-link
+/// into `alpha`), with the `beta → alpha` grant in place. Everything
+/// goes through the product surface — no raw seeding — so the fixture
+/// state is exactly what a real workspace reaches.
+fn make_rename_workspace(root: &Path) {
+    let m = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .args(args)
+            .assert()
+            .success();
+    };
+    m(&["mem-repo", "init", "."]);
+    m(&["mem", "init", "alpha", "--no-gitignore"]);
+    m(&["mem", "init", "beta", "--no-gitignore"]);
+    m(&["workspace", "grant-cross-link", "beta", "alpha"]);
+    let corpus = serde_json::json!({ "creates": [
+        {"title": "One", "entity_type": "spec", "mem": "alpha",
+         "sections": {"identity": "First entity.", "purpose": "Rename fixture."}},
+        {"title": "Two", "entity_type": "spec", "mem": "alpha",
+         "sections": {"identity": "Second entity, see [[alpha--one]] full form.", "purpose": "Rename fixture."},
+         "relations": [{"type": "USES", "to": "alpha--one"}]},
+        {"title": "Watcher", "entity_type": "spec", "mem": "beta",
+         "sections": {"identity": "Watches [[alpha--one]] from beta.", "purpose": "Cross-mem referrer."},
+         "relations": [{"type": "DEPENDS_ON", "to": "alpha--two"}]},
+    ]});
+    let corpus_path = root.join("corpus.json");
+    fs::write(&corpus_path, serde_json::to_string(&corpus).unwrap()).unwrap();
+    m(&["batch-create", "--from", corpus_path.to_str().unwrap()]);
+    fs::remove_file(&corpus_path).unwrap();
+    m(&[
+        "update",
+        "alpha--one",
+        "--auto-hash",
+        "--append",
+        "purpose= Anchored.",
+        "--anchor",
+        r#"{"artifact": "src/lib.rs", "grain": "file", "class": "anchored"}"#,
+    ]);
+    m(&["mem", "set-sync-state", "alpha", "alpha/graph/tree#synced", "abc123"]);
+}
+
+/// Criteria 1 + 2: the rename is complete across entity ids, cross-mem
+/// edges, wiki-links, grants, anchors, and sync-state keys; commit
+/// history is preserved (a branch move, not a fresh seed); and
+/// `memstead health --strict` stays clean.
+#[test]
+fn mem_rename_git_branch_full_surface() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "rename", "alpha", "gamma"])
+        .assert()
+        .success()
+        .stdout(contains("renamed to `gamma`"));
+
+    // New ids resolve; old ids do not.
+    memstead()
+        .current_dir(root)
+        .args(["entity", "gamma--one"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args(["entity", "alpha--one"])
+        .assert()
+        .failure()
+        .stderr(contains("ENTITY_NOT_FOUND"));
+
+    // The cross-mem referrer in `beta` carries the new prefix in both
+    // its wiki-link and its Relationships entry.
+    memstead()
+        .current_dir(root)
+        .args(["entity", "beta--watcher"])
+        .assert()
+        .success()
+        .stdout(contains("[[gamma--one]]"))
+        .stdout(contains("[[gamma--two]]"))
+        .stdout(predicates::prelude::PredicateBooleanExt::not(contains(
+            "alpha--",
+        )));
+
+    // Grants rewritten (value side).
+    let toml = fs::read_to_string(root.join(".memstead/workspace.toml")).unwrap();
+    assert!(
+        toml.contains(r#"beta = ["gamma"]"#),
+        "grant must name the new mem; got:\n{toml}"
+    );
+    assert!(!toml.contains("alpha"), "no grant may still name the old mem:\n{toml}");
+
+    // Branch moved with history: the create-time seed commit is still
+    // reachable from the new branch, and the old branch is gone.
+    let log = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(root.join("mem-repo/.git"))
+        .args(["log", "--oneline", "refs/heads/gamma"])
+        .output()
+        .unwrap();
+    let log = String::from_utf8(log.stdout).unwrap();
+    assert!(
+        log.contains("create mem alpha"),
+        "history must be preserved across the rename; got:\n{log}"
+    );
+    let refs = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(root.join("mem-repo/.git"))
+        .args(["for-each-ref", "--format=%(refname)"])
+        .output()
+        .unwrap();
+    let refs = String::from_utf8(refs.stdout).unwrap();
+    assert!(!refs.contains("refs/heads/alpha"), "old branch must be gone:\n{refs}");
+
+    // Anchors sidecar re-keyed on the moved branch.
+    let sidecar = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(root.join("mem-repo/.git"))
+        .args(["show", "refs/heads/gamma:.memstead/anchors.json"])
+        .output()
+        .unwrap();
+    let sidecar = String::from_utf8(sidecar.stdout).unwrap();
+    assert!(
+        sidecar.contains("gamma--one") && !sidecar.contains("alpha--one"),
+        "anchors must key on the new id; got:\n{sidecar}"
+    );
+
+    // Sync-state keys follow the mem name.
+    let config = std::process::Command::new("git")
+        .arg("--git-dir")
+        .arg(root.join("mem-repo/.git"))
+        .args(["show", "refs/heads/__MEMSTEAD:mems/gamma/config.json"])
+        .output()
+        .unwrap();
+    let config = String::from_utf8(config.stdout).unwrap();
+    assert!(
+        config.contains("gamma/graph/tree#synced") && !config.contains("alpha/"),
+        "sync-state keys must carry the new mem name; got:\n{config}"
+    );
+
+    // Criterion 2: health --strict is clean after the rename.
+    memstead()
+        .current_dir(root)
+        .args(["health", "--strict"])
+        .assert()
+        .success();
+}
+
+/// Criteria 3 + 4 + 7: every refusal fires with its typed code, never
+/// `INTERNAL`, and leaves the workspace byte-identical (refs,
+/// workspace.toml, mounts.json all unchanged).
+#[test]
+fn mem_rename_refusals_are_typed_and_effect_free() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    let snapshot = |label: &str| -> (String, String, String) {
+        let refs = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(root.join("mem-repo/.git"))
+            .args(["for-each-ref", "--format=%(refname) %(objectname)"])
+            .output()
+            .unwrap_or_else(|e| panic!("for-each-ref ({label}): {e}"));
+        (
+            String::from_utf8(refs.stdout).unwrap(),
+            fs::read_to_string(root.join(".memstead/workspace.toml")).unwrap(),
+            fs::read_to_string(root.join(".memstead/state/mounts.json")).unwrap(),
+        )
+    };
+    let before = snapshot("before");
+
+    let refusals: &[(&[&str], &str, bool)] = &[
+        (&["mem", "rename", "nope", "other"], "UNKNOWN_MEM", true),
+        (&["mem", "rename", "alpha", "beta"], "MEM_NAME_COLLISION", true),
+        (&["mem", "rename", "alpha", "Bad Name"], "INVALID_MEM_NAME", true),
+        (&["mem", "rename", "alpha", "alpha"], "INVALID_INPUT", true),
+        // Agent mode (no operator env): no allowlist configured →
+        // MEM_PATH_NOT_ALLOWED with the policy_table disambiguator.
+        (&["mem", "rename", "alpha", "delta"], "MEM_PATH_NOT_ALLOWED", false),
+    ];
+    for (args, code, operator) in refusals {
+        let mut cmd = memstead();
+        cmd.current_dir(root);
+        if *operator {
+            cmd.env("MEMSTEAD_OPERATOR_MODE", "1");
+        } else {
+            cmd.env_remove("MEMSTEAD_OPERATOR_MODE");
+        }
+        let out = cmd.args(*args).assert().failure().get_output().stderr.clone();
+        let stderr = String::from_utf8(out).unwrap();
+        assert!(stderr.contains(code), "expected {code}; got: {stderr}");
+        assert!(!stderr.contains("INTERNAL"), "INTERNAL leaked: {stderr}");
+        if *code == "MEM_PATH_NOT_ALLOWED" {
+            assert!(
+                stderr.contains("mem_management.delete"),
+                "policy_table disambiguator missing: {stderr}"
+            );
+        }
+    }
+
+    let after = snapshot("after");
+    assert_eq!(before, after, "a refused rename must leave the workspace byte-identical");
+}
+
+/// Criterion 5: a half-applied rename — the peer mem already rewritten
+/// to the new prefix, the identity flip not yet done — is (a) visible
+/// to `health --strict` as findings, and (b) completed by re-issuing
+/// the same `mem rename`.
+#[test]
+fn mem_rename_interrupted_half_state_detectable_and_completable() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    // Simulate the interruption: `beta` has already been swept
+    // (references `gamma--…`), `alpha` has not flipped yet. The sweep
+    // commit is reproduced through the same backend path the real
+    // sweep uses (a raw branch commit against beta's ref).
+    let watcher_body = "---\ntype: spec\ncreated_date: 2026-02-01\nlast_modified: 2026-02-01\nlevel: M0\n---\n# Watcher\n\n## Identity\n\nWatches [[gamma--one]] from beta.\n\n## Purpose\n\nCross-mem referrer.\n\n## Relationships\n\n- **DEPENDS_ON**: [[gamma--two]]\n";
+    commit_mem_branch(root, "beta", &[("watcher.md", watcher_body)]);
+
+    // (a) The half-state is never silent: the dangling `gamma--…`
+    // references (mem `gamma` not yet mounted) surface as a stub in
+    // the health report. (Strict mode's exit code gates schema
+    // violations, not stub counts — the criterion binds the
+    // *reporting*, which is the stub line.)
+    memstead()
+        .current_dir(root)
+        .args(["health", "--strict"])
+        .assert()
+        .stdout(contains("Stubs: 1"));
+
+    // (b) Re-issuing the same rename completes it.
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "rename", "alpha", "gamma"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args(["entity", "gamma--one"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args(["health", "--strict"])
+        .assert()
+        .success()
+        .stdout(contains("Stubs: 0"));
+}
+
+/// Criterion 1 (folder leg): a folder-backed mount renames — the mount
+/// identity flips, entities re-id, the folder's on-disk location stays.
+#[test]
+fn mem_rename_folder_mount() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let store = root.join(".memstead");
+    fs::create_dir_all(store.join("state")).unwrap();
+    fs::write(
+        store.join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    // A folder-backed MOUNT inside a mem-repo workspace: the `mem`
+    // subcommand family requires the mem-repo flavour (a folder-only
+    // workspace boots the filesystem flavour, where `mem` refuses), so
+    // the fixture lays down the bare mem-repo alongside the folder
+    // mount.
+    memstead_git_branch::test_support::init_real_mem_repo(root, &[]);
+    fs::write(
+        store.join("state").join("mounts.json"),
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    )
+    .unwrap();
+    let mem_dir = root.join("engine-mem");
+    fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    fs::write(
+        mem_dir.join("solo.md"),
+        "---\ntype: spec\ncreated_date: 2026-02-01\nlast_modified: 2026-02-01\nlevel: M0\n---\n# Solo\n\n## Identity\n\nFolder-mount rename fixture.\n\n## Purpose\n\nTesting.\n",
+    )
+    .unwrap();
+
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "rename", "engine", "motor"])
+        .assert()
+        .success();
+
+    memstead()
+        .current_dir(root)
+        .args(["entity", "motor--solo"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args(["entity", "engine--solo"])
+        .assert()
+        .failure();
+    assert!(
+        root.join("engine-mem").join("solo.md").exists(),
+        "folder location is not identity — the directory stays in place"
+    );
+    let mounts = fs::read_to_string(store.join("state").join("mounts.json")).unwrap();
+    assert!(
+        mounts.contains(r#""motor""#) && !mounts.contains(r#""engine""#),
+        "mounts.json must carry the new name; got:\n{mounts}"
+    );
+}
+
+/// Constraint: read-only mounts cannot be renamed (their identity is
+/// the archive's internal name).
+#[test]
+fn mem_rename_read_only_mount_refuses() {
+    let _guard = cache_guard().lock().unwrap();
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = sender_mem.join("sender-mem-1.0.0.mem");
+    memstead()
+        .current_dir(sender.path())
+        .args(["export", "--format", "mem", "-o"])
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+    memstead()
+        .current_dir(receiver.path())
+        .arg("install")
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .args(["mem", "rename", "sender-mem", "other-name"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(out).unwrap();
+    assert!(
+        stderr.contains("READ_ONLY_MOUNT") || stderr.contains("read-only"),
+        "renaming an RO mount must refuse with the read-only code; got: {stderr}"
+    );
+    assert!(!stderr.contains("INTERNAL"), "INTERNAL leaked: {stderr}");
+}

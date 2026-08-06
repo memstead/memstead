@@ -140,6 +140,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             commands::mem::MemAction::Init(args) => commands::mem::run(&ctx, args),
             commands::mem::MemAction::Unregister(args) => commands::mem::run_unregister(&ctx, args),
             commands::mem::MemAction::Delete(args) => commands::mem::run_delete(&ctx, args),
+            commands::mem::MemAction::Rename(args) => commands::mem::run_rename(&ctx, args),
             commands::mem::MemAction::SetVersion(args) => {
                 commands::mem::run_set_version(&ctx, args)
             }

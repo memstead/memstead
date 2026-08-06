@@ -1702,3 +1702,414 @@ fn canonicalize_maybe_missing(path: &std::path::Path) -> std::path::PathBuf {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Mem rename
+// ---------------------------------------------------------------------------
+
+/// Parameters for [`rename_mem`].
+#[derive(Debug, Clone)]
+pub struct MemRenameParams {
+    /// Current mem name (full hierarchical identifier).
+    pub old: String,
+    /// Target mem name. Must satisfy the mem-name grammar and not be
+    /// registered.
+    pub new: String,
+    /// When `true`, both allowlist gates (delete for `old`, create for
+    /// `new`) are skipped — same posture as `create_mem` / `delete_mem`.
+    pub operator_mode: bool,
+    /// Agent-authored provenance note (≤[`NOTE_MAX_LEN`] chars),
+    /// carried on every commit the rename produces.
+    pub note: Option<String>,
+}
+
+/// Response of [`rename_mem`].
+#[derive(Debug, Clone)]
+pub struct MemRenameResponse {
+    pub old: String,
+    pub new: String,
+    /// Mems whose entity files were rewritten by the reference sweep,
+    /// in commit order.
+    pub rewritten_mems: Vec<String>,
+    /// `true` when the call completed a previously interrupted rename
+    /// (the old name was already gone, the new mount present): only
+    /// the idempotent halves ran (reference sweep, grants, binding /
+    /// findings relocation).
+    pub resumed: bool,
+    pub warnings: Vec<memstead_base::ops::WarningHint>,
+}
+
+/// Rename a mem: `old` → `new`, complete across every surface that
+/// carries the name.
+///
+/// Entity ids are derived from `(mount name, file path)`, so the mem's
+/// own entities re-id automatically once the mount is renamed; the
+/// orchestrator's job is everything textual and structural around
+/// that:
+///
+/// 1. **Reference sweep** ([`memstead_base::Engine::rewrite_mem_references`]):
+///    every `<old>--<slug>` / `<old>:<slug>` wiki-link and
+///    Relationships entry in every writable mem (peers and the renamed
+///    mem's own full-id self-references), plus the anchors-sidecar
+///    keys — one commit per affected mem, all tagged with one
+///    `logical_operation_id`.
+/// 2. **Sync-state keys** in the mem's config
+///    (`<old>/<binding>/<source>#…` → `<new>/…`), written to the
+///    backend before the identity flip so the updated blob travels
+///    with it.
+/// 3. **Storage identity flip**: git-branch mounts move
+///    `refs/heads/<old>` to `refs/heads/<new>` at the same tip
+///    (history preserved) and relocate the `__MEMSTEAD:mems/` config
+///    blob in one ref transaction; folder mounts keep their directory
+///    (the mount name, not the path, is the identity).
+/// 4. **Router / mounts**: the mount re-registers under the new name
+///    and `mounts.json` is persisted.
+/// 5. **Workspace grants**: `[cross_mem_links]` keys and named values
+///    carrying `old` are rewritten to `new` in `workspace.toml`.
+/// 6. **Binding + findings stores**:
+///    `.memstead/projections/<old>/` and
+///    `.memstead/state/findings/<old>/` move to `<new>/`, and each
+///    relocated binding's `destination_mem` field is rewritten.
+///
+/// **Refusal atomicity:** every refusal (unknown mem, read-only mount,
+/// grammar, collision, allowlists) fires before the first write — a
+/// refused call leaves the workspace byte-identical.
+///
+/// **Interruption:** the sweep commits per-mem; a crash mid-sweep
+/// leaves stale `<old>--` references that surface as stubs in health,
+/// and re-issuing the same `rename_mem` completes the operation. When
+/// the identity flip has already happened (old gone, new present) the
+/// call runs in *resumption mode*: only the idempotent halves execute.
+///
+/// **In-process caveat:** grants rewritten on disk (step 5) are not
+/// reflected into the already-loaded engine's settings — the CLI's
+/// one-shot process model makes this invisible; a long-lived embedder
+/// must re-boot after a rename.
+pub fn rename_mem(
+    engine: &mut memstead_base::Engine,
+    params: MemRenameParams,
+) -> Result<MemRenameResponse, FullEngineError> {
+    // ---- Step 0: input validation (no writes past this block) ----
+    if let Some(note) = params.note.as_deref()
+        && note.chars().count() > NOTE_MAX_LEN
+    {
+        return Err(memstead_base::EngineError::InvalidInput(format!(
+            "note exceeds {NOTE_MAX_LEN} characters"
+        ))
+        .into());
+    }
+    if params.old == params.new {
+        return Err(memstead_base::EngineError::InvalidInput(
+            "rename source and target are the same name".to_string(),
+        )
+        .into());
+    }
+    if let Some(reason) = classify_invalid_mem_name(&params.new) {
+        return Err(FullEngineError::InvalidMemName {
+            name: params.new.clone(),
+            reason,
+        });
+    }
+    if memstead_base::entity::id::validate_mem_name_grammar(&params.new).is_err() {
+        return Err(FullEngineError::InvalidMemName {
+            name: params.new.clone(),
+            reason: "invalid_char",
+        });
+    }
+
+    // ---- Step 1: mode resolution ----
+    let old_mount = engine.mount(&params.old).cloned();
+    let new_mount_present = engine.mount(&params.new).is_some();
+    let resumed = match (&old_mount, new_mount_present) {
+        (Some(_), true) => {
+            return Err(memstead_base::EngineError::MemNameCollision {
+                name: params.new.clone(),
+                source_origin: "registered mount".to_string(),
+            }
+            .into());
+        }
+        (Some(m), false) => {
+            if m.capability != memstead_base::MountCapability::Write {
+                return Err(memstead_base::EngineError::ReadOnlyMount(params.old.clone()).into());
+            }
+            false
+        }
+        (None, true) => {
+            // The identity flip already happened — resumption mode.
+            // The new mount must be writable (a rename never produces
+            // a read-only mount, so anything else is a name clash
+            // with an installed read mem, not a resumable rename).
+            if !engine.mem_router().is_writable(&params.new) {
+                return Err(memstead_base::EngineError::UnknownMem(params.old.clone()).into());
+            }
+            true
+        }
+        (None, false) => {
+            return Err(memstead_base::EngineError::UnknownMem(params.old.clone()).into());
+        }
+    };
+
+    // ---- Step 2: allowlist gates (normal mode, agent posture) ----
+    // Resumption mode skips them: the flip that created the current
+    // state already passed both gates, and the old name can no longer
+    // match anything.
+    if !resumed && !params.operator_mode {
+        let attempted = std::path::PathBuf::from(format!("(mem: {})", params.old));
+
+        let delete_rule_set = DeleteRuleSet::new(engine.settings().mem_delete_rules.clone())
+            .map_err(|e| {
+                memstead_base::EngineError::InvalidInput(format!("mem_delete_rules: {e}"))
+            })?;
+        let delete_patterns: Vec<String> = delete_rule_set.patterns();
+        if delete_rule_set.is_empty()
+            || delete_rule_set
+                .first_match(std::path::Path::new(&params.old))
+                .is_none()
+        {
+            let reason = if delete_rule_set.is_empty() {
+                "no_allowlist_configured"
+            } else {
+                "no_match"
+            };
+            return Err(FullEngineError::MemPathNotAllowed {
+                attempted,
+                candidate: params.old.clone(),
+                patterns: delete_patterns,
+                reason,
+                policy_table: "mem_management.delete",
+            });
+        }
+
+        let create_rule_set = CreateRuleSet::new(engine.settings().mem_create_rules.clone())
+            .map_err(|e| {
+                memstead_base::EngineError::InvalidInput(format!("mem_create_rules: {e}"))
+            })?;
+        let create_patterns: Vec<String> = create_rule_set.patterns();
+        let matched_rule = if create_rule_set.is_empty() {
+            None
+        } else {
+            create_rule_set
+                .first_match(std::path::Path::new(&params.new))
+                .cloned()
+        };
+        let Some(matched_rule) = matched_rule else {
+            let reason = if create_rule_set.is_empty() {
+                "no_allowlist_configured"
+            } else {
+                "no_match"
+            };
+            return Err(FullEngineError::MemPathNotAllowed {
+                attempted: std::path::PathBuf::from(format!("(mem: {})", params.new)),
+                candidate: params.new.clone(),
+                patterns: create_patterns,
+                reason,
+                policy_table: "mem_management.create",
+            });
+        };
+
+        // Schema gate: the pin is unchanged by a rename, so the
+        // matched create rule's schema list is checked against the
+        // mem's EXISTING pin (config pin first, mount assertion as
+        // fallback). A mem with no discoverable pin passes only a
+        // wildcard rule — refusing there would make unpinned mems
+        // unrenamable for a reason the operator can't see.
+        let schema_wildcard = matched_rule
+            .schemas
+            .iter()
+            .any(|s| s == memstead_base::SCHEMA_WILDCARD);
+        if !schema_wildcard {
+            let existing_pin: Option<String> = engine
+                .mem_configs_named()
+                .find(|(name, _)| *name == params.old)
+                .and_then(|(_, c)| c.schema.as_ref().map(|s| s.to_string()))
+                .or_else(|| {
+                    old_mount
+                        .as_ref()
+                        .and_then(|m| m.schema.as_ref().map(|s| s.to_string()))
+                });
+            let allowed = existing_pin
+                .as_deref()
+                .is_some_and(|pin| matched_rule.schemas.iter().any(|s| s == pin));
+            if !allowed {
+                return Err(FullEngineError::MemSchemaNotAllowed {
+                    candidate: params.new.clone(),
+                    matched_pattern: matched_rule.pattern.clone(),
+                    requested_schema: existing_pin.unwrap_or_else(|| "(no pin)".to_string()),
+                    allowed_schemas: matched_rule.schemas.clone(),
+                });
+            }
+        }
+    }
+
+    // ---- Step 3: reference sweep (idempotent; both modes) ----
+    let sweep = engine
+        .rewrite_mem_references(&params.old, &params.new, params.note.as_deref())
+        .map_err(FullEngineError::from)?;
+
+    // ---- Steps 4-6: identity flip (normal mode only) ----
+    if !resumed {
+        let mount = old_mount.expect("normal mode implies the old mount is present");
+
+        // Step 4: sync-state keys embed the mem name
+        // (`<mem>/<binding>/<source>#…`) — rewrite them on the old
+        // backend so the updated config blob travels with the flip.
+        {
+            // No public live-backend accessor exists; a throwaway
+            // backend handle from the factory reads and writes the
+            // same storage the mounted one does (git-branch handles
+            // are cheap ref wrappers, folder handles are paths).
+            let factory = engine.backend_factory();
+            let backend_ref = factory(&mount).map_err(|e| {
+                memstead_base::EngineError::Mem(format!("instantiate backend: {e}"))
+            })?;
+            let config_bytes = backend_ref
+                .read_mem_config()
+                .map_err(|e| memstead_base::EngineError::Mem(format!("read mem config: {e}")))?;
+            if let Some(bytes) = config_bytes
+                && let Ok(mut cfg) =
+                    serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes)
+            {
+                let old_prefix = format!("{}/", params.old);
+                let new_prefix = format!("{}/", params.new);
+                let mut changed = false;
+                let rewritten: std::collections::BTreeMap<String, String> = cfg
+                    .sync_state
+                    .into_iter()
+                    .map(|(k, v)| match k.strip_prefix(&old_prefix) {
+                        Some(rest) => {
+                            changed = true;
+                            (format!("{new_prefix}{rest}"), v)
+                        }
+                        None => (k, v),
+                    })
+                    .collect();
+                cfg.sync_state = rewritten;
+                if changed {
+                    let mut out = serde_json::to_vec_pretty(&cfg).map_err(|e| {
+                        memstead_base::EngineError::Mem(format!("serialise mem config: {e}"))
+                    })?;
+                    out.push(b'\n');
+                    backend_ref.write_mem_config(&out).map_err(|e| {
+                        memstead_base::EngineError::Mem(format!("write mem config: {e}"))
+                    })?;
+                }
+            }
+        }
+
+        // Step 5: storage identity flip.
+        let new_storage = match &mount.storage {
+            memstead_base::MountStorage::GitBranch { gitdir, branch } => {
+                let ops = engine.git_branch_ops().ok_or_else(|| {
+                    memstead_base::EngineError::InvalidInput(
+                        "mem rename on a git-branch mount requires the git-branch ops \
+                         bundle (full boot only)"
+                            .to_string(),
+                    )
+                })?;
+                let canonical_gitdir = gitdir.canonicalize().unwrap_or_else(|_| gitdir.clone());
+                // Mount records may carry the branch as a bare leaf or
+                // as the full `refs/heads/<leaf>` form — the backend
+                // instantiation tolerates both. Normalise to the leaf
+                // for the storage call and write the new record in the
+                // same form the old one used.
+                let had_prefix = branch.starts_with("refs/heads/");
+                let old_leaf = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+                (ops.rename_mem_storage)(&canonical_gitdir, old_leaf, &params.new)
+                    .map_err(|e| memstead_base::EngineError::Mem(format!("storage rename: {e}")))?;
+                let new_branch = if had_prefix {
+                    format!("refs/heads/{}", params.new)
+                } else {
+                    params.new.clone()
+                };
+                memstead_base::MountStorage::GitBranch {
+                    gitdir: gitdir.clone(),
+                    branch: new_branch,
+                }
+            }
+            other => other.clone(),
+        };
+
+        // Step 6: re-register under the new name and persist.
+        engine
+            .unregister_writable_mem(&params.old)
+            .map_err(FullEngineError::from)?;
+        let new_mount = memstead_base::Mount {
+            mem: params.new.clone(),
+            schema: mount.schema.clone(),
+            storage: new_storage,
+            capability: mount.capability,
+            lifecycle: mount.lifecycle,
+            cross_linkable: mount.cross_linkable,
+            migration_target: mount.migration_target.clone(),
+        };
+        let factory = engine.backend_factory();
+        let backend = factory(&new_mount)
+            .map_err(|e| memstead_base::EngineError::Mem(format!("instantiate backend: {e}")))?;
+        let origin = memstead_base::MemOrigin::RuntimeCreated {
+            at: std::time::SystemTime::now(),
+            by_tool: "memstead mem rename",
+        };
+        engine
+            .register_writable_mem(new_mount, backend, origin)
+            .map_err(FullEngineError::from)?;
+        engine.persist_state().map_err(FullEngineError::from)?;
+    }
+
+    // ---- Step 7: workspace grants (idempotent; both modes) ----
+    if let Some(root) = engine.workspace_root().map(|p| p.to_path_buf()) {
+        crate::workspace_config_edit::rename_mem_in_cross_links(&root, &params.old, &params.new)
+            .map_err(|e| memstead_base::EngineError::Mem(format!("grants rewrite: {e}")))?;
+
+        // ---- Step 8: binding + findings stores (idempotent) ----
+        let store_dir = root.join(memstead_base::WORKSPACE_STORE_DIR);
+        let projections_old = store_dir.join("projections").join(&params.old);
+        let projections_new = store_dir.join("projections").join(&params.new);
+        if projections_old.is_dir() && !projections_new.exists() {
+            std::fs::rename(&projections_old, &projections_new).map_err(|e| {
+                memstead_base::EngineError::Mem(format!("move projections dir: {e}"))
+            })?;
+        }
+        if projections_new.is_dir() {
+            for entry in std::fs::read_dir(&projections_new)
+                .map_err(|e| memstead_base::EngineError::Mem(format!("read projections: {e}")))?
+            {
+                let path = entry
+                    .map_err(|e| memstead_base::EngineError::Mem(format!("read projections: {e}")))?
+                    .path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Ok(mut doc) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                if doc.get("destination_mem").and_then(|v| v.as_str()) == Some(params.old.as_str())
+                {
+                    doc["destination_mem"] = serde_json::Value::String(params.new.clone());
+                    let mut out = serde_json::to_string_pretty(&doc).unwrap_or(text);
+                    out.push('\n');
+                    std::fs::write(&path, out).map_err(|e| {
+                        memstead_base::EngineError::Mem(format!("rewrite binding: {e}"))
+                    })?;
+                }
+            }
+        }
+        let findings_old = store_dir.join("state").join("findings").join(&params.old);
+        let findings_new = store_dir.join("state").join("findings").join(&params.new);
+        if findings_old.is_dir() && !findings_new.exists() {
+            std::fs::rename(&findings_old, &findings_new)
+                .map_err(|e| memstead_base::EngineError::Mem(format!("move findings dir: {e}")))?;
+        }
+    }
+
+    let note_warning = engine.note_missing_warning("rename_mem", params.note.as_deref());
+    Ok(MemRenameResponse {
+        old: params.old,
+        new: params.new,
+        rewritten_mems: sweep.rewritten_mems,
+        resumed,
+        warnings: note_warning.into_iter().collect(),
+    })
+}

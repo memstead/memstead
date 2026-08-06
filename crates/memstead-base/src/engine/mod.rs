@@ -440,6 +440,15 @@ pub type GitBranchBranchResetFn = fn(
 pub type GitBranchPruneResidueFn =
     fn(gitdir: &Path, branch_full_path: &str) -> Result<(), BackendError>;
 
+/// `rename_mem` dispatch for the git-branch backend: move the mem's
+/// content branch `refs/heads/<old>` to `refs/heads/<new>` at the same
+/// tip (history preserved) and relocate the `__MEMSTEAD:mems/<old>/`
+/// config blob to `mems/<new>/`, all in one ref-edit transaction.
+/// Refuses (no mutation) when the source branch is missing or the
+/// target branch already exists.
+pub type GitBranchRenameMemStorageFn =
+    fn(gitdir: &Path, old_leaf: &str, new_leaf: &str) -> Result<(), BackendError>;
+
 /// `Engine::install_schema` dispatch for the git-branch backend: write a
 /// schema package (`(relative-path, bytes)` pairs) onto the workspace's
 /// unified `__MEMSTEAD:schemas/<name>@<version>/` ref and return the
@@ -489,6 +498,7 @@ pub struct GitBranchOps {
     pub export: GitBranchExportFn,
     pub export_to_bytes: GitBranchExportToBytesFn,
     pub prune_residue: GitBranchPruneResidueFn,
+    pub rename_mem_storage: GitBranchRenameMemStorageFn,
     pub write_schema: GitBranchWriteSchemaFn,
     pub read_schema_file: GitBranchReadSchemaFileFn,
     pub read_ref_schemas: GitBranchReadRefSchemasFn,

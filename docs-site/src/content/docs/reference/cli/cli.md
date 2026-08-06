@@ -58,6 +58,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead mem init`↴](#memstead-mem-init)
 * [`memstead mem unregister`↴](#memstead-mem-unregister)
 * [`memstead mem delete`↴](#memstead-mem-delete)
+* [`memstead mem rename`↴](#memstead-mem-rename)
 * [`memstead mem set-version`↴](#memstead-mem-set-version)
 * [`memstead mem set-schema`↴](#memstead-mem-set-schema)
 * [`memstead mem set-description`↴](#memstead-mem-set-description)
@@ -1045,6 +1046,7 @@ Mem lifecycle commands
 * `init` — Register a new mem via the engine's mem-management orchestrator
 * `unregister` — Router-only removal — unregisters the mem from the workspace but leaves its stored content in place for archive workflows. Cross-mem grants pointing at the unregistered mem stay valid (the data they rely on survives); a follow-up `memstead mem init <same name>` re-attaches against the preserved storage. Refuses with `MEM_HAS_INCOMING_REFS` when entities in other mems still link into this one — remove those incoming cross-mem references first (mirrors `mem delete`'s precondition)
 * `delete` — Storage-destroying removal — unregisters the mem AND deletes its stored content. Refuses with `MEM_REFERENCED_BY_POLICY` when any other writable mem has a `cross_mem_links` grant pointing at the target (revoke the grant first). For router-only removal that keeps the storage, use `memstead mem unregister`
+* `rename` — Rename a mem: `<old> <new>`, complete across every surface that carries the name — entity-id prefixes, cross-mem edges and wiki-links in every writable mem, anchors, workspace grants, bindings, sync-state, findings store — with the mem's commit history preserved (a branch move, never a fresh seed). Agent mode requires the old name to pass `[[mem_management.delete]]` AND the new name to pass `[[mem_management.create]]` (schema pin unchanged). An interrupted rename is completable by re-issuing the same command. Read-only mounts refuse
 * `set-version` — Update a mem's `version` field. The version is consumed by `memstead export --format mem` to stamp the archive filename and the `.mem` archive's published config. `version` is seeded at init (`0.1.0`); bump via this command before publishing
 * `set-schema` — Set a mem's schema pin — the integrity-driven schema-migration trigger. Already-integral mems switch immediately; otherwise the mem enters dual-pin migration (writes validate against the target) and the response lists the non-integral entities. Re-issue after repairing to complete the switch
 * `set-description` — Set a mem's one-line `description` — embedded in `.mem` archive exports and surfaced on the registry card at publish time. An empty string clears the field. Set it before `memstead export` / `memstead publish` so the shared archive carries its card text
@@ -1123,6 +1125,24 @@ Storage-destroying removal — unregisters the mem AND deletes its stored conten
 * `--note <NOTE>` — Optional provenance note (≤280 chars). Captured on the engine trace surface; surfaces via the outer-repo Stop hook. No per-mem commit is produced by delete
 * `--operator-mode` — Bypass the workspace `[[mem_management.delete]]` allowlist for this invocation. See `InitArgs::operator_mode` for the full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`
 * `--detach-incoming` — Mem-replacement affordance: skip the `MEM_HAS_INCOMING_REFS` refusal and leave surviving Write-Mems' cross-mem edges into this mem dangling as stubs. The referrers' files stay untouched; a later `memstead mem init <same name>` re-adopts the edges. Use when re-homing a mem (backend or location change) under a stable name — the response lists every detached referrer so re-adoption can be verified
+
+
+
+## `memstead mem rename`
+
+Rename a mem: `<old> <new>`, complete across every surface that carries the name — entity-id prefixes, cross-mem edges and wiki-links in every writable mem, anchors, workspace grants, bindings, sync-state, findings store — with the mem's commit history preserved (a branch move, never a fresh seed). Agent mode requires the old name to pass `[[mem_management.delete]]` AND the new name to pass `[[mem_management.create]]` (schema pin unchanged). An interrupted rename is completable by re-issuing the same command. Read-only mounts refuse
+
+**Usage:** `memstead mem rename [OPTIONS] <OLD> <NEW>`
+
+###### **Arguments:**
+
+* `<OLD>` — Current mem name
+* `<NEW>` — New mem name (mem-name grammar; must not be registered)
+
+###### **Options:**
+
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars), carried on every commit the rename produces
+* `--operator-mode` — Bypass both workspace allowlists (`[[mem_management.delete]]` for the old name, `[[mem_management.create]]` for the new) for this invocation — same posture as `mem init` / `mem delete`. Also settable via `MEMSTEAD_OPERATOR_MODE=1`
 
 
 

@@ -55,6 +55,16 @@ pub enum MemAction {
     /// pointing at the target (revoke the grant first). For router-only
     /// removal that keeps the storage, use `memstead mem unregister`.
     Delete(DeleteArgs),
+    /// Rename a mem: `<old> <new>`, complete across every surface
+    /// that carries the name — entity-id prefixes, cross-mem edges and
+    /// wiki-links in every writable mem, anchors, workspace grants,
+    /// bindings, sync-state, findings store — with the mem's commit
+    /// history preserved (a branch move, never a fresh seed). Agent
+    /// mode requires the old name to pass `[[mem_management.delete]]`
+    /// AND the new name to pass `[[mem_management.create]]` (schema
+    /// pin unchanged). An interrupted rename is completable by
+    /// re-issuing the same command. Read-only mounts refuse.
+    Rename(RenameArgs),
     /// Update a mem's `version` field. The version is consumed by
     /// `memstead export --format mem` to stamp the archive filename and
     /// the `.mem` archive's published config. `version` is seeded at
@@ -595,6 +605,97 @@ fn mem_template_guidance_note(
          --write-guidance '{{\"{first}\": \"…\"}}' (or edit the mem config) to fill them.",
         keys.join(", "),
     ))
+}
+
+/// `memstead mem rename <old> <new>` arguments.
+#[derive(Args, Debug)]
+pub struct RenameArgs {
+    /// Current mem name.
+    pub old: String,
+    /// New mem name (mem-name grammar; must not be registered).
+    pub new: String,
+    /// Agent-authored provenance note (≤280 chars), carried on every
+    /// commit the rename produces.
+    #[arg(long)]
+    pub note: Option<String>,
+    /// Bypass both workspace allowlists (`[[mem_management.delete]]`
+    /// for the old name, `[[mem_management.create]]` for the new) for
+    /// this invocation — same posture as `mem init` / `mem delete`.
+    /// Also settable via `MEMSTEAD_OPERATOR_MODE=1`.
+    #[arg(long)]
+    pub operator_mode: bool,
+}
+
+pub fn run_rename(ctx: &CliContext, args: RenameArgs) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| generic_error(format!("determine current directory: {e}")))?;
+    let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
+        validation_error(format!(
+            "no workspace found above {}. `memstead mem rename` must run \
+             inside a configured workspace.",
+            cwd.display(),
+        ))
+    })?;
+
+    let mut engine = match ctx.cli_engine()? {
+        CliEngine::MemRepo(e) => e,
+        CliEngine::Filesystem(_) => {
+            return Err(validation_error(format!(
+                "`memstead mem rename` requires a mem-repo workspace; the workspace at {} is filesystem-shaped.",
+                workspace_root.display(),
+            )));
+        }
+    };
+    let params = mem_management::MemRenameParams {
+        old: args.old,
+        new: args.new,
+        operator_mode: resolve_operator_mode(args.operator_mode),
+        note: args.note,
+    };
+    let response =
+        mem_management::rename_mem(&mut engine, params).map_err(full_engine_err_to_cli)?;
+    if ctx.json {
+        crate::output::print_json(&serde_json::json!({
+            "old": response.old,
+            "new": response.new,
+            "rewritten_mems": response.rewritten_mems,
+            "resumed": response.resumed,
+            "warnings": response
+                .warnings
+                .iter()
+                .map(|w| serde_json::json!({"code": w.code(), "message": w.message()}))
+                .collect::<Vec<_>>(),
+        }))?;
+    } else {
+        let mut out = if response.resumed {
+            format!(
+                "# Mem rename completed\n\n`{}` → `{}` — the identity flip had already \
+                 happened; the remaining reference sweep and store relocations ran.\n",
+                response.old, response.new,
+            )
+        } else {
+            format!("# Mem `{}` renamed to `{}`\n", response.old, response.new)
+        };
+        if !response.rewritten_mems.is_empty() {
+            out.push_str(&format!(
+                "\n- Reference rewrites committed in: {}\n",
+                response
+                    .rewritten_mems
+                    .iter()
+                    .map(|m| format!("`{m}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+        }
+        if !response.warnings.is_empty() {
+            out.push_str("\n## Warnings\n\n");
+            for w in &response.warnings {
+                out.push_str(&format!("- **{}**: {}\n", w.code(), w.message()));
+            }
+        }
+        crate::output::print_markdown(&out);
+    }
+    Ok(())
 }
 
 pub fn run_delete(ctx: &CliContext, args: DeleteArgs) -> anyhow::Result<()> {

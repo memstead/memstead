@@ -72,6 +72,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     export: export_dispatch,
     export_to_bytes: export_to_bytes_dispatch,
     prune_residue: prune_residue_dispatch,
+    rename_mem_storage: rename_mem_storage_dispatch,
     write_schema: write_schema_dispatch,
     read_schema_file: read_schema_file_dispatch,
     read_ref_schemas: read_ref_schemas_dispatch,
@@ -161,6 +162,30 @@ fn prune_residue_dispatch(
             ))
         },
     )
+}
+
+/// Dispatcher for `memstead_engine::rename_mem` on git-branch
+/// workspaces: branch move + `__MEMSTEAD:mems/` config relocation in
+/// one ref-edit transaction, history preserved.
+fn rename_mem_storage_dispatch(
+    gitdir: &std::path::Path,
+    old_leaf: &str,
+    new_leaf: &str,
+) -> Result<(), memstead_base::backend::BackendError> {
+    let ctx = memstead_base::vcs::CommitContext {
+        actor: memstead_base::vcs::Actor::Agent,
+        client: None,
+        tool: Some("memstead mem rename"),
+        note: None,
+        logical_operation_id: None,
+        entity_ids: None,
+    };
+    crate::storage_memstead::rename_mem_artifacts_at_gitdir(gitdir, old_leaf, new_leaf, &ctx)
+        .map_err(|e| {
+            memstead_base::backend::BackendError::Other(format!(
+                "mem rename {old_leaf} -> {new_leaf}: {e}",
+            ))
+        })
 }
 
 fn changes_since_dispatch(

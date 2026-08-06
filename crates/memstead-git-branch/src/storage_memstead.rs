@@ -1145,6 +1145,199 @@ pub fn delete_mem_artifacts_at_gitdir(
     Ok(())
 }
 
+/// Rename a mem's storage identity in one logical operation: the
+/// content branch `refs/heads/<old_leaf>` moves to
+/// `refs/heads/<new_leaf>` **at the same tip** (history preserved — a
+/// ref move, never a fresh seed), and the per-mem config blob moves
+/// from `__MEMSTEAD:mems/<old_leaf>/config.json` to
+/// `mems/<new_leaf>/config.json` in a single `__MEMSTEAD` commit. All
+/// three ref changes (create new branch, delete old branch, advance
+/// `__MEMSTEAD`) land in one ref-edit transaction, so a crash cannot
+/// leave the branch half-moved.
+///
+/// Refusals (no mutation on any): `refs/heads/<old_leaf>` missing,
+/// `refs/heads/<new_leaf>` already present.
+pub fn rename_mem_artifacts_at_gitdir(
+    gitdir: &Path,
+    old_leaf: &str,
+    new_leaf: &str,
+    ctx: &CommitContext<'_>,
+) -> Result<(), MemRepoWriteError> {
+    use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
+    use gix::refs::{FullName, Target};
+
+    let repo = gix::open(gitdir).map_err(|e| MemRepoWriteError::GixOpen {
+        path: gitdir.display().to_string(),
+        message: e.to_string(),
+    })?;
+
+    // ---- Step 0: resolve both branch refs; refuse before any write ----
+    let old_ref = format!("refs/heads/{old_leaf}");
+    let new_ref = format!("refs/heads/{new_leaf}");
+    let old_tip: gix::ObjectId = repo
+        .try_find_reference(&old_ref)
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
+        .ok_or_else(|| {
+            MemRepoWriteError::GitTree(format!("rename source branch {old_ref} not found"))
+        })?
+        .into_fully_peeled_id()
+        .map_err(|e| MemRepoWriteError::GitTree(format!("peel {old_ref}: {e}")))?
+        .detach();
+    if repo
+        .try_find_reference(&new_ref)
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
+        .is_some()
+    {
+        return Err(MemRepoWriteError::GitTree(format!(
+            "rename target branch {new_ref} already exists"
+        )));
+    }
+
+    // ---- Step 1: move the config blob on __MEMSTEAD (if present) ----
+    let existing_memstead_tip: Option<gix::ObjectId> = repo
+        .try_find_reference("refs/heads/__MEMSTEAD")
+        .map_err(|e| MemRepoWriteError::GitTree(e.to_string()))?
+        .map(|r| {
+            r.into_fully_peeled_id()
+                .map(|id| id.detach())
+                .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD: {e}")))
+        })
+        .transpose()?;
+
+    let mut new_memstead_commit: Option<gix::ObjectId> = None;
+    if let Some(tip) = existing_memstead_tip {
+        let commit = repo
+            .find_object(tip)
+            .map_err(|e| MemRepoWriteError::GitTree(format!("read __MEMSTEAD commit: {e}")))?
+            .into_commit();
+        let tree = commit
+            .tree()
+            .map_err(|e| MemRepoWriteError::GitTree(format!("peel __MEMSTEAD tree: {e}")))?;
+
+        let old_path = format!("mems/{old_leaf}/config.json");
+        let new_path = format!("mems/{new_leaf}/config.json");
+        let config_blob_id = tree
+            .lookup_entry_by_path(&old_path)
+            .map_err(|e| MemRepoWriteError::GitTree(format!("lookup {old_path}: {e}")))?
+            .map(|e| e.object_id());
+
+        if let Some(blob_id) = config_blob_id {
+            let mut editor = tree.edit().map_err(|e| {
+                MemRepoWriteError::GitTree(format!("editor init for __MEMSTEAD: {e}"))
+            })?;
+            editor
+                .remove(old_path.as_str())
+                .map_err(|e| MemRepoWriteError::GitTree(format!("tree remove {old_path}: {e}")))?;
+            editor
+                .upsert(
+                    new_path.as_str(),
+                    gix::objs::tree::EntryKind::Blob,
+                    blob_id,
+                )
+                .map_err(|e| MemRepoWriteError::GitTree(format!("tree upsert {new_path}: {e}")))?;
+            let new_tree_id = editor
+                .write()
+                .map_err(|e| MemRepoWriteError::GitTree(format!("tree write for __MEMSTEAD: {e}")))?
+                .detach();
+
+            let time = gix::date::Time::now_local_or_utc();
+            let committer_sig = gix::actor::Signature {
+                name: COMMITTER_NAME.into(),
+                email: COMMITTER_EMAIL.into(),
+                time,
+            };
+            let author_sig = match author_identity(ctx) {
+                Some((name, email)) => gix::actor::Signature {
+                    name: name.into(),
+                    email: email.into(),
+                    time,
+                },
+                None => committer_sig.clone(),
+            };
+            let full_message = format_commit_message(
+                &format!("memstead: rename mem `{old_leaf}` → `{new_leaf}`"),
+                ctx,
+            );
+            let commit_obj = gix::objs::Commit {
+                message: full_message.into(),
+                tree: new_tree_id,
+                author: author_sig,
+                committer: committer_sig,
+                encoding: None,
+                parents: vec![tip].into_iter().collect(),
+                extra_headers: Default::default(),
+            };
+            new_memstead_commit = Some(
+                repo.write_object(&commit_obj)
+                    .map_err(|e| {
+                        MemRepoWriteError::GitTree(format!("write __MEMSTEAD rename commit: {e}"))
+                    })?
+                    .detach(),
+            );
+        }
+    }
+
+    // ---- Step 2: one ref-edit transaction for all three changes ----
+    let mut edits: Vec<RefEdit> = Vec::with_capacity(3);
+
+    let new_full: FullName = new_ref.as_str().try_into().map_err(|e| {
+        MemRepoWriteError::RefTransaction(format!("invalid branch ref {new_ref:?}: {e}"))
+    })?;
+    edits.push(RefEdit {
+        change: Change::Update {
+            log: LogChange {
+                mode: RefLog::AndReference,
+                force_create_reflog: false,
+                message: format!("memstead: rename mem `{old_leaf}` → `{new_leaf}`")
+                    .as_str()
+                    .into(),
+            },
+            expected: PreviousValue::MustNotExist,
+            new: Target::Object(old_tip),
+        },
+        name: new_full,
+        deref: false,
+    });
+
+    let old_full: FullName = old_ref.as_str().try_into().map_err(|e| {
+        MemRepoWriteError::RefTransaction(format!("invalid branch ref {old_ref:?}: {e}"))
+    })?;
+    edits.push(RefEdit {
+        change: Change::Delete {
+            expected: PreviousValue::MustExistAndMatch(Target::Object(old_tip)),
+            log: RefLog::AndReference,
+        },
+        name: old_full,
+        deref: false,
+    });
+
+    if let (Some(prior_tip), Some(new_commit)) = (existing_memstead_tip, new_memstead_commit) {
+        let memstead_full: FullName = "refs/heads/__MEMSTEAD".try_into().map_err(|e| {
+            MemRepoWriteError::RefTransaction(format!("invalid __MEMSTEAD ref: {e}"))
+        })?;
+        edits.push(RefEdit {
+            change: Change::Update {
+                log: LogChange {
+                    mode: RefLog::AndReference,
+                    force_create_reflog: false,
+                    message: format!("memstead: rename mem `{old_leaf}` → `{new_leaf}`")
+                        .as_str()
+                        .into(),
+                },
+                expected: PreviousValue::MustExistAndMatch(Target::Object(prior_tip)),
+                new: Target::Object(new_commit),
+            },
+            name: memstead_full,
+            deref: false,
+        });
+    }
+
+    repo.edit_references(edits)
+        .map_err(|e| MemRepoWriteError::RefTransaction(e.to_string()))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

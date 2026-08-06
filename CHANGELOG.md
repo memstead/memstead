@@ -36,6 +36,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
+- **A mem can be renamed.** `memstead mem rename <old> <new>` performs
+  a complete rename across every surface that carries the name: entity
+  ids re-prefix (ids derive from the mount name), every cross-mem edge
+  and wiki-link in every writable mem is rewritten (one commit per
+  affected mem, all sharing one logical-operation id), anchors-sidecar
+  keys re-key, workspace `[cross_mem_links]` grants naming the mem are
+  rewritten on either side, sync-state keys and the
+  binding/findings-store paths follow, and the mem's commit history is
+  preserved — the branch moves at its tip, never a fresh seed. Agent
+  mode requires the old name to pass `[[mem_management.delete]]` and
+  the new name `[[mem_management.create]]` (schema pin unchanged);
+  operator-mode bypasses both, as with init/delete. Every refusal
+  (unknown mem, collision, grammar, read-only mount, allowlists) fires
+  before the first write and leaves the workspace byte-identical. An
+  interrupted rename is detectable (health reports the dangling
+  references as stubs) and completable by re-issuing the same command.
+  Works on git-branch and folder-backed mounts; read-only mounts
+  refuse. Previously the only path was a hand-built migration
+  (measured at ~40 minutes for a 73-entity mem in the field).
 - **The sizing curve is measured, not advertised.** A new on-demand
   harness (`cargo run -p xtask -- sizing-curve`) generates graded
   synthetic mem-repo workspaces through the product surface and times

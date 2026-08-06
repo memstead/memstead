@@ -140,6 +140,57 @@ pub(crate) fn rewrite_cross_mem_slug(
     (out, rewritten)
 }
 
+/// Rewrite every cross-mem wiki-link in `text` whose mem half matches
+/// `old_mem` — regardless of slug — to carry `new_mem` instead,
+/// preserving the separator (`:` or `--`), the slug, and any `|label`
+/// suffix. The mem-rename counterpart of [`rewrite_cross_mem_slug`]:
+/// that function retargets one renamed entity, this one retargets a
+/// whole renamed mem.
+///
+/// Matches inside fenced code blocks and inline code spans are not
+/// rewritten (same discipline as the two sibling rewriters). Returns
+/// the rewritten text plus a count of how many matches were changed.
+pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (String, usize) {
+    let masked = mask_for_link_scan(text);
+    let link_re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let mut out = String::with_capacity(text.len());
+    let mut last_end = 0usize;
+    let mut rewritten = 0usize;
+
+    for cap in link_re.captures_iter(&masked) {
+        let whole = cap.get(0).unwrap();
+        let inner = cap.get(1).unwrap();
+        let inner_str = &text[inner.start()..inner.end()];
+        let (target, label) = match inner_str.find('|') {
+            Some(i) => (&inner_str[..i], Some(&inner_str[i + 1..])),
+            None => (inner_str, None),
+        };
+
+        out.push_str(&text[last_end..whole.start()]);
+
+        let rewritten_inner = match split_cross_mem_target(target) {
+            Some((mem, sep, slug)) if mem == old_mem => Some(format!("{new_mem}{sep}{slug}")),
+            _ => None,
+        };
+
+        if let Some(new_target) = rewritten_inner {
+            out.push_str("[[");
+            out.push_str(&new_target);
+            if let Some(lbl) = label {
+                out.push('|');
+                out.push_str(lbl);
+            }
+            out.push_str("]]");
+            rewritten += 1;
+        } else {
+            out.push_str(&text[whole.start()..whole.end()]);
+        }
+        last_end = whole.end();
+    }
+    out.push_str(&text[last_end..]);
+    (out, rewritten)
+}
+
 /// Decompose a cross-mem wiki-link target half into
 /// `(mem, separator, slug)`. Returns `None` for bare-slug forms.
 ///

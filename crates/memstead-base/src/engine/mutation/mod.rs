@@ -18,6 +18,7 @@ use super::EngineError;
 
 pub mod create;
 pub mod delete;
+pub mod mem_sweep;
 pub mod parse_recovery;
 pub mod relate;
 pub mod rename;
