@@ -153,6 +153,8 @@ impl Engine {
             .map_err(|e| invalid(e.to_string()))?;
         memstead_schema::check_section_heading_roundtrip(&schema)
             .map_err(|e| invalid(e.to_string()))?;
+        memstead_schema::check_reserved_metadata_keys(&schema)
+            .map_err(|e| invalid(e.to_string()))?;
         let (declared_name, declared_version) =
             (schema.manifest.name.as_str(), schema.version.to_string());
         if declared_name != name || declared_version != version {

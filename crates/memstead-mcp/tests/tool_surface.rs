@@ -2322,6 +2322,28 @@ fn memstead_update_description_mentions_metadata_unset() {
     );
 }
 
+/// The reserved identity triple (`mem`/`id`/`type`) is set-refused but
+/// unset-ALLOWED (the sanctioned repair for a historically smuggled
+/// key). The tool description must state that asymmetry — a text that
+/// documents unset as refused sends agents to delete-and-recreate,
+/// destroying provenance for nothing.
+#[test]
+fn memstead_update_description_states_reserved_unset_asymmetry() {
+    let desc = description_of("memstead_update");
+    assert!(
+        desc.contains("Read-only on SET"),
+        "memstead_update must scope the reserved-triple refusal to SET."
+    );
+    assert!(
+        desc.contains("sanctioned repair"),
+        "memstead_update must document reserved-key unset as the sanctioned repair."
+    );
+    assert!(
+        !desc.contains("set/unset"),
+        "the retired set-and-unset-refused wording must not resurface."
+    );
+}
+
 #[test]
 fn memstead_update_description_mentions_patch_all() {
     let desc = description_of("memstead_update");

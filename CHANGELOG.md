@@ -8,6 +8,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **Reserved metadata keys are reserved everywhere.** The engine's
+  identity/discriminator triple (`type` / `mem` / `id`) now has one
+  reservation with one behaviour across every path. The loader's
+  reserved set widens from `type` alone to the full triple, enforced
+  on the authoring/installation path (`memstead schema install` /
+  `validate`, the engine install primitive) with the typed
+  `ReservedSchemaKey` refusal — and, matching the heading-round-trip
+  posture, no longer refuses at boot: a schema already sealed that
+  violates the rule keeps loading instead of bricking the workspace.
+  The create path now refuses a caller-supplied reserved key with the
+  same deliberate `READ_ONLY_FIELD` the update path uses, instead of
+  the incidental `UNKNOWN_METADATA_FIELD`. And `metadata_unset` may
+  now name a reserved key — the sanctioned repair for an entity that
+  acquired a smuggled one before the write gates closed (previously
+  only delete-and-recreate, destroying provenance and edges);
+  removing a reserved key can only move an entity toward the
+  invariant, and unsetting `type` never leaves an entity typeless —
+  the engine re-seeds the authoritative discriminator, so on a
+  healthy entity it is a no-op. Setting a reserved key stays refused
+  everywhere; create's stamp-and-proceed posture for engine-managed
+  timestamp fields is untouched.
 - **Anchors merge; they no longer silently replace.** An update carrying
   `anchors` used to discard the entity's entire prior anchor set —
   observed live as a sync loop regressing an entity's coverage because

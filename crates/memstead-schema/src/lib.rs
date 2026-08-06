@@ -33,8 +33,8 @@ pub use config::{
     published_config_from, published_format_accepted,
 };
 pub use loader::{
-    HeadingKeyViolation, SchemaLoadError, check_section_heading_roundtrip, load_schema_from_dir,
-    load_schema_from_memory,
+    HeadingKeyViolation, SchemaLoadError, check_reserved_metadata_keys,
+    check_section_heading_roundtrip, load_schema_from_dir, load_schema_from_memory,
 };
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,

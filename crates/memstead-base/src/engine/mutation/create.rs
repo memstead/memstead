@@ -206,6 +206,17 @@ impl Engine {
 
         // 3. Pre-write validators: section keys and metadata values.
         validate_section_keys(args.sections.keys().map(String::as_str), type_def.as_ref())?;
+        // Reserved identity/discriminator keys (`mem`/`id`/`type`)
+        // refuse deliberately (`READ_ONLY_FIELD`) before the metadata
+        // parse loop can refuse them incidentally as
+        // `UNKNOWN_METADATA_FIELD` — symmetric with the update path's
+        // set gate, so the two paths agree and the refusal names the
+        // real reason. Timestamp fields keep create's documented
+        // stamp-and-proceed posture (`IGNORED_READONLY_FIELD` warning,
+        // step 5a) — only the triple is checked here.
+        for key in args.metadata.keys() {
+            crate::runtime_validator::validate_reserved_metadata_key(key.as_str())?;
+        }
         // 3a. Validate any `anchors[]` payload up front — a malformed
         //     element (unknown class/grain, missing artifact, hash on a
         //     non-hash class, grain unsupported by the resolving medium's
@@ -3907,5 +3918,45 @@ community:
                 .entity_anchors(&crate::EntityId::new("specs", "no-anchors"))
                 .is_empty()
         );
+    }
+
+    // ---- reserved metadata keys on create --------------------------------
+
+    /// A create carrying a reserved identity/discriminator metadata key
+    /// (`type` / `mem` / `id`) refuses with the same deliberate
+    /// `READ_ONLY_FIELD` the update path uses — not the incidental
+    /// `UNKNOWN_METADATA_FIELD` — and the entity is not written.
+    /// Refusal complement: a create with only declared, non-reserved
+    /// keys lands exactly as today (covered pervasively by every other
+    /// create test; the explicit control below re-asserts it beside
+    /// the refusals).
+    #[test]
+    fn create_refuses_reserved_metadata_keys_deliberately() {
+        let (mut engine, _tmp) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+        for reserved in ["type", "mem", "id"] {
+            let mut args = empty_create_args("specs", "Smuggler");
+            args.metadata
+                .insert(reserved.to_string(), "bogus".to_string());
+            let err = engine
+                .create_entity(args, actor, Some(&client), None)
+                .expect_err("reserved key must refuse on create");
+            assert_eq!(err.code(), "READ_ONLY_FIELD", "key '{reserved}': {err:?}");
+            assert!(
+                engine
+                    .get_entity(&crate::EntityId::new("specs", "smuggler"))
+                    .is_none(),
+                "entity must not be written after the '{reserved}' refusal"
+            );
+        }
+        // Control: the same create without the smuggled key lands.
+        engine
+            .create_entity(
+                empty_create_args("specs", "Smuggler"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("a clean create is untouched by the reserved-key gate");
     }
 }

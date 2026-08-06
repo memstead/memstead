@@ -2574,34 +2574,60 @@ mod tests {
         }
     }
 
-    /// Same gate applies on `metadata_unset` — agents can't sneak the
-    /// triple out by removing it instead of overwriting.
+    /// `metadata_unset` is the asymmetric half of the reservation:
+    /// unsetting a reserved key is ALLOWED (the sanctioned repair for a
+    /// historically smuggled key — on a healthy entity it is a
+    /// committed-nothing no-op, and `type` is engine-re-seeded so the
+    /// entity never goes typeless), while the engine-stamped timestamp
+    /// fields stay refused on unset.
     #[test]
-    fn update_rejects_read_only_metadata_unset() {
+    fn update_allows_reserved_metadata_unset_but_refuses_timestamp_unset() {
         let tmp = TempDir::new().unwrap();
         write_workspace(&tmp, "demo");
         let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
         let (id, hash) = seed_via_mcp(&server, "Unsettable");
 
-        let result = server.memstead_update(Parameters(UpdateParams {
-            anchors: None,
-            relations_unset: None,
-            anchors_unset: None,
-            id: id.clone(),
-            expected_hash: hash,
-            sections: None,
-            append_sections: None,
-            patch_sections: None,
-            metadata: None,
-            metadata_unset: Some(vec!["type".to_string()]),
-            dry_run: None,
-            note: None,
-            declare_relations: None,
-        }));
+        let unset_params = |keys: Vec<&str>| {
+            Parameters(UpdateParams {
+                anchors: None,
+                relations_unset: None,
+                anchors_unset: None,
+                id: id.clone(),
+                expected_hash: hash.clone(),
+                sections: None,
+                append_sections: None,
+                patch_sections: None,
+                metadata: None,
+                metadata_unset: Some(keys.into_iter().map(String::from).collect()),
+                dry_run: None,
+                note: None,
+                declare_relations: None,
+            })
+        };
+
+        // Reserved triple: unset succeeds. On this healthy entity it is
+        // a no-op (nothing was smuggled), surfaced as UPDATE_NOOP.
+        for field in ["type", "mem", "id"] {
+            let result = server.memstead_update(unset_params(vec![field]));
+            assert!(
+                !result.is_error.unwrap_or(false),
+                "unset of reserved '{field}' must be allowed (repair route)"
+            );
+            let body = result.structured_content.unwrap();
+            assert!(
+                body["warnings"]
+                    .as_array()
+                    .is_some_and(|w| w.iter().any(|e| e["code"] == "UPDATE_NOOP")),
+                "healthy-entity reserved unset is a no-op: {body}"
+            );
+        }
+
+        // Engine-stamped timestamps: unset still refuses.
+        let result = server.memstead_update(unset_params(vec!["last_modified"]));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
         assert_eq!(body["code"], "READ_ONLY_FIELD");
-        assert_eq!(body["details"]["field"], "type");
+        assert_eq!(body["details"]["field"], "last_modified");
     }
 
     /// The virtual `relationships` surface is managed by `memstead_relate`,

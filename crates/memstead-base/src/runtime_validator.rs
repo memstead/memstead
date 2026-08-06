@@ -1,18 +1,19 @@
-//! Runtime CRUD validators consumed by the unified [`crate::Engine`]
-//! and `memstead-git-branch`'s mem-repo engine.
+//! Runtime CRUD validators consumed by the unified [`crate::Engine`] —
+//! the single mutation engine, whatever storage backend (mem-repo git
+//! branch, plain folder, archive) sits behind a mount.
 //!
 //! Distinct concern from [`crate::validator`], which validates sealed
 //! archive bytes at the registry / read-mem ingress boundary. This
-//! module sits *inside* both runtime engines and gates per-mutation
+//! module sits *inside* the mutation engine and gates per-mutation
 //! payloads (section keys, metadata keys, enum values) against the
 //! pinned schema. The wire-format error codes
 //! (`UNKNOWN_SECTION`, `UNKNOWN_METADATA`, `INVALID_ENUM_VALUE`,
-//! `MISSING_REQUIRED_SECTION`) are stable across both engines so MCP
-//! callers see the same envelope shape regardless of workspace flavour.
+//! `MISSING_REQUIRED_SECTION`) are stable regardless of workspace
+//! storage, so MCP callers always see the same envelope shape.
 //!
 //! Returns a typed [`ValidationError`] (or a list of
 //! [`MissingRequiredSection`] for the warning surface) — the engine
-//! layer above wraps these into its own per-flavour error/Result type.
+//! layer above wraps these into its error/Result type.
 
 use std::sync::OnceLock;
 
@@ -538,29 +539,75 @@ impl ValidationError {
     }
 }
 
-/// Read-only metadata keys the `memstead_update` path must never accept on
-/// either set or unset. Keeping these tied to the schema's identity
-/// fields would silently drift the entity-id contract; the engine
-/// surface treats them as immutable across both flavours.
+/// Reserved metadata keys — the entity's identity/discriminator triple.
+/// No write path accepts them as caller-supplied metadata (create and
+/// update both refuse a *set*); letting them ride the schema's declared
+/// fields would silently drift the entity-id contract. Unset is the one
+/// sanctioned exception: `metadata_unset` may name a reserved key to
+/// repair an entity that acquired a smuggled one before the write gates
+/// closed — removing a reserved key can only move the entity toward the
+/// invariant (the `type` discriminator is re-seeded by the engine, never
+/// left absent).
 pub const READ_ONLY_METADATA_KEYS: &[&str] = &["mem", "id", "type"];
 
-/// Reject any attempt to set or unset a read-only metadata key. Both
-/// engine flavours call this from their `update_entity` paths; the
-/// shared list ensures the `mem` / `id` / `type` triple stays
-/// authoritative across both, and the schema's `init_timestamp` /
-/// `auto_timestamp` annotations are honoured on write — the engine
-/// owns those values on create (`init_timestamp`, set once) and on
-/// every update (`auto_timestamp`, re-stamped). Returns
-/// [`ValidationError::ReadOnlyField`] on rejection.
-pub fn validate_writable_metadata_key(
-    key: &str,
-    schema: &TypeDefinition,
-) -> Result<(), ValidationError> {
+/// Reject a caller-supplied reserved identity/discriminator key
+/// (`mem` / `id` / `type`) as metadata — the create-path half of the
+/// reservation, deliberate and typed
+/// ([`ValidationError::ReadOnlyField`]) rather than the incidental
+/// `UNKNOWN_METADATA_FIELD` a reserved key would otherwise trip
+/// (no installable schema can declare one). Timestamp fields are NOT
+/// checked here: create's posture for `init_timestamp` /
+/// `auto_timestamp` fields is stamp-and-proceed with an
+/// `IGNORED_READONLY_FIELD` warning, deliberately.
+pub fn validate_reserved_metadata_key(key: &str) -> Result<(), ValidationError> {
     if READ_ONLY_METADATA_KEYS.contains(&key) {
         return Err(ValidationError::ReadOnlyField {
             field: key.to_string(),
         });
     }
+    Ok(())
+}
+
+/// Reject any attempt to **set** a read-only metadata key. The single
+/// mutation engine (`memstead-base`) calls this from its `update_entity`
+/// path over the `metadata` map: the `mem` / `id` / `type` triple stays
+/// engine-authoritative, and the schema's `init_timestamp` /
+/// `auto_timestamp` annotations are honoured on write — the engine
+/// owns those values on create (`init_timestamp`, set once) and on
+/// every update (`auto_timestamp`, re-stamped). Returns
+/// [`ValidationError::ReadOnlyField`] on rejection. The unset path has
+/// its own gate ([`validate_unsettable_metadata_key`]) because the
+/// reserved triple is unset-allowed there as the sanctioned repair.
+pub fn validate_writable_metadata_key(
+    key: &str,
+    schema: &TypeDefinition,
+) -> Result<(), ValidationError> {
+    validate_reserved_metadata_key(key)?;
+    if let Some(field) = schema.metadata_field(key)
+        && (field.init_timestamp || field.auto_timestamp)
+    {
+        return Err(ValidationError::ReadOnlyField {
+            field: key.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Gate for `metadata_unset` keys. Unlike the set path
+/// ([`validate_writable_metadata_key`]), the reserved
+/// identity/discriminator triple (`mem` / `id` / `type`) IS
+/// unsettable: removing one can only move an entity toward the
+/// invariant, and it is the sanctioned repair for entities that
+/// acquired a smuggled reserved key before the write gates closed
+/// (delete-and-recreate would destroy provenance and edges).
+/// Engine-stamped timestamp fields (`init_timestamp` /
+/// `auto_timestamp`) stay refused on unset — the engine owns their
+/// values and re-stamps them; unsetting one is caller confusion, not
+/// repair.
+pub fn validate_unsettable_metadata_key(
+    key: &str,
+    schema: &TypeDefinition,
+) -> Result<(), ValidationError> {
     if let Some(field) = schema.metadata_field(key)
         && (field.init_timestamp || field.auto_timestamp)
     {
@@ -896,9 +943,9 @@ pub enum RelationshipCheck {
 /// admit unknown names and return a warning string for the engine to
 /// surface.
 ///
-/// Both engine flavours call this from their `memstead_relate` paths so
-/// the wire shape (`INVALID_REL_TYPE`, `allowed[]`, `suggestion`) is
-/// stable across mem-repo and filesystem-mem.
+/// The mutation engine calls this from its `memstead_relate` path; the
+/// wire shape (`INVALID_REL_TYPE`, `allowed[]`, `suggestion`) is stable
+/// regardless of workspace storage.
 pub fn validate_rel_type(
     rel_type: &str,
     schema: &Schema,

@@ -2179,6 +2179,7 @@ mod tests {
             staleness_threshold_days: 90,
             write_rules: vec![],
             required_outgoing: vec![],
+            declared_metadata_keys: vec![],
         };
 
         let mut sections = HashMap::new();

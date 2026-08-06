@@ -46,6 +46,16 @@ pub struct TypeDefinition {
     // form round-trips.
     #[serde(skip)]
     pub edge_weights: IndexMap<String, f32>,
+    /// Raw author-declared metadata-field keys, recorded by the loader
+    /// BEFORE the base-metadata merge injects the engine fields
+    /// (`type`, `created_date`, `last_modified`, `tags`). The
+    /// install-path reserved-key check
+    /// ([`crate::loader::check_reserved_metadata_keys`]) reads this
+    /// list so it can refuse an author-declared reserved key without
+    /// false-positives on the injected ones. Skipped during
+    /// serialization so the on-disk form round-trips.
+    #[serde(skip)]
+    pub declared_metadata_keys: Vec<String>,
 }
 
 /// One outgoing-edge requirement block on a type definition. Lists one

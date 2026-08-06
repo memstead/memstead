@@ -757,12 +757,68 @@ fn base_metadata_carries_engine_flags() {
     assert!(tags.optional, "tags must be optional by default");
 }
 
+/// A schema declaring a reserved identity/discriminator metadata key
+/// (`type` / `mem` / `id`) LOADS — boot and sealed-schema reads share
+/// this loader, and a schema sealed before the reservation widened must
+/// keep booting — but the install-path gate
+/// (`check_reserved_metadata_keys`) refuses it with the typed error
+/// naming the key. Refusal complement: a schema declaring none of them
+/// passes the gate untouched.
+#[test]
+fn reserved_metadata_keys_load_but_refuse_at_install_gate() {
+    for reserved in ["type", "mem", "id"] {
+        let type_yaml = minimal_type().replace(
+            "metadata_fields:\n",
+            &format!(
+                "metadata_fields:\n  - key: {reserved}\n    description: Smuggled reserved key\n    field_type: string\n"
+            ),
+        );
+        // Sealed/boot posture: the load itself succeeds.
+        let schema = load(&minimal_manifest(), &[("sample", &type_yaml)]).unwrap_or_else(|e| {
+            panic!("schema declaring '{reserved}' must still load (sealed posture), got {e:?}")
+        });
+        assert!(
+            schema
+                .get_type("sample")
+                .unwrap()
+                .declared_metadata_keys
+                .iter()
+                .any(|k| k == reserved),
+            "loader must record the raw declared key '{reserved}'"
+        );
+        // Authoring/install posture: the gate refuses, naming the key.
+        let err = memstead_schema::check_reserved_metadata_keys(&schema)
+            .expect_err("install gate must refuse the reserved key");
+        match err {
+            SchemaLoadError::ReservedSchemaKey {
+                type_name,
+                kind,
+                offending_key,
+                reserved_keys,
+            } => {
+                assert_eq!(type_name, "sample");
+                assert_eq!(kind, "metadata_field");
+                assert_eq!(offending_key, reserved);
+                assert_eq!(reserved_keys, vec!["type", "mem", "id"]);
+            }
+            other => panic!("expected ReservedSchemaKey for '{reserved}', got {other:?}"),
+        }
+    }
+
+    // Complement: a clean schema passes the gate.
+    let clean = load(&minimal_manifest(), &[("sample", &minimal_type())]).expect("load ok");
+    memstead_schema::check_reserved_metadata_keys(&clean)
+        .expect("a schema declaring no reserved key passes the install gate");
+}
+
 #[test]
 fn redeclaring_base_metadata_key_is_rejected() {
-    // `type` is now rejected with `ReservedSchemaKey` (engine-invariant
-    // frontmatter discriminator); the rest of the base-metadata keys
-    // still surface as `RedeclaredBaseField` (engine-managed conveniences,
-    // not reserved). See `reserved_metadata_field_keys` in the loader.
+    // `type` refuses with `ReservedSchemaKey` on the install path
+    // (engine-invariant frontmatter discriminator; see
+    // `check_reserved_metadata_keys`); the rest of the base-metadata
+    // keys still surface as `RedeclaredBaseField` at load
+    // (engine-managed conveniences, not reserved). See
+    // `reserved_metadata_field_keys` in the loader.
     for redeclared in ["created_date", "last_modified", "tags"] {
         let manifest = minimal_manifest();
         let type_yaml = format!(
@@ -1625,6 +1681,21 @@ fn every_builtin_schema_passes_heading_roundtrip() {
         memstead_schema::check_section_heading_roundtrip(&schema).unwrap_or_else(|e| {
             panic!(
                 "built-in schema '{}' violates heading round-trip: {e}",
+                schema.manifest.name
+            )
+        });
+    }
+}
+
+/// The shipped built-ins must pass the widened reserved-metadata-key
+/// gate — the install-path refusal cannot land while a built-in would
+/// be refused by it.
+#[test]
+fn every_builtin_schema_passes_reserved_metadata_keys() {
+    for schema in memstead_schema::builtins::load_builtin_schemas().expect("builtins load") {
+        memstead_schema::check_reserved_metadata_keys(&schema).unwrap_or_else(|e| {
+            panic!(
+                "built-in schema '{}' declares a reserved metadata key: {e}",
                 schema.manifest.name
             )
         });

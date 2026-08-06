@@ -12,7 +12,7 @@ use crate::ops::{ModifiedMetadata, ModifiedSections, WarningHint};
 use crate::provenance::{Provenance, ProvenanceKind};
 use crate::runtime_validator::{
     parse_metadata_value, validate_section_content, validate_section_keys,
-    validate_updatable_section, validate_writable_metadata_key,
+    validate_unsettable_metadata_key, validate_updatable_section, validate_writable_metadata_key,
 };
 use crate::vcs::{Actor, ClientId, CommitContext};
 use crate::workspace::MountCapability;
@@ -412,8 +412,13 @@ impl Engine {
         for key in args.metadata.keys() {
             validate_writable_metadata_key(key.as_str(), type_def.as_ref())?;
         }
+        // Unset has its own gate: the reserved `mem`/`id`/`type` triple
+        // is unset-ALLOWED (the sanctioned repair for entities that
+        // acquired a smuggled reserved key before the write gates
+        // closed) while engine-stamped timestamp fields stay refused —
+        // see `validate_unsettable_metadata_key`.
         for key in &args.metadata_unset {
-            validate_writable_metadata_key(key.as_str(), type_def.as_ref())?;
+            validate_unsettable_metadata_key(key.as_str(), type_def.as_ref())?;
         }
 
         // Reject the same key appearing in `metadata` (set) and
@@ -567,6 +572,34 @@ impl Engine {
 
         let mut modified_metadata_unset: Vec<String> = Vec::new();
         for key in args.metadata_unset {
+            // Reserved identity/discriminator keys bypass the
+            // required-field gate below: unsetting one is the
+            // sanctioned repair for a historically smuggled key, and
+            // it can only move the entity toward the invariant. For
+            // `type` the engine immediately re-seeds the authoritative
+            // discriminator from the entity's own type — the
+            // frontmatter can never go typeless (a missing `type:`
+            // would silently re-type the entity to the mem's default
+            // on the next parse), so on a healthy entity the unset is
+            // a no-op. `mem`/`id` are never engine-seeded in the map;
+            // removing a smuggled one is a real (recorded) removal.
+            if crate::runtime_validator::READ_ONLY_METADATA_KEYS.contains(&key.as_str()) {
+                if key == "type" {
+                    let authoritative =
+                        crate::entity::MetadataValue::String(next.entity_type.clone());
+                    if next
+                        .metadata
+                        .shift_remove("type")
+                        .is_some_and(|removed| removed != authoritative)
+                    {
+                        modified_metadata_unset.push(key);
+                    }
+                    next.metadata.insert("type".to_string(), authoritative);
+                } else if next.metadata.shift_remove(&key).is_some() {
+                    modified_metadata_unset.push(key);
+                }
+                continue;
+            }
             // Reject unset on required fields — the pre-remove check
             // carries the recovery payload (field_description,
             // enum_values, type_write_rules) so MCP envelopes surface
@@ -5089,5 +5122,166 @@ community:
         assert_eq!(err.code(), crate::anchor::INVALID_ANCHOR_CODE);
         assert_eq!(engine.entity_anchors(&id).len(), 2, "no partial apply");
         assert_eq!(std::fs::read(&sidecar_path).unwrap(), before);
+    }
+
+    // ---- reserved metadata keys: set refused, unset is the repair --------
+
+    /// Bare update-args shell for the reserved-key tests.
+    fn bare_args(id: EntityId, hash: Option<String>) -> UpdateEntityArgs {
+        UpdateEntityArgs {
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            id,
+            expected_hash: hash,
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+        }
+    }
+
+    /// On an entity fixture carrying historically smuggled reserved
+    /// keys (`mem` / `id` in its frontmatter, written before the write
+    /// gates closed), `metadata_unset` naming them succeeds, removes
+    /// them from the store and the on-disk file, and the entity
+    /// round-trips cleanly thereafter. Refusal complement: `metadata`
+    /// (set) with a reserved key still refuses on update — single and
+    /// batch.
+    #[test]
+    fn reserved_key_unset_repairs_smuggled_entity_and_set_stays_refused() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        // Pre-gate fixture: frontmatter smuggles `mem` and `id`.
+        std::fs::write(
+            mem_dir.join("smuggled.md"),
+            "---\ntype: spec\nmem: wrong-mem\nid: bogus-id\n---\n# Smuggled\n\n## Identity\n\nsmuggled identity.\n\n## Purpose\n\nsmuggled purpose.\n",
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let id = EntityId::new("specs", "smuggled");
+        let entity = engine.get_entity(&id).expect("fixture boots");
+        assert!(
+            entity.metadata.contains_key("mem") && entity.metadata.contains_key("id"),
+            "fixture must carry the smuggled keys after boot"
+        );
+        let hash = entity.content_hash.clone();
+
+        // Refusal complement, single: SET of a reserved key refuses.
+        for reserved in ["type", "mem", "id"] {
+            let mut args = bare_args(id.clone(), Some(hash.clone()));
+            args.metadata
+                .insert(reserved.to_string(), "resmuggled".to_string());
+            let err = engine
+                .update_entity(args, actor, Some(&client), None)
+                .expect_err("reserved-key set must refuse on update");
+            assert_eq!(err.code(), "READ_ONLY_FIELD", "key '{reserved}': {err:?}");
+        }
+        // Refusal complement, batch: same refusal through batch_update
+        // (atomic — nothing lands).
+        let mut batch_item = bare_args(id.clone(), Some(hash.clone()));
+        batch_item
+            .metadata
+            .insert("id".to_string(), "resmuggled".to_string());
+        let batch = engine
+            .batch_update(vec![(batch_item, None)], actor, Some(&client))
+            .expect("batch returns a result envelope");
+        assert!(
+            !batch.applied,
+            "batch with a reserved-key set must not apply"
+        );
+        assert_eq!(batch.failed, 1);
+
+        // The sanctioned repair: unset both smuggled keys in one call.
+        let mut args = bare_args(id.clone(), Some(hash));
+        args.metadata_unset = vec!["mem".to_string(), "id".to_string()];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .expect("reserved-key unset is the sanctioned repair");
+        assert!(!out.commit_sha.is_empty(), "repair is a real commit");
+        assert_eq!(
+            out.modified_metadata.unset,
+            vec!["mem".to_string(), "id".to_string()]
+        );
+
+        // Invariant restored: store and disk are clean, and the entity
+        // round-trips through a further ordinary update.
+        let entity = engine.get_entity(&id).expect("entity survives repair");
+        assert!(
+            !entity.metadata.contains_key("mem") && !entity.metadata.contains_key("id"),
+            "smuggled keys must be gone from the store"
+        );
+        let on_disk = std::fs::read_to_string(mem_dir.join("smuggled.md")).unwrap();
+        assert!(
+            !on_disk.contains("wrong-mem") && !on_disk.contains("bogus-id"),
+            "smuggled keys must be gone from the file: {on_disk}"
+        );
+        let mut args = bare_args(id.clone(), Some(entity.content_hash.clone()));
+        args.sections
+            .insert("identity".to_string(), "repaired identity".to_string());
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .expect("post-repair entity round-trips cleanly");
+    }
+
+    /// Unsetting `type` never leaves an entity typeless: the engine
+    /// re-seeds the authoritative discriminator, so on a healthy entity
+    /// the unset is a committed-nothing no-op (`UPDATE_NOOP`) and the
+    /// type survives on disk. (A missing `type:` would silently re-type
+    /// the entity to the mem's default on the next parse — the re-seed
+    /// forecloses that.) Unset of a nonexistent reserved key is equally
+    /// a no-op, not an error.
+    #[test]
+    fn reserved_type_unset_reseeds_and_is_a_noop_on_healthy_entities() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let created = engine
+            .create_entity(
+                empty_create_args("specs", "Healthy"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let id = EntityId::new("specs", "healthy");
+
+        for key in ["type", "mem", "id"] {
+            let mut args = bare_args(id.clone(), Some(created.content_hash.clone()));
+            args.metadata_unset = vec![key.to_string()];
+            let out = engine
+                .update_entity(args, actor, Some(&client), None)
+                .unwrap_or_else(|e| panic!("unset '{key}' on a healthy entity must no-op: {e:?}"));
+            assert!(
+                out.commit_sha.is_empty(),
+                "unset '{key}' on a healthy entity is a no-op, not a commit"
+            );
+            assert!(
+                out.warnings.iter().any(|w| w.code() == "UPDATE_NOOP"),
+                "no-op must carry the UPDATE_NOOP warning for '{key}'"
+            );
+        }
+        let entity = engine.get_entity(&id).unwrap();
+        assert_eq!(entity.entity_type, "spec");
+        assert_eq!(
+            entity.metadata.get("type").and_then(|v| v.as_str()),
+            Some("spec"),
+            "the discriminator survives a type unset"
+        );
     }
 }

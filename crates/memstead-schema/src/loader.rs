@@ -126,8 +126,12 @@ pub enum SchemaLoadError {
     /// Schema declares a regular section or metadata field whose key
     /// collides with an engine-invariant key. The reserved set covers
     /// section key `relationships` (the parser's auto-managed
-    /// `## Relationships` section) and metadata field key `type` (the
-    /// engine-set frontmatter type discriminator).
+    /// `## Relationships` section) and the metadata identity/
+    /// discriminator triple `type` / `mem` / `id`
+    /// ([`reserved_metadata_field_keys`]). Sections refuse at load;
+    /// metadata keys refuse on the install/strict-validation path
+    /// ([`check_reserved_metadata_keys`]) so sealed schemas keep
+    /// booting.
     #[error(
         "type '{type_name}' declares {kind} with reserved key '{offending_key}' — reserved keys: [{}]",
         reserved_keys.join(", ")
@@ -304,10 +308,46 @@ pub fn reserved_section_keys() -> &'static [&'static str] {
     &["relationships"]
 }
 
-/// Engine-invariant metadata-field keys reserved against schema use.
-/// `type` is the engine-set frontmatter discriminator.
+/// Engine-invariant metadata-field keys reserved against schema use —
+/// the entity's identity/discriminator triple. `type` is the engine-set
+/// frontmatter discriminator; `mem` and `id` are the entity's
+/// structural identity, owned by the engine's id grammar and mount
+/// routing. One reservation, one behaviour: no installable schema may
+/// declare any of them (see [`check_reserved_metadata_keys`]), and the
+/// engine write paths refuse them as caller-supplied metadata.
 pub fn reserved_metadata_field_keys() -> &'static [&'static str] {
-    &["type"]
+    &["type", "mem", "id"]
+}
+
+/// Author/install-path check: refuse a schema whose types **declare**
+/// an engine-reserved metadata-field key (`type` / `mem` / `id`).
+/// Reads the raw pre-merge declaration list the loader records
+/// (`TypeDefinition::declared_metadata_keys`) so the engine-injected
+/// base fields never false-positive.
+///
+/// Same posture as [`check_section_heading_roundtrip`]: install and
+/// strict validation call this and refuse; boot and sealed-schema
+/// loads must NOT — a schema already sealed that violates the rule
+/// keeps loading (refusing at boot would brick the workspace), and the
+/// engine's write-path refusals keep the reserved keys unwritable
+/// regardless.
+pub fn check_reserved_metadata_keys(schema: &crate::Schema) -> Result<(), SchemaLoadError> {
+    for td in schema.types.values() {
+        for key in &td.declared_metadata_keys {
+            if reserved_metadata_field_keys().contains(&key.as_str()) {
+                return Err(SchemaLoadError::ReservedSchemaKey {
+                    type_name: td.name.clone(),
+                    kind: "metadata_field",
+                    offending_key: key.clone(),
+                    reserved_keys: reserved_metadata_field_keys()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn format_suggestion(needle: &str, candidates: &[String]) -> String {
@@ -594,28 +634,21 @@ fn load_with_context(
             });
         }
 
-        // Reserved-metadata-field-key check. `type` is the engine-set
-        // frontmatter discriminator and must never appear in a schema's
-        // metadata field list. Runs before the base-metadata merge so
-        // the engine-injected fields don't false-positive here.
-        for field in &td.metadata_fields {
-            if reserved_metadata_field_keys().contains(&field.key.as_str()) {
-                return Err(SchemaLoadError::ReservedSchemaKey {
-                    type_name: td.name.clone(),
-                    kind: "metadata_field",
-                    offending_key: field.key.clone(),
-                    reserved_keys: reserved_metadata_field_keys()
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                });
-            }
-        }
+        // Record the raw author-declared metadata keys BEFORE the
+        // base-metadata merge, so the install-path reserved-key check
+        // ([`check_reserved_metadata_keys`]) can tell a declared
+        // `type`/`mem`/`id` from the engine-injected base fields. The
+        // check itself deliberately does NOT run here: this loader
+        // serves boot and sealed-schema reads too, and a schema sealed
+        // before the reservation widened must keep loading (heading-
+        // round-trip posture — refusal fires on the authoring/install
+        // path, never at boot).
+        td.declared_metadata_keys = td.metadata_fields.iter().map(|f| f.key.clone()).collect();
 
         // Reject redeclarations of remaining engine-implicit base metadata
         // (`created_date`, `last_modified`, `tags`). The reserved `type`
-        // case was already handled above with the typed reserved-key
-        // error.
+        // case is excluded here — it refuses with the typed reserved-key
+        // error on the install path instead.
         for field in &td.metadata_fields {
             if base_metadata::is_base_key(&field.key)
                 && !reserved_metadata_field_keys().contains(&field.key.as_str())

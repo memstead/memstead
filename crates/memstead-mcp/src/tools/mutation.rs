@@ -185,7 +185,7 @@ pub struct UpdateParams {
     #[schemars(description = "Metadata fields to set: { \"level\": \"M1\" }")]
     pub metadata: Option<IndexMap<String, String>>,
     #[schemars(
-        description = "Metadata keys to remove. Silent no-op if absent. Errors on read-only fields (mem, id, type, plus the engine-stamped created_date / last_modified) and on schema-required fields. Cannot overlap with `metadata` keys — pass one or the other per key."
+        description = "Metadata keys to remove. Silent no-op if absent. Errors on the engine-stamped timestamp fields (created_date / last_modified) and on schema-required fields. The reserved identity triple (mem / id / type) is asymmetric by design: SET refuses (READ_ONLY_FIELD, here and on create) but UNSET is allowed — the sanctioned repair for an entity that acquired a smuggled reserved key before the write gates closed. Unsetting `type` never leaves the entity typeless (the engine re-seeds the authoritative discriminator; on a healthy entity it is a no-op). Cannot overlap with `metadata` keys — pass one or the other per key."
     )]
     pub metadata_unset: Option<Vec<String>>,
     #[schemars(

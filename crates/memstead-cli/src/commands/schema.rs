@@ -194,7 +194,9 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
     // Self-check with the engine loader — the scaffold's contract is
     // "validates clean as generated"; fail loudly here rather than at
     // the user's `schema validate` if a template edit ever breaks it.
-    if let Err(e) = memstead_schema::loader::load_schema_from_dir(&pkg_dir) {
+    if let Err(e) = memstead_schema::loader::load_schema_from_dir(&pkg_dir)
+        .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
+    {
         return Err(CliError::new(
             ExitKind::Generic,
             crate::INTERNAL_CODE,
@@ -521,6 +523,7 @@ write_rules:
 fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
     match memstead_schema::loader::load_schema_from_dir(&args.path)
         .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
+        .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
     {
         Ok(schema) => {
             let (name, version) = schema.id();
@@ -668,11 +671,14 @@ fn resolve_source(
     let as_path = Path::new(source);
     if as_path.is_dir() {
         // Path source — validate with the engine loader before copying.
-        // Includes the heading round-trip gate: install is an authoring
-        // path, so a schema whose headings cannot derive back to their
-        // keys is refused here, never sealed.
+        // Includes the heading round-trip and reserved-metadata-key
+        // gates: install is an authoring path, so a schema whose
+        // headings cannot derive back to their keys, or that declares
+        // a reserved `type`/`mem`/`id` metadata field, is refused
+        // here, never sealed.
         let schema = memstead_schema::load_schema_from_dir(as_path)
             .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
+            .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,
