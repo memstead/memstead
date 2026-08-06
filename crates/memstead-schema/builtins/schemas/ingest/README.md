@@ -12,11 +12,11 @@ The mem is scaffolding, not a session log. Each entry is an objective claim abou
 
 ## Location
 
-The schema lives on `__MEMSTEAD:schemas/ingest@0.1.0/` of the workspace's `mem-repo` (loaded via `memstead-core::mem_repo_schemas::load_schemas_from_ref`). Process mems pin it via `"schema": "ingest@0.1.0"` (or the unversioned `"ingest"`) in their `.memstead/config.json`.
+The schema lives on `__MEMSTEAD:schemas/ingest@0.2.0/` of the workspace's `mem-repo` (loaded via `memstead-core::mem_repo_schemas::load_schemas_from_ref`). Process mems pin it via `"schema": "ingest@0.2.0"` (or the unversioned `"ingest"`) in their `.memstead/config.json`.
 
 ## Lifecycle
 
-A process mem is created automatically by the ingest skill on first run of `/memstead:ingest <ingest-name>` (operator-mode CLI invocation, `memstead mem create ingest/<ingest-name> --schema ingest@0.1.0`). Subsequent runs reuse it. The operator deletes a process mem explicitly via `/memstead:ingest --clear <ingest-name>` (per-ingest, idempotent on already-deleted mems). One-shot/lens ingests are by-design ephemeral and do not get a process mem.
+A process mem is created automatically by the ingest skill on first run of `/memstead:ingest <ingest-name>` (operator-mode CLI invocation, `memstead mem create ingest/<ingest-name> --schema ingest@0.2.0`). Subsequent runs reuse it. The operator deletes a process mem explicitly via `/memstead:ingest --clear <ingest-name>` (per-ingest, idempotent on already-deleted mems). One-shot/lens ingests are by-design ephemeral and do not get a process mem.
 
 ## Re-verification expectation
 

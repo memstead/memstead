@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ingest@0.1.0 — knowledge-graph schema for ingest *process mems*.
+# ingest@0.2.0 — knowledge-graph schema for ingest *process mems*.
 #
 # A process mem is paired 1:1 with one ingest configuration
 # (e.g. `ingest/engine-graph` is paired with the `engine-graph`
@@ -25,7 +25,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: ingest
-version: 0.1.0
+version: 0.2.0
 
 description: |
   Process-mem schema for ingest configurations. Three types capture
@@ -98,22 +98,18 @@ relationships:
       default_weight: 1.0
 
 # Cross-mem relationship vocabulary. Source-owned: process-mem entries emit
-# REFERENCES into their paired destination, which may be a software- or a
-# project-schema mem. REFERENCES is re-declared per target schema because the
-# cross-mem path does not consult the intra-mem definitions above.
+# REFERENCES into their paired destination mem.
+# The wildcard destination is bound to this schema's
+# alias_target_rel_type (REFERENCES, below): a process mem points at
+# its paired destination WHATEVER schema that destination pins, through
+# the soft auto-emitted links it was designed around. Hand-authored
+# structural rel-types would still need a per-destination-schema entry.
 cross_mem_relationships:
-  - to_schema: software
+  - to_schema: "*"
     definitions:
       - name: REFERENCES
-        description: Soft reference from a process-mem quality entry into the destination (software) entity it speaks about.
+        description: Soft reference from a process-mem quality entry into the destination entity it speaks about — whatever schema the destination mem pins.
         when_to_use: Auto-emitted from inline wiki-links into the paired destination mem. Do not author manually.
-        default_weight: 0.5
-        source_types: [coverage_gap, verification_target, inconsistency]
-  - to_schema: project
-    definitions:
-      - name: REFERENCES
-        description: Soft reference from a process-mem quality entry into the destination (project) entity it speaks about.
-        when_to_use: Auto-emitted from inline wiki-links into the paired project destination mem. Do not author manually.
         default_weight: 0.5
         source_types: [coverage_gap, verification_target, inconsistency]
 

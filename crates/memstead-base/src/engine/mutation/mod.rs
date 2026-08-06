@@ -728,8 +728,9 @@ pub(super) fn validate_description_posture(
             .as_ref()
             .expect("target_schema_ref is Some when cross_mem_different");
         source_schema
-            .cross_mem_entry(&target_ref.name)
-            .and_then(|entry| entry.definitions.iter().find(|d| d.name == rel_type))
+            .cross_mem_entries(&target_ref.name)
+            .iter()
+            .find_map(|entry| entry.definitions.iter().find(|d| d.name == rel_type))
             .map(|d| d.per_edge_description)
     } else {
         source_schema

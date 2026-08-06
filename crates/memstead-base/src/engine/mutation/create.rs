@@ -3029,6 +3029,232 @@ write_rules: []
         );
     }
 
+    /// Plan 11 end-to-end: an `ingest`-schema process mem body-links
+    /// into a destination pinning an ARBITRARY user-written schema.
+    /// The wildcard (bound to `alias_target_rel_type: REFERENCES`)
+    /// admits the auto-emitted alias edge; the edge survives a fresh
+    /// boot (the load path routes through the same matcher); explicit
+    /// authoring of the alias type still refuses
+    /// RELATION_MANUAL_AUTHORING_FORBIDDEN; a structural rel-type into
+    /// the undeclared destination still refuses
+    /// CROSS_MEM_EDGE_NOT_DECLARED; and the workspace policy gate
+    /// still fires when the direction is not granted.
+    #[test]
+    fn ingest_wildcard_links_into_arbitrary_destination_schema() {
+        use crate::engine::test_helpers::write_schema_files_with_default_type;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let dest_dir = tmp.path().join("dest");
+        let proc_dir = tmp.path().join("proc");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        std::fs::create_dir_all(&proc_dir).unwrap();
+
+        // A user-written schema the engine has never shipped.
+        let schemas_dir = tmp.path().join("schemas");
+        let user_manifest = r#"name: debate
+version: 0.1.0
+description: a user-written destination schema
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        write_schema_files_with_default_type(&schemas_dir, "debate@0.1.0", user_manifest, &["doc"]);
+
+        let mount = |mem: &str, dir: &std::path::Path, schema: &str, version: (u64, u64, u64)| {
+            crate::workspace::Mount {
+                mem: mem.to_string(),
+                schema: Some(memstead_schema::SchemaRef::new(
+                    schema,
+                    semver::Version::new(version.0, version.1, version.2),
+                )),
+                storage: crate::workspace::MountStorage::Folder {
+                    path: dir.to_path_buf(),
+                },
+                capability: crate::workspace::MountCapability::Write,
+                lifecycle: crate::workspace::MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            }
+        };
+        let boot = |grant: bool| -> Engine {
+            let mounts = vec![
+                (
+                    mount("dest", &dest_dir, "debate", (0, 1, 0)),
+                    Box::new(FilesystemMemWriter::new(dest_dir.clone())) as Box<dyn MemBackend>,
+                ),
+                (
+                    mount("proc", &proc_dir, "ingest", (0, 2, 0)),
+                    Box::new(FilesystemMemWriter::new(proc_dir.clone())) as Box<dyn MemBackend>,
+                ),
+            ];
+            let mut engine =
+                Engine::from_mounts_with_schemas_dir(mounts, Some(schemas_dir.as_path()))
+                    .expect("ingest + user schema boot");
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            if grant {
+                settings.cross_mem_links.insert(
+                    "proc".to_string(),
+                    CrossLinkValue::List(vec!["dest".to_string()]),
+                );
+            }
+            engine.set_settings(settings);
+            engine
+        };
+        let (actor, client) = cli_actor();
+
+        let mut engine = boot(true);
+        // Destination entity in the user-schema mem.
+        let target = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "dest".to_string(),
+                    title: "Target Doc".to_string(),
+                    entity_type: "doc".to_string(),
+                    sections: IndexMap::from_iter([(
+                        "body".to_string(),
+                        "destination content".to_string(),
+                    )]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // Process-mem entry body-linking the destination entity.
+        let entry = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "proc".to_string(),
+                    title: "Check The Claim".to_string(),
+                    entity_type: "verification_target".to_string(),
+                    sections: IndexMap::from_iter([
+                        (
+                            "claim".to_string(),
+                            "the claim under suspicion lives in [[dest--target-doc]]".to_string(),
+                        ),
+                        ("source_to_check".to_string(), "dest mem".to_string()),
+                        (
+                            "verifiable_when".to_string(),
+                            "the linked entity still says so".to_string(),
+                        ),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("wildcard admits the alias link into the user-schema destination");
+        let stored = engine.get_entity(&entry.id).unwrap();
+        assert!(
+            stored
+                .relationships
+                .iter()
+                .any(|r| r.rel_type == "REFERENCES" && r.target == target.id),
+            "alias REFERENCES edge must emit: {:?}",
+            stored.relationships
+        );
+
+        // Explicit authoring of the alias rel-type: still forbidden.
+        let err = engine
+            .relate_entity(
+                RelateEntityArgs {
+                    source: entry.id.clone(),
+                    expected_hash: None,
+                    rel_type: "REFERENCES".to_string(),
+                    target: target.id.clone(),
+                    remove: false,
+                    description: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "RELATION_MANUAL_AUTHORING_FORBIDDEN", "{err:?}");
+
+        // Structural rel-type into the undeclared destination: the
+        // historical refusal, wildcard notwithstanding.
+        let err = engine
+            .relate_entity(
+                RelateEntityArgs {
+                    source: entry.id.clone(),
+                    expected_hash: None,
+                    rel_type: "PART_OF".to_string(),
+                    target: target.id.clone(),
+                    remove: false,
+                    description: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "CROSS_MEM_EDGE_NOT_DECLARED", "{err:?}");
+
+        // Load-path survival: a FRESH boot over the same folders (the
+        // store-builder path that previously dropped undeclared
+        // cross-mem edges) keeps the alias edge.
+        drop(engine);
+        let rebooted = boot(true);
+        let reloaded = rebooted.get_entity(&entry.id).unwrap();
+        assert!(
+            reloaded
+                .relationships
+                .iter()
+                .any(|r| r.rel_type == "REFERENCES" && r.target == target.id),
+            "alias edge must survive reload: {:?}",
+            reloaded.relationships
+        );
+
+        // Policy gate intact: without the grant, the same wildcarded
+        // link refuses CROSS_MEM_LINK_NOT_ALLOWED.
+        let mut denied = boot(false);
+        let err = denied
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "proc".to_string(),
+                    title: "Denied Entry".to_string(),
+                    entity_type: "verification_target".to_string(),
+                    sections: IndexMap::from_iter([
+                        (
+                            "claim".to_string(),
+                            "points at [[dest--target-doc]]".to_string(),
+                        ),
+                        ("source_to_check".to_string(), "dest mem".to_string()),
+                        ("verifiable_when".to_string(), "never".to_string()),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "CROSS_MEM_LINK_NOT_ALLOWED", "{err:?}");
+    }
+
     /// Two-mem Write-Write scaffold —
     /// `test` and `other` both pin the default schema, no
     /// `cross_mem_links` policy set yet (default deny-all). The

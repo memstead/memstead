@@ -8,6 +8,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Cross-mem wildcard destination, bound to the alias rel-type.** A
+  schema's `cross_mem_relationships` may now declare `to_schema: "*"`
+  — restricted at load to the rel-type the schema names as its
+  `alias_target_rel_type` (a wildcard for any other rel-type refuses,
+  naming both; a schema without an alias target cannot use one). The
+  binding is the safety argument: the author already permitted soft,
+  auto-emitted references of that type, and the wildcard only extends
+  that decision across the mem boundary — hand-authored structural
+  edges keep requiring a per-destination-schema declaration, and the
+  workspace `cross_mem_links` policy, target existence, and
+  source-type gates all stay in force. One matcher serves edge
+  validation, the load-path edge filter, and the per-edge-description
+  posture lookup, so the wildcard is honoured identically at write
+  and at reload (previously the store builder silently dropped such
+  edges at boot). The built-in `ingest` schema moves to 0.2.0 and
+  replaces its two hardcoded destination entries (`software`,
+  `project`) with the wildcard, so a process mem links into its paired
+  destination whatever schema that destination pins.
 - **`SCHEMA_NOT_FOUND` tells the truth in its message.** An unresolved
   schema pin now summarises the resolution trail in the message
   itself — which sources were searched and what each held (e.g.

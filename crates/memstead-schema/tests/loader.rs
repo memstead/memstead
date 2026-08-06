@@ -1188,6 +1188,75 @@ fn cross_mem_relationships_section_loads_well_formed_entries() {
     );
 }
 
+/// Plan 11: `to_schema: "*"` loads when bound to the schema's
+/// `alias_target_rel_type`, and the priority-ordered matcher resolves
+/// it for arbitrary destination names — alongside exact entries.
+#[test]
+fn cross_mem_wildcard_bound_to_alias_target_loads_and_matches_any_name() {
+    let m = minimal_manifest().replace(
+        "community:",
+        "cross_mem_relationships:\n  - to_schema: \"*\"\n    definitions:\n      - name: REFERENCES\n        description: soft link anywhere\n        default_weight: 0.5\n        source_types: [sample]\n  - to_schema: other\n    definitions:\n      - name: PART_OF\n        description: structural, per-schema\n        default_weight: 3.0\nalias_target_rel_type: REFERENCES\ncommunity:",
+    );
+    let schema = load(&m, &[("sample", &minimal_type())]).expect("wildcard bound to alias loads");
+    // Arbitrary never-seen destination: only the wildcard applies.
+    let entries = schema.cross_mem_entries("user-written-schema");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].to_schema, "*");
+    // Declared destination: exact entry FIRST, wildcard still present —
+    // a structural declaration must not shadow the wildcarded alias.
+    let entries = schema.cross_mem_entries("other");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].to_schema, "other");
+    assert_eq!(entries[1].to_schema, "*");
+    // No-entry schema name without a wildcard: empty (exact-only form).
+    let m2 = minimal_manifest().replace(
+        "community:",
+        "cross_mem_relationships:\n  - to_schema: other\n    definitions: []\ncommunity:",
+    );
+    let schema2 = load(&m2, &[("sample", &minimal_type())]).unwrap();
+    assert!(schema2.cross_mem_entries("stranger").is_empty());
+}
+
+/// Plan 11 refusal complements: a wildcard for a NON-alias rel-type is
+/// refused naming both rel-types; a schema with no
+/// `alias_target_rel_type` cannot use a wildcard at all.
+#[test]
+fn cross_mem_wildcard_refuses_non_alias_rel_type_and_missing_alias_target() {
+    // Wildcard declaring a structural rel-type: refused, both names in
+    // the message.
+    let m = minimal_manifest().replace(
+        "community:",
+        "cross_mem_relationships:\n  - to_schema: \"*\"\n    definitions:\n      - name: PART_OF\n        description: structural\n        default_weight: 3.0\nalias_target_rel_type: REFERENCES\ncommunity:",
+    );
+    let err = load(&m, &[("sample", &minimal_type())]).unwrap_err();
+    match &err {
+        SchemaLoadError::CrossMemWildcardNonAliasRelType {
+            rel_type,
+            alias_target,
+        } => {
+            assert_eq!(rel_type, "PART_OF");
+            assert_eq!(alias_target, "REFERENCES");
+        }
+        other => panic!("expected CrossMemWildcardNonAliasRelType, got {other:?}"),
+    }
+    let msg = err.to_string();
+    assert!(
+        msg.contains("PART_OF") && msg.contains("REFERENCES"),
+        "message names both rel-types: {msg}"
+    );
+
+    // No alias_target_rel_type declared: no wildcard at all.
+    let m2 = minimal_manifest().replace(
+        "community:",
+        "cross_mem_relationships:\n  - to_schema: \"*\"\n    definitions:\n      - name: REFERENCES\n        description: soft\n        default_weight: 0.5\ncommunity:",
+    );
+    let err2 = load(&m2, &[("sample", &minimal_type())]).unwrap_err();
+    assert!(
+        matches!(err2, SchemaLoadError::CrossMemWildcardWithoutAliasTarget),
+        "got {err2:?}"
+    );
+}
+
 #[test]
 fn cross_mem_relationships_to_schema_versioned_rejected() {
     // `to_schema` is the domain identity — a bare schema name. A

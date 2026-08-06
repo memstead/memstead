@@ -162,6 +162,40 @@ impl Schema {
             .find(|entry| entry.to_schema == target_name)
     }
 
+    /// Every cross-mem entry applicable to `target_name`, in priority
+    /// order: the exact-name entry first, then the `to_schema: "*"`
+    /// wildcard entry (loader-bound to this schema's
+    /// `alias_target_rel_type`). Consumers resolve a rel-type by
+    /// first hit across the returned entries, so an exact declaration
+    /// for a destination schema never SHADOWS the wildcard for the
+    /// alias rel-type — a schema carrying structural declarations for
+    /// one destination keeps its wildcarded alias links to that same
+    /// destination. Empty when neither entry exists. This is the ONE
+    /// matcher behind edge validation, the load-path edge filter, and
+    /// the per-edge-description posture lookup — a wildcard honoured
+    /// in one place is honoured in all three.
+    pub fn cross_mem_entries(&self, target_name: &str) -> Vec<&CrossMemRelationshipEntry> {
+        let mut out = Vec::with_capacity(2);
+        if target_name != "*"
+            && let Some(exact) = self
+                .manifest
+                .cross_mem_relationships
+                .iter()
+                .find(|entry| entry.to_schema == target_name)
+        {
+            out.push(exact);
+        }
+        if let Some(wildcard) = self
+            .manifest
+            .cross_mem_relationships
+            .iter()
+            .find(|entry| entry.to_schema == "*")
+        {
+            out.push(wildcard);
+        }
+        out
+    }
+
     /// Load the embedded `default` builtin schema.
     ///
     /// Backed by the embedded YAML bundle under `builtins/schemas/default/`

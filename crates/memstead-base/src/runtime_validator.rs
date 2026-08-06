@@ -1030,12 +1030,31 @@ pub fn validate_cross_mem_edge(
     source_schema: &Schema,
     target_schema_ref: &memstead_schema::SchemaRef,
 ) -> CrossMemRelCheck {
-    let Some(entry) = source_schema.cross_mem_entry(&target_schema_ref.name) else {
+    // Priority-ordered entries: exact-name declaration first, then the
+    // `to_schema: "*"` wildcard (loader-bound to the schema's alias
+    // target rel-type). First rel-type hit across the entries wins, so
+    // structural declarations for a destination never shadow the
+    // wildcarded alias links into it.
+    let entries = source_schema.cross_mem_entries(&target_schema_ref.name);
+    if entries.is_empty() {
         return CrossMemRelCheck::EdgeNotDeclared;
-    };
+    }
 
-    let Some(def) = entry.definitions.iter().find(|d| d.name == rel_type) else {
-        let allowed: Vec<RelationshipHint> = cross_mem_entry_hints(entry);
+    let Some(def) = entries
+        .iter()
+        .find_map(|entry| entry.definitions.iter().find(|d| d.name == rel_type))
+    else {
+        // Only the wildcard matched and it doesn't carry this
+        // rel-type: for THIS destination schema the rel-type has
+        // genuinely no declaration — the historical
+        // `CROSS_MEM_EDGE_NOT_DECLARED` refusal, so a structural edge
+        // into an undeclared schema reads the same with or without a
+        // wildcard present (the wildcard only ever admits the alias
+        // rel-type).
+        if !entries.iter().any(|e| e.to_schema != "*") {
+            return CrossMemRelCheck::EdgeNotDeclared;
+        }
+        let allowed: Vec<RelationshipHint> = cross_mem_entries_hints(&entries);
         let candidate_names: Vec<String> = allowed.iter().map(|h| h.name.clone()).collect();
         let suggestion = nearest_str_match(rel_type, &candidate_names);
         return CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipType {
@@ -1052,7 +1071,9 @@ pub fn validate_cross_mem_edge(
         return CrossMemRelCheck::Ok;
     }
     let to_for_err = to_type.unwrap_or("<unknown>").to_string();
-    let suggestion = cross_mem_suggest_shape(entry, from_type, to_type);
+    let suggestion = entries
+        .iter()
+        .find_map(|entry| cross_mem_suggest_shape(entry, from_type, to_type));
     CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipShape {
         rel_type: rel_type.to_string(),
         from_type: from_type.to_string(),
@@ -1061,6 +1082,22 @@ pub fn validate_cross_mem_edge(
         allowed_target_types: def.target_types.clone(),
         suggestion,
     })
+}
+
+/// Union of [`cross_mem_entry_hints`] across priority-ordered entries,
+/// de-duplicated by rel-type name (first entry's hint wins) and
+/// re-sorted.
+fn cross_mem_entries_hints(entries: &[&CrossMemRelationshipEntry]) -> Vec<RelationshipHint> {
+    let mut out: Vec<RelationshipHint> = Vec::new();
+    for entry in entries {
+        for hint in cross_mem_entry_hints(entry) {
+            if !out.iter().any(|h| h.name == hint.name) {
+                out.push(hint);
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
 }
 
 /// Sorted vocabulary hints for one cross-mem entry, excluding the
@@ -1498,6 +1535,137 @@ write_rules: []
         assert!(matches!(
             validate_cross_mem_edge("MENTIONS", "decision", Some("page"), &src, &target),
             CrossMemRelCheck::Ok
+        ));
+    }
+
+    /// Plan 11: a schema with a `to_schema: "*"` entry (loader-bound to
+    /// its alias rel-type) plus an exact per-schema entry for
+    /// structural edges.
+    fn wildcard_source_schema() -> std::sync::Arc<Schema> {
+        let manifest_yaml = r#"name: source-wc
+version: 0.1.0
+description: wildcard cross-mem source schema
+when_to_use: tests
+types:
+  - step
+  - decision
+relationships:
+  mode: strict
+  definitions:
+    - name: SOFT_REF
+      description: alias-emitted soft reference
+      default_weight: 0.5
+    - name: ADDRESSES
+      description: structural
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+alias_target_rel_type: SOFT_REF
+cross_mem_relationships:
+  - to_schema: other
+    definitions:
+      - name: ADDRESSES
+        description: structural, per-schema
+        default_weight: 1.0
+        source_types: [step]
+        target_types: [requirement]
+  - to_schema: "*"
+    definitions:
+      - name: SOFT_REF
+        description: soft reference anywhere
+        default_weight: 0.5
+        source_types: [step]
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let body_section = r#"description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: _default
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+        let types = vec![
+            ("step".to_string(), format!("name: step\n{body_section}")),
+            (
+                "decision".to_string(),
+                format!("name: decision\n{body_section}"),
+            ),
+        ];
+        std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(manifest_yaml, &types)
+                .expect("wildcard schema loads"),
+        )
+    }
+
+    /// The wildcard admits the alias rel-type into ANY destination
+    /// schema — including one carrying its own exact structural entry
+    /// (coexistence: the exact entry must not shadow the wildcard).
+    #[test]
+    fn cross_mem_wildcard_admits_alias_edge_to_any_schema() {
+        let src = wildcard_source_schema();
+        // Arbitrary user-written destination schema, arbitrary type.
+        let user = memstead_schema::SchemaRef::new("debate", semver::Version::new(0, 1, 0));
+        assert!(matches!(
+            validate_cross_mem_edge("SOFT_REF", "step", Some("argument"), &src, &user),
+            CrossMemRelCheck::Ok
+        ));
+        // Destination with an exact structural entry: BOTH work.
+        let other = memstead_schema::SchemaRef::new("other", semver::Version::new(1, 0, 0));
+        assert!(matches!(
+            validate_cross_mem_edge("SOFT_REF", "step", Some("requirement"), &src, &other),
+            CrossMemRelCheck::Ok
+        ));
+        assert!(matches!(
+            validate_cross_mem_edge("ADDRESSES", "step", Some("requirement"), &src, &other),
+            CrossMemRelCheck::Ok
+        ));
+    }
+
+    /// Refusal complements around the wildcard: the source-type list on
+    /// the wildcard declaration still gates; a structural rel-type into
+    /// a destination with no per-schema declaration is still the
+    /// historical `CROSS_MEM_EDGE_NOT_DECLARED` refusal.
+    #[test]
+    fn cross_mem_wildcard_keeps_source_type_gate_and_structural_refusal() {
+        let src = wildcard_source_schema();
+        let user = memstead_schema::SchemaRef::new("debate", semver::Version::new(0, 1, 0));
+        // `decision` is not in the wildcard declaration's source_types.
+        match validate_cross_mem_edge("SOFT_REF", "decision", Some("argument"), &src, &user) {
+            CrossMemRelCheck::Invalid(ValidationError::InvalidRelationshipShape {
+                from_type,
+                allowed_source_types,
+                ..
+            }) => {
+                assert_eq!(from_type, "decision");
+                assert_eq!(allowed_source_types, vec!["step".to_string()]);
+            }
+            other => panic!("expected shape refusal on source-type gate, got {other:?}"),
+        }
+        // Structural rel-type into an undeclared destination: the
+        // wildcard (alias-only) does not admit it — same refusal as
+        // before the wildcard existed.
+        assert!(matches!(
+            validate_cross_mem_edge("ADDRESSES", "step", Some("argument"), &src, &user),
+            CrossMemRelCheck::EdgeNotDeclared
         ));
     }
 

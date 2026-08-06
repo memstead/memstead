@@ -498,8 +498,9 @@ pub fn validate_loaded_relations(
                         .as_ref()
                         .expect("target_schema_ref is Some when cross_mem_different");
                     schema
-                        .cross_mem_entry(&target_ref.name)
-                        .and_then(|entry| entry.definitions.iter().find(|d| d.name == rel.rel_type))
+                        .cross_mem_entries(&target_ref.name)
+                        .iter()
+                        .find_map(|entry| entry.definitions.iter().find(|d| d.name == rel.rel_type))
                         .map(|d| d.per_edge_description)
                 } else {
                     schema

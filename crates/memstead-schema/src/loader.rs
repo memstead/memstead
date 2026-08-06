@@ -156,6 +156,32 @@ pub enum SchemaLoadError {
     #[error("cross_mem_relationships declares duplicate to_schema '{to_schema}'")]
     DuplicateCrossMemToSchema { to_schema: String },
 
+    /// A `to_schema: "*"` wildcard entry in a schema that declares no
+    /// `alias_target_rel_type`. The wildcard is BOUND to the
+    /// alias-synthesised rel-type — a schema that has not opted into
+    /// alias synthesis has made no decision the wildcard could extend.
+    #[error(
+        "cross_mem_relationships declares to_schema '*' but the schema declares no \
+         alias_target_rel_type — the wildcard is bound to the alias-synthesised rel-type; \
+         declare alias_target_rel_type, or name each destination schema explicitly"
+    )]
+    CrossMemWildcardWithoutAliasTarget,
+
+    /// A `to_schema: "*"` wildcard entry declaring a rel-type other
+    /// than the schema's `alias_target_rel_type`. Hand-authored
+    /// structural edges keep requiring a per-destination-schema
+    /// declaration — the wildcard only extends the soft, auto-emitted
+    /// alias references the author already permitted.
+    #[error(
+        "cross_mem_relationships[to_schema='*'] declares rel-type '{rel_type}', but the \
+         wildcard is bound to the schema's alias_target_rel_type '{alias_target}' — \
+         hand-authored structural edges need a per-destination-schema declaration"
+    )]
+    CrossMemWildcardNonAliasRelType {
+        rel_type: String,
+        alias_target: String,
+    },
+
     /// A `cross_mem_relationships[].definitions[*].source_types` entry
     /// references a type name not declared in the source schema's
     /// `types` list. Source types belong to the source schema's
@@ -477,17 +503,37 @@ fn load_with_context(
     // schemas).
     let mut seen_to_schemas: HashSet<String> = HashSet::new();
     for entry in &manifest.cross_mem_relationships {
-        if entry.to_schema.contains('@') {
-            return Err(SchemaLoadError::InvalidCrossMemToSchema {
-                value: entry.to_schema.clone(),
-                reason: "must not carry a version or range".into(),
-            });
-        }
-        if let Err(reason) = name_shape(&entry.to_schema) {
-            return Err(SchemaLoadError::InvalidCrossMemToSchema {
-                value: entry.to_schema.clone(),
-                reason: reason.into(),
-            });
+        if entry.to_schema == "*" {
+            // Wildcard destination — bound to the alias-synthesised
+            // rel-type. The binding IS the safety argument: the author
+            // already permitted soft auto-emitted references of that
+            // type; the wildcard extends that decision across the mem
+            // boundary and introduces no new permission. Structural
+            // rel-types stay per-destination-schema.
+            let Some(alias) = manifest.alias_target_rel_type.as_deref() else {
+                return Err(SchemaLoadError::CrossMemWildcardWithoutAliasTarget);
+            };
+            for def in &entry.definitions {
+                if def.name != alias {
+                    return Err(SchemaLoadError::CrossMemWildcardNonAliasRelType {
+                        rel_type: def.name.clone(),
+                        alias_target: alias.to_string(),
+                    });
+                }
+            }
+        } else {
+            if entry.to_schema.contains('@') {
+                return Err(SchemaLoadError::InvalidCrossMemToSchema {
+                    value: entry.to_schema.clone(),
+                    reason: "must not carry a version or range".into(),
+                });
+            }
+            if let Err(reason) = name_shape(&entry.to_schema) {
+                return Err(SchemaLoadError::InvalidCrossMemToSchema {
+                    value: entry.to_schema.clone(),
+                    reason: reason.into(),
+                });
+            }
         }
         if !seen_to_schemas.insert(entry.to_schema.clone()) {
             return Err(SchemaLoadError::DuplicateCrossMemToSchema {
