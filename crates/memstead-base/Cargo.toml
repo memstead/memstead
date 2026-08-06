@@ -19,6 +19,7 @@ all-features = true
 [dependencies]
 memstead-schema.workspace = true
 globset.workspace = true
+pulldown-cmark.workspace = true
 indexmap.workspace = true
 regex.workspace = true
 schemars.workspace = true

@@ -9,6 +9,7 @@ pub mod archive_provenance;
 pub mod base_metadata;
 pub mod builtins;
 pub mod config;
+pub mod content_expr;
 pub mod loader;
 pub mod manifest;
 pub mod meta_schema;

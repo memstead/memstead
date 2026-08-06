@@ -33,6 +33,7 @@ pub mod pipeline_edit;
 pub mod pipeline_migrate;
 pub mod pipeline_store;
 pub mod provenance;
+pub mod section_format;
 pub mod render;
 pub mod runtime_validator;
 pub mod schema_source;

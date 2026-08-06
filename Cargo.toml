@@ -69,6 +69,10 @@ toml_edit = "0.25"
 gix = { version = "0.85", default-features = false, features = ["revision", "tree-editor", "blob-diff", "max-performance-safe", "sha1"] }
 tantivy = "0.26"
 globset = "0.4"
+# Section-format enforcement (agent-toolbox plan 08): CommonMark+GFM-table
+# block-sequence reduction. Deliberately minimal: no default features,
+# tables enabled via the runtime Options flag, must build in the wasm lane.
+pulldown-cmark = { version = "0.13", default-features = false }
 
 # Faster dev/test compiles. Trade: slightly less debug info than the
 # default, but stack traces and line numbers stay intact. Smaller debug
