@@ -175,6 +175,29 @@ pub enum Command {
     #[command(name = "batch-update")]
     BatchUpdate(commands::batch_update::Args),
 
+    /// Create many entities in one atomic call. Input is a JSON file
+    /// with a top-level `creates: [...]` array — each entry the same
+    /// shape as `create --from`, with its own provenance `note`.
+    /// Intra-batch references resolve as real targets (cycles included
+    /// where the schema permits), so a mutually-referencing set lands
+    /// in a single pass with no stubs. All-or-nothing: any invalid
+    /// entry refuses the whole batch and names EVERY failing entry.
+    /// One commit per touched mem.
+    #[cfg(feature = "mem-repo")]
+    #[command(name = "batch-create")]
+    BatchCreate(commands::batch_create::Args),
+
+    /// Apply many edge changes in one atomic call. Input is a JSON
+    /// file with a top-level `relates: [...]` array mixing additions
+    /// and removals, applied in order — each entry mirrors `relate`
+    /// (`from` / `type` / `to`, optional `remove`, `description`,
+    /// per-entry `note`). All-or-nothing: any invalid entry refuses
+    /// the whole batch and names EVERY failing entry. One commit per
+    /// touched mem.
+    #[cfg(feature = "mem-repo")]
+    #[command(name = "batch-relate")]
+    BatchRelate(commands::batch_relate::Args),
+
     /// Apply parse-time-drift recovery across writable mems. Walks
     /// `PARSED_RELATION_INVALID` warnings, re-renders affected
     /// source entities to drop the stale rows, and reports per-entry

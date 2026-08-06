@@ -893,11 +893,12 @@ impl Engine {
     /// `HASH_MISMATCH`, entity-not-found, any per-item refusal —
     /// **nothing is committed**: the on-disk mem and the in-memory
     /// store are restored to exactly their pre-call state, and the
-    /// result is marked `applied: false` with the offending item
-    /// carrying a typed `{code, message, details}` error envelope and
-    /// every other item marked `"not_applied"`. The first failing item
-    /// stops preparation (fail-fast); the caller fixes it and
-    /// resubmits.
+    /// result is marked `applied: false` with EVERY failing item
+    /// carrying a typed `{code, message, details}` error envelope
+    /// (the family's report-all contract — bounded at
+    /// [`Self::BATCH_ERROR_REPORT_CAP`] detailed envelopes, with
+    /// `errors_suppressed` counting the rest) and every valid item
+    /// marked `"not_applied"`, so one repair cycle fixes the file.
     ///
     /// On success the returned `commit_sha` is the single batch commit
     /// — an honest `memstead_changes_since` cursor / revert handle. Each
@@ -958,18 +959,23 @@ impl Engine {
         // What each item is, in submission order, so the result
         // entries echo the input order. `Prepared` is a real write
         // (its `PreparedUpdate` lives in `prepared`); `Noop` is an
-        // applied no-op (content unchanged, no write).
+        // applied no-op (content unchanged, no write); `Error` is a
+        // refusal (its envelope lives in `errors` by index).
         enum Item {
             Prepared,
             Noop,
+            Error,
         }
         let mut items: Vec<(EntityId, Item)> = Vec::with_capacity(updates.len());
         let mut prepared: Vec<PreparedUpdate> = Vec::new();
         let mut notes: Vec<Option<String>> = Vec::new();
+        let mut errors: Vec<(usize, EngineError)> = Vec::new();
 
-        // --- Phase 1: validate + prepare every item (no commits) ---
-        let mut iter = updates.into_iter();
-        while let Some((args, note)) = iter.next() {
+        // --- Phase 1: validate + prepare every item (no commits).
+        // Report-all: a failing item never stops preparation — every
+        // remaining item still validates so the refusal can name every
+        // failing entry at once (the family's upgraded contract).
+        for (i, (args, note)) in updates.into_iter().enumerate() {
             let id = args.id.clone();
             match self.prepare_update(args) {
                 Ok(PrepareOutcome::Done(_)) => {
@@ -982,40 +988,60 @@ impl Engine {
                     items.push((id, Item::Prepared));
                 }
                 Err(e) => {
-                    // Refuse the whole batch. Roll back store + disk.
-                    self.store = store_snapshot;
-                    self.discard_all_pending();
-                    let mut results: Vec<crate::ops::BatchEntry> = items
-                        .into_iter()
-                        .map(|(prev_id, _)| crate::ops::BatchEntry {
-                            id: prev_id,
-                            action: "not_applied".to_string(),
-                            error: None,
-                        })
-                        .collect();
-                    results.push(crate::ops::BatchEntry {
-                        id,
-                        action: "error".to_string(),
-                        error: Some(batch_error_envelope(&e)),
-                    });
-                    // Items after the failure were never prepared.
-                    for (rem_args, _) in iter {
-                        results.push(crate::ops::BatchEntry {
-                            id: rem_args.id,
-                            action: "not_applied".to_string(),
-                            error: None,
-                        });
-                    }
-                    return Ok(crate::ops::BatchResult {
-                        errors_suppressed: 0,
-                        applied: false,
-                        results,
-                        succeeded: 0,
-                        failed: 1,
-                        commit_sha: String::new(),
-                    });
+                    items.push((id, Item::Error));
+                    errors.push((i, e));
                 }
             }
+        }
+
+        if !errors.is_empty() {
+            // Refuse the whole batch. Roll back store + disk, then
+            // report every failing entry — bounded at
+            // `BATCH_ERROR_REPORT_CAP` detailed envelopes with
+            // `errors_suppressed` counting the rest.
+            self.store = store_snapshot;
+            self.discard_all_pending();
+            let failed = errors.len();
+            let mut error_map: std::collections::HashMap<usize, EngineError> =
+                errors.into_iter().collect();
+            let mut reported = 0usize;
+            let mut suppressed = 0usize;
+            let results: Vec<crate::ops::BatchEntry> = items
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, _))| match error_map.remove(&i) {
+                    Some(e) => {
+                        if reported < Self::BATCH_ERROR_REPORT_CAP {
+                            reported += 1;
+                            crate::ops::BatchEntry {
+                                id,
+                                action: "error".to_string(),
+                                error: Some(batch_error_envelope(&e)),
+                            }
+                        } else {
+                            suppressed += 1;
+                            crate::ops::BatchEntry {
+                                id,
+                                action: "error".to_string(),
+                                error: None,
+                            }
+                        }
+                    }
+                    None => crate::ops::BatchEntry {
+                        id,
+                        action: "not_applied".to_string(),
+                        error: None,
+                    },
+                })
+                .collect();
+            return Ok(crate::ops::BatchResult {
+                errors_suppressed: suppressed,
+                applied: false,
+                results,
+                succeeded: 0,
+                failed,
+                commit_sha: String::new(),
+            });
         }
 
         // --- Phase 2: stage every prepared write, then commit once
@@ -1124,6 +1150,7 @@ impl Engine {
                 action: match item {
                     Item::Prepared => "updated".to_string(),
                     Item::Noop => "noop".to_string(),
+                    Item::Error => unreachable!("refusal path returned above"),
                 },
                 error: None,
             })
@@ -1623,6 +1650,92 @@ mod tests {
                 .get("identity")
                 .map(String::as_str),
             Some("B body"),
+        );
+    }
+
+    /// Report-all (the family's upgraded contract): a batch with TWO
+    /// failing items names both with their typed codes — a failing
+    /// item no longer stops preparation at the first error.
+    #[test]
+    fn batch_update_reports_every_failing_item() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let created = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "specs".to_string(),
+                    title: "Seed".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: IndexMap::from_iter([
+                        ("identity".to_string(), "seed identity".to_string()),
+                        ("purpose".to_string(), "seed purpose".to_string()),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let upd = |id: EntityId, hash: Option<String>| UpdateEntityArgs {
+            anchors: Vec::new(),
+            id,
+            expected_hash: hash,
+            sections: IndexMap::from_iter([("identity".to_string(), "new body".to_string())]),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+        };
+        let result = engine
+            .batch_update(
+                vec![
+                    (upd(created.id.clone(), None), None),
+                    (upd(EntityId("specs--missing-one".to_string()), None), None),
+                    (upd(EntityId("specs--missing-two".to_string()), None), None),
+                ],
+                Actor::Cli,
+                None,
+            )
+            .unwrap();
+        assert!(!result.applied);
+        assert_eq!(result.failed, 2, "{result:?}");
+        assert_eq!(result.commit_sha, "");
+        let codes: Vec<(usize, &str)> = result
+            .results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.action == "error")
+            .map(|(i, r)| (i, r.error.as_ref().map(|e| e.code.as_str()).unwrap_or("")))
+            .collect();
+        assert_eq!(
+            codes,
+            vec![(1, "ENTITY_NOT_FOUND"), (2, "ENTITY_NOT_FOUND")],
+            "BOTH failing items named, not just the first: {result:?}"
+        );
+        assert_eq!(result.results[0].action, "not_applied");
+        // The valid item's change did not land.
+        assert_eq!(
+            engine
+                .get_entity(&created.id)
+                .unwrap()
+                .sections
+                .get("identity")
+                .map(String::as_str),
+            Some("seed identity"),
         );
     }
 

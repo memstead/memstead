@@ -8,18 +8,33 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
-- **Engine `batch_create` (in progress: CLI + batch-relate follow).**
-  `create_entity` is split into the prepare/commit halves
-  `batch_update` established, and a new `Engine::batch_create` creates
-  N entities in one call with one commit per touched mem. Intra-batch
-  references resolve as REAL typed targets (every entity is staged as
-  a skeleton before per-entry validation, so sibling edges get full
-  shape validation, duplicates within the batch are refused, and no
-  transient stub or stub warning is created for a batch-supplied
-  target — cycles included where the schema permits). Refusal is
-  all-or-nothing and REPORT-ALL: every failing entry is named with
-  its index and typed code, bounded at 50 detailed envelopes with an
-  `errors_suppressed` count beyond that (never silent truncation).
+- **Batch parity: `memstead batch-create` and `memstead batch-relate`.**
+  Creation and edge changes gain the atomic batch form updates already
+  had, completing the CLI batch family. `batch-create --from
+  <file.json>` takes a `creates: [...]` array of single-`create
+  --from`-shaped entries (per-entry provenance `note`, no batch-level
+  note flag) and creates all of them with one workspace load and one
+  commit per touched mem. Intra-batch references resolve as REAL typed
+  targets: every entity is staged before per-entry validation, so
+  sibling edges get full target-type shape validation, duplicates
+  within the batch are refused, and no transient stub or stub warning
+  is created for a batch-supplied target — cycles included where the
+  schema permits, turning the two-pass bulk-ingest workaround into one
+  pass. `batch-relate --from <file.json>` takes a `relates: [...]`
+  array mixing additions and removals, applied IN ORDER (a later entry
+  sees an earlier entry's edge) with the same one-commit semantics.
+  Engine-side, `create_entity` and `relate_entity` are split into the
+  prepare/commit halves `batch_update` established, so the batch paths
+  share every single-item validation gate by construction. The batch
+  commands stay CLI-only (no MCP tool, no UniFFI surface — the
+  existing surface test pins the MCP abstention).
+- **Batch refusals now report EVERY failing entry.** The whole family
+  (`batch-update` upgraded, the two new commands from birth) refuses
+  all-or-nothing and names every failing entry with its index and
+  typed code — bounded at 50 detailed envelopes with an
+  `errors_suppressed` count beyond that (never silent truncation) —
+  so one repair cycle fixes the file. Previously `batch-update`
+  stopped at the first invalid entry.
 - **Metadata values are findable.** The per-mem search index gains one
   tokenized `metadata` field per entity carrying that entity's
   metadata KEYS and VALUES — built from the entity, not the schema, so

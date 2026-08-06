@@ -24,6 +24,40 @@ use super::{
     validate_relation_target_grammar,
 };
 
+/// A fully validated relate — every gate has passed and the source
+/// entity's next markdown is generated, but nothing has been written
+/// to the store, the disk, or the mem-repo yet. `stage_prepared_relate`
+/// performs the store-side effects and the (uncommitted) file write;
+/// the caller then commits and applies via
+/// `apply_prepared_relate_to_store`.
+pub(super) struct PreparedRelate {
+    pub(super) mount_idx: usize,
+    pub(super) source_mem: String,
+    pub(super) from: EntityId,
+    pub(super) to: EntityId,
+    pub(super) rel_type: String,
+    pub(super) action: RelateAction,
+    pub(super) file_path: String,
+    pub(super) markdown: String,
+    pub(super) warnings: Vec<WarningHint>,
+    /// `Some` when the add path must materialise a forward-reference
+    /// stub for an absent target. Prepare plans the stub; the stage
+    /// step upserts it — prepare itself never mutates the store, so a
+    /// refused batch has nothing to undo from prepares alone.
+    pub(super) stub_target: Option<EntityId>,
+    pub(super) type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
+}
+
+/// What `prepare_relate` resolved to.
+pub(super) enum RelatePrepareOutcome {
+    /// No-op path (idempotent re-add / absent remove): the complete
+    /// outcome, with its typed no-op warning and an empty
+    /// `commit_sha` — nothing to write or commit.
+    Done(RelateEntityOutcome),
+    /// A real edge change, validated and ready to stage.
+    Prepared(PreparedRelate),
+}
+
 impl Engine {
     /// Add or remove a typed relationship on `args.source`.
     ///
@@ -50,7 +84,6 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<RelateEntityOutcome, EngineError> {
-        let mut args = args;
         let source_mem = args.source.mem().to_string();
         let target_mem = args.target.mem().to_string();
 
@@ -58,11 +91,115 @@ impl Engine {
         // target mem, when distinct) if a sibling advanced either
         // ref, so the source `expected_hash` compare and the target
         // existence/stub decisions below run against current truth.
-        // The drift notice rides the outcome's `warnings`.
+        // The drift notice rides the outcome's `warnings`. Hoisted
+        // out of `prepare_relate` so `batch_relate` can probe every
+        // touched mem exactly once up front instead of per entry.
         let mut drift_warnings = self.reload_if_stale(Some(&source_mem));
         if target_mem != source_mem {
             drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
         }
+
+        let prepared = match self.prepare_relate(args, drift_warnings)? {
+            RelatePrepareOutcome::Done(outcome) => return Ok(outcome),
+            RelatePrepareOutcome::Prepared(p) => p,
+        };
+
+        self.stage_prepared_relate(&prepared)?;
+
+        let backend = self.mounts[prepared.mount_idx].backend.as_ref();
+        let commit_subject = format!("memstead: relate {}", prepared.from);
+        let ctx = CommitContext {
+            actor,
+            client: client.cloned(),
+            tool: Some("relate_entity"),
+            note: note.map(String::from),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let commit_sha = backend.commit(&commit_subject, &ctx)?;
+
+        backend.append_provenance(&Provenance::new(
+            std::time::SystemTime::now(),
+            ProvenanceKind::Relate,
+            Some(prepared.from.to_string()),
+            actor,
+            client.cloned(),
+            note.map(String::from),
+        ))?;
+
+        self.record_self_write(prepared.mount_idx, &commit_sha);
+
+        let content_hash = self.apply_prepared_relate_to_store(&prepared)?;
+
+        // On the `--remove` path, the edge we just dropped may
+        // have been the last incoming edge to a stub. The orphan-stub
+        // GC hook fired from `memstead_delete` already; mirror it here so
+        // every mutation that can leave orphans cleans them up.
+        // Scoped sweep — only inspect the just-severed target. The
+        // only possible new orphan from a relate-remove is the
+        // target whose incoming edge we removed; checking the entire
+        // store would catch pre-existing orphans which aren't this
+        // mutation's responsibility (and which `memstead_delete`'s full
+        // sweep also leaves alone before its own removal). Funnels
+        // through the shared `gc_orphan_stubs_among` predicate so the
+        // relate-remove, delete, and update-via-alias-resync paths
+        // can't drift on what counts as a GC-able orphan.
+        let orphan_stubs_removed: Vec<EntityId> =
+            if matches!(prepared.action, RelateAction::Removed) {
+                super::gc_orphan_stubs_among(&mut self.store, std::iter::once(&prepared.to))
+            } else {
+                Vec::new()
+            };
+
+        self.invalidate_communities();
+        self.invalidate_search_indexes();
+
+        let PreparedRelate {
+            from,
+            to,
+            rel_type,
+            action,
+            mut warnings,
+            ..
+        } = prepared;
+
+        // `require_notes` provenance nudge — single engine-level
+        // enforcement point. Only reached on the real-commit path
+        // (Added / Removed); the NoOpAlreadyPresent / NoOpAbsent branches
+        // return early above with an empty `commit_sha` and never demand
+        // a note (nothing landed to attribute).
+        if let Some(w) = self.note_missing_warning("relate_entity", note) {
+            warnings.push(w);
+        }
+
+        Ok(RelateEntityOutcome {
+            from,
+            to,
+            rel_type,
+            action,
+            content_hash,
+            commit_sha,
+            source: "explicit".to_string(),
+            warnings,
+            orphan_stubs_removed,
+        })
+    }
+
+    /// Every validation gate and the mutation plan for one relate —
+    /// shared verbatim by the single-item path above and
+    /// [`Self::batch_relate`], so batching can never drift from the
+    /// single-item gates. Never mutates the store, writes no file,
+    /// commits nothing: refusals are side-effect-free by
+    /// construction. The reload-before-operation probe is the
+    /// caller's job (hoisted so a batch probes each mem once).
+    fn prepare_relate(
+        &mut self,
+        args: RelateEntityArgs,
+        mut drift_warnings: Vec<WarningHint>,
+    ) -> Result<RelatePrepareOutcome, EngineError> {
+        let mut args = args;
+        let source_mem = args.source.mem().to_string();
+        let target_mem = args.target.mem().to_string();
 
         // Target-id grammar gate (shared helper, also called from
         // `Engine::create_entity` for inline relations so both
@@ -441,21 +578,21 @@ impl Engine {
             }
         };
 
-        // Materialise a stub for an absent target on the real-add path.
+        // Plan a stub for an absent target on the real-add path.
         // Skipped on no-op paths (NoOpAlreadyPresent / NoOpAbsent — the
         // edge isn't actually being added) and on the remove path (the
         // edge being dropped, no need to manifest the target). This is
-        // the engine's target-materialisation step on the add path.
+        // the engine's target-materialisation step on the add path;
+        // prepare only records the decision — the upsert happens in
+        // `stage_prepared_relate` so prepare stays store-neutral.
         // The auto-stub surfaces as a typed `AutoStubCreated` warning
         // on the response's `warnings[]` — the deprecated top-level
         // `stub_warning` field that pre-Item-03 carried this fact has
         // been removed, so every diagnostic now follows the uniform
         // `{ code, message, details }` warning shape.
+        let mut stub_target: Option<EntityId> = None;
         if matches!(action, RelateAction::Added) && !self.store.contains(&args.target) {
-            self.store.upsert(
-                args.target.clone(),
-                make_stub(&args.target, crate::entity::StubKind::ForwardReference),
-            );
+            stub_target = Some(args.target.clone());
             warnings.push(WarningHint::AutoStubCreated {
                 stub_id: args.target.clone(),
             });
@@ -498,7 +635,7 @@ impl Engine {
                 }
                 _ => unreachable!(),
             }
-            return Ok(RelateEntityOutcome {
+            return Ok(RelatePrepareOutcome::Done(RelateEntityOutcome {
                 from: args.source,
                 to: args.target,
                 rel_type: args.rel_type,
@@ -510,7 +647,7 @@ impl Engine {
                 // No-op branch: nothing changed in the graph, so the
                 // orphan-stub sweep can't have anything to collect.
                 orphan_stubs_removed: Vec::new(),
-            });
+            }));
         }
 
         // The relate path rewrites the on-disk file (the
@@ -526,82 +663,321 @@ impl Engine {
         let file_path = next.file_path.clone();
         let markdown = generate_markdown(&next, type_def.as_ref());
 
-        let backend = self.mounts[mount_idx].backend.as_ref();
-        backend.write_entity(Path::new(&file_path), markdown.as_bytes())?;
-        let commit_subject = format!("memstead: relate {}", args.source);
-        let ctx = CommitContext {
-            actor,
-            client: client.cloned(),
-            tool: Some("relate_entity"),
-            note: note.map(String::from),
-            logical_operation_id: None,
-            entity_ids: None,
-        };
-        let commit_sha = backend.commit(&commit_subject, &ctx)?;
+        Ok(RelatePrepareOutcome::Prepared(PreparedRelate {
+            mount_idx,
+            source_mem,
+            from: args.source,
+            to: args.target,
+            rel_type: args.rel_type,
+            action,
+            file_path,
+            markdown,
+            warnings,
+            stub_target,
+            type_def,
+        }))
+    }
 
-        backend.append_provenance(&Provenance::new(
-            std::time::SystemTime::now(),
-            ProvenanceKind::Relate,
-            Some(args.source.to_string()),
-            actor,
-            client.cloned(),
-            note.map(String::from),
-        ))?;
+    /// Perform a prepared relate's pre-commit side effects: upsert the
+    /// planned forward-reference stub (if any) and write the source
+    /// entity's regenerated markdown into the backend's pending
+    /// buffer. Nothing is committed; a caller that aborts afterwards
+    /// rolls back with a store snapshot + `discard_all_pending`.
+    fn stage_prepared_relate(&mut self, p: &PreparedRelate) -> Result<(), EngineError> {
+        if let Some(stub_id) = &p.stub_target {
+            self.store.upsert(
+                stub_id.clone(),
+                make_stub(stub_id, crate::entity::StubKind::ForwardReference),
+            );
+        }
+        self.mounts[p.mount_idx]
+            .backend
+            .write_entity(Path::new(&p.file_path), p.markdown.as_bytes())?;
+        Ok(())
+    }
 
-        self.record_self_write(mount_idx, &commit_sha);
-
-        let parse_result = parse_markdown(&markdown, &file_path, type_def.as_ref(), &source_mem)
-            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+    /// Parse the prepared markdown back and push it into the store
+    /// (replacing the pre-mutation source entity), then re-run the
+    /// alias-edge remap. Returns the new `content_hash`. In the
+    /// single-item path this runs after the commit (preserving the
+    /// pre-split ordering); `batch_relate` runs it immediately after
+    /// staging each entry so later entries in the same batch validate
+    /// against this entry's effect — applied-in-order semantics.
+    fn apply_prepared_relate_to_store(
+        &mut self,
+        p: &PreparedRelate,
+    ) -> Result<String, EngineError> {
+        let parse_result = parse_markdown(
+            &p.markdown,
+            &p.file_path,
+            p.type_def.as_ref(),
+            &p.source_mem,
+        )
+        .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
         let content_hash = parse_result.entity.content_hash.clone();
-
         let fallback = engine_fallback_type();
         push_entities_into_store(&mut self.store, vec![parse_result], fallback.as_ref(), None);
         crate::entity::store_builder::remap_alias_target_edge_sources(
             &mut self.store,
             &self.schemas,
         );
+        Ok(content_hash)
+    }
 
-        // On the `--remove` path, the edge we just dropped may
-        // have been the last incoming edge to a stub. The orphan-stub
-        // GC hook fired from `memstead_delete` already; mirror it here so
-        // every mutation that can leave orphans cleans them up.
-        // Scoped sweep — only inspect the just-severed target. The
-        // only possible new orphan from a relate-remove is the
-        // target whose incoming edge we removed; checking the entire
-        // store would catch pre-existing orphans which aren't this
-        // mutation's responsibility (and which `memstead_delete`'s full
-        // sweep also leaves alone before its own removal). Funnels
-        // through the shared `gc_orphan_stubs_among` predicate so the
-        // relate-remove, delete, and update-via-alias-resync paths
-        // can't drift on what counts as a GC-able orphan.
-        let orphan_stubs_removed: Vec<EntityId> = if matches!(action, RelateAction::Removed) {
-            super::gc_orphan_stubs_among(&mut self.store, std::iter::once(&args.target))
-        } else {
-            Vec::new()
-        };
+    /// Atomic batch relate — the edge-side sibling of
+    /// [`Self::batch_create`] / [`Self::batch_update`]. One list
+    /// carrying both additions and removals, **applied in order**:
+    /// each entry validates against the graph state produced by every
+    /// prior valid entry (an add followed by a remove of the same edge
+    /// nets to no edge; an acyclic check sees edges added earlier in
+    /// the same batch). Per-entry shape mirrors what `relate` accepts.
+    ///
+    /// - **All-or-nothing, report-all.** A single invalid entry
+    ///   refuses the whole batch — no edge changes, no head movement —
+    ///   and the refusal identifies EVERY failing entry with its typed
+    ///   `{code, message, details}` envelope, bounded at
+    ///   [`Self::BATCH_ERROR_REPORT_CAP`] with `errors_suppressed`
+    ///   counting the rest. An entry after a failing one validates
+    ///   against the state as of the prior *valid* entries, so a
+    ///   dependent entry may cascade — every reported code is still a
+    ///   true refusal of the submitted file.
+    /// - **One commit per touched mem** (subject
+    ///   `memstead: batch-relate (N edges)`), per-entry provenance
+    ///   notes, exactly like the rest of the family. No-op entries
+    ///   (idempotent re-add / absent remove) report `"noop"` and
+    ///   produce no write.
+    /// - Orphan-stub GC runs over every removed edge's target after
+    ///   the commit, same predicate as the single-item path (the
+    ///   collected ids are not part of `BatchResult`'s fixed family
+    ///   shape).
+    pub fn batch_relate(
+        &mut self,
+        relates: Vec<(RelateEntityArgs, Option<String>)>,
+        actor: Actor,
+        client: Option<&ClientId>,
+    ) -> Result<crate::ops::BatchResult, EngineError> {
+        if relates.is_empty() {
+            return Ok(crate::ops::BatchResult {
+                errors_suppressed: 0,
+                applied: true,
+                results: Vec::new(),
+                succeeded: 0,
+                failed: 0,
+                commit_sha: String::new(),
+            });
+        }
+
+        // Reload every touched mem (sources and targets) once, up
+        // front — the per-entry probe is hoisted out of
+        // `prepare_relate` for exactly this.
+        let mut touched_mems: Vec<String> = relates
+            .iter()
+            .flat_map(|(a, _)| [a.source.mem().to_string(), a.target.mem().to_string()])
+            .collect();
+        touched_mems.sort();
+        touched_mems.dedup();
+        for m in &touched_mems {
+            self.reload_if_stale(Some(m));
+        }
+
+        // Snapshot for the all-or-nothing rollback: staged entries
+        // mutate the store as they apply (in-order semantics), so a
+        // refusal restores this snapshot and discards every backend's
+        // pending buffer. Any early-return added below MUST do both.
+        let store_snapshot = self.store.clone();
+
+        enum ItemState {
+            Applied(&'static str),
+            Noop,
+            Error,
+        }
+        let mut items: Vec<(EntityId, ItemState)> = Vec::with_capacity(relates.len());
+        let mut prepared: Vec<PreparedRelate> = Vec::new();
+        let mut notes: Vec<Option<String>> = Vec::new();
+        let mut errors: Vec<(usize, EngineError)> = Vec::new();
+
+        for (i, (args, note)) in relates.into_iter().enumerate() {
+            let source_id = args.source.clone();
+            match self.prepare_relate(args, Vec::new()) {
+                Ok(RelatePrepareOutcome::Done(_)) => {
+                    items.push((source_id, ItemState::Noop));
+                }
+                Ok(RelatePrepareOutcome::Prepared(p)) => {
+                    // Stage + apply NOW so later entries validate
+                    // against this entry's effect (applied-in-order).
+                    if let Err(e) = self.stage_prepared_relate(&p) {
+                        self.store = store_snapshot;
+                        self.discard_all_pending();
+                        return Err(e);
+                    }
+                    if let Err(e) = self.apply_prepared_relate_to_store(&p) {
+                        self.store = store_snapshot;
+                        self.discard_all_pending();
+                        return Err(e);
+                    }
+                    let label = match p.action {
+                        RelateAction::Added => "added",
+                        RelateAction::Removed => "removed",
+                        _ => unreachable!("no-ops resolve to Done"),
+                    };
+                    items.push((source_id, ItemState::Applied(label)));
+                    prepared.push(p);
+                    notes.push(note);
+                }
+                Err(e) => {
+                    items.push((source_id, ItemState::Error));
+                    errors.push((i, e));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            // Refuse the whole batch; roll back every staged entry.
+            self.store = store_snapshot;
+            self.discard_all_pending();
+            let failed = errors.len();
+            let mut error_map: std::collections::HashMap<usize, EngineError> =
+                errors.into_iter().collect();
+            let mut reported = 0usize;
+            let mut suppressed = 0usize;
+            let results: Vec<crate::ops::BatchEntry> = items
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, _))| match error_map.remove(&i) {
+                    Some(e) => {
+                        if reported < Self::BATCH_ERROR_REPORT_CAP {
+                            reported += 1;
+                            crate::ops::BatchEntry {
+                                id,
+                                action: "error".to_string(),
+                                error: Some(super::update::batch_error_envelope(&e)),
+                            }
+                        } else {
+                            suppressed += 1;
+                            crate::ops::BatchEntry {
+                                id,
+                                action: "error".to_string(),
+                                error: None,
+                            }
+                        }
+                    }
+                    None => crate::ops::BatchEntry {
+                        id,
+                        action: "not_applied".to_string(),
+                        error: None,
+                    },
+                })
+                .collect();
+            return Ok(crate::ops::BatchResult {
+                errors_suppressed: suppressed,
+                applied: false,
+                results,
+                succeeded: 0,
+                failed,
+                commit_sha: String::new(),
+            });
+        }
+
+        // --- Commit once per touched mount, in first-seen order. ---
+        let mut distinct_mounts: Vec<usize> = Vec::new();
+        for p in &prepared {
+            if !distinct_mounts.contains(&p.mount_idx) {
+                distinct_mounts.push(p.mount_idx);
+            }
+        }
+        let mut mount_commits: Vec<(usize, String)> = Vec::with_capacity(distinct_mounts.len());
+        for &m in &distinct_mounts {
+            // Distinct source ids for this mount (an entity may carry
+            // several edge changes in one batch).
+            let mut entity_ids: Vec<String> = Vec::new();
+            let mut edge_count = 0usize;
+            for p in prepared.iter().filter(|p| p.mount_idx == m) {
+                edge_count += 1;
+                let s = p.from.to_string();
+                if !entity_ids.contains(&s) {
+                    entity_ids.push(s);
+                }
+            }
+            let subject = format!("memstead: batch-relate ({edge_count} edges)");
+            let ctx = CommitContext {
+                actor,
+                client: client.cloned(),
+                tool: Some("batch_relate"),
+                note: None,
+                logical_operation_id: None,
+                entity_ids: Some(entity_ids),
+            };
+            match self.mounts[m].backend.commit(&subject, &ctx) {
+                Ok(sha) => mount_commits.push((m, sha)),
+                Err(e) => {
+                    // A commit failed: roll back the store and any
+                    // still-pending backends. Mems already committed
+                    // in this loop stay committed (the family's
+                    // per-mem atomicity).
+                    self.store = store_snapshot;
+                    self.discard_all_pending();
+                    return Err(e.into());
+                }
+            }
+        }
+
+        // Provenance per entry, self-write markers per mount.
+        for (p, note) in prepared.iter().zip(notes.iter()) {
+            let commit_sha = mount_commits
+                .iter()
+                .find(|(m, _)| *m == p.mount_idx)
+                .map(|(_, s)| s.clone())
+                .unwrap_or_default();
+            self.mounts[p.mount_idx]
+                .backend
+                .append_provenance(&Provenance::new(
+                    std::time::SystemTime::now(),
+                    ProvenanceKind::Relate,
+                    Some(p.from.to_string()),
+                    actor,
+                    client.cloned(),
+                    note.clone(),
+                ))?;
+            self.record_self_write(p.mount_idx, &commit_sha);
+        }
+
+        // Orphan-stub GC over every removed edge's target — same
+        // scoped sweep and shared predicate as the single-item path.
+        let removed_targets: Vec<EntityId> = prepared
+            .iter()
+            .filter(|p| matches!(p.action, RelateAction::Removed))
+            .map(|p| p.to.clone())
+            .collect();
+        super::gc_orphan_stubs_among(&mut self.store, removed_targets.iter());
 
         self.invalidate_communities();
         self.invalidate_search_indexes();
 
-        // `require_notes` provenance nudge — single engine-level
-        // enforcement point. Only reached on the real-commit path
-        // (Added / Removed); the NoOpAlreadyPresent / NoOpAbsent branches
-        // return early above with an empty `commit_sha` and never demand
-        // a note (nothing landed to attribute).
-        if let Some(w) = self.note_missing_warning("relate_entity", note) {
-            warnings.push(w);
-        }
+        let commit_sha = mount_commits
+            .last()
+            .map(|(_, s)| s.clone())
+            .unwrap_or_default();
+        let succeeded = items.len();
+        let results: Vec<crate::ops::BatchEntry> = items
+            .into_iter()
+            .map(|(id, state)| crate::ops::BatchEntry {
+                id,
+                action: match state {
+                    ItemState::Applied(label) => label.to_string(),
+                    ItemState::Noop => "noop".to_string(),
+                    ItemState::Error => unreachable!("refusal path returned above"),
+                },
+                error: None,
+            })
+            .collect();
 
-        Ok(RelateEntityOutcome {
-            from: args.source,
-            to: args.target,
-            rel_type: args.rel_type,
-            action,
-            content_hash,
+        Ok(crate::ops::BatchResult {
+            errors_suppressed: 0,
+            applied: true,
+            results,
+            succeeded,
+            failed: 0,
             commit_sha,
-            source: "explicit".to_string(),
-            warnings,
-            orphan_stubs_removed,
         })
     }
 
@@ -2889,4 +3265,180 @@ community:
     }
 
     // ---- Engine::rename_entity --------------------------------------
+
+    /// Batch relate: one list mixing additions and removals, applied
+    /// IN ORDER in one invocation with one commit. The remove entry
+    /// targets an edge added earlier in the same batch — if entries
+    /// validated against the pre-batch state instead, that remove
+    /// would resolve to `NoOpAbsent` ("noop"), so the asserted
+    /// `"removed"` action is the in-order proof.
+    #[test]
+    fn batch_relate_applies_adds_and_removes_in_order_one_commit() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        for title in ["A", "B", "C"] {
+            engine
+                .create_entity(
+                    empty_create_args("specs", title),
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap();
+        }
+        let id = |slug: &str| crate::entity::EntityId::new("specs", slug);
+        let edge = |from: &str, to: &str, remove: bool| RelateEntityArgs {
+            source: id(from),
+            expected_hash: None,
+            rel_type: "USES".to_string(),
+            target: id(to),
+            remove,
+            description: None,
+        };
+
+        let result = engine
+            .batch_relate(
+                vec![
+                    (edge("a", "b", false), Some("add a-b".to_string())),
+                    (edge("a", "c", false), Some("add a-c".to_string())),
+                    (edge("a", "c", true), Some("undo a-c".to_string())),
+                ],
+                actor,
+                Some(&client),
+            )
+            .unwrap();
+        assert!(result.applied, "{result:?}");
+        assert_eq!(result.succeeded, 3);
+        assert_eq!(result.failed, 0);
+        assert!(!result.commit_sha.is_empty(), "one real commit");
+        let actions: Vec<&str> = result.results.iter().map(|r| r.action.as_str()).collect();
+        assert_eq!(
+            actions,
+            vec!["added", "added", "removed"],
+            "in-order application: the remove sees the same batch's add"
+        );
+
+        // Net state: A carries exactly the surviving edge to B.
+        let a = engine.get_entity(&id("a")).unwrap();
+        assert_eq!(a.relationships.len(), 1, "{:?}", a.relationships);
+        assert_eq!(a.relationships[0].rel_type, "USES");
+        assert_eq!(a.relationships[0].target, id("b"));
+    }
+
+    /// Atomicity + report-all for batch relate: a batch with several
+    /// invalid entries changes NOTHING (no edge lands, the head is
+    /// unmoved, staged earlier entries roll back) and names EVERY
+    /// failing entry with its typed code.
+    #[test]
+    fn batch_relate_refuses_whole_batch_reporting_every_failure() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        let a = engine
+            .create_entity(empty_create_args("specs", "A"), actor, Some(&client), None)
+            .unwrap();
+        engine
+            .create_entity(empty_create_args("specs", "B"), actor, Some(&client), None)
+            .unwrap();
+        let head_before = engine
+            .mem_head_sha("specs")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let count_before = engine.store().all_entities().count();
+
+        let id = |slug: &str| crate::entity::EntityId::new("specs", slug);
+        let result = engine
+            .batch_relate(
+                vec![
+                    // Valid — stages an edge that must roll back.
+                    (
+                        RelateEntityArgs {
+                            source: id("a"),
+                            expected_hash: None,
+                            rel_type: "USES".to_string(),
+                            target: id("b"),
+                            remove: false,
+                            description: None,
+                        },
+                        None,
+                    ),
+                    // Missing source.
+                    (
+                        RelateEntityArgs {
+                            source: id("ghost"),
+                            expected_hash: None,
+                            rel_type: "USES".to_string(),
+                            target: id("b"),
+                            remove: false,
+                            description: None,
+                        },
+                        None,
+                    ),
+                    // Optimistic-lock mismatch.
+                    (
+                        RelateEntityArgs {
+                            source: id("b"),
+                            expected_hash: Some("definitely-wrong".to_string()),
+                            rel_type: "USES".to_string(),
+                            target: id("a"),
+                            remove: false,
+                            description: None,
+                        },
+                        None,
+                    ),
+                ],
+                actor,
+                Some(&client),
+            )
+            .unwrap();
+        assert!(!result.applied);
+        assert_eq!(result.failed, 2, "{result:?}");
+        assert!(result.commit_sha.is_empty());
+        let codes: Vec<(usize, &str)> = result
+            .results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.action == "error")
+            .map(|(i, r)| (i, r.error.as_ref().map(|e| e.code.as_str()).unwrap_or("")))
+            .collect();
+        assert_eq!(
+            codes,
+            vec![(1, "ENTITY_NOT_FOUND"), (2, "HASH_MISMATCH")],
+            "every failing entry named with index + typed code: {result:?}"
+        );
+        assert_eq!(result.results[0].action, "not_applied");
+
+        // NOTHING changed: the staged first edge rolled back, the head
+        // is unmoved, and no stub or entity appeared.
+        let a_after = engine.get_entity(&a.id).unwrap();
+        assert!(
+            a_after.relationships.is_empty(),
+            "staged edge must roll back: {:?}",
+            a_after.relationships
+        );
+        assert_eq!(a_after.content_hash, a.content_hash);
+        let head_after = engine
+            .mem_head_sha("specs")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert_eq!(head_before, head_after, "mem head unmoved");
+        assert_eq!(engine.store().all_entities().count(), count_before);
+    }
 }

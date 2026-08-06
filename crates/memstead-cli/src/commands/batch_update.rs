@@ -116,71 +116,10 @@ struct RelationPayload {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let bytes = std::fs::read(&args.from).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "INVALID_INPUT",
-            format!("failed to read {}: {e}", args.from.display()),
-        )
-    })?;
-
-    // Two-phase parse so unknown-key refusals carry per-entry
-    // `entry_index` / `unknown_keys` / `suggested` recovery payloads
-    // instead of just serde's raw "unknown field" line/column text.
-    let envelope: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
-        CliError::new(
-            ExitKind::Validation,
-            "INVALID_INPUT",
-            format!("invalid JSON in {}: {e}", args.from.display()),
-        )
-        .with_details(serde_json::json!({
-            "path": args.from.display().to_string(),
-            "parser_error": e.to_string(),
-        }))
-    })?;
-    let updates_value = envelope
-        .get("updates")
-        .cloned()
-        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-    let updates_array = match &updates_value {
-        serde_json::Value::Array(a) => a.clone(),
-        _ => {
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                "`updates` must be a JSON array",
-            )
-            .into());
-        }
-    };
-    // Surface top-level unknown keys too (e.g. `update` typo for `updates`).
-    if let serde_json::Value::Object(map) = &envelope {
-        let unknown: Vec<String> = map
-            .keys()
-            .filter(|k| k.as_str() != "updates")
-            .cloned()
-            .collect();
-        if !unknown.is_empty() {
-            return Err(CliError::new(
-                ExitKind::Validation,
-                "INVALID_INPUT",
-                format!(
-                    "unknown top-level key(s) {unknown:?} — only `updates: [...]` is recognised"
-                ),
-            )
-            .with_details(serde_json::json!({
-                "unknown_keys": unknown,
-                "suggested": "updates",
-            }))
-            .into());
-        }
-    }
-
-    if updates_array.is_empty() {
-        return Err(
-            CliError::new(ExitKind::Validation, "INVALID_INPUT", "updates[] is empty").into(),
-        );
-    }
+    // Envelope parsing shared with the batch family; the two-phase
+    // per-entry parse below keeps this command's richer unknown-key
+    // recovery payloads (`entry_index` / `unknown_keys` / `suggested`).
+    let updates_array = super::batch::parse_batch_envelope(&args.from, "updates")?;
 
     let mut entries: Vec<EntryPayload> = Vec::with_capacity(updates_array.len());
     for (idx, entry_value) in updates_array.into_iter().enumerate() {
@@ -212,7 +151,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             crate::commands::merge_mem_changed_json(&mut body, &mem_changed);
             print_json(&body)?;
         } else {
-            let mut md = render_batch_markdown(&result);
+            let mut md = super::batch::render_batch_markdown("update", &result);
             md.push_str(&crate::commands::render_mem_changed_block(&mem_changed));
             print_markdown(&md);
         }
@@ -230,91 +169,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // rides stderr. In `--json` mode the single error envelope is the
     // only thing on stdout, so it stays exactly one JSON document.
     if !ctx.json {
-        print_markdown(&render_batch_markdown(&result));
+        print_markdown(&super::batch::render_batch_markdown("update", &result));
     }
-    Err(batch_refused_error(&result).into())
-}
-
-/// Render the per-entry markdown breakdown for a batch result (success
-/// or failure). Each entry shows a status marker, its id/action, and any
-/// per-entry error code+message; an applied batch appends its commit SHA.
-fn render_batch_markdown(result: &memstead_base::ops::BatchResult) -> String {
-    let header = if result.applied {
-        format!(
-            "# Batch update applied — {} item(s) in one commit",
-            result.succeeded
-        )
-    } else {
-        format!(
-            "# Batch update REFUSED — {} item(s) failed, nothing committed",
-            result.failed
-        )
-    };
-    let mut lines = vec![header, String::new()];
-    for entry in &result.results {
-        let marker = if entry.error.is_some() {
-            "✗"
-        } else if entry.action == "not_applied" {
-            "·"
-        } else {
-            "✓"
-        };
-        let detail = entry
-            .error
-            .as_ref()
-            .map(|e| format!(" — [{}] {}", e.code, e.message))
-            .unwrap_or_default();
-        lines.push(format!(
-            "- {marker} `{}` ({}){}",
-            entry.id, entry.action, detail
-        ));
-    }
-    if result.applied && !result.commit_sha.is_empty() {
-        lines.push(String::new());
-        lines.push(format!("Commit: `{}`", result.commit_sha));
-    }
-    lines.join("\n")
-}
-
-/// Build the error envelope for a refused (atomic) batch. The top-level
-/// `code` is the stable `BATCH_REFUSED` token; the `ExitKind` mirrors the
-/// dominant (refusal-tripping) entry's failure so `$?` matches single
-/// `update` and the documented table (hash mismatch → 4, missing entity /
-/// mem → 3, schema/policy refusal → 5). The full [`BatchResult`] rides
-/// on `details` — per-entry codes stay available without re-running.
-fn batch_refused_error(result: &memstead_base::ops::BatchResult) -> CliError {
-    let dominant = result.results.iter().find(|e| e.error.is_some());
-    let (code, failing_id, message) = match dominant {
-        Some(entry) => {
-            let err = entry.error.as_ref().expect("dominant entry has an error");
-            (err.code.as_str(), entry.id.to_string(), err.message.clone())
-        }
-        None => (
-            "",
-            String::new(),
-            "batch-update refused; nothing committed".to_string(),
-        ),
-    };
-    let kind = batch_refused_exit_kind(code);
-    let summary = format!(
-        "batch-update refused — {} item(s) failed, nothing committed; first failure [{}] on `{}`: {}",
-        result.failed, code, failing_id, message,
-    );
-    CliError::new(kind, "BATCH_REFUSED", summary)
-        .with_details(serde_json::to_value(result).unwrap_or(serde_json::Value::Null))
-}
-
-/// Map the dominant per-entry failure code to the process exit code,
-/// reusing the documented `0/1/3/4/5` taxonomy so a refused batch exits
-/// the same way the equivalent single `memstead update` would. Unrecognised
-/// codes fall to `Validation` (5) — the bucket for schema/policy refusals,
-/// which is what most batch-entry failures are.
-fn batch_refused_exit_kind(code: &str) -> ExitKind {
-    match code {
-        "HASH_MISMATCH" => ExitKind::HashMismatch,
-        "ENTITY_NOT_FOUND" | "UNKNOWN_MEM" => ExitKind::NotFound,
-        _ => ExitKind::Validation,
-    }
+    Err(super::batch::batch_refused_error("update", &result).into())
 }
 
 /// Map a single JSON entry to the engine's [`UpdateEntityArgs`],

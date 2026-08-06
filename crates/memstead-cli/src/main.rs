@@ -118,6 +118,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         #[cfg(feature = "mem-repo")]
         Command::BatchUpdate(args) => commands::batch_update::run(&ctx, args),
         #[cfg(feature = "mem-repo")]
+        Command::BatchCreate(args) => commands::batch_create::run(&ctx, args),
+        #[cfg(feature = "mem-repo")]
+        Command::BatchRelate(args) => commands::batch_relate::run(&ctx, args),
+        #[cfg(feature = "mem-repo")]
         Command::Recover(args) => commands::recover::run(&ctx, args),
         Command::Anchors(args) => commands::anchors::run(&ctx, args),
         Command::Changes(args) => commands::changes::run(&ctx, args),

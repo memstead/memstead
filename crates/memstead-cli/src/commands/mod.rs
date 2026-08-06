@@ -234,6 +234,12 @@ pub mod update;
 // `memstead` binary (default features); absent from the lean
 // `--no-default-features` build, which has no git-branch backend.
 #[cfg(feature = "mem-repo")]
+pub mod batch;
+#[cfg(feature = "mem-repo")]
+pub mod batch_create;
+#[cfg(feature = "mem-repo")]
+pub mod batch_relate;
+#[cfg(feature = "mem-repo")]
 pub mod batch_update;
 #[cfg(feature = "mem-repo")]
 pub mod branch_reset;

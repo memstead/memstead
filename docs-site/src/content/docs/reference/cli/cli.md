@@ -39,6 +39,8 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead delete`↴](#memstead-delete)
 * [`memstead rename`↴](#memstead-rename)
 * [`memstead batch-update`↴](#memstead-batch-update)
+* [`memstead batch-create`↴](#memstead-batch-create)
+* [`memstead batch-relate`↴](#memstead-batch-relate)
 * [`memstead recover`↴](#memstead-recover)
 * [`memstead anchors`↴](#memstead-anchors)
 * [`memstead changes`↴](#memstead-changes)
@@ -138,6 +140,8 @@ Exit codes:
 * `delete` — Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by design (no post-state to race on); race protection comes from `HAS_INCOMING_REFS` — and `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases
 * `rename` — Rename an entity (changes ID, file path, and every incoming wiki-link)
 * `batch-update` — Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
+* `batch-create` — Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
+* `batch-relate` — Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
@@ -801,6 +805,30 @@ Update many entities in one atomic call. Input is a JSON file with a top-level `
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `updates: [...]` array
+
+
+
+## `memstead batch-create`
+
+Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
+
+**Usage:** `memstead batch-create --from <FILE>`
+
+###### **Options:**
+
+* `--from <FILE>` — JSON file with a top-level `creates: [...]` array
+
+
+
+## `memstead batch-relate`
+
+Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
+
+**Usage:** `memstead batch-relate --from <FILE>`
+
+###### **Options:**
+
+* `--from <FILE>` — JSON file with a top-level `relates: [...]` array
 
 
 

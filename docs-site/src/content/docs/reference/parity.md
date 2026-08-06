@@ -65,6 +65,8 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 
 - `admin`
 - `anchors`
+- `batch-create`
+- `batch-relate`
 - `batch-update`
 - `domain`
 - `export`
