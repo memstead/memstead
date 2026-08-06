@@ -322,8 +322,13 @@ fn resolve_two_pass(
 ///
 /// Runs once at boot after every mount's entities are pushed into the
 /// store. Mutation paths do not call this — they pre-validate via
-/// `validate_rel_type` + `validate_rel_shape` before the write and
-/// the existing same-call `would_cycle` check guards acyclic adds.
+/// `validate_rel_type` + `validate_rel_shape` before the write, and
+/// every edge-writing verb (relate, `create.relations[]`,
+/// `update.declare_relations`, and the batch paths) runs the shared
+/// cycle family (`validate_edge_acyclicity`: self-loop on propagating
+/// rel-types, `would_cycle` on acyclic ones) in the same call. This
+/// sweep therefore covers pre-existing on-disk data only — entities
+/// written before the write-path gates closed, or edited out-of-band.
 pub fn validate_loaded_relations(
     store: &mut Store,
     schemas: &std::collections::HashMap<String, std::sync::Arc<memstead_schema::Schema>>,

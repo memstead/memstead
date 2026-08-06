@@ -745,6 +745,14 @@ impl Engine {
             .iter()
             .position(|m| m.mount.mem == mem)
             .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+        // Capability gate, identical in shape and position to the six
+        // sibling setters (`set_mem_version` … `set_mem_sync_state`):
+        // a schema-pin change starts a migration — the one lifecycle
+        // mutation a read-only mount must be able to refuse like any
+        // other.
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem.to_string()));
+        }
 
         // The requested target must resolve before anything else —
         // an unknown ref is an error, not a migration into nowhere.
@@ -3810,5 +3818,73 @@ community:
             engine.migration_target("specs").unwrap().as_display(),
             "mig-b@0.1.0"
         );
+    }
+
+    /// Every lifecycle setter refuses `READ_ONLY_MOUNT` on a read-only
+    /// mount — the family, not an instance. `set_mem_schema` was the
+    /// one ungated sibling (a schema-pin change starts a migration —
+    /// the last mutation a sealed mount should accept); this test
+    /// enumerates all seven current setters — extend it when adding an
+    /// eighth (the enumeration is manual, not reflective). Refusal complement: the same calls succeed (or fail
+    /// for their own non-capability reasons) against a writable mount —
+    /// covered by the existing per-setter tests; `set_mem_schema`'s
+    /// writable-mount behaviour is pinned by the migration tests above.
+    #[test]
+    fn every_lifecycle_setter_refuses_on_read_only_mount() {
+        let tmp = TempDir::new().unwrap();
+        let archive_path = build_archive(tmp.path(), "ext", &[("a.md", b"# Title: Foo\n")]);
+        let mut engine = Engine::from_mounts(vec![(
+            archive_mount("ext", archive_path.clone()),
+            Box::new(ArchiveBackend::new(archive_path)) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+
+        let default_pin: memstead_schema::SchemaRef = "default@1.0.0".parse().unwrap();
+        let attempts: Vec<(&str, EngineError)> = vec![
+            (
+                "set_mem_schema",
+                engine.set_mem_schema("ext", &default_pin).unwrap_err(),
+            ),
+            (
+                "set_mem_version",
+                engine
+                    .set_mem_version("ext", semver::Version::new(9, 9, 9), None)
+                    .unwrap_err(),
+            ),
+            (
+                "set_mem_description",
+                engine
+                    .set_mem_description("ext", Some("x".into()), None)
+                    .unwrap_err(),
+            ),
+            (
+                "set_mem_title",
+                engine
+                    .set_mem_title("ext", Some("x".into()), None)
+                    .unwrap_err(),
+            ),
+            (
+                "set_mem_subject",
+                engine.set_mem_subject("ext", None, None).unwrap_err(),
+            ),
+            (
+                "set_mem_internal",
+                engine.set_mem_internal("ext", true, None).unwrap_err(),
+            ),
+            (
+                "set_mem_sync_state",
+                engine
+                    .set_mem_sync_state("ext", "k", "t", None)
+                    .unwrap_err(),
+            ),
+        ];
+        for (setter, err) in attempts {
+            match err {
+                EngineError::ReadOnlyMount(v) => {
+                    assert_eq!(v, "ext", "{setter} must name the refused mem")
+                }
+                other => panic!("{setter} must refuse ReadOnlyMount, got {other:?}"),
+            }
+        }
     }
 }

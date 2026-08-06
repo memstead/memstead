@@ -1313,7 +1313,6 @@ fn apply_declare_relations(
             .get(&rel.to)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
-        let _ = schema; // Helper resolves the schema via the engine.
         let _ = super::route_edge_validation(
             engine,
             &canonical,
@@ -1345,6 +1344,18 @@ fn apply_declare_relations(
         // boundary too — gate on manual_authoring posture.
         super::validate_manual_authoring_posture(
             engine, &canonical, source_mem, &next.id, &rel.to,
+        )?;
+
+        // Cycle family — the same shared gate `memstead_relate` runs
+        // (self-loop on propagating types, long cycle on acyclic
+        // types), against the current store state.
+        super::validate_edge_acyclicity(
+            &engine.store,
+            schema,
+            &next.id,
+            next.entity_type.as_str(),
+            &rel.to,
+            &canonical,
         )?;
 
         // Append to the entity's relationships list. Duplicate
@@ -5283,5 +5294,119 @@ community:
             Some("spec"),
             "the discriminator survives a type unset"
         );
+    }
+
+    // ---- cycle family on declare_relations -------------------------------
+
+    /// `update.declare_relations` runs the same cycle family as
+    /// `memstead_relate`: a cycle-closing edge on an acyclic rel-type
+    /// refuses `RELATIONSHIP_CYCLE` with the relate path's recovery
+    /// detail, a self-loop on a propagating rel-type refuses
+    /// identically, and — refusal complement — a non-cycle edge on the
+    /// acyclic type is accepted exactly as today.
+    #[test]
+    fn declare_relations_refuses_cycle_and_self_loop_like_relate() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        // alpha PART_OF beta lands via create + relate.
+        let alpha = engine
+            .create_entity(
+                empty_create_args("specs", "Alpha"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let beta = engine
+            .create_entity(
+                empty_create_args("specs", "Beta"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        engine
+            .relate_entity(
+                crate::engine::RelateEntityArgs {
+                    source: alpha.id.clone(),
+                    target: beta.id.clone(),
+                    rel_type: "PART_OF".to_string(),
+                    remove: false,
+                    expected_hash: None,
+                    description: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let declare = |rel_type: &str, from: &EntityId, to: &EntityId, hash: String| {
+            let mut args = bare_args(from.clone(), Some(hash));
+            args.declare_relations = vec![crate::ops::RelateArg {
+                to: to.clone(),
+                rel_type: rel_type.to_string(),
+                description: None,
+            }];
+            args
+        };
+
+        // beta declaring PART_OF→alpha closes beta→alpha→beta.
+        let err = engine
+            .update_entity(
+                declare("PART_OF", &beta.id, &alpha.id, beta.content_hash.clone()),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("cycle-closing declare_relations must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+        let details = err.details();
+        assert_eq!(details["rel_type"], "PART_OF");
+        assert!(details["existing_path"].is_array());
+        assert!(
+            engine
+                .get_entity(&beta.id)
+                .unwrap()
+                .relationships
+                .is_empty(),
+            "the refused edge must not land"
+        );
+
+        // Self-loop on a propagating rel-type (spec propagates USES).
+        // Alpha's hash moved with the relate above — read the live one.
+        let alpha_hash = engine.get_entity(&alpha.id).unwrap().content_hash.clone();
+        let err = engine
+            .update_entity(
+                declare("USES", &alpha.id, &alpha.id, alpha_hash),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("self-loop declare_relations must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+
+        // Refusal complement: a non-cycle PART_OF edge is accepted.
+        engine
+            .update_entity(
+                declare(
+                    "PART_OF",
+                    &beta.id,
+                    &EntityId::new("specs", "gamma"),
+                    beta.content_hash.clone(),
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("a non-cycle PART_OF declare must land as today");
     }
 }

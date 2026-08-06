@@ -697,6 +697,58 @@ pub(super) fn route_edge_validation(
     }
 }
 
+/// Cycle-family gate for one prospective edge — the single owner of
+/// both refusals, shared by every edge-writing verb (`memstead_relate`,
+/// `memstead_create.relations[]`, `memstead_update.declare_relations`, and the
+/// batch paths, which stage prior items' edges into `store` so an
+/// intra-batch cycle refuses like a stored one):
+///
+/// - **Self-loop on a propagating rel-type.** `from == to` on any
+///   rel-type the source type lists in `propagating_relationships` is
+///   always a weight-bomb, regardless of the `acyclic` flag.
+/// - **Cycle on an acyclic rel-type.** An add closing a back-path
+///   `to → … → from` (via [`crate::graph::query::would_cycle`]) refuses
+///   with the existing path, capped at [`RELATIONSHIP_CYCLE_PATH_CAP`].
+///
+/// Both refuse [`EngineError::RelationshipCycle`] (`RELATIONSHIP_CYCLE`)
+/// with identical recovery detail on every path. Callers skip this on
+/// remove paths — removal can only break cycles, never close one.
+pub(super) fn validate_edge_acyclicity(
+    store: &Store,
+    schema: &memstead_schema::Schema,
+    from: &EntityId,
+    from_type: &str,
+    to: &EntityId,
+    rel_type: &str,
+) -> Result<(), EngineError> {
+    if from == to && schema.type_propagates(from_type, rel_type) {
+        return Err(EngineError::RelationshipCycle {
+            rel_type: rel_type.to_string(),
+            from: from.clone(),
+            to: to.clone(),
+            existing_path: vec![from.clone()],
+            path_truncated: false,
+        });
+    }
+    if schema.relationship_acyclic(rel_type)
+        && let Some(path) = crate::graph::query::would_cycle(store, from, to, rel_type)
+    {
+        let truncated = path.len() > RELATIONSHIP_CYCLE_PATH_CAP;
+        let mut existing_path = path;
+        if truncated {
+            existing_path.truncate(RELATIONSHIP_CYCLE_PATH_CAP);
+        }
+        return Err(EngineError::RelationshipCycle {
+            rel_type: rel_type.to_string(),
+            from: from.clone(),
+            to: to.clone(),
+            existing_path,
+            path_truncated: truncated,
+        });
+    }
+    Ok(())
+}
+
 /// Validate the per-edge description posture declared on the rel-type
 /// in the routing-appropriate definition (intra-mem when source and
 /// target share the schema; cross-mem entry when they don't). Emits

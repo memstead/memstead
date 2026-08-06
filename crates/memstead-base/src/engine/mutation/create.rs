@@ -443,6 +443,26 @@ impl Engine {
             // explicit-author boundary — gate on the rel-type's
             // `manual_authoring` posture.
             super::validate_manual_authoring_posture(self, &rel.rel_type, &args.mem, &id, &rel.to)?;
+            // Cycle family — the same shared gate `memstead_relate` runs
+            // (self-loop on propagating types, long cycle on acyclic
+            // types), against the current store. A stub being promoted
+            // by this create already carries its incoming edges, so a
+            // back-path through the new id is visible; on the batch
+            // path prior items' edges are staged into the store, so an
+            // intra-batch cycle refuses here too. Canonicalise the
+            // rel-type first (same derivation as
+            // `update.declare_relations`) so the schema lookups see
+            // the wire-contract form.
+            let canonical = crate::entity::id::validate_rel_type(&rel.rel_type)
+                .unwrap_or_else(|_| rel.rel_type.clone());
+            super::validate_edge_acyclicity(
+                &self.store,
+                schema.as_ref(),
+                &id,
+                args.entity_type.as_str(),
+                &rel.to,
+                &canonical,
+            )?;
         }
 
         // 7. Synthesise the in-memory entity for the generator. The
@@ -908,6 +928,23 @@ impl Engine {
             args.dry_run = false; // batch never dry-runs per entry
             match self.prepare_create(args, Some(&batch_ids), Vec::new()) {
                 Ok(CreatePrepareOutcome::Prepared(p)) => {
+                    // Stage this item's declared edges onto its skeleton
+                    // so later items validate against the batch's own
+                    // graph state — an intra-batch cycle on an acyclic
+                    // rel-type refuses exactly like a stored one
+                    // (`validate_edge_acyclicity` walks the store). The
+                    // snapshot rollback discards these on refusal; the
+                    // apply pass replaces them with the parsed truth.
+                    for r in &p.relations_declared {
+                        self.store.add_edge(
+                            p.id.clone(),
+                            crate::store::Edge {
+                                rel_type: r.rel_type.clone(),
+                                target: r.target.clone(),
+                                source: crate::store::EdgeSource::Explicit,
+                            },
+                        );
+                    }
                     ids_in_order[i] = p.id.clone();
                     prepared.push(p);
                     notes.push(note);
@@ -3958,5 +3995,217 @@ community:
                 None,
             )
             .expect("a clean create is untouched by the reserved-key gate");
+    }
+
+    // ---- cycle family on the create paths --------------------------------
+
+    fn create_with_relation(mem: &str, title: &str, rel_type: &str, to: &str) -> CreateEntityArgs {
+        let mut args = empty_create_args(mem, title);
+        args.relations = vec![crate::ops::RelateArg {
+            to: crate::EntityId(to.to_string()),
+            rel_type: rel_type.to_string(),
+            description: None,
+        }];
+        args
+    }
+
+    /// `create.relations[]` runs the same cycle family as
+    /// `memstead_relate`: an edge closing a cycle through a promoted
+    /// stub refuses `RELATIONSHIP_CYCLE` (acyclic rel-type), a
+    /// self-loop on a propagating rel-type refuses identically, and —
+    /// refusal complement — a non-cycle edge on the acyclic type lands
+    /// exactly as today.
+    #[test]
+    fn create_relations_refuse_cycle_and_self_loop_like_relate() {
+        let (mut engine, _tmp) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+
+        // A PART_OF→ghost auto-stubs `ghost` with an incoming edge.
+        engine
+            .create_entity(
+                create_with_relation("specs", "Alpha", "PART_OF", "specs--ghost"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // Promoting the stub with a back-edge closes alpha→ghost→alpha.
+        let err = engine
+            .create_entity(
+                create_with_relation("specs", "Ghost", "PART_OF", "specs--alpha"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("cycle-closing create.relations[] must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+        // Recovery detail matches the relate path's shape.
+        let details = err.details();
+        assert_eq!(details["rel_type"], "PART_OF");
+        assert!(details["existing_path"].is_array());
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("specs", "ghost"))
+                .is_none_or(|e| e.stub),
+            "the refused entity must not be written"
+        );
+
+        // Self-loop on a propagating rel-type (spec propagates USES).
+        let err = engine
+            .create_entity(
+                create_with_relation("specs", "Selfy", "USES", "specs--selfy"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("self-loop create.relations[] must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+
+        // Refusal complement: a non-cycle edge on the acyclic type
+        // lands (fresh chain link, no back-path).
+        engine
+            .create_entity(
+                create_with_relation("specs", "Beta", "PART_OF", "specs--alpha"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("a non-cycle PART_OF edge must land as today");
+    }
+
+    /// An intra-batch cycle on an acyclic rel-type refuses the whole
+    /// batch — the staged state IS the graph state the batch validates
+    /// against. Refusal complement: an acyclic intra-batch chain lands.
+    #[test]
+    fn batch_create_refuses_intra_batch_cycle() {
+        let (mut engine, _tmp) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+
+        let result = engine
+            .batch_create(
+                vec![
+                    (
+                        create_with_relation("specs", "Ping", "PART_OF", "specs--pong"),
+                        None,
+                    ),
+                    (
+                        create_with_relation("specs", "Pong", "PART_OF", "specs--ping"),
+                        None,
+                    ),
+                ],
+                actor,
+                Some(&client),
+            )
+            .expect("batch returns a result envelope");
+        assert!(!result.applied, "intra-batch cycle must refuse the batch");
+        assert!(
+            result.results.iter().any(|r| r
+                .error
+                .as_ref()
+                .is_some_and(|e| e.code == "RELATIONSHIP_CYCLE")),
+            "the refusal must carry RELATIONSHIP_CYCLE: {:?}",
+            result.results
+        );
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("specs", "ping"))
+                .is_none(),
+            "nothing lands from a refused batch"
+        );
+
+        // Refusal complement: an acyclic intra-batch chain lands.
+        let result = engine
+            .batch_create(
+                vec![
+                    (
+                        create_with_relation("specs", "Chain One", "PART_OF", "specs--chain-two"),
+                        None,
+                    ),
+                    (empty_create_args("specs", "Chain Two"), None),
+                ],
+                actor,
+                Some(&client),
+            )
+            .expect("acyclic batch lands");
+        assert!(result.applied, "{:?}", result.results);
+        assert_eq!(result.succeeded, 2);
+    }
+
+    /// Refusal complement at depth: a deep-but-acyclic PART_OF chain
+    /// past the cycle path cap is accepted on the create path — the cap
+    /// bounds the *reported* path on refusal, never the legality of a
+    /// long acyclic chain — and one closing edge at the far end still
+    /// refuses.
+    #[test]
+    fn deep_acyclic_chain_near_path_cap_is_accepted() {
+        let (mut engine, _tmp) = folder_engine("specs");
+        let (actor, client) = cli_actor();
+        let depth = crate::engine::mutation::RELATIONSHIP_CYCLE_PATH_CAP + 2;
+
+        // link-0 ← link-1 ← … each new entity PART_OF the previous.
+        engine
+            .create_entity(
+                empty_create_args("specs", "Link 0"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        for i in 1..depth {
+            engine
+                .create_entity(
+                    create_with_relation(
+                        "specs",
+                        &format!("Link {i}"),
+                        "PART_OF",
+                        &format!("specs--link-{}", i - 1),
+                    ),
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap_or_else(|e| panic!("deep acyclic link {i} must land: {e:?}"));
+        }
+
+        // Closing the loop end-to-end still refuses, with the reported
+        // path truncated at the cap.
+        let last = depth - 1;
+        let err = engine
+            .update_entity(
+                {
+                    let id = crate::EntityId::new("specs", "link-0");
+                    let hash = engine.get_entity(&id).unwrap().content_hash.clone();
+                    crate::engine::UpdateEntityArgs {
+                        anchors: Vec::new(),
+                        anchors_unset: Vec::new(),
+                        id,
+                        expected_hash: Some(hash),
+                        sections: IndexMap::new(),
+                        append_sections: IndexMap::new(),
+                        patch_sections: IndexMap::new(),
+                        metadata: IndexMap::new(),
+                        metadata_unset: Vec::new(),
+                        declare_relations: vec![crate::ops::RelateArg {
+                            to: crate::EntityId::new("specs", &format!("link-{last}")),
+                            rel_type: "PART_OF".to_string(),
+                            description: None,
+                        }],
+                        dry_run: false,
+                        relations_unset: Vec::new(),
+                    }
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("closing the deep chain must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE");
+        let details = err.details();
+        assert_eq!(details["path_truncated"], true);
+        assert_eq!(
+            details["existing_path"].as_array().unwrap().len(),
+            crate::engine::mutation::RELATIONSHIP_CYCLE_PATH_CAP
+        );
     }
 }

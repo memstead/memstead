@@ -20,8 +20,7 @@ use memstead_schema::SchemaRef;
 
 use super::super::{Engine, EngineError, RelateAction, RelateEntityArgs, RelateEntityOutcome};
 use super::{
-    RELATIONSHIP_CYCLE_PATH_CAP, make_stub, unknown_type_error, validate_description_posture,
-    validate_relation_target_grammar,
+    make_stub, unknown_type_error, validate_description_posture, validate_relation_target_grammar,
 };
 
 /// A fully validated relate — every gate has passed and the source
@@ -458,55 +457,20 @@ impl Engine {
             });
         }
 
-        // Self-loops on
-        // any propagating-from-source rel-type are always a weight-
-        // bomb, regardless of whether the rel-type carries the
-        // `acyclic` flag. Gate on the source-type's
-        // `propagating_relationships` list — independent of the
-        // long-cycle `acyclic` check below so a non-acyclic
-        // propagating rel-type (e.g. USES from spec) still refuses
-        // `from == to`, matching the semantic agents can predict
-        // from `memstead_schema`'s exposed `propagating_relationships`.
-        if !args.remove
-            && args.source == args.target
-            && schema.type_propagates(entity.entity_type.as_str(), &args.rel_type)
-        {
-            return Err(EngineError::RelationshipCycle {
-                rel_type: args.rel_type.clone(),
-                from: args.source.clone(),
-                to: args.target.clone(),
-                existing_path: vec![args.source.clone()],
-                path_truncated: false,
-            });
-        }
-
-        // Cycle check on the real-add path: if the rel_type is
-        // declared acyclic in the mem's schema, an add closing a
-        // back-path through `to → … → from` is rejected with the
-        // existing path (capped). Skipped on the remove path and
-        // when the rel_type isn't declared acyclic. The acyclic-add
-        // guard runs here via `graph::query::would_cycle`.
-        if !args.remove
-            && schema.relationship_acyclic(&args.rel_type)
-            && let Some(path) = crate::graph::query::would_cycle(
+        // Cycle family on the real-add path — the self-loop refusal
+        // (propagating rel-types) and the acyclic long-cycle refusal,
+        // via the shared gate every edge-writing verb runs
+        // (`validate_edge_acyclicity`). Skipped on the remove path:
+        // removal can only break cycles, never close one.
+        if !args.remove {
+            super::validate_edge_acyclicity(
                 &self.store,
+                schema,
                 &args.source,
+                entity.entity_type.as_str(),
                 &args.target,
                 &args.rel_type,
-            )
-        {
-            let truncated = path.len() > RELATIONSHIP_CYCLE_PATH_CAP;
-            let mut existing_path = path;
-            if truncated {
-                existing_path.truncate(RELATIONSHIP_CYCLE_PATH_CAP);
-            }
-            return Err(EngineError::RelationshipCycle {
-                rel_type: args.rel_type.clone(),
-                from: args.source.clone(),
-                to: args.target.clone(),
-                existing_path,
-                path_truncated: truncated,
-            });
+            )?;
         }
 
         let type_def = schema

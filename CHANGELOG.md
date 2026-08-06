@@ -8,6 +8,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **A guard that exists on one write path exists on all of them.** Two
+  closures of the same defect class. (1) The cycle family — the
+  self-loop refusal on propagating rel-types and the
+  `RELATIONSHIP_CYCLE` refusal on acyclic ones — previously ran only
+  on `memstead_relate`; the same illegal edge written through
+  `memstead_create.relations[]`, `memstead_update.declare_relations`, or a
+  batch landed on disk and was then silently dropped by the next
+  boot's cycle sweep, announced only as a boot warning the writer
+  never saw. All edge-writing verbs now run one shared gate
+  (`validate_edge_acyclicity` — one owner, no per-path copies) with
+  identical codes and recovery detail; batch-create stages each
+  item's edges so an intra-batch cycle refuses exactly like a stored
+  one; relate's behaviour is byte-identical. The boot sweep stays as
+  the last-resort net for pre-existing data, and its coverage comment
+  now tells the truth. (2) `set_mem_schema` was the only lifecycle
+  setter without the read-only-mount capability gate — a schema-pin
+  change (which starts a migration) was the one lifecycle mutation a
+  sealed mount could not refuse. It now refuses `READ_ONLY_MOUNT`
+  exactly like its six siblings, and a family-level test enumerates
+  all seven so an eighth setter cannot ship ungated.
 - **Reserved metadata keys are reserved everywhere.** The engine's
   identity/discriminator triple (`type` / `mem` / `id`) now has one
   reservation with one behaviour across every path. The loader's
