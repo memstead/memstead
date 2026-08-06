@@ -1353,8 +1353,9 @@ impl fmt::Display for WarningHint {
             } => {
                 let recovery_msg = if origin == "readonly" {
                     "Source mem is mounted read-only; the engine cannot \
-                     rewrite the markdown. Either uninstall the archive \
-                     or accept the dropped relation."
+                     rewrite the markdown. Either remove the mount \
+                     (`memstead uninstall <mem>`) or accept the dropped \
+                     relation."
                 } else {
                     "Fix the source markdown (via memstead_update / \
                      memstead_relate — `details.recovery` carries the abstract \
@@ -1374,9 +1375,9 @@ impl fmt::Display for WarningHint {
                  referrer(s) still target it; the in-memory entity is \
                  demoted to a stub at the same id so the surviving \
                  incoming edges keep a valid target. Surviving referrers: \
-                 [{}]. Either accept the stub or uninstall the source \
-                 archive — read-only content cannot be rewritten by the \
-                 engine.",
+                 [{}]. Either accept the stub or remove the source mount \
+                 (`memstead uninstall <mem>`) — read-only content cannot \
+                 be rewritten by the engine.",
                 referrers
                     .iter()
                     .map(|r| r.to_string())

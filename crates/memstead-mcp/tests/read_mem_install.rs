@@ -1,38 +1,37 @@
 #![cfg(feature = "mem-repo")]
-//! Integration tests for the `--read-mem` install batch (V3 Task 3).
+//! Integration tests for the `--read-mem` install batch.
 //!
 //! Drives [`memstead_mcp::read_mems::install_read_mems`] directly — the
 //! binary entry point is a thin wrapper over the same helper, so these
 //! tests pin the behavior the MCP server exhibits without having to
-//! spawn it and speak MCP over stdio.
+//! spawn it and speak MCP over stdio. Each accepted archive lands in
+//! the global cache and registers as a **workspace-level read-only
+//! mount** on the engine — no host-mem config is involved.
 //!
 //! **Warn-and-continue** is the pinned contract: a bad archive produces
 //! a `Failed` entry in the batch output, the good archives before and
 //! after it still install, no cache file lands for the rejection, and
-//! the specific `ValidationError` reason survives in the error's
-//! `Display` form so the caller's log is actionable.
+//! the specific validation reason survives in the error string so the
+//! caller's log is actionable.
 
 use std::path::{Path, PathBuf};
 
-use memstead_git_branch::mem_cache::{CACHE_OVERRIDE_ENV, InstallError, TargetMem};
+use memstead_git_branch::mem_cache::CACHE_OVERRIDE_ENV;
 use memstead_git_branch::ops::export::export_mem;
-use memstead_git_branch::validator::ValidationError;
-use memstead_git_branch::vcs::CommitContext;
 use memstead_mcp::read_mems::{ReadMemResult, install_read_mems};
 use tempfile::TempDir;
 
-/// Disk-shape install convenience for the existing test fixtures. Wraps
-/// `install_read_mems` with `TargetMem::Disk(project)` and a dummy
-/// commit context — the disk arm ignores `ctx` + `commit_message`.
-fn install_to_disk_project(archives: &[PathBuf], project: &Path, cwd: &Path) -> Vec<ReadMemResult> {
-    install_read_mems(
-        archives,
-        TargetMem::Disk(project),
-        &CommitContext::internal(),
-        "memstead: install (test)",
-        cwd,
-        &[],
-    )
+/// Batch-install convenience: a fresh empty engine (no mounts, no
+/// workspace root) receives the registrations; the pair comes back so
+/// tests can assert both the batch outcomes and the engine's mount
+/// state.
+fn install_batch(
+    archives: &[PathBuf],
+    cwd: &Path,
+) -> (memstead_base::Engine, Vec<ReadMemResult>) {
+    let mut engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
+    let results = install_read_mems(&mut engine, archives, cwd);
+    (engine, results)
 }
 
 /// Build a minimal write-mem directory at `mem_dir` and export it to
@@ -61,17 +60,6 @@ fn build_valid_archive(mem_dir: &Path, archive_path: &Path, name: &str) {
     // No workspace context — schema resolver falls through to the
     // embedded builtin.
     export_mem(&mem_dir, &config, archive_path, None, None).unwrap();
-}
-
-/// Write a minimal writable-mem config directory that the batch can
-/// register `readMems` entries into.
-fn write_minimal_mem_config(dir: &Path, _name: &str) {
-    std::fs::create_dir_all(dir.join(".memstead")).unwrap();
-    std::fs::write(
-        dir.join(".memstead/config.json"),
-        r#"{"version":"1.0.0","schema":"default@1.0.0"}"#,
-    )
-    .unwrap();
 }
 
 /// Process-global env lock — identical pattern to
@@ -111,27 +99,37 @@ impl Drop for CacheGuard {
 }
 
 #[test]
-fn valid_archive_installs_into_cache_and_registers_in_config() {
+fn valid_archive_installs_into_cache_and_registers_a_read_only_mount() {
     let tmp = TempDir::new().unwrap();
     let cache = tmp.path().join("cache");
-    let project = tmp.path().join("project");
     let src_dir = tmp.path().join("src");
     let archive = tmp.path().join("good.mem");
 
-    std::fs::create_dir_all(&project).unwrap();
-    write_minimal_mem_config(&project, "specs");
     build_valid_archive(&src_dir, &archive, "good");
 
     let _g = CacheGuard::install(&cache);
-    let results = install_to_disk_project(std::slice::from_ref(&archive), &project, tmp.path());
+    let (engine, results) = install_batch(std::slice::from_ref(&archive), tmp.path());
 
     assert_eq!(results.len(), 1);
-    let ReadMemResult::Installed { outcome, .. } = &results[0] else {
+    let ReadMemResult::Installed { outcome, mount, .. } = &results[0] else {
         panic!("expected Installed, got {:?}", results[0]);
     };
     assert_eq!(outcome.mem_name, "good");
     assert!(outcome.copied_to_cache);
-    assert!(outcome.registered_in_config);
+    assert_eq!(
+        *mount,
+        memstead_git_branch::mem_cache::MountRegistration::Registered
+    );
+
+    // The engine carries the workspace-level read-only mount.
+    let mounted = engine.mount("good").expect("mount registered");
+    assert_eq!(mounted.capability, memstead_base::MountCapability::ReadOnly);
+    assert!(matches!(
+        &mounted.storage,
+        memstead_base::MountStorage::Archive { path } if *path == outcome.cache_path
+    ));
+    assert!(!engine.mem_router().is_writable("good"));
+    assert!(engine.mem_router().is_visible("good"));
 
     // Cache is content-addressed: `good-<key>.mem`, no `.tmp` sibling.
     let names: Vec<String> = cache
@@ -151,38 +149,28 @@ fn valid_archive_installs_into_cache_and_registers_in_config() {
 }
 
 #[test]
-fn corrupt_archive_reports_validation_zip_and_writes_nothing() {
+fn corrupt_archive_reports_validation_and_writes_nothing() {
     let tmp = TempDir::new().unwrap();
     let cache = tmp.path().join("cache");
-    let project = tmp.path().join("project");
     let bad = tmp.path().join("bad.mem");
 
-    std::fs::create_dir_all(&project).unwrap();
-    write_minimal_mem_config(&project, "specs");
     std::fs::write(&bad, b"definitely not a zip").unwrap();
 
     let _g = CacheGuard::install(&cache);
-    let results = install_to_disk_project(std::slice::from_ref(&bad), &project, tmp.path());
+    let (engine, results) = install_batch(std::slice::from_ref(&bad), tmp.path());
 
     assert_eq!(results.len(), 1);
     let ReadMemResult::Failed { archive, error } = &results[0] else {
         panic!("expected Failed, got {:?}", results[0]);
     };
     assert_eq!(archive, &bad);
-
-    // The specific variant carries path+reason via Display — pin it here
-    // so a future refactor can't swap in a generic "validation failed".
-    match error {
-        InstallError::Validation(ValidationError::Zip(_)) => {}
-        other => panic!("expected InstallError::Validation(Zip), got {other:?}"),
-    }
-    let rendered = format!("{error}");
     assert!(
-        rendered.contains("archive failed strict validation"),
-        "error Display must surface the validation wrapper: {rendered}"
+        error.contains("archive failed strict validation"),
+        "error must surface the validation wrapper: {error}"
     );
 
-    // No cache file landed — validation failed before the write step.
+    // No mount registered, no cache file landed.
+    assert!(engine.mount("bad").is_none());
     assert!(
         cache
             .read_dir()
@@ -195,30 +183,29 @@ fn corrupt_archive_reports_validation_zip_and_writes_nothing() {
 fn bad_archive_in_batch_does_not_abort_good_ones() {
     let tmp = TempDir::new().unwrap();
     let cache = tmp.path().join("cache");
-    let project = tmp.path().join("project");
     let src_dir_a = tmp.path().join("src_a");
     let src_dir_b = tmp.path().join("src_b");
     let good_a = tmp.path().join("good_a.mem");
     let bad = tmp.path().join("bad.mem");
     let good_b = tmp.path().join("good_b.mem");
 
-    std::fs::create_dir_all(&project).unwrap();
-    write_minimal_mem_config(&project, "specs");
     build_valid_archive(&src_dir_a, &good_a, "alpha");
     std::fs::write(&bad, b"not a zip").unwrap();
     build_valid_archive(&src_dir_b, &good_b, "beta");
 
     let _g = CacheGuard::install(&cache);
-    let results = install_to_disk_project(
-        &[good_a.clone(), bad.clone(), good_b.clone()],
-        &project,
-        tmp.path(),
-    );
+    let (engine, results) =
+        install_batch(&[good_a.clone(), bad.clone(), good_b.clone()], tmp.path());
 
     assert_eq!(results.len(), 3);
     assert!(matches!(results[0], ReadMemResult::Installed { .. }));
     assert!(matches!(results[1], ReadMemResult::Failed { .. }));
     assert!(matches!(results[2], ReadMemResult::Installed { .. }));
+
+    // Both good archives are mounted read-only; the bad one is absent.
+    assert!(engine.mount("alpha").is_some());
+    assert!(engine.mount("beta").is_some());
+    assert!(engine.mount("bad").is_none());
 
     // Both good archives landed in cache under their content-addressed
     // names (`<name>-<key>.mem`); the bad one left no trace.
@@ -250,19 +237,16 @@ fn bad_archive_in_batch_does_not_abort_good_ones() {
 fn relative_archive_paths_resolve_against_cwd() {
     let tmp = TempDir::new().unwrap();
     let cache = tmp.path().join("cache");
-    let project = tmp.path().join("project");
     let src_dir = tmp.path().join("src");
     let archive = tmp.path().join("archives").join("rel.mem");
 
     std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
-    std::fs::create_dir_all(&project).unwrap();
-    write_minimal_mem_config(&project, "specs");
     build_valid_archive(&src_dir, &archive, "rel");
 
     // Caller hands in a relative path; the helper joins against `cwd`.
     let relative: PathBuf = PathBuf::from("archives").join("rel.mem");
     let _g = CacheGuard::install(&cache);
-    let results = install_to_disk_project(&[relative], &project, tmp.path());
+    let (_engine, results) = install_batch(&[relative], tmp.path());
 
     assert_eq!(results.len(), 1);
     let ReadMemResult::Installed {

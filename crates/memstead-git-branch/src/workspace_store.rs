@@ -18,14 +18,37 @@ use memstead_base::{
 /// pipeline hands to [`Engine`] construction.
 type MountedBackend = (Mount, Box<dyn MemBackend>);
 
-fn hydrate_read_mems(
+/// Outcome of the one-way legacy `readMems` boot migration.
+struct LegacyReadMemMigration {
+    /// The migrated mounts, ready to join the workspace roster.
+    mounts: Vec<MountedBackend>,
+    /// Read-mem names that were migrated (mount + config rewrite).
+    migrated_mems: Vec<String>,
+    /// Writable mems whose configs carried the legacy entries.
+    from_host_mems: Vec<String>,
+}
+
+/// One-way boot migration: legacy per-host-mem `readMems` config
+/// entries become workspace-level read-only mounts. For every entry
+/// that resolves to a cache file, the mount is synthesised exactly as
+/// the historical hydration did, and the entry is REMOVED from the
+/// host mem's config through the engine-owned backend writer — so a
+/// second boot finds no key and stays silent. Entries whose cache
+/// file is missing stay in the config (visible, retried next boot)
+/// rather than being dropped into nothing. Names already present in
+/// the workspace mount roster are treated as migrated (the mount
+/// exists; only the legacy key is cleaned up).
+fn migrate_legacy_read_mems(
     writable_mounts: &[MountedBackend],
     writable_names: &std::collections::HashSet<String>,
-) -> Result<Vec<MountedBackend>, BootError> {
+    already_mounted: &std::collections::HashSet<String>,
+) -> Result<LegacyReadMemMigration, BootError> {
     let cache_dir = crate::mem_cache::mem_cache_dir();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut extras: Vec<MountedBackend> = Vec::new();
-    for (_, backend) in writable_mounts {
+    let mut migrated_mems: Vec<String> = Vec::new();
+    let mut from_host_mems: Vec<String> = Vec::new();
+    for (host_mount, backend) in writable_mounts {
         let bytes = match backend.read_mem_config() {
             Ok(Some(b)) => b,
             _ => continue,
@@ -34,15 +57,30 @@ fn hydrate_read_mems(
             Ok(v) => v,
             Err(_) => continue,
         };
-        let config = match memstead_schema::config::parse_mem_config(&value) {
+        let mut config = match memstead_schema::config::parse_mem_config(&value) {
             Ok(c) => c,
             Err(_) => continue,
         };
+        if config.read_mems.is_empty() {
+            continue;
+        }
+        let mut retained: std::collections::BTreeMap<String, memstead_schema::config::ReadMemSpec> =
+            Default::default();
+        let mut host_migrated_any = false;
         for (mem_name, spec) in &config.read_mems {
             if writable_names.contains(mem_name) {
+                // Shadowed by a writable mount — historically skipped;
+                // the entry is dead weight either way. Drop it.
+                host_migrated_any = true;
                 continue;
             }
-            if !seen.insert(mem_name.clone()) {
+            if already_mounted.contains(mem_name) || !seen.insert(mem_name.clone()) {
+                // Already a workspace mount (or migrated from an
+                // earlier host in this same pass) — clean up the key.
+                host_migrated_any = true;
+                if !migrated_mems.contains(mem_name) {
+                    migrated_mems.push(mem_name.clone());
+                }
                 continue;
             }
             // Content-addressed cache file:
@@ -57,6 +95,10 @@ fn hydrate_read_mems(
                 .map(|ext| cache_dir.join(format!("{stem}.{ext}")))
                 .find(|p| p.is_file());
             let Some(archive_path) = archive_path else {
+                // Cache file missing — keep the entry so the reference
+                // stays visible (and the migration retries next boot)
+                // instead of silently vanishing.
+                retained.insert(mem_name.clone(), spec.clone());
                 continue;
             };
             // Read the archive's actual schema pin from its
@@ -90,12 +132,37 @@ fn hydrate_read_mems(
                 cross_linkable: false,
                 migration_target: None,
             };
-            let backend: Box<dyn MemBackend> =
+            let ro_backend: Box<dyn MemBackend> =
                 Box::new(memstead_base::storage::ArchiveBackend::new(archive_path));
-            extras.push((read_mount, backend));
+            extras.push((read_mount, ro_backend));
+            migrated_mems.push(mem_name.clone());
+            host_migrated_any = true;
+        }
+
+        if host_migrated_any {
+            // Rewrite the host config with only the retained (still
+            // unresolvable) entries — engine-owned writer, one commit.
+            config.read_mems = retained;
+            if let Ok(mut out) = serde_json::to_vec_pretty(&config) {
+                out.push(b'\n');
+                if let Err(e) = backend.write_mem_config(&out) {
+                    tracing::warn!(
+                        mem = %host_mount.mem,
+                        error = %e,
+                        "readMems migration: mounts were created but the legacy \
+                         key could not be removed from the host config — the \
+                         migration warning will repeat next boot"
+                    );
+                }
+            }
+            from_host_mems.push(host_mount.mem.clone());
         }
     }
-    Ok(extras)
+    Ok(LegacyReadMemMigration {
+        mounts: extras,
+        migrated_mems,
+        from_host_mems,
+    })
 }
 
 pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootError> {
@@ -114,18 +181,46 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     };
 
     let settings = workspace.settings.clone();
-    let writable_names: std::collections::HashSet<String> =
+    // The shadow set is WRITABLE mounts only — archive read-mounts in
+    // the roster must not shadow-refuse their own migration cleanup.
+    let writable_names: std::collections::HashSet<String> = workspace
+        .mounts
+        .iter()
+        .filter(|m| m.capability == memstead_base::MountCapability::Write)
+        .map(|m| m.mem.clone())
+        .collect();
+    let all_mounted_names: std::collections::HashSet<String> =
         workspace.mounts.iter().map(|m| m.mem.clone()).collect();
     let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> = Vec::with_capacity(workspace.mounts.len());
     for mount in workspace.mounts {
         let backend = crate::storage::instantiate_full_backend(&mount)?;
         mounts.push((mount, backend));
     }
-    // Read-mem hydration. For each writable mount, read its
-    // `__MEMSTEAD:mem.config.json` and attach each `readMems` entry as
-    // a read-only `ArchiveBackend` pointing at the global mem cache.
-    let extra_read_mounts = hydrate_read_mems(&mounts, &writable_names)?;
-    mounts.extend(extra_read_mounts);
+    // One-way legacy migration: per-host-mem `readMems` entries become
+    // workspace-level read-only mounts (registered in the engine-managed
+    // mount state), the legacy keys are removed through the engine's own
+    // config writers, and one warning names what moved. A second boot
+    // finds no key and is silent.
+    let migration = migrate_legacy_read_mems(&mounts, &writable_names, &all_mounted_names)?;
+    let migration_happened = !migration.migrated_mems.is_empty();
+    if !migration.mounts.is_empty() {
+        mounts.extend(migration.mounts);
+        // Persist the migrated mounts so the next boot loads them from
+        // the mount state directly.
+        let persisted = memstead_base::Workspace {
+            mounts: mounts.iter().map(|(m, _)| m.clone()).collect(),
+            settings: settings.clone(),
+        };
+        use memstead_base::workspace_store::WorkspaceStoreAdapter as _;
+        if let Err(e) = FileWorkspaceStore::new().save_state(workspace_root, &persisted) {
+            tracing::warn!(
+                error = %e,
+                "readMems migration: mount-state persistence failed — the \
+                 migrated mounts serve this boot but the next boot repeats \
+                 the migration"
+            );
+        }
+    }
     // Read authored schemas off the git-branch `__MEMSTEAD:schemas/` ref
     // (empty for a fresh, legacy `__SCHEMAS`-only, or pre-migration
     // workspace) and overlay them, so a schema installed onto the ref by
@@ -173,6 +268,14 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     // pre-v2 store refuses boot with the migrate-naming error (`memstead
     // projection migrate` is the only path from old-shape configs).
     engine.set_pipeline_configs(memstead_base::load_pipeline_configs(workspace_root)?);
+    if migration_happened {
+        engine.push_load_warning(
+            memstead_base::ops::WarningHint::ReadMemsMigratedToMounts {
+                mems: migration.migrated_mems,
+                from_host_mems: migration.from_host_mems,
+            },
+        );
+    }
     // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
     // (best-effort) so editors validate authored schema YAML.
     let _ = memstead_schema::meta_schema::publish_meta_schemas(workspace_root);

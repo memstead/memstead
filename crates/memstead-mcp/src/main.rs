@@ -121,7 +121,7 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 
     tracing::info!("boot: mem-repo workspace at {}", workspace_root.display());
 
-    let engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root)
+    let mut engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root)
         .with_context(|| format!("failed to load workspace at {}", workspace_root.display()))?;
 
     let stats = engine.status();
@@ -147,65 +147,27 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     let plugin = settings.plugin.clone();
 
     if !args.read_mems.is_empty() {
-        let target_mem_name = engine
-            .mem_router()
-            .writable_mems()
-            .iter()
-            .next()
-            .cloned()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "CONFIG_ERROR: --read-mem was supplied but no writable mem is registered to receive the registration."
-                )
-            })?;
-        let target = memstead_git_branch::mem_cache::TargetMem::MemRepo {
-            workspace_root: &workspace_root,
-            mem_name: &target_mem_name,
-        };
-        let install_ctx = memstead_git_branch::CommitContext {
-            actor: memstead_git_branch::Actor::Cli,
-            client: Some(memstead_git_branch::ClientId {
-                name: "memstead-mcp".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            }),
-            tool: None,
-            note: None,
-            logical_operation_id: None,
-            entity_ids: None,
-        };
-        let install_message =
-            format!("memstead: install (read-mem registration into {target_mem_name})");
         let cwd = std::env::current_dir()
             .context("Could not determine current directory for --read-mem resolution")?;
-        // Pass the workspace's writable-mount roster so
-        // `install_read_mem` can refuse archives whose authoritative
-        // name shadows a writable. An earlier shape reported install
-        // success while `hydrate_read_mems` silently skipped the
-        // registration.
-        let writable: Vec<String> = engine
-            .mem_router()
-            .writable_mems()
-            .iter()
-            .map(|n| n.to_string())
-            .collect();
-        let writable_refs: Vec<&str> = writable.iter().map(String::as_str).collect();
-        let results = read_mems::install_read_mems(
-            &args.read_mems,
-            target,
-            &install_ctx,
-            &install_message,
-            &cwd,
-            &writable_refs,
-        );
+        let results = read_mems::install_read_mems(&mut engine, &args.read_mems, &cwd);
+        let mut any_mount_change = false;
         for result in results {
             match result {
-                read_mems::ReadMemResult::Installed { archive, outcome } => {
+                read_mems::ReadMemResult::Installed {
+                    archive,
+                    outcome,
+                    mount,
+                } => {
+                    if mount != memstead_git_branch::mem_cache::MountRegistration::AlreadyRegistered
+                    {
+                        any_mount_change = true;
+                    }
                     tracing::info!(
-                        "installed read-mem {} from {} (cache_copy={}, registered={})",
+                        "installed read-mem {} from {} (cache_copy={}, mount={:?})",
                         outcome.mem_name,
                         archive.display(),
                         outcome.copied_to_cache,
-                        outcome.registered_in_config,
+                        mount,
                     );
                     // Install warnings surface on the boot log — the
                     // install happens before the MCP transport exists, so
@@ -223,6 +185,9 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
                     tracing::warn!("skipped --read-mem {}: {}", archive.display(), error);
                 }
             }
+        }
+        if any_mount_change && let Err(e) = engine.persist_state() {
+            tracing::warn!("--read-mem mount-state persistence failed: {e}");
         }
     }
 

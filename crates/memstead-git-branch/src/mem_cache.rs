@@ -25,35 +25,12 @@ use memstead_schema::{
     ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_SCHEMA_PREFIX, PublishedMemConfig, SchemaRef,
     SchemaRegistry,
 };
-use serde_json::{Map, Value, json};
 
 use crate::entity::loader::LoadError;
-use crate::mem_repo_config::{self, MemRepoWriteError};
+use crate::mem_repo_config::MemRepoWriteError;
 use crate::validator::{ValidationError, validate_and_normalize_archive};
-use crate::vcs::CommitContext;
 
-/// Where the per-mem `readMems` registration should land.
-///
-/// `Disk` mirrors the legacy disk-shaped workspace: `install_read_mem`
-/// reads `<mem_dir>/.memstead/config.json`, mutates `readMems`, and
-/// writes the updated bytes back. `MemRepo` targets the post-cutover
-/// mem-repo-backed workspace: the same mutation lands as a tree commit
-/// on `mem-repo-git:__MEMSTEAD:mems/<mem_name>/config.json` instead.
-///
-/// One enum keeps the validator + cache-copy logic shared across both
-/// shapes — the config-registration step is the only branching point.
-#[derive(Debug, Clone, Copy)]
-pub enum TargetMem<'a> {
-    /// Legacy disk-shaped mem. `path` is the directory containing
-    /// `.memstead/config.json`.
-    Disk(&'a Path),
-    /// Post-cutover mem-repo-backed mem. The config blob lives in
-    /// `<workspace_root>/mem-repo/.git/` at `__MEMSTEAD:mems/<mem_name>/config.json`.
-    MemRepo {
-        workspace_root: &'a Path,
-        mem_name: &'a str,
-    },
-}
+
 
 /// Env var that overrides `<data_dir>/memstead/mems` for tests.
 pub const CACHE_OVERRIDE_ENV: &str = "MEMSTEAD_MEM_CACHE";
@@ -123,22 +100,7 @@ pub fn read_published_config(archive_path: &Path) -> Result<PublishedMemConfig, 
     })
 }
 
-/// Outcome of an `install_read_mem` call — captured so callers can log
-/// what actually happened without re-deriving it from side effects.
-#[derive(Debug, Clone)]
-pub struct InstallOutcome {
-    /// Mem name, taken from the validator's approved config.
-    pub mem_name: String,
-    /// `true` if canonical bytes were written into the cache on this
-    /// call; `false` if the content-addressed cache file already
-    /// existed and was left alone.
-    pub copied_to_cache: bool,
-    /// `true` if a new `readMems` entry was added to the mem config
-    /// on this call; `false` if the name was already declared.
-    pub registered_in_config: bool,
-    /// Typed non-fatal issues surfaced by the install.
-    pub warnings: Vec<WarningHint>,
-}
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
@@ -297,210 +259,76 @@ pub fn install_to_cache(
     })
 }
 
-pub fn install_read_mem(
-    archive_path: &Path,
-    target: TargetMem<'_>,
-    ctx: &CommitContext<'_>,
-    commit_message: &str,
-    writable_mem_names: &[&str],
-) -> Result<InstallOutcome, InstallError> {
-    // 1. Validate + canonicalize. Never install bytes the validator
-    //    rejected; never install the caller's original bytes — what
-    //    lands in the cache is always the validator's canonical form.
-    let bytes = std::fs::read(archive_path)?;
-    let validated = validate_and_normalize_archive(&bytes).map_err(InstallError::Validation)?;
+/// What happened on the mount-registration side of an install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MountRegistration {
+    /// Fresh registration.
+    Registered,
+    /// Same name, same content-addressed cache file — nothing to do.
+    AlreadyRegistered,
+    /// Same name, new content — the mount was re-pointed at the new
+    /// cache file.
+    Refreshed,
+}
 
-    let warnings: Vec<WarningHint> = Vec::new();
-
-    // Refuse up-front
-    // when the archive's authoritative name shadows a writable mount
-    // in the caller's workspace. The boot-time
-    // `hydrate_read_mems` silently skips a read-mem registration
-    // that collides with a writable mount — without this gate the
-    // install reports success but the subsequent reload produces no
-    // observable effect. The check is opt-in via the caller-supplied
-    // `writable_mem_names` slice; passing an empty slice (no
-    // workspace context available) skips the gate, preserving the
-    // engine-helper's testability in non-workspace contexts.
-    if let Some(shadowed) = writable_mem_names
-        .iter()
-        .find(|n| **n == validated.config.name.as_str())
-    {
-        return Err(InstallError::ShadowsWritable {
-            archive_name: validated.config.name.clone(),
-            shadows_writable: (*shadowed).to_string(),
-        });
-    }
-
-    // 2. Content-addressed atomic-rename write. The cache file is keyed
-    //    by `<name>-<content_key>.mem`, where `content_key` is a short
-    //    digest of the validator's canonical bytes. `name` passed the
-    //    strict slug regex and the key is hex, so the path is provably
-    //    safe on every platform.
-    //
-    //    Content-addressing removes the
-    //    name-collision class entirely. Two distinct archives sharing an
-    //    internal mem name produce distinct keys → distinct files, so
-    //    they coexist in the global cache without one shadowing the other
-    //    (the per-registration `cacheKey` resolves each workspace to the
-    //    right file). Re-installing byte-identical content resolves to the
-    //    same key → the file already exists → idempotent dedup no-op. The
-    //    prior `CACHE_NAME_COLLISION` dead end (distinct bytes, same name,
-    //    no engine-reachable remedy) can no longer occur.
-    let cache_dir = mem_cache_dir();
-    std::fs::create_dir_all(&cache_dir)?;
-    let cache_key = content_cache_key(&validated.canonical_bytes);
-    let dest = cache_dir.join(format!(
-        "{}-{}.{ARCHIVE_EXTENSION}",
-        validated.config.name, cache_key
-    ));
-    let copied_to_cache = if dest.exists() {
-        // The key IS the content digest, so an existing file at this path
-        // is byte-identical by construction — dedup, skip the write.
-        false
-    } else {
-        let tmp = dest.with_extension(format!("{ARCHIVE_EXTENSION}.tmp"));
-        std::fs::write(&tmp, &validated.canonical_bytes)?;
-        std::fs::rename(&tmp, &dest)?;
-        true
-    };
-
-    // 3. Config-registration side effect — branches on target shape. The
-    //    `cache_key` is recorded in the `readMems` entry so the loader
-    //    resolves the content-addressed file.
-    let registered_in_config = match target {
-        TargetMem::Disk(mem_dir) => {
-            let (mut config, config_path) = memstead_schema::config::load_config(mem_dir)?;
-            register_read_mem_in_config(
-                &config_path,
-                &mut config,
-                &validated.config.name,
-                &cache_key,
-            )?
+/// Register a cached archive (the outcome of [`install_to_cache`]) as
+/// a workspace-level read-only mount on the live engine — the shared
+/// back half of `memstead install` and the MCP server's `--read-mem`
+/// boot flag. Idempotent per content: an existing read-only mount
+/// under the same name is a no-op when it already points at this
+/// cache file, and an in-place refresh (unregister + re-register)
+/// when the content changed. The caller persists the mount state
+/// (`engine.persist_state()`) after a `Registered` / `Refreshed`
+/// outcome.
+pub fn register_cached_archive(
+    engine: &mut memstead_base::Engine,
+    outcome: &CacheInstallOutcome,
+    by_tool: &'static str,
+) -> Result<MountRegistration, memstead_base::EngineError> {
+    let registration = match engine.mount(&outcome.mem_name) {
+        Some(existing) if existing.capability == memstead_base::MountCapability::ReadOnly => {
+            match &existing.storage {
+                memstead_base::MountStorage::Archive { path } if *path == outcome.cache_path => {
+                    return Ok(MountRegistration::AlreadyRegistered);
+                }
+                _ => {
+                    engine.unregister_read_mount(&outcome.mem_name)?;
+                    MountRegistration::Refreshed
+                }
+            }
         }
-        TargetMem::MemRepo {
-            workspace_root,
-            mem_name,
-        } => register_read_mem_in_mem_repo(
-            workspace_root,
-            mem_name,
-            &validated.config.name,
-            &cache_key,
-            ctx,
-            commit_message,
-        )?,
+        // A writable mount of the same name is the caller's shadow
+        // gate's business (install_to_cache refuses it up-front).
+        _ => MountRegistration::Registered,
     };
 
-    Ok(InstallOutcome {
-        mem_name: validated.config.name,
-        copied_to_cache,
-        registered_in_config,
-        warnings,
-    })
-}
-
-/// Register `read_mem_name` in the workspace mem `mem_name`'s
-/// `configs/<mem_name>.json` blob on `mem-repo-git:main`. Read-modify-
-/// write: parse the existing blob, insert the `readMems` entry if
-/// missing, serialize, commit on top of `main`. Returns `true` if the
-/// entry was added, `false` if it was already declared (no commit lands).
-///
-/// Race window: non-atomic against concurrent writers on `main`. See
-/// `mem_repo_config::commit_config`'s docstring.
-fn register_read_mem_in_mem_repo(
-    workspace_root: &Path,
-    mem_name: &str,
-    read_mem_name: &str,
-    cache_key: &str,
-    ctx: &CommitContext<'_>,
-    commit_message: &str,
-) -> Result<bool, InstallError> {
-    use memstead_schema::config::ConfigError;
-
-    // Read the current blob bytes from the tree, parse as JSON, mutate.
-    let config = mem_repo_config::read_config(workspace_root, mem_name)
-        .map_err(|e| ConfigError::Other(format!("read configs/{mem_name}.json: {e}")))?;
-    let mut value = serde_json::to_value(&config)
-        .map_err(|e| ConfigError::Other(format!("re-serialize MemConfig: {e}")))?;
-    let obj = value
-        .as_object_mut()
-        .ok_or_else(|| ConfigError::Other("config root must be a JSON object".into()))?;
-
-    let entry = obj
-        .entry("readMems")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let map = entry
-        .as_object_mut()
-        .ok_or_else(|| ConfigError::Other("readMems must be a JSON object".into()))?;
-
-    if map.contains_key(read_mem_name) {
-        return Ok(false);
-    }
-
-    map.insert(
-        read_mem_name.to_string(),
-        json!({ "source": { "type": "local" }, "cacheKey": cache_key }),
+    let mount = memstead_base::Mount {
+        mem: outcome.mem_name.clone(),
+        schema: Some(outcome.schema.clone()),
+        storage: memstead_base::MountStorage::Archive {
+            path: outcome.cache_path.clone(),
+        },
+        capability: memstead_base::MountCapability::ReadOnly,
+        lifecycle: memstead_base::MountLifecycle::Eager,
+        cross_linkable: false,
+        migration_target: None,
+    };
+    let backend: Box<dyn memstead_base::MemBackend> = Box::new(
+        memstead_base::storage::ArchiveBackend::new(outcome.cache_path.clone()),
     );
-
-    let updated_bytes = serde_json::to_vec_pretty(&value)
-        .map_err(|e| ConfigError::Other(format!("serialize updated config: {e}")))?;
-    mem_repo_config::commit_config(
-        workspace_root,
-        mem_name,
-        &updated_bytes,
-        ctx,
-        commit_message,
-    )?;
-    Ok(true)
+    let origin = memstead_base::MemOrigin::RuntimeCreated {
+        at: std::time::SystemTime::now(),
+        by_tool,
+    };
+    engine.register_read_mount(mount, backend, origin)?;
+    Ok(registration)
 }
 
-/// Add a `readMems` entry for `mem_name` with `source: { type: "local" }`
-/// to `config` and persist the change. Returns `true` if the map changed,
-/// `false` if the name was already declared (any source) so the config was
-/// left untouched and no write happened.
-///
-/// Kept private because the only valid caller today is `install_read_mem`;
-/// hand-editing read mems from inside the engine would bypass the
-/// archive-validation step up front.
-fn register_read_mem_in_config(
-    config_path: &Path,
-    config: &mut Value,
-    mem_name: &str,
-    cache_key: &str,
-) -> Result<bool, memstead_schema::config::ConfigError> {
-    let obj = config.as_object_mut().ok_or_else(|| {
-        memstead_schema::config::ConfigError::Other("config root must be a JSON object".into())
-    })?;
 
-    let entry = obj
-        .entry("readMems")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let map = entry.as_object_mut().ok_or_else(|| {
-        memstead_schema::config::ConfigError::Other("readMems must be a JSON object".into())
-    })?;
 
-    if map.contains_key(mem_name) {
-        return Ok(false);
-    }
 
-    map.insert(
-        mem_name.to_string(),
-        json!({ "source": { "type": "local" }, "cacheKey": cache_key }),
-    );
 
-    // Route through update_config_field so the commit path (validation +
-    // pretty-print + trailing newline) stays in one place. We pass the
-    // already-mutated map back in so the writer just serializes it.
-    let new_read_mems = Value::Object(map.clone());
-    memstead_schema::config::update_config_field(
-        config_path,
-        config,
-        "readMems",
-        new_read_mems,
-        false,
-    )?;
-    Ok(true)
-}
+
 
 /// Outcome of `extract_archive_schema_if_needed` — so callers can log
 /// the specific reason a no-op happened, or know whether the mem's
@@ -726,18 +554,11 @@ mod tests {
         export_mem(&mem_dir, &config, archive_path, None, None).unwrap();
     }
 
-    /// Disk-shape install convenience for the existing test fixtures.
-    /// Wraps `install_read_mem(archive, TargetMem::Disk(project), ...)`
-    /// with a deterministic dummy commit context so the call shape stays
-    /// minimal at every test site.
-    fn install_to_disk(archive: &Path, project: &Path) -> Result<InstallOutcome, InstallError> {
-        install_read_mem(
-            archive,
-            TargetMem::Disk(project),
-            &CommitContext::internal(),
-            "memstead: install (test)",
-            &[],
-        )
+    /// Cache-side install convenience for the test fixtures — no
+    /// shadow set, no mount registration (the engine-side half has its
+    /// own tests).
+    fn cache_install(archive: &Path) -> Result<CacheInstallOutcome, InstallError> {
+        install_to_cache(archive, &[])
     }
 
     /// Build a writable-mem config directory for install tests. Adds the
@@ -839,28 +660,21 @@ mod tests {
         build_valid_archive(&src_dir, &src, "aws-patterns");
 
         let _g = CacheGuard::install(&cache);
-        let outcome = install_to_disk(&src, &project).unwrap();
+        let outcome = cache_install(&src).unwrap();
 
         assert_eq!(outcome.mem_name, "aws-patterns");
         assert!(outcome.copied_to_cache);
-        assert!(outcome.registered_in_config);
         assert!(
             outcome.warnings.is_empty(),
             "current-format install must not warn: {:?}",
             outcome.warnings
         );
 
-        // Project config lists the mem with a local source and the
-        // content-addressed cache key the loader resolves against.
-        let cfg_raw = std::fs::read_to_string(project.join(".memstead/config.json")).unwrap();
-        let cfg: serde_json::Value = serde_json::from_str(&cfg_raw).unwrap();
-        let rv = cfg["readMems"]["aws-patterns"]["source"]["type"].as_str();
-        assert_eq!(rv, Some("local"));
-        let key = cfg["readMems"]["aws-patterns"]["cacheKey"]
-            .as_str()
-            .expect("registration must record the content cacheKey");
-
+        // The outcome carries the content-addressed cache reference the
+        // mount registration points at.
+        let key = outcome.cache_key.as_str();
         let cached = cache.join(format!("aws-patterns-{key}.mem"));
+        assert_eq!(outcome.cache_path, cached);
         assert!(cached.is_file(), "content-addressed cache file must exist");
 
         // Cached bytes must equal the validator's canonical form, and the
@@ -887,7 +701,7 @@ mod tests {
         build_valid_archive(&src_dir, &src, "alpha");
 
         let _g = CacheGuard::install(&cache);
-        install_to_disk(&src, &project).unwrap();
+        cache_install(&src).unwrap();
 
         // The temp-then-rename path must leave the content-addressed
         // `<name>-<key>.mem` on disk and never the `.tmp` sibling. The
@@ -922,53 +736,15 @@ mod tests {
         build_valid_archive(&src_dir, &src, "alpha");
 
         let _g = CacheGuard::install(&cache);
-        let first = install_to_disk(&src, &project).unwrap();
+        let first = cache_install(&src).unwrap();
         assert!(first.copied_to_cache);
-        assert!(first.registered_in_config);
 
-        // Second run: both side effects report `false`. The cache file
-        // survives untouched (existing-file guard fires before the
-        // canonical write).
-        let second = install_to_disk(&src, &project).unwrap();
+        // Second run: the cache side effect reports `false`. The cache
+        // file survives untouched (existing-file guard fires before
+        // the canonical write) and the content key is stable.
+        let second = cache_install(&src).unwrap();
         assert!(!second.copied_to_cache);
-        assert!(!second.registered_in_config);
-    }
-
-    #[test]
-    fn install_preserves_existing_non_local_source() {
-        let tmp = TempDir::new().unwrap();
-        let cache = tmp.path().join("cache");
-        let project = tmp.path().join("project");
-        let src_dir = tmp.path().join("src");
-        let src = tmp.path().join("x.mem");
-        std::fs::create_dir_all(project.join(".memstead")).unwrap();
-        std::fs::write(
-            project.join(".memstead/config.json"),
-            r#"{
-                "version":"1.0.0",
-                "schema":"default@1.0.0",
-                "readMems": {
-                    "alpha": {"source":{"type":"url","url":"https://example.com/x.mem"}}
-                }
-            }"#,
-        )
-        .unwrap();
-        build_valid_archive(&src_dir, &src, "alpha");
-
-        let _g = CacheGuard::install(&cache);
-        let outcome = install_to_disk(&src, &project).unwrap();
-        assert!(outcome.copied_to_cache);
-        assert!(
-            !outcome.registered_in_config,
-            "existing entry must not be overwritten"
-        );
-
-        let cfg_raw = std::fs::read_to_string(project.join(".memstead/config.json")).unwrap();
-        let cfg: serde_json::Value = serde_json::from_str(&cfg_raw).unwrap();
-        assert_eq!(
-            cfg["readMems"]["alpha"]["source"]["type"].as_str(),
-            Some("url")
-        );
+        assert_eq!(first.cache_key, second.cache_key);
     }
 
     /// Two byte-distinct archives that share an internal mem name both
@@ -989,17 +765,9 @@ mod tests {
         build_valid_archive(&src_a_dir, &src_a, "alpha");
 
         let _g = CacheGuard::install(&cache);
-        let first = install_to_disk(&src_a, &project).unwrap();
+        let first = cache_install(&src_a).unwrap();
         assert!(first.copied_to_cache);
-        let key_a = std::fs::read_to_string(project.join(".memstead/config.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|c| {
-                c["readMems"]["alpha"]["cacheKey"]
-                    .as_str()
-                    .map(String::from)
-            })
-            .expect("first install records a cacheKey");
+        let key_a = first.cache_key.clone();
 
         // Build a *different* archive that lands at the same canonical
         // name (`alpha`) with distinct content.
@@ -1025,31 +793,13 @@ mod tests {
         );
 
         // Second install (different bytes, same name): SUCCEEDS — no
-        // collision, no dead end. A second project registers it.
-        let project_b = tmp.path().join("project-b");
-        std::fs::create_dir_all(&project_b).unwrap();
-        write_minimal_mem_config(&project_b, "specs");
-        let second = install_read_mem(
-            &src_b,
-            TargetMem::Disk(&project_b),
-            &CommitContext::internal(),
-            "memstead: install (test)",
-            &[],
-        )
-        .unwrap();
+        // collision, no dead end.
+        let second = cache_install(&src_b).unwrap();
         assert!(
             second.copied_to_cache,
             "distinct bytes must install, not collide"
         );
-        let key_b = std::fs::read_to_string(project_b.join(".memstead/config.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|c| {
-                c["readMems"]["alpha"]["cacheKey"]
-                    .as_str()
-                    .map(String::from)
-            })
-            .expect("second install records a cacheKey");
+        let key_b = second.cache_key.clone();
 
         // Distinct content ⇒ distinct keys ⇒ both cache files coexist.
         assert_ne!(
@@ -1077,19 +827,15 @@ mod tests {
         build_valid_archive(&src_dir, &src, "alpha");
 
         let _g = CacheGuard::install(&cache);
-        let first = install_to_disk(&src, &project).unwrap();
+        let first = cache_install(&src).unwrap();
         assert!(first.copied_to_cache);
 
         // Re-install with the SAME archive bytes — canonical(input)
         // matches the cache file → idempotent success.
-        let second = install_to_disk(&src, &project).unwrap();
+        let second = cache_install(&src).unwrap();
         assert!(
             !second.copied_to_cache,
             "idempotent re-install must report copied_to_cache: false"
-        );
-        assert!(
-            !second.registered_in_config,
-            "idempotent re-install must not re-register"
         );
     }
 
@@ -1135,7 +881,7 @@ mod tests {
         repack_with_foreign_meta_dir(&modern, &foreign);
 
         let _g = CacheGuard::install(&cache);
-        let err = install_to_disk(&foreign, &project)
+        let err = cache_install(&foreign)
             .expect_err("a foreign meta-layout archive must not install");
         assert!(matches!(err, InstallError::Validation(_)), "got {err:?}");
     }
@@ -1151,7 +897,7 @@ mod tests {
         std::fs::write(&src, b"not a zip").unwrap();
 
         let _g = CacheGuard::install(&cache);
-        let err = install_to_disk(&src, &project).unwrap_err();
+        let err = cache_install(&src).unwrap_err();
         assert!(matches!(err, InstallError::Validation(_)));
         // Validation failed up front → neither cache file nor temp
         // sibling was written.

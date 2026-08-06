@@ -96,6 +96,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Quickstart(args) => commands::quickstart::run(&ctx, args),
         #[cfg(feature = "mem-repo")]
         Command::Install(args) => commands::install::run(&ctx, args),
+        #[cfg(feature = "mem-repo")]
+        Command::Uninstall(args) => commands::uninstall::run(&ctx, args),
         Command::Link(args) => commands::link::run(&ctx, args),
         Command::Publish(args) => commands::publish::run(&ctx, args),
         Command::Unpublish(args) => commands::unpublish::run(&ctx, args),

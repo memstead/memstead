@@ -635,7 +635,7 @@ fn install_is_idempotent() {
         .assert()
         .success();
 
-    // First install: copied + registered.
+    // First install: copied + mounted.
     memstead()
         .current_dir(receiver.path())
         .arg("install")
@@ -644,7 +644,7 @@ fn install_is_idempotent() {
         .assert()
         .success()
         .stdout(contains("copied into cache"))
-        .stdout(contains("registered as a read-mem"));
+        .stdout(contains("registered as a workspace-level read-only mount"));
 
     // Second install: no-op on both sides.
     memstead()
@@ -655,7 +655,7 @@ fn install_is_idempotent() {
         .assert()
         .success()
         .stdout(contains("already in cache"))
-        .stdout(contains("already registered as a read-mem"));
+        .stdout(contains("already registered as a read-mem mount (unchanged)"));
 }
 
 /// After installing an archive as an RO mount: `memstead workspace dump

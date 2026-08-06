@@ -103,9 +103,15 @@ pub enum Command {
     Quickstart(commands::quickstart::Args),
 
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`
-    /// from the memstead.io registry.
+    /// from the memstead.io registry. Registers it as a workspace-level
+    /// read-only mount; `memstead uninstall` is the symmetric removal.
     #[cfg(feature = "mem-repo")]
     Install(commands::install::Args),
+
+    /// Remove an installed read-mem's workspace-level mount. The global
+    /// cache copy survives by default; re-`install` re-registers it.
+    #[cfg(feature = "mem-repo")]
+    Uninstall(commands::uninstall::Args),
 
     /// Link a filesystem mem to a registry-published dependency.
     /// `memstead link <scope/name>` fetches the archive into the

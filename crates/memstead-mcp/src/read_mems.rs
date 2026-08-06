@@ -1,13 +1,18 @@
 //! Batch-install helper for the `--read-mem` CLI flag.
 //!
-//! Wraps [`memstead_git_branch::mem_cache::install_read_mem`] in a small loop
-//! so the binary entry point stays thin and integration tests can drive
-//! the behavior without spawning the MCP server.
+//! Wraps [`memstead_git_branch::mem_cache::install_to_cache`] +
+//! [`memstead_git_branch::mem_cache::register_cached_archive`] in a
+//! small loop so the binary entry point stays thin and integration
+//! tests can drive the behavior without spawning the MCP server. Each
+//! archive lands in the global cache and registers as a
+//! **workspace-level read-only mount** — the same model `memstead
+//! install` produces; no writable mem's config is touched.
 
 use std::path::{Path, PathBuf};
 
-use memstead_git_branch::mem_cache::{self, InstallError, InstallOutcome, TargetMem};
-use memstead_git_branch::vcs::CommitContext;
+use memstead_git_branch::mem_cache::{
+    self, CacheInstallOutcome, InstallError, MountRegistration,
+};
 
 /// Outcome of processing a single `--read-mem` argument.
 ///
@@ -16,44 +21,44 @@ use memstead_git_branch::vcs::CommitContext;
 /// tests inspect structure.
 #[derive(Debug)]
 pub enum ReadMemResult {
-    /// Validator accepted the archive; side effects captured in
-    /// `outcome` (cache write + config registration, either or both may
-    /// have been no-ops for an already-present mem).
+    /// Validator accepted the archive; it is cached and mounted
+    /// (either or both may have been no-ops for already-present
+    /// content).
     Installed {
         archive: PathBuf,
-        outcome: InstallOutcome,
+        outcome: CacheInstallOutcome,
+        mount: MountRegistration,
     },
-    /// Validator rejected the archive, or an I/O step around it failed.
-    /// `InstallError::Validation`'s `Display` preserves path + reason
-    /// from the underlying `ValidationError`, so a warn log over the
-    /// error value is actionable without unwrapping the variant.
-    Failed {
-        archive: PathBuf,
-        error: InstallError,
-    },
+    /// Validation, cache I/O, or mount registration failed. The error
+    /// `Display` preserves path + reason, so a warn log over the
+    /// value is actionable without unwrapping the variant.
+    Failed { archive: PathBuf, error: String },
 }
 
-/// Install every `--read-mem` archive against `target`, one by one,
-/// collecting per-archive outcomes.
+/// Install every `--read-mem` archive as a workspace-level read-only
+/// mount, one by one, collecting per-archive outcomes.
 ///
 /// **Warn-and-continue semantics.** A malformed archive does not abort
 /// the batch — the caller receives a `Failed` entry and keeps going.
 /// The write mem stays useful on its own; tearing the server down
 /// over one bad `--read-mem` is worse DX than a visible warning plus
-/// a running server. Hard-fail remains a future option via a dedicated
-/// flag if a use case emerges; not built now.
+/// a running server.
 ///
-/// Relative `archive` paths resolve against `cwd`. The `target` selects
-/// disk vs. mem-repo registration shape; `ctx` + `commit_message` ride
-/// along for the mem-repo arm.
+/// Relative `archive` paths resolve against `cwd`. The caller persists
+/// the mount state once after the batch (`engine.persist_state()`)
+/// when any entry reports a `Registered` / `Refreshed` mount.
 pub fn install_read_mems(
+    engine: &mut memstead_base::Engine,
     archives: &[PathBuf],
-    target: TargetMem<'_>,
-    ctx: &CommitContext<'_>,
-    commit_message: &str,
     cwd: &Path,
-    writable_mem_names: &[&str],
 ) -> Vec<ReadMemResult> {
+    let writable: Vec<String> = engine
+        .mem_router()
+        .writable_mems()
+        .iter()
+        .map(|n| n.to_string())
+        .collect();
+
     archives
         .iter()
         .map(|archive| {
@@ -62,16 +67,30 @@ pub fn install_read_mems(
             } else {
                 cwd.join(archive)
             };
-            match mem_cache::install_read_mem(
-                &archive,
-                target,
-                ctx,
-                commit_message,
-                writable_mem_names,
-            ) {
-                Ok(outcome) => ReadMemResult::Installed { archive, outcome },
-                Err(error) => ReadMemResult::Failed { archive, error },
+            let writable_refs: Vec<&str> = writable.iter().map(String::as_str).collect();
+            let outcome = match mem_cache::install_to_cache(&archive, &writable_refs) {
+                Ok(o) => o,
+                Err(e) => {
+                    return ReadMemResult::Failed {
+                        archive,
+                        error: e.to_string(),
+                    };
+                }
+            };
+            match mem_cache::register_cached_archive(engine, &outcome, "--read-mem") {
+                Ok(mount) => ReadMemResult::Installed {
+                    archive,
+                    outcome,
+                    mount,
+                },
+                Err(e) => ReadMemResult::Failed {
+                    archive,
+                    error: e.to_string(),
+                },
             }
         })
         .collect()
 }
+
+/// Re-exported for callers that log validation failures specifically.
+pub type ReadMemInstallError = InstallError;
