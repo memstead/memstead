@@ -673,6 +673,16 @@ pub enum WarningHint {
         mem: String,
         unregistered_at: String,
     },
+    /// One-time boot migration: legacy `readMems` entries found in a
+    /// writable mem's config were converted into workspace-level
+    /// read-only mounts and the legacy key was removed from the
+    /// config. `mems` lists the migrated read-mem names,
+    /// `from_host_mems` the writable mems whose configs carried them.
+    /// A second boot is silent — the source key is gone.
+    ReadMemsMigratedToMounts {
+        mems: Vec<String>,
+        from_host_mems: Vec<String>,
+    },
     /// The mem was created on storage with no version control (a
     /// folder mount). Provenance means something WEAKER there than the
     /// headline "every mutation a reasoned commit": mutations ARE
@@ -1425,6 +1435,20 @@ impl fmt::Display for WarningHint {
                  reattach was unexpected, run `memstead mem delete \
                  {mem}` to destroy the storage and start fresh."
             ),
+            WarningHint::ReadMemsMigratedToMounts {
+                mems,
+                from_host_mems,
+            } => write!(
+                f,
+                "legacy `readMems` registrations were migrated to \
+                 workspace-level read-only mounts: [{}] (previously \
+                 attached to writable mem(s) [{}]). The legacy key was \
+                 removed from the config; this migration runs once. \
+                 Remove a migrated read-mem with `memstead uninstall \
+                 <name>`.",
+                mems.join(", "),
+                from_host_mems.join(", "),
+            ),
             WarningHint::FolderMemProvenance { mem } => write!(
                 f,
                 "mem '{mem}' was created on folder storage with no \
@@ -1576,6 +1600,7 @@ impl WarningHint {
             Self::ResidualStubForReadOnlyReferrers { .. } => "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
             Self::MemFilesNotDeleted { .. } => "MEM_FILES_NOT_DELETED",
             Self::MemReattachedAfterUnregister { .. } => "MEM_REATTACHED_AFTER_UNREGISTER",
+            Self::ReadMemsMigratedToMounts { .. } => "READ_MEMS_MIGRATED_TO_MOUNTS",
             Self::FolderMemProvenance { .. } => "FOLDER_MEM_PROVENANCE",
             Self::SchemaAuthoringSourceMissing { .. } => "SCHEMA_AUTHORING_SOURCE_MISSING",
             Self::SchemaAuthoringSourceDiverged { .. } => "SCHEMA_AUTHORING_SOURCE_DIVERGED",
@@ -1608,6 +1633,7 @@ impl WarningHint {
             Self::MemReloaded { mem, .. } => Some(mem.as_str()),
             Self::MemFilesNotDeleted { mem, .. } => Some(mem.as_str()),
             Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
+            Self::ReadMemsMigratedToMounts { .. } => None,
             Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
             Self::DuplicateRelationship { from, .. } => Some(from.mem()),
@@ -2053,6 +2079,13 @@ impl WarningHint {
             } => serde_json::json!({
                 "mem": mem,
                 "unregistered_at": unregistered_at,
+            }),
+            Self::ReadMemsMigratedToMounts {
+                mems,
+                from_host_mems,
+            } => serde_json::json!({
+                "mems": mems,
+                "from_host_mems": from_host_mems,
             }),
             Self::FolderMemProvenance { mem } => serde_json::json!({
                 "mem": mem,

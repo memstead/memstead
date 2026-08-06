@@ -262,6 +262,59 @@ impl Engine {
         Ok(Some(mount.backend))
     }
 
+    /// Register a read-only mount at runtime — the install path's
+    /// engine primitive. Same registration pipeline as
+    /// [`Self::register_writable_mem`] (collision probe, config read,
+    /// schema resolution, entity load, router swap); the router branch
+    /// lands the mount in the read-only slot for
+    /// `capability: ReadOnly` + `Archive` storage, so `is_writable`
+    /// stays false and `archive_path_for_mem` resolves.
+    pub fn register_read_mount(
+        &mut self,
+        mount: Mount,
+        backend: Box<dyn MemBackend>,
+        origin: MemOrigin,
+    ) -> Result<(), EngineError> {
+        self.register_writable_mem_inner(mount, backend, origin, true)
+    }
+
+    /// Unregister a read-only mount at runtime — the uninstall path's
+    /// engine primitive, mirroring [`Self::unregister_writable_mem`]
+    /// for the read-only slot. Returns `Ok(None)` when the name is
+    /// not a registered read-only mount (writable mems are the
+    /// delete/unregister verbs' business, deliberately not this
+    /// one's). Registration removal only — the backing archive file
+    /// (global cache) is never touched.
+    pub fn unregister_read_mount(
+        &mut self,
+        mem_name: &str,
+    ) -> Result<Option<Box<dyn MemBackend>>, EngineError> {
+        let pos = self.mounts.iter().position(|m| {
+            m.mount.mem == mem_name
+                && m.mount.capability == crate::workspace::MountCapability::ReadOnly
+        });
+        let Some(idx) = pos else {
+            return Ok(None);
+        };
+        let mount = self.mounts.remove(idx);
+        self.schemas.remove(&mount.mount.mem);
+        let _removed = self.store.remove_entities_by_mem(mem_name);
+        self.load_warnings
+            .retain(|w| w.source_mem() != Some(mem_name));
+        Arc::make_mut(&mut self.mem_router).remove_read_only(mem_name);
+        self.invalidate_communities();
+        self.invalidate_search_indexes();
+        Ok(Some(mount.backend))
+    }
+
+    /// Append a typed load-time warning from outside the engine's own
+    /// load pipeline — the boot orchestrators (which live in the full
+    /// crate) use this to surface one-time migrations they perform
+    /// around engine construction.
+    pub fn push_load_warning(&mut self, warning: crate::ops::WarningHint) {
+        self.load_warnings.push(warning);
+    }
+
     /// Register a writable mem at runtime. Engine-level primitive
     /// that `memstead_mem_create` builds on.
     ///
@@ -466,6 +519,7 @@ impl Engine {
         let last_known_head = backend.current_head().ok().flatten();
         let mem_name_for_router = mount.mem.clone();
         let storage_for_router = mount.storage.clone();
+        let mount_capability_for_router = mount.capability;
         self.mounts.push(MountedBackend {
             mount,
             backend,
@@ -476,16 +530,28 @@ impl Engine {
             archive_provenance: None,
         });
 
-        // Step 7: COW snapshot swap on mem_router. Folder mounts
-        // surface their on-disk path; other backends register with
-        // `dir: None` (mem-repo-backed mounts have no working tree).
-        let dir: Option<PathBuf> = match &storage_for_router {
-            MountStorage::Folder { path } => Some(path.clone()),
-            MountStorage::GitBranch { .. }
-            | MountStorage::Archive { .. }
-            | MountStorage::InMemory => None,
-        };
-        Arc::make_mut(&mut self.mem_router).add_writable(mem_name_for_router, dir, origin);
+        // Step 7: COW snapshot swap on mem_router, branched on the
+        // mount's capability — a read-only archive mount registers in
+        // the router's read-only slot (so `is_writable` stays false
+        // and `archive_path_for_mem` resolves), everything else in the
+        // writable slot. Folder mounts surface their on-disk path;
+        // other backends register with `dir: None` (mem-repo-backed
+        // mounts have no working tree).
+        match (&mount_capability_for_router, &storage_for_router) {
+            (crate::workspace::MountCapability::ReadOnly, MountStorage::Archive { path }) => {
+                Arc::make_mut(&mut self.mem_router)
+                    .add_read_only(mem_name_for_router, path.clone());
+            }
+            _ => {
+                let dir: Option<PathBuf> = match &storage_for_router {
+                    MountStorage::Folder { path } => Some(path.clone()),
+                    MountStorage::GitBranch { .. }
+                    | MountStorage::Archive { .. }
+                    | MountStorage::InMemory => None,
+                };
+                Arc::make_mut(&mut self.mem_router).add_writable(mem_name_for_router, dir, origin);
+            }
+        }
 
         // Step 8: invalidate dependent memos.
         if run_global_passes {

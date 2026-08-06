@@ -226,6 +226,77 @@ fn content_cache_key(canonical_bytes: &[u8]) -> String {
 /// Returns an `InstallOutcome` describing which effects fired. The
 /// authoritative mem name comes from the validator's approved
 /// config, not from the submitted filename or caller argument.
+/// Outcome of [`install_to_cache`] — the cache-side half of an
+/// install, with everything the caller needs to register the archive
+/// as a workspace-level read-only mount.
+#[derive(Debug, Clone)]
+pub struct CacheInstallOutcome {
+    /// Mem name, taken from the validator's approved config — the
+    /// archive's sole identity.
+    pub mem_name: String,
+    /// The archive's schema pin, from its bundled config.
+    pub schema: memstead_schema::SchemaRef,
+    /// Content-addressed cache file the mount's `Archive` storage
+    /// points at.
+    pub cache_path: PathBuf,
+    /// The content digest half of the cache filename.
+    pub cache_key: String,
+    /// `true` if canonical bytes were written on this call; `false`
+    /// on the idempotent dedup path.
+    pub copied_to_cache: bool,
+    /// Typed non-fatal issues surfaced by the install.
+    pub warnings: Vec<WarningHint>,
+}
+
+/// Validate an archive and land it in the global content-addressed
+/// cache — the cache-side half of `memstead install`, with **no
+/// config or mount side effects** (the caller registers the returned
+/// archive as a workspace-level read-only mount). Shares the
+/// validator, the shadow-name gate, and the content-addressed
+/// atomic-rename write with the historical combined path.
+pub fn install_to_cache(
+    archive_path: &Path,
+    writable_mem_names: &[&str],
+) -> Result<CacheInstallOutcome, InstallError> {
+    let bytes = std::fs::read(archive_path)?;
+    let validated = validate_and_normalize_archive(&bytes).map_err(InstallError::Validation)?;
+
+    if let Some(shadowed) = writable_mem_names
+        .iter()
+        .find(|n| **n == validated.config.name.as_str())
+    {
+        return Err(InstallError::ShadowsWritable {
+            archive_name: validated.config.name.clone(),
+            shadows_writable: (*shadowed).to_string(),
+        });
+    }
+
+    let cache_dir = mem_cache_dir();
+    std::fs::create_dir_all(&cache_dir)?;
+    let cache_key = content_cache_key(&validated.canonical_bytes);
+    let dest = cache_dir.join(format!(
+        "{}-{}.{ARCHIVE_EXTENSION}",
+        validated.config.name, cache_key
+    ));
+    let copied_to_cache = if dest.exists() {
+        false
+    } else {
+        let tmp = dest.with_extension(format!("{ARCHIVE_EXTENSION}.tmp"));
+        std::fs::write(&tmp, &validated.canonical_bytes)?;
+        std::fs::rename(&tmp, &dest)?;
+        true
+    };
+
+    Ok(CacheInstallOutcome {
+        mem_name: validated.config.name,
+        schema: validated.config.schema.clone(),
+        cache_path: dest,
+        cache_key,
+        copied_to_cache,
+        warnings: Vec::new(),
+    })
+}
+
 pub fn install_read_mem(
     archive_path: &Path,
     target: TargetMem<'_>,

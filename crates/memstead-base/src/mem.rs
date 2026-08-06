@@ -220,6 +220,21 @@ impl MemRouterSnapshot {
         self.read_only_archives.insert(name, archive_path);
     }
 
+    /// Remove a read-only mem from the router. Returns `true` when the
+    /// entry was present. Mirror of [`Self::remove_writable`] for the
+    /// uninstall path: writable entries are not affected, and `visible`
+    /// only drops the name when no writable entry still carries it.
+    pub fn remove_read_only(&mut self, name: &str) -> bool {
+        if self.read_only_archives.remove(name).is_some() {
+            if !self.writable_entries.contains_key(name) {
+                self.visible.remove(name);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     /// Check if a mem is writable.
     pub fn is_writable(&self, mem: &str) -> bool {
         self.writable.contains(mem)
