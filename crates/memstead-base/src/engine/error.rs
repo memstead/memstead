@@ -669,11 +669,29 @@ pub enum EngineError {
     /// `details.sources`. Empty `sources` marks an internal lookup miss
     /// (an already-resolved schema absent from the engine's per-mem
     /// map), not a genuine source-resolution failure.
-    #[error("mem {mem}: schema pin {pin:?} did not resolve in any schema source")]
+    ///
+    /// The MESSAGE summarises the trail — which sources were searched
+    /// and whether the name was found at other versions — so the
+    /// distinction between a wrong-version pin and a never-installed
+    /// package reaches consumers that never open `details` (a reported
+    /// autonomous loop burned five rounds on the payload-only shape).
+    /// `install_hint` (set by [`EngineError::with_schema_install_probe`]
+    /// where a workspace root is known) names the authoring package
+    /// that exists in the working tree but was never installed, and
+    /// the message then points at `memstead schema install`.
+    #[error("{}", schema_not_found_message(mem, pin, sources, install_hint))]
     SchemaNotFound {
         mem: String,
         pin: String,
         sources: Vec<SchemaSourceDiagnostic>,
+        /// Path to an authoring package in the working tree whose
+        /// manifest name matches the pin's name while NO source holds
+        /// any version of that name — i.e. the package was authored
+        /// but never installed. `None` when no such package exists,
+        /// when the name is installed at other versions (a version
+        /// mismatch is a different fix), or when no workspace root
+        /// was available to probe.
+        install_hint: Option<String>,
     },
     /// A schema package handed to `install_schema` failed validation —
     /// the loader's semantic checks or the section-heading round-trip
@@ -1393,11 +1411,25 @@ impl EngineError {
                 "mem": mem,
                 "since": since,
             }),
-            EngineError::SchemaNotFound { mem, pin, sources } => serde_json::json!({
-                "mem": mem,
-                "pin": pin,
-                "sources": sources,
-            }),
+            EngineError::SchemaNotFound {
+                mem,
+                pin,
+                sources,
+                install_hint,
+            } => {
+                let mut details = serde_json::json!({
+                    "mem": mem,
+                    "pin": pin,
+                    "sources": sources,
+                });
+                if let Some(path) = install_hint {
+                    details["install_hint"] = serde_json::json!({
+                        "authoring_package": path,
+                        "command": format!("memstead schema install {path}"),
+                    });
+                }
+                details
+            }
             EngineError::SchemaPackageInvalid {
                 name,
                 version,
@@ -1630,6 +1662,124 @@ fn _required_field_unset_msg(field: &str, entity_type: &str, on_create: bool) ->
 /// hash-recovery via `memstead_entity` (which returns the same empty
 /// hash). Surface the actual corrective action — pass
 /// `expected_hash: ""` — instead.
+/// Render the `SCHEMA_NOT_FOUND` message with its source-trail
+/// summary. The trail says exactly which sources were searched and
+/// what each held — never more (a source absent from `sources` is not
+/// claimed searched). A right-name/wrong-version failure and a
+/// never-installed failure are distinguishable from this sentence
+/// alone; the structured `details.sources` stays the richer channel.
+/// Empty `sources` (internal lookup miss) keeps the bare legacy
+/// sentence — there was no source search to summarise.
+fn schema_not_found_message(
+    mem: &str,
+    pin: &str,
+    sources: &[SchemaSourceDiagnostic],
+    install_hint: &Option<String>,
+) -> String {
+    let mut msg = format!("mem {mem}: schema pin {pin:?} did not resolve in any schema source");
+    if sources.is_empty() {
+        return msg;
+    }
+    let name = pin.split('@').next().unwrap_or(pin);
+    let trail: Vec<String> = sources
+        .iter()
+        .map(|s| {
+            if let Some(status) = s.status {
+                format!("{} ({status})", s.source)
+            } else if s.versions_found.is_empty() {
+                format!("{} (nothing for {name:?})", s.source)
+            } else {
+                format!("{} (holds {})", s.source, s.versions_found.join(", "))
+            }
+        })
+        .collect();
+    msg.push_str(&format!(" — searched {}", trail.join(", ")));
+    if sources.iter().any(|s| !s.versions_found.is_empty()) {
+        msg.push_str(&format!(
+            "; the name {name:?} exists at the versions listed — the pinned version is wrong, \
+             or the pinned version was never installed"
+        ));
+    }
+    if let Some(path) = install_hint {
+        msg.push_str(&format!(
+            "; an authoring package named {name:?} exists at {path:?} but is not installed — \
+             run: memstead schema install {path}"
+        ));
+    }
+    msg
+}
+
+impl EngineError {
+    /// Attach the schema-install hint to a `SchemaNotFound` where a
+    /// workspace root is known: probe the root's immediate
+    /// subdirectories for an authoring schema package (a directory the
+    /// schema loader accepts) whose manifest name matches the pin's
+    /// name, and record its path when NO resolution source holds any
+    /// version of that name. Any other error variant — and any
+    /// `SchemaNotFound` where the name IS installed at some version
+    /// (a version mismatch is a different fix), where `sources` is
+    /// empty (internal miss, no source search happened), or where no
+    /// candidate package exists — passes through unchanged. Read-only:
+    /// the probe never writes, installs, or seals anything.
+    pub fn with_schema_install_probe(self, workspace_root: Option<&std::path::Path>) -> Self {
+        let EngineError::SchemaNotFound {
+            mem,
+            pin,
+            sources,
+            install_hint,
+        } = self
+        else {
+            return self;
+        };
+        let hint = if install_hint.is_some() {
+            install_hint
+        } else if sources.is_empty() || sources.iter().any(|s| !s.versions_found.is_empty()) {
+            None
+        } else {
+            let name = pin.split('@').next().unwrap_or(&pin).to_string();
+            workspace_root.and_then(|root| probe_authoring_package(root, &name))
+        };
+        EngineError::SchemaNotFound {
+            mem,
+            pin,
+            sources,
+            install_hint: hint,
+        }
+    }
+}
+
+/// Scan `root`'s immediate subdirectories for a loadable schema
+/// package whose manifest name is `name`. Hidden directories and the
+/// workspace's own storage (`mem-repo`, `.memstead`) are skipped. The
+/// full loader runs (error path only, so the cost is acceptable) — a
+/// directory that merely LOOKS like a package but fails validation
+/// produces no hint, because `memstead schema install` would refuse it
+/// anyway.
+fn probe_authoring_package(root: &std::path::Path, name: &str) -> Option<String> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = entry.file_name();
+        let dir_name = dir_name.to_string_lossy();
+        if dir_name.starts_with('.') || dir_name == "mem-repo" {
+            continue;
+        }
+        if !path.join("schema.yaml").is_file() {
+            continue;
+        }
+        if let Ok(schema) = memstead_schema::load_schema_from_dir(&path) {
+            let (loaded_name, _) = schema.id();
+            if loaded_name == name {
+                return Some(path.display().to_string());
+            }
+        }
+    }
+    None
+}
+
 fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
     if is_stub {
         format!(
@@ -1706,6 +1856,7 @@ mod plan05_subsystem_tests {
             mem: "specs".to_string(),
             pin: "default@99.0.0".to_string(),
             sources,
+            install_hint: None,
         };
         assert_eq!(err.code(), "SCHEMA_NOT_FOUND");
         let d = err.details();
@@ -1734,6 +1885,142 @@ mod plan05_subsystem_tests {
             src[2].get("versions_found").is_some(),
             "remote still ships an (empty) versions_found list",
         );
+    }
+
+    /// The MESSAGE (not just `details`) summarises the source trail,
+    /// and a right-name/wrong-version failure is distinguishable from
+    /// a never-installed one without opening `details`. The message
+    /// names exactly the sources in `sources` — never one that was
+    /// not searched — and the empty-sources internal miss keeps the
+    /// bare legacy sentence.
+    #[test]
+    fn schema_not_found_message_summarises_trail_and_distinguishes_wrong_version() {
+        // Wrong version: the builtin catalogue holds `default@1.0.0`,
+        // the pin asks for 99.0.0.
+        let requested: semver::Version = "99.0.0".parse().unwrap();
+        let wrong_version = EngineError::SchemaNotFound {
+            mem: "specs".to_string(),
+            pin: "default@99.0.0".to_string(),
+            sources: SchemaSourceDiagnostic::for_failed_pin("default", &requested, &[]),
+            install_hint: None,
+        };
+        let msg = wrong_version.to_string();
+        assert!(msg.contains("searched local_storage"), "got: {msg}");
+        assert!(msg.contains("builtin (holds"), "got: {msg}");
+        assert!(msg.contains("remote (not_configured)"), "got: {msg}");
+        assert!(
+            msg.contains("the pinned version is wrong"),
+            "wrong-version case must be named in the message: {msg}"
+        );
+
+        // Never installed: no source holds any version of the name.
+        let never: semver::Version = "1.0.0".parse().unwrap();
+        let never_installed = EngineError::SchemaNotFound {
+            mem: "specs".to_string(),
+            pin: "no-such-schema@1.0.0".to_string(),
+            sources: SchemaSourceDiagnostic::for_failed_pin("no-such-schema", &never, &[]),
+            install_hint: None,
+        };
+        let msg2 = never_installed.to_string();
+        assert!(
+            msg2.contains("nothing for \"no-such-schema\""),
+            "never-installed case names the empty sources: {msg2}"
+        );
+        assert!(
+            !msg2.contains("the pinned version is wrong"),
+            "never-installed must NOT claim a version mismatch: {msg2}"
+        );
+        assert_ne!(msg, msg2, "the two failures are distinguishable");
+
+        // Internal lookup miss (empty sources): bare legacy sentence,
+        // no trail is claimed.
+        let internal = EngineError::SchemaNotFound {
+            mem: "specs".to_string(),
+            pin: "x@1.0.0".to_string(),
+            sources: Vec::new(),
+            install_hint: None,
+        };
+        assert_eq!(
+            internal.to_string(),
+            "mem specs: schema pin \"x@1.0.0\" did not resolve in any schema source",
+        );
+    }
+
+    /// The install-hint probe attaches the authoring-package pointer
+    /// exactly when a loadable package with the pin's name sits in the
+    /// workspace root while NO source holds any version of the name —
+    /// and stays silent for a version mismatch (installed at another
+    /// version), for an absent package, and for a non-`SchemaNotFound`
+    /// error.
+    #[test]
+    fn schema_install_probe_hints_only_for_uninstalled_authoring_package() {
+        // Workspace root carrying the memstead-schema `examples/minimal`
+        // package (name `recipe`) as an authoring folder.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let src_pkg = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../memstead-schema/examples/minimal");
+        let dst = tmp.path().join("recipe");
+        std::fs::create_dir_all(dst.join("types")).unwrap();
+        std::fs::copy(src_pkg.join("schema.yaml"), dst.join("schema.yaml")).unwrap();
+        for entry in std::fs::read_dir(src_pkg.join("types")).unwrap().flatten() {
+            std::fs::copy(entry.path(), dst.join("types").join(entry.file_name())).unwrap();
+        }
+
+        let requested: semver::Version = "0.1.0".parse().unwrap();
+        let not_found = || EngineError::SchemaNotFound {
+            mem: "specs".to_string(),
+            pin: "recipe@0.1.0".to_string(),
+            sources: SchemaSourceDiagnostic::for_failed_pin("recipe", &requested, &[]),
+            install_hint: None,
+        };
+
+        // Uninstalled + authored → hint attaches, message + details
+        // point at `memstead schema install`.
+        let hinted = not_found().with_schema_install_probe(Some(tmp.path()));
+        let msg = hinted.to_string();
+        assert!(
+            msg.contains("memstead schema install"),
+            "hint must name the install command: {msg}"
+        );
+        assert!(msg.contains("recipe"), "hint names the package: {msg}");
+        let d = hinted.details();
+        assert!(
+            d["install_hint"]["command"]
+                .as_str()
+                .unwrap()
+                .starts_with("memstead schema install"),
+            "details carry the hint: {d}"
+        );
+
+        // No workspace root → no hint.
+        let no_root = not_found().with_schema_install_probe(None);
+        assert!(!no_root.to_string().contains("schema install"));
+
+        // No such authoring package → no hint.
+        let other_tmp = tempfile::TempDir::new().unwrap();
+        let absent = not_found().with_schema_install_probe(Some(other_tmp.path()));
+        assert!(!absent.to_string().contains("schema install"));
+
+        // Version mismatch against an installed package (some source
+        // holds versions of the name) → no hint even though the
+        // authoring package exists.
+        let mismatch_req: semver::Version = "99.0.0".parse().unwrap();
+        let mismatch = EngineError::SchemaNotFound {
+            mem: "specs".to_string(),
+            pin: "default@99.0.0".to_string(),
+            sources: SchemaSourceDiagnostic::for_failed_pin("default", &mismatch_req, &[]),
+            install_hint: None,
+        }
+        .with_schema_install_probe(Some(tmp.path()));
+        assert!(
+            !mismatch.to_string().contains("schema install"),
+            "version mismatch must not hint install: {mismatch}"
+        );
+
+        // Non-SchemaNotFound errors pass through unchanged.
+        let other = EngineError::UnknownMem("specs".to_string())
+            .with_schema_install_probe(Some(tmp.path()));
+        assert_eq!(other.code(), "UNKNOWN_MEM");
     }
 
     /// The ambiguous-grammar case suggests a

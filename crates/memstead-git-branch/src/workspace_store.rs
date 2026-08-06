@@ -155,11 +155,14 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     // `__MEMSTEAD:schemas/` ref (`ref_schemas` above); the folder dir is
     // typically absent in a git-branch workspace → a no-op overlay.
     let fixed_schemas_dir = workspace_root.join(".memstead").join("schemas");
+    // Root is known here, so an unresolved pin can be enriched with
+    // the never-installed-package hint before it surfaces.
     let mut engine = Engine::from_mounts_with_schemas_dir_and_extra(
         mounts,
         Some(fixed_schemas_dir.as_path()),
         ref_schemas,
-    )?;
+    )
+    .map_err(|e| e.with_schema_install_probe(Some(workspace_root)))?;
     engine.set_settings(settings);
     engine.set_workspace_root(workspace_root.to_path_buf());
     engine.set_backend_factory(crate::storage::instantiate_full_backend);

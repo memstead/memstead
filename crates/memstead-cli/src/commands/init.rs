@@ -168,7 +168,24 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         details: None,
     })?;
 
+    // Folder-mem provenance notice: this storage class has no version
+    // control, so say at creation what provenance means here. Shares
+    // the engine's typed warning so the CLI and `memstead_mem_create`
+    // read as one voice. A warning, never a refusal.
+    let provenance_notice = memstead_base::ops::WarningHint::FolderMemProvenance {
+        mem: args.name.clone(),
+    };
+
     if ctx.json {
+        let mut warnings = vec![json!({
+            "code": provenance_notice.code(),
+            "message": provenance_notice.message(),
+        })];
+        // Additive optional entry on the stable success shape — only
+        // present when the pin is unresolved at init time.
+        if let Some(w) = &unresolved_warning {
+            warnings.push(json!({ "code": "SCHEMA_NOT_FOUND", "message": w }));
+        }
         let mut payload = json!({
             "workspace_root": target.display().to_string(),
             "config_path": config_path(&target).display().to_string(),
@@ -176,11 +193,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "schema": schema_pin.as_display(),
             "format": FILESYSTEM_WORKSPACE_FORMAT,
         });
-        // Additive optional field on the stable success shape — only
-        // present when the pin is unresolved at init time.
-        if let Some(w) = &unresolved_warning {
-            payload["warnings"] = json!([{ "code": "SCHEMA_NOT_FOUND", "message": w }]);
-        }
+        payload["warnings"] = json!(warnings);
         return print_json(&payload);
     }
 
@@ -205,6 +218,12 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         "- Drop `.md` entities into the workspace root.".to_string(),
         "- `memstead link <scope/name>` to add a cross-mem dependency.".to_string(),
         "- `memstead publish` to push the mem to the registry.".to_string(),
+        String::new(),
+        format!(
+            "> [{}] {}",
+            provenance_notice.code(),
+            provenance_notice.message()
+        ),
     ]);
     print_markdown(&lines.join("\n"));
     Ok(())

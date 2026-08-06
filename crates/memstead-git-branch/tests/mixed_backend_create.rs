@@ -82,6 +82,16 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
         "heuristic git-branch create produces a real 40-hex sha, got {:?}",
         plans.seed_commit_sha
     );
+    // Refusal complement (plan 10): a git-backed mem has real
+    // commits — creating it carries NO folder-provenance notice.
+    assert!(
+        !plans
+            .warnings
+            .iter()
+            .any(|w| w.code() == "FOLDER_MEM_PROVENANCE"),
+        "git-branch create must not warn about folder provenance: {:?}",
+        plans.warnings
+    );
 
     // The explicit-folder create.
     let response = mem_management::create_mem(
@@ -119,6 +129,17 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
                 .all(|c| c.is_ascii_hexdigit())),
         "folder seed cursor must be synthetic, got a 40-hex sha: {:?}",
         response.seed_commit_sha
+    );
+
+    // The folder create — storage without version control — carries
+    // the provenance notice (plan 10), and was not blocked by it.
+    assert!(
+        response
+            .warnings
+            .iter()
+            .any(|w| w.code() == "FOLDER_MEM_PROVENANCE"),
+        "folder create must carry the provenance notice: {:?}",
+        response.warnings
     );
 
     // Mount registered as a folder mount.

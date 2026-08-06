@@ -346,10 +346,14 @@ impl Engine {
             .clone();
         let schema = crate::engine::SchemaResolver::new(&builtin_schemas)
             .resolve(&effective_pin)
-            .map_err(|sources| EngineError::SchemaNotFound {
-                mem: mount.mem.clone(),
-                pin: effective_pin.as_display(),
-                sources,
+            .map_err(|sources| {
+                EngineError::SchemaNotFound {
+                    mem: mount.mem.clone(),
+                    pin: effective_pin.as_display(),
+                    sources,
+                    install_hint: None,
+                }
+                .with_schema_install_probe(self.workspace_root())
             })?;
 
         // Step 4: load entities via the backend, push into the
@@ -536,7 +540,9 @@ impl Engine {
                     &target.version,
                     &consulted,
                 ),
+                install_hint: None,
             }
+            .with_schema_install_probe(self.workspace_root())
         })?;
 
         // `Mount.schema` is now the optional assertion; for a mem the

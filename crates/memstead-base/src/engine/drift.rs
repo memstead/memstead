@@ -691,6 +691,7 @@ impl Engine {
                 // absent from the per-mem map), not a source-resolution
                 // failure — no per-source diagnostics apply.
                 sources: Vec::new(),
+                install_hint: None,
             })?
             .clone();
 

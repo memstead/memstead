@@ -213,6 +213,7 @@ impl Engine {
                     mem: m.mount.mem.clone(),
                     pin: effective_pin.as_display(),
                     sources,
+                    install_hint: None,
                 })?;
             schemas.insert(m.mount.mem.clone(), schema.clone());
 
@@ -380,7 +381,10 @@ impl Engine {
         let local = crate::schema_source::FolderSchemaSource::for_workspace(workspace_root)
             .read_schemas()
             .map_err(|e| EngineError::SchemaResolverInit(e.to_string()))?;
-        let mut engine = Engine::from_mounts_inner(mounts, local)?;
+        // Root is known here, so an unresolved pin can be enriched with
+        // the never-installed-package hint before it surfaces.
+        let mut engine = Engine::from_mounts_inner(mounts, local)
+            .map_err(|e| e.with_schema_install_probe(Some(workspace_root)))?;
         engine.set_settings(settings);
         engine.workspace_root = Some(workspace_root.to_path_buf());
         // Load the workspace store's pipeline configs — the v2 single-record
@@ -1837,7 +1841,12 @@ pattern = "exec-*"
         let err = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
             .unwrap_err();
         match err {
-            EngineError::SchemaNotFound { mem, pin, sources } => {
+            EngineError::SchemaNotFound {
+                mem,
+                pin,
+                sources,
+                install_hint: _,
+            } => {
                 assert_eq!(mem, "specs");
                 assert_eq!(pin, "totally-not-a-schema@1.0.0");
                 // The diagnostics name all three sources in fixed order;

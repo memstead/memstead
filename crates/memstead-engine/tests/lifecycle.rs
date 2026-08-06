@@ -224,6 +224,25 @@ fn create_mem_succeeds_with_wildcard_rule() {
         config_path.exists(),
         "config.json must land at {config_path:?}"
     );
+    // Folder storage has no version control: creation carries the
+    // provenance notice naming the ledger, the placeholder SHA, and
+    // the durability condition — and the create was NOT blocked (the
+    // assertions above already proved the mem landed).
+    let notice = response
+        .warnings
+        .iter()
+        .find(|w| w.code() == "FOLDER_MEM_PROVENANCE")
+        .expect("folder-mem create must carry FOLDER_MEM_PROVENANCE");
+    let msg = notice.message();
+    assert!(msg.contains("changelog"), "names the ledger: {msg}");
+    assert!(
+        msg.contains("placeholder"),
+        "names the placeholder sha: {msg}"
+    );
+    assert!(
+        msg.contains("durable"),
+        "names the durability condition: {msg}"
+    );
 }
 
 /// The seed commit's provenance carries the caller's actor + client

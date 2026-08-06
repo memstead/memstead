@@ -917,7 +917,9 @@ impl Engine {
                         &target.version,
                         &consulted,
                     ),
+                    install_hint: None,
                 }
+                .with_schema_install_probe(self.workspace_root())
             })?,
         };
         Ok(crate::ops::integrity::conformance_findings(

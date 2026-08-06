@@ -1029,10 +1029,14 @@ pub fn create_mem(
     builtin_schemas.extend_from_slice(engine.builtin_schemas());
     let resolved_schema = memstead_base::engine::SchemaResolver::new(&builtin_schemas)
         .resolve(&params.schema_ref)
-        .map_err(|sources| memstead_base::EngineError::SchemaNotFound {
-            mem: params.name.clone(),
-            pin: params.schema_ref.to_string(),
-            sources,
+        .map_err(|sources| {
+            memstead_base::EngineError::SchemaNotFound {
+                mem: params.name.clone(),
+                pin: params.schema_ref.to_string(),
+                sources,
+                install_hint: None,
+            }
+            .with_schema_install_probe(engine.workspace_root())
         })?;
     let canonical_schema_ref = memstead_schema::SchemaRef::new(
         resolved_schema.manifest.name.clone(),
@@ -1155,10 +1159,14 @@ pub fn create_mem(
                 };
                 let resolved = memstead_base::engine::SchemaResolver::new(&builtin_schemas)
                     .resolve(&parsed)
-                    .map_err(|sources| memstead_base::EngineError::SchemaNotFound {
-                        mem: params.name.clone(),
-                        pin: parsed.to_string(),
-                        sources,
+                    .map_err(|sources| {
+                        memstead_base::EngineError::SchemaNotFound {
+                            mem: params.name.clone(),
+                            pin: parsed.to_string(),
+                            sources,
+                            install_hint: None,
+                        }
+                        .with_schema_install_probe(engine.workspace_root())
                     })?;
                 let canon_str = memstead_schema::SchemaRef::new(
                     resolved.manifest.name.clone(),
@@ -1639,12 +1647,23 @@ pub fn create_mem(
     // transport). The seed commit landed above; a noteless create
     // surfaces the warning without blocking.
     let note_warning = engine.note_missing_warning("create_mem", params.note.as_deref());
+    let mut warnings: Vec<memstead_base::ops::WarningHint> = note_warning.into_iter().collect();
+    // Folder storage has no version control: say at creation what
+    // provenance means there (changelog ledger, placeholder SHAs,
+    // durability tied to the surrounding repo). A warning, never a
+    // refusal — folder mems are a supported storage class. Git-branch
+    // mounts carry real commits and get no notice.
+    if storage_kind == StorageKind::Folder {
+        warnings.push(memstead_base::ops::WarningHint::FolderMemProvenance {
+            mem: params.name.clone(),
+        });
+    }
     Ok(MemCreateResponse {
         name: params.name,
         location: canonical,
         schema_ref: canonical_schema_ref,
         seed_commit_sha,
-        warnings: note_warning.into_iter().collect(),
+        warnings,
     })
 }
 

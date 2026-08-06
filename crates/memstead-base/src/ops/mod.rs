@@ -673,6 +673,17 @@ pub enum WarningHint {
         mem: String,
         unregistered_at: String,
     },
+    /// The mem was created on storage with no version control (a
+    /// folder mount). Provenance means something WEAKER there than the
+    /// headline "every mutation a reasoned commit": mutations ARE
+    /// recorded — each lands in the folder backend's changelog ledger
+    /// (`.memstead/changelog.jsonl`) with its provenance note — but
+    /// there are no commits, the `commit_sha` every mutation returns
+    /// is a synthetic placeholder, and the content is not durable
+    /// until the surrounding repository commits it. Emitted once, at
+    /// creation, to whoever is actually acting; never a refusal —
+    /// folder mems are a supported storage class.
+    FolderMemProvenance { mem: String },
     /// A `## Relationships` row was followed by trailing content that
     /// did not match the canonical em-dash delimiter (` — `, U+2014
     /// framed by spaces) — ASCII `--`, ASCII `-`, en-dash U+2013, or
@@ -1389,6 +1400,16 @@ impl fmt::Display for WarningHint {
                  reattach was unexpected, run `memstead mem delete \
                  {mem}` to destroy the storage and start fresh."
             ),
+            WarningHint::FolderMemProvenance { mem } => write!(
+                f,
+                "mem '{mem}' was created on folder storage with no \
+                 version control. Provenance here is the changelog \
+                 ledger (`.memstead/changelog.jsonl`), which records \
+                 every mutation with its note — but there are no \
+                 commits: the `commit_sha` mutations return is a \
+                 synthetic placeholder, and the content is not durable \
+                 until the surrounding repository commits it."
+            ),
             WarningHint::MemFilesNotDeleted {
                 mem,
                 reason,
@@ -1502,6 +1523,7 @@ impl WarningHint {
             Self::ResidualStubForReadOnlyReferrers { .. } => "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
             Self::MemFilesNotDeleted { .. } => "MEM_FILES_NOT_DELETED",
             Self::MemReattachedAfterUnregister { .. } => "MEM_REATTACHED_AFTER_UNREGISTER",
+            Self::FolderMemProvenance { .. } => "FOLDER_MEM_PROVENANCE",
             Self::AmbiguousDescriptionDelimiter { .. } => "AMBIGUOUS_DESCRIPTION_DELIMITER",
             Self::ParseMissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",
             Self::ParseDescriptionNotPermitted { .. } => "DESCRIPTION_NOT_PERMITTED",
@@ -1531,6 +1553,7 @@ impl WarningHint {
             Self::MemReloaded { mem, .. } => Some(mem.as_str()),
             Self::MemFilesNotDeleted { mem, .. } => Some(mem.as_str()),
             Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
+            Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
             Self::DuplicateRelationship { from, .. } => Some(from.mem()),
             Self::NoSuchRelationship { from, .. } => Some(from.mem()),
@@ -1961,6 +1984,12 @@ impl WarningHint {
             } => serde_json::json!({
                 "mem": mem,
                 "unregistered_at": unregistered_at,
+            }),
+            Self::FolderMemProvenance { mem } => serde_json::json!({
+                "mem": mem,
+                "ledger": ".memstead/changelog.jsonl",
+                "commit_sha": "synthetic placeholder (no version control)",
+                "durability": "content persists only when the surrounding repository commits it",
             }),
             Self::AmbiguousDescriptionDelimiter {
                 from,

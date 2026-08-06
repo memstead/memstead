@@ -645,10 +645,7 @@ impl CliError {
                     "source": source_origin,
                 })),
             ),
-            SchemaNotFound { mem, pin, sources } => (
-                ExitKind::Validation,
-                Some(serde_json::json!({ "mem": mem, "pin": pin, "sources": sources })),
-            ),
+            e @ SchemaNotFound { .. } => (ExitKind::Validation, Some(e.details())),
             SchemaPackageInvalid {
                 name,
                 version,

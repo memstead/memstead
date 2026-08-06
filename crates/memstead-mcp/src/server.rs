@@ -1312,14 +1312,10 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::SchemaNotFound { mem, pin, sources } => tool_error_with_payload(
+        e @ E::SchemaNotFound { .. } => tool_error_with_payload(
             "SCHEMA_NOT_FOUND",
             &message,
-            envelope(
-                "SCHEMA_NOT_FOUND",
-                message.clone(),
-                serde_json::json!({ "mem": mem, "pin": pin, "sources": sources }),
-            ),
+            envelope("SCHEMA_NOT_FOUND", message.clone(), e.details()),
         ),
         E::SchemaPackageInvalid {
             name,

@@ -8,6 +8,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **`SCHEMA_NOT_FOUND` tells the truth in its message.** An unresolved
+  schema pin now summarises the resolution trail in the message
+  itself — which sources were searched and what each held (e.g.
+  `searched local_storage (nothing for "x"), builtin (holds 1.0.0),
+  remote (not_configured)`) — so a right-name/wrong-version pin and a
+  never-installed package are distinguishable without opening
+  `details` (where the structured `sources` trail remains unchanged).
+  When the pin fails while a loadable authoring package of that name
+  sits in the workspace root uninstalled, the error names the fix:
+  `memstead schema install <path>` (message and
+  `details.install_hint`). A reported autonomous loop burned five
+  rounds and a server restart on the old one-sentence message.
+- **Folder mems say what provenance means, at creation.** Creating a
+  mem on storage without version control (a folder mount — via
+  `memstead_mem_create`, `memstead mem init` with folder storage, or
+  `memstead init`) now returns a `FOLDER_MEM_PROVENANCE` warning
+  stating plainly: mutations ARE recorded in the changelog ledger
+  (`.memstead/changelog.jsonl`) with their notes, but there are no
+  commits, the returned `commit_sha` is a synthetic placeholder, and
+  the content is not durable until the surrounding repository commits
+  it. A warning, never a refusal; git-backed mems get no notice.
 - **Batch parity: `memstead batch-create` and `memstead batch-relate`.**
   Creation and edge changes gain the atomic batch form updates already
   had, completing the CLI batch family. `batch-create --from
