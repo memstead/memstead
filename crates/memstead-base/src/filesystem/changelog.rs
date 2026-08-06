@@ -146,7 +146,74 @@ pub enum ChangelogError {
 /// Creates the `.memstead/` parent directory and the file if absent.
 pub fn append_change(workspace_root: &Path, entry: &ChangeEntry<'_>) -> Result<(), ChangelogError> {
     let now = std::time::SystemTime::now();
-    append_change_at(workspace_root, entry, now)
+    append_change_monotonic(workspace_root, entry, now)
+}
+
+/// Variant of [`append_change_at`] that guarantees the written `ts`
+/// is strictly greater than the changelog's current last-line `ts`.
+///
+/// The last-line `ts` doubles as the folder backend's drift cursor
+/// (`current_head()`), and the engine's self-write bookkeeping treats
+/// "cursor unchanged" as "no commit landed" — so two mutations landing
+/// inside the same millisecond must not share a `ts`, or the second
+/// one becomes invisible to drift detection and the events channel.
+/// When `now` is not strictly after the last line (same-millisecond
+/// commits, or a clock that stepped backwards), the written timestamp
+/// is bumped to `last + 1ms`. The format and the lexicographic-cursor
+/// dialect are unchanged — strictly increasing fixed-width RFC 3339
+/// stays strictly increasing lexicographically.
+///
+/// Production callers route here; [`append_change_at`] stays the exact
+/// write-this-timestamp primitive for deterministic tests.
+pub fn append_change_monotonic(
+    workspace_root: &Path,
+    entry: &ChangeEntry<'_>,
+    now: std::time::SystemTime,
+) -> Result<(), ChangelogError> {
+    // Compare at the cursor's own granularity — the formatted
+    // millisecond string — not raw `SystemTime`: `now` carries
+    // sub-millisecond nanos that make it "later" than the parsed
+    // last-line ts even when both format to the same millisecond,
+    // which is exactly the collision the clamp exists to prevent.
+    let effective = match last_line_ts(&changelog_path(workspace_root)) {
+        Some(last) if format_rfc3339_utc(now) <= format_rfc3339_utc(last) => {
+            last + std::time::Duration::from_millis(1)
+        }
+        _ => now,
+    };
+    append_change_at(workspace_root, entry, effective)
+}
+
+/// Read the `ts` of the changelog's last non-empty line, parsed back
+/// to a `SystemTime`. `None` when the file is absent, unreadable, or
+/// its last line doesn't carry a parseable `ts` — the monotonic clamp
+/// is best-effort and must never block an append. Reads only the tail
+/// of the file (last 4 KiB) so appends stay O(1) in changelog length;
+/// a line is well under 4 KiB per the atomicity contract above.
+fn last_line_ts(path: &Path) -> Option<std::time::SystemTime> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(4096);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+    // Lossy: a seek that lands mid-UTF-8-char only garbles the first
+    // (incomplete) line of the tail, which the rev() scan never needs.
+    let tail = String::from_utf8_lossy(&buf);
+    tail.lines()
+        .rev()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| {
+            let ts = serde_json::from_str::<serde_json::Value>(l)
+                .ok()?
+                .get("ts")?
+                .as_str()?
+                .to_string();
+            parse_rfc3339_utc(&ts)
+        })
+        .next()
 }
 
 /// Variant of [`append_change`] that takes the timestamp explicitly.
@@ -548,6 +615,58 @@ mod tests {
     fn timestamp_handles_epoch() {
         let s = format_rfc3339_utc(ts(0, 0));
         assert_eq!(s, "1970-01-01T00:00:00.000Z");
+    }
+
+    fn bare_entry() -> ChangeEntry<'static> {
+        ChangeEntry {
+            kind: MutationKind::Create,
+            entity: Some("spec:x"),
+            actor: Actor::Agent,
+            client: None,
+            note: None,
+            logical_operation_id: None,
+        }
+    }
+
+    fn line_ts(line: &str) -> String {
+        serde_json::from_str::<serde_json::Value>(line).unwrap()["ts"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn monotonic_append_bumps_same_millisecond_timestamp() {
+        // The last-line ts is the folder drift cursor; two commits in
+        // the same millisecond must still advance it, or the second
+        // becomes invisible to drift detection and the events channel.
+        let tmp = TempDir::new().unwrap();
+        let now = ts(1_778_243_696, 500);
+        append_change_monotonic(tmp.path(), &bare_entry(), now).unwrap();
+        append_change_monotonic(tmp.path(), &bare_entry(), now).unwrap();
+        let lines = read_lines(&changelog_path(tmp.path()));
+        assert_eq!(line_ts(&lines[0]), "2026-05-08T12:34:56.500Z");
+        assert_eq!(line_ts(&lines[1]), "2026-05-08T12:34:56.501Z");
+    }
+
+    #[test]
+    fn monotonic_append_bumps_backwards_clock() {
+        let tmp = TempDir::new().unwrap();
+        append_change_monotonic(tmp.path(), &bare_entry(), ts(1_778_243_696, 500)).unwrap();
+        // Clock stepped backwards a full second — still clamps to
+        // last + 1ms rather than writing a regressing cursor.
+        append_change_monotonic(tmp.path(), &bare_entry(), ts(1_778_243_695, 0)).unwrap();
+        let lines = read_lines(&changelog_path(tmp.path()));
+        assert_eq!(line_ts(&lines[1]), "2026-05-08T12:34:56.501Z");
+    }
+
+    #[test]
+    fn monotonic_append_keeps_strictly_later_timestamp_verbatim() {
+        let tmp = TempDir::new().unwrap();
+        append_change_monotonic(tmp.path(), &bare_entry(), ts(1_778_243_696, 500)).unwrap();
+        append_change_monotonic(tmp.path(), &bare_entry(), ts(1_778_243_696, 501)).unwrap();
+        let lines = read_lines(&changelog_path(tmp.path()));
+        assert_eq!(line_ts(&lines[1]), "2026-05-08T12:34:56.501Z");
     }
 
     #[test]

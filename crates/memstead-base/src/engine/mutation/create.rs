@@ -50,7 +50,7 @@ use crate::workspace::MountCapability;
 
 use super::super::{CreateEntityArgs, CreateEntityOutcome, Engine, EngineError};
 use super::{
-    EdgeRouteOutcome, make_stub, route_edge_validation, today_iso, unknown_type_error,
+    EdgeRouteOutcome, make_stub, route_edge_validation, unknown_type_error,
     validate_relation_target_grammar,
 };
 
@@ -270,7 +270,7 @@ impl Engine {
         //     a schema-promised meaning the user cannot override.
         //     `init_timestamp` is create-only (set once, then stable);
         //     `auto_timestamp` re-stamps on every update.
-        let today = today_iso();
+        let today = self.now_iso();
         // Accumulate `IGNORED_READONLY_FIELD` warnings: when the caller
         // supplied a value for an auto-managed field, the engine value
         // overwrites it below — surface that the input was discarded
@@ -1498,7 +1498,7 @@ write_rules: []
             source: Some(source.into()),
             ..Default::default()
         };
-        let mut make_args = |title: &str, a: crate::anchor::AnchorInput| {
+        let make_args = |title: &str, a: crate::anchor::AnchorInput| {
             let mut args = empty_create_args("specs", title);
             args.anchors = vec![a];
             args
@@ -2168,7 +2168,7 @@ write_rules: []
 
         // Both timestamps should reflect the engine's `today_iso()`,
         // not the caller's `2020-01-01`.
-        let today = super::today_iso();
+        let today = crate::engine::mutation::today_iso();
         assert_eq!(outcome.created_date, today);
         let entity = engine
             .get_entity(&outcome.id)

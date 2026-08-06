@@ -283,7 +283,23 @@ pub struct Engine {
     /// leak into the next operation's response, so callers that reload
     /// must take.
     pending_mem_changed: Vec<crate::ops::MemChangedNotice>,
+    /// Timestamp source for engine-stamped mutation metadata
+    /// (`created_date` on create, `last_modified` on update/relate/
+    /// rename — every field the schema marks `init_timestamp` /
+    /// `auto_timestamp`). Defaults to the system clock; tests that
+    /// assert over canonical entity bytes pin it via
+    /// [`Self::set_mutation_clock`] so two engines stamp identical
+    /// values. A testability affordance, not a behaviour switch:
+    /// nothing in production swaps the default, and the stamped
+    /// format (second-granularity RFC 3339, see
+    /// `mutation::iso_from_system_time`) is unchanged.
+    mutation_clock: MutationClock,
 }
+
+/// Clock the engine reads when stamping mutation timestamps. `Arc`'d
+/// closure rather than a trait so a test can pin a constant with one
+/// line: `engine.set_mutation_clock(Arc::new(|| some_time))`.
+pub type MutationClock = Arc<dyn Fn() -> std::time::SystemTime + Send + Sync>;
 
 /// Backend factory function pointer. Both flavours' existing
 /// `instantiate_*_backend` functions match this signature, so the

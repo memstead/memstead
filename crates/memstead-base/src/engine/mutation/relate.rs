@@ -621,7 +621,7 @@ impl Engine {
         // current ISO. Only fires on the commit-producing branch —
         // the no-op early-return above skips this block, so an
         // idempotent re-add or NoOpAbsent never advances the stamp.
-        let today = super::today_iso();
+        let today = self.now_iso();
         super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
 
         let file_path = next.file_path.clone();

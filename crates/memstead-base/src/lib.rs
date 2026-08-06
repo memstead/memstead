@@ -67,9 +67,10 @@ pub use engine::{
     FromArchiveBytesError, GitBranchBranchResetFn, GitBranchChangesSinceFn, GitBranchDiffFn,
     GitBranchExportFn, GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn,
     GitBranchPushFn, GitBranchReadTreeFn, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, INLINE_LIST_CAP,
-    ReferrerInfo, RelateAction, RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs,
-    RenameEntityOutcome, ReviewMarkStatus, SchemaSourceDiagnostic, SetReviewMarkOutcome,
-    StoryStart, UpdateEntityArgs, UpdateEntityOutcome, format_inline_list_overflow,
+    MutationClock, ReferrerInfo, RelateAction, RelateEntityArgs, RelateEntityOutcome,
+    RenameEntityArgs, RenameEntityOutcome, ReviewMarkStatus, SchemaSourceDiagnostic,
+    SetReviewMarkOutcome, StoryStart, UpdateEntityArgs, UpdateEntityOutcome,
+    format_inline_list_overflow,
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};

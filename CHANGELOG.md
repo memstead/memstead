@@ -7,6 +7,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **The engine stops losing events and moving hashes on wall-clock
+  boundaries.** Three determinism defects, each fixed at the
+  mechanism. (1) Folder-mem drift cursors strictly advance per
+  commit: the changelog append clamps a same-millisecond or
+  backwards timestamp to `last + 1ms`, so two commits inside one
+  millisecond no longer share a cursor and the second `MemChangedEvent`
+  is no longer swallowed by the self-write dedup. Format and the
+  lexicographic cursor dialect are unchanged. (2) An anchor-only
+  update no longer auto-stamps `last_modified` — the documented
+  "anchors never move `_hash`" contract now holds across second
+  boundaries, so refreshing anchors never invalidates a cached
+  `expected_hash`. (3) Mutation timestamps read an engine-owned
+  injectable clock (`Engine::set_mutation_clock`, default system
+  clock; stamped format unchanged) — a testing seam that lets
+  canonical-byte assertions pin time instead of loosening, closing
+  the cross-surface hash-parity flake.
+
 ### Added
 - **Health includes carry what health knows.** Three closures on the
   health surface. (1) `HealthIssue` gains a structured `code`

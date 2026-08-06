@@ -51,6 +51,27 @@ impl Engine {
         self.backend_factory = factory;
     }
 
+    /// Replace the mutation-timestamp clock — the source every
+    /// engine-stamped metadata field (`init_timestamp` /
+    /// `auto_timestamp` schema flags: `created_date`, `last_modified`)
+    /// reads. A testing affordance for suites that assert over
+    /// canonical entity bytes (e.g. cross-surface hash parity):
+    /// pin both engines to the same constant and byte-level
+    /// nondeterminism from wall-clock seconds disappears. Production
+    /// code never calls this — the default installed at construction
+    /// is the system clock, and the stamped format is unchanged
+    /// either way.
+    pub fn set_mutation_clock(&mut self, clock: crate::engine::MutationClock) {
+        self.mutation_clock = clock;
+    }
+
+    /// Current mutation timestamp as the second-granularity ISO form
+    /// the stamping paths write. Reads [`Self::mutation_clock`] — the
+    /// system clock unless a test pinned it.
+    pub(crate) fn now_iso(&self) -> String {
+        crate::engine::mutation::iso_from_system_time((self.mutation_clock)())
+    }
+
     /// Install the git-branch ops bundle. Full boot
     /// (`memstead_git_branch::engine_from_workspace_root`) calls this once
     /// at construction. Lean consumers leave it unset and the

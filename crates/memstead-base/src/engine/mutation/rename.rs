@@ -200,7 +200,7 @@ impl Engine {
         // `generate_markdown` so the new file carries the stamp.
         // Pre-compute `today` once so all entities rewritten by this
         // logical operation receive the same timestamp.
-        let today = super::today_iso();
+        let today = self.now_iso();
         super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
 
         let markdown = generate_markdown(&next, type_def.as_ref());

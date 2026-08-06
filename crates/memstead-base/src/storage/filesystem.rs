@@ -255,10 +255,11 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
     /// sibling's), advancing the cursor; the drift check then treats
     /// the advance exactly like a git-branch tip move. Absent
     /// changelog (a mem never mutated through the engine) keeps the
-    /// historical no-drift-signal `None`. Same-millisecond sibling
-    /// appends can momentarily share a cursor value — detection then
-    /// rides the next append (the changelog dialect's precision,
-    /// pre-existing).
+    /// historical no-drift-signal `None`. Appends go through
+    /// `append_change_monotonic`, so the cursor strictly advances even
+    /// for same-millisecond commits; only a read-append race between
+    /// separate processes can momentarily share a cursor value —
+    /// detection then rides the next append.
     fn current_head(&self) -> Result<Option<String>, BackendError> {
         let log_path = crate::filesystem::changelog::changelog_path(&self.root);
         let raw = match std::fs::read_to_string(&log_path) {
@@ -389,7 +390,10 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
             note: record.note.as_deref(),
             logical_operation_id: record.logical_operation_id.as_deref(),
         };
-        changelog::append_change_at(&self.root, &entry, record.timestamp)
+        // Monotonic variant: the last-line `ts` is this backend's
+        // drift cursor (`current_head()`), so same-millisecond commits
+        // must still advance it — see `append_change_monotonic`.
+        changelog::append_change_monotonic(&self.root, &entry, record.timestamp)
             .map_err(|e| BackendError::Other(format!("changelog append: {e}")))
     }
 

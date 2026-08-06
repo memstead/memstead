@@ -19,7 +19,7 @@ use crate::workspace::MountCapability;
 
 use super::super::{Engine, EngineError, UpdateEntityArgs, UpdateEntityOutcome};
 use super::{
-    PATCH_OLD_NOT_FOUND_CONTENT_CAP, make_stub, today_iso, unknown_type_error,
+    PATCH_OLD_NOT_FOUND_CONTENT_CAP, make_stub, unknown_type_error,
     validate_relation_target_grammar,
 };
 use crate::engine::outcomes::RelationDeclared;
@@ -646,7 +646,7 @@ impl Engine {
         // timestamp on the prior write, but `today_iso()` returns
         // date-only), and the no-op compare never matched. Compute
         // `today` for later use but don't stamp `next` yet.
-        let today = today_iso();
+        let today = self.now_iso();
 
         // Alias-synthesis pass: for schemas declaring
         // `alias_target_rel_type`, append engine-emitted relations of
@@ -766,7 +766,16 @@ impl Engine {
 
         // Real change: apply the auto-stamp now and regenerate the
         // markdown so the subsequent hash + write reflect it.
-        super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
+        // Exception — the anchor-only leg (`content_unchanged` true,
+        // reachable only because anchors/unsets are present): the
+        // sidecar is the sole delta and `_hash` excludes it, so the
+        // entity bytes must stay untouched. Stamping here would move
+        // `last_modified` (and with it `_hash`) whenever the update
+        // lands in a different second than the previous write —
+        // breaking the "anchors never move `_hash`" contract.
+        if !content_unchanged {
+            super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
+        }
         let markdown = generate_markdown(&next, type_def.as_ref());
 
         let mut warnings: Vec<WarningHint> = Vec::new();
@@ -892,7 +901,14 @@ impl Engine {
         // hand the staged write to the caller to commit. The single
         // path commits immediately; the batch path commits the whole
         // set at once.
-        let modified_date = if type_def.metadata_fields.iter().any(|f| f.auto_timestamp) {
+        let modified_date = if content_unchanged {
+            // Anchor-only: nothing was stamped; report the preserved
+            // on-entity value, mirroring the no-op branch.
+            next.metadata
+                .get("last_modified")
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default()
+        } else if type_def.metadata_fields.iter().any(|f| f.auto_timestamp) {
             today.clone()
         } else {
             String::new()
@@ -5109,6 +5125,55 @@ community:
             )
             .unwrap_err();
         assert!(matches!(err, EngineError::EmptyUpdate { .. }));
+    }
+
+    /// The same contract across a wall-clock second boundary: an
+    /// anchor-only update landing a full second after the create must
+    /// not auto-stamp `last_modified` (which would change the entity
+    /// bytes and move `_hash`). Pre-fix, the anchor-only leg fell past
+    /// the no-op guard into the unconditional auto-stamp and this
+    /// failed whenever create and update straddled a second — the
+    /// pinned clock makes that straddle deterministic.
+    #[test]
+    fn anchor_only_update_across_second_boundary_never_moves_hash() {
+        let (mut engine, _tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+
+        let t0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_778_243_696);
+        engine.set_mutation_clock(std::sync::Arc::new(move || t0));
+        // Re-create baseline under the pinned clock so the stamped
+        // `last_modified` is exactly t0's second.
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.metadata = [("level".to_string(), "M1".to_string())]
+            .into_iter()
+            .collect();
+        let restamped = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+
+        // One second later: anchor-only update.
+        let t1 = t0 + std::time::Duration::from_secs(1);
+        engine.set_mutation_clock(std::sync::Arc::new(move || t1));
+        let mut args = anchor_args(id.clone(), Some(restamped.content_hash.clone()));
+        args.anchors = vec![anchor_input("c.rs", "h-c")];
+        let out = engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+        assert!(!out.commit_sha.is_empty(), "anchor-only update commits");
+        assert_eq!(
+            out.content_hash, restamped.content_hash,
+            "anchors never move `_hash`, even across a second boundary"
+        );
+        // The preserved `last_modified` is observable on the entity too.
+        let entity = engine.store().get(&id).unwrap();
+        assert_eq!(
+            entity
+                .metadata
+                .get("last_modified")
+                .and_then(|v| v.as_str()),
+            Some("2026-05-08T12:34:56Z"),
+            "anchor-only update must not restamp last_modified"
+        );
     }
 
     /// A malformed `anchors_unset[]` selector refuses the whole update

@@ -349,7 +349,16 @@ pub(crate) fn stage_anchors_rename(
     Ok(true)
 }
 
-/// Now as a full ISO-8601 datetime string `YYYY-MM-DDTHH:MM:SSZ`
+/// System-clock convenience over [`iso_from_system_time`], for tests
+/// that compare against "roughly now". Mutation paths instead go
+/// through `Engine::now_iso`, which reads the engine's injectable
+/// clock — so canonical-bytes tests can pin the stamped value.
+#[cfg(test)]
+pub(super) fn today_iso() -> String {
+    iso_from_system_time(std::time::SystemTime::now())
+}
+
+/// An instant as a full ISO-8601 datetime string `YYYY-MM-DDTHH:MM:SSZ`
 /// (UTC). Used by mutation paths that auto-stamp metadata fields
 /// (e.g. `last_modified` on update, `created_date` on create).
 ///
@@ -362,14 +371,12 @@ pub(crate) fn stage_anchors_rename(
 /// load; new writes carry the wider form.
 ///
 /// Pure function: no allocation outside the `format!` invocation,
-/// no error path (the system-clock fallback to UNIX epoch on a
-/// clock that hasn't been set yet is acceptable for a best-effort
-/// timestamp). Howard-Hinnant civil-from-days for the date half;
-/// trivial modular arithmetic for the time half.
-pub(super) fn today_iso() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
+/// no error path (the fallback to UNIX epoch on an instant before
+/// the epoch is acceptable for a best-effort timestamp).
+/// Howard-Hinnant civil-from-days for the date half; trivial modular
+/// arithmetic for the time half.
+pub(super) fn iso_from_system_time(t: std::time::SystemTime) -> String {
+    let now = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs();
     let days = secs / 86400;
     let secs_of_day = secs % 86400;
