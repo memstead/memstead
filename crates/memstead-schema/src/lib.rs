@@ -49,6 +49,7 @@ pub use source::{
 pub use types::{
     ConstraintDef, ConstraintSeverity, FieldType, Filterable, MetadataFieldDef,
     PropagationDirection, RequiredCardinality, RequiredOutgoing, SectionDef, Serialization,
+    TableFormat,
     TypeDefinition, TypeExample, derive_section_key,
 };
 

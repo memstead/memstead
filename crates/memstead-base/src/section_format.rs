@@ -434,6 +434,315 @@ fn raw_cell_count(source: &str, line: usize) -> usize {
     count
 }
 
+// ---------------------------------------------------------------------------
+// Format evaluation
+// ---------------------------------------------------------------------------
+
+/// One violation of a section's declared format. The serde shape is
+/// the wire `details` payload of the corresponding refusal code —
+/// `SECTION_CONTENT_MISMATCH` / `SECTION_ITEM_PATTERN_MISMATCH` /
+/// `INVALID_TABLE_COLUMNS` — plus the reserved-setext case, which
+/// rides the pre-existing `SECTION_CONTENT_INVALID` family.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SectionFormatViolation {
+    ContentMismatch {
+        section: String,
+        /// The declared expression, verbatim.
+        expected: String,
+        /// The observed top-level block sequence (display forms).
+        found: Vec<String>,
+        /// 1-based source line of the offending block (the line after
+        /// the last block when the body ended too early).
+        failed_at: usize,
+        /// Display forms of the terminals legal at that position.
+        expected_next: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        example: Option<String>,
+    },
+    ItemPatternMismatch {
+        section: String,
+        /// 0-based index of the offending unit (list item / paragraph
+        /// line) within its kind.
+        item_index: usize,
+        /// 1-based source line of the unit.
+        line: usize,
+        /// The unit's text as matched (items: lazy continuation
+        /// joined; paragraphs: the source line).
+        text: String,
+        /// The declared pattern, verbatim (anchoring is implicit).
+        pattern: String,
+        /// The pattern's named capture groups — the parts a
+        /// conforming unit would carry.
+        groups: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        example: Option<String>,
+    },
+    TableColumns {
+        section: String,
+        /// What went wrong: `header` (names/order mismatch),
+        /// `cell_count` (row width vs declared columns), or
+        /// `cell_pattern` (a cell failing its column's regex).
+        reason: String,
+        expected_columns: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        found_columns: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        row_line: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_cells: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        found_cells: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        column: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pattern: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cell: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        example: Option<String>,
+    },
+    /// A setext h1/h2 inside a format-checked section — the reserved
+    /// levels the byte-class line guard cannot see.
+    SetextReserved {
+        section: String,
+        line: usize,
+        depth: u8,
+    },
+}
+
+impl SectionFormatViolation {
+    /// The wire code of this violation's refusal.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ContentMismatch { .. } => "SECTION_CONTENT_MISMATCH",
+            Self::ItemPatternMismatch { .. } => "SECTION_ITEM_PATTERN_MISMATCH",
+            Self::TableColumns { .. } => "INVALID_TABLE_COLUMNS",
+            Self::SetextReserved { .. } => "SECTION_CONTENT_INVALID",
+        }
+    }
+
+    /// One-line human rendering for refusal message text.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::ContentMismatch {
+                section,
+                expected,
+                found,
+                failed_at,
+                expected_next,
+                ..
+            } => format!(
+                "section '{section}' does not match its declared shape `{expected}` — found [{}], expected {} at line {failed_at}",
+                found.join(", "),
+                if expected_next.is_empty() {
+                    "end of section".to_string()
+                } else {
+                    expected_next.join(" | ")
+                },
+            ),
+            Self::ItemPatternMismatch {
+                section,
+                line,
+                text,
+                pattern,
+                ..
+            } => format!(
+                "section '{section}' line {line} does not match the declared item pattern `{pattern}`: {text}"
+            ),
+            Self::TableColumns {
+                section, reason, ..
+            } => format!("section '{section}' violates its table contract ({reason})"),
+            Self::SetextReserved {
+                section,
+                line,
+                depth,
+            } => format!(
+                "section '{section}' line {line} is a setext h{depth} heading — h1/h2 are the entity's own levels"
+            ),
+        }
+    }
+}
+
+/// Evaluate one section body against its declared format. Returns
+/// every violation in document order (the write path refuses with the
+/// first; health reports all). A section declaring no `content` — or
+/// one whose expression failed to compile, which the loader refuses
+/// anyway — produces no violations (free-form).
+pub fn check_section_format(
+    def: &memstead_schema::SectionDef,
+    body: &str,
+) -> Vec<SectionFormatViolation> {
+    let Some(expr) = def.compiled_content.as_ref() else {
+        return Vec::new();
+    };
+    let section = def.key.as_str();
+    let reduced = reduce_section(body);
+    let mut out: Vec<SectionFormatViolation> = Vec::new();
+
+    for setext in &reduced.setext_reserved {
+        out.push(SectionFormatViolation::SetextReserved {
+            section: section.to_string(),
+            line: setext.line,
+            depth: setext.depth,
+        });
+    }
+
+    let observed = reduced.observed();
+    if let Err(failure) = expr.match_blocks(&observed) {
+        let failed_at_line = reduced
+            .blocks
+            .get(failure.failed_at)
+            .map(|b| b.line)
+            .unwrap_or_else(|| {
+                reduced
+                    .blocks
+                    .last()
+                    .map(|b| b.line + 1)
+                    .unwrap_or(1)
+            });
+        out.push(SectionFormatViolation::ContentMismatch {
+            section: section.to_string(),
+            expected: expr.source().to_string(),
+            found: observed.iter().map(|b| b.display()).collect(),
+            failed_at: failed_at_line,
+            expected_next: failure.expected_next,
+            example: def.example.clone(),
+        });
+    }
+
+    if let Some(pattern_src) = &def.item_pattern
+        // The loader guarantees the pattern compiles and the content
+        // expression names exactly one of list/paragraph.
+        && let Ok(pattern) = regex::Regex::new(&format!("^(?:{pattern_src})$"))
+    {
+        let groups: Vec<String> = pattern
+            .capture_names()
+            .flatten()
+            .map(str::to_string)
+            .collect();
+        let targets_lists = expr.mentioned_names().contains(&"list");
+        let mut unit_index = 0usize;
+        for block in &reduced.blocks {
+            match &block.detail {
+                BlockDetail::List { items } if targets_lists => {
+                    for (line, text) in items {
+                        if !pattern.is_match(text) {
+                            out.push(SectionFormatViolation::ItemPatternMismatch {
+                                section: section.to_string(),
+                                item_index: unit_index,
+                                line: *line,
+                                text: text.clone(),
+                                pattern: pattern_src.clone(),
+                                groups: groups.clone(),
+                                example: def.example.clone(),
+                            });
+                        }
+                        unit_index += 1;
+                    }
+                }
+                BlockDetail::Paragraph { lines } if !targets_lists => {
+                    for (line, text) in lines {
+                        if !pattern.is_match(text) {
+                            out.push(SectionFormatViolation::ItemPatternMismatch {
+                                section: section.to_string(),
+                                item_index: unit_index,
+                                line: *line,
+                                text: text.clone(),
+                                pattern: pattern_src.clone(),
+                                groups: groups.clone(),
+                                example: def.example.clone(),
+                            });
+                        }
+                        unit_index += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(table_format) = &def.table {
+        for block in &reduced.blocks {
+            let BlockDetail::Table { header, rows } = &block.detail else {
+                continue;
+            };
+            if header != &table_format.columns {
+                out.push(SectionFormatViolation::TableColumns {
+                    section: section.to_string(),
+                    reason: "header".to_string(),
+                    expected_columns: table_format.columns.clone(),
+                    found_columns: header.clone(),
+                    row_line: None,
+                    expected_cells: None,
+                    found_cells: None,
+                    column: None,
+                    pattern: None,
+                    cell: None,
+                    example: def.example.clone(),
+                });
+                // A wrong header makes per-cell checks noise.
+                continue;
+            }
+            for row in rows {
+                if row.raw_cell_count != table_format.columns.len() {
+                    out.push(SectionFormatViolation::TableColumns {
+                        section: section.to_string(),
+                        reason: "cell_count".to_string(),
+                        expected_columns: table_format.columns.clone(),
+                        found_columns: Vec::new(),
+                        row_line: Some(row.line),
+                        expected_cells: Some(table_format.columns.len()),
+                        found_cells: Some(row.raw_cell_count),
+                        column: None,
+                        pattern: None,
+                        cell: None,
+                        example: def.example.clone(),
+                    });
+                    continue;
+                }
+                for (column, pattern_src) in &table_format.column_patterns {
+                    let Some(col_idx) =
+                        table_format.columns.iter().position(|c| c == column)
+                    else {
+                        continue;
+                    };
+                    let Some(cell) = row.cells.get(col_idx) else {
+                        continue;
+                    };
+                    let Ok(pattern) = regex::Regex::new(&format!("^(?:{pattern_src})$"))
+                    else {
+                        continue;
+                    };
+                    if !pattern.is_match(cell) {
+                        out.push(SectionFormatViolation::TableColumns {
+                            section: section.to_string(),
+                            reason: "cell_pattern".to_string(),
+                            expected_columns: table_format.columns.clone(),
+                            found_columns: Vec::new(),
+                            row_line: Some(row.line),
+                            expected_cells: None,
+                            found_cells: None,
+                            column: Some(column.clone()),
+                            pattern: Some(pattern_src.clone()),
+                            cell: Some(cell.clone()),
+                            example: def.example.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    out.sort_by_key(|v| match v {
+        SectionFormatViolation::ContentMismatch { failed_at, .. } => *failed_at,
+        SectionFormatViolation::ItemPatternMismatch { line, .. } => *line,
+        SectionFormatViolation::TableColumns { row_line, .. } => row_line.unwrap_or(0),
+        SectionFormatViolation::SetextReserved { line, .. } => *line,
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,5 +954,234 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.failed_at, 1);
         assert_eq!(err.expected_next, vec!["list(bullet)".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod check_tests {
+    use super::*;
+    use memstead_schema::{ConstraintSeverity, SectionDef, TableFormat};
+
+    fn def(
+        content: &str,
+        item_pattern: Option<&str>,
+        table: Option<TableFormat>,
+        example: Option<&str>,
+    ) -> SectionDef {
+        SectionDef {
+            key: "body".to_string(),
+            heading: "Body".to_string(),
+            required: true,
+            search_weight: 1.0,
+            catch_all: true,
+            write_rules: vec![],
+            description: None,
+            content: Some(content.to_string()),
+            item_pattern: item_pattern.map(str::to_string),
+            table,
+            example: example.map(str::to_string),
+            format_severity: ConstraintSeverity::Block,
+            compiled_content: Some(
+                memstead_schema::content_expr::ContentExpr::parse(content).unwrap(),
+            ),
+        }
+    }
+
+    #[test]
+    fn content_mismatch_carries_position_expectation_and_example() {
+        let d = def(
+            "(heading(3) list(bullet))+",
+            None,
+            None,
+            Some("### Phase 1\n- **Kickoff** — 2026-09-01\n"),
+        );
+        let violations = check_section_format(&d, "### Phase 1\n\nprose statt liste\n");
+        assert_eq!(violations.len(), 1);
+        let SectionFormatViolation::ContentMismatch {
+            failed_at,
+            expected_next,
+            found,
+            example,
+            ..
+        } = &violations[0]
+        else {
+            panic!("expected content mismatch: {violations:?}");
+        };
+        assert_eq!(*failed_at, 3, "line of the offending paragraph");
+        assert_eq!(expected_next, &vec!["list(bullet)".to_string()]);
+        assert_eq!(found, &vec!["heading(3)".to_string(), "paragraph".to_string()]);
+        assert!(example.as_deref().unwrap().contains("Kickoff"));
+        assert_eq!(violations[0].code(), "SECTION_CONTENT_MISMATCH");
+
+        // Conforming body: no violations.
+        assert!(
+            check_section_format(&d, "### Phase 1\n- **Kickoff** — 2026-09-01\n").is_empty()
+        );
+    }
+
+    #[test]
+    fn item_pattern_flags_each_nonconforming_item_with_groups() {
+        let d = def(
+            "list(bullet)",
+            Some(r"\*\*(?<name>[^*]+)\*\* — (?<datum>\d{4}-\d{2}-\d{2})"),
+            None,
+            None,
+        );
+        let ok = "- **Kickoff** — 2026-09-01\n- **Zwei** — 2026-09-02\n";
+        assert!(check_section_format(&d, ok).is_empty());
+
+        // Lazy continuation still matches (joined by a single space).
+        let lazy = "- **Kickoff** —\n  2026-09-01\n";
+        assert!(
+            check_section_format(&d, lazy).is_empty(),
+            "continuation never changes the match: {:?}",
+            check_section_format(&d, lazy)
+        );
+
+        let bad = "- **Kickoff** — 2026-09-01\n- kein format\n";
+        let violations = check_section_format(&d, bad);
+        assert_eq!(violations.len(), 1);
+        let SectionFormatViolation::ItemPatternMismatch {
+            item_index,
+            line,
+            text,
+            groups,
+            ..
+        } = &violations[0]
+        else {
+            panic!("expected item mismatch: {violations:?}");
+        };
+        assert_eq!(*item_index, 1);
+        assert_eq!(*line, 2);
+        assert_eq!(text, "kein format");
+        assert_eq!(groups, &vec!["name".to_string(), "datum".to_string()]);
+        assert_eq!(violations[0].code(), "SECTION_ITEM_PATTERN_MISMATCH");
+    }
+
+    #[test]
+    fn paragraph_pattern_checks_each_source_line() {
+        // The anker two-halves citation shape — the left half may
+        // contain spaces (the `bverfg:1 BvR 2649/21` case must pass).
+        let d = def(
+            "paragraph+",
+            Some(r"(?<quelle>\S[^|]*?) \| (?<aussage>.+)"),
+            None,
+            None,
+        );
+        let ok = "bverfg:1 BvR 2649/21 Rn. 183 | Der Staat schuldet Schutz.\ngg:art-20a | Schutzauftrag.\n";
+        assert!(
+            check_section_format(&d, ok).is_empty(),
+            "{:?}",
+            check_section_format(&d, ok)
+        );
+        // The observed silent-deviation shape: missing ` | ` separator.
+        let bad = "bverfg:1 BvR 2649/21 Rn. 183 — Der Staat schuldet Schutz.\n";
+        let violations = check_section_format(&d, bad);
+        assert_eq!(violations.len(), 1);
+        assert!(matches!(
+            &violations[0],
+            SectionFormatViolation::ItemPatternMismatch { line: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn table_contract_enforces_columns_counts_and_cell_patterns() {
+        let table = TableFormat {
+            columns: vec!["Name".into(), "Datum".into()],
+            column_patterns: [("Datum".to_string(), r"\d{4}-\d{2}-\d{2}".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        let d = def("table", None, Some(table), None);
+
+        let ok = "| Name | Datum |\n| --- | --- |\n| Kickoff | 2026-09-01 |\n";
+        assert!(check_section_format(&d, ok).is_empty());
+
+        // Wrong header order.
+        let wrong_header = "| Datum | Name |\n| --- | --- |\n| 2026-09-01 | Kickoff |\n";
+        let violations = check_section_format(&d, wrong_header);
+        assert!(matches!(
+            &violations[0],
+            SectionFormatViolation::TableColumns { reason, .. } if reason == "header"
+        ));
+
+        // Short row — GFM would silently pad it.
+        let short = "| Name | Datum |\n| --- | --- |\n| nur-eine |\n";
+        let violations = check_section_format(&d, short);
+        let SectionFormatViolation::TableColumns {
+            reason,
+            expected_cells,
+            found_cells,
+            row_line,
+            ..
+        } = &violations[0]
+        else {
+            panic!("expected table violation: {violations:?}");
+        };
+        assert_eq!(reason, "cell_count");
+        assert_eq!(*expected_cells, Some(2));
+        assert_eq!(*found_cells, Some(1));
+        assert_eq!(*row_line, Some(3));
+        assert_eq!(violations[0].code(), "INVALID_TABLE_COLUMNS");
+
+        // Cell pattern violation names column, row, pattern.
+        let bad_cell = "| Name | Datum |\n| --- | --- |\n| Kickoff | morgen |\n";
+        let violations = check_section_format(&d, bad_cell);
+        let SectionFormatViolation::TableColumns {
+            reason,
+            column,
+            pattern,
+            cell,
+            row_line,
+            ..
+        } = &violations[0]
+        else {
+            panic!("expected cell violation: {violations:?}");
+        };
+        assert_eq!(reason, "cell_pattern");
+        assert_eq!(column.as_deref(), Some("Datum"));
+        assert!(pattern.as_deref().unwrap().contains("d{4}"));
+        assert_eq!(cell.as_deref(), Some("morgen"));
+        assert_eq!(*row_line, Some(3));
+    }
+
+    #[test]
+    fn setext_reserved_headings_refuse_in_checked_sections() {
+        let d = def("paragraph+", None, None, None);
+        let violations = check_section_format(&d, "Titel\n=====\n\ntext\n");
+        assert!(
+            violations
+                .iter()
+                .any(|v| matches!(v, SectionFormatViolation::SetextReserved { depth: 1, .. })),
+            "{violations:?}"
+        );
+        assert_eq!(
+            violations
+                .iter()
+                .find(|v| matches!(v, SectionFormatViolation::SetextReserved { .. }))
+                .unwrap()
+                .code(),
+            "SECTION_CONTENT_INVALID"
+        );
+    }
+
+    #[test]
+    fn free_form_section_produces_no_violations() {
+        let d = SectionDef {
+            key: "body".to_string(),
+            heading: "Body".to_string(),
+            required: true,
+            search_weight: 1.0,
+            catch_all: true,
+            write_rules: vec![],
+            description: None,
+            content: None,
+            item_pattern: None,
+            table: None,
+            example: None,
+            format_severity: ConstraintSeverity::Block,
+            compiled_content: None,
+        };
+        assert!(check_section_format(&d, "anything\n=====\n\n- mixed\n* markers\n").is_empty());
     }
 }

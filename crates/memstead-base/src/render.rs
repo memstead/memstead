@@ -1276,6 +1276,33 @@ impl OriginClass {
 /// prose `description`, `default_writing_guidance`) reach a consuming
 /// agent as instructions. A `full`-verbosity request on a third-party
 /// schema therefore still omits them — the override is one-directional.
+/// Append a section's format declaration (plan 08) to its rendered
+/// object — only the declared keys, so undeclared sections keep their
+/// exact pre-plan shape. `format_severity` renders whenever a
+/// `content` declaration exists (the default `block` is a legality
+/// fact, not noise).
+fn append_section_format(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    s: &memstead_schema::SectionDef,
+) {
+    if let Some(content) = &s.content {
+        obj.insert("content".into(), serde_json::json!(content));
+        obj.insert(
+            "format_severity".into(),
+            serde_json::json!(s.format_severity),
+        );
+    }
+    if let Some(pattern) = &s.item_pattern {
+        obj.insert("item_pattern".into(), serde_json::json!(pattern));
+    }
+    if let Some(table) = &s.table {
+        obj.insert("table".into(), serde_json::json!(table));
+    }
+    if let Some(example) = &s.example {
+        obj.insert("example".into(), serde_json::json!(example));
+    }
+}
+
 pub fn build_schema_payload(
     schema: &Arc<Schema>,
     used_by: Vec<String>,
@@ -1390,12 +1417,19 @@ pub fn build_schema_payload(
                 .sections
                 .iter()
                 .map(|s| {
-                    serde_json::json!({
+                    let mut obj = serde_json::json!({
                         "key": s.key,
                         "heading": s.heading,
                         "required": s.required,
                         "write_rules": s.write_rules,
-                    })
+                    });
+                    // Section-format declarations (plan 08) — a
+                    // legality condition, so it must never be
+                    // invisible in the schema response (rendered at
+                    // BOTH verbosity levels via the lite projection
+                    // below).
+                    append_section_format(obj.as_object_mut().unwrap(), s);
+                    obj
                 })
                 .collect();
 
@@ -1749,10 +1783,24 @@ pub fn build_schema_payload(
                     .map(|secs| {
                         secs.iter()
                             .map(|s| {
-                                serde_json::json!({
-                                    "key": s["key"],
-                                    "required": s["required"],
-                                })
+                                let mut o = serde_json::Map::new();
+                                o.insert("key".into(), s["key"].clone());
+                                o.insert("required".into(), s["required"].clone());
+                                // The format declaration is a
+                                // legality condition — the lite
+                                // skeleton carries it in full.
+                                for k in [
+                                    "content",
+                                    "item_pattern",
+                                    "table",
+                                    "example",
+                                    "format_severity",
+                                ] {
+                                    if let Some(v) = s.get(k) {
+                                        o.insert(k.into(), v.clone());
+                                    }
+                                }
+                                serde_json::Value::Object(o)
                             })
                             .collect()
                     })
@@ -2241,6 +2289,12 @@ mod tests {
                 catch_all: false,
                 write_rules: vec![],
                 description: None,
+                content: None,
+                item_pattern: None,
+                table: None,
+                example: None,
+                format_severity: memstead_schema::ConstraintSeverity::Block,
+                compiled_content: None,
             }],
             metadata_fields: vec![],
             title_weight: 1.0,
@@ -3181,6 +3235,115 @@ write_rules: []
         let ts = &lite["types_summary"].as_array().unwrap()[0];
         assert_eq!(ts["constraints"], expected_constraints);
         assert_eq!(ts["required_outgoing"][0]["severity"], "block");
+
+        // Section-format declarations render at BOTH verbosity
+        // levels (plan 08 shares plan 07's no-hidden-legality rule).
+        let fmt_manifest = r#"name: formatted
+version: 1.0.0
+description: format render fixture
+when_to_use: render tests
+types:
+  - plan
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let fmt_type = r#"name: plan
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+  - key: meilensteine
+    heading: Meilensteine
+    required: false
+    search_weight: 5.0
+    catch_all: false
+    write_rules: []
+    content: "(heading(3) list(bullet))+"
+    item_pattern: '\*\*(?<name>[^*]+)\*\*'
+    example: |
+      ### Phase 1
+      - **Kickoff**
+    format_severity: warn
+  - key: tabelle
+    heading: Tabelle
+    required: false
+    search_weight: 5.0
+    catch_all: false
+    write_rules: []
+    content: "table"
+    table:
+      columns: [Name, Datum]
+      column_patterns:
+        Datum: '\d{4}-\d{2}-\d{2}'
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+        let fmt_schema = Arc::new(
+            memstead_schema::loader::load_schema_from_memory(
+                fmt_manifest,
+                &[("plan".to_string(), fmt_type.to_string())],
+            )
+            .expect("format fixture loads"),
+        );
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload =
+                build_schema_payload(&fmt_schema, vec![], verbosity, OriginClass::FirstParty);
+            let sections_key = match verbosity {
+                SchemaVerbosity::Full => &payload["types"][0]["sections"],
+                SchemaVerbosity::Lite => &payload["types_summary"][0]["sections"],
+            };
+            let secs = sections_key.as_array().unwrap();
+            let meilensteine = secs
+                .iter()
+                .find(|s| s["key"] == "meilensteine")
+                .expect("declared section present");
+            assert_eq!(
+                meilensteine["content"], "(heading(3) list(bullet))+",
+                "{verbosity:?} carries content"
+            );
+            assert!(meilensteine["item_pattern"].as_str().unwrap().contains("name"));
+            assert!(meilensteine["example"].as_str().unwrap().contains("Kickoff"));
+            assert_eq!(meilensteine["format_severity"], "warn");
+            let tabelle = secs.iter().find(|s| s["key"] == "tabelle").unwrap();
+            assert_eq!(tabelle["format_severity"], "block", "default renders");
+            assert_eq!(tabelle["table"]["columns"][0], "Name");
+            assert!(
+                tabelle["table"]["column_patterns"]["Datum"]
+                    .as_str()
+                    .is_some()
+            );
+            let body = secs.iter().find(|s| s["key"] == "body").unwrap();
+            assert!(
+                body.get("content").is_none() && body.get("format_severity").is_none(),
+                "undeclared section keeps its pre-plan shape"
+            );
+        }
 
         // Complement: a constraint-free builtin renders the
         // always-present empty list at both levels.

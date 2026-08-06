@@ -694,8 +694,13 @@ pub fn validate_section_content<'a>(
             // Match the parser's regex shape: `^## ` (two hashes, one
             // space, at least one trailing char). The trailing space
             // requirement excludes bare `##` (which the parser does
-            // not match either) and `###`+ headings.
-            if line.starts_with("## ") && line.len() > 3 {
+            // not match either) and `###`+ headings. `^# ` joins the
+            // guard (plan 08): h1 and h2 are the entity's own levels
+            // — the title and the section delimiters — so neither may
+            // be embedded in a section body.
+            if (line.starts_with("## ") && line.len() > 3)
+                || (line.starts_with("# ") && line.len() > 2)
+            {
                 return Err(ValidationError::SectionContentInvalid {
                     section: key.to_string(),
                     embedded_heading: line.to_string(),

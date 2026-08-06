@@ -348,7 +348,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         // payload come from the error itself so the lean server ships
         // the same wire contract as the full server.
         e @ (EngineError::ConstraintUnsatisfied { .. }
-        | EngineError::RequiredOutgoingUnsatisfied { .. }) => {
+        | EngineError::RequiredOutgoingUnsatisfied { .. }
+        | EngineError::SectionFormatRefused { .. }) => {
             tool_error_with_details(e.code(), &display, Some(e.details()))
         }
         EngineError::NotFound { id } => {

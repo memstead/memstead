@@ -402,6 +402,13 @@
           "type": "boolean",
           "default": false
         },
+        "content": {
+          "description": "Declared markdown shape (section-format vocabulary, plan 08):\na flat content expression over the mdast block vocabulary —\nsee [`crate::content_expr::ContentExpr`]. Absent = free-form,\nexactly the pre-declaration behavior. Validated and compiled\nat schema load ([`SectionDef::compiled_content`]).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "description": {
           "type": [
             "string",
@@ -409,8 +416,26 @@
           ],
           "default": null
         },
+        "example": {
+          "description": "One conforming snippet, echoed verbatim in every format\nrefusal — for an agent, a conforming example outperforms any\ngrammar string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format_severity": {
+          "description": "Severity of format violations (plan 07's uniform model).\nDefault `block`: a shape violation is deterministic and\none-round-trip repairable (the enum-value analogy) — `warn`\nstays available per section.",
+          "$ref": "#/$defs/ConstraintSeverity"
+        },
         "heading": {
           "type": "string"
+        },
+        "item_pattern": {
+          "description": "Regex applied to the repeating unit of the declared `content`\n(list items with lazy continuation joined; paragraph source\nlines). Implicitly anchored `^…$`; named capture groups name\nthe parts in refusal payloads. Legal only when `content`\ncontains exactly one of `list` / `paragraph`.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "key": {
           "type": "string"
@@ -421,6 +446,17 @@
         "search_weight": {
           "type": "number",
           "format": "float"
+        },
+        "table": {
+          "description": "Table contract — only legal when `content` contains `table`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TableFormat"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "write_rules": {
           "type": "array",
@@ -444,6 +480,28 @@
         "default",
         "csv_array",
         "omit_when_falsy"
+      ]
+    },
+    "TableFormat": {
+      "description": "The table contract of a format-declared section: `columns` pins\nheader names and order; `column_patterns` maps column name → regex\nper cell (implicitly anchored). Column-count enforcement is ours by\ndecision — GFM silently pads/truncates short or long rows, so a\nrow with the wrong cell count is *our* refusal, not the parser's.",
+      "type": "object",
+      "properties": {
+        "column_patterns": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "columns"
       ]
     },
     "TypeExample": {

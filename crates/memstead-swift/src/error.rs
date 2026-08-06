@@ -91,7 +91,8 @@ impl From<EngineError> for MemsteadError {
             // failures with the engine's own message (names the
             // entity and the violated declaration).
             e @ (EngineError::ConstraintUnsatisfied { .. }
-            | EngineError::RequiredOutgoingUnsatisfied { .. }) => Self::ValidationFailed {
+            | EngineError::RequiredOutgoingUnsatisfied { .. }
+            | EngineError::SectionFormatRefused { .. }) => Self::ValidationFailed {
                 message: e.to_string(),
             },
             EngineError::DuplicateMem(name) => Self::ValidationFailed {

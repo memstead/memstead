@@ -326,6 +326,59 @@ pub struct SectionDef {
     pub write_rules: Vec<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// Declared markdown shape (section-format vocabulary, plan 08):
+    /// a flat content expression over the mdast block vocabulary —
+    /// see [`crate::content_expr::ContentExpr`]. Absent = free-form,
+    /// exactly the pre-declaration behavior. Validated and compiled
+    /// at schema load ([`SectionDef::compiled_content`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// Regex applied to the repeating unit of the declared `content`
+    /// (list items with lazy continuation joined; paragraph source
+    /// lines). Implicitly anchored `^…$`; named capture groups name
+    /// the parts in refusal payloads. Legal only when `content`
+    /// contains exactly one of `list` / `paragraph`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_pattern: Option<String>,
+    /// Table contract — only legal when `content` contains `table`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<TableFormat>,
+    /// One conforming snippet, echoed verbatim in every format
+    /// refusal — for an agent, a conforming example outperforms any
+    /// grammar string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
+    /// Severity of format violations (plan 07's uniform model).
+    /// Default `block`: a shape violation is deterministic and
+    /// one-round-trip repairable (the enum-value analogy) — `warn`
+    /// stays available per section.
+    #[serde(
+        default = "ConstraintSeverity::block",
+        skip_serializing_if = "severity_is_block"
+    )]
+    pub format_severity: ConstraintSeverity,
+    /// The compiled `content` expression — populated by the loader
+    /// (parse once, match per write). Skipped in serialization so the
+    /// on-disk form round-trips.
+    #[serde(skip)]
+    pub compiled_content: Option<crate::content_expr::ContentExpr>,
+}
+
+fn severity_is_block(s: &ConstraintSeverity) -> bool {
+    *s == ConstraintSeverity::Block
+}
+
+/// The table contract of a format-declared section: `columns` pins
+/// header names and order; `column_patterns` maps column name → regex
+/// per cell (implicitly anchored). Column-count enforcement is ours by
+/// decision — GFM silently pads/truncates short or long rows, so a
+/// row with the wrong cell count is *our* refusal, not the parser's.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TableFormat {
+    pub columns: Vec<String>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub column_patterns: IndexMap<String, String>,
 }
 
 /// A metadata (frontmatter) field.

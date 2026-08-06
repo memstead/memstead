@@ -590,6 +590,30 @@ impl Engine {
         // (one implementation; the two surfaces cannot disagree). A
         // warning, never a refusal: entities are legitimately built up
         // over several calls.
+        // Section-format evaluation (plan 08): each written section
+        // body against its declared markdown shape, judged by the
+        // real CommonMark reduction. Block-tier refuses with the
+        // first violation, pre-commit; warn-tier surfaces via the
+        // health sweep, never at write time.
+        for def in &type_def.sections {
+            if def.format_severity != memstead_schema::ConstraintSeverity::Block {
+                continue;
+            }
+            let Some(body) = entity_for_render.sections.get(def.key.as_str()) else {
+                continue;
+            };
+            if let Some(first) = crate::section_format::check_section_format(def, body)
+                .into_iter()
+                .next()
+            {
+                return Err(EngineError::SectionFormatRefused {
+                    entity_type: entity_for_render.entity_type.clone(),
+                    entity_id: id.to_string(),
+                    violation: first,
+                });
+            }
+        }
+
         let unsatisfied = crate::ops::health::unsatisfied_required_outgoing(
             &entity_for_render,
             type_def.as_ref(),
@@ -5328,4 +5352,262 @@ community:
             crate::engine::mutation::RELATIONSHIP_CYCLE_PATH_CAP
         );
     }
+
+    const FORMAT_MANIFEST: &str = r#"name: formatproof
+version: 0.1.0
+description: section-format proof schema
+when_to_use: format tests
+types:
+  - plan
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+
+    const FORMAT_PLAN_TYPE: &str = r#"name: plan
+description: a plan with formatted milestones
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+  - key: meilensteine
+    heading: Meilensteine
+    required: false
+    search_weight: 5.0
+    catch_all: false
+    write_rules: []
+    content: "(heading(3) list(bullet))+"
+    item_pattern: '\*\*(?<name>[^*]+)\*\* — (?<datum>\d{4}-\d{2}-\d{2})'
+    example: |
+      ### Phase 1
+      - **Kickoff** — 2026-09-01
+  - key: notizen
+    heading: Notizen
+    required: false
+    search_weight: 5.0
+    catch_all: false
+    write_rules: []
+    content: "list(bullet)"
+    format_severity: warn
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+  - meilensteine
+  - notizen
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+
+    fn format_engine(tmp: &TempDir) -> Engine {
+        engine_with_proof_schema(
+            tmp,
+            "formatproof",
+            FORMAT_MANIFEST,
+            &[("plan", FORMAT_PLAN_TYPE)],
+        )
+    }
+
+    fn plan_create_args(title: &str, meilensteine: Option<&str>, notizen: Option<&str>) -> CreateEntityArgs {
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "a plan body.".to_string());
+        if let Some(m) = meilensteine {
+            sections.insert("meilensteine".to_string(), m.to_string());
+        }
+        if let Some(n) = notizen {
+            sections.insert("notizen".to_string(), n.to_string());
+        }
+        CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "proof".to_string(),
+            title: title.to_string(),
+            entity_type: "plan".to_string(),
+            sections,
+            metadata: IndexMap::new(),
+            relations: vec![],
+            dry_run: false,
+        }
+    }
+
+    /// Block-tier format enforcement on create: a nonconforming
+    /// section refuses with the format code and the echoed example;
+    /// the conforming write passes; a warn-tier section never refuses.
+    #[test]
+    fn create_enforces_declared_section_format() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = format_engine(&tmp);
+        let (actor, client) = cli_actor();
+
+        let err = engine
+            .create_entity(
+                plan_create_args("Plan A", Some("### Phase 1\n\nprose statt liste\n"), None),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "SECTION_CONTENT_MISMATCH");
+        let details = err.details();
+        assert_eq!(details["section"], "meilensteine");
+        assert!(
+            details["example"].as_str().unwrap().contains("Kickoff"),
+            "the conforming example is echoed: {details}"
+        );
+        assert_eq!(details["expected_next"][0], "list(bullet)");
+
+        // Item-pattern violation gets its own code.
+        let err = engine
+            .create_entity(
+                plan_create_args("Plan B", Some("### Phase 1\n- kein format\n"), None),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "SECTION_ITEM_PATTERN_MISMATCH");
+
+        // Conforming write passes.
+        engine
+            .create_entity(
+                plan_create_args(
+                    "Plan C",
+                    Some("### Phase 1\n- **Kickoff** — 2026-09-01\n"),
+                    None,
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // Warn-tier section: nonconforming content commits.
+        let outcome = engine
+            .create_entity(
+                plan_create_args("Plan D", None, Some("kein listenpunkt\n")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(!outcome.commit_sha.is_empty(), "warn tier never refuses");
+    }
+
+    /// Composed-body rule on update: an append whose delta is
+    /// harmless refuses when the COMPOSED body violates; the
+    /// conforming replacement passes.
+    #[test]
+    fn update_judges_format_on_composed_body() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = format_engine(&tmp);
+        let (actor, client) = cli_actor();
+        let created = engine
+            .create_entity(
+                plan_create_args(
+                    "Plan A",
+                    Some("### Phase 1\n- **Kickoff** — 2026-09-01\n"),
+                    None,
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // Append a trailing paragraph: the delta alone is legal
+        // markdown, the composed body no longer matches the shape.
+        let current = engine.get_entity(&created.id).unwrap().content_hash.clone();
+        let mut append = IndexMap::new();
+        append.insert(
+            "meilensteine".to_string(),
+            "\n\nnachtrag als absatz\n".to_string(),
+        );
+        let err = engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: created.id.clone(),
+                    expected_hash: Some(current.clone()),
+                    sections: IndexMap::new(),
+                    append_sections: append,
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "SECTION_CONTENT_MISMATCH");
+
+        // A conforming append (another phase) passes.
+        let mut append = IndexMap::new();
+        append.insert(
+            "meilensteine".to_string(),
+            "\n\n### Phase 2\n- **Go-Live** — 2026-10-01\n".to_string(),
+        );
+        engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: created.id.clone(),
+                    expected_hash: Some(current),
+                    sections: IndexMap::new(),
+                    append_sections: append,
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+    }
+
+    /// Reserved-heading extension (criterion 4): `^# ` now refuses in
+    /// any section body, exactly like `^## ` — free-form sections
+    /// included, via the byte-class line guard.
+    #[test]
+    fn embedded_h1_refuses_in_any_section() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = format_engine(&tmp);
+        let (actor, client) = cli_actor();
+        let mut args = plan_create_args("Plan H", None, None);
+        args.sections
+            .insert("body".to_string(), "intro\n# Injected Title\ntail".to_string());
+        let err = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap_err();
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
+    }
+
 }

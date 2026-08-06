@@ -731,7 +731,9 @@ fn engine_err_unified(
         // Block-tier declared-constraint refusals — code and recovery
         // payload come from the error itself (`code()` / `details()`),
         // so the envelope stays aligned with the CLI `--json` shape.
-        E::ConstraintUnsatisfied { .. } | E::RequiredOutgoingUnsatisfied { .. } => {
+        E::ConstraintUnsatisfied { .. }
+        | E::RequiredOutgoingUnsatisfied { .. }
+        | E::SectionFormatRefused { .. } => {
             tool_error_with_payload(e.code(), &message, envelope(e.code(), message.clone(), e.details()))
         }
         E::HashMismatch {

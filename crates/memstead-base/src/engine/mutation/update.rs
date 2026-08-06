@@ -497,6 +497,17 @@ impl Engine {
             schema.as_ref(),
         )?;
 
+        // Keys this update touches, captured before the args maps are
+        // consumed — the section-format evaluation below judges
+        // exactly these on their composed bodies.
+        let format_touched: std::collections::HashSet<String> = args
+            .sections
+            .keys()
+            .chain(args.append_sections.keys())
+            .chain(args.patch_sections.keys())
+            .cloned()
+            .collect();
+
         let mut modified_sections: Vec<String> = Vec::new();
         for (key, body) in args.sections {
             modified_sections.push(key.clone());
@@ -814,6 +825,35 @@ impl Engine {
         // alias-synthesis run), evaluated through the same function
         // the health sweep uses (one implementation; the two surfaces
         // cannot disagree). A warning, never a refusal.
+        // Section-format evaluation (plan 08), composed-body rule: a
+        // section touched by this update (replace, append, or patch)
+        // is judged on its COMPOSED final body — the delta-only
+        // byte-class guard keeps its scope, shape needs the
+        // composition point. Untouched sections stay lenient (their
+        // pre-existing violations are health findings; the next write
+        // is the sanctioned repair point).
+        for def in &type_def.sections {
+            if def.format_severity != memstead_schema::ConstraintSeverity::Block {
+                continue;
+            }
+            if !format_touched.contains(def.key.as_str()) {
+                continue;
+            }
+            let Some(body) = next.sections.get(def.key.as_str()) else {
+                continue;
+            };
+            if let Some(first) = crate::section_format::check_section_format(def, body)
+                .into_iter()
+                .next()
+            {
+                return Err(EngineError::SectionFormatRefused {
+                    entity_type: next.entity_type.clone(),
+                    entity_id: id.to_string(),
+                    violation: first,
+                });
+            }
+        }
+
         let unsatisfied =
             crate::ops::health::unsatisfied_required_outgoing(&next, type_def.as_ref());
         if !unsatisfied.is_empty() {

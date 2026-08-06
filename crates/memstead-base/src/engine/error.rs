@@ -238,6 +238,21 @@ pub enum EngineError {
         entity_id: String,
         violations: Vec<crate::ops::health::UnsatisfiedConstraint>,
     },
+    /// Write refused: a section body violates its schema-declared
+    /// markdown format (`content` / `item_pattern` / `table` on the
+    /// section, `format_severity: block`). The code and recovery
+    /// payload come from the violation itself
+    /// (`SECTION_CONTENT_MISMATCH` / `SECTION_ITEM_PATTERN_MISMATCH`
+    /// / `INVALID_TABLE_COLUMNS`, or `SECTION_CONTENT_INVALID` for a
+    /// reserved setext heading); the payload echoes the declared
+    /// `example` where one exists — for an agent, a conforming
+    /// example outperforms any grammar string.
+    #[error("write refused: {entity_id} ({entity_type}) — {}", violation.describe())]
+    SectionFormatRefused {
+        entity_type: String,
+        entity_id: String,
+        violation: crate::section_format::SectionFormatViolation,
+    },
     /// Write refused: the entity's final edge set leaves a
     /// block-tier `required_outgoing` block unsatisfied
     /// (`severity: block` on the block). The default warn tier keeps
@@ -1086,6 +1101,7 @@ impl EngineError {
             EngineError::AlreadyExists { .. } => "ENTITY_ALREADY_EXISTS",
             EngineError::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
             EngineError::RequiredOutgoingUnsatisfied { .. } => "MISSING_REQUIRED_OUTGOING",
+            EngineError::SectionFormatRefused { violation, .. } => violation.code(),
             EngineError::NotFound { .. } => "ENTITY_NOT_FOUND",
             EngineError::HashMismatch { .. } => "HASH_MISMATCH",
             EngineError::HasIncomingRefs { .. } => "HAS_INCOMING_REFS",
@@ -1180,6 +1196,18 @@ impl EngineError {
                 "entity_id": entity_id,
                 "missing": missing,
             }),
+            EngineError::SectionFormatRefused {
+                entity_type,
+                entity_id,
+                violation,
+            } => {
+                let mut v = serde_json::to_value(violation).unwrap_or_default();
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert("entity_type".into(), serde_json::json!(entity_type));
+                    obj.insert("entity_id".into(), serde_json::json!(entity_id));
+                }
+                v
+            }
             EngineError::RepairNotNeeded { id, recovery } => {
                 serde_json::json!({ "id": id, "recovery": recovery })
             }

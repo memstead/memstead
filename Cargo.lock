@@ -2665,6 +2665,7 @@ version = "0.4.0"
 dependencies = [
  "include_dir",
  "indexmap",
+ "regex",
  "schemars",
  "semver",
  "serde",

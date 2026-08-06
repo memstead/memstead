@@ -106,6 +106,19 @@ pub enum SchemaLoadError {
     },
 
     #[error(
+        "type '{type_name}' section '{section}' format declaration is invalid: {}",
+        problems.join("; ")
+    )]
+    InvalidSectionFormat {
+        type_name: String,
+        section: String,
+        /// EVERY problem of the section's declaration — the loader
+        /// names all offenders, never the first only, so one repair
+        /// pass fixes the schema.
+        problems: Vec<String>,
+    },
+
+    #[error(
         "type '{type_name}' metadata field '{field}' default '{default}' is not listed in enum_values: [{}]",
         allowed.join(", ")
     )]
@@ -677,6 +690,7 @@ fn load_with_context(
         merged.extend(base_metadata::suffix_fields());
         td.metadata_fields = merged;
 
+        compile_section_formats(&mut td)?;
         validate_type(&td, &rel_names, &available_rels)?;
 
         // Resolve edge_weights: start with schema defaults, apply overrides.
@@ -754,6 +768,94 @@ fn name_shape(name: &str) -> Result<(), &'static str> {
         if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
             return Err("must contain only lowercase letters, digits, and hyphens");
         }
+    }
+    Ok(())
+}
+
+/// Validate and compile the section-format declarations of a type
+/// (plan 08). Loader honesty: every malformed declaration refuses at
+/// load with `InvalidSectionFormat` naming ALL problems of the
+/// section; a valid `content` expression is compiled once and cached
+/// on the section (`compiled_content`).
+fn compile_section_formats(td: &mut TypeDefinition) -> Result<(), SchemaLoadError> {
+    use crate::content_expr::ContentExpr;
+    for section in &mut td.sections {
+        let declares_any = section.content.is_some()
+            || section.item_pattern.is_some()
+            || section.table.is_some()
+            || section.example.is_some();
+        if !declares_any {
+            continue;
+        }
+        let mut problems: Vec<String> = Vec::new();
+
+        let compiled = match &section.content {
+            None => {
+                problems.push(
+                    "`item_pattern` / `table` / `example` require a `content` declaration"
+                        .to_string(),
+                );
+                None
+            }
+            Some(expr_src) => match ContentExpr::parse(expr_src) {
+                Ok(expr) => Some(expr),
+                Err(e) => {
+                    problems.push(format!("`content` is invalid: {e}"));
+                    None
+                }
+            },
+        };
+
+        if let Some(pattern) = &section.item_pattern {
+            if let Err(e) = regex::Regex::new(pattern) {
+                problems.push(format!("`item_pattern` is not a valid regex: {e}"));
+            }
+            if let Some(expr) = &compiled {
+                let names = expr.mentioned_names();
+                let has_list = names.contains(&"list");
+                let has_paragraph = names.contains(&"paragraph");
+                if has_list == has_paragraph {
+                    problems.push(
+                        "`item_pattern` requires a `content` expression containing exactly                          one of `list` / `paragraph` (tables use `column_patterns`)"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        if let Some(table) = &section.table {
+            if let Some(expr) = &compiled
+                && !expr.mentioned_names().contains(&"table")
+            {
+                problems.push(
+                    "`table` block is only legal when `content` contains `table`".to_string(),
+                );
+            }
+            if table.columns.is_empty() {
+                problems.push("`table.columns` must name at least one column".to_string());
+            }
+            for (column, pattern) in &table.column_patterns {
+                if !table.columns.contains(column) {
+                    problems.push(format!(
+                        "`column_patterns` names '{column}', which is not in `columns`"
+                    ));
+                }
+                if let Err(e) = regex::Regex::new(pattern) {
+                    problems.push(format!(
+                        "`column_patterns.{column}` is not a valid regex: {e}"
+                    ));
+                }
+            }
+        }
+
+        if !problems.is_empty() {
+            return Err(SchemaLoadError::InvalidSectionFormat {
+                type_name: td.name.clone(),
+                section: section.key.clone(),
+                problems,
+            });
+        }
+        section.compiled_content = compiled;
     }
     Ok(())
 }

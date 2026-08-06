@@ -1949,3 +1949,109 @@ fn constraint_status_propagation_block_severity_rejected() {
         "got: {err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Section-format declarations (plan 08)
+// ---------------------------------------------------------------------------
+
+/// A full declaration (content + item_pattern + example + severity)
+/// loads, compiles, and defaults severity to block.
+#[test]
+fn section_format_declaration_accepted_and_compiled() {
+    use memstead_schema::ConstraintSeverity;
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    content: \"(heading(3) list(bullet))+\"\n    item_pattern: '\\*\\*(?<name>[^*]+)\\*\\* — (?<datum>\\d{4}-\\d{2}-\\d{2})'\n    example: |\n      ### Phase 1\n      - **Kickoff** — 2026-09-01\n",
+    );
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    let section = td.sections.iter().find(|s| s.key == "body").unwrap();
+    assert_eq!(section.content.as_deref(), Some("(heading(3) list(bullet))+"));
+    assert!(section.compiled_content.is_some(), "compiled at load");
+    assert_eq!(section.format_severity, ConstraintSeverity::Block, "default block");
+
+    let warn = t.replace("    example: |", "    format_severity: warn\n    example: |");
+    let schema = load(&minimal_manifest(), &[("sample", &warn)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    let section = td.sections.iter().find(|s| s.key == "body").unwrap();
+    assert_eq!(section.format_severity, ConstraintSeverity::Warn);
+}
+
+/// Loader honesty: EVERY problem of a malformed declaration is named,
+/// never the first only.
+#[test]
+fn section_format_malformed_declaration_names_all_offenders() {
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    content: \"bulletList\"\n    item_pattern: '([unclosed'\n    table:\n      columns: []\n",
+    );
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    let SchemaLoadError::InvalidSectionFormat { section, problems, .. } = &err else {
+        panic!("expected InvalidSectionFormat, got: {err}");
+    };
+    assert_eq!(section, "body");
+    assert!(problems.len() >= 3, "all offenders named: {problems:?}");
+    assert!(problems.iter().any(|p| p.contains("bulletList")));
+    assert!(problems.iter().any(|p| p.contains("item_pattern")));
+    assert!(problems.iter().any(|p| p.contains("columns")));
+}
+
+/// `item_pattern` needs exactly one of list/paragraph in the content
+/// expression; a table block needs `table` in the expression; format
+/// fields without `content` refuse.
+#[test]
+fn section_format_cross_field_legality() {
+    // Both list and paragraph → refuse.
+    let both = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    content: \"paragraph list\"\n    item_pattern: '.+'\n",
+    );
+    load(&minimal_manifest(), &[("sample", &both)]).expect_err("both kinds must fail");
+
+    // Neither → refuse.
+    let neither = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    content: \"table\"\n    item_pattern: '.+'\n",
+    );
+    load(&minimal_manifest(), &[("sample", &neither)]).expect_err("neither kind must fail");
+
+    // table block without `table` in content → refuse.
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    content: \"paragraph\"\n    table:\n      columns: [Name]\n",
+    );
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("table without table must fail");
+
+    // item_pattern without content → refuse.
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    item_pattern: '.+'\n",
+    );
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("pattern without content must fail");
+
+    // column_patterns naming an undeclared column → refuse.
+    let t = minimal_type().replace(
+        "  - key: body\n    heading: Body\n    required: true\n",
+        "  - key: body\n    heading: Body\n    required: true\n    content: \"table\"\n    table:\n      columns: [Name]\n      column_patterns:\n        Datum: '\\d+'\n",
+    );
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown column must fail");
+}
+
+/// Reserved heading depths refuse at load through the expression
+/// parser (criterion 4's load half).
+#[test]
+fn section_format_heading_depth_one_and_two_refuse_at_load() {
+    for depth in ["1", "2"] {
+        let t = minimal_type().replace(
+            "  - key: body\n    heading: Body\n    required: true\n",
+            &format!(
+                "  - key: body\n    heading: Body\n    required: true\n    content: \"heading({depth}) paragraph\"\n"
+            ),
+        );
+        let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+        assert!(
+            err.to_string().contains("3–6"),
+            "names the reserved range: {err}"
+        );
+    }
+}
