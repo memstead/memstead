@@ -2084,18 +2084,27 @@ fn builtin_planning_bump_declares_bullet_lists() {
     let v2 = planning.iter().find(|s| s.version.to_string() == "0.2.0").unwrap();
     let pros_v1 = &v1.types["option"].sections.iter().find(|s| s.key == "pros").unwrap();
     assert!(pros_v1.content.is_none(), "0.1.0 stays undeclared");
-    for (ty, key) in [
-        ("option", "pros"),
-        ("option", "cons"),
-        ("goal", "in_scope"),
-        ("goal", "out_of_scope"),
-        ("decision", "consequences"),
-        ("risk", "mitigations"),
+    // Required sections demand the list outright; optional sections
+    // declare the `?` form so omission stays legal (absent-as-empty:
+    // a bare `list(bullet)` on a `required: false` section would
+    // contradict the flag by omission-refusing).
+    for (ty, key, expected) in [
+        ("option", "pros", "list(bullet)"),
+        ("option", "cons", "list(bullet)"),
+        ("goal", "in_scope", "list(bullet)?"),
+        ("goal", "out_of_scope", "list(bullet)?"),
+        ("decision", "consequences", "list(bullet)"),
+        ("risk", "mitigations", "list(bullet)?"),
     ] {
         let section = v2.types[ty].sections.iter().find(|s| s.key == key).unwrap();
-        assert_eq!(section.content.as_deref(), Some("list(bullet)"), "{ty}.{key}");
+        assert_eq!(section.content.as_deref(), Some(expected), "{ty}.{key}");
         assert!(section.compiled_content.is_some(), "{ty}.{key} compiled");
         assert!(section.format_problems.is_empty());
+        assert_eq!(
+            section.required,
+            expected == "list(bullet)",
+            "{ty}.{key}: omission-admitting form iff optional"
+        );
     }
 }
 

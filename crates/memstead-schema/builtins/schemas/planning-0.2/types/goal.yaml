@@ -46,7 +46,7 @@ sections:
     search_weight: 5.0
     write_rules:
       - "Bullet list of what this planning phase covers."
-    content: "list(bullet)"
+    content: "list(bullet)?"
     example: |
       - One point per bullet, concrete and specific.
   - key: out_of_scope
@@ -55,7 +55,7 @@ sections:
     search_weight: 5.0
     write_rules:
       - "Bullet list of what is explicitly excluded. High-value — stating what's out prevents scope creep."
-    content: "list(bullet)"
+    content: "list(bullet)?"
     example: |
       - One point per bullet, concrete and specific.
   - key: notes

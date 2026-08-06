@@ -48,7 +48,7 @@ sections:
     search_weight: 10.0
     write_rules:
       - "Bullet list of mitigation strategies, including any that are already in place or planned. Each mitigation that becomes a concrete step should be authored as a `step` with MITIGATES → this risk."
-    content: "list(bullet)"
+    content: "list(bullet)?"
     example: |
       - One point per bullet, concrete and specific.
   - key: triggers
