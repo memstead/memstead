@@ -47,8 +47,8 @@ pub use source::{
 };
 pub use types::{
     ConstraintDef, ConstraintSeverity, FieldType, Filterable, MetadataFieldDef,
-    RequiredCardinality, RequiredOutgoing, SectionDef, Serialization, TypeDefinition, TypeExample,
-    derive_section_key,
+    PropagationDirection, RequiredCardinality, RequiredOutgoing, SectionDef, Serialization,
+    TypeDefinition, TypeExample, derive_section_key,
 };
 
 /// Name constants for the 10 built-in knowledge types shipped in the

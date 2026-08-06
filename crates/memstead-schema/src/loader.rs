@@ -689,6 +689,31 @@ fn load_with_context(
         types_map.insert(stem.clone(), Arc::new(td));
     }
 
+    // Schema-level constraint pass — checks that need every type
+    // loaded. `enum_from_neighbour.section` names a section on the
+    // *reached* entity, whose type this schema cannot pin statically;
+    // requiring the key to exist on at least one declared type catches
+    // the typo class without over-constraining the endpoint.
+    let all_section_keys: HashSet<&str> = types_map
+        .values()
+        .flat_map(|t| t.sections.iter().map(|s| s.key.as_str()))
+        .collect();
+    for td in types_map.values() {
+        for c in &td.constraints {
+            if let crate::types::ConstraintDef::EnumFromNeighbour { section, .. } = c
+                && !all_section_keys.contains(section.as_str())
+            {
+                return Err(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "enum_from_neighbour",
+                    offender: section.clone(),
+                    reason: "`section` names a section key no type of this schema declares"
+                        .to_string(),
+                });
+            }
+        }
+    }
+
     Ok(Schema {
         manifest,
         version,
@@ -838,6 +863,105 @@ fn validate_type(
                             "`when_value` is not in `{when_field}`'s enum_values [{}]",
                             allowed.join(", ")
                         ),
+                    });
+                }
+            }
+            crate::types::ConstraintDef::Unique { fields, .. } => {
+                if fields.is_empty() {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "unique",
+                        offender: "(empty)".to_string(),
+                        reason: "`fields` must name at least one metadata field".to_string(),
+                    });
+                }
+                for f in fields {
+                    if !field_keys.contains(f.as_str()) {
+                        return Err(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "unique",
+                            offender: f.clone(),
+                            reason: "`fields` entry names no metadata field of this type"
+                                .to_string(),
+                        });
+                    }
+                }
+            }
+            crate::types::ConstraintDef::EnumFromNeighbour {
+                field, rel_type, ..
+            } => {
+                if !field_keys.contains(field.as_str()) {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "enum_from_neighbour",
+                        offender: field.clone(),
+                        reason: "`field` names no metadata field of this type".to_string(),
+                    });
+                }
+                if !rel_names.contains(rel_type) {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "enum_from_neighbour",
+                        offender: rel_type.clone(),
+                        reason: "`rel_type` is not in the schema's relationship vocabulary"
+                            .to_string(),
+                    });
+                }
+                // `section` names a key on the *reached* type, which
+                // this per-type pass cannot see — the schema-level
+                // pass after all types load checks it.
+            }
+            crate::types::ConstraintDef::StatusPropagation {
+                field,
+                value,
+                rel_type,
+                severity,
+                ..
+            } => {
+                let Some(field_def) = td.metadata_fields.iter().find(|f| f.key == *field) else {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "status_propagation",
+                        offender: field.clone(),
+                        reason: "`field` names no metadata field of this type".to_string(),
+                    });
+                };
+                if let Some(allowed) = &field_def.enum_values
+                    && !allowed.contains(value)
+                {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "status_propagation",
+                        offender: value.clone(),
+                        reason: format!(
+                            "`value` is not in `{field}`'s enum_values [{}]",
+                            allowed.join(", ")
+                        ),
+                    });
+                }
+                if !rel_names.contains(rel_type) {
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "status_propagation",
+                        offender: rel_type.clone(),
+                        reason: "`rel_type` is not in the schema's relationship vocabulary"
+                            .to_string(),
+                    });
+                }
+                if *severity == crate::types::ConstraintSeverity::Block {
+                    // Propagation can never refuse a write (the taint
+                    // arises from the ancestor's later change), so a
+                    // `block` declaration would be a promise the
+                    // engine will not keep — refuse it rather than
+                    // load-and-downgrade.
+                    return Err(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "status_propagation",
+                        offender: "block".to_string(),
+                        reason: "status_propagation is always warn-tier — a parent falling after \
+                                 the child was written cannot retroactively make the child's \
+                                 write illegal"
+                            .to_string(),
                     });
                 }
             }

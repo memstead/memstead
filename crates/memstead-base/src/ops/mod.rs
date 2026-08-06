@@ -1340,11 +1340,7 @@ impl fmt::Display for WarningHint {
                     n = violations.len(),
                 )?;
                 for v in violations {
-                    write!(
-                        f,
-                        "\n  - {}: '{}' is required when {}={} and is unset",
-                        v.kind, v.field, v.when_field, v.when_value,
-                    )?;
+                    write!(f, "\n  - {}", v.describe())?;
                 }
                 Ok(())
             }

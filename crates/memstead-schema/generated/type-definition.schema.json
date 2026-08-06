@@ -163,6 +163,103 @@
             "when_field",
             "when_value"
           ]
+        },
+        {
+          "description": "Form 2 — uniqueness: the tuple of metadata-field values named\nin `fields` is unique among entities of this type within one\nmem. Entities missing any of the fields carry no tuple and are\nnot compared. Defaults to `block` — the whole point of the\ndeclaration is preventing the duplicate at write time.",
+          "type": "object",
+          "properties": {
+            "fields": {
+              "description": "The metadata fields forming the unique tuple (each must be\na declared metadata field of this type).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "unique"
+            },
+            "severity": {
+              "$ref": "#/$defs/ConstraintSeverity",
+              "default": "block"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "fields"
+          ]
+        },
+        {
+          "description": "Form 3 — enum-from-neighbour: the legal values of `field` are\nthe bullet-list entries (`- value` lines) of the `section`\nsection on the entity reached from this one via a `rel_type`\nedge. A set value with no backing entry in any reached\nneighbour's section — including the no-neighbour and\nmissing-section cases, where nothing can back it — is a\nviolation.",
+          "type": "object",
+          "properties": {
+            "field": {
+              "description": "The metadata field whose values the neighbour enumerates.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "enum_from_neighbour"
+            },
+            "rel_type": {
+              "description": "The outgoing rel-type that reaches the enumerating entity.",
+              "type": "string"
+            },
+            "section": {
+              "description": "The section key on the reached entity whose bullet entries\nare the legal values.",
+              "type": "string"
+            },
+            "severity": {
+              "$ref": "#/$defs/ConstraintSeverity",
+              "default": "warn"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "field",
+            "rel_type",
+            "section"
+          ]
+        },
+        {
+          "description": "Form 5 — status propagation: when `field` on an entity of this\ntype holds `value` (the terminal value), every entity reaching\nit — transitively — via `rel_type` edges in `direction` is\ntainted; tainted entities surface as health findings naming\ntheir tainting ancestor. Always warn-tier: the taint arises\nfrom the ancestor's *later* change, so it can never refuse the\ndescendant's historical write (the loader refuses a `block`\ndeclaration on this form rather than accepting a promise the\nengine will not keep).",
+          "type": "object",
+          "properties": {
+            "direction": {
+              "description": "Which direction reaches the dependents: `incoming` taints\nthe entities whose `rel_type` edges point at the terminal\nentity (and their dependents, transitively); `outgoing`\nthe entities the terminal entity points at.",
+              "$ref": "#/$defs/PropagationDirection"
+            },
+            "field": {
+              "description": "The status metadata field on this (the tainting) type.",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "status_propagation"
+            },
+            "rel_type": {
+              "description": "The rel-type the taint travels along.",
+              "type": "string"
+            },
+            "severity": {
+              "$ref": "#/$defs/ConstraintSeverity",
+              "default": "warn"
+            },
+            "value": {
+              "description": "The terminal value that starts the taint (validated\nagainst `field`'s enum, when it declares one).",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "field",
+            "value",
+            "rel_type",
+            "direction"
+          ]
         }
       ]
     },
@@ -254,6 +351,14 @@
         "key",
         "description",
         "field_type"
+      ]
+    },
+    "PropagationDirection": {
+      "description": "Traversal direction for [`ConstraintDef::StatusPropagation`].",
+      "type": "string",
+      "enum": [
+        "incoming",
+        "outgoing"
       ]
     },
     "RequiredCardinality": {

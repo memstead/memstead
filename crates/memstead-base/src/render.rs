@@ -1490,6 +1490,39 @@ pub fn build_schema_payload(
                         "when_value": when_value,
                         "severity": severity,
                     }),
+                    memstead_schema::ConstraintDef::Unique { fields, severity } => {
+                        serde_json::json!({
+                            "kind": "unique",
+                            "fields": fields,
+                            "severity": severity,
+                        })
+                    }
+                    memstead_schema::ConstraintDef::EnumFromNeighbour {
+                        field,
+                        rel_type,
+                        section,
+                        severity,
+                    } => serde_json::json!({
+                        "kind": "enum_from_neighbour",
+                        "field": field,
+                        "rel_type": rel_type,
+                        "section": section,
+                        "severity": severity,
+                    }),
+                    memstead_schema::ConstraintDef::StatusPropagation {
+                        field,
+                        value,
+                        rel_type,
+                        direction,
+                        severity,
+                    } => serde_json::json!({
+                        "kind": "status_propagation",
+                        "field": field,
+                        "value": value,
+                        "rel_type": rel_type,
+                        "direction": direction,
+                        "severity": severity,
+                    }),
                 })
                 .collect();
             serde_json::json!({
@@ -3070,6 +3103,17 @@ constraints:
     field: checked_by
     when_field: status
     when_value: checked
+  - kind: unique
+    fields: [status, checked_by]
+  - kind: enum_from_neighbour
+    field: status
+    rel_type: PART_OF
+    section: body
+  - kind: status_propagation
+    field: status
+    value: checked
+    rel_type: PART_OF
+    direction: incoming
 write_rules: []
 "#;
         let schema = Arc::new(
@@ -3080,13 +3124,39 @@ write_rules: []
             .expect("fixture loads"),
         );
 
-        let expected_constraint = serde_json::json!({
-            "kind": "requires_when",
-            "field": "checked_by",
-            "when_field": "status",
-            "when_value": "checked",
-            "severity": "warn",
-        });
+        // All five constraint forms (requires_when, unique,
+        // enum_from_neighbour, status_propagation here; form 4 is the
+        // required_outgoing severity) must be visible with their
+        // severity at both verbosity levels.
+        let expected_constraints = serde_json::json!([
+            {
+                "kind": "requires_when",
+                "field": "checked_by",
+                "when_field": "status",
+                "when_value": "checked",
+                "severity": "warn",
+            },
+            {
+                "kind": "unique",
+                "fields": ["status", "checked_by"],
+                "severity": "block",
+            },
+            {
+                "kind": "enum_from_neighbour",
+                "field": "status",
+                "rel_type": "PART_OF",
+                "section": "body",
+                "severity": "warn",
+            },
+            {
+                "kind": "status_propagation",
+                "field": "status",
+                "value": "checked",
+                "rel_type": "PART_OF",
+                "direction": "incoming",
+                "severity": "warn",
+            },
+        ]);
 
         let full = build_schema_payload(
             &schema,
@@ -3095,8 +3165,7 @@ write_rules: []
             OriginClass::FirstParty,
         );
         let t = &full["types"].as_array().unwrap()[0];
-        assert_eq!(t["constraints"].as_array().unwrap().len(), 1);
-        assert_eq!(t["constraints"][0], expected_constraint);
+        assert_eq!(t["constraints"], expected_constraints);
         assert_eq!(t["required_outgoing"][0]["severity"], "block");
 
         let lite = build_schema_payload(
@@ -3106,7 +3175,7 @@ write_rules: []
             OriginClass::FirstParty,
         );
         let ts = &lite["types_summary"].as_array().unwrap()[0];
-        assert_eq!(ts["constraints"][0], expected_constraint);
+        assert_eq!(ts["constraints"], expected_constraints);
         assert_eq!(ts["required_outgoing"][0]["severity"], "block");
 
         // Complement: a constraint-free builtin renders the

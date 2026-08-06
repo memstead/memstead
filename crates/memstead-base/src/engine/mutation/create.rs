@@ -621,12 +621,16 @@ impl Engine {
         // same single evaluation the health `constraints` include
         // runs. Block-tier violations refuse; warn-tier violations
         // warn and the write proceeds.
-        let violated =
-            crate::ops::health::unsatisfied_constraints(&entity_for_render, type_def.as_ref());
+        let violated = crate::ops::health::unsatisfied_constraints(
+            &self.store,
+            &entity_for_render,
+            type_def.as_ref(),
+            None,
+        );
         if !violated.is_empty() {
             let blocked: Vec<_> = violated
                 .iter()
-                .filter(|v| v.severity == memstead_schema::ConstraintSeverity::Block)
+                .filter(|v| v.severity() == memstead_schema::ConstraintSeverity::Block)
                 .cloned()
                 .collect();
             if !blocked.is_empty() {
@@ -1461,10 +1465,18 @@ write_rules: []
             })
             .expect("CONSTRAINT_UNSATISFIED warning present");
         assert_eq!(violation.len(), 1);
-        assert_eq!(violation[0].kind, "requires_when");
-        assert_eq!(violation[0].field, "checked_by");
-        assert_eq!(violation[0].when_field, "status");
-        assert_eq!(violation[0].when_value, "checked");
+        let crate::ops::health::UnsatisfiedConstraint::RequiresWhen {
+            field,
+            when_field,
+            when_value,
+            ..
+        } = &violation[0]
+        else {
+            panic!("expected requires_when violation");
+        };
+        assert_eq!(field, "checked_by");
+        assert_eq!(when_field, "status");
+        assert_eq!(when_value, "checked");
 
         // Health parity — same single evaluation.
         let reports = crate::ops::health::collect_constraint_findings(
@@ -1475,7 +1487,12 @@ write_rules: []
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].id, outcome.id);
         assert_eq!(reports[0].violations.len(), 1);
-        assert_eq!(reports[0].violations[0].field, "checked_by");
+        let crate::ops::health::UnsatisfiedConstraint::RequiresWhen { field, .. } =
+            &reports[0].violations[0]
+        else {
+            panic!("expected requires_when finding");
+        };
+        assert_eq!(field, "checked_by");
 
         // Complement 1: satisfying the constraint in the same create
         // emits no warning and no finding.
@@ -1766,6 +1783,614 @@ write_rules: []
             )
             .unwrap_err();
         assert_eq!(err.code(), "RELATIONSHIP_CYCLE");
+    }
+
+    /// Generic constraint-proof fixture: one folder-mounted mem
+    /// (`proof`) pinned to a schema built from the given manifest and
+    /// type YAMLs.
+    fn engine_with_proof_schema(
+        tmp: &TempDir,
+        schema_name: &str,
+        manifest_yaml: &str,
+        types: &[(&str, &str)],
+    ) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join(schema_name);
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(pkg.join("schema.yaml"), manifest_yaml).unwrap();
+        for (name, yaml) in types {
+            std::fs::write(pkg.join("types").join(format!("{name}.yaml")), yaml).unwrap();
+        }
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "proof".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                schema_name,
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap()
+    }
+
+    fn proof_create(
+        engine: &mut Engine,
+        entity_type: &str,
+        title: &str,
+        metadata: &[(&str, &str)],
+        relations: Vec<crate::ops::RelateArg>,
+    ) -> Result<CreateEntityOutcome, EngineError> {
+        let (actor, client) = cli_actor();
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), format!("{title} body."));
+        let mut md = IndexMap::new();
+        for (k, v) in metadata {
+            md.insert(k.to_string(), v.to_string());
+        }
+        engine.create_entity(
+            CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: "proof".to_string(),
+                title: title.to_string(),
+                entity_type: entity_type.to_string(),
+                sections,
+                metadata: md,
+                relations,
+                dry_run: false,
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+    }
+
+    fn rel(to: &str, rel_type: &str) -> crate::ops::RelateArg {
+        crate::ops::RelateArg {
+            to: crate::entity::EntityId(to.to_string()),
+            rel_type: rel_type.to_string(),
+            description: None,
+        }
+    }
+
+    const GROUNDING_MANIFEST: &str = r#"name: grounding
+version: 0.1.0
+description: anker-shaped grounding proof schema
+when_to_use: constraint-proof tests
+types:
+  - anchor
+  - tradeoff
+relationships:
+  mode: strict
+  definitions:
+    - name: FOLLOWS_FROM
+      description: stands on
+      default_weight: 3.0
+    - name: SUPPORTS
+      description: pro
+      default_weight: 1.0
+    - name: OPPOSES
+      description: contra
+      default_weight: 1.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+
+    const GROUNDING_ANCHOR: &str = r#"name: anchor
+description: a judgment standing on others
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: lifecycle
+    field_type: string
+    enum_values: [open, checked, fallen]
+    optional: true
+  - key: checked_by
+    description: who checked
+    field_type: string
+    optional: true
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+  - status
+  - checked_by
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+constraints:
+  - kind: requires_when
+    field: checked_by
+    when_field: status
+    when_value: checked
+  - kind: status_propagation
+    field: status
+    value: fallen
+    rel_type: FOLLOWS_FROM
+    direction: incoming
+write_rules: []
+"#;
+
+    const GROUNDING_TRADEOFF: &str = r#"name: tradeoff
+description: a claim with two sides
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+required_outgoing:
+  - relationships: [SUPPORTS]
+    cardinality: at_least_one
+  - relationships: [OPPOSES]
+    cardinality: at_least_one
+write_rules: []
+"#;
+
+    /// The anker proof (plan 07, criterion 2): the grounding-shaped
+    /// schema answers `pruefe_kette.py`'s check questions 1–3 from
+    /// health output alone — no project Python.
+    #[test]
+    fn anker_proof_grounding_schema_answers_check_questions_from_health() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_proof_schema(
+            &tmp,
+            "grounding",
+            GROUNDING_MANIFEST,
+            &[
+                ("anchor", GROUNDING_ANCHOR),
+                ("tradeoff", GROUNDING_TRADEOFF),
+            ],
+        );
+
+        // A fallen root, a child standing on it, a grandchild standing
+        // on the child (transitive), plus an untainted sibling chain.
+        let root = proof_create(&mut engine, "anchor", "Root", &[("status", "fallen")], vec![])
+            .unwrap();
+        let child = proof_create(
+            &mut engine,
+            "anchor",
+            "Child",
+            &[],
+            vec![rel(&root.id.0, "FOLLOWS_FROM")],
+        )
+        .unwrap();
+        let grandchild = proof_create(
+            &mut engine,
+            "anchor",
+            "Grandchild",
+            &[],
+            vec![rel(&child.id.0, "FOLLOWS_FROM")],
+        )
+        .unwrap();
+        let standing = proof_create(
+            &mut engine,
+            "anchor",
+            "Standing Root",
+            &[("status", "open")],
+            vec![],
+        )
+        .unwrap();
+        let standing_child = proof_create(
+            &mut engine,
+            "anchor",
+            "Standing Child",
+            &[],
+            vec![rel(&standing.id.0, "FOLLOWS_FROM")],
+        )
+        .unwrap();
+        // Question 3's subject: checked without a checker.
+        let unchecked = proof_create(
+            &mut engine,
+            "anchor",
+            "Checked No Checker",
+            &[("status", "checked")],
+            vec![],
+        )
+        .unwrap();
+        // Question 2's subject: a one-sided trade-off.
+        let onesided = proof_create(
+            &mut engine,
+            "tradeoff",
+            "One Sided",
+            &[],
+            vec![rel(&standing.id.0, "SUPPORTS")],
+        )
+        .unwrap();
+
+        // Question 1 — descendants of the fallen anchor are flagged,
+        // naming their ancestor; the standing chain is not.
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        let tainted_of = |id: &crate::entity::EntityId| -> Vec<String> {
+            findings
+                .iter()
+                .filter(|r| &r.id == id)
+                .flat_map(|r| &r.violations)
+                .filter_map(|v| match v {
+                    crate::ops::health::UnsatisfiedConstraint::StatusPropagation {
+                        tainted_by,
+                        ..
+                    } => Some(tainted_by.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(tainted_of(&child.id), vec![root.id.to_string()]);
+        assert_eq!(
+            tainted_of(&grandchild.id),
+            vec![root.id.to_string()],
+            "the taint is transitive and names the terminal ancestor"
+        );
+        assert!(tainted_of(&standing_child.id).is_empty());
+        assert!(tainted_of(&root.id).is_empty(), "the source is not its own finding");
+
+        // Question 3 — checked-without-checker is flagged.
+        assert!(
+            findings.iter().any(|r| r.id == unchecked.id
+                && r.violations.iter().any(|v| matches!(
+                    v,
+                    crate::ops::health::UnsatisfiedConstraint::RequiresWhen { field, .. }
+                        if field == "checked_by"
+                ))),
+            "checked-without-checker must be a health finding"
+        );
+
+        // Question 2 — the one-sided trade-off is flagged missing its
+        // OPPOSES block (form 4 at warn), from health output alone.
+        let missing = crate::ops::health::collect_missing_required_outgoing(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        let onesided_report = missing
+            .iter()
+            .find(|r| r.id == onesided.id)
+            .expect("one-sided trade-off flagged");
+        assert_eq!(onesided_report.missing.len(), 1);
+        assert_eq!(onesided_report.missing[0].relationships, vec!["OPPOSES"]);
+    }
+
+    const PLENUM_MANIFEST: &str = r#"name: plenum-proof
+version: 0.1.0
+description: plenum-shaped uniqueness and vocabulary proof schema
+when_to_use: constraint-proof tests
+types:
+  - rede
+  - vocabulary
+relationships:
+  mode: strict
+  definitions:
+    - name: REFERENCES
+      description: soft ref
+      default_weight: 0.5
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+
+    fn plenum_rede_type(unique_severity: &str) -> String {
+        format!(
+            r#"name: rede
+description: one speech
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: rede_id
+    description: source id
+    field_type: string
+    optional: true
+  - key: rede_sha256
+    description: content hash
+    field_type: string
+    optional: true
+  - key: kategorie
+    description: category from the shared vocabulary
+    field_type: string
+    optional: true
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+  - rede_id
+  - rede_sha256
+  - kategorie
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+constraints:
+  - kind: unique
+    fields: [rede_id, rede_sha256]
+    severity: {unique_severity}
+  - kind: enum_from_neighbour
+    field: kategorie
+    rel_type: REFERENCES
+    section: terms
+write_rules: []
+"#
+        )
+    }
+
+    const PLENUM_VOCABULARY: &str = r#"name: vocabulary
+description: the shared term list
+when_to_use: tests
+sections:
+  - key: terms
+    heading: Terms
+    required: false
+    search_weight: 5.0
+    catch_all: false
+    write_rules: []
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields:
+  - title
+  - body
+  - terms
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+
+    /// The plenum proof, uniqueness half (plan 07, criterion 3): a
+    /// second create with the same declared key tuple refuses with a
+    /// typed code naming the colliding entity — the 37-duplicates
+    /// scenario bounces at the engine. Health reports a pre-existing
+    /// violation planted under a warn-tier variant.
+    #[test]
+    fn plenum_proof_uniqueness_refuses_duplicates_and_health_reports_planted_ones() {
+        // Block tier: the duplicate refuses, naming the collider.
+        let tmp = TempDir::new().unwrap();
+        let rede = plenum_rede_type("block");
+        let mut engine = engine_with_proof_schema(
+            &tmp,
+            "plenum-proof",
+            PLENUM_MANIFEST,
+            &[("rede", &rede), ("vocabulary", PLENUM_VOCABULARY)],
+        );
+        let first = proof_create(
+            &mut engine,
+            "rede",
+            "Speech One",
+            &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+            vec![],
+        )
+        .unwrap();
+        let err = proof_create(
+            &mut engine,
+            "rede",
+            "Speech One Duplicate",
+            &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+            vec![],
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED");
+        assert_eq!(
+            err.details()["violations"][0]["colliding"],
+            first.id.to_string(),
+            "the refusal names the colliding entity"
+        );
+        // A different tuple passes.
+        proof_create(
+            &mut engine,
+            "rede",
+            "Speech Two",
+            &[("rede_id", "19-43"), ("rede_sha256", "def456")],
+            vec![],
+        )
+        .unwrap();
+
+        // Warn tier: plant the duplicate, health reports it.
+        let tmp = TempDir::new().unwrap();
+        let rede = plenum_rede_type("warn");
+        let mut engine = engine_with_proof_schema(
+            &tmp,
+            "plenum-proof",
+            PLENUM_MANIFEST,
+            &[("rede", &rede), ("vocabulary", PLENUM_VOCABULARY)],
+        );
+        proof_create(
+            &mut engine,
+            "rede",
+            "Planted A",
+            &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+            vec![],
+        )
+        .unwrap();
+        let planted = proof_create(
+            &mut engine,
+            "rede",
+            "Planted B",
+            &[("rede_id", "19-42"), ("rede_sha256", "abc123")],
+            vec![],
+        )
+        .unwrap();
+        assert!(
+            planted
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::ConstraintUnsatisfied { .. })),
+            "warn tier surfaces the duplicate as a warning and commits"
+        );
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        assert_eq!(
+            findings.len(),
+            2,
+            "both sides of the planted duplicate are findings: {findings:?}"
+        );
+    }
+
+    /// The plenum proof, enum-from-neighbour half (plan 07,
+    /// criterion 3): renaming a value in the neighbour's section makes
+    /// every stale holder a health finding.
+    #[test]
+    fn plenum_proof_enum_from_neighbour_flags_stale_holders_after_rename() {
+        let tmp = TempDir::new().unwrap();
+        let rede = plenum_rede_type("warn");
+        let mut engine = engine_with_proof_schema(
+            &tmp,
+            "plenum-proof",
+            PLENUM_MANIFEST,
+            &[("rede", &rede), ("vocabulary", PLENUM_VOCABULARY)],
+        );
+        let (actor, client) = cli_actor();
+
+        // The vocabulary entity enumerates the legal categories.
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "the term list.".to_string());
+        sections.insert("terms".to_string(), "- haushalt\n- verkehr\n".to_string());
+        let vocab = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "proof".to_string(),
+                    title: "Kategorien".to_string(),
+                    entity_type: "vocabulary".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: vec![],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        // A holder whose value is backed: clean.
+        let holder = proof_create(
+            &mut engine,
+            "rede",
+            "Holder",
+            &[("kategorie", "haushalt")],
+            vec![rel(&vocab.id.0, "REFERENCES")],
+        )
+        .unwrap();
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        assert!(
+            findings.iter().all(|r| r.id != holder.id),
+            "backed value produces no finding: {findings:?}"
+        );
+
+        // Rename the value in the neighbour's section — the holder
+        // goes stale and health flags it.
+        let current = engine.get_entity(&vocab.id).unwrap().content_hash.clone();
+        let mut sections = IndexMap::new();
+        sections.insert("terms".to_string(), "- finanzen\n- verkehr\n".to_string());
+        engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: vocab.id.clone(),
+                    expected_hash: Some(current),
+                    sections,
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+        );
+        let stale = findings
+            .iter()
+            .find(|r| r.id == holder.id)
+            .expect("stale holder is flagged after the rename");
+        assert!(stale.violations.iter().any(|v| matches!(
+            v,
+            crate::ops::health::UnsatisfiedConstraint::EnumFromNeighbour { value, .. }
+                if value == "haushalt"
+        )));
     }
 
     /// The advertised mutation warning is real: a create leaving a

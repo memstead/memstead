@@ -43,27 +43,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the cross-surface hash-parity flake.
 
 ### Added
-- **The constraint vocabulary (first two forms): schemas declare what
-  is unhealthy to keep.** A type can now declare `constraints` in its
-  schema YAML — starting with `requires_when` ("`status: checked`
-  requires `checked_by`": a metadata field or section becomes required
-  whenever another metadata field holds a declared value) — and every
-  `required_outgoing` block can declare a `severity`. One uniform
-  severity model for all constraint forms: `warn` (the default —
-  health finding, plus a write-time `CONSTRAINT_UNSATISFIED` warning
-  on create/update) or `block` (write-time refusal on every surface —
-  create, update, and for `required_outgoing` also the relate-remove
-  that would break the block — plus the same health finding for
-  pre-existing violations). `memstead health --include constraints`
-  lists standing violations (participates in `--strict`), the
-  `memstead_schema` response renders every declaration with its
+- **The constraint vocabulary: schemas declare what is unhealthy to
+  keep.** A type can now declare `constraints` in its schema YAML —
+  five forms: `requires_when` ("`status: checked` requires
+  `checked_by`": a metadata field or section becomes required whenever
+  another metadata field holds a declared value), `unique` (a tuple of
+  metadata fields unique among the type's entities within one mem —
+  defaults to `block`, its whole point is bouncing the duplicate),
+  `enum_from_neighbour` (a field's legal values are the bullet entries
+  of a named section on the entity reached via a named edge; an
+  unbacked value is a finding), `status_propagation` (a terminal
+  status value taints every entity reaching it — transitively — via a
+  named rel-type and direction; tainted entities are health findings
+  naming their tainting ancestor; always warn-tier, and a `block`
+  declaration refuses at load rather than becoming a promise the
+  engine won't keep), and a `severity` on every `required_outgoing`
+  block. One uniform severity model: `warn` (the default — health
+  finding, plus a write-time `CONSTRAINT_UNSATISFIED` warning) or
+  `block` (write-time refusal on every surface — create, update, and
+  the relate-remove that would break a `required_outgoing` block or
+  un-back an `enum_from_neighbour` value — plus the same health
+  finding for pre-existing violations). `memstead health --include
+  constraints` lists standing violations (participates in `--strict`),
+  the `memstead_schema` response renders every declaration with its
   severity at both verbosity levels, and malformed declarations
-  (unknown field, unknown trigger field, a trigger value outside the
-  field's enum, an unevaluated `kind`) refuse at schema load with a
-  typed error naming the offender — no declaration can load and be
-  silently ignored. Schemas declaring no constraints keep byte-identical
-  behavior. Further forms (uniqueness, enum-from-neighbour, status
-  propagation) follow in the same vocabulary.
+  (unknown field, unknown trigger field or rel-type, a value outside
+  the field's enum, a section no type declares, an unevaluated `kind`)
+  refuse at schema load with a typed error naming the offender — no
+  declaration can load and be silently ignored. Schemas declaring no
+  constraints keep byte-identical behavior.
 - **`memstead verify-anchors` — a drift statement without a binding.**
   Verifies every anchor in a mem against its declared source and
   reports, per anchor: `resolved`, `drifted` (hash differs under

@@ -107,6 +107,14 @@ pub enum ConstraintSeverity {
     Block,
 }
 
+impl ConstraintSeverity {
+    /// Serde default for forms whose default tier is `block`
+    /// (uniqueness — plenum 4's 37 duplicates are the evidence).
+    pub fn block() -> Self {
+        Self::Block
+    }
+}
+
 /// One declared keep-health constraint on a type — the constraint
 /// vocabulary (agent-toolbox plan 07). Declarations travel sealed with
 /// the schema package and are rendered on the `memstead_schema`
@@ -132,6 +140,69 @@ pub enum ConstraintDef {
         #[serde(default)]
         severity: ConstraintSeverity,
     },
+    /// Form 2 — uniqueness: the tuple of metadata-field values named
+    /// in `fields` is unique among entities of this type within one
+    /// mem. Entities missing any of the fields carry no tuple and are
+    /// not compared. Defaults to `block` — the whole point of the
+    /// declaration is preventing the duplicate at write time.
+    Unique {
+        /// The metadata fields forming the unique tuple (each must be
+        /// a declared metadata field of this type).
+        fields: Vec<String>,
+        #[serde(default = "ConstraintSeverity::block")]
+        severity: ConstraintSeverity,
+    },
+    /// Form 3 — enum-from-neighbour: the legal values of `field` are
+    /// the bullet-list entries (`- value` lines) of the `section`
+    /// section on the entity reached from this one via a `rel_type`
+    /// edge. A set value with no backing entry in any reached
+    /// neighbour's section — including the no-neighbour and
+    /// missing-section cases, where nothing can back it — is a
+    /// violation.
+    EnumFromNeighbour {
+        /// The metadata field whose values the neighbour enumerates.
+        field: String,
+        /// The outgoing rel-type that reaches the enumerating entity.
+        rel_type: String,
+        /// The section key on the reached entity whose bullet entries
+        /// are the legal values.
+        section: String,
+        #[serde(default)]
+        severity: ConstraintSeverity,
+    },
+    /// Form 5 — status propagation: when `field` on an entity of this
+    /// type holds `value` (the terminal value), every entity reaching
+    /// it — transitively — via `rel_type` edges in `direction` is
+    /// tainted; tainted entities surface as health findings naming
+    /// their tainting ancestor. Always warn-tier: the taint arises
+    /// from the ancestor's *later* change, so it can never refuse the
+    /// descendant's historical write (the loader refuses a `block`
+    /// declaration on this form rather than accepting a promise the
+    /// engine will not keep).
+    StatusPropagation {
+        /// The status metadata field on this (the tainting) type.
+        field: String,
+        /// The terminal value that starts the taint (validated
+        /// against `field`'s enum, when it declares one).
+        value: String,
+        /// The rel-type the taint travels along.
+        rel_type: String,
+        /// Which direction reaches the dependents: `incoming` taints
+        /// the entities whose `rel_type` edges point at the terminal
+        /// entity (and their dependents, transitively); `outgoing`
+        /// the entities the terminal entity points at.
+        direction: PropagationDirection,
+        #[serde(default)]
+        severity: ConstraintSeverity,
+    },
+}
+
+/// Traversal direction for [`ConstraintDef::StatusPropagation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PropagationDirection {
+    Incoming,
+    Outgoing,
 }
 
 /// Required-cardinality variants. `AtLeastOne` is the only variant

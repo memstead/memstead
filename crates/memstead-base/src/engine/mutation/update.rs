@@ -842,11 +842,12 @@ impl Engine {
         // Declared-constraints evaluation — same single evaluation the
         // health `constraints` include runs, against this update's
         // final state. Block-tier violations refuse; warn-tier warn.
-        let violated = crate::ops::health::unsatisfied_constraints(&next, type_def.as_ref());
+        let violated =
+            crate::ops::health::unsatisfied_constraints(&self.store, &next, type_def.as_ref(), Some(id));
         if !violated.is_empty() {
             let blocked: Vec<_> = violated
                 .iter()
-                .filter(|v| v.severity == memstead_schema::ConstraintSeverity::Block)
+                .filter(|v| v.severity() == memstead_schema::ConstraintSeverity::Block)
                 .cloned()
                 .collect();
             if !blocked.is_empty() {

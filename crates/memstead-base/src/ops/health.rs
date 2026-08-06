@@ -586,38 +586,126 @@ pub fn unsatisfied_required_outgoing(
         .collect()
 }
 
-/// One unsatisfied declared constraint on one entity — the wire entry
+/// One violated declared constraint on one entity — the wire entry
 /// shared by the write-path surface (the `CONSTRAINT_UNSATISFIED`
 /// warning or refusal, tier decided by the declared severity) and the
-/// health `constraints` include. `kind` names the constraint form
-/// (`requires_when`); the remaining fields restate the declaration so
-/// a consumer can repair without re-fetching the schema. `severity`
-/// always serializes here — the entry is new wire surface, so there is
-/// no pre-existing shape to keep byte-identical.
+/// health `constraints` include. The serde `kind` tag names the form;
+/// the remaining fields restate the declaration (plus the observed
+/// offense — the colliding entity, the unbacked value, the tainting
+/// ancestor) so a consumer can repair without re-fetching the schema.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct UnsatisfiedConstraint {
-    pub kind: &'static str,
-    pub field: String,
-    pub when_field: String,
-    pub when_value: String,
-    pub severity: memstead_schema::ConstraintSeverity,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UnsatisfiedConstraint {
+    RequiresWhen {
+        field: String,
+        when_field: String,
+        when_value: String,
+        severity: memstead_schema::ConstraintSeverity,
+    },
+    Unique {
+        fields: Vec<String>,
+        /// The entity's values for `fields`, in declaration order.
+        values: Vec<String>,
+        /// The other entity holding the same tuple (lexically smallest
+        /// when several collide).
+        colliding: String,
+        severity: memstead_schema::ConstraintSeverity,
+    },
+    EnumFromNeighbour {
+        field: String,
+        /// The set value no reached neighbour's section backs.
+        value: String,
+        rel_type: String,
+        section: String,
+        severity: memstead_schema::ConstraintSeverity,
+    },
+    StatusPropagation {
+        field: String,
+        /// The terminal value the ancestor holds.
+        value: String,
+        rel_type: String,
+        /// The tainting ancestor — the entity holding the terminal
+        /// value that this entity (transitively) reaches.
+        tainted_by: String,
+        severity: memstead_schema::ConstraintSeverity,
+    },
 }
 
-/// Evaluate one entity's declared `constraints` against its current
-/// state, returning the violated ones in declaration order. THE single
-/// evaluation — shared by the health sweep
+impl UnsatisfiedConstraint {
+    pub fn severity(&self) -> memstead_schema::ConstraintSeverity {
+        match self {
+            Self::RequiresWhen { severity, .. }
+            | Self::Unique { severity, .. }
+            | Self::EnumFromNeighbour { severity, .. }
+            | Self::StatusPropagation { severity, .. } => *severity,
+        }
+    }
+
+    /// One-line human rendering for warning/refusal message text.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::RequiresWhen {
+                field,
+                when_field,
+                when_value,
+                ..
+            } => format!(
+                "requires_when: '{field}' is required when {when_field}={when_value} and is unset"
+            ),
+            Self::Unique {
+                fields, colliding, ..
+            } => format!(
+                "unique: tuple ({}) collides with '{colliding}'",
+                fields.join(", ")
+            ),
+            Self::EnumFromNeighbour {
+                field,
+                value,
+                rel_type,
+                section,
+                ..
+            } => format!(
+                "enum_from_neighbour: '{field}' value '{value}' has no backing entry in any \
+                 `{section}` section reached via {rel_type}"
+            ),
+            Self::StatusPropagation {
+                field,
+                value,
+                tainted_by,
+                ..
+            } => format!("status_propagation: tainted by '{tainted_by}' ({field}={value})"),
+        }
+    }
+}
+
+/// Evaluate one entity's declared per-entity `constraints` against its
+/// current state (and, for the store-aware forms, against the rest of
+/// its mem), returning the violated ones in declaration order. THE
+/// single evaluation — shared by the health sweep
 /// ([`collect_constraint_findings`]) and the per-mutation
-/// `CONSTRAINT_UNSATISFIED` surface on create/update; a second
+/// `CONSTRAINT_UNSATISFIED` surface on create/update/relate; a second
 /// implementation of any form is a defect.
 ///
-/// `requires_when` semantics: the constraint triggers when
-/// `when_field`'s frontmatter value equals `when_value` exactly; a
-/// triggered constraint is satisfied when `field` — a metadata field
-/// or a section key, the loader guarantees it is one of the two — is
-/// present with non-blank content.
+/// Form semantics:
+/// - `requires_when` triggers when `when_field`'s frontmatter value
+///   equals `when_value` exactly; a triggered constraint is satisfied
+///   when `field` — a metadata field or a section key — is present
+///   with non-blank content.
+/// - `unique`: the entity's tuple of `fields` values (skipped when any
+///   field is unset/blank) must not equal another non-stub entity's
+///   tuple within the same mem and type. `exclude` names the entity's
+///   own id so an update does not collide with its stored self.
+/// - `enum_from_neighbour`: a set `field` value must appear as a
+///   bullet entry (`- value` / `* value` line) in the `section` body
+///   of at least one entity reached via an outgoing `rel_type` edge.
+/// - `status_propagation` is a reachability property of the graph,
+///   not of one write — it is evaluated only by the health sweep
+///   ([`collect_constraint_findings`]), never here.
 pub fn unsatisfied_constraints(
+    store: &Store,
     entity: &crate::entity::Entity,
     td: &TypeDefinition,
+    exclude: Option<&crate::entity::EntityId>,
 ) -> Vec<UnsatisfiedConstraint> {
     use memstead_schema::ConstraintDef;
     td.constraints
@@ -647,16 +735,95 @@ pub fn unsatisfied_constraints(
                 if satisfied {
                     return None;
                 }
-                Some(UnsatisfiedConstraint {
-                    kind: "requires_when",
+                Some(UnsatisfiedConstraint::RequiresWhen {
                     field: field.clone(),
                     when_field: when_field.clone(),
                     when_value: when_value.clone(),
                     severity: *severity,
                 })
             }
+            ConstraintDef::Unique { fields, severity } => {
+                let tuple = tuple_of(entity, fields)?;
+                let mut colliding: Vec<&str> = store
+                    .all_entities()
+                    .filter(|other| {
+                        !other.stub
+                            && other.mem == entity.mem
+                            && other.entity_type == entity.entity_type
+                            && Some(&other.id) != exclude
+                            && other.id != entity.id
+                            && tuple_of(other, fields).as_ref() == Some(&tuple)
+                    })
+                    .map(|other| other.id.0.as_str())
+                    .collect();
+                colliding.sort_unstable();
+                let first = colliding.first()?;
+                Some(UnsatisfiedConstraint::Unique {
+                    fields: fields.clone(),
+                    values: tuple,
+                    colliding: first.to_string(),
+                    severity: *severity,
+                })
+            }
+            ConstraintDef::EnumFromNeighbour {
+                field,
+                rel_type,
+                section,
+                severity,
+            } => {
+                let value = entity
+                    .metadata
+                    .get(field.as_str())
+                    .map(|v| v.to_frontmatter_string())
+                    .filter(|v| !v.trim().is_empty())?;
+                let backed = entity
+                    .relationships
+                    .iter()
+                    .filter(|rel| rel.rel_type == *rel_type)
+                    .filter_map(|rel| store.get(&rel.target))
+                    .filter_map(|neighbour| neighbour.sections.get(section.as_str()))
+                    .any(|body| bullet_entries(body).any(|entry| entry == value));
+                if backed {
+                    return None;
+                }
+                Some(UnsatisfiedConstraint::EnumFromNeighbour {
+                    field: field.clone(),
+                    value,
+                    rel_type: rel_type.clone(),
+                    section: section.clone(),
+                    severity: *severity,
+                })
+            }
+            ConstraintDef::StatusPropagation { .. } => None,
         })
         .collect()
+}
+
+/// The entity's tuple of frontmatter values for `fields`, in
+/// declaration order — `None` when any field is unset or blank (no
+/// tuple, nothing to compare).
+fn tuple_of(entity: &crate::entity::Entity, fields: &[String]) -> Option<Vec<String>> {
+    fields
+        .iter()
+        .map(|f| {
+            entity
+                .metadata
+                .get(f.as_str())
+                .map(|v| v.to_frontmatter_string())
+                .filter(|v| !v.trim().is_empty())
+        })
+        .collect()
+}
+
+/// The bullet entries of a section body — trimmed text of `- item` /
+/// `* item` lines. The legal-value shape `enum_from_neighbour` reads.
+fn bullet_entries(body: &str) -> impl Iterator<Item = &str> {
+    body.lines().filter_map(|line| {
+        let t = line.trim_start();
+        t.strip_prefix("- ")
+            .or_else(|| t.strip_prefix("* "))
+            .map(str::trim)
+    })
 }
 
 /// One entity's violated declared constraints, surfaced from the
@@ -672,17 +839,24 @@ pub struct ConstraintFindingReport {
     pub violations: Vec<UnsatisfiedConstraint>,
 }
 
-/// Collect every non-stub entity whose type declares `constraints`
-/// that the entity's current state violates. Deterministic — sorted by
-/// `(mem, id)`. Same skip rules as
-/// [`collect_missing_required_outgoing`]: no schema or no type
-/// definition for the entity means nothing to evaluate.
+/// Collect every non-stub entity whose declared `constraints` its
+/// current state violates. Two passes: the per-entity forms
+/// (`requires_when`, `unique`, `enum_from_neighbour`) through the
+/// shared [`unsatisfied_constraints`] evaluation, then the
+/// `status_propagation` graph sweep — for each entity holding a
+/// declared terminal value, every entity reaching it (transitively)
+/// via the declared rel-type and direction gains a finding naming that
+/// tainting ancestor. Deterministic — reports sorted by `(mem, id)`,
+/// violations in declaration order then by tainting ancestor.
 pub fn collect_constraint_findings(
     store: &Store,
     mem_filter: Option<&str>,
     mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
 ) -> Vec<ConstraintFindingReport> {
-    let mut out = Vec::new();
+    use memstead_schema::ConstraintDef;
+    let mut by_entity: std::collections::BTreeMap<String, Vec<UnsatisfiedConstraint>> =
+        Default::default();
+
     for entity in store.all_entities() {
         if entity.stub {
             continue;
@@ -701,20 +875,122 @@ pub fn collect_constraint_findings(
         if td.constraints.is_empty() {
             continue;
         }
-        let violations = unsatisfied_constraints(entity, td);
-        if violations.is_empty() {
-            continue;
+
+        // Pass 1 — per-entity forms.
+        let violations = unsatisfied_constraints(store, entity, td, None);
+        if !violations.is_empty() {
+            by_entity
+                .entry(entity.id.0.clone())
+                .or_default()
+                .extend(violations);
         }
-        out.push(ConstraintFindingReport {
-            id: entity.id.clone(),
-            title: entity.title.clone(),
-            entity_type: entity.entity_type.clone(),
-            mem: entity.mem.clone(),
-            violations,
-        });
+
+        // Pass 2 — this entity as a taint source: it holds a declared
+        // terminal value, so sweep its dependents.
+        for c in &td.constraints {
+            let ConstraintDef::StatusPropagation {
+                field,
+                value,
+                rel_type,
+                direction,
+                severity,
+            } = c
+            else {
+                continue;
+            };
+            let terminal = entity
+                .metadata
+                .get(field.as_str())
+                .is_some_and(|v| v.to_frontmatter_string() == *value);
+            if !terminal {
+                continue;
+            }
+            for tainted in reach_transitively(store, &entity.id, rel_type, *direction) {
+                if let Some(v) = mem_filter
+                    && tainted.mem() != v
+                {
+                    continue;
+                }
+                by_entity.entry(tainted.0.clone()).or_default().push(
+                    UnsatisfiedConstraint::StatusPropagation {
+                        field: field.clone(),
+                        value: value.clone(),
+                        rel_type: rel_type.clone(),
+                        tainted_by: entity.id.to_string(),
+                        severity: *severity,
+                    },
+                );
+            }
+        }
     }
+
+    let mut out: Vec<ConstraintFindingReport> = by_entity
+        .into_iter()
+        .filter_map(|(id, violations)| {
+            let id = crate::entity::EntityId(id);
+            let entity = store.get(&id)?;
+            Some(ConstraintFindingReport {
+                id,
+                title: entity.title.clone(),
+                entity_type: entity.entity_type.clone(),
+                mem: entity.mem.clone(),
+                violations,
+            })
+        })
+        .collect();
     out.sort_by(|a, b| a.mem.cmp(&b.mem).then_with(|| a.id.0.cmp(&b.id.0)));
     out
+}
+
+/// Transitive reachability along one rel-type from `start`, excluding
+/// `start` itself. `Incoming` walks against edge direction (the
+/// entities whose `rel_type` edges point at the frontier — "what
+/// stands on this"); `Outgoing` follows the frontier's own edges.
+/// Stubs are traversed (an edge through a stub still transmits the
+/// taint) but stubs themselves are not returned.
+fn reach_transitively(
+    store: &Store,
+    start: &crate::entity::EntityId,
+    rel_type: &str,
+    direction: memstead_schema::PropagationDirection,
+) -> Vec<crate::entity::EntityId> {
+    use memstead_schema::PropagationDirection;
+    let mut seen: std::collections::HashSet<crate::entity::EntityId> =
+        std::iter::once(start.clone()).collect();
+    let mut frontier = vec![start.clone()];
+    let mut reached = Vec::new();
+    while let Some(current) = frontier.pop() {
+        let next: Vec<crate::entity::EntityId> = match direction {
+            PropagationDirection::Incoming => store
+                .all_entities()
+                .filter(|e| {
+                    e.relationships
+                        .iter()
+                        .any(|r| r.rel_type == rel_type && r.target == current)
+                })
+                .map(|e| e.id.clone())
+                .collect(),
+            PropagationDirection::Outgoing => store
+                .get(&current)
+                .map(|e| {
+                    e.relationships
+                        .iter()
+                        .filter(|r| r.rel_type == rel_type)
+                        .map(|r| r.target.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+        for id in next {
+            if seen.insert(id.clone()) {
+                if store.get(&id).is_some_and(|e| !e.stub) {
+                    reached.push(id.clone());
+                }
+                frontier.push(id);
+            }
+        }
+    }
+    reached
 }
 
 /// One entity's unsatisfied `required_outgoing` blocks, surfaced from

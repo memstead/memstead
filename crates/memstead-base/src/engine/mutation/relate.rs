@@ -562,6 +562,33 @@ impl Engine {
                     missing: blocked,
                 });
             }
+            // Edge-dependent declared constraints: removing this edge
+            // must not un-back a block-tier `enum_from_neighbour`
+            // value (the edge to the enumerating neighbour is what
+            // backs it). Edge-independent forms are filtered out —
+            // their verdict is identical before and after a relate,
+            // so refusing here would block unrelated repair work.
+            let blocked: Vec<_> = crate::ops::health::unsatisfied_constraints(
+                &self.store,
+                &next,
+                type_def.as_ref(),
+                Some(&args.source),
+            )
+            .into_iter()
+            .filter(|v| {
+                matches!(
+                    v,
+                    crate::ops::health::UnsatisfiedConstraint::EnumFromNeighbour { .. }
+                ) && v.severity() == memstead_schema::ConstraintSeverity::Block
+            })
+            .collect();
+            if !blocked.is_empty() {
+                return Err(EngineError::ConstraintUnsatisfied {
+                    entity_type: next.entity_type.clone(),
+                    entity_id: args.source.to_string(),
+                    violations: blocked,
+                });
+            }
         }
 
         // Plan a stub for an absent target on the real-add path.

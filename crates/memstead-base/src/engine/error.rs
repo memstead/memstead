@@ -229,9 +229,9 @@ pub enum EngineError {
     /// restates each violated declaration so the caller can repair
     /// without re-fetching the schema.
     #[error(
-        "write refused: {entity_id} ({entity_type}) violates {n} block-tier declared constraint(s) — first: '{first_field}' is required and unset",
+        "write refused: {entity_id} ({entity_type}) violates {n} block-tier declared constraint(s) — first: {first}",
         n = violations.len(),
-        first_field = violations.first().map(|v| v.field.as_str()).unwrap_or("?"),
+        first = violations.first().map(|v| v.describe()).unwrap_or_default(),
     )]
     ConstraintUnsatisfied {
         entity_type: String,

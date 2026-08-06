@@ -1727,9 +1727,13 @@ fn constraint_requires_when_accepted_with_severity() {
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
     let td = schema.types.get("sample").unwrap();
     assert_eq!(td.constraints.len(), 2);
-    let ConstraintDef::RequiresWhen { severity, .. } = &td.constraints[0];
+    let ConstraintDef::RequiresWhen { severity, .. } = &td.constraints[0] else {
+        panic!("expected requires_when");
+    };
     assert_eq!(*severity, ConstraintSeverity::Warn, "default is warn");
-    let ConstraintDef::RequiresWhen { severity, .. } = &td.constraints[1];
+    let ConstraintDef::RequiresWhen { severity, .. } = &td.constraints[1] else {
+        panic!("expected requires_when");
+    };
     assert_eq!(*severity, ConstraintSeverity::Block);
 }
 
@@ -1818,4 +1822,130 @@ fn required_outgoing_severity_parses_and_rejects_unknown() {
     severity: fatal
 "#;
     load(&minimal_manifest(), &[("sample", &bad)]).expect_err("unknown severity must fail");
+}
+
+/// Forms 2/3/5 accept valid declarations; uniqueness defaults to
+/// block (its whole point is preventing the duplicate).
+#[test]
+fn constraint_forms_two_three_five_accepted() {
+    use memstead_schema::{ConstraintDef, ConstraintSeverity};
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: unique
+    fields: [status]
+  - kind: enum_from_neighbour
+    field: status
+    rel_type: REFERENCES
+    section: body
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_type: PART_OF
+    direction: incoming
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.constraints.len(), 3);
+    let ConstraintDef::Unique { severity, .. } = &td.constraints[0] else {
+        panic!("expected unique");
+    };
+    assert_eq!(
+        *severity,
+        ConstraintSeverity::Block,
+        "uniqueness defaults to block"
+    );
+}
+
+#[test]
+fn constraint_unique_unknown_field_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: unique
+    fields: [status, rede_sha256]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "rede_sha256"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_unique_empty_fields_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: unique
+    fields: []
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("empty tuple must fail");
+}
+
+#[test]
+fn constraint_enum_from_neighbour_unknown_rel_type_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: enum_from_neighbour
+    field: status
+    rel_type: ENUMERATES
+    section: body
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "ENUMERATES"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_enum_from_neighbour_unknown_section_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: enum_from_neighbour
+    field: status
+    rel_type: REFERENCES
+    section: vocabulary
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "vocabulary"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_status_propagation_value_outside_enum_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: fallen
+    rel_type: PART_OF
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "fallen"),
+        "got: {err}"
+    );
+}
+
+/// `status_propagation` can never refuse a write, so a `block`
+/// declaration is refused at load rather than accepted as a promise
+/// the engine will not keep.
+#[test]
+fn constraint_status_propagation_block_severity_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_type: PART_OF
+    direction: incoming
+    severity: block
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { ref offender, .. } if offender == "block"),
+        "got: {err}"
+    );
 }
