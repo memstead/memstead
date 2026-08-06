@@ -57,9 +57,9 @@ pub enum RecoveryActionInput {
     /// content is safe to adopt.
     Reattach,
     /// Destroy the residue, then proceed with the normal create
-    /// path. Prior entities are gone. **Not yet implemented** — the
-    /// orchestrator currently refuses with `INVALID_INPUT` pointing
-    /// at `memstead mem delete <name>`.
+    /// path: the residual branch and its `__MEMSTEAD` config blob are
+    /// pruned in one ref-edit transaction before the fresh seed
+    /// commit. Prior entities are gone by design.
     ForceOverwrite,
     /// Refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the
     /// caller to run `memstead mem delete <name>` first. Hard barrier

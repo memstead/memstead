@@ -568,7 +568,7 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
         },
         {
           "const": "force_overwrite",
-          "description": "Destroy the residue, then proceed with the normal create\npath. Prior entities are gone. **Not yet implemented** — the\norchestrator currently refuses with `INVALID_INPUT` pointing\nat `memstead mem delete <name>`.",
+          "description": "Destroy the residue, then proceed with the normal create\npath: the residual branch and its `__MEMSTEAD` config blob are\npruned in one ref-edit transaction before the fresh seed\ncommit. Prior entities are gone by design.",
           "type": "string"
         },
         {
