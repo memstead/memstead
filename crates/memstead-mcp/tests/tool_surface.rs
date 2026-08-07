@@ -1196,6 +1196,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "_policy",
             "require_notes",
             "cross_mem_links",
+            // Frontmatter slot: the serving engine's absolute workspace
+            // path (CLI `--workspace` targeting for skills that shell out).
+            "_workspace_root",
             // Lean-flavour overview: mount roster fields + the
             // frontmatter/error tokens its description names.
             "durable",
