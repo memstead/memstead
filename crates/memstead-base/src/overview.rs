@@ -746,6 +746,14 @@ pub fn compose_overview(
     md.push_str(&format!("_cluster_count: {cluster_count}\n"));
     md.push_str(&format!("_entity_count: {entity_count_total}\n"));
     md.push_str(&format!("_modularity: {mod_str}\n"));
+    // Absolute workspace root of the serving engine — the one place a
+    // session can learn where CLI invocations must point
+    // (`memstead --workspace <root> …`) without inheriting cwd or an
+    // env var from the caller. Omitted for engines built straight from
+    // a mount list (tests, ad-hoc embedders), which have no root.
+    if let Some(root) = engine.workspace_root() {
+        md.push_str(&format!("_workspace_root: {}\n", root.display()));
+    }
     if let Some(ref s) = policy_flow {
         md.push_str(&format!("_policy: {s}\n"));
     }

@@ -112,13 +112,21 @@ export function anchorsGate(workspaceRoot) {
 // CLI: `record <dir>` (used by /setup) writes the record; `gate <dir>`
 // (used by capability-gated routers) prints the `{capable, version, reason}`
 // gate as JSON on stdout and always exits 0 — the caller branches on
-// `capable`, never on the exit code. `<dir>` may be any directory in the
-// project: both commands resolve the actual workspace root from it (walk-up
+// `capable`, never on the exit code. `root <dir>` prints the resolved
+// workspace root path — skills use it to pass `--workspace` explicitly on
+// every `memstead` CLI call instead of inheriting cwd (the CLI's own upward
+// walk cannot find a workspace that lives *below* the session cwd, the
+// common `cd <dir>` `.mcp.json` layout). `<dir>` may be any directory in the
+// project: all commands resolve the actual workspace root from it (walk-up
 // + `.mcp.json` cd-target probe), so `$(pwd)` is safe even when the
 // workspace lives in a subdirectory.
 function main() {
   const [cmd, dir] = process.argv.slice(2);
   const root = dir ? resolveWorkspaceRootFrom(dir) : null;
+  if (cmd === 'root' && root) {
+    console.log(root);
+    process.exit(0);
+  }
   if (cmd === 'record' && root) {
     const r = recordBinaryVersion(root);
     if (r.ok) {
@@ -132,7 +140,7 @@ function main() {
     console.log(JSON.stringify(anchorsGate(root)));
     process.exit(0);
   }
-  console.error('usage: binary-version.mjs (record|gate) <dir-anywhere-in-project>');
+  console.error('usage: binary-version.mjs (record|gate|root) <dir-anywhere-in-project>');
   process.exit(2);
 }
 

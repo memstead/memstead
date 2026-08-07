@@ -8,6 +8,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **The overview names its workspace: `_workspace_root` frontmatter.**
+  `memstead_overview` (both server flavours, and the CLI `overview`)
+  renders the absolute path of the workspace the serving engine booted
+  from as a `_workspace_root` frontmatter slot — the one authoritative
+  place a session can learn where `memstead` CLI invocations must point
+  (`--workspace <root>`) without inheriting a cwd or an env var from
+  the caller. Omitted for engines built straight from a mount list
+  (in-memory sketches have no root). The plugin's `/sync` skill now
+  resolves the root once (`binary-version.mjs root <dir>` — the
+  existing walk-up + `.mcp.json` cd-target probe, new `root`
+  subcommand) and passes `--workspace` explicitly on every CLI call it
+  issues, so the sync loop works from any directory with zero
+  configuration — no more `MEMSTEAD_WORKSPACE` export.
 - **Section content format: schemas declare a section's markdown
   shape.** A schema section can carry `content` — a flat expression
   over the mdast block vocabulary (`"(heading(3) list(bullet))+"`,

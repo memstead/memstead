@@ -23,12 +23,14 @@ write-only on the mem; engine refusals are surfaced verbatim, never worked aroun
 
 ## Steps
 
-1. Parse `$ARGUMENTS`. A binding id (`<mem>/<stem>`) → step 2. `--verify
+1. `WS="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" root "$(pwd)")"` —
+   every `memstead` call below carries `--workspace "$WS"`, never bare cwd.
+   Parse `$ARGUMENTS`: a binding id (`<mem>/<stem>`) → step 2. `--verify
    <binding>` → step 6. `--inventory <binding>` → step 7. No argument? Ask.
    `--all` → run
 
    ```sh
-   memstead --json projection brief --all --operation any
+   memstead --json --workspace "$WS" projection brief --all --operation any
    ```
 
    No bindings configured → say so and stop. Nothing due → say so and stop —
@@ -43,19 +45,15 @@ write-only on the mem; engine refusals are surfaced verbatim, never worked aroun
    it (steps 2–5).
 
 2. Check the anchors capability once:
-
-   ```sh
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)"
-   ```
-
-   **Capable** → include `anchors` naming the source artifact(s), with
-   `source` = the brief-listed entry point. **Not capable** → omit; say why.
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)"` —
+   **capable** → include `anchors` naming the source artifact(s), with
+   `source` = the brief-listed entry point; **not capable** → omit, say why.
 
 3. Render and read the sync brief, then follow it — it carries the changed
    slice, the open findings, and the conservatism rules:
 
    ```sh
-   memstead projection brief --sync <binding>
+   memstead --workspace "$WS" projection brief --sync <binding>
    ```
 
 4. Apply only what the brief calls for, via the MCP mutation tools, inside the
@@ -67,14 +65,14 @@ write-only on the mem; engine refusals are surfaced verbatim, never worked aroun
 5. Record what you did so the baseline advances:
 
    ```sh
-   memstead projection advance <binding> --dispositions '{"<artifact-id>":"worked", …}'
+   memstead --workspace "$WS" projection advance <binding> --dispositions '{"<artifact-id>":"worked", …}'
    ```
 
    Anchored writes count as worked on their own; supply dispositions only for
    the rest (skipped or out-of-intent artifacts), using only ids the brief
    listed. The baseline advances once the slice is fully dispositioned.
 
-6. `--verify <binding>`: run `memstead projection verify <binding>` —
+6. `--verify <binding>`: run `memstead --workspace "$WS" projection verify <binding>` —
    report-only, nothing changes; it measures the mem, not your project's
    changes or tests. Present the engine's deterministic report as ordered —
    verdict and top actions first, never re-ranked. A near-zero first report on
@@ -84,7 +82,7 @@ write-only on the mem; engine refusals are surfaced verbatim, never worked aroun
    repair to quiescence. Start with the complete measurement:
 
    ```sh
-   memstead projection verify <binding> --full
+   memstead --workspace "$WS" projection verify <binding> --full
    ```
 
    Then repair in passes: steps 2–5 off the rendered sync brief, then
