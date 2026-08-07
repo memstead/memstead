@@ -1,9 +1,16 @@
 //! Scan the engine workspace for typed error codes and render the
 //! cross-surface Error Code Index. Codes are sourced from:
 //!
-//! * `EngineError::code()` / `ValidationError::code()` / `OpsError::code()`
-//!   match arms in `memstead-base` — every variant returns an
-//!   `UPPER_SNAKE_CASE` literal here.
+//! * Every `fn code(&self) -> &'static str` body in `memstead-base` —
+//!   the whole crate is swept, so `EngineError::code()` /
+//!   `ValidationError::code()` / `OpsError::code()` are covered along
+//!   with delegated violation `code()` impls (e.g.
+//!   `SectionFormatViolation` in `section_format.rs`, reached through
+//!   `EngineError::SectionFormatRefused`) — every variant returns an
+//!   `UPPER_SNAKE_CASE` literal there. `pub const ..._CODE: &str`
+//!   constants in `memstead-base` are also indexed, for `code()` impls
+//!   that return a named constant instead of a literal (e.g.
+//!   `INVALID_ANCHOR_CODE` in `anchor.rs`).
 //! * `tool_error(...)` / `tool_error_with_payload(...)` callsites in
 //!   `memstead-mcp` — first positional argument.
 //! * `CliError::new(_, "...", _)`, `.with_code("...")`, and
@@ -73,14 +80,30 @@ fn scan_engine_codes(
     let arm_re = Regex::new(r#"=>\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
     let bare_lit_re = Regex::new(r#"^\s*"([A-Z][A-Z0-9_]+)"\s*,?\s*(?://.*)?$"#).unwrap();
     let header_re = Regex::new(r#"\bfn code\(&self\)\s*->\s*&'static\s*str"#).unwrap();
-    for sub in [
-        "crates/memstead-base/src/engine/error.rs",
-        "crates/memstead-base/src/runtime_validator.rs",
-        "crates/memstead-base/src/ops/mod.rs",
-    ] {
-        let path = workspace_root.join(sub);
+    // Same const style the CLI scan matches — catches `code()` impls
+    // that return a named constant instead of a string literal.
+    let const_re =
+        Regex::new(r#"pub const [A-Z_]+_CODE:\s*&str\s*=\s*"([A-Z][A-Z0-9_]+)""#).unwrap();
+    // Sweep the whole crate rather than a hand-kept file list: the
+    // `fn code(&self) -> &'static str` header gate means only typed-code
+    // bodies contribute, so delegated violation `code()` impls (e.g.
+    // `section_format.rs`, reached via `EngineError::SectionFormatRefused`)
+    // are indexed without anyone remembering to register the file.
+    let root = workspace_root.join("crates/memstead-base/src");
+    for path in rust_sources(&root)? {
+        let rel = pathdiff(workspace_root, &path);
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
+        for cap in const_re.captures_iter(&text) {
+            let m = cap.get(1).unwrap();
+            push(
+                codes,
+                m.as_str().to_string(),
+                Surface::Engine,
+                &rel,
+                line_of(&text, m.start()),
+            );
+        }
         let mut in_code_fn = false;
         let mut depth: i32 = 0;
         for (idx, line) in text.lines().enumerate() {
@@ -96,7 +119,7 @@ fn scan_engine_codes(
                     .chain(bare_lit_re.captures_iter(line))
                 {
                     let code = cap.get(1).unwrap().as_str().to_string();
-                    push(codes, code, Surface::Engine, sub, (idx + 1) as u32);
+                    push(codes, code, Surface::Engine, &rel, (idx + 1) as u32);
                 }
                 if depth <= 0 {
                     in_code_fn = false;

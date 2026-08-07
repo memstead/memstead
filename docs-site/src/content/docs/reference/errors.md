@@ -6,7 +6,7 @@ title: "Error Code Index"
 
 Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`), and the MCP server (`memstead-mcp`). Each row lists the code, the surfaces that emit it, and the source locations. Not indexed here: the registry-relayed codes the CLI maps from memstead.io HTTP statuses during publish/install (`REGISTRY_VALIDATION_FAILED`, `NOT_AUTHENTICATED`, `FORBIDDEN`, `REGISTRY_NOT_FOUND`, `GONE`, `ARCHIVE_TOO_LARGE`, `RATE_LIMITED`, `REGISTRY_ERROR` — see the publish guide and `memstead-cli/src/commands/publish.rs`).
 
-**Distinct codes:** 181
+**Distinct codes:** 185
 
 | Code | Surfaces | Source locations |
 |------|----------|------------------|
@@ -54,6 +54,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `IGNORED_READONLY_FIELD` | engine | `crates/memstead-base/src/ops/mod.rs:1625` |
 | `INLINE_WIKI_LINK_AUTO_STUBBED` | engine | `crates/memstead-base/src/ops/mod.rs:1574` |
 | `INTERNAL` | CLI, MCP | `crates/memstead-cli/src/commands/schema.rs:620`<br>`crates/memstead-cli/src/lib.rs:28`<br>`crates/memstead-mcp/src/filesystem_server.rs:1680`<br>`crates/memstead-mcp/src/filesystem_server.rs:1723` |
+| `INVALID_ANCHOR` | engine | `crates/memstead-base/src/anchor.rs:67` |
 | `INVALID_CURSOR` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1145`<br>`crates/memstead-mcp/src/server.rs:1609` |
 | `INVALID_DOMAIN` | CLI | `crates/memstead-cli/src/commands/domain.rs:148` |
 | `INVALID_ENTITY_ID` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1124`<br>`crates/memstead-mcp/src/server.rs:268`<br>`crates/memstead-mcp/src/server.rs:283`<br>`crates/memstead-mcp/src/server.rs:1239` |
@@ -63,6 +64,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `INVALID_MEM_NAME` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1126`<br>`crates/memstead-mcp/src/server.rs:1273`<br>`crates/memstead-mcp/src/server.rs:1689` |
 | `INVALID_REL_SHAPE` | engine | `crates/memstead-base/src/runtime_validator.rs:201` |
 | `INVALID_REL_TYPE` | engine | `crates/memstead-base/src/runtime_validator.rs:200` |
+| `INVALID_TABLE_COLUMNS` | engine | `crates/memstead-base/src/section_format.rs:520` |
 | `INVALID_TITLE` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1100`<br>`crates/memstead-cli/src/commands/batch_create.rs:179`<br>`crates/memstead-cli/src/commands/create.rs:226`<br>`crates/memstead-mcp/src/server.rs:1206` |
 | `INVALID_VERSION` | CLI | `crates/memstead-cli/src/commands/publish.rs:129` |
 | `INVALID_WIKI_LINK_TARGET` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1125`<br>`crates/memstead-mcp/src/server.rs:1254` |
@@ -160,8 +162,10 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `SEARCH_MEM_INDEX_UNAVAILABLE` | engine | `crates/memstead-base/src/ops/mod.rs:1621` |
 | `SEARCH_RESULTS_TRUNCATED` | engine | `crates/memstead-base/src/ops/mod.rs:1608` |
 | `SEARCH_UNAVAILABLE_IN_WASM` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1153`<br>`crates/memstead-mcp/src/server.rs:1565` |
-| `SECTION_CONTENT_INVALID` | engine | `crates/memstead-base/src/runtime_validator.rs:202`<br>`crates/memstead-base/src/runtime_validator.rs:203` |
+| `SECTION_CONTENT_INVALID` | engine | `crates/memstead-base/src/runtime_validator.rs:202`<br>`crates/memstead-base/src/runtime_validator.rs:203`<br>`crates/memstead-base/src/section_format.rs:521` |
+| `SECTION_CONTENT_MISMATCH` | engine | `crates/memstead-base/src/section_format.rs:518` |
 | `SECTION_HEADING_DIVERGENCE` | engine | `crates/memstead-base/src/ops/mod.rs:1633` |
+| `SECTION_ITEM_PATTERN_MISMATCH` | engine | `crates/memstead-base/src/section_format.rs:519` |
 | `SECTION_NOT_UPDATABLE` | engine | `crates/memstead-base/src/runtime_validator.rs:199` |
 | `SELF_LINK_IGNORED` | engine | `crates/memstead-base/src/ops/mod.rs:1635` |
 | `SET_AND_UNSET_CONFLICT` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1129`<br>`crates/memstead-mcp/src/server.rs:1126` |
