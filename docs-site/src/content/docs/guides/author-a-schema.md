@@ -114,6 +114,54 @@ Now iterate on the package: rename `note` into your first real type (the filenam
 
 For full worked schemas to read (not copy — the scaffold already gave you a valid base), see the [examples](https://github.com/memstead/memstead/tree/main/examples): `agent-program` (a single-mem, execution-flavoured schema) and the `reimpl-source`/`reimpl-target` pair (a two-mem model with cross-mem links).
 
+## 7. Declare keep-health constraints
+
+Beyond what is *legal to write*, a type can declare what is *unhealthy to keep* — a `constraints:` list on the type definition, drawn from a closed vocabulary of five forms under one uniform `severity` model: `warn` (a health finding on the health report) or `block` (a write-time refusal, plus a health finding for pre-existing violations). The forms:
+
+- **`requires_when`** — a field or section becomes required when another metadata field holds a declared value (`status: checked` requires `checked_by`). Defaults to `warn`.
+- **`required_outgoing` severity** — each required-edge block on the type can carry `severity: block`, promoting its historical `MISSING_REQUIRED_OUTGOING` warning to a refusal.
+- **`unique`** — a tuple of metadata fields unique among entities of this type within the mem. Defaults to `block`: the point is bouncing the duplicate at write time.
+- **`enum_from_neighbour`** — a field whose legal values are the bullet-list entries of a named section on the entity reached via a named outgoing edge; a value nothing backs is a violation. Defaults to `warn`.
+- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it via a named rel-type and direction; tainted entities surface as health findings naming their tainting ancestor. Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes `propagating_relationships`, which keeps only its self-edge-refusal behaviour.
+
+```yaml
+# types/recipe.yaml
+constraints:
+  - kind: requires_when          # status: retired requires a replaced_by value
+    field: replaced_by
+    when_field: status
+    when_value: retired
+  - kind: unique                 # one recipe per (name, cuisine)
+    fields: [name, cuisine]      # severity defaults to block for unique
+```
+
+A malformed declaration — an unknown `kind`, an undeclared field or relationship — refuses at `schema validate` / `schema install` with a typed error; nothing loads and gets silently ignored. Declared constraints render on the `memstead_schema` MCP response at both verbosity levels. The exact shape of every form is in the generated IDE-validation reference [`crates/memstead-schema/generated/type-definition.schema.json`](https://github.com/memstead/memstead/tree/main/crates/memstead-schema/generated).
+
+## 8. Declare a section's markdown shape
+
+A section declaration can also pin the markdown structure of its body — a flat `content` expression over the mdast block vocabulary (`paragraph`, `list`, `table`, `code`, `blockquote`, `heading`, `thematicBreak`, `html`), with attribute forms (`list(bullet)`, `list(ordered)`, `heading(3)`–`heading(6)`, `code(lang=json)`) and regular operators: sequence by space, alternation `(paragraph | list)`, repetition `+` `*` `?`. Optional companions:
+
+- **`item_pattern`** — an implicitly anchored regex applied to each repeating unit (list items, paragraph lines); named capture groups name the parts in refusal payloads. Legal only when the expression contains exactly one of `list` / `paragraph`.
+- **`table`** — the table contract: `columns` pins header names and order; `column_patterns` maps column name → per-cell regex.
+- **`example`** — one conforming snippet, echoed verbatim in every format refusal.
+- **`format_severity`** — reuses the constraint severity model; defaults to `block` (a shape violation is deterministic and one-round-trip repairable), `warn` stays available per section.
+
+```yaml
+# types/recipe.yaml
+sections:
+  - key: ingredients
+    heading: Ingredients
+    required: true
+    search_weight: 1.0
+    content: "list(bullet)"
+    item_pattern: '(?<amount>[\d/.]+\s?\w*) (?<ingredient>.+)'
+    example: |
+      - 500g flour
+      - 300ml water
+```
+
+A section with no `content` stays free-form, exactly as before. Violations refuse (or warn) with `SECTION_CONTENT_MISMATCH`, `SECTION_ITEM_PATTERN_MISMATCH`, or `INVALID_TABLE_COLUMNS` — each carrying the declared expression, the found block sequence, and the `example` — indexed in the [Error Code Index](../../reference/errors/). The full key shapes live in the same generated reference as the constraints.
+
 ## Where next
 
 - The [Glossary](../../glossary/#schema) defines schema, schema pin, and migration precisely.

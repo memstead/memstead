@@ -1,6 +1,6 @@
 # Sizing curve — measured operating limits
 
-**Measured:** 2026-08-06 · engine at commit `c48cd07` (pre-release 0.4.0) ·
+**Measured:** 2026-08-06 · engine at commit `c48cd07` (post-0.4.0, pre-0.5) ·
 Apple M5 Max (macOS, aarch64), release binary. **All numbers are
 hardware-relative** — treat the shape of the curve as portable and the
 absolute milliseconds as this machine's. The field deployment that

@@ -360,15 +360,21 @@ The response's `_hash` is the *new* token — chain it into your next mutation w
 
 In a `strict`-mode schema only declared relationship types are legal. Guess wrong and the refusal enumerates the whole legal vocabulary — no separate lookup call needed.
 
+`memstead_relate` takes a `relations` array of operation objects, applied atomically — a single edge is a list of one, and one failing entry refuses the whole list.
+
 **Call 1 — refused** (`RELATES_TO` is not in the default schema's vocabulary):
 
 ```json
 {
   "name": "memstead_relate",
   "arguments": {
-    "from": "my-graph--optimistic-locking",
-    "type": "RELATES_TO",
-    "to": "my-graph--idempotency"
+    "relations": [
+      {
+        "from": "my-graph--optimistic-locking",
+        "type": "RELATES_TO",
+        "to": "my-graph--idempotency"
+      }
+    ]
   }
 }
 ```
@@ -395,29 +401,38 @@ In a `strict`-mode schema only declared relationship types are legal. Guess wron
 {
   "name": "memstead_relate",
   "arguments": {
-    "from": "my-graph--retry",
-    "type": "DEPENDS_ON",
-    "to": "my-graph--idempotency"
+    "relations": [
+      {
+        "from": "my-graph--retry",
+        "type": "DEPENDS_ON",
+        "to": "my-graph--idempotency"
+      }
+    ]
   }
 }
 ```
 
 ```json
 {
-  "from": "my-graph--retry",
-  "to": "my-graph--idempotency",
-  "rel_type": "DEPENDS_ON",
-  "source": "explicit",
-  "_hash": "f559cb6a71019a85",
-  "_mem_schema": "default@1.0.0",
+  "results": [
+    {
+      "from": "my-graph--retry",
+      "to": "my-graph--idempotency",
+      "rel_type": "DEPENDS_ON",
+      "action": "added",
+      "source": "explicit",
+      "_hash": "f559cb6a71019a85"
+    }
+  ],
   "commit_sha": "000000000000000018be959d068d4dd80000000000000000",
-  "durable": true,
+  "warnings": [],
   "orphan_stubs_removed": [],
-  "warnings": []
+  "_mem_schema": "default@1.0.0",
+  "durable": true
 }
 ```
 
-Two notes on edges: the relate response's `_hash` is the source entity's new lock token (relating rewrote its Relationships section). And `REFERENCES` is `manual_authoring: forbidden` — it's emitted automatically from `[[wiki-links]]` in section bodies; write the link, not the edge.
+Two notes on edges: each `results[]` entry's `_hash` is that source entity's new lock token (relating rewrote its Relationships section) — with a longer `relations` list the whole batch lands all-or-nothing in one commit per touched mem, and one failing entry refuses everything (larger lists report every failure under `BATCH_REFUSED`). And `REFERENCES` is `manual_authoring: forbidden` — it's emitted automatically from `[[wiki-links]]` in section bodies; write the link, not the edge.
 
 ## Where the reference takes over
 

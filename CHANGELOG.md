@@ -7,41 +7,6 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Fixed
-- **`--force-overwrite`'s documentation stops lying.** The CLI flag
-  help and the MCP `memstead_mem_create` recovery-parameter
-  description both claimed the destroy-and-recreate recovery path was
-  "not yet implemented" — it has been implemented and tested for some
-  time (residual branch + config blob pruned in one ref-edit
-  transaction, then the normal create path). Both surfaces now state
-  the real behaviour; the flag and recovery value are unchanged.
-- **Plugin guard hooks now block with their designed message.** The
-  entity-edit, entity-bash, and ingest deny hooks wrote their
-  `BLOCKED: …` reason to stdout — but Claude Code's exit-2 hook
-  contract feeds **stderr** back to the agent, so the agent saw an
-  empty "hook error" instead of the message (the blocks themselves
-  always held). The reason now lands on stderr, unchanged in wording.
-  A new invocation self-test executes all four `hooks.json` command
-  strings exactly as written (shell + `CLAUDE_PLUGIN_ROOT` env) with
-  violating and benign inputs, so neither the command strings nor the
-  message channel can rot unobserved again.
-- **The engine stops losing events and moving hashes on wall-clock
-  boundaries.** Three determinism defects, each fixed at the
-  mechanism. (1) Folder-mem drift cursors strictly advance per
-  commit: the changelog append clamps a same-millisecond or
-  backwards timestamp to `last + 1ms`, so two commits inside one
-  millisecond no longer share a cursor and the second `MemChangedEvent`
-  is no longer swallowed by the self-write dedup. Format and the
-  lexicographic cursor dialect are unchanged. (2) An anchor-only
-  update no longer auto-stamps `last_modified` — the documented
-  "anchors never move `_hash`" contract now holds across second
-  boundaries, so refreshing anchors never invalidates a cached
-  `expected_hash`. (3) Mutation timestamps read an engine-owned
-  injectable clock (`Engine::set_mutation_clock`, default system
-  clock; stamped format unchanged) — a testing seam that lets
-  canonical-byte assertions pin time instead of loosening, closing
-  the cross-surface hash-parity flake.
-
 ### Added
 - **Section content format: schemas declare a section's markdown
   shape.** A schema section can carry `content` — a flat expression
@@ -241,70 +206,6 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   guarantee — a mem pinned to a heading-round-trip-violating sealed
   schema serves writes, with the divergence warning and the persisting
   health finding — is now locked by a test, not by review.
-
-### Changed
-- **A guard that exists on one write path exists on all of them.** Two
-  closures of the same defect class. (1) The cycle family — the
-  self-loop refusal on propagating rel-types and the
-  `RELATIONSHIP_CYCLE` refusal on acyclic ones — previously ran only
-  on `memstead_relate`; the same illegal edge written through
-  `memstead_create.relations[]`, `memstead_update.declare_relations`, or a
-  batch landed on disk and was then silently dropped by the next
-  boot's cycle sweep, announced only as a boot warning the writer
-  never saw. All edge-writing verbs now run one shared gate
-  (`validate_edge_acyclicity` — one owner, no per-path copies) with
-  identical codes and recovery detail; batch-create stages each
-  item's edges so an intra-batch cycle refuses exactly like a stored
-  one; relate's behaviour is byte-identical. The boot sweep stays as
-  the last-resort net for pre-existing data, and its coverage comment
-  now tells the truth. (2) `set_mem_schema` was the only lifecycle
-  setter without the read-only-mount capability gate — a schema-pin
-  change (which starts a migration) was the one lifecycle mutation a
-  sealed mount could not refuse. It now refuses `READ_ONLY_MOUNT`
-  exactly like its six siblings, and a family-level test enumerates
-  all seven so an eighth setter cannot ship ungated.
-- **Reserved metadata keys are reserved everywhere.** The engine's
-  identity/discriminator triple (`type` / `mem` / `id`) now has one
-  reservation with one behaviour across every path. The loader's
-  reserved set widens from `type` alone to the full triple, enforced
-  on the authoring/installation path (`memstead schema install` /
-  `validate`, the engine install primitive) with the typed
-  `ReservedSchemaKey` refusal — and, matching the heading-round-trip
-  posture, no longer refuses at boot: a schema already sealed that
-  violates the rule keeps loading instead of bricking the workspace.
-  The create path now refuses a caller-supplied reserved key with the
-  same deliberate `READ_ONLY_FIELD` the update path uses, instead of
-  the incidental `UNKNOWN_METADATA_FIELD`. And `metadata_unset` may
-  now name a reserved key — the sanctioned repair for an entity that
-  acquired a smuggled one before the write gates closed (previously
-  only delete-and-recreate, destroying provenance and edges);
-  removing a reserved key can only move an entity toward the
-  invariant, and unsetting `type` never leaves an entity typeless —
-  the engine re-seeds the authoritative discriminator, so on a
-  healthy entity it is a no-op. Setting a reserved key stays refused
-  everywhere; create's stamp-and-proceed posture for engine-managed
-  timestamp fields is untouched.
-- **Anchors merge; they no longer silently replace.** An update carrying
-  `anchors` used to discard the entity's entire prior anchor set —
-  observed live as a sync loop regressing an entity's coverage because
-  each later batch displaced the earlier one. Anchor writes now
-  **merge**: an incoming anchor replaces the existing anchor with the
-  same `(artifact, grain, class)` triple and appends otherwise, so
-  incremental anchoring works and writing never removes an anchor the
-  call did not name. Removal is explicit via the new `anchors_unset`
-  on the update surface (MCP `memstead_update`, CLI `--anchor-unset` /
-  `--from` payload / batch-update entries): each selector names an
-  `artifact` and may narrow by `grain` and/or `class`; a bare artifact
-  removes every anchor on it; unset applies before the merge in the
-  same mutation; unsetting a nonexistent target is an idempotent no-op
-  (the `metadata_unset` / `relations_unset` conventions). Full-replace
-  stays expressible — unset the artifact(s) and write the new set in
-  one call. Re-sending an entity's full current set produces exactly
-  the same stored state as before; an empty or absent `anchors` list
-  remains a no-op, never a prune. The sidecar format, `INVALID_ANCHOR`
-  validation, and the `_hash` exclusion are unchanged.
-
-### Added
 - **The warm server picks up out-of-band installs.** `memstead_reload`
   (and CLI `memstead reload`) gain an additive full-refresh mode:
   `full: true` re-scans the schema sources and the mount manifest on
@@ -562,15 +463,67 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   entities written before the gate existed) and the regenerated file
   carries the declared heading.
 
-### Fixed
-- **The `planning` built-in's `goal` type round-trips its scope
-  sections.** `scope_in`/`In Scope` and `scope_out`/`Out of Scope`
-  violated the round-trip rule — content written under those headings
-  fell through to the catch-all on re-parse. The keys are now
-  `in_scope`/`out_of_scope` (headings unchanged), in the built-in and
-  its seed-fixture mirror.
-
 ### Changed
+- **A guard that exists on one write path exists on all of them.** Two
+  closures of the same defect class. (1) The cycle family — the
+  self-loop refusal on propagating rel-types and the
+  `RELATIONSHIP_CYCLE` refusal on acyclic ones — previously ran only
+  on `memstead_relate`; the same illegal edge written through
+  `memstead_create.relations[]`, `memstead_update.declare_relations`, or a
+  batch landed on disk and was then silently dropped by the next
+  boot's cycle sweep, announced only as a boot warning the writer
+  never saw. All edge-writing verbs now run one shared gate
+  (`validate_edge_acyclicity` — one owner, no per-path copies) with
+  identical codes and recovery detail; batch-create stages each
+  item's edges so an intra-batch cycle refuses exactly like a stored
+  one; relate's behaviour is byte-identical. The boot sweep stays as
+  the last-resort net for pre-existing data, and its coverage comment
+  now tells the truth. (2) `set_mem_schema` was the only lifecycle
+  setter without the read-only-mount capability gate — a schema-pin
+  change (which starts a migration) was the one lifecycle mutation a
+  sealed mount could not refuse. It now refuses `READ_ONLY_MOUNT`
+  exactly like its six siblings, and a family-level test enumerates
+  all seven so an eighth setter cannot ship ungated.
+- **Reserved metadata keys are reserved everywhere.** The engine's
+  identity/discriminator triple (`type` / `mem` / `id`) now has one
+  reservation with one behaviour across every path. The loader's
+  reserved set widens from `type` alone to the full triple, enforced
+  on the authoring/installation path (`memstead schema install` /
+  `validate`, the engine install primitive) with the typed
+  `ReservedSchemaKey` refusal — and, matching the heading-round-trip
+  posture, no longer refuses at boot: a schema already sealed that
+  violates the rule keeps loading instead of bricking the workspace.
+  The create path now refuses a caller-supplied reserved key with the
+  same deliberate `READ_ONLY_FIELD` the update path uses, instead of
+  the incidental `UNKNOWN_METADATA_FIELD`. And `metadata_unset` may
+  now name a reserved key — the sanctioned repair for an entity that
+  acquired a smuggled one before the write gates closed (previously
+  only delete-and-recreate, destroying provenance and edges);
+  removing a reserved key can only move an entity toward the
+  invariant, and unsetting `type` never leaves an entity typeless —
+  the engine re-seeds the authoritative discriminator, so on a
+  healthy entity it is a no-op. Setting a reserved key stays refused
+  everywhere; create's stamp-and-proceed posture for engine-managed
+  timestamp fields is untouched.
+- **Anchors merge; they no longer silently replace.** An update carrying
+  `anchors` used to discard the entity's entire prior anchor set —
+  observed live as a sync loop regressing an entity's coverage because
+  each later batch displaced the earlier one. Anchor writes now
+  **merge**: an incoming anchor replaces the existing anchor with the
+  same `(artifact, grain, class)` triple and appends otherwise, so
+  incremental anchoring works and writing never removes an anchor the
+  call did not name. Removal is explicit via the new `anchors_unset`
+  on the update surface (MCP `memstead_update`, CLI `--anchor-unset` /
+  `--from` payload / batch-update entries): each selector names an
+  `artifact` and may narrow by `grain` and/or `class`; a bare artifact
+  removes every anchor on it; unset applies before the merge in the
+  same mutation; unsetting a nonexistent target is an idempotent no-op
+  (the `metadata_unset` / `relations_unset` conventions). Full-replace
+  stays expressible — unset the artifact(s) and write the new set in
+  one call. Re-sending an entity's full current set produces exactly
+  the same stored state as before; an empty or absent `anchors` list
+  remains a no-op, never a prune. The sidecar format, `INVALID_ANCHOR`
+  validation, and the `_hash` exclusion are unchanged.
 - **The lean MCP surface's tool descriptions go through the same lint suite
   as the full server's.** The `tool_surface` description lints (lead-verb
   allowlist, word/byte bounds, TODO markers, backtick-reference resolution
@@ -584,6 +537,65 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   into the `memstead_health` contract, and the too-thin lean
   `memstead_entity` description now documents `sections`,
   `include_relations`, and `include_context`.
+- **The `propagating_relationships` deprecation pointer names its
+  successor.** The effect note (both verbosity levels) now points
+  schema authors at `status_propagation` — the constraint that
+  carries the real propagation semantics — alongside the honest
+  single-effect (self-edge refusal) statement.
+
+### Fixed
+- **`--force-overwrite`'s documentation stops lying.** The CLI flag
+  help and the MCP `memstead_mem_create` recovery-parameter
+  description both claimed the destroy-and-recreate recovery path was
+  "not yet implemented" — it has been implemented and tested for some
+  time (residual branch + config blob pruned in one ref-edit
+  transaction, then the normal create path). Both surfaces now state
+  the real behaviour; the flag and recovery value are unchanged.
+- **Plugin guard hooks now block with their designed message.** The
+  entity-edit, entity-bash, and ingest deny hooks wrote their
+  `BLOCKED: …` reason to stdout — but Claude Code's exit-2 hook
+  contract feeds **stderr** back to the agent, so the agent saw an
+  empty "hook error" instead of the message (the blocks themselves
+  always held). The reason now lands on stderr, unchanged in wording.
+  A new invocation self-test executes all four `hooks.json` command
+  strings exactly as written (shell + `CLAUDE_PLUGIN_ROOT` env) with
+  violating and benign inputs, so neither the command strings nor the
+  message channel can rot unobserved again.
+- **The engine stops losing events and moving hashes on wall-clock
+  boundaries.** Three determinism defects, each fixed at the
+  mechanism. (1) Folder-mem drift cursors strictly advance per
+  commit: the changelog append clamps a same-millisecond or
+  backwards timestamp to `last + 1ms`, so two commits inside one
+  millisecond no longer share a cursor and the second `MemChangedEvent`
+  is no longer swallowed by the self-write dedup. Format and the
+  lexicographic cursor dialect are unchanged. (2) An anchor-only
+  update no longer auto-stamps `last_modified` — the documented
+  "anchors never move `_hash`" contract now holds across second
+  boundaries, so refreshing anchors never invalidates a cached
+  `expected_hash`. (3) Mutation timestamps read an engine-owned
+  injectable clock (`Engine::set_mutation_clock`, default system
+  clock; stamped format unchanged) — a testing seam that lets
+  canonical-byte assertions pin time instead of loosening, closing
+  the cross-surface hash-parity flake.
+- **The `planning` built-in's `goal` type round-trips its scope
+  sections.** `scope_in`/`In Scope` and `scope_out`/`Out of Scope`
+  violated the round-trip rule — content written under those headings
+  fell through to the catch-all on re-parse. The keys are now
+  `in_scope`/`out_of_scope` (headings unchanged), in the built-in and
+  its seed-fixture mirror.
+- **The legacy `@scope/name` rejection is typed.** The CLI's
+  legacy-form refusal leaked code `INTERNAL` through a bare error on
+  a user-triggerable path; it now refuses `INVALID_INPUT`. And the
+  `READ_MEM_SHADOWS_WRITABLE` recovery prose cited the removed
+  `--mem` host flag — it now names the real recovery (mem rename /
+  unregister).
+- **Mem curation text is visible where mems are listed.** The
+  description and subject scope now render on `memstead_overview`'s
+  mem roster (Description/Subject lines, only when set) and
+  `memstead mem list` appends the description to each row —
+  previously two of the three curation fields were writable over MCP
+  but invisible on the roster, readable only via a configure
+  no-field read-back.
 
 ## [0.4.0] - 2026-07-20
 

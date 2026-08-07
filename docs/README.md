@@ -46,6 +46,9 @@ check fails the build if the committed copy lags).
   the error-code index.
 - **[Workspace config example](workspace.toml.example)** — annotated
   example of the engine's `.memstead/workspace.toml`.
+- **[Sizing curve](sizing-curve.md)** — measured operating limits by
+  workspace size (boot, update, search, overview on graded synthetic
+  workspaces); rerun via `cargo run -p xtask -- sizing-curve`.
 
 ## 💡 Explanation — *understanding why*
 
