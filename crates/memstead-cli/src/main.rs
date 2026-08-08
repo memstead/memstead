@@ -24,6 +24,7 @@ use memstead_cli::setup;
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let json_mode = cli.json;
+    let verb = cli.command.verb();
 
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
@@ -32,6 +33,19 @@ fn main() -> ExitCode {
             let kind = cli_err.map(|c| c.kind).unwrap_or(ExitKind::Generic);
             let code = cli_err.map(|c| c.effective_code()).unwrap_or("INTERNAL");
             let details = cli_err.and_then(|c| c.details.as_ref());
+            // Friction ledger (best-effort, before rendering): every
+            // typed refusal this surface returns appends one
+            // content-free entry — code, verb, timestamp, surface —
+            // to the workspace-local ledger. Unresolvable workspace
+            // (pre-boot refusals outside any workspace) degrades to
+            // not-recording; the refusal below is unaffected either
+            // way.
+            if let Ok(cwd) = std::env::current_dir()
+                && let Some(root) = setup::find_workspace_root(&cwd)
+            {
+                memstead_base::friction::FrictionLedger::for_workspace(&root)
+                    .record("cli", verb, code);
+            }
             // `{e:#}` renders the whole anyhow chain (`context: cause`),
             // not just the outermost context line — an engine refusal
             // like `SchemaNotFound` stays visible through a

@@ -43,6 +43,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "integrity",
     "config",
     "anchors",
+    "friction",
 ];
 
 /// The `include=["anchors"]` axis — per-mem counts of the four

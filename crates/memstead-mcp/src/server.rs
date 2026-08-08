@@ -3135,7 +3135,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return graph health metrics. Typed payload on `structured_content` (always whole); text chunkable past `token_budget` (page via `chunk`). Default: summary counts (per-schema `orphans_by_schema`/`communities_by_schema`), node/edge totals, type/edge distributions, `writable_mems`/`read_mems` rosters, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `constraints`, `conformance`, `integrity`, `config`, `anchors`. `missing_fields` adds per-issue `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH`) beside the legacy `missing` names. `config` = the `include_config` projection (rendered once if both). `conformance` lints entities against `target_schema` or each mem's pin into `findings` `{id, axis, code, detail}` (write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body `[[id]]` refs lacking files. `tags` aggregates into `tag_distribution` (`limit`-capped), `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied `required_outgoing` blocks. `constraints` lists standing declared-constraint violations with `severity`. `anchors` adds per-mem counts of the four anchor states `resolved`/`drifted`/`recheck`/`unresolvable`. `most_connected` entries: `total`/`incoming`/`outgoing` plus `typed_*` counterparts. Unknown `include` keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps `most_connected`/`tag_distribution` at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings (`SUSPICIOUS_NESTED_PREFIX`, `DUPLICATE_SECTION_HEADING`, `MEM_RELOADED`) — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; edge counts turn source-in-mem; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).",
+        description = "Return graph health metrics. Typed payload on `structured_content` (always whole); text chunkable past `token_budget` (page via `chunk`). Default: summary counts (per-schema `orphans_by_schema`/`communities_by_schema`), node/edge totals, type/edge distributions, `writable_mems`/`read_mems` rosters, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `constraints`, `conformance`, `integrity`, `config`, `anchors`, `friction` (refusal-ledger counts). `missing_fields` adds per-issue `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH`) beside the legacy `missing` names. `config` = the `include_config` projection (rendered once if both). `conformance` lints entities against `target_schema` or each mem's pin into `findings` `{id, axis, code, detail}` (write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body `[[id]]` refs lacking files. `tags` aggregates into `tag_distribution` (`limit`-capped), `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied `required_outgoing` blocks. `constraints` lists standing declared-constraint violations with `severity`. `anchors` adds per-mem counts of the four anchor states `resolved`/`drifted`/`recheck`/`unresolvable`. `most_connected` entries: `total`/`incoming`/`outgoing` + `typed_*`. Unknown keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps `most_connected`/`tag_distribution` at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings (`SUSPICIOUS_NESTED_PREFIX`, `DUPLICATE_SECTION_HEADING`, `MEM_RELOADED`) — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; edge counts turn source-in-mem; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -4322,16 +4322,59 @@ impl ServerHandler for McpServer {
     /// before dispatch. A client that kept a stale tool list or
     /// deliberately probes the bypass gets the same contract as the
     /// `list_tools` omission: this tool is not available here.
+    ///
+    /// This is also the friction ledger's one recording seam for the
+    /// whole tool surface (agent-trust plan 08): every dispatched
+    /// result that is a typed refusal appends one content-free entry
+    /// — code, tool name, timestamp, surface — best-effort, after the
+    /// response is already built, so recording can never perturb the
+    /// refusal it measures.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let verb = request.name.to_string();
         if self.disabled_tools.contains(request.name.as_ref()) {
-            return Ok(self.tool_disabled_response(request.name.as_ref()));
+            let resp = self.tool_disabled_response(request.name.as_ref());
+            self.record_friction(&verb, &resp);
+            return Ok(resp);
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        Self::tool_router().call(tcc).await
+        let result = Self::tool_router().call(tcc).await;
+        if let Ok(r) = &result {
+            self.record_friction(&verb, r);
+        }
+        result
+    }
+}
+
+impl McpServer {
+    /// Append a friction-ledger entry when `result` is a typed refusal
+    /// (`is_error` with a structured `code`). Untyped errors and
+    /// successes append nothing; an unresolvable workspace root
+    /// degrades to not-recording. Best-effort throughout — the
+    /// response has already been built and is returned unchanged.
+    fn record_friction(&self, verb: &str, result: &CallToolResult) {
+        if !result.is_error.unwrap_or(false) {
+            return;
+        }
+        let Some(code) = result
+            .structured_content
+            .as_ref()
+            .and_then(|v| v.get("code"))
+            .and_then(|c| c.as_str())
+        else {
+            return;
+        };
+        let root = match self.unified_engine().lock() {
+            Ok(engine) => engine.workspace_root().map(|p| p.to_path_buf()),
+            Err(_) => None,
+        };
+        if let Some(root) = root {
+            memstead_base::friction::FrictionLedger::for_workspace(&root)
+                .record("mcp", verb, code);
+        }
     }
 }
 

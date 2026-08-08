@@ -56,6 +56,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Friction ledger: the engine measures its own surface's
+  learnability.** Every typed refusal the CLI or MCP surface returns
+  appends one content-free entry — code, verb, timestamp, surface;
+  never parameters, ids, or message text — to a workspace-local,
+  gitignored, size-bounded ledger under `.memstead/state/friction/`.
+  `memstead health --include friction` (and the MCP counterpart on
+  both flavours) summarizes it: counts per refusal code and per verb,
+  whole-ledger plus a recent 24h window; without the include, health
+  output is unchanged. The ledger is local-only forever — no
+  transmission, no registry involvement — and recording is
+  best-effort: a ledger write failure is swallowed and the refusal
+  returns unchanged, so the instrument never perturbs what it
+  measures. Appends are single-write whole lines on an append-mode
+  handle, so a CLI invocation beside a running MCP server interleaves
+  entries without corruption; the bound is two-generation rotation.
 - **Leaf declaration: a type can say its entities are terminal by
   construction.** A schema type may declare `leaf: true`; health's
   orphan axis then exempts that type's edge-less entities (they are

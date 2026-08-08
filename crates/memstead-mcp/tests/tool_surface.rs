@@ -1551,6 +1551,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "note",
         ],
         "memstead_health" => &[
+            // Friction-ledger axis (include=friction) — agent-trust
+            // plan 08's refusal-ledger summary.
+            "friction",
             // Standalone anchor-verification axis (include=anchors).
             "anchors",
             "resolved",

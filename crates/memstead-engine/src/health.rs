@@ -540,6 +540,26 @@ pub fn compose_health(
             memstead_base::ops::health::health_anchors_axis(engine),
         );
     }
+    if include.iter().any(|s| s == "friction") {
+        // The friction ledger's read surface (agent-trust plan 08):
+        // counts per code / per verb over the workspace-local refusal
+        // ledger, whole-ledger plus a recent 24h window. A workspace
+        // without a root (in-memory boots) or without a ledger yet
+        // serves the empty summary — the axis never fails health.
+        let summary = match engine.workspace_root() {
+            Some(root) => {
+                memstead_base::friction::FrictionLedger::for_workspace(root).summarize()
+            }
+            None => serde_json::json!({
+                "total": 0,
+                "by_code": {},
+                "by_verb": {},
+                "recent_24h": { "total": 0, "by_code": {} },
+                "ledger_bytes": 0,
+            }),
+        };
+        obj.insert("friction".into(), summary);
+    }
     if include.iter().any(|s| s == "missing_required_outgoing") {
         let reports = engine.missing_required_outgoing(vf);
         let arr: Vec<serde_json::Value> = reports

@@ -7,7 +7,7 @@ use rmcp::schemars;
 #[serde(deny_unknown_fields)]
 pub struct HealthParams {
     #[schemars(
-        description = "Detail sections to include (default: none — summary counts only). Allowed keys: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity. `conformance` lints every entity against the effective schema and returns per-entity `findings` (`{id, axis, code, detail}` with write-time typed codes); `integrity` additionally projects the consistency axis (dangling links, stubs) into the same findings list. Unknown keys surface as UNKNOWN_INCLUDE_KEY on warnings."
+        description = "Detail sections to include (default: none — summary counts only). Allowed keys: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity, friction. `conformance` lints every entity against the effective schema and returns per-entity `findings` (`{id, axis, code, detail}` with write-time typed codes); `integrity` additionally projects the consistency axis (dangling links, stubs) into the same findings list. `friction` summarizes the workspace-local refusal ledger — counts per typed refusal code and per verb, whole-ledger plus a recent 24h window; the ledger is local-only, refusals-only, content-free (code/verb/timestamp/surface, never parameters or payload text). Unknown keys surface as UNKNOWN_INCLUDE_KEY on warnings."
     )]
     pub include: Option<Vec<String>>,
     #[schemars(

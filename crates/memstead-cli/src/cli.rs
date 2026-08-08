@@ -311,3 +311,73 @@ pub enum Command {
     /// enable <build|sync|verify> <binding>` adds a missing operation block.
     Projection(commands::projection::Args),
 }
+
+impl Command {
+    /// The subcommand's user-facing verb name, as typed on the command
+    /// line — the `verb` field the friction ledger records on a typed
+    /// refusal. Nested action groups report their top-level noun
+    /// (`mem`, `mem-repo`, `workspace`, `domain`, `admin`): per-verb
+    /// counts at that granularity already answer the design questions,
+    /// and nothing payload-shaped can leak through a static name.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Command::Status => "status",
+            Command::Entity(_) => "entity",
+            Command::Relations(_) => "relations",
+            Command::Search(_) => "search",
+            Command::List(_) => "list",
+            Command::Context(_) => "context",
+            Command::Overview(_) => "overview",
+            Command::Type(_) => "type",
+            Command::Health(_) => "health",
+            Command::Export(_) => "export",
+            Command::Init(_) => "init",
+            Command::Quickstart(_) => "quickstart",
+            #[cfg(feature = "mem-repo")]
+            Command::Install(_) => "install",
+            #[cfg(feature = "mem-repo")]
+            Command::Uninstall(_) => "uninstall",
+            Command::VerifyAnchors(_) => "verify-anchors",
+            Command::Link(_) => "link",
+            Command::Publish(_) => "publish",
+            Command::Unpublish(_) => "unpublish",
+            Command::Domain { .. } => "domain",
+            Command::Admin { .. } => "admin",
+            Command::Login(_) => "login",
+            Command::Logout(_) => "logout",
+            Command::Create(_) => "create",
+            Command::Update(_) => "update",
+            Command::Relate(_) => "relate",
+            Command::Delete(_) => "delete",
+            Command::Rename(_) => "rename",
+            #[cfg(feature = "mem-repo")]
+            Command::BatchUpdate(_) => "batch-update",
+            #[cfg(feature = "mem-repo")]
+            Command::BatchCreate(_) => "batch-create",
+            #[cfg(feature = "mem-repo")]
+            Command::BatchRelate(_) => "batch-relate",
+            #[cfg(feature = "mem-repo")]
+            Command::Recover(_) => "recover",
+            Command::Anchors(_) => "anchors",
+            Command::Changes(_) => "changes",
+            Command::ReviewMark(_) => "review-mark",
+            Command::Reload(_) => "reload",
+            #[cfg(feature = "mem-repo")]
+            Command::Fetch(_) => "fetch",
+            #[cfg(feature = "mem-repo")]
+            Command::Pull(_) => "pull",
+            #[cfg(feature = "mem-repo")]
+            Command::Push(_) => "push",
+            #[cfg(feature = "mem-repo")]
+            Command::BranchReset(_) => "branch-reset",
+            #[cfg(feature = "mem-repo")]
+            Command::Mem { .. } => "mem",
+            #[cfg(feature = "mem-repo")]
+            Command::MemRepo { .. } => "mem-repo",
+            #[cfg(feature = "mem-repo")]
+            Command::Workspace { .. } => "workspace",
+            Command::Schema(_) => "schema",
+            Command::Projection(_) => "projection",
+        }
+    }
+}

@@ -2480,3 +2480,99 @@ fn full_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
     let delete = harness.call_tool("memstead_mem_delete", json!({ "name": "target" }));
     let _ = assert_success_envelope(&delete);
 }
+
+// ---------------------------------------------------------------------------
+// Friction ledger (agent-trust plan 08) — the dual-surface fixture.
+// ---------------------------------------------------------------------------
+
+/// One fixture drives both surfaces: a refused MCP call (through the
+/// REAL dispatch seam — the spawned binary's `call_tool`) and a
+/// refused CLI call each append one content-free ledger entry with
+/// code, verb, timestamp, and surface; successful calls on both
+/// surfaces append nothing; the wire-served `include: ["friction"]`
+/// axis reports the combined counts.
+///
+/// The CLI binary is resolved from the mcp binary's target directory —
+/// both are built by the canonical workspace test surface
+/// (`run-tests.sh`, workspace-wide nextest).
+#[test]
+fn friction_ledger_records_both_surfaces_and_serves_the_axis() {
+    let tmp = TempDir::new().unwrap();
+    seed_empty_workspace(tmp.path());
+    let ledger_path = tmp
+        .path()
+        .join(".memstead")
+        .join("state")
+        .join("friction")
+        .join("refusals.jsonl");
+    let entries = |path: &Path| -> Vec<Value> {
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("every ledger line parses"))
+            .collect()
+    };
+
+    let cli_bin = Path::new(memstead_mcp_bin())
+        .parent()
+        .expect("binary has a parent dir")
+        .join("memstead");
+    assert!(
+        cli_bin.exists(),
+        "memstead CLI binary not built — run the workspace test surface (run-tests.sh)"
+    );
+
+    // Refused MCP call through the real wire: unknown mem.
+    let mut harness = WireHarness::start(tmp.path());
+    let refused = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "ghost--entity", "sections": [] }),
+    );
+    assert_eq!(refused["isError"], true, "{refused}");
+    let after_mcp = entries(&ledger_path);
+    assert_eq!(after_mcp.len(), 1, "one entry per refused MCP call");
+    assert_eq!(after_mcp[0]["surface"], "mcp");
+    assert_eq!(after_mcp[0]["verb"], "memstead_entity");
+    assert_eq!(
+        after_mcp[0]["code"],
+        refused["structuredContent"]["code"],
+        "ledger code matches the served refusal"
+    );
+    assert!(after_mcp[0]["ts"].as_u64().unwrap() > 0);
+
+    // Refused CLI call against the SAME workspace/ledger.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args(["--json", "entity", "ghost--entity"])
+        .output()
+        .expect("run memstead CLI");
+    assert!(!out.status.success(), "CLI fixture call must refuse");
+    let after_cli = entries(&ledger_path);
+    assert_eq!(after_cli.len(), 2, "one entry per refused CLI call");
+    assert_eq!(after_cli[1]["surface"], "cli");
+    assert_eq!(after_cli[1]["verb"], "entity");
+
+    // Successful calls on both surfaces append nothing.
+    let ok = harness.call_tool("memstead_health", json!({}));
+    assert!(ok["isError"] != true, "{ok}");
+    let ok_cli = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args(["--json", "health"])
+        .output()
+        .expect("run memstead CLI");
+    assert!(ok_cli.status.success());
+    assert_eq!(
+        entries(&ledger_path).len(),
+        2,
+        "successful calls append nothing"
+    );
+
+    // The wire-served include axis reports the combined counts.
+    let served = harness.call_tool("memstead_health", json!({ "include": ["friction"] }));
+    assert!(served["isError"] != true, "{served}");
+    let axis = &served["structuredContent"]["friction"];
+    assert_eq!(axis["total"], 2, "{served}");
+    assert_eq!(axis["by_verb"]["mcp:memstead_entity"], 1);
+    assert_eq!(axis["by_verb"]["cli:entity"], 1);
+    assert_eq!(axis["recent_24h"]["total"], 2);
+}

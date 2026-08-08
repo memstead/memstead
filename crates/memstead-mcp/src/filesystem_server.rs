@@ -1684,13 +1684,16 @@ impl FilesystemMcpServer {
             health.findings = Some(findings);
         }
 
-        // `include=["anchors"]` (per-mem four-state counts) and
+        // `include=["anchors"]` (per-mem four-state counts),
         // `include=["constraints"]` (standing declared-constraint
-        // violations) — both from the shared base helpers, patched
-        // onto the serialized report so combined includes compose.
+        // violations), and `include=["friction"]` (the refusal
+        // ledger's summary — agent-trust plan 08) — from the shared
+        // base helpers, patched onto the serialized report so
+        // combined includes compose.
         let wants_anchors = include.iter().any(|s| s == "anchors");
         let wants_constraints = include.iter().any(|s| s == "constraints");
-        if wants_anchors || wants_constraints {
+        let wants_friction = include.iter().any(|s| s == "friction");
+        if wants_anchors || wants_constraints || wants_friction {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
                 Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
@@ -1706,6 +1709,11 @@ impl FilesystemMcpServer {
                     value["schema_format_defects"] =
                         serde_json::to_value(defects).unwrap_or(serde_json::Value::Null);
                 }
+            }
+            if wants_friction {
+                value["friction"] =
+                    memstead_base::friction::FrictionLedger::for_workspace(&self.workspace_root)
+                        .summarize();
             }
             return json_response(&value);
         }
@@ -2056,13 +2064,30 @@ impl ServerHandler for FilesystemMcpServer {
         })
     }
 
+    /// Friction-ledger seam (agent-trust plan 08), mirroring the full
+    /// flavour: every dispatched typed refusal appends one
+    /// content-free ledger entry, best-effort, after the response is
+    /// built.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let verb = request.name.to_string();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        Self::tool_router().call(tcc).await
+        let result = Self::tool_router().call(tcc).await;
+        if let Ok(r) = &result
+            && r.is_error.unwrap_or(false)
+            && let Some(code) = r
+                .structured_content
+                .as_ref()
+                .and_then(|v| v.get("code"))
+                .and_then(|c| c.as_str())
+        {
+            memstead_base::friction::FrictionLedger::for_workspace(&self.workspace_root)
+                .record("mcp", &verb, code);
+        }
+        result
     }
 }
 

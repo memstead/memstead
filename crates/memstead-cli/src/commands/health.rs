@@ -21,7 +21,10 @@ pub struct Args {
     /// missing_required_outgoing, constraints (standing violations of
     /// declared schema constraints), conformance, integrity, config,
     /// anchors (per-mem counts of the four standalone
-    /// anchor-verification states).
+    /// anchor-verification states), friction (the workspace-local
+    /// refusal ledger's summary — counts per typed refusal code and
+    /// per verb, whole-ledger plus a recent 24h window; local-only,
+    /// content-free).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -269,6 +272,29 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if let Some(axis) = &anchors_axis {
         obj.insert("anchors".to_string(), axis.clone());
     }
+    // `--include friction`: the friction ledger's read surface
+    // (agent-trust plan 08) — counts per refusal code / per verb,
+    // whole ledger plus a recent 24h window. Same summarizer MCP's
+    // axis serves; no workspace resolvable → empty summary.
+    let friction_axis = if include.iter().any(|s| s == "friction") {
+        let summary = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| crate::setup::find_workspace_root(&cwd))
+            .map(|root| memstead_base::friction::FrictionLedger::for_workspace(&root).summarize())
+            .unwrap_or_else(|| {
+                json!({
+                    "total": 0,
+                    "by_code": {},
+                    "by_verb": {},
+                    "recent_24h": { "total": 0, "by_code": {} },
+                    "ledger_bytes": 0,
+                })
+            });
+        obj.insert("friction".to_string(), summary.clone());
+        Some(summary)
+    } else {
+        None
+    };
 
     // Typed warnings array — engine-level health warnings (load-time
     // drift, the authoring-drift axis, …) in the same `{code, message,
@@ -542,6 +568,37 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 counts["recheck"].as_u64().unwrap_or(0),
                 counts["unresolvable"].as_u64().unwrap_or(0),
             ));
+        }
+        lines.push(String::new());
+    }
+
+    if let Some(f) = &friction_axis {
+        lines.push(format!(
+            "## Friction ({} refusals recorded, {} in the last 24h)",
+            f["total"].as_u64().unwrap_or(0),
+            f["recent_24h"]["total"].as_u64().unwrap_or(0),
+        ));
+        if let Some(by_code) = f["by_code"].as_object().filter(|m| !m.is_empty()) {
+            lines.push("- by code:".to_string());
+            let mut entries: Vec<(&String, u64)> = by_code
+                .iter()
+                .map(|(k, v)| (k, v.as_u64().unwrap_or(0)))
+                .collect();
+            entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+            for (code, count) in entries {
+                lines.push(format!("  - {code}: {count}"));
+            }
+        }
+        if let Some(by_verb) = f["by_verb"].as_object().filter(|m| !m.is_empty()) {
+            lines.push("- by verb:".to_string());
+            let mut entries: Vec<(&String, u64)> = by_verb
+                .iter()
+                .map(|(k, v)| (k, v.as_u64().unwrap_or(0)))
+                .collect();
+            entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+            for (verb, count) in entries {
+                lines.push(format!("  - {verb}: {count}"));
+            }
         }
         lines.push(String::new());
     }
