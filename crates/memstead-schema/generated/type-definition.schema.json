@@ -1,7 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "TypeDefinition",
-  "description": "Complete type definition — serde/schemars-based, authored in YAML.",
   "type": "object",
   "properties": {
     "boundaries": {
@@ -44,6 +43,10 @@
     },
     "hierarchy_relationship": {
       "type": "string"
+    },
+    "leaf": {
+      "description": "Terminal-by-construction marker: entities of this type are\nleaves — they carry no edges BY DESIGN, so health's orphan\naxis exempts their edge-less entities and reports them as a\nseparate leaf population instead (visible, never vanished).\nLeaf means \"no edges required\", not \"edges forbidden\": a\nleaf-typed entity WITH edges stays legal, and every other\nhealth axis, search, and traversal treats leaf entities\nexactly like any other. Declarative per-type flag (the sixth\ndeclarative form the agent-toolbox constraint vocabulary\nanticipated), served at both schema verbosity levels.",
+      "type": "boolean"
     },
     "metadata_fields": {
       "type": "array",

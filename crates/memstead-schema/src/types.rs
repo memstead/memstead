@@ -7,6 +7,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Complete type definition — serde/schemars-based, authored in YAML.
+/// `skip_serializing_if` helper for default-false flags.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TypeDefinition {
@@ -27,6 +32,18 @@ pub struct TypeDefinition {
     #[serde(default)]
     pub edge_weight_overrides: IndexMap<String, f32>,
     pub propagating_relationships: Vec<String>,
+    /// Terminal-by-construction marker: entities of this type are
+    /// leaves — they carry no edges BY DESIGN, so health's orphan
+    /// axis exempts their edge-less entities and reports them as a
+    /// separate leaf population instead (visible, never vanished).
+    /// Leaf means "no edges required", not "edges forbidden": a
+    /// leaf-typed entity WITH edges stays legal, and every other
+    /// health axis, search, and traversal treats leaf entities
+    /// exactly like any other. Declarative per-type flag (the sixth
+    /// declarative form the agent-toolbox constraint vocabulary
+    /// anticipated), served at both schema verbosity levels.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub leaf: bool,
     pub updatable_fields: Vec<String>,
     pub health_required_fields: Vec<String>,
     pub staleness_threshold_days: u32,

@@ -295,6 +295,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if !warning_payload.is_empty() {
         obj.insert("warnings".into(), json!(warning_payload));
     }
+    // Leaf populations — the counts the orphan axis exempts because
+    // those types are terminal by construction (agent-trust plan 06).
+    if !health.leaf_entities_by_type.is_empty() {
+        obj.insert(
+            "leaf_entities_by_type".into(),
+            serde_json::to_value(&health.leaf_entities_by_type).unwrap_or_default(),
+        );
+    }
     // Quarantine roster — a boot-honesty fact, present whenever
     // non-empty, never behind an include gate (agent-trust plan 04).
     if !health.quarantined.is_empty() {
@@ -662,6 +670,7 @@ fn gather_mem_repo(
         engine.communities().count,
         limit,
         include,
+        || engine.orphans(),
         |limit| engine_most_connected_mem_repo(engine, limit),
         || engine.missing_required_outgoing(None),
         || engine.constraint_findings(None),
@@ -684,6 +693,7 @@ fn gather_filesystem(
         engine.communities().count,
         limit,
         include,
+        || engine.orphans(),
         |limit| engine_most_connected_filesystem(engine, limit),
         || engine.missing_required_outgoing(None),
         || engine.constraint_findings(None),
@@ -744,13 +754,14 @@ fn gather_from_store(
     community_count: usize,
     limit: usize,
     include: &[String],
+    orphans_fn: impl FnOnce() -> Vec<EntityId>,
     most_connected_fn: impl FnOnce(usize) -> Vec<MostConnectedRow>,
     missing_required_outgoing_fn: impl FnOnce() -> Vec<MissingRequiredOutgoingReport>,
     constraint_findings_fn: impl FnOnce() -> Vec<ConstraintFindingReport>,
     schema_format_defects_fn: impl FnOnce() -> Vec<memstead_base::ops::health::SchemaFormatDefect>,
 ) -> GatheredHealth {
     let real_count = store.all_entities().filter(|e| !e.stub).count();
-    let orphan_ids: Vec<(EntityId, String)> = memstead_base::graph::query::find_orphans(store)
+    let orphan_ids: Vec<(EntityId, String)> = orphans_fn()
         .into_iter()
         .map(|id| {
             let title = store.get(&id).map(|e| e.title.clone()).unwrap_or_default();

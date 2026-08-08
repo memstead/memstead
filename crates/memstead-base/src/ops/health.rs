@@ -291,7 +291,8 @@ pub fn compute_health(
     stale_entities.sort_by_key(|e| std::cmp::Reverse(e.days_since_modified));
 
     // Structural counts
-    let orphan_count = query::find_orphans(store).len();
+    let orphan_count = query::find_orphans_with_schemas(store, mem_schemas).len();
+    let leaf_entities_by_type = query::leaf_population(store, mem_schemas);
     let stub_count = query::find_stubs(store).len();
 
     HealthSummary {
@@ -302,6 +303,7 @@ pub fn compute_health(
         warnings: Vec::new(),
         quarantined: Vec::new(),
         boot_diagnosis: None,
+        leaf_entities_by_type,
         dangling_links: None,
         findings: None,
         tag_distribution: None,

@@ -958,9 +958,18 @@ impl Engine {
         self.community_memo = OnceCell::new();
     }
 
-    /// Real entities with no incoming or outgoing edges.
+    /// Real entities with no incoming or outgoing edges — leaf-declared
+    /// types exempt (their edge-less entities are terminal by
+    /// construction; see [`Self::leaf_population`]).
     pub fn orphans(&self) -> Vec<EntityId> {
-        crate::graph::query::find_orphans(&self.store)
+        crate::graph::query::find_orphans_with_schemas(&self.store, &self.schemas)
+    }
+
+    /// Count of real entities per leaf-declared type, keyed
+    /// `<schema_ref>:<type>` — the visible population the orphan
+    /// exemption covers.
+    pub fn leaf_population(&self) -> std::collections::BTreeMap<String, usize> {
+        crate::graph::query::leaf_population(&self.store, &self.schemas)
     }
 
     /// Stub entities with their referencer ids.

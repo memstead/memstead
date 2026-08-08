@@ -384,6 +384,14 @@ pub fn compose_health(
     if let Some(diag) = &health.boot_diagnosis {
         obj.insert("boot_diagnosis".into(), diag.clone());
     }
+    // Leaf populations — visible beside the orphan axis they exempt
+    // (agent-trust plan 06); omitted when no type declares leaf.
+    if !health.leaf_entities_by_type.is_empty() {
+        obj.insert(
+            "leaf_entities_by_type".into(),
+            serde_json::to_value(&health.leaf_entities_by_type).unwrap_or_default(),
+        );
+    }
 
     if include.iter().any(|s| s == "orphans") {
         let orphans_list: Vec<serde_json::Value> = orphan_ids

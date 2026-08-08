@@ -2920,6 +2920,14 @@ pub struct HealthSummary {
     /// all. Absent on every ordinarily booted engine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boot_diagnosis: Option<serde_json::Value>,
+    /// Real-entity count per leaf-declared type (`<schema_ref>:<type>`
+    /// keys) — the population the orphan axis exempts because those
+    /// types are terminal by construction (agent-trust plan 06).
+    /// Visible, never vanished. Empty (and omitted from the wire) for
+    /// schemas that declare nothing, keeping default output
+    /// byte-unchanged.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub leaf_entities_by_type: std::collections::BTreeMap<String, usize>,
     /// Inline wiki-links in entity section bodies that resolve to stub
     /// targets (no on-disk markdown file). Populated only when the caller
     /// opts in via `include=["dangling_links"]`; `None` otherwise, so

@@ -1559,7 +1559,7 @@ pub fn build_schema_payload(
                     }),
                 })
                 .collect();
-            serde_json::json!({
+            let mut obj = serde_json::json!({
                 "name": td.name,
                 "description": td.description,
                 "when_to_use": td.when_to_use,
@@ -1571,7 +1571,14 @@ pub fn build_schema_payload(
                 "propagating_relationships": td.propagating_relationships,
                 "required_outgoing": required_outgoing,
                 "constraints": constraints,
-            })
+            });
+            // Leaf declaration — a legality-relevant fact an agent
+            // planning writes must see; emitted only when true so
+            // undeclared schemas keep their payload bytes unchanged.
+            if td.leaf {
+                obj["leaf"] = serde_json::json!(true);
+            }
+            obj
         })
         .collect();
 
@@ -1824,14 +1831,20 @@ pub fn build_schema_payload(
                             .collect()
                     })
                     .unwrap_or_default();
-                serde_json::json!({
+                let mut o = serde_json::json!({
                     "name": t["name"],
                     "sections": sections,
                     "fields": fields,
                     "propagating_relationships": t["propagating_relationships"],
                     "required_outgoing": t["required_outgoing"],
                     "constraints": t["constraints"],
-                })
+                });
+                // Leaf declaration rides the lite skeleton too — it is
+                // a legality-relevant per-type fact.
+                if t.get("leaf") == Some(&serde_json::json!(true)) {
+                    o["leaf"] = serde_json::json!(true);
+                }
+                o
             })
             .collect();
         obj.insert(
@@ -2304,6 +2317,7 @@ mod tests {
             edge_weight_overrides: indexmap::IndexMap::new(),
             edge_weights: indexmap::IndexMap::new(),
             propagating_relationships: vec![],
+            leaf: false,
             updatable_fields: vec![],
             health_required_fields: vec![],
             staleness_threshold_days: 90,

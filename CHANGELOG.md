@@ -8,6 +8,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Leaf declaration: a type can say its entities are terminal by
+  construction.** A schema type may declare `leaf: true`; health's
+  orphan axis then exempts that type's edge-less entities (they are
+  edge-less by design — counting them as orphans was noise masking
+  real orphans, e.g. 7 false ingest-mem orphans per report) and
+  instead reports the population as `leaf_entities_by_type`
+  (`<schema_ref>:<type>` → count) on `memstead health` and the MCP
+  counterpart — visible, never vanished. Leaf means "no edges
+  required", not "edges forbidden": leaf entities with edges stay
+  legal, and every other health axis, search, and traversal treats
+  them like any other entity. The flag is served at both schema
+  verbosity levels; output is byte-unchanged for schemas that declare
+  nothing.
 - **Surface honesty: the MCP instructions tell the whole truth about
   the surface.** Session start now answers "what can this engine do,
   on which surface, at which version" with no out-of-band knowledge:

@@ -219,9 +219,26 @@ pub fn would_cycle(
 
 /// Find orphan entities — non-stub entities with no edges at all (completely isolated).
 pub fn find_orphans(store: &Store) -> Vec<EntityId> {
+    find_orphans_with_schemas(store, &std::collections::HashMap::new())
+}
+
+/// Schema-aware orphan scan: like [`find_orphans`], but entities whose
+/// type declares `leaf: true` in their mem's schema are exempt — a
+/// leaf is edge-less BY CONSTRUCTION, so counting it as an orphan is
+/// noise that masks real orphans (agent-trust plan 06). The exempted
+/// population stays visible through [`leaf_population`]. An empty
+/// schema map (tests, ad-hoc callers) reproduces the schema-blind
+/// behaviour exactly.
+pub fn find_orphans_with_schemas(
+    store: &Store,
+    schemas: &std::collections::HashMap<String, std::sync::Arc<memstead_schema::Schema>>,
+) -> Vec<EntityId> {
     let mut results = Vec::new();
     for entity in store.all_entities() {
         if entity.stub {
+            continue;
+        }
+        if entity_is_declared_leaf(entity, schemas) {
             continue;
         }
         let out = store.outgoing(&entity.id);
@@ -231,6 +248,45 @@ pub fn find_orphans(store: &Store) -> Vec<EntityId> {
         }
     }
     results
+}
+
+/// Whether `entity`'s type declares `leaf: true` in its mem's schema.
+fn entity_is_declared_leaf(
+    entity: &crate::entity::Entity,
+    schemas: &std::collections::HashMap<String, std::sync::Arc<memstead_schema::Schema>>,
+) -> bool {
+    schemas
+        .get(entity.mem.as_str())
+        .and_then(|s| s.types.get(&entity.entity_type))
+        .is_some_and(|t| t.leaf)
+}
+
+/// The leaf population health reports beside the orphan axis: for
+/// every leaf-declared type with at least one real entity, the count
+/// of its entities, keyed `<schema_ref>:<type>`. Visible, never
+/// vanished — the reader still sees the population the orphan
+/// exemption covers.
+pub fn leaf_population(
+    store: &Store,
+    schemas: &std::collections::HashMap<String, std::sync::Arc<memstead_schema::Schema>>,
+) -> std::collections::BTreeMap<String, usize> {
+    let mut out: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for entity in store.all_entities() {
+        if entity.stub {
+            continue;
+        }
+        if let Some(schema) = schemas.get(entity.mem.as_str())
+            && schema
+                .types
+                .get(&entity.entity_type)
+                .is_some_and(|t| t.leaf)
+        {
+            let (name, version) = schema.id();
+            *out.entry(format!("{name}@{version}:{}", entity.entity_type))
+                .or_default() += 1;
+        }
+    }
+    out
 }
 
 /// Find stub entities — entities created from unresolved references.
@@ -918,5 +974,88 @@ mod tests {
             dh_pos < mh_pos,
             "dependency hub must outrank co-mention hub"
         );
+    }
+
+    /// Agent-trust plan 06 (criterion 1): leaf-declared types are
+    /// exempt from the orphan scan — visible instead through
+    /// `leaf_population` — while non-leaf types count exactly as
+    /// before, a leaf WITH edges stays legal, and an empty schema map
+    /// reproduces the schema-blind behaviour byte-for-byte.
+    #[test]
+    fn leaf_declared_types_exempt_from_orphans_but_visible_as_population() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let manifest = r#"
+name: leafy
+version: 0.1.0
+description: leaf test schema
+when_to_use: tests
+types:
+  - obs
+  - spec
+relationships:
+  mode: strict
+  definitions:
+    - name: USES
+      description: u
+      default_weight: 1.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+      acyclic: true
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\npropagating_relationships: []\nupdatable_fields:\n  - title\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let obs_yaml = format!("name: obs\ndescription: t\nwhen_to_use: h\nleaf: true\n{body}");
+        let spec_yaml = format!("name: spec\ndescription: t\nwhen_to_use: h\n{body}");
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[
+                    ("obs".to_string(), obs_yaml),
+                    ("spec".to_string(), spec_yaml),
+                ],
+            )
+            .expect("leaf fixture schema parses"),
+        );
+        let mut schemas: HashMap<String, Arc<memstead_schema::Schema>> = HashMap::new();
+        schemas.insert("s".to_string(), schema);
+
+        let mut store = Store::new();
+        let mut e = |id: &str, ty: &str| {
+            let mut ent = entity(id, "s", false);
+            ent.entity_type = ty.to_string();
+            store.upsert(EntityId(id.into()), ent);
+        };
+        e("lonely-spec", "spec"); // real orphan
+        e("lonely-obs", "obs"); // leaf: exempt
+        e("linked-obs", "obs"); // leaf with an edge: legal, not orphan anyway
+        e("hub", "spec");
+        add_edge(&mut store, "linked-obs", "hub", "USES");
+
+        // Schema-aware: only the non-leaf edge-less entity is an orphan.
+        let orphans = find_orphans_with_schemas(&store, &schemas);
+        assert_eq!(
+            orphans,
+            vec![EntityId("lonely-spec".into())],
+            "leaf-typed edge-less entities are exempt; non-leaf count as before"
+        );
+        // The exempted population is visible, keyed schema_ref:type.
+        let pop = leaf_population(&store, &schemas);
+        assert_eq!(pop.get("leafy@0.1.0:obs"), Some(&2));
+        assert_eq!(pop.len(), 1);
+
+        // Empty schema map == historical schema-blind behaviour.
+        let blind = find_orphans(&store);
+        let mut blind_sorted: Vec<String> = blind.iter().map(|i| i.0.clone()).collect();
+        blind_sorted.sort();
+        assert_eq!(blind_sorted, vec!["lonely-obs", "lonely-spec"]);
+        assert!(leaf_population(&store, &HashMap::new()).is_empty());
     }
 }
