@@ -2576,3 +2576,127 @@ fn friction_ledger_records_both_surfaces_and_serves_the_axis() {
     assert_eq!(axis["by_verb"]["cli:entity"], 1);
     assert_eq!(axis["recent_24h"]["total"], 2);
 }
+
+// ---------------------------------------------------------------------------
+// Negative findings (agent-trust plan 10) — the fourth ingest type.
+// ---------------------------------------------------------------------------
+
+/// ingest@0.5.0's `negative_finding`: a conformant entity writes via
+/// MCP and via the CLI against the same process mem; malformed
+/// variants refuse with the standard typed conformance errors; and
+/// the type's leaf declaration keeps edge-less findings out of the
+/// orphan axis (they surface as a leaf population instead).
+#[test]
+fn negative_finding_writes_on_both_surfaces_and_is_leaf_exempt() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("proc", "ingest@0.5.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    // Legal via MCP: all three required sections.
+    let ok = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "No rollback runbook in the source tree",
+            "entity_type": "negative_finding",
+            "mem": "proc",
+            "sections": {
+                "sought": "A rollback runbook for failed deploys.",
+                "search_path": "Full read of docs/ops; grep for rollback and revert across docs/.",
+                "finding": "Nothing — deploys are documented forward-only."
+            }
+        }),
+    );
+    assert!(ok["isError"] != true, "legal negative_finding must land: {ok}");
+    assert_eq!(
+        ok["structuredContent"]["id"], "proc--no-rollback-runbook-in-the-source-tree",
+        "{ok}"
+    );
+
+    // Illegal via MCP: missing required sections → typed refusal.
+    let missing = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Half a finding",
+            "entity_type": "negative_finding",
+            "mem": "proc",
+            "sections": { "sought": "Something." }
+        }),
+    );
+    assert_eq!(missing["isError"], true, "{missing}");
+    assert_eq!(
+        missing["structuredContent"]["code"], "MISSING_REQUIRED_SECTION",
+        "{missing}"
+    );
+
+    // CLI against the SAME workspace: legal write.
+    let cli_bin = Path::new(memstead_mcp_bin())
+        .parent()
+        .expect("binary has a parent dir")
+        .join("memstead");
+    assert!(cli_bin.exists(), "memstead CLI binary not built");
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "create",
+            "--mem",
+            "proc",
+            "--title",
+            "No SLA stated for the batch queue",
+            "--type",
+            "negative_finding",
+            "--section",
+            "sought=A latency or delivery SLA for the batch queue.",
+            "--section",
+            "search_path=Skim of the queue chapter; grep for SLA and latency across docs/.",
+            "--section",
+            "finding=Nothing — the queue is documented without service guarantees.",
+        ])
+        .output()
+        .expect("run memstead CLI");
+    assert!(
+        out.status.success(),
+        "legal CLI negative_finding must land: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // CLI illegal variant: unknown section → typed refusal.
+    let bad = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "create",
+            "--mem",
+            "proc",
+            "--title",
+            "Bad finding",
+            "--type",
+            "negative_finding",
+            "--section",
+            "sought=X.",
+            "--section",
+            "search_path=Y.",
+            "--section",
+            "finding=Z.",
+            "--section",
+            "bogus_section=nope",
+        ])
+        .output()
+        .expect("run memstead CLI");
+    assert!(!bad.status.success());
+    let body: Value =
+        serde_json::from_slice(&bad.stdout).expect("CLI --json refusal parses");
+    assert_eq!(body["code"], "UNKNOWN_SECTION", "{body}");
+
+    // Leaf exemption: both findings are edge-less, yet the orphan
+    // axis lists neither — they surface as the leaf population.
+    let health = harness.call_tool("memstead_health", json!({ "include": ["orphans"] }));
+    assert!(health["isError"] != true, "{health}");
+    let orphans = serde_json::to_string(&health["structuredContent"]["orphans"]).unwrap();
+    assert!(
+        !orphans.contains("no-rollback-runbook") && !orphans.contains("no-sla-stated"),
+        "leaf-typed negative findings must not appear as orphans: {orphans}"
+    );
+    let leaf = &health["structuredContent"]["leaf_entities_by_type"];
+    assert_eq!(leaf["ingest@0.5.0:negative_finding"], 2, "{health}");
+}

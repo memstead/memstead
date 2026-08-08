@@ -56,6 +56,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Negative findings: "searched, nothing found" is a result, not a
+  gap.** ingest@0.5.0 adds a fourth type, `negative_finding` — what
+  was sought, the search directions actually walked (`search_path`,
+  the load-bearing section: git carries when, only the entry can
+  carry where the search looked), and the empty result. It is the
+  operational opposite of `coverage_gap`: a gap is work to do (the
+  source has material the destination lacks), a negative finding is
+  work that is done and must not be silently redone — both types'
+  prose names the other and the rule for choosing. Leaf-declared
+  (edge-less findings are never orphans), with the same optional
+  wiki-link reach into the destination claim the absence bears on,
+  and an engine-validated exemplar demonstrating a real absence
+  finding. Prior ingest versions stay sealed per the retention
+  manifest; the process-mem pairing pins the new version.
 - **Schemas teach by example: a type can carry one engine-validated
   exemplar.** A schema type may declare `exemplar:` — one canonical
   entity in the mem markdown shape (title, metadata, sections,

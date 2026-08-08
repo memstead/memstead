@@ -104,3 +104,8 @@ sha256 = "7c103d0e027f12df55e712e327c3dfc170d85c3c6084a0cf9e49430be5a91a6e"
 name = "software"
 version = "0.3.0"
 sha256 = "358ccf91737cf72738e9870059cfd36124050e37bc8c100bb0083333f55fc45e"
+
+[[shipped]]
+name = "ingest"
+version = "0.5.0"
+sha256 = "8d4b06d15546c88a6e403cb4ea39ff42e78bbedeed5e783197f973b9c15f299e"

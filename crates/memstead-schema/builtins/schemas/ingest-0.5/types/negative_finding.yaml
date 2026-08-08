@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: negative_finding
+leaf: true
+description: |
+  A completed search of the source space that found nothing.
+  "Searched, empty" is a result, not a gap: it records what was
+  sought, the search directions actually walked, and the finding —
+  nothing there — so no later run silently repeats the search and
+  the holding stays auditable ("not searched" and "searched, empty"
+  are different states).
+when_to_use: |
+  Use when a run searched the source space for something and
+  concluded it is not there. The defining test: is the search DONE
+  and would repeating it be waste? A negative_finding closes a
+  question; a `coverage_gap` opens one. File here only when the
+  search path can be stated concretely enough that a later reader
+  can judge whether the coverage was sufficient.
+boundaries:
+  - Not a coverage_gap — a gap asserts the source HAS material the destination lacks (work to do); a negative_finding asserts the source space HOLDS NOTHING for what was sought (work done). Filing one as the other either sends agents hunting for what does not exist or silently re-opens a settled search.
+  - Not an unverified claim — use `verification_target` when the destination carries a claim to check.
+  - Not a contradiction — use `inconsistency`.
+  - Not a judgment that the absence is a problem. Whether the world SHOULD hold this belongs to the destination (a memo, a constraint); this type only records that it does not.
+system_message: |
+  A negative_finding records absence *in the world*: what was
+  sought, where and how the search walked, and the empty result.
+  The search path is the load-bearing section — git records when a
+  finding was made, but only the entry itself can record WHERE the
+  search looked, and a later reader judges coverage from exactly
+  that. Wiki-link the destination claim the absence bears on, if
+  one exists; the auto-emitted REFERENCES edge anchors the finding.
+sections:
+  - key: sought
+    heading: Sought
+    required: true
+    search_weight: 30.0
+    write_rules:
+      - "One or two sentences naming what the search was for, concretely. Standalone-readable in a search snippet — a later agent must recognize its own question in this section before rerunning the search."
+  - key: search_path
+    heading: Search path
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "The directions actually walked: which files, docs, folders, queries, or interviews were covered, and how (skim, full read, grep terms). Concrete enough that a later reader can judge whether the coverage was sufficient — an unverifiable search path makes the finding worthless."
+      - "State what was NOT covered when the search was deliberately bounded; a bounded search honestly stated beats an exhaustive one vaguely claimed."
+  - key: finding
+    heading: Finding
+    required: true
+    search_weight: 20.0
+    write_rules:
+      - "The result, stated as a result: what the searched space holds instead (nothing, or the nearest misses found). Wiki-link the destination claim this absence bears on (e.g. `[[the-claim-entity]]`) so the auto-emitted REFERENCES edge anchors the finding."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields: []
+title_weight: 100.0
+text_fields: [sought, search_path, finding, notes]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields: [title, sought, search_path, finding, notes, tags]
+health_required_fields: [sought, search_path, finding]
+staleness_threshold_days: 90
+write_rules:
+  - "Record the search, not the feeling. \"Probably nothing there\" is not a negative finding; a walked search path with an empty result is."
+  - "The boundary with `coverage_gap` is operational: a gap is work to DO (the source has it, the destination lacks it), a negative_finding is work DONE (the source space lacks it — keep off). Choose by asking which instruction the entry gives the next run."
+  - "A negative finding can expire: if the source space grows (new docs, new releases), a later run may deliberately rerun the search and delete or supersede the entry. Deleting a still-true finding wastes the original search."
+  - "No internal edges to other process entries; the only reach is the optional wiki-link into the destination claim the absence bears on."
+
+exemplar:
+  title: "No retention period stated anywhere in the source handbook"
+  sections:
+    sought: "A stated retention period for failed-job logs — how long the scheduler keeps them before deletion."
+    search_path: "Full read of the handbook's operations and deployment chapters; grep across docs/ for retention, rotate, prune, delete after; skim of the scheduler config reference tables. Not covered: the vendor's upstream documentation."
+    finding: "Nothing — the handbook never states a retention period. Nearest miss: the operations chapter mentions log rotation without a duration. Bears on [[failed-jobs-retry-three-times-before-paging]], which cites log evidence older than any plausible rotation window."

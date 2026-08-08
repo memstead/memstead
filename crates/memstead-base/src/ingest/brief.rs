@@ -25,9 +25,10 @@ use crate::pipeline::{MediumType, PatternMode};
 /// `SLICE_CAP`. Beyond it a `…and N more` line stands in.
 const SLICE_CAP: usize = 25;
 
-/// The schema every `ingest/<name>` process mem pins — mirrors the plugin's
-/// `PROCESS_MEM_SCHEMA`.
-pub const PROCESS_MEM_SCHEMA: &str = "ingest@0.4.0";
+/// The schema every `ingest/<name>` process mem pins. (The historical
+/// plugin-side twin of this constant is retired — this is the single
+/// authority.)
+pub const PROCESS_MEM_SCHEMA: &str = "ingest@0.5.0";
 
 /// The paired-process-mem state the brief blocks read — the engine-side of
 /// the plugin's `processMem` object. Whether a process mem is present /
@@ -1353,7 +1354,7 @@ mod tests {
         assert!(out.starts_with("## Situation\n\nYou are running one iteration of `macos` (discovery mode) inside a loop."));
         assert!(out.contains("Mutating the destination is this run's mandate:"));
         assert!(out.contains("The `PreCompact` hook fires near the limit"));
-        assert!(out.contains("A paired process mem `ingest/macos` (schema `ingest@0.4.0`) carries destination-quality debt"));
+        assert!(out.contains("A paired process mem `ingest/macos` (schema `ingest@0.5.0`) carries destination-quality debt"));
         assert!(
             out.ends_with("write rules.\n\n"),
             "block ends in a blank line"
@@ -1387,7 +1388,7 @@ mod tests {
         };
         let out = render_situation(&resolved("os", None, vec![]), &failed);
         assert!(out.contains("could not be auto-created — engine offline."));
-        assert!(out.contains("memstead mem init os --org-path ingest --schema ingest@0.4.0"));
+        assert!(out.contains("memstead mem init os --org-path ingest --schema ingest@0.5.0"));
     }
 
     /// Operative data: a primary source with paths/ignore, a reference mem
@@ -1429,7 +1430,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
 
 ### Paired process mem
 
-- **ingest/macos** — schema: `ingest@0.4.0`. Inspect via `memstead_overview` / `memstead_search mem=macos`.
+- **ingest/macos** — schema: `ingest@0.5.0`. Inspect via `memstead_overview` / `memstead_search mem=macos`.
 \n";
         assert_eq!(out, expected);
     }
