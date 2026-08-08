@@ -145,7 +145,11 @@ fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
     memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
-    let proj_dir = tmp.path().join(".memstead").join("projections").join("engine");
+    let proj_dir = tmp
+        .path()
+        .join(".memstead")
+        .join("projections")
+        .join("engine");
     std::fs::create_dir_all(&proj_dir).unwrap();
     std::fs::write(proj_dir.join("graph.json"), "{}").unwrap();
 

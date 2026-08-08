@@ -1333,7 +1333,10 @@ impl FilesystemMcpServer {
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {
         if p.relations.is_empty() {
-            return tool_error("INVALID_INPUT", "relations must carry at least one operation");
+            return tool_error(
+                "INVALID_INPUT",
+                "relations must carry at least one operation",
+            );
         }
         let mut engine = crate::lock_engine!(self.engine);
         let (actor, client) = self.actor_and_client();
@@ -2909,9 +2912,9 @@ mod tests {
         let dup_body = dup.structured_content.unwrap();
         assert_eq!(dup_body["results"][0]["action"], "noop");
         assert!(
-            dup_body["warnings"].as_array().is_some_and(|w| w
-                .iter()
-                .any(|x| x["code"] == "DUPLICATE_RELATIONSHIP")),
+            dup_body["warnings"]
+                .as_array()
+                .is_some_and(|w| w.iter().any(|x| x["code"] == "DUPLICATE_RELATIONSHIP")),
             "duplicate add must warn typed: {dup_body}"
         );
     }

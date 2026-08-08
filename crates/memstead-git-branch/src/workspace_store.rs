@@ -269,12 +269,10 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     // projection migrate` is the only path from old-shape configs).
     engine.set_pipeline_configs(memstead_base::load_pipeline_configs(workspace_root)?);
     if migration_happened {
-        engine.push_load_warning(
-            memstead_base::ops::WarningHint::ReadMemsMigratedToMounts {
-                mems: migration.migrated_mems,
-                from_host_mems: migration.from_host_mems,
-            },
-        );
+        engine.push_load_warning(memstead_base::ops::WarningHint::ReadMemsMigratedToMounts {
+            mems: migration.migrated_mems,
+            from_host_mems: migration.from_host_mems,
+        });
     }
     // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
     // (best-effort) so editors validate authored schema YAML.

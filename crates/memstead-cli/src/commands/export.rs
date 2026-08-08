@@ -185,10 +185,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             json!(!engine.mem_router().is_writable(mem_name)),
         );
         group.insert("entity_count".to_string(), json!(envelopes.len()));
-        group.insert(
-            "entities".to_string(),
-            serde_json::Value::Array(envelopes),
-        );
+        group.insert("entities".to_string(), serde_json::Value::Array(envelopes));
         mems.insert(mem_name.clone(), serde_json::Value::Object(group));
     }
 

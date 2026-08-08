@@ -3336,8 +3336,18 @@ write_rules: []
                 meilensteine["content"], "(heading(3) list(bullet))+",
                 "{verbosity:?} carries content"
             );
-            assert!(meilensteine["item_pattern"].as_str().unwrap().contains("name"));
-            assert!(meilensteine["example"].as_str().unwrap().contains("Kickoff"));
+            assert!(
+                meilensteine["item_pattern"]
+                    .as_str()
+                    .unwrap()
+                    .contains("name")
+            );
+            assert!(
+                meilensteine["example"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Kickoff")
+            );
             assert_eq!(meilensteine["format_severity"], "warn");
             let tabelle = secs.iter().find(|s| s["key"] == "tabelle").unwrap();
             assert_eq!(tabelle["format_severity"], "block", "default renders");

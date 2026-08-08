@@ -30,8 +30,6 @@ use crate::entity::loader::LoadError;
 use crate::mem_repo_config::MemRepoWriteError;
 use crate::validator::{ValidationError, validate_and_normalize_archive};
 
-
-
 /// Env var that overrides `<data_dir>/memstead/mems` for tests.
 pub const CACHE_OVERRIDE_ENV: &str = "MEMSTEAD_MEM_CACHE";
 
@@ -99,8 +97,6 @@ pub fn read_published_config(archive_path: &Path) -> Result<PublishedMemConfig, 
         ))
     })
 }
-
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
@@ -318,12 +314,6 @@ pub fn register_cached_archive(
     engine.register_read_mount(mount, backend, origin)?;
     Ok(registration)
 }
-
-
-
-
-
-
 
 /// Outcome of `extract_archive_schema_if_needed` — so callers can log
 /// the specific reason a no-op happened, or know whether the mem's
@@ -876,8 +866,8 @@ mod tests {
         repack_with_foreign_meta_dir(&modern, &foreign);
 
         let _g = CacheGuard::install(&cache);
-        let err = cache_install(&foreign)
-            .expect_err("a foreign meta-layout archive must not install");
+        let err =
+            cache_install(&foreign).expect_err("a foreign meta-layout archive must not install");
         assert!(matches!(err, InstallError::Validation(_)), "got {err:?}");
     }
 

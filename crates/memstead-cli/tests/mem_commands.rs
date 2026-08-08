@@ -655,7 +655,9 @@ fn install_is_idempotent() {
         .assert()
         .success()
         .stdout(contains("already in cache"))
-        .stdout(contains("already registered as a read-mem mount (unchanged)"));
+        .stdout(contains(
+            "already registered as a read-mem mount (unchanged)",
+        ));
 }
 
 /// After installing an archive as an RO mount: `memstead workspace dump
@@ -1134,7 +1136,11 @@ fn export_json_folder_mem_round_trips_and_mutates_nothing() {
         let mut files: Vec<(String, Vec<u8>)> = walk_files(&mem_dir)
             .into_iter()
             .map(|p| {
-                let rel = p.strip_prefix(&mem_dir).unwrap().to_string_lossy().into_owned();
+                let rel = p
+                    .strip_prefix(&mem_dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
                 let bytes = fs::read(&p).unwrap_or_else(|e| panic!("read {p:?} ({label}): {e}"));
                 (rel, bytes)
             })
@@ -1258,7 +1264,13 @@ fn make_rename_workspace(root: &Path) {
         "--anchor",
         r#"{"artifact": "src/lib.rs", "grain": "file", "class": "anchored"}"#,
     ]);
-    m(&["mem", "set-sync-state", "alpha", "alpha/graph/tree#synced", "abc123"]);
+    m(&[
+        "mem",
+        "set-sync-state",
+        "alpha",
+        "alpha/graph/tree#synced",
+        "abc123",
+    ]);
 }
 
 /// Criteria 1 + 2: the rename is complete across entity ids, cross-mem
@@ -1311,7 +1323,10 @@ fn mem_rename_git_branch_full_surface() {
         toml.contains(r#"beta = ["gamma"]"#),
         "grant must name the new mem; got:\n{toml}"
     );
-    assert!(!toml.contains("alpha"), "no grant may still name the old mem:\n{toml}");
+    assert!(
+        !toml.contains("alpha"),
+        "no grant may still name the old mem:\n{toml}"
+    );
 
     // Branch moved with history: the create-time seed commit is still
     // reachable from the new branch, and the old branch is gone.
@@ -1333,7 +1348,10 @@ fn mem_rename_git_branch_full_surface() {
         .output()
         .unwrap();
     let refs = String::from_utf8(refs.stdout).unwrap();
-    assert!(!refs.contains("refs/heads/alpha"), "old branch must be gone:\n{refs}");
+    assert!(
+        !refs.contains("refs/heads/alpha"),
+        "old branch must be gone:\n{refs}"
+    );
 
     // Anchors sidecar re-keyed on the moved branch.
     let sidecar = std::process::Command::new("git")
@@ -1395,12 +1413,24 @@ fn mem_rename_refusals_are_typed_and_effect_free() {
 
     let refusals: &[(&[&str], &str, bool)] = &[
         (&["mem", "rename", "nope", "other"], "UNKNOWN_MEM", true),
-        (&["mem", "rename", "alpha", "beta"], "MEM_NAME_COLLISION", true),
-        (&["mem", "rename", "alpha", "Bad Name"], "INVALID_MEM_NAME", true),
+        (
+            &["mem", "rename", "alpha", "beta"],
+            "MEM_NAME_COLLISION",
+            true,
+        ),
+        (
+            &["mem", "rename", "alpha", "Bad Name"],
+            "INVALID_MEM_NAME",
+            true,
+        ),
         (&["mem", "rename", "alpha", "alpha"], "INVALID_INPUT", true),
         // Agent mode (no operator env): no allowlist configured →
         // MEM_PATH_NOT_ALLOWED with the policy_table disambiguator.
-        (&["mem", "rename", "alpha", "delta"], "MEM_PATH_NOT_ALLOWED", false),
+        (
+            &["mem", "rename", "alpha", "delta"],
+            "MEM_PATH_NOT_ALLOWED",
+            false,
+        ),
     ];
     for (args, code, operator) in refusals {
         let mut cmd = memstead();
@@ -1410,7 +1440,13 @@ fn mem_rename_refusals_are_typed_and_effect_free() {
         } else {
             cmd.env_remove("MEMSTEAD_OPERATOR_MODE");
         }
-        let out = cmd.args(*args).assert().failure().get_output().stderr.clone();
+        let out = cmd
+            .args(*args)
+            .assert()
+            .failure()
+            .get_output()
+            .stderr
+            .clone();
         let stderr = String::from_utf8(out).unwrap();
         assert!(stderr.contains(code), "expected {code}; got: {stderr}");
         assert!(!stderr.contains("INTERNAL"), "INTERNAL leaked: {stderr}");
@@ -1423,7 +1459,10 @@ fn mem_rename_refusals_are_typed_and_effect_free() {
     }
 
     let after = snapshot("after");
-    assert_eq!(before, after, "a refused rename must leave the workspace byte-identical");
+    assert_eq!(
+        before, after,
+        "a refused rename must leave the workspace byte-identical"
+    );
 }
 
 /// Criterion 5: a half-applied rename — the peer mem already rewritten
@@ -1639,8 +1678,7 @@ fn install_registers_workspace_read_only_mount() {
         .success()
         .stdout(contains("sender-mem"));
 
-    let mounts =
-        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    let mounts = fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
     assert!(
         mounts.contains(r#""sender-mem""#) && mounts.contains(r#""archive""#),
         "mounts.json must carry the archive mount; got:\n{mounts}"
@@ -1692,7 +1730,12 @@ fn uninstall_round_trip_cache_survives_and_reads_have_parity() {
     memstead()
         .current_dir(receiver.path())
         .env("MEMSTEAD_OPERATOR_MODE", "1")
-        .args(["workspace", "grant-cross-link", "receiver-mem", "sender-mem"])
+        .args([
+            "workspace",
+            "grant-cross-link",
+            "receiver-mem",
+            "sender-mem",
+        ])
         .env("MEMSTEAD_MEM_CACHE", cache.path())
         .assert()
         .success();
@@ -1763,7 +1806,11 @@ fn uninstall_round_trip_cache_survives_and_reads_have_parity() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .filter(|n| n.starts_with("sender-mem-") && n.ends_with(".mem"))
         .collect();
-    assert_eq!(cached.len(), 1, "cache copy must survive uninstall: {cached:?}");
+    assert_eq!(
+        cached.len(),
+        1,
+        "cache copy must survive uninstall: {cached:?}"
+    );
 
     // Re-install re-registers from the surviving cache copy.
     memstead()
@@ -1843,15 +1890,13 @@ fn legacy_read_mems_config_migrates_at_boot() {
         health.contains("READ_MEMS_MIGRATED_TO_MOUNTS") && health.contains("sender-mem"),
         "boot must surface the migration warning naming the mem; got:\n{health}"
     );
-    let mounts =
-        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    let mounts = fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
     assert!(
         mounts.contains(r#""sender-mem""#),
         "migrated mount must persist; got:\n{mounts}"
     );
     let cfg_after =
-        memstead_git_branch::mem_repo_config::read_config(receiver.path(), "receiver-mem")
-            .unwrap();
+        memstead_git_branch::mem_repo_config::read_config(receiver.path(), "receiver-mem").unwrap();
     assert!(
         cfg_after.read_mems.is_empty(),
         "legacy key must be removed; got {:?}",
@@ -1886,7 +1931,12 @@ fn legacy_read_mems_config_migrates_at_boot() {
     memstead()
         .current_dir(receiver.path())
         .env("MEMSTEAD_OPERATOR_MODE", "1")
-        .args(["workspace", "grant-cross-link", "receiver-mem", "sender-mem"])
+        .args([
+            "workspace",
+            "grant-cross-link",
+            "receiver-mem",
+            "sender-mem",
+        ])
         .env("MEMSTEAD_MEM_CACHE", cache.path())
         .assert()
         .success();
@@ -1928,7 +1978,10 @@ fn uninstall_refusals_are_typed_and_effect_free() {
     let mounts_before =
         fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
 
-    for (name, code) in [("no-such-mem", "UNKNOWN_MEM"), ("receiver-mem", "MEM_NOT_READ_ONLY")] {
+    for (name, code) in [
+        ("no-such-mem", "UNKNOWN_MEM"),
+        ("receiver-mem", "MEM_NOT_READ_ONLY"),
+    ] {
         let out = memstead()
             .current_dir(receiver.path())
             .arg("uninstall")
@@ -1945,7 +1998,10 @@ fn uninstall_refusals_are_typed_and_effect_free() {
 
     let mounts_after =
         fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
-    assert_eq!(mounts_before, mounts_after, "refusals must not touch mount state");
+    assert_eq!(
+        mounts_before, mounts_after,
+        "refusals must not touch mount state"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1966,9 +2022,17 @@ fn make_anchor_workspace(root: &Path) {
     m(&["mem-repo", "init", "."]);
     m(&["mem", "init", "hold", "--no-gitignore"]);
     m(&[
-        "create", "--mem", "hold", "--title", "Holder", "--type", "spec",
-        "--section", "identity=Anchored fixture entity.",
-        "--section", "purpose=Verification states.",
+        "create",
+        "--mem",
+        "hold",
+        "--title",
+        "Holder",
+        "--type",
+        "spec",
+        "--section",
+        "identity=Anchored fixture entity.",
+        "--section",
+        "purpose=Verification states.",
     ]);
 
     // Four source files; anchors record the ORIGINAL content's
@@ -2075,7 +2139,10 @@ fn verify_anchors_reports_four_states_without_binding() {
         .output()
         .unwrap()
         .stdout;
-    assert_eq!(refs_before, refs_after, "verify-anchors must not move any ref");
+    assert_eq!(
+        refs_before, refs_after,
+        "verify-anchors must not move any ref"
+    );
 }
 
 /// Criterion 3: a mem whose bindings span multiple media no longer
@@ -2106,8 +2173,11 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
         .current_dir(root)
         .env("MEMSTEAD_OPERATOR_MODE", "1")
         .args([
-            "update", "hold--holder", "--auto-hash",
-            "--append", "purpose= Url anchor.",
+            "update",
+            "hold--holder",
+            "--auto-hash",
+            "--append",
+            "purpose= Url anchor.",
             "--anchor",
             r#"{"artifact":"https://example.com/spec","grain":"url","class":"informed-by"}"#,
         ])

@@ -140,9 +140,8 @@ fn install_archive(
     let outcome =
         mem_cache::install_to_cache(archive, &writable_refs).map_err(install_err_to_cli)?;
 
-    let mount_state =
-        mem_cache::register_cached_archive(engine, &outcome, "memstead install")
-            .map_err(engine_err_to_cli)?;
+    let mount_state = mem_cache::register_cached_archive(engine, &outcome, "memstead install")
+        .map_err(engine_err_to_cli)?;
     if mount_state != mem_cache::MountRegistration::AlreadyRegistered {
         engine.persist_state().map_err(engine_err_to_cli)?;
     }

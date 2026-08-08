@@ -39,9 +39,13 @@ pub enum BlockDetail {
     /// continuation / soft breaks joined by a single space (the text
     /// a renderer shows; continuation never changes an `item_pattern`
     /// match). Nested blocks inside an item are not part of its text.
-    List { items: Vec<(usize, String)> },
+    List {
+        items: Vec<(usize, String)>,
+    },
     /// Each source line of the paragraph: `(line, text)`.
-    Paragraph { lines: Vec<(usize, String)> },
+    Paragraph {
+        lines: Vec<(usize, String)>,
+    },
     /// Header cell texts plus each row's entry. `cells` come from the
     /// parser (already padded/truncated to header width — GFM
     /// normalizes silently); `raw_cell_count` is the REAL
@@ -174,11 +178,9 @@ pub fn reduce_section(source: &str) -> ReducedSection {
                         Tag::Table(_) => Some(ObservedBlock::Table),
                         Tag::CodeBlock(kind) => Some(ObservedBlock::Code {
                             lang: match kind {
-                                CodeBlockKind::Fenced(info) => info
-                                    .split_whitespace()
-                                    .next()
-                                    .unwrap_or("")
-                                    .to_string(),
+                                CodeBlockKind::Fenced(info) => {
+                                    info.split_whitespace().next().unwrap_or("").to_string()
+                                }
                                 CodeBlockKind::Indented => String::new(),
                             },
                         }),
@@ -604,13 +606,7 @@ pub fn check_section_format(
             .blocks
             .get(failure.failed_at)
             .map(|b| b.line)
-            .unwrap_or_else(|| {
-                reduced
-                    .blocks
-                    .last()
-                    .map(|b| b.line + 1)
-                    .unwrap_or(1)
-            });
+            .unwrap_or_else(|| reduced.blocks.last().map(|b| b.line + 1).unwrap_or(1));
         out.push(SectionFormatViolation::ContentMismatch {
             section: section.to_string(),
             expected: expr.source().to_string(),
@@ -712,16 +708,14 @@ pub fn check_section_format(
                     continue;
                 }
                 for (column, pattern_src) in &table_format.column_patterns {
-                    let Some(col_idx) =
-                        table_format.columns.iter().position(|c| c == column)
+                    let Some(col_idx) = table_format.columns.iter().position(|c| c == column)
                     else {
                         continue;
                     };
                     let Some(cell) = row.cells.get(col_idx) else {
                         continue;
                     };
-                    let Ok(pattern) = regex::Regex::new(&format!("^(?:{pattern_src})$"))
-                    else {
+                    let Ok(pattern) = regex::Regex::new(&format!("^(?:{pattern_src})$")) else {
                         continue;
                     };
                     if !pattern.is_match(cell) {
@@ -823,11 +817,15 @@ mod tests {
     fn code_blocks_containing_dashes_are_not_lists() {
         assert_eq!(
             observed("```\n- not a list\n```\n"),
-            vec![ObservedBlock::Code { lang: String::new() }]
+            vec![ObservedBlock::Code {
+                lang: String::new()
+            }]
         );
         assert_eq!(
             observed("    - not a list\n"),
-            vec![ObservedBlock::Code { lang: String::new() }]
+            vec![ObservedBlock::Code {
+                lang: String::new()
+            }]
         );
         assert_eq!(
             observed("```rust\nfn x() {}\n```\n"),
@@ -895,7 +893,10 @@ mod tests {
         };
         assert_eq!(
             lines,
-            &[(1, "erste zeile".to_string()), (2, "zweite zeile".to_string())]
+            &[
+                (1, "erste zeile".to_string()),
+                (2, "zweite zeile".to_string())
+            ]
         );
         let BlockDetail::Paragraph { lines } = &reduced.blocks[1].detail else {
             panic!("paragraph detail");
@@ -937,9 +938,10 @@ mod tests {
         let BlockDetail::List { items } = &reduced.blocks[0].detail else {
             panic!("list detail");
         };
-        assert_eq!(items.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(), vec![
-            "parent", "second"
-        ]);
+        assert_eq!(
+            items.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+            vec!["parent", "second"]
+        );
     }
 
     #[test]
@@ -1020,14 +1022,15 @@ mod check_tests {
         };
         assert_eq!(*failed_at, 3, "line of the offending paragraph");
         assert_eq!(expected_next, &vec!["list(bullet)".to_string()]);
-        assert_eq!(found, &vec!["heading(3)".to_string(), "paragraph".to_string()]);
+        assert_eq!(
+            found,
+            &vec!["heading(3)".to_string(), "paragraph".to_string()]
+        );
         assert!(example.as_deref().unwrap().contains("Kickoff"));
         assert_eq!(violations[0].code(), "SECTION_CONTENT_MISMATCH");
 
         // Conforming body: no violations.
-        assert!(
-            check_section_format(&d, "### Phase 1\n- **Kickoff** — 2026-09-01\n").is_empty()
-        );
+        assert!(check_section_format(&d, "### Phase 1\n- **Kickoff** — 2026-09-01\n").is_empty());
     }
 
     #[test]
@@ -1179,7 +1182,8 @@ mod check_tests {
             check_section_format(&d, ok)
         );
         // Missing span hash — the checker's regex class, declared.
-        let bad = "btp:20/13/073:4559-4985:09b80726ef42 | 2022-01-26 · Chrupalla · https://example.org
+        let bad =
+            "btp:20/13/073:4559-4985:09b80726ef42 | 2022-01-26 · Chrupalla · https://example.org
 ";
         assert_eq!(check_section_format(&d, bad).len(), 1);
         // Missing the two-halves separator.

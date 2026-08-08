@@ -684,7 +684,7 @@ fn resolve_source(
         let schema = memstead_schema::load_schema_from_dir(as_path)
             .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
             .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
-        .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
+            .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,

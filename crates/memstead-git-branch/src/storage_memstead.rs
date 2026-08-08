@@ -1229,11 +1229,7 @@ pub fn rename_mem_artifacts_at_gitdir(
                 .remove(old_path.as_str())
                 .map_err(|e| MemRepoWriteError::GitTree(format!("tree remove {old_path}: {e}")))?;
             editor
-                .upsert(
-                    new_path.as_str(),
-                    gix::objs::tree::EntryKind::Blob,
-                    blob_id,
-                )
+                .upsert(new_path.as_str(), gix::objs::tree::EntryKind::Blob, blob_id)
                 .map_err(|e| MemRepoWriteError::GitTree(format!("tree upsert {new_path}: {e}")))?;
             let new_tree_id = editor
                 .write()

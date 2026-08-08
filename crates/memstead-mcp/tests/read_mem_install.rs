@@ -25,10 +25,7 @@ use tempfile::TempDir;
 /// workspace root) receives the registrations; the pair comes back so
 /// tests can assert both the batch outcomes and the engine's mount
 /// state.
-fn install_batch(
-    archives: &[PathBuf],
-    cwd: &Path,
-) -> (memstead_base::Engine, Vec<ReadMemResult>) {
+fn install_batch(archives: &[PathBuf], cwd: &Path) -> (memstead_base::Engine, Vec<ReadMemResult>) {
     let mut engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
     let results = install_read_mems(&mut engine, archives, cwd);
     (engine, results)

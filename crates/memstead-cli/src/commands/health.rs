@@ -712,11 +712,7 @@ fn fill_config_projection(
 
 /// Engine-aware step for `--include anchors` — the per-mem four-state
 /// counts from the shared axis helper.
-fn fill_anchors_axis(
-    engine: &memstead_base::Engine,
-    include: &[String],
-    g: &mut GatheredHealth,
-) {
+fn fill_anchors_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
     if include.iter().any(|s| s == "anchors") {
         g.anchors_axis = Some(memstead_base::ops::health::health_anchors_axis(engine));
     }

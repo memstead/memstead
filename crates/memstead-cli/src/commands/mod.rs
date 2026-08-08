@@ -246,9 +246,6 @@ pub mod branch_reset;
 #[cfg(feature = "mem-repo")]
 pub mod install;
 #[cfg(feature = "mem-repo")]
-pub mod uninstall;
-pub mod verify_anchors;
-#[cfg(feature = "mem-repo")]
 pub mod mem;
 #[cfg(feature = "mem-repo")]
 pub mod mem_repo;
@@ -256,5 +253,8 @@ pub mod mem_repo;
 pub mod recover;
 #[cfg(feature = "mem-repo")]
 pub mod transport;
+#[cfg(feature = "mem-repo")]
+pub mod uninstall;
+pub mod verify_anchors;
 #[cfg(feature = "mem-repo")]
 pub mod workspace;

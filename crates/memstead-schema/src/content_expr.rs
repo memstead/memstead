@@ -41,14 +41,20 @@ pub const BLOCK_NAMES: &[&str] = &[
 pub enum ObservedBlock {
     Paragraph,
     /// `ordered: false` is a bullet list.
-    List { ordered: bool },
+    List {
+        ordered: bool,
+    },
     Table,
     /// `lang` is the fenced-code info string's first word, empty for
     /// none (and for indented code blocks).
-    Code { lang: String },
+    Code {
+        lang: String,
+    },
     Blockquote,
     /// ATX or setext heading depth (1–6).
-    Heading { depth: u8 },
+    Heading {
+        depth: u8,
+    },
     ThematicBreak,
     Html,
 }
@@ -130,15 +136,23 @@ impl Terminal {
 /// carries the offending token so loader errors can name it.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ContentExprError {
-    #[error("unknown block name '{0}' — the vocabulary is paragraph, list, table, code, blockquote, heading, thematicBreak, html")]
+    #[error(
+        "unknown block name '{0}' — the vocabulary is paragraph, list, table, code, blockquote, heading, thematicBreak, html"
+    )]
     UnknownBlockName(String),
     #[error("invalid attribute '{attr}' on '{name}'")]
     InvalidAttribute { name: String, attr: String },
-    #[error("heading depth {0} is outside 3–6 — h1/h2 are the entity's own levels (title, section delimiters)")]
+    #[error(
+        "heading depth {0} is outside 3–6 — h1/h2 are the entity's own levels (title, section delimiters)"
+    )]
     HeadingDepthReserved(u8),
-    #[error("nested groups are not allowed — the expression grammar is regular (no nesting, no recursion)")]
+    #[error(
+        "nested groups are not allowed — the expression grammar is regular (no nesting, no recursion)"
+    )]
     NestedGroup,
-    #[error("a group must be either an alternation of names or a sequence — mixing '|' and sequence inside one group is not allowed")]
+    #[error(
+        "a group must be either an alternation of names or a sequence — mixing '|' and sequence inside one group is not allowed"
+    )]
     MixedGroupOperators,
     #[error("unbalanced parentheses")]
     UnbalancedParens,
@@ -610,7 +624,10 @@ mod tests {
         assert!(e.match_blocks(&[bullet()]).is_ok());
         assert!(e.match_blocks(&[]).is_err());
         assert!(e.match_blocks(&[bullet(), bullet()]).is_err());
-        assert!(e.match_blocks(&[ObservedBlock::List { ordered: true }]).is_err());
+        assert!(
+            e.match_blocks(&[ObservedBlock::List { ordered: true }])
+                .is_err()
+        );
     }
 
     #[test]
@@ -724,7 +741,10 @@ mod tests {
             ContentExpr::parse("+list"),
             Err(ContentExprError::DanglingRepetition('+'))
         ));
-        assert!(matches!(ContentExpr::parse(""), Err(ContentExprError::Empty)));
+        assert!(matches!(
+            ContentExpr::parse(""),
+            Err(ContentExprError::Empty)
+        ));
         assert!(matches!(
             ContentExpr::parse("()"),
             Err(ContentExprError::EmptyGroup)

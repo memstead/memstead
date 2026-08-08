@@ -966,11 +966,8 @@ fn validate_type(
     // Constraint vocabulary (loader honesty: a malformed declaration
     // refuses with a typed error naming the offender — never
     // load-and-ignore).
-    let field_keys: std::collections::HashSet<&str> = td
-        .metadata_fields
-        .iter()
-        .map(|f| f.key.as_str())
-        .collect();
+    let field_keys: std::collections::HashSet<&str> =
+        td.metadata_fields.iter().map(|f| f.key.as_str()).collect();
     let section_keys: std::collections::HashSet<&str> =
         td.sections.iter().map(|sec| sec.key.as_str()).collect();
     for c in &td.constraints {
@@ -981,8 +978,7 @@ fn validate_type(
                 when_value,
                 ..
             } => {
-                if !field_keys.contains(field.as_str()) && !section_keys.contains(field.as_str())
-                {
+                if !field_keys.contains(field.as_str()) && !section_keys.contains(field.as_str()) {
                     return Err(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "requires_when",

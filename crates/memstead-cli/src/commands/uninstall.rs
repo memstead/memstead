@@ -96,13 +96,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     mem: from.mem().to_string(),
                 })
                 .collect();
-            return Err(CliError::from_engine_op(
-                memstead_base::EngineError::MemHasIncomingRefs {
+            return Err(
+                CliError::from_engine_op(memstead_base::EngineError::MemHasIncomingRefs {
                     mem: args.name,
                     referrers,
-                },
-            )
-            .into());
+                })
+                .into(),
+            );
         }
     }
 

@@ -303,9 +303,9 @@ fn check_relationships_syntax(body: &str, path: &str) -> Result<(), ValidationEr
             .next()
     {
         let line = match &v {
-            crate::section_format::SectionFormatViolation::ItemPatternMismatch {
-                text, ..
-            } => text.clone(),
+            crate::section_format::SectionFormatViolation::ItemPatternMismatch { text, .. } => {
+                text.clone()
+            }
             other => other.describe(),
         };
         return Err(ValidationError::InvalidRelationshipLine {

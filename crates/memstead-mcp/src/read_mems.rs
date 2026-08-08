@@ -10,9 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use memstead_git_branch::mem_cache::{
-    self, CacheInstallOutcome, InstallError, MountRegistration,
-};
+use memstead_git_branch::mem_cache::{self, CacheInstallOutcome, InstallError, MountRegistration};
 
 /// Outcome of processing a single `--read-mem` argument.
 ///

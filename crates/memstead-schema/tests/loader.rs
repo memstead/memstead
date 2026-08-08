@@ -1966,11 +1966,21 @@ fn section_format_declaration_accepted_and_compiled() {
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
     let td = schema.types.get("sample").unwrap();
     let section = td.sections.iter().find(|s| s.key == "body").unwrap();
-    assert_eq!(section.content.as_deref(), Some("(heading(3) list(bullet))+"));
+    assert_eq!(
+        section.content.as_deref(),
+        Some("(heading(3) list(bullet))+")
+    );
     assert!(section.compiled_content.is_some(), "compiled at load");
-    assert_eq!(section.format_severity, ConstraintSeverity::Block, "default block");
+    assert_eq!(
+        section.format_severity,
+        ConstraintSeverity::Block,
+        "default block"
+    );
 
-    let warn = t.replace("    example: |", "    format_severity: warn\n    example: |");
+    let warn = t.replace(
+        "    example: |",
+        "    format_severity: warn\n    example: |",
+    );
     let schema = load(&minimal_manifest(), &[("sample", &warn)]).expect("must load");
     let td = schema.types.get("sample").unwrap();
     let section = td.sections.iter().find(|s| s.key == "body").unwrap();
@@ -1989,7 +1999,10 @@ fn section_format_malformed_declaration_names_all_offenders() {
     // fires on the install / strict-validation path.
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("boot-lenient load");
     let err = memstead_schema::check_section_formats(&schema).expect_err("install must refuse");
-    let SchemaLoadError::InvalidSectionFormat { section, problems, .. } = &err else {
+    let SchemaLoadError::InvalidSectionFormat {
+        section, problems, ..
+    } = &err
+    else {
         panic!("expected InvalidSectionFormat, got: {err}");
     };
     assert_eq!(section, "body");
@@ -2057,8 +2070,7 @@ fn section_format_heading_depth_one_and_two_refuse_at_load() {
             ),
         );
         let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("lenient load");
-        let err =
-            memstead_schema::check_section_formats(&schema).expect_err("install must refuse");
+        let err = memstead_schema::check_section_formats(&schema).expect_err("install must refuse");
         assert!(
             err.to_string().contains("3–6"),
             "names the reserved range: {err}"
@@ -2080,9 +2092,19 @@ fn builtin_planning_bump_declares_bullet_lists() {
     assert!(versions.contains(&"0.1.0".to_string()), "{versions:?}");
     assert!(versions.contains(&"0.2.0".to_string()), "{versions:?}");
 
-    let v1 = planning.iter().find(|s| s.version.to_string() == "0.1.0").unwrap();
-    let v2 = planning.iter().find(|s| s.version.to_string() == "0.2.0").unwrap();
-    let pros_v1 = &v1.types["option"].sections.iter().find(|s| s.key == "pros").unwrap();
+    let v1 = planning
+        .iter()
+        .find(|s| s.version.to_string() == "0.1.0")
+        .unwrap();
+    let v2 = planning
+        .iter()
+        .find(|s| s.version.to_string() == "0.2.0")
+        .unwrap();
+    let pros_v1 = &v1.types["option"]
+        .sections
+        .iter()
+        .find(|s| s.key == "pros")
+        .unwrap();
     assert!(pros_v1.content.is_none(), "0.1.0 stays undeclared");
     // Required sections demand the list outright; optional sections
     // declare the `?` form so omission stays legal (absent-as-empty:
@@ -2131,5 +2153,8 @@ fn section_format_lone_severity_and_cross_section_aggregation_refuse() {
     let err = memstead_schema::check_section_formats(&schema).expect_err("must refuse");
     let msg = err.to_string();
     assert!(msg.contains("nope"), "{msg}");
-    assert!(msg.contains("alsonope"), "second section's problem named too: {msg}");
+    assert!(
+        msg.contains("alsonope"),
+        "second section's problem named too: {msg}"
+    );
 }
