@@ -35,6 +35,7 @@ use crate::workspace::{Mount, WorkspaceSettings};
 pub mod apply_commit;
 pub mod archive;
 pub mod boot;
+pub mod check_ops;
 pub mod drift;
 pub mod error;
 pub mod events;

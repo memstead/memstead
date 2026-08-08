@@ -195,6 +195,9 @@ impl From<EngineError> for MemsteadError {
             EngineError::ReadOnlyMount(name) => Self::ValidationFailed {
                 message: format!("mem {name} is mounted read-only"),
             },
+            e @ EngineError::CheckNotRecorded { .. } => Self::ValidationFailed {
+                message: e.to_string(),
+            },
             EngineError::HasIncomingRefs { id, referrers } => Self::ValidationFailed {
                 message: format!(
                     "{id} has {} incoming write-mem references; remove them first via memstead_relate --remove or memstead_update",

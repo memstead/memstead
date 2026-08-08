@@ -216,6 +216,13 @@ pub enum EngineError {
     /// backend never triggers — capability gating runs first.
     #[error("mem {0} is mounted read-only; mutations rejected")]
     ReadOnlyMount(String),
+    /// A check could not be persisted — either the engine has no
+    /// workspace root (in-memory engines have no durable check
+    /// store) or the ledger append failed. A check the caller
+    /// believes recorded but was not is worse than a refusal, so
+    /// recording is never best-effort.
+    #[error("check not recorded: {reason}")]
+    CheckNotRecorded { reason: String },
     /// Entity type is not declared in the pinned schema for this
     /// mem. Carries the declared types (sorted) and a fuzzy
     /// suggestion so the agent can recover without re-reading the
@@ -1113,6 +1120,7 @@ impl EngineError {
             EngineError::PushedCommitsProtected { .. } => "PUSHED_COMMITS_PROTECTED",
             EngineError::BranchResetHeadMoved { .. } => "BRANCH_RESET_HEAD_MOVED",
             EngineError::ReadOnlyMount(_) => "READ_ONLY_MOUNT",
+            EngineError::CheckNotRecorded { .. } => "CHECK_NOT_RECORDED",
             EngineError::UnknownType { .. } => "UNKNOWN_ENTITY_TYPE",
             EngineError::InvalidTitle(_) => "INVALID_TITLE",
             EngineError::AlreadyExists { .. } => "ENTITY_ALREADY_EXISTS",

@@ -37,6 +37,7 @@ use std::path::Path;
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
+    CheckParams,
     CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams, UpdateParams,
 };
 
@@ -920,6 +921,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         | e @ EngineError::PushedCommitsProtected { .. }
         | e @ EngineError::BranchResetHeadMoved { .. }
         | e @ EngineError::ReadOnlyMount(_)
+        | e @ EngineError::CheckNotRecorded { .. }
         | e @ EngineError::Mem(_)
         | e @ EngineError::MemNameCollision { .. }
         | e @ EngineError::InvalidInput(_) => tool_error(e.code(), &e.to_string()),
@@ -2016,6 +2018,61 @@ impl FilesystemMcpServer {
     }
 
     #[tool(
+        name = "memstead_check",
+        description = "Record a check: \"entity E checked, verdict ok | failed, via method M\" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and the mem's change history are untouched). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed here as `check_state`. Verdict vocabulary is closed (`ok` | `failed`); an unknown verdict refuses `INVALID_VERDICT`. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED`).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn memstead_check(&self, Parameters(p): Parameters<CheckParams>) -> CallToolResult {
+        let Some(verdict) = memstead_base::check::Verdict::from_wire(&p.verdict) else {
+            return tool_error_with_details(
+                "INVALID_VERDICT",
+                &format!(
+                    "unknown verdict {:?} — the vocabulary is: {}",
+                    p.verdict,
+                    memstead_base::check::VERDICTS.join(", ")
+                ),
+                Some(serde_json::json!({ "allowed": memstead_base::check::VERDICTS })),
+            );
+        };
+        let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
+        let (actor, client) = self.actor_and_client();
+        let id = EntityId(p.entity);
+        match engine.record_check(
+            id.mem(),
+            id.as_ref(),
+            verdict,
+            p.method.as_deref(),
+            actor,
+            client.as_ref(),
+        ) {
+            Ok(record) => {
+                let (state, _) = match engine.entity_check_state(id.mem(), id.as_ref()) {
+                    Ok(pair) => pair,
+                    Err(e) => return engine_op_error(e),
+                };
+                json_response(&serde_json::json!({
+                    "entity": record.entity,
+                    "verdict": record.verdict,
+                    "check_state": state.as_str(),
+                    "role": record.role,
+                    "ts": record.ts,
+                    "method": record.method,
+                }))
+            }
+            Err(e) => engine_op_error(e),
+        }
+    }
+
+    #[tool(
         name = "memstead_overview",
         description = "Start here — the cold-start entry point for a Memstead engine. Returns the schema catalogue, the mem inventory, and the community clusters as Markdown. Every visible mem is listed under `## Mems`: a writable mem carries a `durable` flag and `storage` kind (an in-memory sketch reads `durable: false` / `storage: in-memory` — writes are volatile, evicted on session-TTL / restart), and a read-only mount carries `Access: read-only`, its deployment-declared trust `Origin` (`first-party` / `third-party`), and its own entity count. Per-mem counts, `_entity_count`, and the communities section always agree — one rendering authority. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mems, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` scopes the roster, schema anchor, and communities to any one visible mem (a read-only mount included); a name matching no visible mem returns `UNKNOWN_MEM` whose list names every visible mem. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster. This surface carries no mem-lifecycle tools, so the `## Lifecycle Namespaces` section is omitted. Frontmatter `_overview_mode` is \"complete\", \"reduced\", or \"overbudget\"; `_mem_schema` appears only under a `mem` filter; `_workspace_root` is the serving engine's absolute workspace path (omitted for rootless in-memory engines).",
         annotations(
@@ -2086,7 +2143,7 @@ pub const FS_SERVER_INSTRUCTIONS: &str = concat!(
     "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities (operating costs measured in docs/sizing-curve.md; larger holdings work at proportionally higher load cost); an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating.",
     " Engine version: ",
     env!("CARGO_PKG_VERSION"),
-    " — serverInfo.version carries the same value; a version different from your last session means this surface may have changed: re-read the roster below. Tool roster (complete, 12 tools): READ — memstead_overview (workspace dashboard: schemas, mems, communities, quarantine roster), memstead_entity (one entity + _hash), memstead_search (text + metadata filter), memstead_schema (the pinned schema, lite/full), memstead_health (drift, conformance, quarantine roster, boot diagnosis), memstead_diff (two-ref structural diff), memstead_changes_since (change deltas for incremental sync). WRITE — memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete (entity mutations, optimistic _hash locking). CLI companion: the `memstead` CLI serves this same engine with verb families that deliberately live only there — bulk mutation (batch-create, batch-update, batch-relate: reach for these instead of looping single MCP mutation calls when writing many entities), archive export (export), distribution/registry (publish, unpublish, login, logout, domain), workspace bootstrap and repair (init, quickstart, projection migrate, schema install), and read/report verbs (status, list, context). If a task feels like N repetitive single-entity calls, check the CLI first."
+    " — serverInfo.version carries the same value; a version different from your last session means this surface may have changed: re-read the roster below. Tool roster (complete, 13 tools): READ — memstead_overview (workspace dashboard: schemas, mems, communities, quarantine roster), memstead_entity (one entity + _hash), memstead_search (text + metadata filter), memstead_schema (the pinned schema, lite/full), memstead_health (drift, conformance, quarantine roster, boot diagnosis), memstead_diff (two-ref structural diff), memstead_changes_since (change deltas for incremental sync). WRITE — memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete (entity mutations, optimistic _hash locking). PROCESS — memstead_check (record a check of one entity: verdict ok|failed with method note; never a mutation — derived check state serves in memstead_entity's opt-in provenance block). CLI companion: the `memstead` CLI serves this same engine with verb families that deliberately live only there — bulk mutation (batch-create, batch-update, batch-relate: reach for these instead of looping single MCP mutation calls when writing many entities), archive export (export), distribution/registry (publish, unpublish, login, logout, domain), workspace bootstrap and repair (init, quickstart, projection migrate, schema install), and read/report verbs (status, list, context). If a task feels like N repetitive single-entity calls, check the CLI first."
 );
 
 #[tool_handler(router = FilesystemMcpServer::tool_router())]

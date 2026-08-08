@@ -180,6 +180,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         text.push_str(&l);
                         text.push('\n');
                     }
+                    if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
+                        text.push_str(&format!("- check state: {state}\n"));
+                    }
                 }
             }
         }

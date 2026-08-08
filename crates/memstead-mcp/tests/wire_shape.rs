@@ -2789,6 +2789,206 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
 /// refuses typed with the vocabulary named on both surfaces; and the
 /// folder backend records the same shape in its JSONL ledger.
 #[test]
+fn check_operation_records_derives_state_and_mutates_nothing() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+    let cli_bin = Path::new(memstead_mcp_bin())
+        .parent()
+        .expect("binary has a parent dir")
+        .join("memstead");
+    assert!(cli_bin.exists(), "memstead CLI binary not built");
+
+    // Author an entity. It starts never-checked.
+    let created = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Checked Claim",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." },
+            "role": "author"
+        }),
+    );
+    assert!(created["isError"] != true, "{created}");
+    let hash = created["structuredContent"]["_hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let commit_before = created["structuredContent"]["commit_sha"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--checked-claim", "include_provenance": true }),
+    );
+    assert_eq!(
+        read["structuredContent"]["mutation_provenance"]["check_state"], "never_checked",
+        "{read}"
+    );
+
+    // Refusal complements before any check lands: illegal verdict
+    // (vocabulary named), unknown entity.
+    let bad = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--checked-claim", "verdict": "passed" }),
+    );
+    assert_eq!(bad["isError"], true, "{bad}");
+    assert_eq!(bad["structuredContent"]["code"], "INVALID_VERDICT", "{bad}");
+    assert!(
+        serde_json::to_string(&bad["structuredContent"]["details"]["allowed"])
+            .unwrap()
+            .contains("failed"),
+        "vocabulary named: {bad}"
+    );
+    let missing = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--no-such-entity", "verdict": "ok" }),
+    );
+    assert_eq!(missing["isError"], true, "{missing}");
+    assert_eq!(
+        missing["structuredContent"]["code"], "ENTITY_NOT_FOUND",
+        "{missing}"
+    );
+
+    // Check as checker, verdict ok → checked_ok.
+    let checked = harness.call_tool(
+        "memstead_check",
+        json!({
+            "entity": "specs--checked-claim",
+            "verdict": "ok",
+            "method": "diffed against source spec",
+            "role": "checker"
+        }),
+    );
+    assert!(checked["isError"] != true, "{checked}");
+    assert_eq!(checked["structuredContent"]["check_state"], "checked_ok");
+    assert_eq!(checked["structuredContent"]["role"], "checker");
+
+    // Checking mutates nothing: entity `_hash` unchanged, mem history
+    // gained no commit (the create's commit is still HEAD), markdown
+    // untouched.
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--checked-claim", "include_provenance": true }),
+    );
+    let sc = &read["structuredContent"];
+    assert_eq!(sc["_hash"].as_str().unwrap(), hash, "check must not touch _hash");
+    assert_eq!(sc["mutation_provenance"]["check_state"], "checked_ok", "{sc}");
+    let last = &sc["mutation_provenance"]["last_check"];
+    assert_eq!(last["verdict"], "ok");
+    assert_eq!(last["role"], "checker");
+    assert_eq!(last["method"], "diffed against source spec");
+    let gitdir = tmp.path().join("mem-repo").join(".git");
+    let head = Command::new("git")
+        .args([
+            "--git-dir",
+            gitdir.to_str().unwrap(),
+            "rev-parse",
+            "refs/heads/specs",
+        ])
+        .output()
+        .expect("git rev-parse");
+    assert_eq!(
+        String::from_utf8_lossy(&head.stdout).trim(),
+        commit_before,
+        "a check must not produce a mem commit"
+    );
+
+    // Entity edit → check_stale (computed by hash comparison, never
+    // stamped).
+    let updated = harness.call_tool(
+        "memstead_update",
+        json!({
+            "id": "specs--checked-claim",
+            "expected_hash": hash,
+            "sections": { "purpose": "P2." },
+            "role": "author"
+        }),
+    );
+    assert!(updated["isError"] != true, "{updated}");
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--checked-claim", "include_provenance": true }),
+    );
+    assert_eq!(
+        read["structuredContent"]["mutation_provenance"]["check_state"], "check_stale",
+        "{read}"
+    );
+
+    // Re-check via the CLI (verb parity, session --role) → checked_ok.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "--role",
+            "verifier",
+            "check",
+            "specs--checked-claim",
+            "--verdict",
+            "ok",
+        ])
+        .output()
+        .expect("run memstead CLI check");
+    assert!(
+        out.status.success(),
+        "CLI check must land: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["check_state"], "checked_ok", "{v}");
+    assert_eq!(v["role"], "verifier");
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--checked-claim", "include_provenance": true }),
+    );
+    assert_eq!(
+        read["structuredContent"]["mutation_provenance"]["check_state"], "checked_ok",
+        "{read}"
+    );
+
+    // A failed verdict serves check_failed — and supersession never
+    // erases: the ledger keeps every record.
+    let failed = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--checked-claim", "verdict": "failed", "role": "checker" }),
+    );
+    assert!(failed["isError"] != true, "{failed}");
+    assert_eq!(failed["structuredContent"]["check_state"], "check_failed");
+    let ledger = std::fs::read_to_string(
+        tmp.path()
+            .join(".memstead")
+            .join("state")
+            .join("checks")
+            .join("checks.jsonl"),
+    )
+    .expect("check ledger exists");
+    assert_eq!(
+        ledger.lines().count(),
+        3,
+        "append-only: every check kept: {ledger}"
+    );
+
+    // CLI illegal-verdict refusal parity.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "check",
+            "specs--checked-claim",
+            "--verdict",
+            "maybe",
+        ])
+        .output()
+        .expect("run memstead CLI check");
+    assert!(!out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["code"], "INVALID_VERDICT", "{v}");
+}
+
+#[test]
 fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);

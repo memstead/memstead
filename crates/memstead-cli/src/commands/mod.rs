@@ -1,5 +1,6 @@
 pub mod anchors;
 pub mod changes;
+pub mod check;
 pub mod context;
 pub mod create;
 

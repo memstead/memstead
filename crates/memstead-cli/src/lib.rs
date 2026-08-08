@@ -653,6 +653,10 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem })),
             ),
+            CheckNotRecorded { reason } => (
+                ExitKind::Generic,
+                Some(serde_json::json!({ "reason": reason })),
+            ),
             MemNameCollision {
                 name,
                 source_origin,

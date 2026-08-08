@@ -56,6 +56,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **The check operation: "checked and sound" vs "never checked" vs
+  "checked, but changed since" is derived, never declared.** A new
+  verb — `memstead_check` (MCP, both flavours; the deliberate single
+  tool addition of the agent-trust bundle) and `memstead check`
+  (CLI) — records "entity E checked, verdict ok | failed, via method
+  M" as an engine-recorded act carrying mutation-provenance identity
+  (actor, client, caller-declared role) and the entity's
+  `content_hash` at check time. Checking mutates nothing: entity
+  markdown, `_hash`, and mem commits are untouched — that
+  non-mutation is what makes staleness computable. Records append to
+  the workspace's check ledger (`.memstead/state/checks/`,
+  append-only, no rotation; persistence failure refuses
+  `CHECK_NOT_RECORDED` — never best-effort); a newer check
+  supersedes older ones for state derivation but never erases them.
+  Derived check state — `never_checked` | `checked_ok` |
+  `check_failed` | `check_stale` (entity changed after its last
+  check, computed by hash comparison) — serves in the entity read's
+  opt-in `mutation_provenance` block alongside the newest check
+  record. The verdict vocabulary is closed (`ok` | `failed`;
+  `INVALID_VERDICT` names it); unknown entities, read-only and
+  quarantined mems refuse typed. A check with an unspecified role
+  records honestly but cannot confirm independence downstream.
 - **Mutation provenance: who acted, in what role — recorded, not
   declared.** Every mutation records a caller-declared role from the
   closed vocabulary `author` | `checker` | `verifier` (or

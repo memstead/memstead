@@ -54,6 +54,9 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_relate",
     "memstead_rename",
     "memstead_update",
+    // Process tier (1) — the bundle's single deliberate tool
+    // addition (agent-trust plan 14): the check operation.
+    "memstead_check",
     // Admin (3)
     "memstead_changes_since",
     "memstead_diff",
@@ -517,7 +520,7 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // `idempotent = false` across the board because a partial-failure
         // retry is not safe (duplicate-title collisions, pre-existing
         // state drift, renamed-out-of-existence scenarios).
-        "memstead_create" | "memstead_update" | "memstead_rename" => HintTriple {
+        "memstead_create" | "memstead_update" | "memstead_rename" | "memstead_check" => HintTriple {
             read_only: Some(false),
             destructive: Some(false),
             idempotent: Some(false),
@@ -749,6 +752,7 @@ fn descriptions_start_with_verb() {
         "Per-mem",
         "List",
         "Check",
+        "Record",
         "Unregister",
         "Reload",
         "Update",
@@ -1549,6 +1553,25 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "cross_mem_relationships",
             // Shared note/require_notes surface.
             "note",
+        ],
+        "memstead_check" => &[
+            // Response field + derived-state vocabulary (agent-trust
+            // plan 14).
+            "check_state",
+            "never_checked",
+            "checked_ok",
+            "check_failed",
+            "check_stale",
+            "_hash",
+            "mutation_provenance",
+            "memstead_entity",
+            // Verdict vocabulary + refusal codes.
+            "ok",
+            "failed",
+            "INVALID_VERDICT",
+            "ENTITY_NOT_FOUND",
+            "READ_ONLY_MOUNT",
+            "CHECK_NOT_RECORDED",
         ],
         "memstead_health" => &[
             // Open-questions axis (include=open_questions) — agent-trust

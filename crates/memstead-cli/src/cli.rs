@@ -235,6 +235,13 @@ pub enum Command {
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
     Changes(commands::changes::Args),
 
+    /// Record a check: "entity E checked, verdict ok | failed, via
+    /// method M" — an engine-recorded act carrying the session's
+    /// `--role`, never a mutation (entity markdown, hash, and mem
+    /// commits untouched). Derived check state serves via
+    /// `memstead entity <id> --provenance`.
+    Check(commands::check::Args),
+
     /// Read and move the per-mem review mark — the engine's one
     /// pointer per mem to the last human-approved state. `list` shows
     /// every mem's mark and head; `set`/`clear` move it (explicit
@@ -368,6 +375,7 @@ impl Command {
             Command::Recover(_) => "recover",
             Command::Anchors(_) => "anchors",
             Command::Changes(_) => "changes",
+            Command::Check(_) => "check",
             Command::ReviewMark(_) => "review-mark",
             Command::Reload(_) => "reload",
             #[cfg(feature = "mem-repo")]

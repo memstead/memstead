@@ -25,7 +25,8 @@ use crate::error_envelope::{tool_error, tool_error_with_payload};
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams, ReloadParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams, UpdateParams,
+    CheckParams, CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams,
+    UpdateParams,
 };
 
 /// The MCP server wrapping the Engine.
@@ -940,6 +941,15 @@ fn engine_err_unified(
                 "READ_ONLY_MOUNT",
                 message.clone(),
                 serde_json::json!({ "mem": mem }),
+            ),
+        ),
+        E::CheckNotRecorded { reason } => tool_error_with_payload(
+            "CHECK_NOT_RECORDED",
+            &message,
+            envelope(
+                "CHECK_NOT_RECORDED",
+                message.clone(),
+                serde_json::json!({ "reason": reason }),
             ),
         ),
         E::UnknownType {
@@ -3147,6 +3157,82 @@ impl McpServer {
     }
 
     #[tool(
+        name = "memstead_check",
+        description = "Record a check: \"entity E checked, verdict ok | failed, via method M\" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and mem commits are untouched; that non-mutation is what makes check-staleness computable). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger — a newer check supersedes older ones for state derivation but never erases them. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — stale means the entity changed after its last check, computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed in this response as `check_state`. Verdict vocabulary is closed (`ok` | `failed`) — nuance goes in `method` or in process-mem entities; an unknown verdict refuses `INVALID_VERDICT`. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), unknown/quarantined mems, read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED` — recording is never best-effort). A check with an unspecified role records honestly but cannot confirm independence downstream.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn memstead_check(&self, Parameters(p): Parameters<CheckParams>) -> CallToolResult {
+        if let Some(err) = validate_entity_id(&p.entity) {
+            return err;
+        }
+        let id = EntityId::canonical(&p.entity);
+        let Some(verdict) = memstead_base::check::Verdict::from_wire(&p.verdict) else {
+            let msg = format!(
+                "unknown verdict {:?} — the vocabulary is: {}",
+                p.verdict,
+                memstead_base::check::VERDICTS.join(", ")
+            );
+            return tool_error_with_payload(
+                "INVALID_VERDICT",
+                &msg,
+                envelope(
+                    "INVALID_VERDICT",
+                    msg.clone(),
+                    serde_json::json!({ "allowed": memstead_base::check::VERDICTS }),
+                ),
+            );
+        };
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
+
+        let unified = self.unified_engine();
+        let mut engine = crate::lock_engine!(unified);
+        let _drift = engine.reload_if_stale(Some(id.mem()));
+        engine.set_role(role);
+        let client = self.client.get().cloned();
+        match engine.record_check(
+            id.mem(),
+            id.as_ref(),
+            verdict,
+            p.method.as_deref(),
+            Actor::Agent,
+            client.as_ref(),
+        ) {
+            Ok(record) => {
+                let (state, _) = match engine.entity_check_state(id.mem(), id.as_ref()) {
+                    Ok(pair) => pair,
+                    Err(e) => return engine_err_unified(e, &engine),
+                };
+                let body = serde_json::json!({
+                    "entity": record.entity,
+                    "verdict": record.verdict,
+                    "check_state": state.as_str(),
+                    "role": record.role,
+                    "ts": record.ts,
+                    "method": record.method,
+                });
+                md_with_structured(
+                    format!(
+                        "Check recorded: {} — verdict {}, state {}",
+                        record.entity,
+                        record.verdict,
+                        state.as_str()
+                    ),
+                    body,
+                )
+            }
+            Err(e) => engine_err_unified(e, &engine),
+        }
+    }
+
+    #[tool(
         name = "memstead_rename",
         description = "Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Per-mem commits share a `logical_operation_id` — correlate via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id demotes to an in-memory stub holding their edges — warning `RESIDUAL_STUB_FOR_READONLY_REFERRERS` names each. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` (`details.current`). Slug-noop: a new title whose slug matches the current one returns `old_id` == `new_id`, empty `commit_sha`, and warning `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected (`INVALID_TITLE`, `proposed_slug` to retry). Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response: `old_id`, `new_id`, `_hash` (post-rename on-disk hash — the next `expected_hash`, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`. Provenance anchors move to the new id in the same commit.",
         annotations(
@@ -4319,7 +4405,7 @@ pub const SERVER_INSTRUCTIONS: &str = concat!(
     "Memstead: schema-agnostic graph engine for typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour follows from its schema (knowledge / planning / inquiry / spec / hybrid). Each mem pins one schema; types and relationships are vocabulary-controlled. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities (operating costs measured in docs/sizing-curve.md; larger holdings work at proportionally higher load cost); an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue (`{ref, description}` per schema), mem inventory, and communities (token-budgeted; drill via include/hints). Schema-discovery contract: each writable mem pins one schema (visible on overview's `## Mems` entries). Before any memstead_create / memstead_update / memstead_relate against mem X, call memstead_schema(name=<X.schema_ref>) once per session. The default reply is the lite structural skeleton — entity-type names with section keys and metadata-field shapes, relationship names with endpoint constraints, plus every legality flag (required sections/fields, required_outgoing edge blocks with cardinality, alias_target_rel_type, manual-authoring posture, acyclic) — enough to plan a legal write. Pass verbosity: full for the prose layer (per-section write_rules, writing_guidance, system_context, when_to_use) before substantial authoring against an unfamiliar schema. Cache for the session — schema is workspace-stable. Schema-conformance errors carry recovery payloads as a fallback (UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, INVALID_ENUM_VALUE, REQUIRED_FIELD_UNSET, INVALID_REL_TYPE, INVALID_REL_SHAPE, MISSING_REQUIRED_SECTION) — fix from `details` rather than re-fetching the schema after every error. Edge model is alias: body wiki-links `[[X]]` are foreign-key references to entries in the auto-managed `## Relationships` section. Schemas with `alias_target_rel_type` auto-emit relations of that rel-type (e.g. REFERENCES) from each body wiki-link via the alias-synthesis pass; explicit author of the named rel-type refuses with RELATION_MANUAL_AUTHORING_FORBIDDEN. Schemas without the pointer refuse unbacked body wiki-links with WIKILINK_WITHOUT_RELATION. Removing a relation while body wiki-links to its target remain refuses only when no other relation to that target survives (RELATION_HAS_BODY_LINKS — set-membership semantics). Shared mutation contract: every mutation accepts an optional note (≤280 chars) landing in the commit body as provenance; when [mutations].require_notes=true a missing note adds a non-blocking NOTE_MISSING warning — the mutation still commits (the policy nudges, it never blocks). memstead_create and memstead_update additionally accept an optional anchors[] — durable provenance records tying the entity to the source artifacts it describes (artifact, grain span|file|tree|url|entity, provenance class anchored|derived|authored|informed-by); they write into the mem-branch anchors sidecar in the SAME commit as the entity, a malformed element refuses the whole mutation with INVALID_ANCHOR (details carries the offending field + allowed set), and the sidecar never participates in _hash — attaching or refreshing anchors never invalidates a cached expected_hash and never surfaces as an entity delta in memstead_changes_since. Anchor writes MERGE into the entity's existing set — same (artifact, grain, class) triple replaces, otherwise appends; writing never removes an anchor the call did not name in memstead_update's anchors_unset[] (explicit removal: bare artifact removes every anchor on it, grain/class narrow the selection, unsetting a nonexistent target is a no-op). memstead_delete removes the entity's anchors and memstead_rename moves them to the new id, both in the same commit as the operation. Real writes return commit_sha (per-mem git; gitdir via memstead_health include_config=true) — use it as the since cursor for memstead_changes_since polling. Schema-conformance recovery payloads carry the fix material in place: details.declared / details.allowed with nearest-match suggestion, details.field_description, details.enum_values, and the type's details.type_write_rules. After a successful memstead_relate the touched entity's on-disk _hash advances; the relate response's _hash is the next valid expected_hash (no re-read needed) — no-op relates (duplicate add, remove-nonexistent) echo the unchanged _hash, which stays valid. Common workflows: search entities by content/structure (memstead_search — omit query for pure metadata filter); read one (memstead_entity — `_hash` is the optimistic-locking token for mutations); read one schema (memstead_schema); create/update/relate/rename/delete entities (memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete); manage workspace mems including planning phases (memstead_mem_create, memstead_mem_delete); inspect drift and per-mem config (memstead_health); poll commit deltas for incremental sync (memstead_changes_since). Errors and warnings ship as { code, message, details } on structured_content; branch on the stable UPPER_SNAKE_CASE code. The text channel mirrors the same code inline as `ERROR [<CODE>]: <message>` so consumers that only read `result.content[0].text` still recover the code with a one-line regex. Never edit `.md` spec files directly — always go through Memstead tools. Error codes: ENTITY_NOT_FOUND, ENTITY_ALREADY_EXISTS, UNKNOWN_MEM, HASH_MISMATCH, RELATIONSHIP_CYCLE, UNKNOWN_SECTION, UNKNOWN_METADATA_FIELD, UNKNOWN_ENTITY_TYPE, INVALID_ENUM_VALUE, INVALID_REL_TYPE, INVALID_REL_SHAPE, READ_ONLY_FIELD, REQUIRED_FIELD_UNSET, SET_AND_UNSET_CONFLICT, CONFLICTING_SECTION_MODES, SECTION_NOT_UPDATABLE, PATCH_OLD_NOT_FOUND, PATCH_SECTION_EMPTY, CROSS_MEM_LINK_NOT_ALLOWED, CROSS_MEM_TARGET_NOT_FOUND, CROSS_MEM_EDGE_NOT_DECLARED, MEM_NOT_WRITABLE, MEM_NAME_COLLISION, MEM_PATH_NOT_ALLOWED, INVALID_MEM_NAME, MEM_SCHEMA_NOT_ALLOWED, MEM_BRANCH_MISSING, MEM_REFERENCED_BY_POLICY, HAS_INCOMING_REFS, STUB_NOT_UPDATABLE, STUB_NOT_RENAMABLE, STUB_CANNOT_RELATE, INVALID_ENTITY_ID, WIKILINK_WITHOUT_RELATION, RELATION_HAS_BODY_LINKS, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, RELATION_MANUAL_AUTHORING_FORBIDDEN, SCHEMA_NOT_FOUND, SCHEMA_RESOLVER_INIT_FAILED, PARSE_ERROR, MEM_ERROR, INVALID_INPUT, VCS_ERROR, INTERNAL_IO_ERROR, CONFIG_ERROR, EXPORT_ERROR, WORKSPACE_SCHEMAS_ERROR, SCHEMA_CACHE_COLLISION, TOOL_DISABLED, INVALID_CURSOR, INVALID_ANCHOR. Health warnings: OUTER_REPO_NOT_IGNORING_MEM_REPO (workspace embedded in an outer git checkout that does not ignore mem-repo/), SUSPICIOUS_NESTED_PREFIX (nested-prefix drift — fix via memstead_update), DUPLICATE_SECTION_HEADING (a section key whose ## Heading appeared twice; first body kept), SCHEMA_AUTHORING_SOURCE_MISSING / SCHEMA_AUTHORING_SOURCE_DIVERGED (a pinned schema's install-stamped authoring package is gone from the working tree, or no longer parses equivalent to the sealed copy the engine runs on; unstamped schemas are not checked). Mem-create warning: FOLDER_MEM_PROVENANCE (the new mem's folder storage has no version control — mutations land in the changelog ledger with their notes, commit_sha is a synthetic placeholder, durability depends on the surrounding repo). Drift warning on any tool: MEM_RELOADED (a sibling engine committed to this mem-repo; the engine auto-reloaded — response content is fresh but cached expected_hash values are stale; re-derive before the next mutation). Relate warnings: AUTO_STUB_CREATED. Delete warning: RESIDUAL_STUB_FOR_READONLY_REFERRERS. Boot warnings: PARSED_RELATION_INVALID, AMBIGUOUS_DESCRIPTION_DELIMITER, MISSING_REQUIRED_DESCRIPTION, DESCRIPTION_NOT_PERMITTED, ENGINE_VERSION_SKEW (the mem's last mutation was performed by a different engine version than this binary; informative, the next mutation re-stamps). Mutation warning: MISSING_REQUIRED_OUTGOING.",
     " Engine version: ",
     env!("CARGO_PKG_VERSION"),
-    " — serverInfo.version carries the same value; a version different from your last session means this surface may have changed: re-read the roster below. Tool roster (complete, 24 tools): READ — memstead_overview (workspace dashboard: schemas, mems, communities, quarantine roster), memstead_entity (one entity + _hash), memstead_search (text + metadata filter), memstead_schema (one schema, lite/full), memstead_health (drift, conformance, per-mem config, quarantine roster, boot diagnosis), memstead_diff (two-ref structural diff), memstead_changes_since (commit deltas for incremental sync). WRITE — memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete (entity mutations, optimistic _hash locking). SESSION — memstead_reload (re-read mems after out-of-band commits; also returns a repaired quarantined mem to service). MEM LIFECYCLE — memstead_mem_create, memstead_mem_delete, memstead_mem_configure (title/description/subject), memstead_mem_set_schema (pin migration; also the quarantined-mem repair verb), memstead_mem_set_version (content semver). WORKSPACE POLICY — memstead_workspace_allow_create, memstead_workspace_revoke_create, memstead_workspace_allow_delete, memstead_workspace_revoke_delete, memstead_workspace_grant_cross_link, memstead_workspace_revoke_cross_link (edit the [mem_management]/[cross_mem_links] allowlists). CLI companion: the `memstead` CLI serves this same engine with verb families that deliberately live only there — bulk mutation in one commit (batch-create, batch-update, batch-relate: reach for these instead of looping single MCP mutation calls when writing many entities), archive export/install (export, install, uninstall), distribution/registry (publish, unpublish, login, logout, domain), workspace bootstrap and repair (init, mem-repo init, quickstart, recover, projection migrate, schema install), and read/report verbs (status, list, context). If a task feels like N repetitive single-entity calls, check the CLI first."
+    " — serverInfo.version carries the same value; a version different from your last session means this surface may have changed: re-read the roster below. Tool roster (complete, 25 tools): READ — memstead_overview (workspace dashboard: schemas, mems, communities, quarantine roster), memstead_entity (one entity + _hash), memstead_search (text + metadata filter), memstead_schema (one schema, lite/full), memstead_health (drift, conformance, per-mem config, quarantine roster, boot diagnosis), memstead_diff (two-ref structural diff), memstead_changes_since (commit deltas for incremental sync). WRITE — memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete (entity mutations, optimistic _hash locking). PROCESS — memstead_check (record a check of one entity: verdict ok|failed with method note; never a mutation — derived check state serves in memstead_entity's opt-in provenance block). SESSION — memstead_reload (re-read mems after out-of-band commits; also returns a repaired quarantined mem to service). MEM LIFECYCLE — memstead_mem_create, memstead_mem_delete, memstead_mem_configure (title/description/subject), memstead_mem_set_schema (pin migration; also the quarantined-mem repair verb), memstead_mem_set_version (content semver). WORKSPACE POLICY — memstead_workspace_allow_create, memstead_workspace_revoke_create, memstead_workspace_allow_delete, memstead_workspace_revoke_delete, memstead_workspace_grant_cross_link, memstead_workspace_revoke_cross_link (edit the [mem_management]/[cross_mem_links] allowlists). CLI companion: the `memstead` CLI serves this same engine with verb families that deliberately live only there — bulk mutation in one commit (batch-create, batch-update, batch-relate: reach for these instead of looping single MCP mutation calls when writing many entities), archive export/install (export, install, uninstall), distribution/registry (publish, unpublish, login, logout, domain), workspace bootstrap and repair (init, mem-repo init, quickstart, recover, projection migrate, schema install), and read/report verbs (status, list, context). If a task feels like N repetitive single-entity calls, check the CLI first."
 );
 
 #[tool_handler]

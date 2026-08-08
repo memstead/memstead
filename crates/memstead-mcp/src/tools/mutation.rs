@@ -355,3 +355,24 @@ pub struct RenameParams {
     #[schemars(description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.")]
     pub role: Option<String>,
 }
+
+/// Parameters for `memstead_check` — the check operation
+/// (agent-trust plan 14). Deliberately minimal: entity, verdict,
+/// optional method note, optional role.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CheckParams {
+    #[schemars(description = "Full entity id (`mem--slug`) of the entity that was checked")]
+    pub entity: String,
+    #[schemars(
+        description = "The verdict, from the closed vocabulary `ok` | `failed`. Nuance goes in `method` or in process-mem entities — an unknown value refuses `INVALID_VERDICT` naming the vocabulary."
+    )]
+    pub verdict: String,
+    #[schemars(
+        description = "Optional free-text method note — how the check was performed (e.g. \"diffed against source spec\")."
+    )]
+    pub method: Option<String>,
+    #[schemars(
+        description = "The role this check is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably on the check record — same trust model as mutation roles: caller-declared but tamper-evident. Omit to record the session default (or unspecified — legal, but an unspecified-role check cannot confirm independence downstream)."
+    )]
+    pub role: Option<String>,
+}
