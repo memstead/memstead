@@ -1018,6 +1018,11 @@ impl FilesystemMcpServer {
         let entity = match engine.get_entity(&id) {
             Some(e) => e.clone(),
             None => {
+                // A quarantined mem's entities are deliberately absent
+                // — the read names the quarantine, not a phantom miss.
+                if engine.quarantine_reason(id.mem()).is_some() {
+                    return engine_op_error(engine.unknown_mem_error(id.mem()));
+                }
                 return tool_error("ENTITY_NOT_FOUND", &format!("entity not found: {id}"));
             }
         };
@@ -1964,6 +1969,9 @@ impl FilesystemMcpServer {
                     "include key 'schema_types' was removed; \
                      call memstead_schema(name=...) for full schema bodies.",
                 )
+            }
+            Err(memstead_base::overview::ComposeOverviewError::MemQuarantined(name)) => {
+                engine_op_error(engine.unknown_mem_error(&name))
             }
             Err(memstead_base::overview::ComposeOverviewError::UnknownMem {
                 name,

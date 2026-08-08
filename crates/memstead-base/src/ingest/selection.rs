@@ -498,7 +498,10 @@ mod tests {
     }
 
     fn configs_of(bindings: Vec<MemPipelineRecord<Binding>>) -> BindingConfigs {
-        BindingConfigs { bindings }
+        BindingConfigs {
+            bindings,
+            quarantined: Vec::new(),
+        }
     }
 
     /// The eligibility gate: a pair rotates only when its operation block
@@ -711,6 +714,7 @@ mod tests {
         }];
         BindingConfigs {
             bindings: vec![record("v", binding)],
+            quarantined: Vec::new(),
         }
     }
 

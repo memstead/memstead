@@ -102,6 +102,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
             .into());
         }
+        Err(ComposeOverviewError::MemQuarantined(name)) => {
+            return Err(crate::CliError::from_engine_op(engine.unknown_mem_error(&name)).into());
+        }
         Err(ComposeOverviewError::UnknownMem {
             name,
             writable_mems,

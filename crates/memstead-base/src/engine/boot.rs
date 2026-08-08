@@ -388,6 +388,7 @@ impl Engine {
             workspace_root: None,
             load_warnings,
             quarantined,
+            boot_diagnosis: None,
             pipeline_configs: crate::pipeline_store::BindingConfigs::default(),
             mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_lean_backend,
@@ -1491,8 +1492,12 @@ community:
             MediumType::Codebase
         );
 
-        // REFUSAL: a pre-v2 (version-less gen-2) projection file refuses
-        // boot with the migrate-naming error — never read, never tolerated.
+        // QUARANTINE (agent-trust plan 04 re-routing of the historical
+        // wholesale refusal): a pre-v2 (version-less gen-2) projection
+        // file no longer fails the boot — the affected binding
+        // quarantines with the migrate-naming reason, still never
+        // read, still never tolerated; the workspace and the healthy
+        // binding keep serving.
         crate::pipeline_store::write_projection(
             tmp.path(),
             "specs",
@@ -1506,10 +1511,18 @@ community:
             },
         )
         .unwrap();
-        let err = Engine::from_workspace_root(tmp.path()).unwrap_err();
+        let engine = Engine::from_workspace_root(tmp.path()).unwrap();
+        let pc = engine.pipeline_configs();
+        assert_eq!(pc.bindings.len(), 1, "the healthy binding still serves");
+        assert_eq!(pc.quarantined.len(), 1, "the legacy one quarantines");
+        assert_eq!(pc.quarantined[0].name, "legacy");
+        assert_eq!(pc.quarantined[0].reason_code, "PROJECTION_STORE_LEGACY");
         assert!(
-            err.to_string().contains("memstead projection migrate"),
-            "boot refusal names the migrate command, got: {err}"
+            pc.quarantined[0]
+                .reason_message
+                .contains("memstead projection migrate"),
+            "quarantine reason names the migrate command, got: {}",
+            pc.quarantined[0].reason_message
         );
     }
 
@@ -2355,6 +2368,58 @@ pattern = "exec-*"
             .expect("reattached mem serves writes");
     }
 
+    /// Criterion 2 complement (agent-trust plan 04): a healthy mem
+    /// whose entity body wiki-links INTO a quarantined mem loads
+    /// normally — the link degrades like any dangling cross-mem link
+    /// (stub target), no cascade failure.
+    #[test]
+    fn cross_mem_link_into_quarantined_mem_degrades_without_cascade() {
+        let tmp = TempDir::new().unwrap();
+        let healthy_dir = tmp.path().join("healthy");
+        std::fs::create_dir_all(&healthy_dir).unwrap();
+        std::fs::write(
+            healthy_dir.join("linker.md"),
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n---\n\
+             # Linker\n\n## Identity\n\nsee [[badpin:target]] for detail.\n",
+        )
+        .unwrap();
+        let badpin_dir = tmp.path().join("badpin");
+        std::fs::create_dir_all(&badpin_dir).unwrap();
+        let mount = |mem: &str, dir: std::path::PathBuf, pin: &str| {
+            (
+                Mount {
+                    mem: mem.to_string(),
+                    schema: Some(SchemaRef::new(pin, semver::Version::new(1, 0, 0))),
+                    storage: MountStorage::Folder { path: dir.clone() },
+                    capability: MountCapability::Write,
+                    lifecycle: MountLifecycle::Eager,
+                    cross_linkable: true,
+                    migration_target: None,
+                },
+                Box::new(FilesystemMemWriter::new(dir)) as Box<dyn MemBackend>,
+            )
+        };
+        let engine = Engine::from_mounts(vec![
+            mount("healthy", healthy_dir, "default"),
+            mount("badpin", badpin_dir, "ghost"),
+        ])
+        .expect("boot survives the cross-mem link into the quarantined mem");
+        assert_eq!(engine.quarantined_mems().len(), 1);
+        // The linking entity loaded; its target degrades to a stub /
+        // dangling link — no cascade, no partial-truth serving of the
+        // quarantined mem.
+        let linker = engine
+            .get_entity(&crate::EntityId::new("healthy", "linker"))
+            .expect("linking entity loads");
+        assert_eq!(linker.entity_type, "spec");
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("badpin", "target"))
+                .is_none_or(|e| e.stub),
+            "the quarantined-side target is at most a stub, never real data"
+        );
+    }
+
     /// A workspace mixing one broken mem with healthy siblings boots,
     /// serves the healthy mems fully, and refuses typed on the
     /// quarantined one — the plenum shape (one bad pin, thirteen
@@ -2389,7 +2454,25 @@ pattern = "exec-*"
             Some(SchemaRef::new("ghost", semver::Version::new(1, 0, 0))),
         );
         let missing_pin = make_mount("nopin", None);
-        let mut engine = Engine::from_mounts(vec![healthy, bad_pin, missing_pin])
+        // Backend-failure variant: the mount's storage path is a FILE,
+        // so the backend's entity walk fails at read time.
+        let bad_io_path = tmp.path().join("badio");
+        std::fs::write(&bad_io_path, "not a directory").unwrap();
+        let bad_io = (
+            Mount {
+                mem: "badio".to_string(),
+                schema: Some(SchemaRef::new("default", semver::Version::new(1, 0, 0))),
+                storage: MountStorage::Folder {
+                    path: bad_io_path.clone(),
+                },
+                capability: MountCapability::Write,
+                lifecycle: MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            },
+            Box::new(FilesystemMemWriter::new(bad_io_path)) as Box<dyn MemBackend>,
+        );
+        let mut engine = Engine::from_mounts(vec![healthy, bad_pin, missing_pin, bad_io])
             .expect("mixed workspace boots");
 
         // Roster: both broken mems, each with its own typed reason.
@@ -2405,6 +2488,10 @@ pattern = "exec-*"
         assert_eq!(
             codes.get("nopin").map(String::as_str),
             Some("MEM_CONFIG_INCOMPLETE")
+        );
+        assert!(
+            codes.contains_key("badio"),
+            "backend read failure quarantines too: {codes:?}"
         );
 
         // The healthy mem is fully writable.

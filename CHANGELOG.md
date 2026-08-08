@@ -8,6 +8,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Quarantine boot: a broken mem disables itself, never the
+  workspace.** Mem-level boot failures (unresolvable or missing schema
+  pin, backend instantiation or read failure) no longer take the
+  workspace down — the mem quarantines with its typed reason and
+  repair command while every healthy sibling loads and serves
+  normally, ending the outage class where one bad pin held thirteen
+  mems hostage. Quarantine is not tolerance: the mem serves nothing;
+  reads and writes naming it refuse with the new `MEM_QUARANTINED`
+  code carrying the underlying reason (never masquerading as
+  `UNKNOWN_MEM` or `ENTITY_NOT_FOUND`), and cross-mem links into it
+  degrade like dangling links. The roster rides the existing
+  dashboards — overview (`## Quarantined Mems`) and health
+  (`quarantined[]`), ungated, byte-unchanged when healthy. Repair
+  returns the mem in-process: `mem set-schema` on a quarantined mem
+  repins the retained mount and re-attaches; `memstead_reload`
+  re-attempts the attach after any external repair. Binding-level
+  failures (legacy pre-v2 or corrupt projection configs) likewise
+  quarantine only that binding: the workspace boots, healthy bindings
+  serve, and the affected binding's projection verbs refuse
+  `PROJECTION_QUARANTINED` with the reason naming `memstead projection
+  migrate`. The MCP server now starts whenever the process starts: a
+  partially broken workspace serves normally, and a wholly unbootable
+  one (corrupt store) serves a mem-less diagnostic shell whose
+  overview/health answer with the typed boot diagnosis
+  (`boot_diagnosis`) instead of the historical silent
+  `-32000 Connection closed` exit. The wholesale-abort regression
+  tests are replaced by quarantine-behaviour tests as a deliberate
+  act.
 - **Repair below boot: a fix for a boot failure no longer requires the
   boot.** The verbs boot-failure messages name as remedies now run on
   exactly the workspace whose boot they repair. `memstead mem

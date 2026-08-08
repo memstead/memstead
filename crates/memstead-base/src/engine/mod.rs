@@ -103,6 +103,23 @@ struct MountedBackend {
     archive_provenance: Option<memstead_schema::ArchiveProvenance>,
 }
 
+/// One quarantined mem: the mem-level boot failure that took it out of
+/// service, and the retained mount record `reload` uses to re-attempt
+/// the attach after a repair. The reason code/message are plan-01
+/// typed material — the message's final clause names the repair
+/// command, so the roster entry is actionable as-is.
+#[derive(Debug, Clone)]
+pub struct QuarantinedMem {
+    /// The mount that failed to attach, retained verbatim for reload.
+    pub mount: crate::workspace::Mount,
+    /// Typed code of the underlying failure (e.g. `SCHEMA_NOT_FOUND`,
+    /// `MEM_CONFIG_INCOMPLETE`, `MEM_ERROR`).
+    pub reason_code: String,
+    /// Full message of the underlying failure, repair command
+    /// included.
+    pub reason_message: String,
+}
+
 /// Unified engine. Holds a list of mounted backends and routes
 /// mem-named operations to the right one.
 ///
@@ -127,23 +144,6 @@ struct MountedBackend {
 /// schemas in a multi-schema workspace. Per-file errors don't fail
 /// construction; they collect into [`Engine::load_errors`] for the
 /// operator to inspect.
-/// One quarantined mem: the mem-level boot failure that took it out of
-/// service, and the retained mount record `reload` uses to re-attempt
-/// the attach after a repair. The reason code/message are plan-01
-/// typed material — the message's final clause names the repair
-/// command, so the roster entry is actionable as-is.
-#[derive(Debug, Clone)]
-pub struct QuarantinedMem {
-    /// The mount that failed to attach, retained verbatim for reload.
-    pub mount: crate::workspace::Mount,
-    /// Typed code of the underlying failure (e.g. `SCHEMA_NOT_FOUND`,
-    /// `MEM_CONFIG_INCOMPLETE`, `MEM_ERROR`).
-    pub reason_code: String,
-    /// Full message of the underlying failure, repair command
-    /// included.
-    pub reason_message: String,
-}
-
 pub struct Engine {
     mounts: Vec<MountedBackend>,
     store: Store,
@@ -240,6 +240,13 @@ pub struct Engine {
     /// repair, without a process restart. Surfaced on overview and
     /// health as the quarantine roster.
     quarantined: Vec<QuarantinedMem>,
+    /// Workspace-level boot diagnosis carried by a diagnostic-shell
+    /// engine ([`Engine::diagnostic_shell`]): the typed reason the
+    /// REAL workspace could not boot at all (e.g. an unparseable
+    /// workspace store). `None` on every ordinarily booted engine.
+    /// Surfaced on overview and health so a session over a wholly
+    /// unbootable workspace can always ask WHY the graph is gone.
+    boot_diagnosis: Option<(String, String)>,
     /// Pipeline configs (Medium / Facet / Projection / Ingest) loaded
     /// from the workspace store at boot. Empty for engines built via
     /// `from_mounts*` (tests, in-memory consumers) and for any workspace

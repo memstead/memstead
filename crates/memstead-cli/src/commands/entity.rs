@@ -39,7 +39,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // typed `ENTITY_NOT_FOUND` code lives on the CLI side here —
     // pin it explicitly so the wire envelope matches what the engine
     // would emit from a write-path miss.
-    let not_found = || {
+    let miss = |engine: &memstead_base::Engine| {
+        // A quarantined mem's entities are deliberately absent — the
+        // read names the quarantine (MEM_QUARANTINED with the boot
+        // reason), not a phantom ENTITY_NOT_FOUND.
+        if engine.quarantine_reason(id.mem()).is_some() {
+            return CliError::from_engine_op(engine.unknown_mem_error(id.mem()));
+        }
         CliError::new(
             ExitKind::NotFound,
             "ENTITY_NOT_FOUND",
@@ -56,13 +62,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let (entity, output, outgoing_snapshot) = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
-            let entity = engine.get_entity(&id).cloned().ok_or_else(not_found)?;
+            let entity = engine
+                .get_entity(&id)
+                .cloned()
+                .ok_or_else(|| miss(&engine))?;
             let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
             let outgoing = engine.store().outgoing(&id).to_vec();
             (entity, md, outgoing)
         }
         CliEngine::Filesystem(engine) => {
-            let entity = engine.get_entity(&id).cloned().ok_or_else(not_found)?;
+            let entity = engine
+                .get_entity(&id)
+                .cloned()
+                .ok_or_else(|| miss(&engine))?;
             let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
             let outgoing = engine.store().outgoing(&id).to_vec();
             (entity, md, outgoing)

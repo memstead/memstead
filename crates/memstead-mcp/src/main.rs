@@ -66,20 +66,22 @@ async fn main() -> anyhow::Result<()> {
     run(args, workspace_root).await
 }
 
-/// Render a boot failure onto stderr in the same typed shape the CLI
-/// prints (`ERROR [<CODE>]: <message>`, message from
-/// [`memstead_base::BootError::surface_message`]), then exit non-zero.
-/// The MCP transport never comes up on a failed boot — the client sees
-/// only a closed connection — so this stderr line is the diagnostic
-/// surface, and it must carry the typed code and repair command, not
-/// an untyped anyhow chain.
-fn exit_boot_failure(workspace_root: &std::path::Path, e: memstead_base::BootError) -> ! {
-    eprintln!(
-        "memstead-mcp: ERROR [{}]: {}",
-        e.code(),
-        e.surface_message(workspace_root)
-    );
-    std::process::exit(1);
+/// Render a workspace-level boot failure onto stderr in the same
+/// typed shape the CLI prints (`ERROR [<CODE>]: <message>`, message
+/// from [`memstead_base::BootError::surface_message`]), then build the
+/// mem-less diagnostic-shell engine that serves in its place — the
+/// server STARTS regardless (degrade, never disappear; agent-trust
+/// plan 04): overview/health answer with this diagnosis instead of
+/// the historical `-32000 Connection closed` exit, so a session can
+/// always ask why the graph is gone. Mem-level failures never reach
+/// here — they quarantine inside a normally-booted engine.
+fn diagnostic_shell_engine(
+    workspace_root: &std::path::Path,
+    e: memstead_base::BootError,
+) -> memstead_base::Engine {
+    let message = e.surface_message(workspace_root);
+    eprintln!("memstead-mcp: ERROR [{}]: {message}", e.code());
+    memstead_base::Engine::diagnostic_shell(e.code().to_string(), message)
 }
 
 /// Walk upward from `cwd` looking for the first ancestor that carries
@@ -119,7 +121,13 @@ async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
         &workspace_root,
     ) {
         Ok(server) => server,
-        Err(e) => exit_boot_failure(&workspace_root, e),
+        Err(e) => {
+            let shell = diagnostic_shell_engine(&workspace_root, e);
+            memstead_mcp::filesystem_server::FilesystemMcpServer::from_engine(
+                shell,
+                workspace_root.clone(),
+            )
+        }
     };
 
     let service = server.serve(stdio()).await?;
@@ -144,7 +152,7 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     let mut engine =
         match memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root) {
             Ok(engine) => engine,
-            Err(e) => exit_boot_failure(&workspace_root, e),
+            Err(e) => diagnostic_shell_engine(&workspace_root, e),
         };
 
     let stats = engine.status();

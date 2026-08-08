@@ -2915,6 +2915,11 @@ pub struct HealthSummary {
     /// on a healthy workspace, keeping default output byte-unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub quarantined: Vec<QuarantinedMemReport>,
+    /// Workspace-level boot diagnosis from a diagnostic-shell engine
+    /// (`{code, message}`): why the real workspace could not boot at
+    /// all. Absent on every ordinarily booted engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_diagnosis: Option<serde_json::Value>,
     /// Inline wiki-links in entity section bodies that resolve to stub
     /// targets (no on-disk markdown file). Populated only when the caller
     /// opts in via `include=["dangling_links"]`; `None` otherwise, so

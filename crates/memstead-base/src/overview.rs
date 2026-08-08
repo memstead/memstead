@@ -91,6 +91,13 @@ pub enum ComposeOverviewError {
         name: String,
         writable_mems: Vec<String>,
     },
+
+    /// `args.mem` names a QUARANTINED mem — scoping refuses with the
+    /// typed quarantine reason rather than reporting the mem unknown
+    /// (agent-trust plan 04). Carries the ready-made engine error so
+    /// both surfaces map it through their ordinary engine-error path.
+    #[error("mem \"{0}\" is quarantined")]
+    MemQuarantined(String),
 }
 
 /// Composer output — rendered markdown plus the structured bits the
@@ -300,6 +307,9 @@ pub fn compose_overview(
     // whose roster is the full visible set.
     let mem_filter: Option<String> = match args.mem {
         Some(v) if engine.mem_router().visible_mems().iter().any(|m| m == v) => Some(v.to_string()),
+        Some(v) if engine.quarantine_reason(v).is_some() => {
+            return Err(ComposeOverviewError::MemQuarantined(v.to_string()));
+        }
         Some(v) => {
             let mut names: Vec<String> =
                 engine.mem_router().visible_mems().iter().cloned().collect();
@@ -1076,6 +1086,13 @@ pub fn compose_overview(
     // (repair command included in its message) and the way back
     // (reload). Omitted entirely on a healthy workspace so ordinary
     // output is byte-unchanged.
+    if let Some((code, message)) = engine.boot_diagnosis() {
+        md.push_str("## Boot Diagnosis\n\n");
+        md.push_str(&format!(
+            "_The workspace could not boot; this diagnostic surface serves no mems._\n\n\
+             - **Reason:** `{code}`\n- **Detail:** {message}\n\n"
+        ));
+    }
     if !engine.quarantined_mems().is_empty() {
         md.push_str("## Quarantined Mems\n\n");
         md.push_str(

@@ -133,25 +133,29 @@ fn full_binary_boots_against_new_layout_workspace() {
     let _ = child.wait();
 }
 
-/// Boot-failure parity: the full binary's stderr diagnostic for a
-/// broken workspace carries the same typed code and the same
-/// `BootError::surface_message` string the CLI's `--json` envelope
-/// ships for the identical fixture (`memstead-cli/tests/
-/// boot_typed_errors.rs` pins the CLI side to the same renderer).
-/// Fixture: a legacy pre-v2 projection config — the backlog item that
-/// used to die as `-32000 Connection closed` with no envelope at all.
+/// Boot-failure parity: the full binary's stderr diagnostic for an
+/// unbootable workspace carries the same typed code and the same
+/// `BootError::surface_message` string the CLI ships for the
+/// identical fixture (`memstead-cli/tests/boot_typed_errors.rs` pins
+/// the CLI side to the same renderer). Fixture: a corrupt workspace
+/// store — under the plan-04 quarantine posture, the only class that
+/// still fails the whole boot (mem-level failures quarantine; legacy
+/// projection configs quarantine their binding). The server no longer
+/// exits — it prints the typed line, then serves the diagnostic
+/// shell; stdin EOF ends it cleanly.
 #[test]
 fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
     let tmp = TempDir::new().unwrap();
     seed_workspace(tmp.path());
     memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
-    let proj_dir = tmp
-        .path()
-        .join(".memstead")
-        .join("projections")
-        .join("engine");
-    std::fs::create_dir_all(&proj_dir).unwrap();
-    std::fs::write(proj_dir.join("graph.json"), "{}").unwrap();
+    std::fs::write(
+        tmp.path()
+            .join(".memstead")
+            .join("state")
+            .join("mounts.json"),
+        "this is not json {",
+    )
+    .unwrap();
 
     // The child resolves its workspace root through cwd, which the OS
     // canonicalizes (`/var` → `/private/var` on macOS) — compute the
@@ -160,7 +164,7 @@ fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
     let boot_err = memstead_git_branch::workspace_store::engine_from_workspace_root(&ws)
         .err()
         .expect("fixture must fail the in-process boot");
-    assert_eq!(boot_err.code(), "PROJECTION_STORE_LEGACY");
+    assert_eq!(boot_err.code(), "WORKSPACE_STORE_PARSE");
     let expected = format!(
         "memstead-mcp: ERROR [{}]: {}",
         boot_err.code(),
@@ -175,13 +179,107 @@ fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
         .output()
         .expect("spawn memstead-mcp (full) — confirm the binary built before running tests");
 
-    assert!(
-        !output.status.success(),
-        "boot against the broken workspace must exit non-zero"
-    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(&expected),
         "stderr must carry the typed boot diagnostic\nexpected line: {expected}\n--- stderr ---\n{stderr}"
     );
+}
+
+fn tools_call_request(id: i64, name: &str) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": {} }
+    }))
+    .unwrap()
+}
+
+/// Criterion 4, partial half (agent-trust plan 04): a workspace with a
+/// broken-pin mem STARTS the server (the mem quarantines inside the
+/// engine) instead of dying into `-32000 Connection closed`.
+#[test]
+fn full_binary_serves_partially_broken_workspace() {
+    let tmp = TempDir::new().unwrap();
+    seed_workspace(tmp.path());
+    memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
+    std::fs::create_dir_all(tmp.path().join("plenum")).unwrap();
+    std::fs::write(
+        tmp.path().join(".memstead").join("state").join("mounts.json"),
+        r#"{ "format": "memstead-mounts-3", "mounts": [
+            { "mem": "plenum", "schema": "ghost@1.0.0", "storage": { "type": "folder", "path": "plenum" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
+        ] }"#,
+    )
+    .unwrap();
+
+    let mut child = Command::new(memstead_mcp_bin())
+        .current_dir(tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn memstead-mcp (full)");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    writeln!(stdin, "{}", initialize_request()).unwrap();
+    stdin.flush().unwrap();
+    drop(stdin);
+    let stdout = child.stdout.take().expect("child stdout");
+    let response = read_response_with_timeout(stdout, 1, Duration::from_secs(15))
+        .expect("server must start and answer initialize despite the broken mem");
+    assert_initialize_envelope(&response);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Criterion 4, wholly-unbootable half: a corrupt workspace store no
+/// longer kills the server — it starts as a diagnostic shell and
+/// `memstead_health` answers with the typed boot diagnosis, so a
+/// session can always ask why the graph is gone.
+#[test]
+fn full_binary_serves_boot_diagnosis_on_unbootable_workspace() {
+    let tmp = TempDir::new().unwrap();
+    seed_workspace(tmp.path());
+    memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
+    std::fs::write(
+        tmp.path()
+            .join(".memstead")
+            .join("state")
+            .join("mounts.json"),
+        "this is not json {",
+    )
+    .unwrap();
+
+    let mut child = Command::new(memstead_mcp_bin())
+        .current_dir(tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn memstead-mcp (full)");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    writeln!(stdin, "{}", initialize_request()).unwrap();
+    writeln!(
+        stdin,
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0", "method": "notifications/initialized"
+        }))
+        .unwrap()
+    )
+    .unwrap();
+    writeln!(stdin, "{}", tools_call_request(2, "memstead_health")).unwrap();
+    stdin.flush().unwrap();
+    drop(stdin);
+
+    let stdout = child.stdout.take().expect("child stdout");
+    let response = read_response_with_timeout(stdout, 2, Duration::from_secs(15))
+        .expect("diagnostic shell must answer memstead_health");
+    let text = serde_json::to_string(&response).unwrap();
+    assert!(
+        text.contains("boot_diagnosis") && text.contains("WORKSPACE_STORE_PARSE"),
+        "health must carry the typed boot diagnosis: {text}"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
 }

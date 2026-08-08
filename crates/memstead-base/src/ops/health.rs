@@ -301,6 +301,7 @@ pub fn compute_health(
         stub_count,
         warnings: Vec::new(),
         quarantined: Vec::new(),
+        boot_diagnosis: None,
         dangling_links: None,
         findings: None,
         tag_distribution: None,

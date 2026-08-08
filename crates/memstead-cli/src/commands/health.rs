@@ -303,6 +303,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             serde_json::to_value(&health.quarantined).unwrap_or_default(),
         );
     }
+    if let Some(diag) = &health.boot_diagnosis {
+        obj.insert("boot_diagnosis".into(), diag.clone());
+    }
 
     // Authoring-drift findings participate in `--strict`
     // unconditionally (no `--include` opt-in): they are

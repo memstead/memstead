@@ -436,6 +436,20 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
     let cli_engine = ctx.cli_engine_at(&root)?;
     let engine = cli_engine.base();
 
+    // Quarantine consult first: a binding whose stored file failed
+    // the load refuses typed with its reason (naming `projection
+    // migrate` for the legacy generations) instead of reporting
+    // not-found (agent-trust plan 04).
+    if let Some(binding_id) = args.binding.as_deref()
+        && let Ok(configs) = load_pipeline_configs(&root)
+        && configs
+            .quarantined
+            .iter()
+            .any(|q| format!("{}/{}", q.mem, q.name) == binding_id)
+    {
+        return Err(binding_miss_error(&configs, binding_id).into());
+    }
+
     // Group-C briefs: verify / sync render for one named binding (no rotation).
     // Both are read-only on the destination mem — the sync brief's repairs reach
     // the mem only when an agent acts on it through the MCP mutation surface.
@@ -850,6 +864,45 @@ fn propose_workspace_toml(root: &std::path::Path) -> Option<String> {
     Some(block)
 }
 
+/// Binding-miss refusal that honours the quarantine roster
+/// (agent-trust plan 04): a binding whose stored file failed the v2
+/// version gate is QUARANTINED, not unknown — the refusal carries the
+/// typed reason, whose message names `memstead projection migrate`
+/// for the legacy generations. Healthy-miss keeps the historical
+/// `PROJECTION_NOT_FOUND`.
+fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str) -> CliError {
+    if let Some(q) = configs
+        .quarantined
+        .iter()
+        .find(|q| format!("{}/{}", q.mem, q.name) == binding_id)
+    {
+        return CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_QUARANTINED",
+            format!(
+                "binding `{binding_id}` is quarantined — its stored file failed the load and \
+                 it serves no operations until repaired: [{}] {}",
+                q.reason_code, q.reason_message
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "reason_code": q.reason_code,
+            "reason_message": q.reason_message,
+            "path": q.path,
+        }));
+    }
+    CliError::new(
+        ExitKind::NotFound,
+        "PROJECTION_NOT_FOUND",
+        format!(
+            "no binding `{binding_id}` in this workspace — scaffold one with \
+             `projection init` or migrate a legacy workspace with `projection migrate`"
+        ),
+    )
+    .with_details(json!({ "binding": binding_id }))
+}
+
 /// Consume a skill-written `reconcile-cursors.json` (D10/AC12): each
 /// machine-absolute `"<mem>:<abs-path>": <sha>` entry seeds the `#synced`
 /// baseline of every binding whose medium pointer resolves to that path (via
@@ -1231,6 +1284,17 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         .with_details(json!({ "binding": binding_id }))
         .into());
     }
+    // Quarantine consult before the raw read: a legacy/corrupt file
+    // refuses with its typed reason (naming `projection migrate` for
+    // the legacy generations) rather than a generic enable failure.
+    if let Ok(configs) = load_pipeline_configs(&root)
+        && configs
+            .quarantined
+            .iter()
+            .any(|q| format!("{}/{}", q.mem, q.name) == binding_id)
+    {
+        return Err(binding_miss_error(&configs, &binding_id).into());
+    }
     let mut binding =
         read_binding(&root, &mem, &stem).map_err(|e| enable_failed(&binding_id, e))?;
 
@@ -1438,17 +1502,7 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
         .bindings
         .iter()
         .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "PROJECTION_NOT_FOUND",
-                format!(
-                    "no binding `{binding_id}` in this workspace — scaffold one with \
-                     `projection init` or migrate a legacy workspace with `projection migrate`"
-                ),
-            )
-            .with_details(json!({ "binding": binding_id }))
-        })?;
+        .ok_or_else(|| binding_miss_error(&configs, &binding_id))?;
 
     // D6/AC4: advance is the sync (maintenance-write) path — refuse when the
     // binding declares no `sync` operation, carrying the one-command remedy
@@ -1578,17 +1632,7 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
         .bindings
         .iter()
         .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "PROJECTION_NOT_FOUND",
-                format!(
-                    "no binding `{binding_id}` in this workspace — scaffold one with \
-                     `projection init` or migrate a legacy workspace with `projection migrate`"
-                ),
-            )
-            .with_details(json!({ "binding": binding_id }))
-        })?;
+        .ok_or_else(|| binding_miss_error(&configs, &binding_id))?;
 
     let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
@@ -1688,17 +1732,7 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
         .bindings
         .iter()
         .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "PROJECTION_NOT_FOUND",
-                format!(
-                    "no binding `{binding_id}` in this workspace — scaffold one with \
-                     `projection init` or migrate a legacy workspace with `projection migrate`"
-                ),
-            )
-            .with_details(json!({ "binding": binding_id }))
-        })?;
+        .ok_or_else(|| binding_miss_error(&configs, &binding_id))?;
 
     let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;

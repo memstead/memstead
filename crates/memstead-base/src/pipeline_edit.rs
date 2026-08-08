@@ -256,7 +256,7 @@ pub fn add_binding_json(
     name: &str,
     patch_json: &str,
 ) -> Result<Binding, PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_pipeline_configs_strict(root)?;
     if binding_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
             primitive: "projection",
@@ -302,7 +302,7 @@ pub fn update_binding_json(
     name: &str,
     patch_json: &str,
 ) -> Result<Binding, PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_pipeline_configs_strict(root)?;
     if !binding_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
@@ -335,7 +335,7 @@ pub fn update_binding_json(
 /// binding's own state files (advance / findings / watermarks) simply stop
 /// being consulted.
 pub fn delete_binding(root: &Path, mem: &str, name: &str) -> Result<(), PipelineEditError> {
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_pipeline_configs_strict(root)?;
     if !binding_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
@@ -358,7 +358,7 @@ pub fn rename_binding(
     if old == new {
         return Ok(());
     }
-    let configs = pipeline_store::load_pipeline_configs(root)?;
+    let configs = pipeline_store::load_pipeline_configs_strict(root)?;
     if !binding_exists(&configs, mem, old) {
         return Err(PipelineEditError::NotFound {
             primitive: "projection",
@@ -391,7 +391,7 @@ impl Engine {
     }
 
     fn refresh_pipeline_configs(&mut self, root: &Path) -> Result<(), PipelineEditError> {
-        self.set_pipeline_configs(pipeline_store::load_pipeline_configs(root)?);
+        self.set_pipeline_configs(pipeline_store::load_pipeline_configs_strict(root)?);
         Ok(())
     }
 

@@ -863,6 +863,28 @@ impl Engine {
         }
     }
 
+    /// The workspace-level boot diagnosis a diagnostic-shell engine
+    /// carries (`None` on ordinarily booted engines).
+    pub fn boot_diagnosis(&self) -> Option<(&str, &str)> {
+        self.boot_diagnosis
+            .as_ref()
+            .map(|(c, m)| (c.as_str(), m.as_str()))
+    }
+
+    /// Build a mem-less diagnostic-shell engine for a workspace whose
+    /// boot failed at the WORKSPACE level (nothing loadable — e.g. an
+    /// unparseable store). It serves no mems and no entities; its one
+    /// job is answering overview/health with the typed boot diagnosis
+    /// so a session can always ask WHY the graph is gone — the MCP
+    /// server serves this instead of exiting into `-32000 Connection
+    /// closed` (degrade, never disappear).
+    pub fn diagnostic_shell(reason_code: String, reason_message: String) -> Engine {
+        let mut engine =
+            Engine::from_mounts(Vec::new()).expect("an empty mount list always constructs");
+        engine.boot_diagnosis = Some((reason_code, reason_message));
+        engine
+    }
+
     /// Append boot-path quarantine entries recorded outside
     /// `from_mounts_inner` (backend-instantiation failures happen
     /// before the mount list reaches the engine constructor). Boot
@@ -1108,6 +1130,10 @@ impl Engine {
                 reason_message: q.reason_message.clone(),
             })
             .collect();
+        summary.boot_diagnosis = self
+            .boot_diagnosis
+            .as_ref()
+            .map(|(code, message)| serde_json::json!({ "code": code, "message": message }));
         // Surface OUTER_REPO_NOT_IGNORING_MEM_REPO when the
         // workspace is embedded inside a git repository whose
         // .gitignore does not list `mem-repo/`. Skipped when
@@ -1341,6 +1367,14 @@ impl Engine {
     /// engine never builds a tantivy index in WASM. Native targets get
     /// the same shape as before, wrapped in `Ok`.
     pub fn search(&self, scope: &SearchScope) -> Result<SearchResult, EngineError> {
+        // A mem filter naming a quarantined mem refuses typed — an
+        // empty result with a missing-index warning would misstate the
+        // reason (the mem is quarantined, not index-less).
+        if let Some(mem) = scope.mem.as_deref()
+            && self.quarantine_reason(mem).is_some()
+        {
+            return Err(self.unknown_mem_error(mem));
+        }
         #[cfg(target_arch = "wasm32")]
         {
             let _ = scope;

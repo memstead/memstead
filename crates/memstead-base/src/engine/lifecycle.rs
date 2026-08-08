@@ -1753,7 +1753,7 @@ impl Engine {
         };
         let mount = self.quarantined[q_idx].mount.clone();
 
-        let mut requarantine = |this: &mut Self, e: &EngineError| {
+        let requarantine = |this: &mut Self, e: &EngineError| {
             this.quarantined[q_idx].reason_code = e.code().to_string();
             this.quarantined[q_idx].reason_message = e.to_string();
         };

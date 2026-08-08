@@ -131,6 +131,41 @@ pub struct PipelineConfigs {
 pub struct BindingConfigs {
     /// Per-mem v2 bindings under the `projections/<mem>/<name>.json` tier.
     pub bindings: Vec<MemPipelineRecord<Binding>>,
+    /// Bindings whose stored file failed the version gate or parse —
+    /// quarantined instead of failing the whole load (degrade, never
+    /// disappear; agent-trust plan 04). A quarantined binding serves
+    /// no operations: resolution sites refuse typed with the entry's
+    /// reason (whose message names `memstead projection migrate` for
+    /// the legacy generations). Mems and healthy bindings serve
+    /// normally.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quarantined: Vec<QuarantinedBinding>,
+}
+
+/// One quarantined binding: the store file that failed the v2
+/// version gate or parse, with its typed reason.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct QuarantinedBinding {
+    /// Destination mem (the `projections/<mem>/` tier).
+    pub mem: String,
+    /// Binding name (`<name>.json`).
+    pub name: String,
+    /// Offending file path.
+    pub path: String,
+    /// Typed reason code (`PROJECTION_STORE_LEGACY`,
+    /// `UNKNOWN_BINDING_VERSION`, `WORKSPACE_STORE_PARSE`).
+    pub reason_code: String,
+    /// Full reason message — the legacy generations' message names
+    /// `memstead projection migrate`.
+    pub reason_message: String,
+    /// Reconstruction payload for [`load_pipeline_configs_strict`]:
+    /// the declared version on an `UNKNOWN_BINDING_VERSION` entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unknown_version: Option<i64>,
+    /// Reconstruction payload: the serde message on a
+    /// `WORKSPACE_STORE_PARSE` entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parse_message: Option<String>,
 }
 
 /// The `<root>/.memstead/<primitive>` directory for a given primitive.
@@ -503,12 +538,15 @@ pub fn load_legacy_pipeline_configs(workspace_root: &Path) -> Result<PipelineCon
 ///
 /// The gate refuses the whole load on the first offending file — a pre-v2
 /// workspace fails loudly (pointing at migrate) rather than loading half-served.
-fn load_bindings(workspace_root: &Path) -> Result<Vec<MemPipelineRecord<Binding>>, StoreError> {
+fn load_bindings(
+    workspace_root: &Path,
+) -> Result<(Vec<MemPipelineRecord<Binding>>, Vec<QuarantinedBinding>), StoreError> {
     let dir = primitive_dir(workspace_root, PROJECTIONS_DIR);
     let mut out: Vec<MemPipelineRecord<Binding>> = Vec::new();
+    let mut quarantined: Vec<QuarantinedBinding> = Vec::new();
     let mem_dirs = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((out, quarantined)),
         Err(e) => {
             return Err(StoreError::Io {
                 path: dir,
@@ -544,24 +582,67 @@ fn load_bindings(workspace_root: &Path) -> Result<Vec<MemPipelineRecord<Binding>
             // opaque "missing field" parse error. Version-less (gen-2) and
             // v1 (three-file store) are known prior generations → the
             // migrate-naming refusal; anything else non-2 is unknown.
-            let value: serde_json::Value = read_json(&path)?;
-            match value.get("version") {
-                None => return Err(StoreError::LegacyProjectionStore { path }),
+            // A failing file QUARANTINES that binding instead of
+            // failing the whole load (degrade, never disappear;
+            // agent-trust plan 04) — the typed judgment is unchanged,
+            // the blast radius shrinks to the one binding.
+            let path_display = path.display().to_string();
+            let quarantine =
+                |q: &mut Vec<QuarantinedBinding>, mem: &str, name: String, e: StoreError| {
+                    let (unknown_version, parse_message) = match &e {
+                        StoreError::UnknownBindingVersion { version, .. } => (Some(*version), None),
+                        StoreError::Parse { message, .. } => (None, Some(message.clone())),
+                        _ => (None, None),
+                    };
+                    q.push(QuarantinedBinding {
+                        mem: mem.to_string(),
+                        name,
+                        path: path_display.clone(),
+                        reason_code: e.code().to_string(),
+                        reason_message: e.to_string(),
+                        unknown_version,
+                        parse_message,
+                    });
+                };
+            let value: serde_json::Value = match read_json(&path) {
+                Ok(v) => v,
+                Err(e) => {
+                    quarantine(&mut quarantined, &mem, name, e);
+                    continue;
+                }
+            };
+            let gate_err = match value.get("version") {
+                None => Some(StoreError::LegacyProjectionStore { path: path.clone() }),
                 Some(v) => match v.as_i64() {
-                    Some(1) => return Err(StoreError::LegacyProjectionStore { path }),
+                    Some(1) => Some(StoreError::LegacyProjectionStore { path: path.clone() }),
                     n if n != Some(i64::from(crate::binding::BINDING_VERSION)) => {
-                        return Err(StoreError::UnknownBindingVersion {
-                            path,
+                        Some(StoreError::UnknownBindingVersion {
+                            path: path.clone(),
                             version: n.unwrap_or(-1),
-                        });
+                        })
                     }
-                    _ => {}
+                    _ => None,
                 },
+            };
+            if let Some(e) = gate_err {
+                quarantine(&mut quarantined, &mem, name, e);
+                continue;
             }
-            let config: Binding = serde_json::from_value(value).map_err(|e| StoreError::Parse {
-                path: path.clone(),
-                message: e.to_string(),
-            })?;
+            let config: Binding = match serde_json::from_value(value) {
+                Ok(c) => c,
+                Err(e) => {
+                    quarantine(
+                        &mut quarantined,
+                        &mem,
+                        name,
+                        StoreError::Parse {
+                            path: path.clone(),
+                            message: e.to_string(),
+                        },
+                    );
+                    continue;
+                }
+            };
             out.push(MemPipelineRecord {
                 mem: mem.clone(),
                 name,
@@ -570,7 +651,9 @@ fn load_bindings(workspace_root: &Path) -> Result<Vec<MemPipelineRecord<Binding>
         }
     }
     out.sort_by(|a, b| (a.mem.as_str(), a.name.as_str()).cmp(&(b.mem.as_str(), b.name.as_str())));
-    Ok(out)
+    quarantined
+        .sort_by(|a, b| (a.mem.as_str(), a.name.as_str()).cmp(&(b.mem.as_str(), b.name.as_str())));
+    Ok((out, quarantined))
 }
 
 /// Load the live **v2 single-record** store from the workspace:
@@ -581,9 +664,35 @@ fn load_bindings(workspace_root: &Path) -> Result<Vec<MemPipelineRecord<Binding>
 /// by this path (a v2 binding carries everything inline); they are served
 /// only by [`load_legacy_pipeline_configs`] for migration.
 pub fn load_pipeline_configs(workspace_root: &Path) -> Result<BindingConfigs, StoreError> {
+    let (bindings, quarantined) = load_bindings(workspace_root)?;
     Ok(BindingConfigs {
-        bindings: load_bindings(workspace_root)?,
+        bindings,
+        quarantined,
     })
+}
+
+/// Strict form for WRITE paths (the pipeline-edit layer): a store
+/// carrying ANY quarantined binding refuses with the first entry's
+/// underlying [`StoreError`] — the edit layer never writes over a
+/// store that needs `memstead projection migrate` (or hand repair).
+/// Read/serve paths use the quarantining [`load_pipeline_configs`].
+pub fn load_pipeline_configs_strict(workspace_root: &Path) -> Result<BindingConfigs, StoreError> {
+    let configs = load_pipeline_configs(workspace_root)?;
+    if let Some(q) = configs.quarantined.first() {
+        let path = PathBuf::from(&q.path);
+        return Err(match q.reason_code.as_str() {
+            "UNKNOWN_BINDING_VERSION" => StoreError::UnknownBindingVersion {
+                path,
+                version: q.unknown_version.unwrap_or(-1),
+            },
+            "WORKSPACE_STORE_PARSE" => StoreError::Parse {
+                path,
+                message: q.parse_message.clone().unwrap_or_default(),
+            },
+            _ => StoreError::LegacyProjectionStore { path },
+        });
+    }
+    Ok(configs)
 }
 
 /// Migrate-local: one stored projection file classified by generation, so
@@ -1006,7 +1115,7 @@ mod tests {
         };
         write_projection(root, "engine", "graph", &projection).unwrap();
 
-        let err = load_pipeline_configs(root).unwrap_err();
+        let err = load_pipeline_configs_strict(root).unwrap_err();
         match err {
             StoreError::LegacyProjectionStore { path } => {
                 assert!(path.ends_with("graph.json"), "got {path:?}");
@@ -1034,7 +1143,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = load_pipeline_configs(root).unwrap_err();
+        let err = load_pipeline_configs_strict(root).unwrap_err();
         match err {
             StoreError::LegacyProjectionStore { path } => {
                 assert!(path.ends_with("graph.json"), "got {path:?}");
@@ -1059,7 +1168,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = load_pipeline_configs(root).unwrap_err();
+        let err = load_pipeline_configs_strict(root).unwrap_err();
         assert!(
             matches!(err, StoreError::UnknownBindingVersion { version: 99, .. }),
             "got {err:?}"

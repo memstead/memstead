@@ -117,11 +117,14 @@ fn health_json(ws: &std::path::Path) -> serde_json::Value {
     parse_envelope(&out)
 }
 
-/// Criterion 2: a legacy pre-v2 projection config refuses boot with a
-/// typed code naming `memstead projection migrate` — the previously
-/// `INTERNAL`-leaking backlog item.
+/// Criterion 2 — re-routed by agent-trust plan 04 (binding
+/// quarantine): a legacy pre-v2 projection config no longer fails the
+/// workspace; the affected binding quarantines and its projection
+/// verbs refuse typed with the reason naming `memstead projection
+/// migrate`, while the workspace itself serves (the previously
+/// `INTERNAL`-leaking, then boot-blocking, backlog item).
 #[test]
-fn legacy_projection_config_refuses_typed_naming_migrate() {
+fn legacy_projection_config_quarantines_binding_typed_naming_migrate() {
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path().join("ws");
     memstead()
@@ -133,13 +136,30 @@ fn legacy_projection_config_refuses_typed_naming_migrate() {
     // Version-less record — the gen-2 shape the v2 loader refuses.
     std::fs::write(proj_dir.join("graph.json"), "{}").unwrap();
 
-    let env = status_error_envelope(&ws);
-    assert_eq!(env["code"], "PROJECTION_STORE_LEGACY", "got: {env}");
+    // The workspace serves.
+    memstead()
+        .current_dir(&ws)
+        .args(["--json", "status"])
+        .assert()
+        .success();
+
+    // The binding's verbs refuse typed, naming the migrate command.
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "brief", "engine/graph"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&out);
+    assert_eq!(env["code"], "PROJECTION_QUARANTINED", "got: {env}");
     let msg = env["message"].as_str().unwrap();
     assert!(
         msg.contains("memstead projection migrate"),
-        "message must name the migrate command: {msg}"
+        "reason must name the migrate command: {msg}"
     );
+    assert_eq!(env["details"]["reason_code"], "PROJECTION_STORE_LEGACY");
 }
 
 /// Duplicate mem name in the mount list refuses typed.

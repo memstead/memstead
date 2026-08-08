@@ -1888,6 +1888,18 @@ impl McpServer {
             // drained notice and silently swallow the whole reload
             // window. Attach it on the success channel split.
             None => {
+                // A quarantined mem's entities are deliberately not in
+                // the store; refusing ENTITY_NOT_FOUND there would be
+                // dishonest ("honest absence beats partial truth" —
+                // the read names the quarantine, not a phantom miss).
+                if engine.quarantine_reason(id.mem()).is_some() {
+                    let err = engine.unknown_mem_error(id.mem());
+                    return attach_drift_to_error(
+                        engine_err_unified(err, &engine),
+                        &drift_warnings,
+                        mem_changed_notices,
+                    );
+                }
                 return attach_drift_to_error(
                     not_found_error(engine.store(), &id),
                     &drift_warnings,
@@ -2207,6 +2219,10 @@ impl McpServer {
                     ),
                 );
             }
+            Err(memstead_engine::overview::ComposeOverviewError::MemQuarantined(name)) => {
+                let err = engine.unknown_mem_error(&name);
+                return engine_err_unified(err, &engine);
+            }
             Err(memstead_engine::overview::ComposeOverviewError::UnknownMem {
                 name,
                 writable_mems,
@@ -2309,6 +2325,14 @@ impl McpServer {
             (Some(name), None) => name.to_string(),
             (None, Some(mem)) => match engine.mount(mem) {
                 Some(m) => m.schema.as_ref().map(|s| s.to_string()).unwrap_or_default(),
+                None if engine.quarantine_reason(mem).is_some() => {
+                    let err = engine.unknown_mem_error(mem);
+                    return attach_drift_to_error(
+                        engine_err_unified(err, &engine),
+                        &drift_warnings,
+                        mem_changed_notices,
+                    );
+                }
                 None => {
                     let known_mems: Vec<String> =
                         engine.mounts().iter().map(|m| m.mem.clone()).collect();
@@ -3171,6 +3195,10 @@ impl McpServer {
             &config,
         ) {
             Ok(v) => v,
+            Err(memstead_engine::health::ComposeHealthError::MemQuarantined(name)) => {
+                let err = engine.unknown_mem_error(&name);
+                return engine_err_unified(err, &engine);
+            }
             Err(memstead_engine::health::ComposeHealthError::UnknownMem {
                 name,
                 writable_mems,
@@ -3552,7 +3580,7 @@ impl McpServer {
         let no_field =
             p.title.is_none() && p.description.is_none() && p.subject.is_none() && !p.clear_subject;
         if no_field && engine.mount(&p.name).is_none() {
-            let e = memstead_base::EngineError::UnknownMem(p.name.clone());
+            let e = engine.unknown_mem_error(&p.name);
             let notices = engine.take_mem_changed_notices();
             let drift = notices_as_reload_warnings(&notices);
             return attach_drift_to_error(engine_err_unified(e, &engine), &drift, notices);

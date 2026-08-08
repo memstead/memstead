@@ -51,6 +51,12 @@ pub enum ComposeHealthError {
         name: String,
         writable_mems: Vec<String>,
     },
+    /// `args.mem` names a QUARANTINED mem — the scope refuses with the
+    /// typed quarantine reason rather than reporting the mem unknown
+    /// (agent-trust plan 04). The wrapper maps it through its ordinary
+    /// engine-error path via `Engine::unknown_mem_error`.
+    #[error("mem \"{0}\" is quarantined")]
+    MemQuarantined(String),
     /// `args.target_schema` did not parse as a `name@x.y.z` ref. `reason` is
     /// the parser's message, surfaced verbatim in the `INVALID_INPUT`
     /// envelope's `details.reason`.
@@ -103,6 +109,9 @@ pub fn compose_health(
     // Mem filter validation — only writable mems accepted.
     let mem_filter: Option<String> = match args.mem {
         Some(v) if engine.mem_router().is_writable(v) => Some(v.to_string()),
+        Some(v) if engine.quarantine_reason(v).is_some() => {
+            return Err(ComposeHealthError::MemQuarantined(v.to_string()));
+        }
         Some(v) => {
             let mut names: Vec<String> = engine
                 .mem_router()
@@ -371,6 +380,9 @@ pub fn compose_health(
             "quarantined".into(),
             serde_json::to_value(&health.quarantined).unwrap_or_default(),
         );
+    }
+    if let Some(diag) = &health.boot_diagnosis {
+        obj.insert("boot_diagnosis".into(), diag.clone());
     }
 
     if include.iter().any(|s| s == "orphans") {

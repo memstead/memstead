@@ -84,7 +84,7 @@ impl crate::Engine {
     /// [`crate::EngineError::UnknownMem`].
     pub fn mem_topology(&self, mem: &str) -> Result<MemTopology, crate::EngineError> {
         if self.mount(mem).is_none() {
-            return Err(crate::EngineError::UnknownMem(mem.to_string()));
+            return Err(self.unknown_mem_error(mem));
         }
         let store = self.store();
         let louvain = self.communities();
