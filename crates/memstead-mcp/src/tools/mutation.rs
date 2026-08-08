@@ -310,6 +310,10 @@ pub struct RelateParams {
     pub relations: Vec<RelateOpInput>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+    #[schemars(
+        description = "Validate and preview the relation operations without executing — no edge lands, no stub is created, no VCS commit. dry_run runs the SAME validation a real call runs (cross-mem policy, vocabulary, description posture, acyclicity, self-loop refusal); an illegal operation refuses with the IDENTICAL typed envelope a real call would return, and a legal one reports the would-be action with `_hash` set to the PROSPECTIVE post-write source hash, `commit_sha` empty (the rehearsal marker), and any would-be `AUTO_STUB_CREATED` warning for an absent target — reported, never created. The follow-up real call on an unchanged mem succeeds; like create's dry_run, its `_hash` diverges from the rehearsed one whenever a wall-clock second ticks between the calls (the auto-stamped `last_modified` enters the hash) — a timestamp shift, not drift."
+    )]
+    pub dry_run: Option<bool>,
 }
 
 /// Parameters for memstead_delete.

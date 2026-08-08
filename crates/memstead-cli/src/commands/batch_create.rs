@@ -3,9 +3,10 @@
 //! all-or-nothing with report-all refusals.
 //!
 //! Each entry is the same shape the single-entity `create --from`
-//! accepts (minus `dry_run` — the batch family has no dry-run, matching
-//! `batch-update`), and carries its own provenance `note`. There is
-//! deliberately no batch-level note flag.
+//! accepts (minus a per-entry `dry_run` — rehearsal is batch-level via
+//! `--dry-run`, which validates the whole batch and commits nothing),
+//! and carries its own provenance `note`. There is deliberately no
+//! batch-level note flag.
 //!
 //! Intra-batch references resolve as REAL targets: an entry's
 //! `relations` (and body wiki-links) may point at entities created by
@@ -44,15 +45,22 @@ pub struct Args {
     /// JSON file with a top-level `creates: [...]` array.
     #[arg(long = "from", value_name = "FILE")]
     pub from: PathBuf,
+    /// Rehearse the whole batch: run the full validation pass
+    /// (intra-batch references resolve, identical refusals,
+    /// report-all) and report the would-be receipt, creating nothing.
+    /// `commit_sha` stays empty (the rehearsal marker).
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 /// Per-entry payload — the single `create --from` shape, per entry.
 /// `id` is tolerated for template symmetry and only *checked* against
 /// the title-derived slug (same contract as single create);
 /// `expected_hash` is tolerated and ignored (nothing exists yet to
-/// compare against). `dry_run` is deliberately NOT accepted: the batch
-/// family has no dry-run (`batch-update` set the contract), so the key
-/// refuses as unknown rather than silently not previewing.
+/// compare against). A per-entry `dry_run` key is NOT accepted —
+/// rehearsal is batch-level (`--dry-run` validates the whole batch as
+/// one graph state), so the key refuses as unknown rather than
+/// silently half-previewing.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EntryPayload {
@@ -119,7 +127,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .map(|(idx, entry)| build_create_args(&engine, idx, entry))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let result = engine
-        .batch_create(creates, Actor::Cli, None)
+        .batch_create(creates, Actor::Cli, None, args.dry_run)
         .map_err(CliError::from_engine_op)?;
     // Reload-before-op runs inside `batch_create` for every mem the
     // batch touches; drain any `mem_changed` notice it stashed.

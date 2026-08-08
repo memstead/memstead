@@ -2707,7 +2707,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Connect entities with typed edges — a list of relation operations applied atomically. `relations` carries one or more `{from, to, type, remove?, description?}` entries; the whole list is all-or-nothing in ONE commit per touched mem, per-entry validation identical to a single operation, in-order semantics (later entries validate against the state earlier entries produced; an acyclic check sees edges added earlier in the list). A single-relation call is a list of one. Pre-fetch the mem's schema via `memstead_schema` (see server instructions). Type names case-insensitive; stored UPPER_SNAKE_CASE. One failing entry refuses the WHOLE list — nothing commits, every failing entry reported: a list of one surfaces its entry's own typed code top-level (`INVALID_REL_TYPE` with `details.allowed` + `suggestion`, `INVALID_REL_SHAPE`, `CROSS_MEM_LINK_NOT_ALLOWED`, `CROSS_MEM_TARGET_NOT_FOUND`, `RELATIONSHIP_CYCLE` with `details.existing_path`, `INVALID_ENTITY_ID`); larger lists wrap under `BATCH_REFUSED` with `details.entries[]` of `{index, from, to, rel_type, code, message, details}` (`errors_suppressed` counts envelopes past the cap). Remove skips shape validation. Per entry: `remove: true` deletes; `from` must be real; `to` may auto-stub (`AUTO_STUB_CREATED`; into an uncreated mem: `CROSS_MEM_TARGET_MEM_UNCREATED`). Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, `action: \"noop\"`). Response: `results[]` in submission order, each `{from, to, rel_type, action, source, _hash}` — `_hash` is that source's next `expected_hash`; top-level `commit_sha` (empty when all no-op), `warnings`, `orphan_stubs_removed` (stubs GC'd when a removed edge was their last referrer; surviving body wiki-links refuse `RELATION_HAS_BODY_LINKS`). Optional `note` rides every entry. Edges never move files.",
+        description = "Connect entities with typed edges — a list of relation operations applied atomically. `relations` carries one or more `{from, to, type, remove?, description?}` entries; the whole list is all-or-nothing in ONE commit per touched mem, per-entry validation identical to a single operation, in-order semantics (later entries validate against the state earlier entries produced; an acyclic check sees edges added earlier in the list). A single-relation call is a list of one. Pre-fetch the mem's schema via `memstead_schema` (see server instructions). Type names case-insensitive; stored UPPER_SNAKE_CASE. One failing entry refuses the WHOLE list — nothing commits, every failing entry reported: a list of one surfaces its entry's own typed code top-level (`INVALID_REL_TYPE` with `details.allowed` + `suggestion`, `INVALID_REL_SHAPE`, `CROSS_MEM_LINK_NOT_ALLOWED`, `CROSS_MEM_TARGET_NOT_FOUND`, `RELATIONSHIP_CYCLE` with `details.existing_path`, `INVALID_ENTITY_ID`); larger lists wrap under `BATCH_REFUSED` with `details.entries[]` of `{index, from, to, rel_type, code, message, details}` (`errors_suppressed` counts envelopes past the cap). Remove skips shape validation. Per entry: `remove: true` deletes; `from` must be real; `to` may auto-stub (`AUTO_STUB_CREATED`; into an uncreated mem: `CROSS_MEM_TARGET_MEM_UNCREATED`). Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, `action: \"noop\"`). Response: `results[]` in submission order, each `{from, to, rel_type, action, source, _hash}` — `_hash` is that source's next `expected_hash`; top-level `commit_sha` (empty when all no-op), `warnings`, `orphan_stubs_removed` (stubs GC'd when a removed edge was their last referrer; surviving body wiki-links refuse `RELATION_HAS_BODY_LINKS`). Optional `note` rides every entry. `dry_run: true` rehearses the list: same validation and refusals, would-be actions and stubs reported, nothing lands; `commit_sha` stays empty (the rehearsal marker). Edges never move files.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -2748,6 +2748,7 @@ impl McpServer {
                         remove: op.remove.unwrap_or(false),
                         expected_hash: None,
                         description: op.description.clone(),
+                        dry_run: p.dry_run.unwrap_or(false),
                     },
                     p.note.clone(),
                 )
@@ -2822,7 +2823,8 @@ impl McpServer {
             .filter(|to| engine.store().get(to).is_none())
             .map(|to| to.to_string())
             .collect();
-        let result = match engine.batch_relate(ops, Actor::Agent, client.as_ref()) {
+        let dry_run = p.dry_run.unwrap_or(false);
+        let result = match engine.batch_relate(ops, Actor::Agent, client.as_ref(), dry_run) {
             Ok(r) => r,
             Err(e) => {
                 let notices = engine.take_mem_changed_notices();
@@ -2913,9 +2915,15 @@ impl McpServer {
                         });
                     }
                 }
+                // Real batch: the stub exists post-commit. Rehearsal:
+                // the staged state rolled back, so a still-absent
+                // target of a validated add entry IS the would-be stub
+                // — same warning, reported instead of created.
+                let stubbed = engine.store().get(&to).map(|e| e.stub).unwrap_or(false);
+                let would_stub = dry_run && entry.action == "added" && engine.store().get(&to).is_none();
                 if !op.remove.unwrap_or(false)
                     && absent_targets.contains(&to.to_string())
-                    && engine.store().get(&to).map(|e| e.stub).unwrap_or(false)
+                    && (stubbed || would_stub)
                 {
                     warnings.push(memstead_base::ops::WarningHint::AutoStubCreated {
                         stub_id: to.clone(),
@@ -2932,6 +2940,10 @@ impl McpServer {
                         memstead_base::EdgeSource::Explicit => "explicit",
                     })
                     .unwrap_or("explicit");
+                // Real batch: post-commit hash (the next valid
+                // `expected_hash`). Rehearsal: the rolled-back store
+                // serves the CURRENT on-disk hash — still the value a
+                // follow-up real call validates against.
                 let hash = engine
                     .store()
                     .get(&from)
@@ -5086,6 +5098,7 @@ mod tests {
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
             assert!(
                 !r.is_error.unwrap_or(false),
@@ -5236,6 +5249,7 @@ mod tests {
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
             assert!(
                 !r.is_error.unwrap_or(false),
@@ -5382,6 +5396,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(!r.is_error.unwrap_or(false), "relate: {}", extract_text(&r));
 
@@ -7909,6 +7924,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(bad_rel.is_error.unwrap_or(false));
         let body = bad_rel.structured_content.unwrap();
@@ -8203,6 +8219,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert_text_carries_code(&bad_rel_type, "INVALID_REL_TYPE");
 
@@ -8217,6 +8234,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert_text_carries_code(&bad_id, "INVALID_ENTITY_ID");
 
@@ -8388,6 +8406,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             remove.is_error.unwrap_or(false),
@@ -8714,6 +8733,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
             assert!(
                 !relate.is_error.unwrap_or(false),
@@ -8853,6 +8873,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -8886,6 +8907,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(!stub_relate.is_error.unwrap_or(false));
         let stub_text = extract_text(&stub_relate);
@@ -9068,6 +9090,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         // Seed
         // identity + purpose so the spec lands; stub adoption still
@@ -10664,6 +10687,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !add.is_error.unwrap_or(false),
@@ -10914,15 +10938,27 @@ write_rules: []
 
     /// `dry_run` preview on `memstead_create` returns the prospective id +
     /// 16-hex `_hash` with no disk write / no commit. A follow-up real
-    /// call with the same inputs produces the same hash **as long as
-    /// both calls land in the same wall-clock second** — the content
-    /// hash covers the `now()`-stamped `created_date`, so the two
-    /// hashes diverge across a second boundary (the create-path caveat
-    /// the dry_run docstring names). Back-to-back in-process, they share
-    /// the second, so the equality assertion below holds.
+    /// call with the same inputs produces the same hash — the content
+    /// hash covers the `now()`-stamped `created_date`, so the test
+    /// pins the engine mutation clock to make the equality
+    /// deterministic (unpinned it would only hold within one
+    /// wall-clock second — the create-path caveat the dry_run
+    /// docstring names).
     #[test]
     fn memstead_create_dry_run_preview() {
         let (server, _tmp) = setup_dual_test_engine();
+        // Pin the mutation clock: `created_date` enters `_hash`, so the
+        // dry-run == real hash-equality assertion below is only
+        // deterministic when both calls stamp the same instant —
+        // unpinned, the test fails whenever a wall-clock second ticks
+        // between them.
+        server
+            .unified_engine()
+            .lock()
+            .unwrap()
+            .set_mutation_clock(std::sync::Arc::new(|| {
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_754_000_000)
+            }));
         let result = server.memstead_create(Parameters(CreateParams {
             anchors: None,
             title: "Große Änderung".to_string(),
@@ -11362,6 +11398,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -11389,6 +11426,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(!first.is_error.unwrap_or(false));
         // b DEPENDS_ON a closes a cycle and must reject with the
@@ -11402,6 +11440,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             cycle.is_error.unwrap_or(false),
@@ -11443,6 +11482,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11477,6 +11517,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11567,6 +11608,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         // Step 2: now relate FROM the stub — must surface
         // STUB_CANNOT_RELATE rather than the cryptic UnknownType
@@ -11580,6 +11622,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11678,6 +11721,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11762,6 +11806,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -11836,6 +11881,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -12092,6 +12138,17 @@ write_rules: []
     #[test]
     fn update_dry_run_returns_prospective_and_current_hash() {
         let (server, _tmp) = setup_dual_test_engine();
+        // Pin the mutation clock: the auto-stamped `last_modified`
+        // enters the hash, so the prospective == real post-write
+        // equality assertion below is only deterministic under a
+        // frozen clock (unpinned, it fails across a second tick).
+        server
+            .unified_engine()
+            .lock()
+            .unwrap()
+            .set_mutation_clock(std::sync::Arc::new(|| {
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_754_000_000)
+            }));
         let id = "specs--entity-a".to_string();
 
         // Read current hash via memstead_entity.
@@ -12429,6 +12486,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !first.is_error.unwrap_or(false),
@@ -12458,6 +12516,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !second.is_error.unwrap_or(false),
@@ -12493,6 +12552,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -14474,6 +14534,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
             assert!(
                 !result.is_error.unwrap_or(false),
@@ -14484,6 +14545,131 @@ write_rules: []
                 payload(&result)["_mem_schema"].as_str(),
                 Some("default@1.0.0"),
             );
+        }
+
+        /// Rehearsal marker form (agent-trust plan 07), single-op path:
+        /// `dry_run: true` reports the would-be edge and would-be stub
+        /// with an EMPTY `commit_sha`, creates nothing, and the
+        /// follow-up real call succeeds with a non-empty one.
+        #[test]
+        fn memstead_relate_dry_run_single_carries_marker_and_creates_nothing() {
+            let (server, _tmp) = setup_dual_test_engine();
+            let call = |dry: Option<bool>| {
+                server.memstead_relate(Parameters(RelateParams {
+                    relations: vec![RelateOpInput {
+                        from: "specs--entity-a".to_string(),
+                        to: "specs--rehearsed-ghost".to_string(),
+                        r#type: "USES".to_string(),
+                        remove: None,
+                        description: None,
+                    }],
+                    note: None,
+                    dry_run: dry,
+                }))
+            };
+            let rehearsed = call(Some(true));
+            assert!(
+                !rehearsed.is_error.unwrap_or(false),
+                "{}",
+                extract_text(&rehearsed)
+            );
+            let body = payload(&rehearsed);
+            assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+            assert_eq!(body["results"][0]["action"], "added");
+            let warnings = serde_json::to_string(&body["warnings"]).unwrap();
+            assert!(
+                warnings.contains("AUTO_STUB_CREATED"),
+                "would-be stub must be reported: {warnings}"
+            );
+            // The stub was never created.
+            let read = server.memstead_entity(Parameters(EntityParams {
+                id: "specs--rehearsed-ghost".to_string(),
+                sections: None,
+                include_relations: None,
+                include_context: None,
+                token_budget: None,
+                chunk: None,
+            }));
+            assert!(
+                read.is_error.unwrap_or(false),
+                "rehearsed stub must not exist: {}",
+                extract_text(&read)
+            );
+            // The real call on the unchanged mem lands.
+            let real = call(None);
+            assert!(!real.is_error.unwrap_or(false), "{}", extract_text(&real));
+            let real_body = payload(&real);
+            assert_ne!(real_body["commit_sha"], "", "the real relate commits");
+            // No cross-call hash-equality assertion: the auto-stamped
+            // `last_modified` (second-resolution wall clock) enters
+            // `_hash`, so rehearsed vs real legitimately diverge when
+            // a second ticks between the calls. The clock-pinned
+            // engine test asserts equality deterministically.
+        }
+
+        /// Rehearsal marker form, batch path: a multi-op `dry_run`
+        /// list reports every would-be action with an empty
+        /// `commit_sha`, reports (never creates) would-be stubs, and
+        /// the follow-up real list succeeds.
+        #[test]
+        fn memstead_relate_dry_run_batch_carries_marker_and_creates_nothing() {
+            let (server, _tmp) = setup_dual_test_engine();
+            let ops = || {
+                vec![
+                    // Reverse direction of the fixture's existing a→b
+                    // edge so this op is a genuine would-be add.
+                    RelateOpInput {
+                        from: "specs--entity-b".to_string(),
+                        to: "specs--entity-a".to_string(),
+                        r#type: "USES".to_string(),
+                        remove: None,
+                        description: None,
+                    },
+                    RelateOpInput {
+                        from: "specs--entity-b".to_string(),
+                        to: "specs--batch-ghost".to_string(),
+                        r#type: "USES".to_string(),
+                        remove: None,
+                        description: None,
+                    },
+                ]
+            };
+            let rehearsed = server.memstead_relate(Parameters(RelateParams {
+                relations: ops(),
+                note: None,
+                dry_run: Some(true),
+            }));
+            assert!(
+                !rehearsed.is_error.unwrap_or(false),
+                "{}",
+                extract_text(&rehearsed)
+            );
+            let body = payload(&rehearsed);
+            assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+            assert_eq!(body["results"][0]["action"], "added");
+            assert_eq!(body["results"][1]["action"], "added");
+            let warnings = serde_json::to_string(&body["warnings"]).unwrap();
+            assert!(
+                warnings.contains("AUTO_STUB_CREATED") && warnings.contains("specs--batch-ghost"),
+                "would-be stub must be reported: {warnings}"
+            );
+            let read = server.memstead_entity(Parameters(EntityParams {
+                id: "specs--batch-ghost".to_string(),
+                sections: None,
+                include_relations: None,
+                include_context: None,
+                token_budget: None,
+                chunk: None,
+            }));
+            assert!(read.is_error.unwrap_or(false), "rehearsed stub must not exist");
+            // The real list on the unchanged mems lands.
+            let real = server.memstead_relate(Parameters(RelateParams {
+                relations: ops(),
+                note: None,
+                dry_run: None,
+            }));
+            assert!(!real.is_error.unwrap_or(false), "{}", extract_text(&real));
+            assert_ne!(payload(&real)["commit_sha"], "", "the real batch commits");
         }
 
         /// Markdown frontmatter on `memstead_entity` carries the anchor as the
@@ -14523,6 +14709,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
 
             let result = server.memstead_entity(Parameters(EntityParams {
@@ -16008,6 +16195,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("INVALID_REL_TYPE"));
@@ -16043,6 +16231,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                dry_run: None,
             }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("INVALID_REL_TYPE"));

@@ -36,6 +36,12 @@ pub struct Args {
     /// JSON file with a top-level `relates: [...]` array.
     #[arg(long = "from", value_name = "FILE")]
     pub from: PathBuf,
+    /// Rehearse the whole batch: run the full in-order validation
+    /// (identical refusals, report-all) and report the would-be
+    /// receipt, committing nothing — no edge, no stub. `commit_sha`
+    /// stays empty (the rehearsal marker).
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 /// Per-entry payload — the `memstead relate` argument set, per entry:
@@ -93,6 +99,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 target: EntityId::canonical(&entry.to),
                 remove: entry.remove,
                 description: entry.description,
+                dry_run: false,
             },
             entry.note,
         ));
@@ -100,7 +107,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     let mut engine = crate::setup::full_engine(ctx)?;
     let result = engine
-        .batch_relate(relates, Actor::Cli, None)
+        .batch_relate(relates, Actor::Cli, None, args.dry_run)
         .map_err(CliError::from_engine_op)?;
     // Reload-before-op runs inside `batch_relate` for every mem the
     // batch touches; drain any `mem_changed` notice it stashed.

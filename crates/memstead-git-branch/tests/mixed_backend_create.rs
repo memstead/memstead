@@ -432,6 +432,7 @@ fn detach_incoming_delete_supports_same_name_rehoming() {
                 target: memstead_base::EntityId::new("target-mem", "anchor-spec"),
                 remove: false,
                 description: None,
+                dry_run: false,
             },
             Actor::Cli,
             None,

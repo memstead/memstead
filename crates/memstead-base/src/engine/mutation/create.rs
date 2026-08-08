@@ -899,11 +899,21 @@ impl Engine {
     /// One workspace load (the caller's), one commit per touched mem
     /// (subject `memstead: batch-create (N entities)`), per-entry
     /// provenance notes exactly like `batch_update`.
+    ///
+    /// **Rehearsal** (`dry_run: true`): the FULL validation pass runs —
+    /// identity, skeleton staging (so intra-batch references resolve as
+    /// real targets, cycles included), per-entry prepare, report-all
+    /// refusals — then the batch stops before any write. A legal batch
+    /// returns the would-be receipt (`applied: true`, per-entry
+    /// `"created"` with the prospective ids) with the marker form's
+    /// empty `commit_sha`; an illegal one returns the same refusal a
+    /// real call would. Nothing is written, committed, or stubbed.
     pub fn batch_create(
         &mut self,
         creates: Vec<(CreateEntityArgs, Option<String>)>,
         actor: Actor,
         client: Option<&ClientId>,
+        dry_run: bool,
     ) -> Result<crate::ops::BatchResult, EngineError> {
         use std::collections::HashSet;
 
@@ -1005,8 +1015,11 @@ impl Engine {
                 errors.push((i, e));
                 continue;
             }
+            // Rehearsal is batch-level (the `dry_run` parameter) —
+            // per-entry dry-run stays forced off so the prepare pass
+            // below never short-circuits into a per-entry preview.
             let mut args = args;
-            args.dry_run = false; // batch never dry-runs per entry
+            args.dry_run = false;
             match self.prepare_create(args, Some(&batch_ids), Vec::new()) {
                 Ok(CreatePrepareOutcome::Prepared(p)) => {
                     // Stage this item's declared edges onto its skeleton
@@ -1080,6 +1093,34 @@ impl Engine {
                 results,
                 succeeded: 0,
                 failed,
+                commit_sha: String::new(),
+            });
+        }
+
+        // Rehearsal: every entry validated against the batch's own
+        // graph state (skeletons made intra-batch targets real) and
+        // nothing failed — stop before any write. Roll back the
+        // skeleton staging and return the would-be receipt with the
+        // marker form's empty `commit_sha`.
+        if dry_run {
+            self.store = store_snapshot;
+            self.discard_all_pending();
+            let succeeded = prepared.len();
+            let results: Vec<crate::ops::BatchEntry> = prepared
+                .into_iter()
+                .map(|p| crate::ops::BatchEntry {
+                    id: p.id,
+                    action: "created".to_string(),
+                    error: None,
+                })
+                .collect();
+            return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
+                errors_suppressed: 0,
+                applied: true,
+                results,
+                succeeded,
+                failed: 0,
                 commit_sha: String::new(),
             });
         }
@@ -1761,6 +1802,7 @@ write_rules: []
                     description: None,
                     remove: true,
                     expected_hash: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1809,6 +1851,7 @@ write_rules: []
                     description: None,
                     remove: false,
                     expected_hash: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2736,6 +2779,7 @@ write_rules: []
                 ],
                 actor,
                 Some(&client),
+                false,
             )
             .unwrap();
         assert!(result.applied, "{result:?}");
@@ -2759,6 +2803,99 @@ write_rules: []
         // never transit through the stub machinery).
         // (BatchResult carries no warnings channel; absence of stubs in
         // the store is the observable.)
+    }
+
+    /// Rehearsal contract (agent-trust plan 07): `batch_create` with
+    /// `dry_run: true` validates the whole batch — intra-batch
+    /// references included — and reports the would-be receipt with the
+    /// marker form's empty `commit_sha`, writing NOTHING. The
+    /// follow-up real call on the unchanged mem succeeds.
+    #[test]
+    fn batch_create_dry_run_reports_receipt_and_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        let with_rel = |title: &str, to: &str| {
+            let mut args = empty_create_args("specs", title);
+            args.relations = vec![crate::ops::RelateArg {
+                to: crate::entity::EntityId::new("specs", to),
+                rel_type: "USES".to_string(),
+                description: None,
+            }];
+            (args, None)
+        };
+        let batch =
+            || vec![with_rel("Alpha", "beta"), with_rel("Beta", "gamma"), with_rel("Gamma", "alpha")];
+
+        let rehearsed = engine.batch_create(batch(), actor, Some(&client), true).unwrap();
+        assert!(rehearsed.applied, "{rehearsed:?}");
+        assert_eq!(rehearsed.succeeded, 3);
+        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        assert!(rehearsed.results.iter().all(|r| r.action == "created"));
+        // The receipt names the prospective ids; nothing landed.
+        for name in ["alpha", "beta", "gamma"] {
+            let id = crate::entity::EntityId::new("specs", name);
+            assert!(
+                rehearsed.results.iter().any(|r| r.id == id),
+                "receipt must name {id}: {rehearsed:?}"
+            );
+            assert!(!engine.store().contains(&id), "rehearsal must create nothing");
+        }
+        assert_eq!(engine.store().all_entities().count(), 0);
+
+        // Identical validation: the real call on the unchanged mem lands.
+        let real = engine.batch_create(batch(), actor, Some(&client), false).unwrap();
+        assert!(real.applied, "{real:?}");
+        assert!(!real.commit_sha.is_empty(), "the real batch commits");
+        assert_eq!(real.succeeded, 3);
+    }
+
+    /// Rehearsal refusal parity: a batch with failing entries refuses
+    /// under `dry_run: true` with the SAME per-entry report-all
+    /// envelope the real call returns — and both perform nothing, so
+    /// the paired invocations are directly comparable.
+    #[test]
+    fn batch_create_dry_run_refuses_identically_to_real() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, _seeded) = engine_with_seed(&tmp, "Existing");
+        let (actor, client) = cli_actor();
+        let plain = |title: &str| (empty_create_args("specs", title), None);
+        let batch = || {
+            vec![
+                plain("Fine One"),
+                plain("Existing"),  // duplicate vs pre-batch store
+                plain("Bad/Title"), // invalid title character
+            ]
+        };
+
+        let rehearsed = engine.batch_create(batch(), actor, Some(&client), true).unwrap();
+        let real = engine.batch_create(batch(), actor, Some(&client), false).unwrap();
+        assert!(!rehearsed.applied && !real.applied);
+        assert_eq!(rehearsed.failed, real.failed);
+        assert_eq!(rehearsed.errors_suppressed, real.errors_suppressed);
+        let envelope = |r: &crate::ops::BatchResult| {
+            r.results
+                .iter()
+                .map(|e| {
+                    (
+                        e.id.to_string(),
+                        e.action.clone(),
+                        e.error
+                            .as_ref()
+                            .map(|err| (err.code.clone(), err.message.clone(), err.details.clone())),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(envelope(&rehearsed), envelope(&real), "identical refusals");
+        assert!(!engine.store().contains(&crate::entity::EntityId::new("specs", "fine-one")));
     }
 
     /// Atomicity + report-all: a batch with several invalid entries
@@ -2788,6 +2925,7 @@ write_rules: []
                 ],
                 actor,
                 Some(&client),
+                false,
             )
             .unwrap();
         assert!(!result.applied);
@@ -2844,7 +2982,7 @@ write_rules: []
         let batch: Vec<_> = (0..n)
             .map(|i| (empty_create_args("specs", &format!("Bad/Title {i}")), None))
             .collect();
-        let result = engine.batch_create(batch, actor, Some(&client)).unwrap();
+        let result = engine.batch_create(batch, actor, Some(&client), false).unwrap();
         assert!(!result.applied);
         assert_eq!(result.failed, n);
         let detailed = result
@@ -3184,6 +3322,7 @@ write_rules: []
                     target: stub_target.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4384,6 +4523,7 @@ community:
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4403,6 +4543,7 @@ community:
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4670,6 +4811,7 @@ community:
                     expected_hash: Some(src.content_hash.clone()),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4938,6 +5080,7 @@ community:
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -5246,6 +5389,7 @@ community:
                 ],
                 actor,
                 Some(&client),
+                false,
             )
             .expect("batch returns a result envelope");
         assert!(!result.applied, "intra-batch cycle must refuse the batch");
@@ -5276,6 +5420,7 @@ community:
                 ],
                 actor,
                 Some(&client),
+                false,
             )
             .expect("acyclic batch lands");
         assert!(result.applied, "{:?}", result.results);

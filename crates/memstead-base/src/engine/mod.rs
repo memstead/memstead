@@ -771,6 +771,7 @@ write_rules: []
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),

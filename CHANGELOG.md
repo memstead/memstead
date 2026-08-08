@@ -8,6 +8,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **The batch family's no-dry-run contract is reversed: rehearsal now
+  covers the whole write surface.** `batch-create` / `batch-update` /
+  `batch-relate` accept `--dry-run` (engine: a batch-level `dry_run`
+  parameter): the FULL validation pass runs — intra-batch reference
+  resolution, in-order relate semantics, report-all refusals — then
+  the batch stops before any write and reports the would-be per-entry
+  receipt with the marker form's empty `commit_sha`. An illegal batch
+  refuses with the identical per-entry envelope the real call
+  returns. The old contract ("the batch family has no dry-run") was
+  set when the family was pure bulk-ingest tooling; pre-validating a
+  whole multi-entity build before entity one lands is precisely
+  batch-shaped, so the contract is deliberately reversed rather than
+  honoured. `memstead_relate` (MCP) and `memstead relate` (CLI) gain
+  `dry_run` the same way — a rehearsed relate reports the would-be
+  edge and would-be auto-stub (reported, never created), and a
+  rehearsed illegal relate refuses exactly as the real call would.
+  The filesystem MCP flavour keeps its typed `UNSUPPORTED_PARAM`
+  refusal (now also on relate) so no surface silently ignores the
+  flag. The rehearsal contract — identical validation, observable
+  zero side effects (git refs, working tree, `.memstead/`
+  byte-identical), marker form on every rehearsed response — is now
+  asserted by tests across create, update, relate, and the batch
+  family, including against quarantined and read-only mems.
 - **`propagating_relationships` renamed to
   `no_self_loop_relationships` — the name stops lying.** The field's
   only functional effect was always the self-loop refusal on

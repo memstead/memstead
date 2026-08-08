@@ -1450,6 +1450,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_relate" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
+            // Lean-flavour refusal for the dry_run param this surface
+            // doesn't honour (same posture as create / update).
+            "UNSUPPORTED_PARAM",
+            "details.params",
             // List-form envelope: refusal wrapper + per-entry fields.
             "BATCH_REFUSED",
             "details.entries",

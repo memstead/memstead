@@ -1330,7 +1330,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Connect or disconnect two entities with a typed relationship in the same filesystem-mem. Cross-mem targets are rejected with CROSS_MEM_RELATION (filesystem-mem is single-mem by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line.",
+        description = "Connect or disconnect two entities with a typed relationship in the same filesystem-mem. Cross-mem targets are rejected with CROSS_MEM_RELATION (filesystem-mem is single-mem by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line. `dry_run` is not implemented on this surface: passing `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names it), never silently ignored — so a rehearsal can never accidentally land a real write. Omit it, or use the unified engine (mem-repo MCP / CLI) which honours it.",
         // idempotent_hint = true: relate's duplicate-add and
         // remove-nonexistent paths are typed-warning no-ops, so a retry
         // converges. Matches the mem-repo server's annotation —
@@ -1338,6 +1338,12 @@ impl FilesystemMcpServer {
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     fn memstead_relate(&self, Parameters(p): Parameters<RelateParams>) -> CallToolResult {
+        // This surface hardwires `dry_run` off — refuse up front when
+        // meaningfully supplied so a rehearsal can never accidentally
+        // land a real write (same posture as create / update).
+        if let Some(refusal) = reject_unsupported_params(&[("dry_run", p.dry_run == Some(true))]) {
+            return refusal;
+        }
         if p.relations.is_empty() {
             return tool_error(
                 "INVALID_INPUT",
@@ -1362,6 +1368,7 @@ impl FilesystemMcpServer {
                         target: EntityId::canonical(&op.to),
                         remove: op.remove.unwrap_or(false),
                         description: op.description.clone(),
+                        dry_run: false,
                     },
                     p.note.clone(),
                 )
@@ -1420,7 +1427,7 @@ impl FilesystemMcpServer {
             .filter(|to| engine.store().get(to).is_none())
             .map(|to| to.to_string())
             .collect();
-        let result = match engine.batch_relate(ops, actor, client.as_ref()) {
+        let result = match engine.batch_relate(ops, actor, client.as_ref(), false) {
             Ok(r) => r,
             Err(e) => return engine_op_error(e),
         };
@@ -2444,6 +2451,35 @@ mod tests {
         let r = server.memstead_update(Parameters(u));
         assert!(is_unsupported(&r));
         assert!(dropped(&r).contains(&"dry_run".to_string()));
+
+        // relate + dry_run: true → refused up front (the unified
+        // engine's rehearsal contract does NOT silently erode into a
+        // real write here); dry_run absent / false stays served.
+        let relate = |dry: Option<bool>| {
+            server.memstead_relate(Parameters(crate::tools::mutation::RelateParams {
+                relations: vec![crate::tools::mutation::RelateOpInput {
+                    from: "demo--anything".into(),
+                    to: "demo--other".into(),
+                    r#type: "REFERENCES".into(),
+                    remove: None,
+                    description: None,
+                }],
+                note: None,
+                dry_run: dry,
+            }))
+        };
+        let r = relate(Some(true));
+        assert!(is_unsupported(&r), "dry_run relate must refuse: {r:?}");
+        assert!(dropped(&r).contains(&"dry_run".to_string()));
+        // dry_run: false / absent is not a meaningful supply — the
+        // call proceeds to the engine (and fails only on the missing
+        // source entity, not on UNSUPPORTED_PARAM).
+        let r = relate(Some(false));
+        assert!(
+            !(r.is_error.unwrap_or(false)
+                && r.structured_content.as_ref().unwrap()["code"] == "UNSUPPORTED_PARAM"),
+            "dry_run: false must not refuse: {r:?}"
+        );
     }
 
     /// Refusal complement (Part B): a defaulted-empty / absent unsupported
@@ -2924,6 +2960,7 @@ mod tests {
                 description: None,
             }],
             note: Some("first".into()),
+            dry_run: None,
         }));
         assert!(!added.is_error.unwrap_or(false));
         assert_eq!(
@@ -2940,6 +2977,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(!dup.is_error.unwrap_or(false));
         let dup_body = dup.structured_content.unwrap();
@@ -2974,6 +3012,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3001,6 +3040,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         assert_eq!(
@@ -3605,6 +3645,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
 
         // Read with include_relations.
@@ -3888,6 +3929,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            dry_run: None,
         }));
 
         let result = server.memstead_overview(Parameters(OverviewParams {

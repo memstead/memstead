@@ -1511,6 +1511,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
                 description: None,
                 expected_hash: None,
                 remove: true,
+                dry_run: false,
             },
             Actor::Cli,
             None,

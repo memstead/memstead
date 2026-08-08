@@ -98,10 +98,45 @@ impl Engine {
             drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
         }
 
+        let dry_run = args.dry_run;
         let prepared = match self.prepare_relate(args, drift_warnings)? {
             RelatePrepareOutcome::Done(outcome) => return Ok(outcome),
             RelatePrepareOutcome::Prepared(p) => p,
         };
+
+        // Rehearsal: the full validation stage ran (identical refusals
+        // and warnings, would-be stub included via the prepared
+        // AUTO_STUB_CREATED warning) — stop before any write. `_hash`
+        // reports the PROSPECTIVE post-write hash; `commit_sha` stays
+        // empty (the marker form). Nothing staged, committed, or
+        // stubbed.
+        if dry_run {
+            let parse_result = parse_markdown(
+                &prepared.markdown,
+                &prepared.file_path,
+                prepared.type_def.as_ref(),
+                &prepared.source_mem,
+            )
+            .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
+            // Identical-warnings contract: the real path appends the
+            // `require_notes` nudge after its commit; the rehearsal of
+            // a would-be commit carries the same warning.
+            let mut warnings = prepared.warnings;
+            if let Some(w) = self.note_missing_warning("relate_entity", note) {
+                warnings.push(w);
+            }
+            return Ok(RelateEntityOutcome {
+                from: prepared.from,
+                to: prepared.to,
+                rel_type: prepared.rel_type,
+                action: prepared.action,
+                content_hash: parse_result.entity.content_hash,
+                commit_sha: String::new(),
+                source: "explicit".to_string(),
+                orphan_stubs_removed: Vec::new(),
+                warnings,
+            });
+        }
 
         self.stage_prepared_relate(&prepared)?;
 
@@ -764,11 +799,22 @@ impl Engine {
     ///   the commit, same predicate as the single-item path (the
     ///   collected ids are not part of `BatchResult`'s fixed family
     ///   shape).
+    ///
+    /// **Rehearsal** (`dry_run: true`): the FULL in-order validation
+    /// pass runs — each entry staged against the state its
+    /// predecessors produced, identical refusals, identical report-all
+    /// envelope — then the batch stops before any commit and rolls the
+    /// staged state back. A legal batch returns the would-be receipt
+    /// (per-entry actions, would-be `orphan_stubs_removed` computed on
+    /// the staged state) with the marker form's empty `commit_sha`; an
+    /// illegal one returns the same refusal a real call would. No
+    /// edge, stub, or commit lands.
     pub fn batch_relate(
         &mut self,
         relates: Vec<(RelateEntityArgs, Option<String>)>,
         actor: Actor,
         client: Option<&ClientId>,
+        dry_run: bool,
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if relates.is_empty() {
             return Ok(crate::ops::BatchResult {
@@ -813,6 +859,12 @@ impl Engine {
 
         for (i, (args, note)) in relates.into_iter().enumerate() {
             let source_id = args.source.clone();
+            // Rehearsal is batch-level (the `dry_run` parameter) —
+            // per-entry dry-run stays forced off; the staging below is
+            // what gives later entries in-order semantics, and the
+            // batch-level rollback undoes it.
+            let mut args = args;
+            args.dry_run = false;
             match self.prepare_relate(args, Vec::new()) {
                 Ok(RelatePrepareOutcome::Done(_)) => {
                     items.push((source_id, ItemState::Noop));
@@ -890,6 +942,45 @@ impl Engine {
                 results,
                 succeeded: 0,
                 failed,
+                commit_sha: String::new(),
+            });
+        }
+
+        // Rehearsal: every entry validated in order against the state
+        // its predecessors produced and nothing failed — stop before
+        // any commit. The would-be orphan GC is computed on the staged
+        // store (honest: it is exactly what the real call would
+        // collect), then the whole staged state rolls back.
+        if dry_run {
+            let removed_targets: Vec<EntityId> = prepared
+                .iter()
+                .filter(|p| matches!(p.action, RelateAction::Removed))
+                .map(|p| p.to.clone())
+                .collect();
+            let orphan_stubs_removed =
+                super::gc_orphan_stubs_among(&mut self.store, removed_targets.iter());
+            self.store = store_snapshot;
+            self.discard_all_pending();
+            let succeeded = items.len();
+            let results: Vec<crate::ops::BatchEntry> = items
+                .into_iter()
+                .map(|(id, state)| crate::ops::BatchEntry {
+                    id,
+                    action: match state {
+                        ItemState::Applied(label) => label.to_string(),
+                        ItemState::Noop => "noop".to_string(),
+                        ItemState::Error => unreachable!("refusal path returned above"),
+                    },
+                    error: None,
+                })
+                .collect();
+            return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed,
+                errors_suppressed: 0,
+                applied: true,
+                results,
+                succeeded,
+                failed: 0,
                 commit_sha: String::new(),
             });
         }
@@ -1021,6 +1112,7 @@ impl Engine {
             target: to.clone(),
             remove,
             description: None,
+            dry_run: false,
         };
         self.relate_entity(args, ctx.actor, ctx.client.as_ref(), ctx.note.as_deref())
     }
@@ -1134,6 +1226,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1172,6 +1265,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1187,6 +1281,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1221,6 +1316,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1255,6 +1351,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1273,6 +1370,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1298,6 +1396,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: true,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1331,6 +1430,7 @@ mod tests {
                     target: absent_target.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1385,6 +1485,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1421,6 +1522,7 @@ mod tests {
                     target: absent_target.clone(),
                     remove: true,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1507,6 +1609,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: true,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1567,6 +1670,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1582,6 +1686,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: true,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1613,6 +1718,7 @@ mod tests {
                     target: absent_target.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1660,6 +1766,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1688,6 +1795,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1722,6 +1830,7 @@ mod tests {
                     target: crate::EntityId::new("other-mem", "thing"),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1761,6 +1870,7 @@ mod tests {
                     target: crate::EntityId("bad target with spaces!!".to_string()),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1792,6 +1902,7 @@ mod tests {
                     target: crate::EntityId(format!("{source_mem}--bad target with spaces!!")),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1827,6 +1938,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1872,6 +1984,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1895,6 +2008,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1945,6 +2059,7 @@ mod tests {
                     target: absent.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -1996,6 +2111,7 @@ mod tests {
                     target: absent.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2029,6 +2145,7 @@ mod tests {
                     target: stub_id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2046,6 +2163,7 @@ mod tests {
                     target: stub_id.clone(),
                     remove: true,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2094,6 +2212,7 @@ mod tests {
                     target: stub_id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2109,6 +2228,7 @@ mod tests {
                     target: stub_id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2127,6 +2247,7 @@ mod tests {
                     target: stub_id.clone(),
                     remove: true,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2381,6 +2502,7 @@ community:
                         target: tgt.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2501,6 +2623,7 @@ community:
                         target: tgt_entity.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2526,6 +2649,7 @@ community:
                         target: tgt.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2711,6 +2835,7 @@ community:
                         target: other_entity.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2773,6 +2898,7 @@ community:
                         target: intra_target.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2810,6 +2936,7 @@ community:
                         target: tgt.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2843,6 +2970,7 @@ community:
                         target: tgt.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2865,6 +2993,7 @@ community:
                         target: tgt.id.clone(),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2887,6 +3016,7 @@ community:
                         target: tgt.id.clone(),
                         remove: true,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -2923,6 +3053,7 @@ community:
                         target: tgt.id.clone(),
                         remove: true,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -3093,6 +3224,33 @@ community:
             }
         }
 
+        /// Rehearsal complement (agent-trust plan 07): a rehearsed
+        /// relate against a read-only boundary refuses EXACTLY as the
+        /// real call would — same variant, same payload. Paired with
+        /// `relate_to_missing_target_in_readonly_mem_refuses` below.
+        #[test]
+        fn relate_dry_run_to_missing_target_in_readonly_mem_refuses_identically() {
+            let (_tmp, mut engine, src) = engine_with_tgt_capability(MountCapability::ReadOnly);
+            let (actor, client) = cli_actor();
+            let args = |dry_run: bool| RelateEntityArgs {
+                source: src.id.clone(),
+                expected_hash: Some(src.content_hash.clone()),
+                rel_type: "ADDRESSES".to_string(),
+                target: crate::EntityId::new("tgt", "missing"),
+                remove: false,
+                description: None,
+                dry_run,
+            };
+            let rehearsed = engine
+                .relate_entity(args(true), actor, Some(&client), None)
+                .unwrap_err();
+            let real = engine
+                .relate_entity(args(false), actor, Some(&client), None)
+                .unwrap_err();
+            assert_eq!(format!("{rehearsed:?}"), format!("{real:?}"));
+            assert_cross_mem_target_not_found(rehearsed, "tgt--missing");
+        }
+
         #[test]
         fn relate_to_missing_target_in_readonly_mem_refuses() {
             let (_tmp, mut engine, src) = engine_with_tgt_capability(MountCapability::ReadOnly);
@@ -3106,6 +3264,7 @@ community:
                         target: crate::EntityId::new("tgt", "missing"),
                         remove: false,
                         description: None,
+                        dry_run: false,
                     },
                     actor,
                     Some(&client),
@@ -3322,6 +3481,7 @@ community:
             target: id(to),
             remove,
             description: None,
+            dry_run: false,
         };
 
         let result = engine
@@ -3333,6 +3493,7 @@ community:
                 ],
                 actor,
                 Some(&client),
+                false,
             )
             .unwrap();
         assert!(result.applied, "{result:?}");
@@ -3351,6 +3512,268 @@ community:
         assert_eq!(a.relationships.len(), 1, "{:?}", a.relationships);
         assert_eq!(a.relationships[0].rel_type, "USES");
         assert_eq!(a.relationships[0].target, id("b"));
+    }
+
+    /// Rehearsal contract (agent-trust plan 07) — single relate:
+    /// `dry_run: true` runs the FULL validation, reports the would-be
+    /// edge and the would-be auto-stub (reported, never created) with
+    /// the marker form's empty `commit_sha`, and writes nothing. The
+    /// follow-up real call succeeds and lands EXACTLY the rehearsed
+    /// prospective `_hash` — the strongest identical-validation
+    /// observable.
+    #[test]
+    fn relate_dry_run_reports_would_be_stub_and_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, source) = engine_with_seed(&tmp, "Src");
+        // Pin the mutation clock: the auto-stamped `last_modified`
+        // enters the content hash, so the prospective-hash == real-hash
+        // assertion below is only deterministic under a frozen clock
+        // (unpinned, it fails whenever a wall-clock second ticks
+        // between the rehearsal and the real call).
+        engine.set_mutation_clock(std::sync::Arc::new(|| {
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_754_000_000)
+        }));
+        let (actor, client) = cli_actor();
+        let absent = crate::EntityId::new("specs", "ghost-target");
+        let args = |dry_run: bool| RelateEntityArgs {
+            source: source.id.clone(),
+            expected_hash: Some(source.content_hash.clone()),
+            rel_type: "USES".to_string(),
+            target: absent.clone(),
+            remove: false,
+            description: None,
+            dry_run,
+        };
+
+        let rehearsed = engine
+            .relate_entity(args(true), actor, Some(&client), None)
+            .unwrap();
+        assert_eq!(rehearsed.action, RelateAction::Added);
+        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        assert!(
+            rehearsed.warnings.iter().any(
+                |w| matches!(w, crate::ops::WarningHint::AutoStubCreated { stub_id } if *stub_id == absent)
+            ),
+            "would-be stub must be reported: {:?}",
+            rehearsed.warnings
+        );
+        assert!(
+            !engine.store().contains(&absent),
+            "would-be stub reported, never created"
+        );
+        // Source untouched: stored hash still the pre-call hash, and
+        // the reported hash is the PROSPECTIVE one (a real change).
+        let stored = engine.store().get(&source.id).unwrap();
+        assert_eq!(stored.content_hash, source.content_hash);
+        assert_ne!(rehearsed.content_hash, source.content_hash);
+        assert!(stored.relationships.is_empty(), "no edge landed");
+
+        // Follow-up real call: succeeds, commits, and the rehearsed
+        // prospective hash IS the real post-write hash.
+        let real = engine
+            .relate_entity(args(false), actor, Some(&client), None)
+            .unwrap();
+        assert!(!real.commit_sha.is_empty(), "the real relate commits");
+        assert_eq!(
+            real.content_hash, rehearsed.content_hash,
+            "prospective hash must equal the real post-write hash"
+        );
+        assert!(engine.store().get(&absent).expect("real call stubs").stub);
+    }
+
+    /// Rehearsal refusal parity — single relate: an illegal rehearsed
+    /// relate refuses with the IDENTICAL typed error the real call
+    /// returns (same variant, same payload).
+    #[test]
+    fn relate_dry_run_refuses_identically_to_real() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, source) = engine_with_seed(&tmp, "Src");
+        let (actor, client) = cli_actor();
+        // Malformed target id (no `--` separator) — INVALID_ENTITY_ID.
+        let args = |dry_run: bool| RelateEntityArgs {
+            source: source.id.clone(),
+            expected_hash: None,
+            rel_type: "USES".to_string(),
+            target: crate::EntityId("bad target with spaces".to_string()),
+            remove: false,
+            description: None,
+            dry_run,
+        };
+        let rehearsed = engine
+            .relate_entity(args(true), actor, Some(&client), None)
+            .unwrap_err();
+        let real = engine
+            .relate_entity(args(false), actor, Some(&client), None)
+            .unwrap_err();
+        assert_eq!(
+            format!("{rehearsed:?}"),
+            format!("{real:?}"),
+            "identical typed refusal"
+        );
+        assert_eq!(rehearsed.code(), real.code());
+    }
+
+    /// Rehearsal — batch relate: `dry_run: true` validates the whole
+    /// list in order (a remove of an edge added earlier in the SAME
+    /// batch reports `"removed"` — the in-order proof), reports the
+    /// would-be receipt with empty `commit_sha`, and commits nothing:
+    /// no edge, no stub, no head movement. The follow-up real batch
+    /// succeeds.
+    #[test]
+    fn batch_relate_dry_run_reports_receipt_and_commits_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        for title in ["A", "B"] {
+            engine
+                .create_entity(
+                    empty_create_args("specs", title),
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap();
+        }
+        let id = |slug: &str| crate::entity::EntityId::new("specs", slug);
+        let edge = |from: &str, to: &str, remove: bool| RelateEntityArgs {
+            source: id(from),
+            expected_hash: None,
+            rel_type: "USES".to_string(),
+            target: id(to),
+            remove,
+            description: None,
+            dry_run: false,
+        };
+        let batch = || {
+            vec![
+                (edge("a", "b", false), None),
+                (edge("a", "ghost", false), None), // would-be auto-stub
+                (edge("a", "b", true), None),      // in-order: sees entry 0's add
+            ]
+        };
+        let head_before = engine
+            .mem_head_sha("specs")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+        let rehearsed = engine
+            .batch_relate(batch(), actor, Some(&client), true)
+            .unwrap();
+        assert!(rehearsed.applied, "{rehearsed:?}");
+        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        let actions: Vec<&str> = rehearsed.results.iter().map(|r| r.action.as_str()).collect();
+        assert_eq!(
+            actions,
+            vec!["added", "added", "removed"],
+            "in-order rehearsal semantics"
+        );
+        // Nothing landed: no stub, no edge, no head movement.
+        assert!(!engine.store().contains(&id("ghost")), "no stub created");
+        assert!(
+            engine.get_entity(&id("a")).unwrap().relationships.is_empty(),
+            "no edge landed"
+        );
+        let head_after = engine
+            .mem_head_sha("specs")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert_eq!(head_before, head_after, "no commit landed");
+
+        // The real batch on the unchanged mem succeeds.
+        let real = engine
+            .batch_relate(batch(), actor, Some(&client), false)
+            .unwrap();
+        assert!(real.applied, "{real:?}");
+        assert!(!real.commit_sha.is_empty());
+    }
+
+    /// Rehearsal refusal parity — batch relate: a failing list refuses
+    /// under `dry_run: true` with the SAME per-entry report-all
+    /// envelope the real refusal carries.
+    #[test]
+    fn batch_relate_dry_run_refuses_identically_to_real() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        for title in ["A", "B"] {
+            engine
+                .create_entity(
+                    empty_create_args("specs", title),
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap();
+        }
+        let id = |slug: &str| crate::entity::EntityId::new("specs", slug);
+        let batch = || {
+            vec![
+                (
+                    RelateEntityArgs {
+                        source: id("a"),
+                        expected_hash: None,
+                        rel_type: "USES".to_string(),
+                        target: id("b"),
+                        remove: false,
+                        description: None,
+                        dry_run: false,
+                    },
+                    None,
+                ),
+                (
+                    RelateEntityArgs {
+                        source: id("a"),
+                        expected_hash: None,
+                        rel_type: "USES".to_string(),
+                        target: crate::EntityId("bad target".to_string()),
+                        remove: false,
+                        description: None,
+                        dry_run: false,
+                    },
+                    None,
+                ),
+            ]
+        };
+        let rehearsed = engine
+            .batch_relate(batch(), actor, Some(&client), true)
+            .unwrap();
+        let real = engine
+            .batch_relate(batch(), actor, Some(&client), false)
+            .unwrap();
+        assert!(!rehearsed.applied && !real.applied);
+        let envelope = |r: &crate::ops::BatchResult| {
+            r.results
+                .iter()
+                .map(|e| {
+                    (
+                        e.id.to_string(),
+                        e.action.clone(),
+                        e.error
+                            .as_ref()
+                            .map(|err| (err.code.clone(), err.message.clone(), err.details.clone())),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(envelope(&rehearsed), envelope(&real), "identical refusals");
+        assert!(
+            engine.get_entity(&id("a")).unwrap().relationships.is_empty(),
+            "neither run landed the valid entry"
+        );
     }
 
     /// Atomicity + report-all for batch relate: a batch with several
@@ -3395,6 +3818,7 @@ community:
                             target: id("b"),
                             remove: false,
                             description: None,
+                            dry_run: false,
                         },
                         None,
                     ),
@@ -3407,6 +3831,7 @@ community:
                             target: id("b"),
                             remove: false,
                             description: None,
+                            dry_run: false,
                         },
                         None,
                     ),
@@ -3419,12 +3844,14 @@ community:
                             target: id("a"),
                             remove: false,
                             description: None,
+                            dry_run: false,
                         },
                         None,
                     ),
                 ],
                 actor,
                 Some(&client),
+                false,
             )
             .unwrap();
         assert!(!result.applied);

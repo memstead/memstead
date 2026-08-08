@@ -1060,6 +1060,14 @@ impl Engine {
     /// commit. A batch where every item is a no-op (content unchanged)
     /// likewise applies with an empty `commit_sha`.
     ///
+    /// **Rehearsal** (`dry_run: true`): the FULL per-item validation
+    /// pass runs — identical refusals, identical report-all envelope —
+    /// then the batch stops before any write or commit. A legal batch
+    /// returns the would-be receipt (`applied: true`, per-entry
+    /// actions) with the marker form's empty `commit_sha`; an illegal
+    /// one returns the same refusal a real call would. Nothing is
+    /// staged, committed, or stamped.
+    ///
     /// Atomicity is per-mem: for the common single-mem batch a
     /// commit-time backend failure rolls the whole batch back. A batch
     /// spanning multiple mems commits each mem in turn; if a later
@@ -1073,6 +1081,7 @@ impl Engine {
         updates: Vec<(UpdateEntityArgs, Option<String>)>,
         actor: Actor,
         client: Option<&ClientId>,
+        dry_run: bool,
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if updates.is_empty() {
             return Ok(crate::ops::BatchResult {
@@ -1130,9 +1139,15 @@ impl Engine {
         // failing entry at once (the family's upgraded contract).
         for (i, (args, note)) in updates.into_iter().enumerate() {
             let id = args.id.clone();
+            // Rehearsal is batch-level (the `dry_run` parameter) —
+            // force the per-entry flag off so `Done` below always
+            // means a genuine content no-op, never a per-entry
+            // dry-run short-circuit misread as one.
+            let mut args = args;
+            args.dry_run = false;
             match self.prepare_update(args) {
                 Ok(PrepareOutcome::Done(_)) => {
-                    // No-op (batch never sets dry_run): applied, no write.
+                    // No-op: applied, no write.
                     items.push((id, Item::Noop));
                 }
                 Ok(PrepareOutcome::Prepared(p)) => {
@@ -1194,6 +1209,38 @@ impl Engine {
                 results,
                 succeeded: 0,
                 failed,
+                commit_sha: String::new(),
+            });
+        }
+
+        // Rehearsal: every item validated (the pass above is the same
+        // one a real batch runs), nothing failed — stop before any
+        // write. Roll back the prepare pass's store effects, discard
+        // any pending buffers, and return the would-be receipt with
+        // the marker form's empty `commit_sha`.
+        if dry_run {
+            self.store = store_snapshot;
+            self.discard_all_pending();
+            let succeeded = items.len();
+            let results: Vec<crate::ops::BatchEntry> = items
+                .into_iter()
+                .map(|(id, item)| crate::ops::BatchEntry {
+                    id,
+                    action: match item {
+                        Item::Prepared => "updated".to_string(),
+                        Item::Noop => "noop".to_string(),
+                        Item::Error => unreachable!("refusal path returned above"),
+                    },
+                    error: None,
+                })
+                .collect();
+            return Ok(crate::ops::BatchResult {
+                orphan_stubs_removed: Vec::new(),
+                errors_suppressed: 0,
+                applied: true,
+                results,
+                succeeded,
+                failed: 0,
                 commit_sha: String::new(),
             });
         }
@@ -1624,7 +1671,7 @@ mod tests {
         )])
         .unwrap();
 
-        let result = engine.batch_update(Vec::new(), Actor::Cli, None).unwrap();
+        let result = engine.batch_update(Vec::new(), Actor::Cli, None, false).unwrap();
         assert!(result.applied, "empty batch is a vacuous success");
         assert_eq!(result.results.len(), 0);
         assert_eq!(result.succeeded, 0);
@@ -1702,6 +1749,7 @@ mod tests {
                 vec![(valid_update, None), (missing_update, None)],
                 Actor::Cli,
                 None,
+                false,
             )
             .unwrap();
         // Whole batch refused: nothing applied, no commit.
@@ -1794,6 +1842,7 @@ mod tests {
                 ],
                 Actor::Cli,
                 None,
+                false,
             )
             .unwrap();
         assert!(result.applied);
@@ -1822,6 +1871,179 @@ mod tests {
                 .get("identity")
                 .map(String::as_str),
             Some("B body"),
+        );
+    }
+
+    /// Rehearsal contract (agent-trust plan 07): `batch_update` with
+    /// `dry_run: true` runs the full per-item validation, reports the
+    /// would-be receipt with the marker form's empty `commit_sha`, and
+    /// persists NOTHING — on-disk bodies and hashes stay untouched.
+    /// The follow-up real call with the SAME expected hashes succeeds,
+    /// proving both the identical-validation contract and the
+    /// side-effect-freeness (a persisted rehearsal would have moved
+    /// the hashes and refused the real call).
+    #[test]
+    fn batch_update_dry_run_reports_receipt_and_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+
+        let mk = |title: &str| CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "specs".to_string(),
+            title: title.to_string(),
+            entity_type: "spec".to_string(),
+            sections: IndexMap::from_iter([
+                ("identity".to_string(), "id".to_string()),
+                ("purpose".to_string(), "purp".to_string()),
+            ]),
+            metadata: IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        let a = engine
+            .create_entity(mk("A"), Actor::Cli, None, None)
+            .unwrap();
+        let b = engine
+            .create_entity(mk("B"), Actor::Cli, None, None)
+            .unwrap();
+
+        let upd = |id: EntityId, hash: String, body: &str| UpdateEntityArgs {
+            anchors: Vec::new(),
+            id,
+            expected_hash: Some(hash),
+            sections: IndexMap::from_iter([("identity".to_string(), body.to_string())]),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
+        };
+        let batch = || {
+            vec![
+                (upd(a.id.clone(), a.content_hash.clone(), "A body"), None),
+                (upd(b.id.clone(), b.content_hash.clone(), "B body"), None),
+            ]
+        };
+
+        let rehearsed = engine
+            .batch_update(batch(), Actor::Cli, None, true)
+            .unwrap();
+        assert!(rehearsed.applied, "{rehearsed:?}");
+        assert_eq!(rehearsed.succeeded, 2);
+        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        assert!(rehearsed.results.iter().all(|e| e.action == "updated"));
+        // Nothing persisted: body and hash unchanged.
+        let a_now = engine.get_entity(&a.id).unwrap();
+        assert_eq!(a_now.sections.get("identity").map(String::as_str), Some("id"));
+        assert_eq!(a_now.content_hash, a.content_hash);
+
+        // The real call with the same (pre-rehearsal) hashes lands.
+        let real = engine
+            .batch_update(batch(), Actor::Cli, None, false)
+            .unwrap();
+        assert!(real.applied, "{real:?}");
+        assert!(!real.commit_sha.is_empty());
+        assert_eq!(
+            engine
+                .get_entity(&a.id)
+                .unwrap()
+                .sections
+                .get("identity")
+                .map(String::as_str),
+            Some("A body"),
+        );
+    }
+
+    /// Rehearsal refusal parity: a failing batch refuses under
+    /// `dry_run: true` with the SAME per-entry envelope (code,
+    /// message, details) the real refusal carries.
+    #[test]
+    fn batch_update_dry_run_refuses_identically_to_real() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let created = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "specs".to_string(),
+                    title: "Valid".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: IndexMap::from_iter([
+                        ("identity".to_string(), "x".to_string()),
+                        ("purpose".to_string(), "p".to_string()),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .unwrap();
+        let upd = |id: EntityId, hash: Option<String>| UpdateEntityArgs {
+            anchors: Vec::new(),
+            id,
+            expected_hash: hash,
+            sections: IndexMap::from_iter([("identity".to_string(), "new".to_string())]),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
+        };
+        let batch = || {
+            vec![
+                (upd(created.id.clone(), Some("wrong-hash".to_string())), None),
+                (upd(EntityId("specs--missing".to_string()), None), None),
+            ]
+        };
+
+        let rehearsed = engine.batch_update(batch(), Actor::Cli, None, true).unwrap();
+        let real = engine.batch_update(batch(), Actor::Cli, None, false).unwrap();
+        assert!(!rehearsed.applied && !real.applied);
+        let envelope = |r: &crate::ops::BatchResult| {
+            r.results
+                .iter()
+                .map(|e| {
+                    (
+                        e.id.to_string(),
+                        e.action.clone(),
+                        e.error
+                            .as_ref()
+                            .map(|err| (err.code.clone(), err.message.clone(), err.details.clone())),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(envelope(&rehearsed), envelope(&real), "identical refusals");
+        // Neither run persisted anything.
+        assert_eq!(
+            engine
+                .get_entity(&created.id)
+                .unwrap()
+                .sections
+                .get("identity")
+                .map(String::as_str),
+            Some("x"),
         );
     }
 
@@ -1882,6 +2104,7 @@ mod tests {
                 ],
                 Actor::Cli,
                 None,
+                false,
             )
             .unwrap();
         assert!(!result.applied);
@@ -1979,7 +2202,7 @@ mod tests {
         assert!(engine.get_entity(&stub_target).is_none());
 
         let result = engine
-            .batch_update(vec![(item1, None), (item2, None)], actor, Some(&client))
+            .batch_update(vec![(item1, None), (item2, None)], actor, Some(&client), false)
             .unwrap();
         assert!(!result.applied, "missing item 2 must refuse the batch");
 
@@ -2347,6 +2570,7 @@ mod tests {
                     target: stub_id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -2941,6 +3165,7 @@ mod tests {
                     target: foo.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -3459,6 +3684,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4059,6 +4285,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4224,6 +4451,7 @@ mod tests {
                     target: target.id.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),
@@ -4878,6 +5106,7 @@ community:
                     target: drifted.clone(),
                     remove: false,
                     description: None,
+                    dry_run: false,
                 },
                 Actor::Cli,
                 None,
@@ -5358,7 +5587,7 @@ community:
             .metadata
             .insert("id".to_string(), "resmuggled".to_string());
         let batch = engine
-            .batch_update(vec![(batch_item, None)], actor, Some(&client))
+            .batch_update(vec![(batch_item, None)], actor, Some(&client), false)
             .expect("batch returns a result envelope");
         assert!(
             !batch.applied,
@@ -5496,6 +5725,7 @@ community:
                     remove: false,
                     expected_hash: None,
                     description: None,
+                    dry_run: false,
                 },
                 actor,
                 Some(&client),

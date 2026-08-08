@@ -58,6 +58,14 @@ pub struct Args {
     /// `NOTE_MISSING` warning.
     #[arg(long)]
     pub note: Option<String>,
+
+    /// Rehearse the relate: run the full validation (identical
+    /// refusals and warnings) and report the would-be edge — including
+    /// a would-be auto-stub, which is reported, never created —
+    /// without writing anything. `commit_sha` stays empty (the
+    /// rehearsal marker); `_hash` is the prospective post-write hash.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 /// Resolve a per-slot value from the positional-OR-flag pair. Both
@@ -107,6 +115,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 remove,
                 expected_hash: None,
                 description: args.description.clone(),
+                dry_run: args.dry_run,
             },
             Actor::Cli,
             Some(&client),
@@ -124,6 +133,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "rel_type": outcome.rel_type,
             "action": format!("{:?}", outcome.action),
             "_hash": outcome.content_hash,
+            // Empty on rehearsals (the marker form) and no-op paths;
+            // the real commit's sha otherwise.
+            "commit_sha": outcome.commit_sha,
             "warnings": outcome.warnings,
             "orphan_stubs_removed": outcome
                 .orphan_stubs_removed
@@ -134,7 +146,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         super::merge_mem_changed_json(&mut body, &mem_changed);
         print_json(&body)?;
     } else {
-        let verb = if remove { "Removed" } else { "Added" };
+        let verb = match (args.dry_run, remove) {
+            (true, true) => "Would remove (dry-run)",
+            (true, false) => "Would add (dry-run)",
+            (false, true) => "Removed",
+            (false, false) => "Added",
+        };
         let warnings_block = if outcome.warnings.is_empty() {
             String::new()
         } else {

@@ -350,6 +350,13 @@ pub struct RelateEntityArgs {
     /// `None` before validation. Ignored on the remove path (`None`
     /// keeps the existing behaviour intact).
     pub description: Option<String>,
+    /// Rehearsal mode (agent-trust plan 07): run the FULL validation
+    /// stage — identical refusals, identical warnings (including the
+    /// would-be `AUTO_STUB_CREATED`) — then stop before any write.
+    /// The response carries the marker form: empty `commit_sha` with
+    /// `_hash` set to the PROSPECTIVE post-write hash. Nothing is
+    /// staged, committed, or stubbed.
+    pub dry_run: bool,
 }
 
 /// What a relate call did to the source's relationships.

@@ -84,6 +84,7 @@ fn goal_fixture_full_story_under_the_current_id() {
                 name: "claude-code".to_string(),
                 version: "1.0.0".to_string(),
             }),
+            false,
         )
         .unwrap();
     assert!(batch.applied, "{batch:?}");
