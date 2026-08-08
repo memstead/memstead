@@ -8,6 +8,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Typed boot errors: every boot failure names its code and its
+  fix.** Boot failures no longer collapse to `ERROR [INTERNAL]` with
+  no next step. `BootError` now carries `code()` / `details()` /
+  `surface_message()`; the CLI's engine-setup seam lifts them into the
+  standard `{code, message, details}` envelope, and the MCP server
+  prints the same code and message on stderr before exiting (its
+  transport never comes up on a failed boot, so stderr is the
+  diagnostic surface). Store-layer failure classes each carry their
+  own token (`WORKSPACE_STORE_PARSE`, `WORKSPACE_STORE_IO`,
+  `WORKSPACE_STORE_FORMAT_MISMATCH`, `LEGACY_WORKSPACE_LAYOUT`,
+  `PROJECTION_STORE_LEGACY` — now real, previously a phantom doc
+  comment — `UNKNOWN_BINDING_VERSION`); classes with no mechanical
+  remedy say so plainly instead of inventing a command. The
+  schema-pin failure message now ends in the repair command the
+  source trail calls for: right-name/wrong-version pins name the
+  concrete `memstead mem set-schema <mem> <name>@<installed-version>`
+  repin (the previously suppressed disappeared-built-in case), and
+  name-unknown-everywhere pins name the `memstead schema install`
+  path even when no authoring package is present to point at. A
+  boot-failure class sweep (`memstead-cli/tests/boot_typed_errors.rs`)
+  plus a CLI/MCP parity test pin the contract.
 - **The overview names its workspace: `_workspace_root` frontmatter.**
   `memstead_overview` (both server flavours, and the CLI `overview`)
   renders the absolute path of the workspace the serving engine booted

@@ -1789,15 +1789,35 @@ fn schema_not_found_message(
         .collect();
     msg.push_str(&format!(" — searched {}", trail.join(", ")));
     if sources.iter().any(|s| !s.versions_found.is_empty()) {
+        // Right name, wrong version. The honest hint is version
+        // repair, not silence: the final clause is the concrete repin
+        // command against the newest version a source actually holds.
+        let best = sources
+            .iter()
+            .flat_map(|s| &s.versions_found)
+            .filter_map(|v| semver::Version::parse(v).ok())
+            .max();
         msg.push_str(&format!(
             "; the name {name:?} exists at the versions listed — the pinned version is wrong, \
              or the pinned version was never installed"
         ));
-    }
-    if let Some(path) = install_hint {
+        if let Some(best) = best {
+            msg.push_str(&format!(
+                "; repin to an installed version: run: memstead mem set-schema {mem} {name}@{best}"
+            ));
+        }
+    } else if let Some(path) = install_hint {
         msg.push_str(&format!(
             "; an authoring package named {name:?} exists at {path:?} but is not installed — \
              run: memstead schema install {path}"
+        ));
+    } else {
+        // Name unknown everywhere and no authoring package in sight —
+        // the repair path is still the install path, stated without a
+        // concrete package location because none exists to name.
+        msg.push_str(&format!(
+            "; no source holds any version of {name:?} — author or obtain the schema package, \
+             then run: memstead schema install <package-dir>"
         ));
     }
     msg
@@ -1914,6 +1934,74 @@ pub enum BootError {
     Engine(#[from] EngineError),
 }
 
+impl BootError {
+    /// Stable, surface-independent error code token (UPPER_SNAKE, per
+    /// the [`EngineError::code`] convention). Every boot failure class
+    /// resolves to a typed code — `INTERNAL` is not producible from
+    /// this seam. The wrapped layers each own their vocabulary:
+    /// store-load failures delegate to
+    /// [`crate::workspace_store::StoreError::code`], backend
+    /// instantiation to
+    /// [`crate::workspace_store::InstantiateError::code`], engine
+    /// construction to [`EngineError::code`].
+    pub fn code(&self) -> &'static str {
+        match self {
+            // Same token the CLI's workspace walk uses — "no
+            // workspace here" is one condition wherever detected.
+            BootError::NotInitialised(_) => "WORKSPACE_NOT_INITIALISED",
+            BootError::Store(e) => e.code(),
+            BootError::Instantiate(e) => e.code(),
+            BootError::Engine(e) => e.code(),
+        }
+    }
+
+    /// Structured recovery payload for the boot failure, surfacing
+    /// under `error.details` on `--json` envelopes. Engine-layer
+    /// failures reuse [`EngineError::details`] (so e.g. a boot-time
+    /// `SCHEMA_NOT_FOUND` ships the same `details.sources` trail the
+    /// per-verb surfaces ship); the other layers name the offending
+    /// path.
+    pub fn details(&self) -> serde_json::Value {
+        use crate::workspace_store::StoreError;
+        match self {
+            BootError::NotInitialised(path) => {
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "hint": { "recovery_command": "memstead mem-repo init" },
+                })
+            }
+            BootError::Store(e) => match e {
+                StoreError::NotInitialised { path }
+                | StoreError::Io { path, .. }
+                | StoreError::Parse { path, .. }
+                | StoreError::FormatMismatch { path, .. }
+                | StoreError::LegacyLayout { path, .. }
+                | StoreError::UnknownBindingVersion { path, .. } => {
+                    serde_json::json!({ "path": path.display().to_string() })
+                }
+                StoreError::LegacyProjectionStore { path } => serde_json::json!({
+                    "path": path.display().to_string(),
+                    "hint": { "recovery_command": "memstead projection migrate" },
+                }),
+                StoreError::Other(_) => serde_json::json!({}),
+            },
+            BootError::Instantiate(
+                crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature { mem },
+            ) => serde_json::json!({ "mem": mem }),
+            BootError::Engine(e) => e.details(),
+        }
+    }
+
+    /// The one boot-failure message every surface prints verbatim
+    /// (CLI stderr / `--json`, MCP boot diagnostics), so the same
+    /// broken workspace reads identically wherever it refuses. The
+    /// leaf error's own message carries the repair command (or states
+    /// plainly that none exists).
+    pub fn surface_message(&self, workspace_root: &std::path::Path) -> String {
+        format!("init engine at {}: {self}", workspace_root.display())
+    }
+}
+
 #[cfg(test)]
 mod plan05_subsystem_tests {
     use super::*;
@@ -2006,6 +2094,10 @@ mod plan05_subsystem_tests {
             msg.contains("the pinned version is wrong"),
             "wrong-version case must be named in the message: {msg}"
         );
+        assert!(
+            msg.contains("memstead mem set-schema specs default@1.0.0"),
+            "wrong-version case ends in the concrete repin command: {msg}"
+        );
 
         // Never installed: no source holds any version of the name.
         let never: semver::Version = "1.0.0".parse().unwrap();
@@ -2023,6 +2115,10 @@ mod plan05_subsystem_tests {
         assert!(
             !msg2.contains("the pinned version is wrong"),
             "never-installed must NOT claim a version mismatch: {msg2}"
+        );
+        assert!(
+            msg2.contains("memstead schema install <package-dir>"),
+            "never-installed (no probe) still names the install path: {msg2}"
         );
         assert_ne!(msg, msg2, "the two failures are distinguishable");
 
@@ -2086,14 +2182,32 @@ mod plan05_subsystem_tests {
             "details carry the hint: {d}"
         );
 
-        // No workspace root → no hint.
+        // No workspace root → no concrete package hint; the message
+        // falls back to the generic install path.
         let no_root = not_found().with_schema_install_probe(None);
-        assert!(!no_root.to_string().contains("schema install"));
+        let no_root_msg = no_root.to_string();
+        assert!(
+            no_root_msg.contains("memstead schema install <package-dir>"),
+            "generic install path without a probe hit: {no_root_msg}"
+        );
+        assert!(
+            !no_root_msg.contains(&tmp.path().display().to_string()),
+            "no concrete package path without a probe hit: {no_root_msg}"
+        );
 
-        // No such authoring package → no hint.
+        // No such authoring package → same generic fallback, no
+        // concrete path.
         let other_tmp = tempfile::TempDir::new().unwrap();
         let absent = not_found().with_schema_install_probe(Some(other_tmp.path()));
-        assert!(!absent.to_string().contains("schema install"));
+        let absent_msg = absent.to_string();
+        assert!(
+            absent_msg.contains("memstead schema install <package-dir>"),
+            "generic install path when no package exists: {absent_msg}"
+        );
+        assert!(
+            !absent_msg.contains(&other_tmp.path().display().to_string()),
+            "no concrete package path when no package exists: {absent_msg}"
+        );
 
         // Version mismatch against an installed package (some source
         // holds versions of the name) → no hint even though the
@@ -2106,9 +2220,14 @@ mod plan05_subsystem_tests {
             install_hint: None,
         }
         .with_schema_install_probe(Some(tmp.path()));
+        let mismatch_msg = mismatch.to_string();
         assert!(
-            !mismatch.to_string().contains("schema install"),
-            "version mismatch must not hint install: {mismatch}"
+            !mismatch_msg.contains("schema install"),
+            "version mismatch must not hint install: {mismatch_msg}"
+        );
+        assert!(
+            mismatch_msg.contains("memstead mem set-schema specs default@1.0.0"),
+            "version mismatch hints version repair instead: {mismatch_msg}"
         );
 
         // Non-SchemaNotFound errors pass through unchanged.

@@ -642,7 +642,9 @@ fn binding_hash_of(binding: &Binding, _resolved: &ResolvedIngest) -> String {
     hash_binding(binding)
 }
 
-/// The current recording key for a binding: `(hash(D), source_head)`.
+/// The current [`FindingKey`] for a binding — `hash(D)` (the half that
+/// keys the store) plus the current `source_head` (observation
+/// metadata carried on each finding, not part of the store key).
 fn current_key(
     engine: &Engine,
     workspace_root: &Path,

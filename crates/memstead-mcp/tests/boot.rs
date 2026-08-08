@@ -132,3 +132,52 @@ fn full_binary_boots_against_new_layout_workspace() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+/// Boot-failure parity: the full binary's stderr diagnostic for a
+/// broken workspace carries the same typed code and the same
+/// `BootError::surface_message` string the CLI's `--json` envelope
+/// ships for the identical fixture (`memstead-cli/tests/
+/// boot_typed_errors.rs` pins the CLI side to the same renderer).
+/// Fixture: a legacy pre-v2 projection config — the backlog item that
+/// used to die as `-32000 Connection closed` with no envelope at all.
+#[test]
+fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
+    let tmp = TempDir::new().unwrap();
+    seed_workspace(tmp.path());
+    memstead_git_branch::test_support::init_real_mem_repo(tmp.path(), &[]);
+    let proj_dir = tmp.path().join(".memstead").join("projections").join("engine");
+    std::fs::create_dir_all(&proj_dir).unwrap();
+    std::fs::write(proj_dir.join("graph.json"), "{}").unwrap();
+
+    // The child resolves its workspace root through cwd, which the OS
+    // canonicalizes (`/var` → `/private/var` on macOS) — compute the
+    // expected line against the same base path.
+    let ws = tmp.path().canonicalize().unwrap();
+    let boot_err = memstead_git_branch::workspace_store::engine_from_workspace_root(&ws)
+        .err()
+        .expect("fixture must fail the in-process boot");
+    assert_eq!(boot_err.code(), "PROJECTION_STORE_LEGACY");
+    let expected = format!(
+        "memstead-mcp: ERROR [{}]: {}",
+        boot_err.code(),
+        boot_err.surface_message(&ws)
+    );
+
+    let output = Command::new(memstead_mcp_bin())
+        .current_dir(tmp.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn memstead-mcp (full) — confirm the binary built before running tests");
+
+    assert!(
+        !output.status.success(),
+        "boot against the broken workspace must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&expected),
+        "stderr must carry the typed boot diagnostic\nexpected line: {expected}\n--- stderr ---\n{stderr}"
+    );
+}

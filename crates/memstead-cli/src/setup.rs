@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "mem-repo")]
 use anyhow::Context;
 
 use memstead_base::Engine as BaseEngine;
@@ -60,6 +61,29 @@ pub fn workspace_not_initialised_error(message: &str) -> CliError {
         details: Some(serde_json::json!({
             "hint": { "recovery_command": WORKSPACE_RECOVERY_COMMAND },
         })),
+    }
+}
+
+/// Lift a [`memstead_base::BootError`] into the typed CLI envelope.
+/// The boot seam previously flattened these through `anyhow`, so the
+/// `main` downcast missed them and every boot failure surfaced as
+/// `code: INTERNAL` with no next step (plenum 2026-08-06/07, expertise
+/// 2026-08-07). The typed material lives on
+/// [`memstead_base::BootError::code`]; this function only wraps it in
+/// the CLI's exit shape. The message is
+/// [`memstead_base::BootError::surface_message`] verbatim — identical
+/// on the MCP server's boot diagnostics for the same broken workspace.
+pub fn boot_error_to_cli(workspace_root: &Path, e: memstead_base::BootError) -> CliError {
+    let details = e.details();
+    let details = match &details {
+        serde_json::Value::Object(map) if map.is_empty() => None,
+        _ => Some(details),
+    };
+    CliError {
+        kind: ExitKind::Generic,
+        code: e.code(),
+        message: e.surface_message(workspace_root),
+        details,
     }
 }
 
@@ -206,8 +230,8 @@ impl CliContext {
         if root.join("mem-repo").join(".git").is_dir() {
             #[cfg(feature = "mem-repo")]
             {
-                let engine = engine_from_workspace_root(root)
-                    .map_err(|e| anyhow::anyhow!("init engine at {}: {e:#}", root.display()))?;
+                let engine =
+                    engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
                 return Ok(CliEngine::MemRepo(engine));
             }
             #[cfg(not(feature = "mem-repo"))]
@@ -223,8 +247,8 @@ impl CliContext {
                 .into());
             }
         }
-        let engine = BaseEngine::from_workspace_root(root)
-            .with_context(|| format!("init filesystem-mem engine at {}", root.display()))?;
+        let engine =
+            BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
         Ok(CliEngine::Filesystem(engine))
     }
 
@@ -267,7 +291,8 @@ impl CliContext {
         }
 
         engine_from_workspace_root(&root)
-            .map_err(|e| anyhow::anyhow!("init engine at {}: {e:#}", root.display()))
+            .map_err(|e| boot_error_to_cli(&root, e))
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -399,7 +424,8 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     }
 
     engine_from_workspace_root(&root)
-        .map_err(|e| anyhow::anyhow!("init engine at {}: {e:#}", root.display()))
+        .map_err(|e| boot_error_to_cli(&root, e))
+        .map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]

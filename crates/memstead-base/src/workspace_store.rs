@@ -74,10 +74,13 @@ pub enum StoreError {
     /// Workspace root has no `.memstead/` directory or no recognised
     /// adapter file inside it. Distinct from `Io` so callers can
     /// distinguish "needs `memstead init`" from "permissions broke".
-    #[error("workspace store not found at {path}")]
+    #[error("workspace store not found at {path} — run `memstead mem-repo init` first")]
     NotInitialised { path: PathBuf },
     /// IO failure reading or writing one of the adapter files.
-    #[error("workspace store io error at {path}: {source}")]
+    #[error(
+        "workspace store io error at {path}: {source} — no memstead command repairs this; \
+         check filesystem permissions and disk state"
+    )]
     Io {
         path: PathBuf,
         #[source]
@@ -86,11 +89,17 @@ pub enum StoreError {
     /// TOML or JSON parse / serialise failure. The wrapped string is
     /// the underlying serde error; the file is named so operators
     /// know where to look.
-    #[error("workspace store parse error at {path}: {message}")]
+    #[error(
+        "workspace store parse error at {path}: {message} — no memstead command repairs this; \
+         fix the named file by hand or restore it from version control"
+    )]
     Parse { path: PathBuf, message: String },
     /// Format version mismatch — adapter understands a different
     /// schema version than the file declares.
-    #[error("workspace store format mismatch at {path}: expected {expected}, found {found}")]
+    #[error(
+        "workspace store format mismatch at {path}: expected {expected}, found {found} — \
+         no memstead command repairs this; use an engine version whose format matches the file"
+    )]
     FormatMismatch {
         path: PathBuf,
         expected: String,
@@ -113,8 +122,8 @@ pub enum StoreError {
     /// retired three-file store. The loader serves only v2 (one record per
     /// pipeline); prior generations are migrated once (`memstead projection
     /// migrate`), never silently served. The message names the one-shot
-    /// migration command; the CLI maps it to the `PROJECTION_STORE_LEGACY`
-    /// token.
+    /// migration command; [`StoreError::code`] maps it to the
+    /// `PROJECTION_STORE_LEGACY` token on every surface.
     #[error(
         "legacy (pre-v2) projection config at {path}: this workspace predates the single-record \
          binding format v2 — run `memstead projection migrate` to convert it in place once"
@@ -131,6 +140,30 @@ pub enum StoreError {
     /// agent-readable message; structured variants extend the enum.
     #[error("workspace store error: {0}")]
     Other(String),
+}
+
+impl StoreError {
+    /// Stable, surface-independent error code token, following the
+    /// [`crate::EngineError::code`] convention (UPPER_SNAKE). Boot
+    /// failures route through [`crate::engine::BootError::code`],
+    /// which delegates here — a store-layer failure carries the same
+    /// typed code on CLI stderr, `--json` envelopes, and the MCP
+    /// server's boot diagnostics.
+    pub fn code(&self) -> &'static str {
+        match self {
+            // Same token the CLI's setup layer uses for "no workspace
+            // marker found" — one condition, one code, regardless of
+            // whether the walk or the store load detected it.
+            StoreError::NotInitialised { .. } => "WORKSPACE_NOT_INITIALISED",
+            StoreError::Io { .. } => "WORKSPACE_STORE_IO",
+            StoreError::Parse { .. } => "WORKSPACE_STORE_PARSE",
+            StoreError::FormatMismatch { .. } => "WORKSPACE_STORE_FORMAT_MISMATCH",
+            StoreError::LegacyLayout { .. } => "LEGACY_WORKSPACE_LAYOUT",
+            StoreError::LegacyProjectionStore { .. } => "PROJECTION_STORE_LEGACY",
+            StoreError::UnknownBindingVersion { .. } => "UNKNOWN_BINDING_VERSION",
+            StoreError::Other(_) => "WORKSPACE_STORE_ERROR",
+        }
+    }
 }
 
 /// Adapter trait — the seam between the engine and the persisted
@@ -780,6 +813,21 @@ pub enum InstantiateError {
          use `instantiate_full_backend` from memstead-git-branch, or rebuild with --features mem-repo"
     )]
     GitBranchRequiresMemRepoFeature { mem: String },
+}
+
+impl InstantiateError {
+    /// Stable, surface-independent error code token (UPPER_SNAKE, per
+    /// the [`crate::EngineError::code`] convention). Reuses the CLI's
+    /// existing `UNSUPPORTED_WORKSPACE_SHAPE` token: both fire when a
+    /// lean binary meets a git-branch-shaped workspace, and the
+    /// agent's next step is identical.
+    pub fn code(&self) -> &'static str {
+        match self {
+            InstantiateError::GitBranchRequiresMemRepoFeature { .. } => {
+                "UNSUPPORTED_WORKSPACE_SHAPE"
+            }
+        }
+    }
 }
 
 /// Materialise a [`MemBackend`] for `mount` using the lean-flavour

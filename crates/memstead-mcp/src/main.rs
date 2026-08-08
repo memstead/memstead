@@ -57,12 +57,29 @@ async fn main() -> anyhow::Result<()> {
 
     let workspace_root = find_workspace_root(&cwd).ok_or_else(|| {
         anyhow::anyhow!(
-            "CONFIG_ERROR: no `.memstead/workspace.toml` workspace found in cwd or any \
-             ancestor. Run `memstead mem-repo init` to bootstrap a new workspace."
+            "memstead-mcp: ERROR [WORKSPACE_NOT_INITIALISED]: no `.memstead/workspace.toml` \
+             workspace found in cwd or any ancestor — run `memstead mem-repo init` to bootstrap \
+             a new workspace"
         )
     })?;
 
     run(args, workspace_root).await
+}
+
+/// Render a boot failure onto stderr in the same typed shape the CLI
+/// prints (`ERROR [<CODE>]: <message>`, message from
+/// [`memstead_base::BootError::surface_message`]), then exit non-zero.
+/// The MCP transport never comes up on a failed boot — the client sees
+/// only a closed connection — so this stderr line is the diagnostic
+/// surface, and it must carry the typed code and repair command, not
+/// an untyped anyhow chain.
+fn exit_boot_failure(workspace_root: &std::path::Path, e: memstead_base::BootError) -> ! {
+    eprintln!(
+        "memstead-mcp: ERROR [{}]: {}",
+        e.code(),
+        e.surface_message(workspace_root)
+    );
+    std::process::exit(1);
 }
 
 /// Walk upward from `cwd` looking for the first ancestor that carries
@@ -98,9 +115,12 @@ async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
         workspace_root.display()
     );
 
-    let server =
-        memstead_mcp::filesystem_server::FilesystemMcpServer::from_workspace_root(&workspace_root)
-            .with_context(|| format!("init lean engine at {}", workspace_root.display()))?;
+    let server = match memstead_mcp::filesystem_server::FilesystemMcpServer::from_workspace_root(
+        &workspace_root,
+    ) {
+        Ok(server) => server,
+        Err(e) => exit_boot_failure(&workspace_root, e),
+    };
 
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
@@ -121,8 +141,11 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 
     tracing::info!("boot: mem-repo workspace at {}", workspace_root.display());
 
-    let mut engine = memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root)
-        .with_context(|| format!("failed to load workspace at {}", workspace_root.display()))?;
+    let mut engine =
+        match memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root) {
+            Ok(engine) => engine,
+            Err(e) => exit_boot_failure(&workspace_root, e),
+        };
 
     let stats = engine.status();
     tracing::info!(

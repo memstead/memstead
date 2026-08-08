@@ -17,13 +17,16 @@
 //! location. Installing a built-in forks it into local storage, which
 //! shadows the built-in per the resolution order — the customization
 //! entry point. Idempotent: re-running reproduces the same files.
-//! Git-branch workspaces are not yet a destination (their schemas live
-//! on the `__MEMSTEAD:schemas/` ref, which routes through the engine).
+//! Git-branch (mem-repo) workspaces are a destination too: install
+//! routes through the engine's `install_schema`, which seals the
+//! package onto the `__MEMSTEAD:schemas/` ref (see
+//! `install_to_git_branch`).
 //!
-//! `validate` is flavour-agnostic and touches no workspace; `install`
-//! needs the workspace root (the install destination) but no engine
-//! instance — it writes folder-backend schema storage directly, which
-//! is the documented folder authoring mechanism (not mem-repo state).
+//! `validate` is flavour-agnostic and touches no workspace. `install`
+//! dispatches on the workspace shape: the folder flavour writes
+//! `.memstead/schemas/` directly (the documented folder authoring
+//! mechanism, no engine needed); the mem-repo flavour boots an engine
+//! because the `__MEMSTEAD` ref is engine-owned state.
 
 use std::path::{Path, PathBuf};
 
