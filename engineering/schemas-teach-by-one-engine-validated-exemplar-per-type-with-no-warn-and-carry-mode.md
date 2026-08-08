@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-08T20:11:29Z
-last_modified: 2026-08-08T20:11:29Z
+last_modified: 2026-08-08T20:33:13Z
 status: accepted
 decided_on: 2026-08-08
 deciders: operator (agent-trust plan 09)
@@ -18,7 +18,7 @@ A schema type may carry ONE canonical exemplar — a complete entity in the mem 
 LLMs learn from examples far better than from rules — few-shot beats specification for every model class that consumes this engine — yet a schema taught exclusively by prose: section keys, write_rules, constraint declarations, with the agent refused into conformance ([[engine--runtime-validator]]). Hand-maintained examples in ordinary documentation die by drift; the 2026-08-07 verification found stale doc comments in the engine's own tree within weeks of writing, and the worked-example teaching package itself carried an `examples:` block whose comment claimed MCP injection that never existed — dead vocabulary lying about its effect, the exact class plan 06 retired. The write-rehearsal work supplied the natural validator: the create path's `dry_run` is the full validation stage, commit-free by contract, so exemplar validation IS the write validation — one gate, no second regime, per [[engineering--a-guard-on-one-write-path-exists-on-all-of-them-with-one-shared-implementation]].
 
 ## Consequences
-An agent authoring its first entity against an unfamiliar type reads a known-good shape instead of deriving one from prose — and what it reads is exactly what the validator accepts, forever, because CI and the install gate refuse divergence (built-in exemplars are gated by the same validator; the worked-example package models the practice under test). Costs accepted: exemplar authoring is real work per type (~44 built-in types across six schemas await their exemplars and new version directories under the append-only rule); the full-verbosity payload grows by one entity per type (bounded — a canonical entity, not a showcase); and third-party schemas may omit exemplars entirely (optional per type — only the reference schemas are held to completeness).
+An agent authoring its first entity against an unfamiliar type reads a known-good shape instead of deriving one from prose — and what it reads is exactly what the validator accepts, forever, because CI and the install gate refuse divergence (built-in exemplars are gated by the same validator; the worked-example package models the practice under test). Costs accepted: exemplar authoring is real work per type (44 built-in exemplars shipped across six new manifest-sealed generations — default@1.2.0, engineering@0.3.0, ingest@0.4.0, planning@0.4.0, project@0.3.0, software@0.3.0 — with completeness asserted on the newest version of every name; the gate's typed defects drove the authoring loop, surfacing that several built-in types declare required-no-default fields real usage rarely supplies); the full-verbosity payload grows by one entity per type (bounded — a canonical entity, not a showcase); and third-party schemas may omit exemplars entirely (optional per type — only the reference schemas are held to completeness).
 
 ## Relationships
 - **REFERENCES**: [[engine:runtime-validator]]

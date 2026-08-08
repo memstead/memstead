@@ -72,7 +72,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   loads refuse it with a pointer at `exemplar:`; sealed content keeps
   loading with the key dropped. The worked-example teaching package
   (`memstead-schema/examples/minimal`) models the practice, gated by
-  the same validator in CI.
+  the same validator in CI. Every built-in type carries an exemplar:
+  six new manifest-sealed generations ship them (default@1.2.0,
+  engineering@0.3.0, ingest@0.4.0, planning@0.4.0, project@0.3.0,
+  software@0.3.0 — 44 exemplars, all engine-validated in CI, with
+  completeness asserted on the newest version of every name);
+  `memstead quickstart` and the ingest process-mem pairing pin the new
+  generations; older versions stay sealed and loadable per the
+  retention manifest.
 - **Friction ledger: the engine measures its own surface's
   learnability.** Every typed refusal the CLI or MCP surface returns
   appends one content-free entry — code, verb, timestamp, surface;

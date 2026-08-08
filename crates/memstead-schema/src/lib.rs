@@ -475,9 +475,10 @@ mod tests {
         let reg = SchemaRegistry::builtin();
         assert!(!reg.is_empty());
         let versions = reg.available_versions("default");
-        // 1.0.0 (sealed, retired vocabulary) + 1.1.0 (current
-        // generation, plan-06 rename) — retention keeps both.
-        assert_eq!(versions.len(), 2);
+        // 1.0.0 (sealed, retired vocabulary) + 1.1.0 (plan-06 rename)
+        // + 1.2.0 (current generation, exemplars) — retention keeps
+        // every shipped version.
+        assert_eq!(versions.len(), 3);
     }
 
     #[test]

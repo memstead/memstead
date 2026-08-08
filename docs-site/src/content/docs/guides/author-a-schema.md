@@ -162,6 +162,35 @@ sections:
 
 A section with no `content` stays free-form, exactly as before. Violations refuse (or warn) with `SECTION_CONTENT_MISMATCH`, `SECTION_ITEM_PATTERN_MISMATCH`, or `INVALID_TABLE_COLUMNS` — each carrying the declared expression, the found block sequence, and the `example` — indexed in the [Error Code Index](../../reference/errors/). The full key shapes live in the same generated reference as the constraints.
 
+## 9. Teach by example — one validated exemplar per type
+
+LLMs learn from examples far better than from rules. A type may carry one canonical `exemplar:` — a complete entity in the mem markdown shape — and the engine **validates it through the real create path** at `memstead schema validate` and at install: a package whose exemplar does not conform refuses with a typed error naming the type and the defect. There is no warn-and-carry mode, so an exemplar can never drift into teaching a shape the validator would refuse — the failure mode that kills every hand-maintained example in ordinary documentation.
+
+```yaml
+# types/recipe.yaml
+exemplar:
+  title: "Classic Bolognese"
+  metadata:
+    cuisine: italian
+  sections:
+    summary: "Slow-simmered Italian meat sauce over fresh pasta."
+    ingredients: |
+      - 500g flour
+      - 300ml water
+  relations:
+    - to: canned-san-marzano-tomatoes
+      type: CONTAINS
+```
+
+The pieces:
+
+- **`title`** drives the id slug exactly as a real create would.
+- **`metadata`** is validated like a real create's overrides — enums included; required-no-default fields must be present. Engine-stamped fields (`created_date`, …) are omitted.
+- **`sections`** must cover every required section, and each body must satisfy the section's declared `content` format.
+- **`relations`** use **bare placeholder slugs** as targets (no `mem--` prefix — an exemplar lives outside any mem). Rel-type legality and edge shape are validated; target existence never is.
+
+Exemplars are optional per type; the built-in reference schemas carry one on every type. Agents see them via `memstead_schema` at `verbosity: full` and in `memstead type <name>` — the lite skeleton every session fetches stays unchanged. The retired `examples:` list (never validated, never served) refuses at authoring load with a pointer here.
+
 ## Where next
 
 - The [Glossary](../../glossary/#schema) defines schema, schema pin, and migration precisely.

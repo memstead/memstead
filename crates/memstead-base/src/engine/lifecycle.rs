@@ -2648,18 +2648,41 @@ write_rules: []
 
     /// Every built-in schema's exemplars validate through the SAME
     /// gate the install path runs — a built-in exemplar broken by a
-    /// future edit fails CI here. (Completeness — every built-in type
-    /// CARRYING an exemplar — is asserted separately once the built-in
-    /// generation shipping exemplars lands; this test is the validity
-    /// teeth from day one.)
+    /// future edit fails CI here. Completeness rides the same walk:
+    /// the NEWEST version of every built-in name carries an exemplar
+    /// on every type (older versions are sealed as shipped and may
+    /// predate the field).
     #[test]
     fn builtin_exemplars_validate_through_the_install_gate() {
         let schemas =
             memstead_schema::builtins::load_builtin_schemas().expect("built-in schemas always load");
-        for schema in schemas {
-            if let Err(defect) = Engine::validate_schema_exemplars(&schema) {
+        // Validity: every exemplar anywhere in the catalogue conforms.
+        for schema in &schemas {
+            if let Err(defect) = Engine::validate_schema_exemplars(schema) {
                 let (name, version) = schema.id();
                 panic!("built-in {name}@{version}: {defect}");
+            }
+        }
+        // Completeness: the newest version per name is exemplar-complete.
+        let mut newest: std::collections::HashMap<String, &std::sync::Arc<memstead_schema::Schema>> =
+            std::collections::HashMap::new();
+        for schema in &schemas {
+            let name = schema.manifest.name.clone();
+            match newest.get(&name) {
+                Some(cur) if cur.version >= schema.version => {}
+                _ => {
+                    newest.insert(name, schema);
+                }
+            }
+        }
+        for (name, schema) in &newest {
+            for (type_name, td) in &schema.types {
+                assert!(
+                    td.exemplar.is_some(),
+                    "built-in {name}@{} type '{type_name}' has no exemplar — the \
+                     reference schemas model the practice completely",
+                    schema.version
+                );
             }
         }
     }
