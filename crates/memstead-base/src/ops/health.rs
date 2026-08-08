@@ -45,6 +45,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "anchors",
     "friction",
     "open_questions",
+    "stale_derivations",
 ];
 
 /// The `include=["anchors"]` axis — per-mem counts of the four
@@ -52,6 +53,51 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 /// per-anchor mechanism `verify-anchors` and the binding verify use.
 /// Shared by the full composer, the CLI health command, and the lean
 /// MCP server so the axis cannot drift between surfaces.
+/// One derivation-staleness finding (agent-trust plan 12): an
+/// explicit edge on a derivation-declared rel-type whose baseline
+/// differs from the target's current hash (`stale`), or that has no
+/// recorded baseline at all (`unbaselined`). Fresh edges are never
+/// reported.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DerivationFinding {
+    pub source: crate::entity::EntityId,
+    pub rel_type: String,
+    pub target: crate::entity::EntityId,
+    /// `"stale"` or `"unbaselined"` — never fabricated as fresh.
+    pub state: String,
+    /// The recorded baseline hash (`None` for unbaselined edges).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<String>,
+    /// The target's current content hash ("" for an absent target).
+    pub current: String,
+}
+
+/// The `include=["stale_derivations"]` axis: per-mem findings from
+/// [`crate::engine::Engine::derivation_report`], shared by the CLI
+/// and both MCP flavours. A mem whose schema declares no derivation
+/// rel-types contributes an empty list — never an error.
+pub fn health_stale_derivations_axis(
+    engine: &crate::engine::Engine,
+    mem_filter: Option<&str>,
+) -> serde_json::Value {
+    let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
+    mems.sort();
+    let mut out = serde_json::Map::new();
+    for mem in mems {
+        if let Some(f) = mem_filter
+            && f != mem
+        {
+            continue;
+        }
+        let findings = engine.derivation_report(&mem).unwrap_or_default();
+        out.insert(
+            mem,
+            serde_json::to_value(&findings).unwrap_or(serde_json::Value::Array(Vec::new())),
+        );
+    }
+    serde_json::Value::Object(out)
+}
+
 /// Per-kind item cap for the `open_questions` axis — the axis is an
 /// agent worklist, not a dump. Stated in the output (`_item_cap`);
 /// truncation is always explicit via each list's `more` count.

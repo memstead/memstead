@@ -117,6 +117,20 @@ pub struct RelationshipDef {
     /// on the `_default` sentinel (never a real edge's rel_type).
     #[serde(default)]
     pub acyclic: bool,
+    /// When true, edges of this rel-type declare that the SOURCE
+    /// derives from the TARGET (agent-trust plan 12). Exactly three
+    /// effects, warn-tier forever: (1) explicitly writing such an
+    /// edge records the target's current content hash as the edge's
+    /// baseline in the engine-owned derivations sidecar (never in the
+    /// markdown, never in `_hash`); (2) the include-gated
+    /// `stale_derivations` health axis reports every such edge whose
+    /// target's current hash differs from its baseline — and edges
+    /// with no baseline as `unbaselined`, distinctly; (3) a
+    /// duplicate-add `memstead_relate` on such an edge refreshes the
+    /// baseline as its one effect — the agent's explicit "reviewed,
+    /// still holds" — and the response says so. Never a write-block.
+    #[serde(default)]
+    pub derivation: bool,
     /// Schema-declared types whose entities may be the source of this
     /// edge. Empty (default) means shape-free — any source type admitted.
     /// The loader validates every entry against the schema's declared

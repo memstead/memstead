@@ -29,7 +29,9 @@ pub struct Args {
     /// anchors, unsatisfied constraints, dangling links, and a paired
     /// process mem's open entries — negative findings separated as
     /// already-searched; capped per kind with an explicit `more`
-    /// count).
+    /// count), stale_derivations (per-mem derivation edges whose
+    /// target changed since the recorded baseline, plus unbaselined
+    /// edges — re-assert via `memstead relate` to refresh).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -104,6 +106,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         config_entries,
         anchors_axis,
         open_questions_axis,
+        stale_derivations_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -280,6 +283,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &open_questions_axis {
         obj.insert("open_questions".to_string(), axis.clone());
+    }
+    if let Some(axis) = &stale_derivations_axis {
+        obj.insert("stale_derivations".to_string(), axis.clone());
     }
     // `--include friction`: the friction ledger's read surface
     // (agent-trust plan 08) — counts per refusal code / per verb,
@@ -731,6 +737,10 @@ struct GatheredHealth {
     /// open_questions`: the composed per-mem worklist from the shared
     /// `health_open_questions_axis` helper (same axis MCP renders).
     open_questions_axis: Option<serde_json::Value>,
+    /// `Some(...)` when the caller asked for `--include
+    /// stale_derivations`: per-mem derivation-staleness findings from
+    /// the shared `health_stale_derivations_axis` helper.
+    stale_derivations_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -798,6 +808,7 @@ fn gather_mem_repo(
     fill_config_projection(engine, include, &mut g);
     fill_anchors_axis(engine, include, &mut g);
     fill_open_questions_axis(engine, include, &mut g);
+    fill_stale_derivations_axis(engine, include, &mut g);
     g
 }
 
@@ -822,6 +833,7 @@ fn gather_filesystem(
     fill_config_projection(engine, include, &mut g);
     fill_anchors_axis(engine, include, &mut g);
     fill_open_questions_axis(engine, include, &mut g);
+    fill_stale_derivations_axis(engine, include, &mut g);
     g
 }
 
@@ -864,6 +876,21 @@ fn fill_open_questions_axis(
     if include.iter().any(|s| s == "open_questions") {
         g.open_questions_axis = Some(
             memstead_base::ops::health::health_open_questions_axis(engine, None),
+        );
+    }
+}
+
+/// Engine-aware step for `--include stale_derivations` — per-mem
+/// derivation-staleness findings (agent-trust plan 12), one shared
+/// implementation with the MCP composer.
+fn fill_stale_derivations_axis(
+    engine: &memstead_base::Engine,
+    include: &[String],
+    g: &mut GatheredHealth,
+) {
+    if include.iter().any(|s| s == "stale_derivations") {
+        g.stale_derivations_axis = Some(
+            memstead_base::ops::health::health_stale_derivations_axis(engine, None),
         );
     }
 }
@@ -960,6 +987,7 @@ fn gather_from_store(
         config_entries: None,
         anchors_axis: None,
         open_questions_axis: None,
+        stale_derivations_axis: None,
     }
 }
 

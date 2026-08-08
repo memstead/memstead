@@ -775,6 +775,24 @@ impl Engine {
         if !validated_anchors.is_empty() {
             super::stage_anchors_sidecar(backend, &id, &[], validated_anchors)?;
         }
+        // Derivation baselines (agent-trust plan 12): each explicitly
+        // declared relation on a derivation rel-type records the
+        // target's current hash ("" for an absent/stubbed target),
+        // staged so baseline and entity ride one commit.
+        if let Some(schema) = self.schemas.get(&mem) {
+            for r in relations_declared
+                .iter()
+                .filter(|r| super::rel_type_declares_derivation(schema, &r.rel_type))
+            {
+                let hash = self
+                    .store
+                    .get(&r.target)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default();
+                let (from, rel, to) = (id.to_string(), r.rel_type.clone(), r.target.to_string());
+                super::stage_derivation_sidecar(backend, |s| s.set(&from, &rel, &to, &hash))?;
+            }
+        }
         let commit_subject = format!("memstead: create {id}");
         let ctx = CommitContext {
             actor,
@@ -1146,6 +1164,31 @@ impl Engine {
                 self.store = store_snapshot;
                 self.discard_all_pending();
                 return Err(e);
+            }
+            // Derivation baselines (plan 12) — same predicate and
+            // staging as the single create; rides the batch commit.
+            if let Some(schema) = self.schemas.get(&p.mem) {
+                for r in p
+                    .relations_declared
+                    .iter()
+                    .filter(|r| super::rel_type_declares_derivation(schema, &r.rel_type))
+                {
+                    let hash = self
+                        .store
+                        .get(&r.target)
+                        .map(|e| e.content_hash.clone())
+                        .unwrap_or_default();
+                    let (from, rel, to) =
+                        (p.id.to_string(), r.rel_type.clone(), r.target.to_string());
+                    if let Err(e) = super::stage_derivation_sidecar(
+                        self.mounts[p.mount_idx].backend.as_ref(),
+                        |s| s.set(&from, &rel, &to, &hash),
+                    ) {
+                        self.store = store_snapshot;
+                        self.discard_all_pending();
+                        return Err(e);
+                    }
+                }
             }
         }
         let mut distinct_mounts: Vec<usize> = Vec::new();

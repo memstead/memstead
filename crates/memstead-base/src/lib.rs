@@ -21,6 +21,7 @@ pub mod chunking;
 pub mod domain_authority_wire;
 pub mod engine;
 pub mod entity;
+pub mod derivation;
 pub mod filesystem;
 pub mod friction;
 pub mod graph;

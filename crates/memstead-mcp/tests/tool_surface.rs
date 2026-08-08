@@ -1556,6 +1556,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // its explicit-truncation field.
             "open_questions",
             "more",
+            // Derivation-staleness axis (include=stale_derivations) —
+            // agent-trust plan 12.
+            "stale_derivations",
+            "unbaselined",
             // Friction-ledger axis (include=friction) — agent-trust
             // plan 08's refusal-ledger summary.
             "friction",

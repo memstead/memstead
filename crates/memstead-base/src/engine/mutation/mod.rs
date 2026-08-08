@@ -335,6 +335,46 @@ impl super::Engine {
 /// next [`crate::backend::MemBackend::commit`] carries entity + anchors
 /// as one atomic commit. Reads honour pending-buffer precedence, so
 /// successive stages within one transaction compose.
+/// Stage a mutation of the engine-owned derivations sidecar
+/// (agent-trust plan 12) so it rides the SAME commit as the edge
+/// write that produced it — the anchors-sidecar atomicity precedent.
+/// The sidecar travels through the backend's normal entity-path
+/// read/write under `.memstead/`, which every backend filters from
+/// entity listings and every archive/export path carries as-is.
+pub(crate) fn stage_derivation_sidecar(
+    backend: &dyn crate::backend::MemBackend,
+    mutate: impl FnOnce(&mut crate::derivation::DerivationSidecar),
+) -> Result<(), EngineError> {
+    let path = std::path::Path::new(crate::derivation::DERIVATION_SIDECAR_PATH);
+    let mut sidecar = match backend.read_entity(path)? {
+        Some(bytes) => crate::derivation::DerivationSidecar::from_bytes(&bytes).map_err(|e| {
+            EngineError::Backend(crate::backend::BackendError::Other(format!(
+                "derivations sidecar parse: {e}"
+            )))
+        })?,
+        None => crate::derivation::DerivationSidecar::default(),
+    };
+    mutate(&mut sidecar);
+    backend.write_entity(path, &sidecar.to_bytes())?;
+    Ok(())
+}
+
+/// True when `schema` declares `rel_type` as a derivation
+/// (`derivation: true` on the relationship definition) — the
+/// predicate every write path shares, so baseline recording cannot
+/// fork per verb.
+pub(crate) fn rel_type_declares_derivation(
+    schema: &memstead_schema::Schema,
+    rel_type: &str,
+) -> bool {
+    schema
+        .manifest
+        .relationships
+        .definitions
+        .iter()
+        .any(|d| d.name == rel_type && d.derivation)
+}
+
 pub(crate) fn stage_anchors_sidecar(
     backend: &dyn crate::backend::MemBackend,
     entity_id: &EntityId,

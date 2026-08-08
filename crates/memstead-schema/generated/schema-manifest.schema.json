@@ -183,6 +183,11 @@
           "type": "number",
           "format": "float"
         },
+        "derivation": {
+          "description": "When true, edges of this rel-type declare that the SOURCE\nderives from the TARGET (agent-trust plan 12). Exactly three\neffects, warn-tier forever: (1) explicitly writing such an\nedge records the target's current content hash as the edge's\nbaseline in the engine-owned derivations sidecar (never in the\nmarkdown, never in `_hash`); (2) the include-gated\n`stale_derivations` health axis reports every such edge whose\ntarget's current hash differs from its baseline — and edges\nwith no baseline as `unbaselined`, distinctly; (3) a\nduplicate-add `memstead_relate` on such an edge refreshes the\nbaseline as its one effect — the agent's explicit \"reviewed,\nstill holds\" — and the response says so. Never a write-block.",
+          "type": "boolean",
+          "default": false
+        },
         "description": {
           "type": "string"
         },

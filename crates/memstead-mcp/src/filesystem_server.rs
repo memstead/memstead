@@ -1694,7 +1694,13 @@ impl FilesystemMcpServer {
         let wants_constraints = include.iter().any(|s| s == "constraints");
         let wants_friction = include.iter().any(|s| s == "friction");
         let wants_open_questions = include.iter().any(|s| s == "open_questions");
-        if wants_anchors || wants_constraints || wants_friction || wants_open_questions {
+        let wants_stale_derivations = include.iter().any(|s| s == "stale_derivations");
+        if wants_anchors
+            || wants_constraints
+            || wants_friction
+            || wants_open_questions
+            || wants_stale_derivations
+        {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
                 Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
@@ -1719,6 +1725,10 @@ impl FilesystemMcpServer {
             if wants_open_questions {
                 value["open_questions"] =
                     memstead_base::ops::health::health_open_questions_axis(&engine, None);
+            }
+            if wants_stale_derivations {
+                value["stale_derivations"] =
+                    memstead_base::ops::health::health_stale_derivations_axis(&engine, None);
             }
             return json_response(&value);
         }

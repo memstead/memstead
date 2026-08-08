@@ -56,6 +56,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Derivation staleness: "my source changed" is computed, never
+  stamped.** A schema can declare a rel-type `derivation: true` —
+  the source derives from the target. Explicitly writing such an edge
+  (create relations, update declare_relations, relate, and every
+  batch sibling) records the target's current content hash as the
+  edge's baseline in an engine-owned sidecar
+  (`.memstead/derivations.json`, the anchors precedent: same-commit
+  staging, invisible in the markdown, excluded from `_hash`). The
+  include-gated `stale_derivations` health axis reports every such
+  edge whose target's current hash differs from its baseline —
+  "source S is stale against target T" — and edges with no baseline
+  as `unbaselined`, distinctly, never fabricated as fresh or stale.
+  Re-asserting the edge via `memstead_relate` refreshes the baseline
+  as the duplicate-add's one effect — the agent's explicit "reviewed,
+  still holds" — with the refresh STATED on the response
+  (`DERIVATION_BASELINE_REFRESHED` + the sidecar commit's sha, `_hash`
+  and markdown untouched); undeclared rel-types keep today's exact
+  no-op. Warn-tier forever: staleness is a review signal, never a
+  write-block. This delivers, properly declared, the behaviour the
+  retired `propagating_relationships` name falsely promised.
 - **Open-questions axis: a mem can enumerate what it does not know.**
   `memstead health --include open_questions` (and the MCP counterpart
   on both flavours) serves, per mem, a composed worklist of the

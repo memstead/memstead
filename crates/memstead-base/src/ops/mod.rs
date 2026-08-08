@@ -583,6 +583,17 @@ pub enum WarningHint {
     /// follow-up `memstead_create` (or `memstead_relate remove=true` to drop
     /// the edge before authoring).
     AutoStubCreated { stub_id: EntityId },
+    /// A duplicate-add `memstead_relate` on a derivation-declared
+    /// rel-type refreshed the edge's baseline (agent-trust plan 12) —
+    /// the agent's explicit "I have reviewed the target's change; the
+    /// derivation still holds". Sidecar-only: `_hash` unchanged, the
+    /// edge unchanged; the response carries this warning so the
+    /// refresh is stated rather than a bare no-op.
+    DerivationBaselineRefreshed {
+        from: EntityId,
+        rel_type: String,
+        to: EntityId,
+    },
     /// A relation parsed from an entity's `## Relationships` section
     /// at load time failed validation against the source mem's
     /// schema (or wiki-link grammar). The entity itself loads
@@ -1394,6 +1405,12 @@ impl fmt::Display for WarningHint {
                  Promote it via memstead_create when authoring the real \
                  entity (stub adoption preserves the incoming edge)."
             ),
+            WarningHint::DerivationBaselineRefreshed { from, rel_type, to } => write!(
+                f,
+                "derivation baseline refreshed: '{from}' -[{rel_type}]-> '{to}' — the edge \
+                 already existed; its baseline now records the target's current content \
+                 hash (reviewed, still holds). Nothing else changed."
+            ),
             WarningHint::ParsedRelationInvalid {
                 entity_id,
                 rel_type,
@@ -1663,6 +1680,7 @@ impl WarningHint {
             Self::SchemaHeadingRoundtripViolation { .. } => "SCHEMA_HEADING_ROUNDTRIP_VIOLATION",
             Self::SectionHeadingDivergence { .. } => "SECTION_HEADING_DIVERGENCE",
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
+            Self::DerivationBaselineRefreshed { .. } => "DERIVATION_BASELINE_REFRESHED",
             Self::SelfLinkIgnored { .. } => "SELF_LINK_IGNORED",
             Self::ParsedRelationInvalid { .. } => "PARSED_RELATION_INVALID",
             Self::ResidualStubForReadOnlyReferrers { .. } => "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
@@ -1712,6 +1730,7 @@ impl WarningHint {
             Self::SelfLinkIgnored { id } => Some(id.mem()),
             Self::CrossMemTargetMemUncreated { from_mem, .. } => Some(from_mem.as_str()),
             Self::AutoStubCreated { stub_id } => Some(stub_id.mem()),
+            Self::DerivationBaselineRefreshed { from, .. } => Some(from.mem()),
             Self::UpdateNoop { id } => Some(id.mem()),
             Self::ParsedRelationInvalid { entity_id, .. } => Some(entity_id.mem()),
             Self::ResidualStubForReadOnlyReferrers { id, .. } => Some(id.mem()),
@@ -2128,6 +2147,11 @@ impl WarningHint {
                 "entities_loaded": entities_loaded,
             }),
             Self::AutoStubCreated { stub_id } => serde_json::json!({ "stub_id": stub_id }),
+            Self::DerivationBaselineRefreshed { from, rel_type, to } => serde_json::json!({
+                "from": from,
+                "rel_type": rel_type,
+                "to": to,
+            }),
             Self::ParsedRelationInvalid {
                 entity_id,
                 rel_type,

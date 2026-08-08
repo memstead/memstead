@@ -498,6 +498,95 @@ impl Engine {
         self.mounts.iter().map(|m| m.mount.mem.as_str()).collect()
     }
 
+    /// Derivation-staleness report for one mem (agent-trust plan 12):
+    /// every EXPLICIT edge whose rel-type the mem's schema declares
+    /// `derivation: true`, compared against its recorded baseline.
+    /// Baseline differs from the target's current hash → `stale`;
+    /// no baseline recorded (edge predates the declaration, or was
+    /// load-derived) → `unbaselined`, distinctly — never fabricated
+    /// as fresh or stale. Fresh edges are not reported. A mem whose
+    /// schema declares no derivation rel-types returns the empty
+    /// report; an unreadable sidecar reads as empty (every edge
+    /// unbaselined) rather than an error.
+    pub fn derivation_report(
+        &self,
+        mem: &str,
+    ) -> Result<Vec<crate::ops::health::DerivationFinding>, EngineError> {
+        if !self.mem_router.is_visible(mem) {
+            return Err(self.unknown_mem_error(mem));
+        }
+        let Some(schema) = self.schemas.get(mem) else {
+            return Ok(Vec::new());
+        };
+        let declared: std::collections::HashSet<&str> = schema
+            .manifest
+            .relationships
+            .definitions
+            .iter()
+            .filter(|d| d.derivation)
+            .map(|d| d.name.as_str())
+            .collect();
+        if declared.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sidecar = self
+            .mounts
+            .iter()
+            .find(|m| m.mount.mem == mem)
+            .and_then(|m| {
+                m.backend
+                    .read_entity(Path::new(crate::derivation::DERIVATION_SIDECAR_PATH))
+                    .ok()
+                    .flatten()
+            })
+            .and_then(|bytes| crate::derivation::DerivationSidecar::from_bytes(&bytes).ok())
+            .unwrap_or_default();
+
+        let mut out = Vec::new();
+        let mut sources: Vec<&crate::entity::Entity> = self
+            .store
+            .all_entities()
+            .filter(|e| !e.stub && e.id.mem() == mem)
+            .collect();
+        sources.sort_by(|a, b| a.id.as_ref().cmp(b.id.as_ref()));
+        for entity in sources {
+            for edge in self.store.outgoing(&entity.id) {
+                if !declared.contains(edge.rel_type.as_str())
+                    || edge.source != crate::store::EdgeSource::Explicit
+                {
+                    continue;
+                }
+                let current = self
+                    .store
+                    .get(&edge.target)
+                    .map(|t| t.content_hash.clone())
+                    .unwrap_or_default();
+                match sidecar.get(entity.id.as_ref(), &edge.rel_type, edge.target.as_ref()) {
+                    None => out.push(crate::ops::health::DerivationFinding {
+                        source: entity.id.clone(),
+                        rel_type: edge.rel_type.clone(),
+                        target: edge.target.clone(),
+                        state: "unbaselined".to_string(),
+                        baseline: None,
+                        current,
+                    }),
+                    Some(baseline) if baseline != current => {
+                        out.push(crate::ops::health::DerivationFinding {
+                            source: entity.id.clone(),
+                            rel_type: edge.rel_type.clone(),
+                            target: edge.target.clone(),
+                            state: "stale".to_string(),
+                            baseline: Some(baseline.to_string()),
+                            current,
+                        })
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Public-shape mount record for `mem`, or `None` for an unknown
     /// mem.
     ///

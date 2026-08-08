@@ -1392,7 +1392,7 @@ pub fn build_schema_payload(
             // `details.allowed_target_types` payload so the agent
             // learns the contract once. Empty arrays = "any type
             // admitted" (no pinning).
-            serde_json::json!({
+            let mut o = serde_json::json!({
                 "name": d.name,
                 "description": d.description,
                 "when_to_use": d.when_to_use,
@@ -1402,7 +1402,16 @@ pub fn build_schema_payload(
                 "manual_authoring": manual_authoring_str(d.manual_authoring),
                 "allowed_sources": d.source_types,
                 "allowed_targets": d.target_types,
-            })
+            });
+            // Derivation declaration (agent-trust plan 12) — a
+            // behaviour-bearing flag (baseline recording, the
+            // stale_derivations axis, duplicate-add re-baseline), so
+            // it must be visible at introspection time. Emitted only
+            // when true so undeclared schemas keep their bytes.
+            if d.derivation {
+                o["derivation"] = serde_json::json!(true);
+            }
+            o
         })
         .collect();
 
@@ -1782,14 +1791,18 @@ pub fn build_schema_payload(
         let relationships_summary: Vec<serde_json::Value> = relationships
             .iter()
             .map(|r| {
-                serde_json::json!({
+                let mut o = serde_json::json!({
                     "name": r["name"],
                     "allowed_sources": r["allowed_sources"],
                     "allowed_targets": r["allowed_targets"],
                     "manual_authoring": r["manual_authoring"],
                     "acyclic": r["acyclic"],
                     "per_edge_description": r["per_edge_description"],
-                })
+                });
+                if r.get("derivation") == Some(&serde_json::json!(true)) {
+                    o["derivation"] = serde_json::json!(true);
+                }
+                o
             })
             .collect();
         obj.insert(

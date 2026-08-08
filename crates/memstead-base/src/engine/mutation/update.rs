@@ -150,6 +150,28 @@ impl Engine {
                 prepared.anchors.clone(),
             )?;
         }
+        // Derivation baselines (agent-trust plan 12): declared
+        // relations on a derivation rel-type record the target's
+        // current hash, riding the same commit as the entity write.
+        if let Some(schema) = self.schemas.get(prepared.id.mem()) {
+            for r in prepared
+                .relations_declared
+                .iter()
+                .filter(|r| super::rel_type_declares_derivation(schema, &r.rel_type))
+            {
+                let hash = self
+                    .store
+                    .get(&r.target)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default();
+                let (from, rel, to) = (
+                    prepared.id.to_string(),
+                    r.rel_type.clone(),
+                    r.target.to_string(),
+                );
+                super::stage_derivation_sidecar(backend, |s| s.set(&from, &rel, &to, &hash))?;
+            }
+        }
         // Anchor-only commits carry the distinct `anchor` verb so their
         // otherwise-invisible sidecar change is legible in the note log;
         // every other update keeps `update`. The verb is a subject-only
@@ -1269,6 +1291,34 @@ impl Engine {
                 self.store = store_snapshot;
                 self.discard_all_pending();
                 return Err(e);
+            }
+            // Derivation baselines (plan 12) — same predicate and
+            // staging as the single update; rides the batch commit.
+            if let Some(schema) = self.schemas.get(p.id.mem()) {
+                for r in p
+                    .relations_declared
+                    .iter()
+                    .filter(|r| super::rel_type_declares_derivation(schema, &r.rel_type))
+                {
+                    let hash = self
+                        .store
+                        .get(&r.target)
+                        .map(|e| e.content_hash.clone())
+                        .unwrap_or_default();
+                    let (from, rel, to) = (
+                        p.id.to_string(),
+                        r.rel_type.clone(),
+                        r.target.to_string(),
+                    );
+                    if let Err(e) = super::stage_derivation_sidecar(
+                        self.mounts[p.mount_idx].backend.as_ref(),
+                        |s| s.set(&from, &rel, &to, &hash),
+                    ) {
+                        self.store = store_snapshot;
+                        self.discard_all_pending();
+                        return Err(e);
+                    }
+                }
             }
         }
 

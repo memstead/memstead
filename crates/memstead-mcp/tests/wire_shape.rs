@@ -2739,3 +2739,40 @@ fn open_questions_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     assert_eq!(ghost["isError"], true, "{ghost}");
     assert_eq!(ghost["structuredContent"]["code"], "UNKNOWN_MEM", "{ghost}");
 }
+
+/// The `stale_derivations` axis over the wire (agent-trust plan 12):
+/// include-gated (absent without the include), a mem with no declared
+/// derivation rel-types serves an empty list rather than an error, no
+/// leaf is `INTERNAL`, and an unknown `mem` scope refuses typed.
+#[test]
+fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    let plain = harness.call_tool("memstead_health", json!({}));
+    assert!(plain["isError"] != true, "{plain}");
+    assert!(
+        plain["structuredContent"].get("stale_derivations").is_none(),
+        "axis must be include-gated: {plain}"
+    );
+
+    let served = harness.call_tool(
+        "memstead_health",
+        json!({ "include": ["stale_derivations"] }),
+    );
+    assert!(served["isError"] != true, "{served}");
+    let axis = &served["structuredContent"]["stale_derivations"];
+    assert_eq!(axis["specs"], json!([]), "undeclared schema → empty list: {served}");
+    assert!(
+        !serde_json::to_string(&served).unwrap().contains("\"INTERNAL\""),
+        "no leaf is INTERNAL: {served}"
+    );
+
+    let ghost = harness.call_tool(
+        "memstead_health",
+        json!({ "include": ["stale_derivations"], "mem": "ghost" }),
+    );
+    assert_eq!(ghost["isError"], true, "{ghost}");
+    assert_eq!(ghost["structuredContent"]["code"], "UNKNOWN_MEM", "{ghost}");
+}
