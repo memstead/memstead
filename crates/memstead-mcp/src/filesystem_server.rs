@@ -882,6 +882,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         | e @ EngineError::SchemaPackageInvalid { .. }
         | e @ EngineError::SchemaResolverInit(_)
         | e @ EngineError::DuplicateMem(_)
+        | e @ EngineError::MemQuarantined { .. }
         | e @ EngineError::UnknownMem(_)
         | e @ EngineError::UnknownRef(_)
         | e @ EngineError::UnknownRemote(_)

@@ -181,7 +181,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == args.mem)
-            .ok_or_else(|| EngineError::UnknownMem(args.mem.clone()))?;
+            .ok_or_else(|| self.unknown_mem_error(&args.mem))?;
         if self.mounts[mount_idx].mount.capability != MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(args.mem));
         }

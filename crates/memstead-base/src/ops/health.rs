@@ -300,6 +300,7 @@ pub fn compute_health(
         orphan_count,
         stub_count,
         warnings: Vec::new(),
+        quarantined: Vec::new(),
         dangling_links: None,
         findings: None,
         tag_distribution: None,

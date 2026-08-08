@@ -19,11 +19,12 @@ fn parse_envelope(stdout_bytes: &[u8]) -> serde_json::Value {
     })
 }
 
-/// A mem-repo workspace whose boot fails with `SCHEMA_NOT_FOUND`: one
-/// folder-mount mem `plenum` pinned (via the mount record — the mem is
-/// config-absent, so the mount pin is settled) to a schema no source
-/// holds.
-fn unbootable_workspace(tmp: &TempDir) -> std::path::PathBuf {
+/// A mem-repo workspace with one folder-mount mem `plenum` pinned
+/// (via the mount record — the mem is config-absent, so the mount pin
+/// is settled) to a schema no source holds. Under the plan-04
+/// quarantine posture the workspace BOOTS with `plenum` quarantined
+/// (`SCHEMA_NOT_FOUND` reason) — the fixture asserts that state.
+fn quarantined_workspace(tmp: &TempDir) -> std::path::PathBuf {
     let ws = tmp.path().join("ws");
     memstead()
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
@@ -42,18 +43,26 @@ fn unbootable_workspace(tmp: &TempDir) -> std::path::PathBuf {
 }"#,
     )
     .unwrap();
-    // Confirm the fixture is really unbootable, and for the reason
-    // this plan repairs.
+    // Confirm the fixture really quarantines `plenum` for the reason
+    // this plan repairs (the workspace itself boots — plan 04).
+    let health = health_json(&ws);
+    assert_eq!(
+        health["quarantined"][0]["reason_code"], "SCHEMA_NOT_FOUND",
+        "fixture must quarantine on the bad pin: {health}"
+    );
+    ws
+}
+
+fn health_json(ws: &std::path::Path) -> serde_json::Value {
     let out = memstead()
-        .current_dir(&ws)
-        .args(["--json", "status"])
+        .current_dir(ws)
+        .args(["--json", "health"])
         .assert()
-        .failure()
+        .success()
         .get_output()
         .stdout
         .clone();
-    assert_eq!(parse_envelope(&out)["code"], "SCHEMA_NOT_FOUND");
-    ws
+    parse_envelope(&out)
 }
 
 fn example_package_dir() -> String {
@@ -63,12 +72,15 @@ fn example_package_dir() -> String {
         .to_string()
 }
 
-/// Criterion 1: on the unbootable workspace, `mem set-schema` to a
-/// resolvable ref succeeds below boot, and the next boot is green.
+/// Criterion 1 (plan 03), re-shaped by plan 04's quarantine posture:
+/// on a workspace whose broken-pin mem is quarantined, `mem
+/// set-schema` to a resolvable ref succeeds — the booted engine's
+/// quarantine-repair branch repins the retained mount and re-attaches
+/// it in-process — and the workspace is fully green after.
 #[test]
-fn set_schema_repairs_unbootable_workspace() {
+fn set_schema_repairs_quarantined_mem() {
     let tmp = TempDir::new().unwrap();
-    let ws = unbootable_workspace(&tmp);
+    let ws = quarantined_workspace(&tmp);
 
     let out = memstead()
         .current_dir(&ws)
@@ -79,13 +91,15 @@ fn set_schema_repairs_unbootable_workspace() {
         .stdout
         .clone();
     let env = parse_envelope(&out);
-    assert_eq!(env["below_boot"], true, "got: {env}");
-    assert_eq!(env["schema_pin"], "default@1.0.0");
-    assert_eq!(
-        env["conformance_checked"], false,
-        "below-boot repair states plainly that the conformance gate did not run: {env}"
-    );
+    assert_eq!(env["schema_pin"], "default@1.0.0", "got: {env}");
 
+    // The repair is durable: a fresh process boots with an empty
+    // quarantine roster and serves the mem.
+    let health = health_json(&ws);
+    assert!(
+        health["quarantined"].is_null(),
+        "roster must be empty after repair: {health}"
+    );
     memstead()
         .current_dir(&ws)
         .args(["--json", "status"])
@@ -93,17 +107,18 @@ fn set_schema_repairs_unbootable_workspace() {
         .success();
 }
 
-/// Criterion 2 + the criterion-4 fork-catcher: on the unbootable
-/// workspace, `schema install <package>` seals the package onto the
-/// `__MEMSTEAD:schemas/` ref below boot, and a subsequent `set-schema`
-/// to the installed ref boots green — the full plenum recovery path.
-/// If the below-boot resolver consulted a different catalogue than the
-/// booted path (e.g. built-ins only), the set-schema step would refuse
-/// the freshly ref-installed schema and this test would fail.
+/// Criterion 2 + the criterion-4 fork-catcher: on the
+/// quarantined-mem workspace, `schema install <package>` seals the
+/// package onto the `__MEMSTEAD:schemas/` ref (never booting), and a
+/// subsequent `set-schema` to the installed ref returns the mem to
+/// full service — the plenum recovery path. If the resolver consulted
+/// a narrower catalogue than boot (e.g. built-ins only), the
+/// set-schema step would refuse the freshly ref-installed schema and
+/// this test would fail.
 #[test]
 fn install_then_set_schema_recovers_end_to_end() {
     let tmp = TempDir::new().unwrap();
-    let ws = unbootable_workspace(&tmp);
+    let ws = quarantined_workspace(&tmp);
 
     let out = memstead()
         .current_dir(&ws)
@@ -123,6 +138,11 @@ fn install_then_set_schema_recovers_end_to_end() {
         .assert()
         .success();
 
+    let health = health_json(&ws);
+    assert!(
+        health["quarantined"].is_null(),
+        "mem returns to service on the installed ref: {health}"
+    );
     memstead()
         .current_dir(&ws)
         .args(["--json", "status"])
@@ -135,10 +155,10 @@ fn install_then_set_schema_recovers_end_to_end() {
 /// force-writes a pin that resolves nowhere.
 #[test]
 fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
-    // Unresolvable target ref on the unbootable workspace: same
-    // SCHEMA_NOT_FOUND the booted path produces (shared resolver).
+    // Unresolvable target ref against the quarantined mem: same
+    // SCHEMA_NOT_FOUND refusal, and the pin is never force-written.
     let tmp = TempDir::new().unwrap();
-    let ws = unbootable_workspace(&tmp);
+    let ws = quarantined_workspace(&tmp);
     let out = memstead()
         .current_dir(&ws)
         .args(["--json", "mem", "set-schema", "plenum", "ghost2@1.0.0"])
@@ -149,21 +169,15 @@ fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
         .clone();
     let env = parse_envelope(&out);
     assert_eq!(env["code"], "SCHEMA_NOT_FOUND", "got: {env}");
-    // The pin was NOT force-written: boot still fails on the original pin.
-    let out = memstead()
-        .current_dir(&ws)
-        .args(["--json", "status"])
-        .assert()
-        .failure()
-        .get_output()
-        .stdout
-        .clone();
+    // The pin was NOT force-written: the mem stays quarantined on the
+    // original broken pin.
+    let health = health_json(&ws);
     assert!(
-        parse_envelope(&out)["message"]
+        health["quarantined"][0]["reason_message"]
             .as_str()
             .unwrap()
             .contains("ghost@1.0.0"),
-        "original broken pin must be untouched"
+        "original broken pin must be untouched: {health}"
     );
 
     // Invalid package refuses typed.
@@ -213,15 +227,24 @@ fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
 }
 
 /// Criterion 5: `projection migrate` with pending reconcile cursors on
-/// a workspace that (still) does not boot completes without
-/// deadlocking — cursors are explicitly deferred with a typed notice
-/// naming the follow-up, and the file survives (silent loss is the
-/// refused shape). Complement: on a bootable workspace the cursors are
-/// consumed and the file deleted, as today.
+/// a workspace that (still) does not boot — under plan 04 that means
+/// a workspace-LEVEL failure (here: a corrupt store; mem-level
+/// failures now quarantine instead of blocking boot) — completes
+/// without deadlocking: cursors are explicitly deferred with a typed
+/// notice naming the follow-up, and the file survives (silent loss is
+/// the refused shape). Complement: on a bootable workspace the
+/// cursors are consumed and the file deleted, as today.
 #[test]
 fn projection_migrate_defers_cursor_seeding_when_boot_fails() {
     let tmp = TempDir::new().unwrap();
-    let ws = unbootable_workspace(&tmp);
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    let mounts = ws.join(".memstead").join("state").join("mounts.json");
+    std::fs::create_dir_all(mounts.parent().unwrap()).unwrap();
+    std::fs::write(&mounts, "this is not json {").unwrap();
     let cursor_path = ws.join(".memstead").join("reconcile-cursors.json");
     std::fs::write(&cursor_path, r#"{"plenum:/abs/somewhere": "abc123"}"#).unwrap();
 

@@ -1070,6 +1070,25 @@ pub fn compose_overview(
         }
     }
 
+    // Quarantined mems — part of the one dashboard, never a separate
+    // tool: mems that failed their mem-level boot step and serve
+    // nothing until repaired. Each entry carries the typed reason
+    // (repair command included in its message) and the way back
+    // (reload). Omitted entirely on a healthy workspace so ordinary
+    // output is byte-unchanged.
+    if !engine.quarantined_mems().is_empty() {
+        md.push_str("## Quarantined Mems\n\n");
+        md.push_str(
+            "_(these mems failed to attach at boot and serve nothing — repair per the reason \
+             below, then run memstead_reload / `memstead reload` to bring them back)_\n\n",
+        );
+        for q in engine.quarantined_mems() {
+            md.push_str(&format!("### {}\n\n", q.mount.mem));
+            md.push_str(&format!("- **Reason:** `{}`\n", q.reason_code));
+            md.push_str(&format!("- **Detail:** {}\n\n", q.reason_message));
+        }
+    }
+
     // Communities
     let emit_community_members = emitted.contains_key("community_members");
     md.push_str("## Communities\n\n");

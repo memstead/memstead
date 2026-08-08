@@ -64,46 +64,35 @@ fn status_error_envelope(ws: &std::path::Path) -> serde_json::Value {
     parse_envelope(&output)
 }
 
-/// Criterion 1, both trail shapes: an unresolvable schema pin refuses
-/// with `SCHEMA_NOT_FOUND`, and the message's final clause names the
-/// repair command the source trail calls for — `mem set-schema` with
-/// the concrete mem and version when the name exists at other
-/// versions, the `schema install` path when no source knows the name.
-/// The envelope message equals `BootError::surface_message` for the
-/// same workspace — the string the MCP boot diagnostics print.
+/// Criterion 1, both trail shapes — re-routed by agent-trust plan 04
+/// (quarantine boot), exactly as this plan's Relationships section
+/// anticipated: an unresolvable schema pin no longer fails the boot;
+/// the mem QUARANTINES with the same typed `SCHEMA_NOT_FOUND` reason,
+/// whose final clause still names the repair command the source trail
+/// calls for. Typed-ness per class is asserted via the health
+/// quarantine roster.
 #[test]
-fn unresolvable_pin_refuses_typed_with_repair_command_for_both_trails() {
+fn unresolvable_pin_quarantines_typed_with_repair_command_for_both_trails() {
     // Trail shape 1: right name, wrong version (the plenum outage's
     // disappeared-built-in class).
     let tmp = TempDir::new().unwrap();
     let ws = filesystem_workspace_with_pin(&tmp, "default@99.0.0");
-    let env = status_error_envelope(&ws);
-    assert_eq!(env["code"], "SCHEMA_NOT_FOUND", "got: {env}");
-    let msg = env["message"].as_str().unwrap();
+    let health = health_json(&ws);
+    let q = &health["quarantined"][0];
+    assert_eq!(q["reason_code"], "SCHEMA_NOT_FOUND", "got: {health}");
+    let msg = q["reason_message"].as_str().unwrap();
     assert!(
         msg.contains("memstead mem set-schema mem1 default@1.0.0"),
         "wrong-version trail must end in the concrete repin command: {msg}"
-    );
-    // Canonicalize: the CLI process resolves cwd through macOS's
-    // `/var` → `/private/var` symlink; the renderer comparison needs
-    // the same base path.
-    let ws_canon = ws.canonicalize().unwrap();
-    let boot_err = memstead_base::Engine::from_workspace_root(&ws_canon)
-        .err()
-        .expect("in-process boot must fail the same way");
-    assert_eq!(boot_err.code(), "SCHEMA_NOT_FOUND");
-    assert_eq!(
-        msg,
-        boot_err.surface_message(&ws_canon),
-        "CLI envelope message must be the shared boot-failure renderer verbatim"
     );
 
     // Trail shape 2: name unknown everywhere.
     let tmp2 = TempDir::new().unwrap();
     let ws2 = filesystem_workspace_with_pin(&tmp2, "ghost@1.0.0");
-    let env2 = status_error_envelope(&ws2);
-    assert_eq!(env2["code"], "SCHEMA_NOT_FOUND", "got: {env2}");
-    let msg2 = env2["message"].as_str().unwrap();
+    let health2 = health_json(&ws2);
+    let q2 = &health2["quarantined"][0];
+    assert_eq!(q2["reason_code"], "SCHEMA_NOT_FOUND", "got: {health2}");
+    let msg2 = q2["reason_message"].as_str().unwrap();
     assert!(
         msg2.contains("memstead schema install"),
         "unknown-name trail must name the install path: {msg2}"
@@ -112,6 +101,20 @@ fn unresolvable_pin_refuses_typed_with_repair_command_for_both_trails() {
         !msg2.contains("mem set-schema"),
         "unknown-name trail must not suggest repinning: {msg2}"
     );
+}
+
+/// Successful `--json health` output for a workspace (boot succeeds
+/// under the plan-04 quarantine posture even when a mem is broken).
+fn health_json(ws: &std::path::Path) -> serde_json::Value {
+    let out = memstead()
+        .current_dir(ws)
+        .args(["--json", "health"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    parse_envelope(&out)
 }
 
 /// Criterion 2: a legacy pre-v2 projection config refuses boot with a
@@ -170,10 +173,10 @@ fn duplicate_mem_name_refuses_typed() {
 }
 
 /// A mount with no schema pin anywhere (no mount pin, no backend
-/// config) refuses typed — whatever the class resolves to, it is not
-/// `INTERNAL`.
+/// config) quarantines typed (plan-04 re-routing) — whatever the
+/// class resolves to, it is not `INTERNAL`.
 #[test]
-fn missing_pin_refuses_typed() {
+fn missing_pin_quarantines_typed() {
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path().join("ws");
     memstead()
@@ -194,13 +197,18 @@ fn missing_pin_refuses_typed() {
     )
     .unwrap();
 
-    let env = status_error_envelope(&ws);
-    let code = env["code"].as_str().unwrap_or_default();
+    let health = health_json(&ws);
+    let code = health["quarantined"][0]["reason_code"]
+        .as_str()
+        .unwrap_or_default();
     assert_ne!(
         code, "INTERNAL",
-        "missing pin must not leak INTERNAL: {env}"
+        "missing pin must not leak INTERNAL: {health}"
     );
-    assert!(!code.is_empty(), "missing pin must carry a code: {env}");
+    assert!(
+        !code.is_empty(),
+        "missing pin must carry a typed quarantine reason: {health}"
+    );
 }
 
 /// An unparseable workspace store refuses typed and — having no

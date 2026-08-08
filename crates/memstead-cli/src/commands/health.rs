@@ -295,6 +295,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if !warning_payload.is_empty() {
         obj.insert("warnings".into(), json!(warning_payload));
     }
+    // Quarantine roster — a boot-honesty fact, present whenever
+    // non-empty, never behind an include gate (agent-trust plan 04).
+    if !health.quarantined.is_empty() {
+        obj.insert(
+            "quarantined".into(),
+            serde_json::to_value(&health.quarantined).unwrap_or_default(),
+        );
+    }
 
     // Authoring-drift findings participate in `--strict`
     // unconditionally (no `--include` opt-in): they are

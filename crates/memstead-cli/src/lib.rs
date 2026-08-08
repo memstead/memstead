@@ -557,6 +557,18 @@ impl CliError {
                     "failure_cause": failure_cause,
                 })),
             ),
+            MemQuarantined {
+                mem,
+                reason_code,
+                reason_message,
+            } => (
+                ExitKind::Generic,
+                Some(serde_json::json!({
+                    "mem": mem,
+                    "reason_code": reason_code,
+                    "reason_message": reason_message,
+                })),
+            ),
             UnknownMem(name) => (
                 // A missing/unmatched mem is a not-found condition, the
                 // same category as `ENTITY_NOT_FOUND` (exit 3) — not a

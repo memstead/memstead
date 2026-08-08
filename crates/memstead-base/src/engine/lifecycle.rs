@@ -832,11 +832,19 @@ impl Engine {
         target: &memstead_schema::SchemaRef,
     ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
         use crate::engine::{SetSchemaOutcome, SetSchemaResult};
+        // A quarantined mem's set-schema IS the repair path (an
+        // unresolvable pin is the commonest quarantine cause): repin
+        // the retained mount, then re-attempt the attach — the same
+        // in-process recovery `reload` performs after an external
+        // repair. Ordinary mounts proceed below unchanged.
+        if self.quarantine_reason(mem).is_some() {
+            return self.set_schema_on_quarantined(mem, target);
+        }
         let mount_idx = self
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem))?;
         // Capability gate, identical in shape and position to the six
         // sibling setters (`set_mem_version` … `set_mem_sync_state`):
         // a schema-pin change starts a migration — the one lifecycle
@@ -1020,7 +1028,7 @@ impl Engine {
                 .mounts
                 .iter()
                 .find(|m| m.mount.mem == name)
-                .ok_or_else(|| EngineError::UnknownMem(name.to_string()))?;
+                .ok_or_else(|| self.unknown_mem_error(&name))?;
             if !matches!(mount.mount.storage, MountStorage::Folder { .. }) {
                 return Err(EngineError::MarkdownExportUnsupportedBackend {
                     mem: name.to_string(),
@@ -1118,7 +1126,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         let config = self.mem_config_for(mem_name).ok_or_else(|| {
             EngineError::InvalidInput(format!(
                 "mem '{mem_name}' has no loaded MemConfig — cannot export"
@@ -1244,7 +1252,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1317,7 +1325,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1372,7 +1380,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1424,7 +1432,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1484,7 +1492,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1557,7 +1565,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1653,12 +1661,197 @@ impl Engine {
         // before the merge), matching the inner fn's no-mutation-on-
         // failed-read fence. Drift events still surface as
         // `MemReloaded` warnings via `reload_if_stale`.
+        // A quarantined mem's reload is the way back into service:
+        // re-attempt the whole attach (backend, schema resolution,
+        // entity load). On success the roster entry disappears; on
+        // failure the mem stays quarantined with a refreshed reason.
+        if self.quarantine_reason(mem).is_some() {
+            return self.reattach_quarantined_mem(mem);
+        }
         let mut sink: Vec<WarningHint> = Vec::new();
         let result = self.reload_one_mem_inner(mem, &mut sink)?;
         self.load_warnings.retain(|w| w.source_mem() != Some(mem));
         self.load_warnings
             .extend(sink.into_iter().filter(|w| w.source_mem() == Some(mem)));
         Ok(result)
+    }
+
+    /// The quarantine branch of [`Self::set_mem_schema`]: repin the
+    /// retained mount (target must resolve — the same booted resolver;
+    /// repair never force-writes a pin that resolves nowhere), bump
+    /// the backend config through the shared value-level writer,
+    /// persist the mount state, then re-attempt the attach. A reattach
+    /// that still fails (some second cause) leaves the mem quarantined
+    /// with its refreshed reason — the pin switch itself is durable
+    /// either way. The booted path's conformance gate cannot run over
+    /// an unloaded mem; findings surface on the post-reattach health.
+    fn set_schema_on_quarantined(
+        &mut self,
+        mem: &str,
+        target: &memstead_schema::SchemaRef,
+    ) -> Result<crate::engine::SetSchemaOutcome, EngineError> {
+        use crate::engine::{SetSchemaOutcome, SetSchemaResult};
+        // Same target-ref validation as the ordinary branch.
+        if self.resolve_schema_by_ref(target).is_none() {
+            let consulted: Vec<_> = self
+                .workspace_schemas
+                .iter()
+                .chain(self.builtin_schemas.iter())
+                .cloned()
+                .collect();
+            return Err(EngineError::SchemaNotFound {
+                mem: mem.to_string(),
+                pin: target.as_display(),
+                sources: crate::engine::error::SchemaSourceDiagnostic::for_failed_pin(
+                    &target.name,
+                    &target.version,
+                    &consulted,
+                ),
+                install_hint: None,
+            }
+            .with_schema_install_probe(self.workspace_root()));
+        }
+        let Some(q_idx) = self.quarantined.iter().position(|q| q.mount.mem == mem) else {
+            return Err(self.unknown_mem_error(mem));
+        };
+        // Repin the retained mount and, where a backend can be
+        // instantiated, the authoritative backend config (shared
+        // value-level bump — same writer as the ordinary branch).
+        self.quarantined[q_idx].mount.schema = Some(target.clone());
+        self.quarantined[q_idx].mount.migration_target = None;
+        if let Ok(backend) = (self.backend_factory)(&self.quarantined[q_idx].mount) {
+            let _ = bump_backend_schema_pin(backend.as_ref(), target);
+        }
+        self.persist_state()?;
+        // Re-attempt the attach. Failure keeps the quarantine (fresh
+        // reason on the roster) but the pin switch stands — the
+        // outcome reports the switch, the roster reports any
+        // remaining cause.
+        let _ = self.reattach_quarantined_mem(mem);
+        Ok(SetSchemaOutcome {
+            mem: mem.to_string(),
+            schema_pin: target.as_display(),
+            migration_target: None,
+            outcome: SetSchemaResult::Switched,
+            findings: Vec::new(),
+        })
+    }
+
+    /// Re-attempt the boot-time attach of a quarantined mem —
+    /// backend instantiation, schema resolution (same resolver and
+    /// catalogue layering as boot: workspace-authored schemas over
+    /// built-ins), then a per-mem entity load. Success removes the
+    /// roster entry and the mem serves again in the same process;
+    /// any failure keeps (re-)quarantining with the fresh typed
+    /// reason, so the roster never goes stale against the live state.
+    fn reattach_quarantined_mem(
+        &mut self,
+        mem: &str,
+    ) -> Result<crate::ops::ReloadResult, EngineError> {
+        let Some(q_idx) = self.quarantined.iter().position(|q| q.mount.mem == mem) else {
+            return Err(self.unknown_mem_error(mem));
+        };
+        let mount = self.quarantined[q_idx].mount.clone();
+
+        let mut requarantine = |this: &mut Self, e: &EngineError| {
+            this.quarantined[q_idx].reason_code = e.code().to_string();
+            this.quarantined[q_idx].reason_message = e.to_string();
+        };
+
+        let backend = match (self.backend_factory)(&mount) {
+            Ok(b) => b,
+            Err(e) => {
+                let err = EngineError::Mem(e.to_string());
+                requarantine(self, &err);
+                return Err(self.unknown_mem_error(mem));
+            }
+        };
+
+        // Same config / pin-authority reads as the boot loop.
+        let last_known_head = backend.current_head().ok().flatten();
+        let mem_config = backend.read_mem_config().ok().flatten().and_then(|bytes| {
+            let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            memstead_schema::config::parse_mem_config(&value).ok()
+        });
+        let archive_provenance = backend
+            .read_archive_provenance()
+            .ok()
+            .flatten()
+            .and_then(|bytes| memstead_schema::ArchiveProvenance::from_archive_bytes(&bytes).ok());
+        let config_pin = mem_config.as_ref().and_then(|c| c.schema.clone());
+        let effective_pin = mount
+            .migration_target
+            .clone()
+            .or(config_pin)
+            .or(mount.schema.clone());
+        let Some(effective_pin) = effective_pin else {
+            let err = EngineError::MemConfigIncomplete {
+                mem: mem.to_string(),
+                missing_fields: vec!["schema".to_string()],
+            };
+            requarantine(self, &err);
+            return Err(self.unknown_mem_error(mem));
+        };
+        let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
+            .workspace_schemas
+            .iter()
+            .chain(self.builtin_schemas.iter())
+            .cloned()
+            .collect();
+        let schema = match crate::engine::SchemaResolver::new(&catalogue).resolve(&effective_pin) {
+            Ok(s) => s,
+            Err(sources) => {
+                let err = EngineError::SchemaNotFound {
+                    mem: mem.to_string(),
+                    pin: effective_pin.as_display(),
+                    sources,
+                    install_hint: None,
+                }
+                .with_schema_install_probe(self.workspace_root());
+                requarantine(self, &err);
+                return Err(self.unknown_mem_error(mem));
+            }
+        };
+
+        // Attach, then load entities through the ordinary per-mem
+        // reload. An entity-load failure re-quarantines (the mount is
+        // detached again) — quarantine is not tolerance.
+        self.quarantined.remove(q_idx);
+        self.schemas.insert(mem.to_string(), schema);
+        self.mounts.push(crate::engine::MountedBackend {
+            mount,
+            backend,
+            last_known_head,
+            mem_config,
+            archive_provenance,
+        });
+        self.mem_router = std::sync::Arc::new(crate::engine::boot::build_mem_router_from_mounts(
+            &self.mounts,
+        ));
+        let mut sink: Vec<WarningHint> = Vec::new();
+        match self.reload_one_mem_inner(mem, &mut sink) {
+            Ok(result) => {
+                self.load_warnings.retain(|w| w.source_mem() != Some(mem));
+                self.load_warnings
+                    .extend(sink.into_iter().filter(|w| w.source_mem() == Some(mem)));
+                self.invalidate_communities();
+                Ok(result)
+            }
+            Err(e) => {
+                let mount_idx = self.mounts.len() - 1;
+                let mounted = self.mounts.remove(mount_idx);
+                self.schemas.remove(mem);
+                self.mem_router = std::sync::Arc::new(
+                    crate::engine::boot::build_mem_router_from_mounts(&self.mounts),
+                );
+                self.quarantined.push(crate::engine::QuarantinedMem {
+                    mount: mounted.mount,
+                    reason_code: e.code().to_string(),
+                    reason_message: e.to_string(),
+                });
+                Err(e)
+            }
+        }
     }
 
     /// Inner per-mem body shared by [`Self::reload_one_mem`]
@@ -1677,12 +1870,12 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem))?;
         let schema = self
             .schemas
             .get(mem)
             .cloned()
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem))?;
 
         // Snapshot pre-reload (id, content_hash) for this mem.
         let pre: HashMap<EntityId, String> = self

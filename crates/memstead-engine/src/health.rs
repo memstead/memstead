@@ -364,6 +364,14 @@ pub fn compose_health(
     if !warnings.is_empty() {
         obj.insert("warnings".into(), serde_json::json!(warnings));
     }
+    // Quarantine roster — a boot-honesty fact, present whenever
+    // non-empty, never behind an include gate (agent-trust plan 04).
+    if !health.quarantined.is_empty() {
+        obj.insert(
+            "quarantined".into(),
+            serde_json::to_value(&health.quarantined).unwrap_or_default(),
+        );
+    }
 
     if include.iter().any(|s| s == "orphans") {
         let orphans_list: Vec<serde_json::Value> = orphan_ids

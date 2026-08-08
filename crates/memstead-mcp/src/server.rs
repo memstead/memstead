@@ -770,6 +770,23 @@ fn engine_err_unified(
                 ),
             )
         }
+        E::MemQuarantined {
+            mem,
+            reason_code,
+            reason_message,
+        } => tool_error_with_payload(
+            "MEM_QUARANTINED",
+            &message,
+            envelope(
+                "MEM_QUARANTINED",
+                message.clone(),
+                serde_json::json!({
+                    "mem": mem,
+                    "reason_code": reason_code,
+                    "reason_message": reason_message,
+                }),
+            ),
+        ),
         E::UnknownRef(raw) => tool_error_with_payload(
             "UNKNOWN_REF",
             &message,

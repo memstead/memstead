@@ -170,7 +170,17 @@ impl Engine {
             .collect();
         let mut load_warnings: Vec<WarningHint> = Vec::new();
 
-        for m in &mounted {
+        // Mem-level failures quarantine the mem instead of failing the
+        // workspace (degrade, never disappear — plenum/expertise
+        // 2026-08-06/07, where one broken mem took every healthy
+        // sibling offline). Nothing is weakened: everything that
+        // failed the boot still fails it, the blast radius shrinks to
+        // the one mem, which serves nothing until repaired + reloaded.
+        let mut quarantined: Vec<crate::engine::QuarantinedMem> = Vec::new();
+        let mut quarantined_idx: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        for (m_idx, m) in mounted.iter().enumerate() {
             // Schema-pin authority: the mem's own per-mem config is
             // the authoritative settled pin, so a copied or cloned mem
             // resolves its schema from its own backend without consulting
@@ -217,23 +227,40 @@ impl Engine {
             let settled_pin = config_pin.or(mount_pin);
             // Dual-pin: a mem mid-migration validates against the
             // migration target, not the settled pin.
-            let effective_pin = m
-                .mount
-                .migration_target
-                .as_ref()
-                .or(settled_pin)
-                .ok_or_else(|| EngineError::MemConfigIncomplete {
+            let Some(effective_pin) = m.mount.migration_target.as_ref().or(settled_pin) else {
+                // Missing pin: quarantine, don't abort the workspace.
+                let e = EngineError::MemConfigIncomplete {
                     mem: m.mount.mem.clone(),
                     missing_fields: vec!["schema".to_string()],
-                })?;
-            let schema = SchemaResolver::new(&builtin_schemas)
-                .resolve(effective_pin)
-                .map_err(|sources| EngineError::SchemaNotFound {
-                    mem: m.mount.mem.clone(),
-                    pin: effective_pin.as_display(),
-                    sources,
-                    install_hint: None,
-                })?;
+                };
+                quarantined.push(crate::engine::QuarantinedMem {
+                    mount: m.mount.clone(),
+                    reason_code: e.code().to_string(),
+                    reason_message: e.to_string(),
+                });
+                quarantined_idx.insert(m_idx);
+                continue;
+            };
+            let schema = match SchemaResolver::new(&builtin_schemas).resolve(effective_pin) {
+                Ok(schema) => schema,
+                Err(sources) => {
+                    // Unresolvable pin: the plenum failure class —
+                    // quarantine this mem, serve the rest.
+                    let e = EngineError::SchemaNotFound {
+                        mem: m.mount.mem.clone(),
+                        pin: effective_pin.as_display(),
+                        sources,
+                        install_hint: None,
+                    };
+                    quarantined.push(crate::engine::QuarantinedMem {
+                        mount: m.mount.clone(),
+                        reason_code: e.code().to_string(),
+                        reason_message: e.to_string(),
+                    });
+                    quarantined_idx.insert(m_idx);
+                    continue;
+                }
+            };
             schemas.insert(m.mount.mem.clone(), schema.clone());
 
             // Sealed schemas keep loading even when they violate the
@@ -251,7 +278,21 @@ impl Engine {
                 });
             }
 
-            let (entries, read_errors) = collect_source_entries(m.backend.as_ref())?;
+            let (entries, read_errors) = match collect_source_entries(m.backend.as_ref()) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // Backend read failure: quarantine this mem, serve
+                    // the rest.
+                    quarantined.push(crate::engine::QuarantinedMem {
+                        mount: m.mount.clone(),
+                        reason_code: e.code().to_string(),
+                        reason_message: e.to_string(),
+                    });
+                    quarantined_idx.insert(m_idx);
+                    schemas.remove(&m.mount.mem);
+                    continue;
+                }
+            };
             let load_result = parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
             // Wire the LoadCollector so the parser/store-builder
             // pipeline forwards typed drift warnings
@@ -269,6 +310,19 @@ impl Engine {
                 }),
             );
             load_errors.extend(load_result.errors);
+        }
+
+        // Drop quarantined mounts from the serving roster: a
+        // quarantined mem has no backend in service, no entities in
+        // the store, no schema in the per-mem map — it exists only on
+        // the quarantine roster until repair + reload re-attach it.
+        if !quarantined_idx.is_empty() {
+            let mut keep_idx = 0usize;
+            mounted.retain(|_| {
+                let keep = !quarantined_idx.contains(&keep_idx);
+                keep_idx += 1;
+                keep
+            });
         }
 
         // Parse-time relation validation runs after every mount's
@@ -333,6 +387,7 @@ impl Engine {
             declared_origins: HashMap::new(),
             workspace_root: None,
             load_warnings,
+            quarantined,
             pipeline_configs: crate::pipeline_store::BindingConfigs::default(),
             mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_lean_backend,
@@ -385,9 +440,19 @@ impl Engine {
         let settings = workspace.settings.clone();
         let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> =
             Vec::with_capacity(workspace.mounts.len());
+        // Backend-instantiation failures quarantine the mem instead of
+        // failing the workspace (degrade, never disappear); the roster
+        // entry lands on the engine after construction.
+        let mut instantiate_quarantine: Vec<crate::engine::QuarantinedMem> = Vec::new();
         for mount in workspace.mounts {
-            let backend = instantiate_lean_backend(&mount)?;
-            mounts.push((mount, backend));
+            match instantiate_lean_backend(&mount) {
+                Ok(backend) => mounts.push((mount, backend)),
+                Err(e) => instantiate_quarantine.push(crate::engine::QuarantinedMem {
+                    reason_code: e.code().to_string(),
+                    reason_message: e.to_string(),
+                    mount,
+                }),
+            }
         }
         // Folder-backend authoring path: authored schema packages live
         // at the fixed `<workspace>/.memstead/schemas/<name>@<version>/`
@@ -405,6 +470,7 @@ impl Engine {
         // the never-installed-package hint before it surfaces.
         let mut engine = Engine::from_mounts_inner(mounts, local)
             .map_err(|e| e.with_schema_install_probe(Some(workspace_root)))?;
+        engine.quarantined.extend(instantiate_quarantine);
         engine.set_settings(settings);
         engine.workspace_root = Some(workspace_root.to_path_buf());
         // Load the workspace store's pipeline configs — the v2 single-record
@@ -461,7 +527,7 @@ impl Engine {
 /// `Workspace.mounts` — the file-adapter case. `RuntimeCreated`
 /// origins land when `memstead_mem_create` migrates onto the unified
 /// engine and produces fresh runtime registrations.
-fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRouterSnapshot {
+pub(crate) fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRouterSnapshot {
     let mut router = MemRouterSnapshot::new();
     for m in mounts {
         match m.mount.capability {
@@ -2174,8 +2240,15 @@ pattern = "exec-*"
         assert_eq!(s.mem_delete_rules[0].pattern, "exec-*");
     }
 
+    /// Deliberate replacement of the historical wholesale-abort test
+    /// (`from_mounts_rejects_unknown_schema_pin_with_typed_error`,
+    /// agent-trust plan 04): an unresolvable pin no longer fails the
+    /// workspace — the mem is QUARANTINED with the same typed
+    /// `SCHEMA_NOT_FOUND` reason (nothing is weakened, the blast
+    /// radius shrinks), operations naming it refuse `MEM_QUARANTINED`,
+    /// and the roster surfaces on health.
     #[test]
-    fn from_mounts_rejects_unknown_schema_pin_with_typed_error() {
+    fn from_mounts_quarantines_unknown_schema_pin() {
         let tmp = TempDir::new().unwrap();
         let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
         let mount = Mount {
@@ -2192,33 +2265,188 @@ pattern = "exec-*"
             cross_linkable: true,
             migration_target: None,
         };
-        let err = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
+        let engine = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
+            .expect("a broken mem quarantines, never fails the workspace");
+
+        let roster = engine.quarantined_mems();
+        assert_eq!(roster.len(), 1);
+        assert_eq!(roster[0].mount.mem, "specs");
+        assert_eq!(roster[0].reason_code, "SCHEMA_NOT_FOUND");
+        assert!(
+            roster[0].reason_message.contains("totally-not-a-schema"),
+            "reason carries the failing pin: {}",
+            roster[0].reason_message
+        );
+        // The mem serves nothing: it is not on the mount roster …
+        assert!(engine.mounts().iter().all(|m| m.mem != "specs"));
+        // … and lookups refuse with the typed quarantine code, not
+        // UNKNOWN_MEM.
+        let err = engine.unknown_mem_error("specs");
+        assert_eq!(err.code(), "MEM_QUARANTINED");
+        assert!(
+            err.to_string().contains("SCHEMA_NOT_FOUND"),
+            "quarantine refusal carries the underlying reason: {err}"
+        );
+        // Health carries the roster without an include gate.
+        let health = engine.health();
+        assert_eq!(health.quarantined.len(), 1);
+        assert_eq!(health.quarantined[0].reason_code, "SCHEMA_NOT_FOUND");
+    }
+
+    /// Criterion 5 (agent-trust plan 04): quarantine → repair →
+    /// reload returns the mem to service in the same engine instance;
+    /// the roster entry disappears. The repair here is the same
+    /// value-level config-pin rewrite `memstead mem set-schema`
+    /// performs below boot (plan 03).
+    #[test]
+    fn reload_returns_repaired_mem_from_quarantine() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_path_buf();
+        std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+        let config_path = dir.join(".memstead").join("config.json");
+        std::fs::write(&config_path, r#"{ "schema": "ghost@1.0.0" }"#).unwrap();
+        let writer = FilesystemMemWriter::new(dir.clone());
+        let mount = Mount {
+            mem: "specs".to_string(),
+            schema: None,
+            storage: MountStorage::Folder { path: dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let mut engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
+        assert_eq!(engine.quarantined_mems().len(), 1);
+        // Un-repaired reload keeps the quarantine (refreshed reason,
+        // typed refusal).
+        let err = engine.reload_one_mem("specs").unwrap_err();
+        assert_eq!(err.code(), "MEM_QUARANTINED");
+        assert_eq!(engine.quarantined_mems().len(), 1);
+
+        // Repair: repin the config to a resolvable schema (what
+        // `mem set-schema` does below boot), then reload.
+        std::fs::write(&config_path, r#"{ "schema": "default@1.0.0" }"#).unwrap();
+        engine
+            .reload_one_mem("specs")
+            .expect("repaired mem re-attaches on reload");
+        assert!(
+            engine.quarantined_mems().is_empty(),
+            "roster entry disappears after re-attach"
+        );
+        // …and the mem serves again in the same process.
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("identity".to_string(), "back".to_string());
+        sections.insert("purpose".to_string(), "post-repair service".to_string());
+        engine
+            .create_entity_with_ctx(
+                crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "specs".to_string(),
+                    title: "Back".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: indexmap::IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                &crate::vcs::CommitContext::internal(),
+            )
+            .expect("reattached mem serves writes");
+    }
+
+    /// A workspace mixing one broken mem with healthy siblings boots,
+    /// serves the healthy mems fully, and refuses typed on the
+    /// quarantined one — the plenum shape (one bad pin, thirteen
+    /// healthy hostages) can no longer occur. Drives the pin-failure
+    /// and missing-pin variants in one fixture.
+    #[test]
+    fn broken_mem_quarantines_while_healthy_siblings_serve() {
+        let tmp = TempDir::new().unwrap();
+        let make_mount = |mem: &str, pin: Option<SchemaRef>| {
+            let dir = tmp.path().join(mem);
+            std::fs::create_dir_all(&dir).unwrap();
+            let writer = FilesystemMemWriter::new(dir.clone());
+            (
+                Mount {
+                    mem: mem.to_string(),
+                    schema: pin,
+                    storage: MountStorage::Folder { path: dir },
+                    capability: MountCapability::Write,
+                    lifecycle: MountLifecycle::Eager,
+                    cross_linkable: true,
+                    migration_target: None,
+                },
+                Box::new(writer) as Box<dyn MemBackend>,
+            )
+        };
+        let healthy = make_mount(
+            "healthy",
+            Some(SchemaRef::new("default", semver::Version::new(1, 0, 0))),
+        );
+        let bad_pin = make_mount(
+            "badpin",
+            Some(SchemaRef::new("ghost", semver::Version::new(1, 0, 0))),
+        );
+        let missing_pin = make_mount("nopin", None);
+        let mut engine = Engine::from_mounts(vec![healthy, bad_pin, missing_pin])
+            .expect("mixed workspace boots");
+
+        // Roster: both broken mems, each with its own typed reason.
+        let codes: std::collections::HashMap<String, String> = engine
+            .quarantined_mems()
+            .iter()
+            .map(|q| (q.mount.mem.clone(), q.reason_code.clone()))
+            .collect();
+        assert_eq!(
+            codes.get("badpin").map(String::as_str),
+            Some("SCHEMA_NOT_FOUND")
+        );
+        assert_eq!(
+            codes.get("nopin").map(String::as_str),
+            Some("MEM_CONFIG_INCOMPLETE")
+        );
+
+        // The healthy mem is fully writable.
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("identity".to_string(), "alive".to_string());
+        sections.insert("purpose".to_string(), "proof of service".to_string());
+        let created = engine
+            .create_entity_with_ctx(
+                crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "healthy".to_string(),
+                    title: "Alive".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: indexmap::IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                &crate::vcs::CommitContext::internal(),
+            )
+            .expect("healthy mem serves writes");
+        assert_eq!(created.id.to_string(), "healthy--alive");
+
+        // Writes against a quarantined mem refuse with the typed code.
+        let mut sections = indexmap::IndexMap::new();
+        sections.insert("identity".to_string(), "x".to_string());
+        let err = engine
+            .create_entity_with_ctx(
+                crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "badpin".to_string(),
+                    title: "Nope".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: indexmap::IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                &crate::vcs::CommitContext::internal(),
+            )
             .unwrap_err();
-        match err {
-            EngineError::SchemaNotFound {
-                mem,
-                pin,
-                sources,
-                install_hint: _,
-            } => {
-                assert_eq!(mem, "specs");
-                assert_eq!(pin, "totally-not-a-schema@1.0.0");
-                // The diagnostics name all three sources in fixed order;
-                // none carries the unknown pin, and remote is reserved.
-                let labels: Vec<&str> = sources.iter().map(|s| s.source).collect();
-                assert_eq!(labels, ["local_storage", "builtin", "remote"]);
-                assert!(sources.iter().all(|s| !s.pinned_version_match));
-                assert_eq!(
-                    sources
-                        .iter()
-                        .find(|s| s.source == "remote")
-                        .unwrap()
-                        .status,
-                    Some("not_configured"),
-                );
-            }
-            other => panic!("expected SchemaNotFound, got {other:?}"),
-        }
+        assert_eq!(err.code(), "MEM_QUARANTINED");
     }
 
     /// Schema-pin authority: the mem's own per-mem config is the
@@ -2274,7 +2502,7 @@ pattern = "exec-*"
     }
 
     #[test]
-    fn from_workspace_root_rejects_git_branch_mount_with_typed_error() {
+    fn from_workspace_root_quarantines_git_branch_mount_on_lean() {
         let tmp = TempDir::new().unwrap();
         let memstead = tmp.path().join(".memstead");
         std::fs::create_dir_all(&memstead).unwrap();
@@ -2304,15 +2532,20 @@ pattern = "exec-*"
             }"#,
         )
         .unwrap();
-        let err = Engine::from_workspace_root(tmp.path()).unwrap_err();
-        match err {
-            crate::BootError::Instantiate(
-                crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature { mem },
-            ) => {
-                assert_eq!(mem, "specs");
-            }
-            other => panic!("expected Instantiate(GitBranchRequiresMemRepoFeature), got {other:?}"),
-        }
+        // Deliberate replacement of the historical wholesale-abort
+        // assertion (agent-trust plan 04): the lean binary meeting a
+        // git-branch mount QUARANTINES that mem (typed
+        // UNSUPPORTED_WORKSPACE_SHAPE reason) instead of refusing the
+        // whole workspace — the judgment is unchanged, the blast
+        // radius shrinks to the one mount the lean flavour cannot
+        // serve.
+        let engine = Engine::from_workspace_root(tmp.path())
+            .expect("lean boot quarantines the git-branch mount, never fails the workspace");
+        let roster = engine.quarantined_mems();
+        assert_eq!(roster.len(), 1);
+        assert_eq!(roster[0].mount.mem, "specs");
+        assert_eq!(roster[0].reason_code, "UNSUPPORTED_WORKSPACE_SHAPE");
+        assert_eq!(engine.unknown_mem_error("specs").code(), "MEM_QUARANTINED");
     }
 
     #[test]

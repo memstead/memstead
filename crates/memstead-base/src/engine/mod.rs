@@ -127,6 +127,23 @@ struct MountedBackend {
 /// schemas in a multi-schema workspace. Per-file errors don't fail
 /// construction; they collect into [`Engine::load_errors`] for the
 /// operator to inspect.
+/// One quarantined mem: the mem-level boot failure that took it out of
+/// service, and the retained mount record `reload` uses to re-attempt
+/// the attach after a repair. The reason code/message are plan-01
+/// typed material — the message's final clause names the repair
+/// command, so the roster entry is actionable as-is.
+#[derive(Debug, Clone)]
+pub struct QuarantinedMem {
+    /// The mount that failed to attach, retained verbatim for reload.
+    pub mount: crate::workspace::Mount,
+    /// Typed code of the underlying failure (e.g. `SCHEMA_NOT_FOUND`,
+    /// `MEM_CONFIG_INCOMPLETE`, `MEM_ERROR`).
+    pub reason_code: String,
+    /// Full message of the underlying failure, repair command
+    /// included.
+    pub reason_message: String,
+}
+
 pub struct Engine {
     mounts: Vec<MountedBackend>,
     store: Store,
@@ -212,6 +229,17 @@ pub struct Engine {
     /// surface can include them when the loader pipeline grows the
     /// warning generators.
     load_warnings: Vec<WarningHint>,
+    /// Mems that failed their mem-level boot step (unresolvable or
+    /// missing schema pin, backend instantiation or read failure) and
+    /// are quarantined instead of failing the whole workspace —
+    /// degrade, never disappear. A quarantined mem serves NOTHING:
+    /// operations naming it refuse with the typed `MEM_QUARANTINED`
+    /// code carrying the underlying reason (quarantine is not
+    /// tolerance — no partial data from a broken mem). The retained
+    /// [`Mount`] record lets `reload` re-attempt the attach after a
+    /// repair, without a process restart. Surfaced on overview and
+    /// health as the quarantine roster.
+    quarantined: Vec<QuarantinedMem>,
     /// Pipeline configs (Medium / Facet / Projection / Ingest) loaded
     /// from the workspace store at boot. Empty for engines built via
     /// `from_mounts*` (tests, in-memory consumers) and for any workspace

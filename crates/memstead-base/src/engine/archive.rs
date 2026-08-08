@@ -139,7 +139,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         let config = self.mem_config_for(mem_name).ok_or_else(|| {
             EngineError::InvalidInput(format!(
                 "mem '{mem_name}' has no loaded MemConfig — cannot export"

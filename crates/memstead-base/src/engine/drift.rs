@@ -484,7 +484,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem))?;
 
         // Run the fetch step alone first so we can validate the
         // prospective state against the schema before letting the
@@ -812,7 +812,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem))?;
 
         // History rewriting is a write — read-only and archive mounts
         // refuse before any dispatch (parity with the mutation surface).

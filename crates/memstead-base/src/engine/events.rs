@@ -188,7 +188,7 @@ impl super::Engine {
         callback: EventCallback,
     ) -> Result<SubscriptionHandle, crate::EngineError> {
         if !self.has_mem(mem) {
-            return Err(crate::EngineError::UnknownMem(mem.to_string()));
+            return Err(self.unknown_mem_error(mem));
         }
         let id = self
             .event_subscribers

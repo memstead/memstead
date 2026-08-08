@@ -201,9 +201,19 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     let all_mounted_names: std::collections::HashSet<String> =
         workspace.mounts.iter().map(|m| m.mem.clone()).collect();
     let mut mounts: Vec<(Mount, Box<dyn MemBackend>)> = Vec::with_capacity(workspace.mounts.len());
+    // Backend-instantiation failures quarantine the mem instead of
+    // failing the workspace (degrade, never disappear); the entries
+    // land on the engine's quarantine roster after construction.
+    let mut instantiate_quarantine: Vec<memstead_base::engine::QuarantinedMem> = Vec::new();
     for mount in workspace.mounts {
-        let backend = crate::storage::instantiate_full_backend(&mount)?;
-        mounts.push((mount, backend));
+        match crate::storage::instantiate_full_backend(&mount) {
+            Ok(backend) => mounts.push((mount, backend)),
+            Err(e) => instantiate_quarantine.push(memstead_base::engine::QuarantinedMem {
+                reason_code: e.code().to_string(),
+                reason_message: e.to_string(),
+                mount,
+            }),
+        }
     }
     // One-way legacy migration: per-host-mem `readMems` entries become
     // workspace-level read-only mounts (registered in the engine-managed
@@ -267,6 +277,7 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
         ref_schemas,
     )
     .map_err(|e| e.with_schema_install_probe(Some(workspace_root)))?;
+    engine.extend_quarantine(instantiate_quarantine);
     engine.set_settings(settings);
     engine.set_workspace_root(workspace_root.to_path_buf());
     engine.set_backend_factory(crate::storage::instantiate_full_backend);

@@ -64,6 +64,12 @@ impl From<EngineError> for MemsteadError {
                 name,
                 writable_mems: Vec::new(),
             },
+            // Quarantined mems collapse into the generic engine-error
+            // shape: the macOS surface renders the full message, which
+            // carries the reason and repair command inline.
+            e @ EngineError::MemQuarantined { .. } => Self::ValidationFailed {
+                message: e.to_string(),
+            },
 
             // Validation lift — only UnknownSection carves out a typed
             // Swift variant; the rest collapse into ValidationFailed.

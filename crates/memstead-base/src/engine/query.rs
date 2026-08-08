@@ -454,7 +454,7 @@ impl Engine {
     /// any backend. A mem with no anchors returns an empty report.
     pub fn verify_mem_anchors(&self, mem: &str) -> Result<MemAnchorVerification, EngineError> {
         if !self.mem_router.is_visible(mem) {
-            return Err(EngineError::UnknownMem(mem.to_string()));
+            return Err(self.unknown_mem_error(mem));
         }
         let mut report = MemAnchorVerification {
             mem: mem.to_string(),
@@ -655,7 +655,7 @@ impl Engine {
     pub fn gitdir_for(&self, mem_name: &str) -> Result<PathBuf, EngineError> {
         let m = self
             .mount(mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         match &m.storage {
             MountStorage::GitBranch { gitdir, .. } => Ok(gitdir.clone()),
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
@@ -683,7 +683,7 @@ impl Engine {
     pub fn worktree_for(&self, mem_name: &str) -> Result<PathBuf, EngineError> {
         let m = self
             .mount(mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         match &m.storage {
             MountStorage::Folder { path } => Ok(path.clone()),
             MountStorage::GitBranch { .. } => {
@@ -790,7 +790,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         Ok(m.last_known_head.clone())
     }
 
@@ -813,7 +813,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| EngineError::UnknownMem(mem_name.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
         let live = m.backend.current_head().ok().flatten();
         Ok(live != m.last_known_head)
     }
@@ -832,6 +832,44 @@ impl Engine {
     /// summaries uniformly.
     pub fn load_warnings(&self) -> &[WarningHint] {
         &self.load_warnings
+    }
+
+    /// The quarantine roster: mems that failed their mem-level boot
+    /// step and serve nothing until repaired + reloaded. Empty on a
+    /// fully healthy workspace. Surfaced on overview and health.
+    pub fn quarantined_mems(&self) -> &[crate::engine::QuarantinedMem] {
+        &self.quarantined
+    }
+
+    /// The quarantine entry for `mem`, when it is quarantined.
+    pub fn quarantine_reason(&self, mem: &str) -> Option<&crate::engine::QuarantinedMem> {
+        self.quarantined.iter().find(|q| q.mount.mem == mem)
+    }
+
+    /// The typed error for a mem name that did not resolve to a
+    /// serving mount: `MEM_QUARANTINED` (carrying the underlying boot
+    /// failure and its repair command) when the mem is on the
+    /// quarantine roster, `UNKNOWN_MEM` otherwise. Every lookup site
+    /// that fails to find a mem routes here so a quarantined mem is
+    /// never misreported as unknown — honest absence, with the reason.
+    pub fn unknown_mem_error(&self, mem: &str) -> EngineError {
+        match self.quarantine_reason(mem) {
+            Some(q) => EngineError::MemQuarantined {
+                mem: mem.to_string(),
+                reason_code: q.reason_code.clone(),
+                reason_message: q.reason_message.clone(),
+            },
+            None => EngineError::UnknownMem(mem.to_string()),
+        }
+    }
+
+    /// Append boot-path quarantine entries recorded outside
+    /// `from_mounts_inner` (backend-instantiation failures happen
+    /// before the mount list reaches the engine constructor). Boot
+    /// paths only — quarantine is a boot judgment, never a runtime
+    /// mutation.
+    pub fn extend_quarantine(&mut self, entries: Vec<crate::engine::QuarantinedMem>) {
+        self.quarantined.extend(entries);
     }
 
     // ---------------------------------------------------------------
@@ -957,7 +995,7 @@ impl Engine {
         let pinned = self
             .schemas
             .get(mem)
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))?;
+            .ok_or_else(|| self.unknown_mem_error(&mem))?;
         let effective: Arc<Schema> = match target_schema {
             None => pinned.clone(),
             Some(target) => self.resolve_schema_by_ref(target).ok_or_else(|| {
@@ -1034,7 +1072,7 @@ impl Engine {
         mem: &str,
     ) -> Result<Vec<crate::ops::integrity::IntegrityFinding>, EngineError> {
         if !self.schemas.contains_key(mem) {
-            return Err(EngineError::UnknownMem(mem.to_string()));
+            return Err(self.unknown_mem_error(mem));
         }
         Ok(crate::ops::integrity::consistency_findings(
             &self.store,
@@ -1058,6 +1096,18 @@ impl Engine {
             merged.append(&mut summary.warnings);
             summary.warnings = merged;
         }
+        // Quarantine roster — a boot-honesty fact, present whenever
+        // non-empty, never behind an include gate. Empty (and omitted
+        // from the wire) on a healthy workspace.
+        summary.quarantined = self
+            .quarantined
+            .iter()
+            .map(|q| crate::ops::QuarantinedMemReport {
+                mem: q.mount.mem.clone(),
+                reason_code: q.reason_code.clone(),
+                reason_message: q.reason_message.clone(),
+            })
+            .collect();
         // Surface OUTER_REPO_NOT_IGNORING_MEM_REPO when the
         // workspace is embedded inside a git repository whose
         // .gitignore does not list `mem-repo/`. Skipped when
@@ -1464,7 +1514,7 @@ impl Engine {
         self.mounts
             .iter()
             .find(|m| m.mount.mem == mem)
-            .ok_or_else(|| EngineError::UnknownMem(mem.to_string()))
+            .ok_or_else(|| self.unknown_mem_error(&mem))
     }
 }
 

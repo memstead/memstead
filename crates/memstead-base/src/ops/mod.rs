@@ -2882,6 +2882,16 @@ pub struct HealthIssue {
     pub message: String,
 }
 
+/// One quarantine-roster entry on [`HealthSummary`]: the mem, the
+/// typed reason code, and the full reason message (repair command
+/// included — plan-01 material).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QuarantinedMemReport {
+    pub mem: String,
+    pub reason_code: String,
+    pub reason_message: String,
+}
+
 /// Aggregated health report for the whole graph.
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthSummary {
@@ -2898,6 +2908,13 @@ pub struct HealthSummary {
     /// merged. Empty on the happy path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningHint>,
+    /// Quarantine roster: mems that failed their mem-level boot step
+    /// and serve nothing until repaired + reloaded. Always present in
+    /// `Engine::health()` output when non-empty — a boot-honesty fact,
+    /// never behind an include gate. Empty (and omitted from the wire)
+    /// on a healthy workspace, keeping default output byte-unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quarantined: Vec<QuarantinedMemReport>,
     /// Inline wiki-links in entity section bodies that resolve to stub
     /// targets (no on-disk markdown file). Populated only when the caller
     /// opts in via `include=["dangling_links"]`; `None` otherwise, so

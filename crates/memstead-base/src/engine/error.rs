@@ -194,6 +194,22 @@ pub enum EngineError {
     /// "wrong mem name" from "backend failure".
     #[error("unknown mem: {0}")]
     UnknownMem(String),
+    /// The mem exists in the workspace but failed its mem-level boot
+    /// step and is quarantined — it serves nothing until repaired
+    /// (degrade, never disappear; quarantine is not tolerance).
+    /// `reason_message` is the underlying typed failure verbatim, its
+    /// final clause the repair command; after the repair,
+    /// `memstead_reload` re-attaches the mem without a restart.
+    #[error(
+        "mem '{mem}' is quarantined — it failed to attach at boot and serves nothing until \
+         repaired: [{reason_code}] {reason_message}. After repairing, run memstead_reload \
+         (or `memstead reload`) to bring it back into service."
+    )]
+    MemQuarantined {
+        mem: String,
+        reason_code: String,
+        reason_message: String,
+    },
     /// Mutation rejected because the mount declares
     /// [`MountCapability::ReadOnly`]. Surfaced before reaching the
     /// backend so the typed `Sealed` payload from the archive
@@ -1087,6 +1103,7 @@ impl EngineError {
         match self {
             EngineError::DuplicateMem(_) => "DUPLICATE_MEM",
             EngineError::UnknownMem(_) => "UNKNOWN_MEM",
+            EngineError::MemQuarantined { .. } => "MEM_QUARANTINED",
             EngineError::UnknownRef(_) => "UNKNOWN_REF",
             EngineError::UnknownRemote(_) => "UNKNOWN_REMOTE",
             EngineError::LocalDivergence { .. } => "LOCAL_DIVERGENCE",
@@ -1178,6 +1195,15 @@ impl EngineError {
     pub fn details(&self) -> serde_json::Value {
         match self {
             EngineError::NotFound { id } => serde_json::json!({ "id": id }),
+            EngineError::MemQuarantined {
+                mem,
+                reason_code,
+                reason_message,
+            } => serde_json::json!({
+                "mem": mem,
+                "reason_code": reason_code,
+                "reason_message": reason_message,
+            }),
             EngineError::ConstraintUnsatisfied {
                 entity_type,
                 entity_id,
