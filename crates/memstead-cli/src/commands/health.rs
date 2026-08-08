@@ -24,7 +24,12 @@ pub struct Args {
     /// anchor-verification states), friction (the workspace-local
     /// refusal ledger's summary — counts per typed refusal code and
     /// per verb, whole-ledger plus a recent 24h window; local-only,
-    /// content-free).
+    /// content-free), open_questions (per-mem composed worklist of
+    /// what the holding does not know: stubs, recheck/unresolvable
+    /// anchors, unsatisfied constraints, dangling links, and a paired
+    /// process mem's open entries — negative findings separated as
+    /// already-searched; capped per kind with an explicit `more`
+    /// count).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -98,6 +103,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         findings,
         config_entries,
         anchors_axis,
+        open_questions_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -271,6 +277,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &anchors_axis {
         obj.insert("anchors".to_string(), axis.clone());
+    }
+    if let Some(axis) = &open_questions_axis {
+        obj.insert("open_questions".to_string(), axis.clone());
     }
     // `--include friction`: the friction ledger's read surface
     // (agent-trust plan 08) — counts per refusal code / per verb,
@@ -572,6 +581,54 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
+    if let Some(axis) = open_questions_axis.as_ref().and_then(|a| a.as_object()) {
+        let cap = axis
+            .get("_item_cap")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default();
+        lines.push(format!("## Open questions (item cap {cap} per kind)"));
+        for (mem, entry) in axis.iter().filter(|(k, _)| *k != "_item_cap") {
+            let total = entry["total_open"].as_u64().unwrap_or(0);
+            lines.push(format!("- `{mem}`: {total} open"));
+            for kind in [
+                "stubs",
+                "anchors_recheck",
+                "anchors_unresolvable",
+                "unsatisfied_constraints",
+                "dangling_links",
+            ] {
+                let count = entry[kind]["count"].as_u64().unwrap_or(0);
+                if count > 0 {
+                    let more = entry[kind]["more"].as_u64().unwrap_or(0);
+                    let suffix = if more > 0 {
+                        format!(" ({more} more not shown)")
+                    } else {
+                        String::new()
+                    };
+                    lines.push(format!("  - {kind}: {count}{suffix}"));
+                }
+            }
+            if let Some(process) = entry.get("process").and_then(|p| p.as_array()) {
+                for p in process {
+                    if p["resolvable"] == serde_json::json!(true) {
+                        lines.push(format!(
+                            "  - process `{}`: {} open entries; {} already searched (do not redo)",
+                            p["binding"].as_str().unwrap_or("?"),
+                            p["open_entries"]["count"].as_u64().unwrap_or(0),
+                            p["already_searched"]["count"].as_u64().unwrap_or(0),
+                        ));
+                    } else {
+                        lines.push(format!(
+                            "  - process `{}`: not resolvable (mem not mounted)",
+                            p["binding"].as_str().unwrap_or("?"),
+                        ));
+                    }
+                }
+            }
+        }
+        lines.push(String::new());
+    }
+
     if let Some(f) = &friction_axis {
         lines.push(format!(
             "## Friction ({} refusals recorded, {} in the last 24h)",
@@ -670,6 +727,10 @@ struct GatheredHealth {
     /// `health_anchors_axis` helper (same axis MCP renders). `None`
     /// otherwise — absence of the key means "not requested".
     anchors_axis: Option<serde_json::Value>,
+    /// `Some(...)` when the caller asked for `--include
+    /// open_questions`: the composed per-mem worklist from the shared
+    /// `health_open_questions_axis` helper (same axis MCP renders).
+    open_questions_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -736,6 +797,7 @@ fn gather_mem_repo(
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
     fill_anchors_axis(engine, include, &mut g);
+    fill_open_questions_axis(engine, include, &mut g);
     g
 }
 
@@ -759,6 +821,7 @@ fn gather_filesystem(
     fill_schema_breakdowns(engine, &mut g);
     fill_config_projection(engine, include, &mut g);
     fill_anchors_axis(engine, include, &mut g);
+    fill_open_questions_axis(engine, include, &mut g);
     g
 }
 
@@ -790,6 +853,21 @@ fn fill_config_projection(
 
 /// Engine-aware step for `--include anchors` — the per-mem four-state
 /// counts from the shared axis helper.
+/// Engine-aware step for `--include open_questions` — the composed
+/// what-don't-we-know worklist (agent-trust plan 11), one shared
+/// implementation with the MCP composer.
+fn fill_open_questions_axis(
+    engine: &memstead_base::Engine,
+    include: &[String],
+    g: &mut GatheredHealth,
+) {
+    if include.iter().any(|s| s == "open_questions") {
+        g.open_questions_axis = Some(
+            memstead_base::ops::health::health_open_questions_axis(engine, None),
+        );
+    }
+}
+
 fn fill_anchors_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
     if include.iter().any(|s| s == "anchors") {
         g.anchors_axis = Some(memstead_base::ops::health::health_anchors_axis(engine));
@@ -881,6 +959,7 @@ fn gather_from_store(
         dangling_links,
         config_entries: None,
         anchors_axis: None,
+        open_questions_axis: None,
     }
 }
 

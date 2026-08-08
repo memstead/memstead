@@ -540,6 +540,12 @@ pub fn compose_health(
             memstead_base::ops::health::health_anchors_axis(engine),
         );
     }
+    if include.iter().any(|s| s == "open_questions") {
+        obj.insert(
+            "open_questions".into(),
+            memstead_base::ops::health::health_open_questions_axis(engine, args.mem),
+        );
+    }
     if include.iter().any(|s| s == "friction") {
         // The friction ledger's read surface (agent-trust plan 08):
         // counts per code / per verb over the workspace-local refusal

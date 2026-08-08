@@ -2700,3 +2700,42 @@ fn negative_finding_writes_on_both_surfaces_and_is_leaf_exempt() {
     let leaf = &health["structuredContent"]["leaf_entities_by_type"];
     assert_eq!(leaf["ingest@0.5.0:negative_finding"], 2, "{health}");
 }
+
+/// The `open_questions` axis over the wire (agent-trust plan 11):
+/// include-gated (absent without the include), an empty workspace
+/// serves an empty axis rather than an error, no leaf is `INTERNAL`,
+/// and an unknown `mem` scope refuses typed.
+#[test]
+fn open_questions_axis_is_include_gated_and_refuses_unknown_mem_typed() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    // Without the include: no axis key.
+    let plain = harness.call_tool("memstead_health", json!({}));
+    assert!(plain["isError"] != true, "{plain}");
+    assert!(
+        plain["structuredContent"].get("open_questions").is_none(),
+        "axis must be include-gated: {plain}"
+    );
+
+    // With the include on a hole-free mem: an empty axis, not an error.
+    let served = harness.call_tool("memstead_health", json!({ "include": ["open_questions"] }));
+    assert!(served["isError"] != true, "{served}");
+    let axis = &served["structuredContent"]["open_questions"];
+    assert_eq!(axis["_item_cap"], 20, "{served}");
+    assert_eq!(axis["specs"]["total_open"], 0, "{served}");
+    assert_eq!(axis["specs"]["stubs"]["count"], 0);
+    assert!(
+        !serde_json::to_string(&served).unwrap().contains("\"INTERNAL\""),
+        "no leaf of the axis is INTERNAL: {served}"
+    );
+
+    // Unknown mem scope refuses typed.
+    let ghost = harness.call_tool(
+        "memstead_health",
+        json!({ "include": ["open_questions"], "mem": "ghost" }),
+    );
+    assert_eq!(ghost["isError"], true, "{ghost}");
+    assert_eq!(ghost["structuredContent"]["code"], "UNKNOWN_MEM", "{ghost}");
+}

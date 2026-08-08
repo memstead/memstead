@@ -56,6 +56,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Open-questions axis: a mem can enumerate what it does not know.**
+  `memstead health --include open_questions` (and the MCP counterpart
+  on both flavours) serves, per mem, a composed worklist of the
+  holding's own holes: its stubs, its never-confirmed (`recheck`) and
+  `unresolvable` anchors, its unsatisfied constraints, its dangling
+  links — and, when a paired process mem is resolvable for the
+  destination, that process mem's open entries, with negative
+  findings under a DISTINCT `already_searched` heading ("done, keep
+  off" — never flattened into the todo pile). Each item carries its
+  kind and the id it hangs on. The axis is a composition of existing
+  signals — it computes nothing new and reads each signal from the
+  same source its own axis serves, so it can never disagree with
+  them. Include-gated (health output is byte-unchanged without it),
+  per-kind item cap with an explicit `more` remainder, and an
+  unresolvable process pairing is stated per mem rather than silent.
 - **Negative findings: "searched, nothing found" is a result, not a
   gap.** ingest@0.5.0 adds a fourth type, `negative_finding` — what
   was sought, the search directions actually walked (`search_path`,

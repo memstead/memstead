@@ -1551,6 +1551,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "note",
         ],
         "memstead_health" => &[
+            // Open-questions axis (include=open_questions) — agent-trust
+            // plan 11's composed what-don't-we-know worklist; `more` is
+            // its explicit-truncation field.
+            "open_questions",
+            "more",
             // Friction-ledger axis (include=friction) — agent-trust
             // plan 08's refusal-ledger summary.
             "friction",

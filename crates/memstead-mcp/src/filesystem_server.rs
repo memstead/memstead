@@ -1693,7 +1693,8 @@ impl FilesystemMcpServer {
         let wants_anchors = include.iter().any(|s| s == "anchors");
         let wants_constraints = include.iter().any(|s| s == "constraints");
         let wants_friction = include.iter().any(|s| s == "friction");
-        if wants_anchors || wants_constraints || wants_friction {
+        let wants_open_questions = include.iter().any(|s| s == "open_questions");
+        if wants_anchors || wants_constraints || wants_friction || wants_open_questions {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
                 Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
@@ -1714,6 +1715,10 @@ impl FilesystemMcpServer {
                 value["friction"] =
                     memstead_base::friction::FrictionLedger::for_workspace(&self.workspace_root)
                         .summarize();
+            }
+            if wants_open_questions {
+                value["open_questions"] =
+                    memstead_base::ops::health::health_open_questions_axis(&engine, None);
             }
             return json_response(&value);
         }
@@ -2505,6 +2510,33 @@ mod tests {
                 && r.structured_content.as_ref().unwrap()["code"] == "UNSUPPORTED_PARAM"),
             "dry_run: false must not refuse: {r:?}"
         );
+    }
+
+    /// The `open_questions` axis on the lean flavour (agent-trust
+    /// plan 11): include-gated — absent without the include, an
+    /// empty per-mem worklist with it, never an error on a hole-free
+    /// mem.
+    #[test]
+    fn open_questions_axis_is_include_gated_on_lean() {
+        let tmp = TempDir::new().unwrap();
+        write_workspace(&tmp, "demo");
+        let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
+
+        let plain = server.memstead_health(Parameters(HealthParams::default()));
+        assert!(!plain.is_error.unwrap_or(false));
+        assert!(
+            plain.structured_content.as_ref().unwrap().get("open_questions").is_none(),
+            "axis must be include-gated on lean"
+        );
+
+        let served = server.memstead_health(Parameters(HealthParams {
+            include: Some(vec!["open_questions".to_string()]),
+            ..Default::default()
+        }));
+        assert!(!served.is_error.unwrap_or(false));
+        let axis = &served.structured_content.as_ref().unwrap()["open_questions"];
+        assert_eq!(axis["_item_cap"], 20, "{axis}");
+        assert_eq!(axis["demo"]["total_open"], 0, "{axis}");
     }
 
     /// Refusal complement (Part B): a defaulted-empty / absent unsupported

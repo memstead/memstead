@@ -44,6 +44,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "config",
     "anchors",
     "friction",
+    "open_questions",
 ];
 
 /// The `include=["anchors"]` axis — per-mem counts of the four
@@ -51,6 +52,198 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 /// per-anchor mechanism `verify-anchors` and the binding verify use.
 /// Shared by the full composer, the CLI health command, and the lean
 /// MCP server so the axis cannot drift between surfaces.
+/// Per-kind item cap for the `open_questions` axis — the axis is an
+/// agent worklist, not a dump. Stated in the output (`_item_cap`);
+/// truncation is always explicit via each list's `more` count.
+pub const OPEN_QUESTIONS_ITEM_CAP: usize = 20;
+
+/// The `include=["open_questions"]` axis (agent-trust plan 11): per
+/// mem, a composed worklist of what the holding does not know — its
+/// stubs, its never-confirmed (`recheck`) and `unresolvable` anchors,
+/// its unsatisfied constraints, its dangling links, and, when a
+/// paired process mem is resolvable for the destination, that
+/// process mem's open entries. Negative findings ride under the
+/// DISTINCT `already_searched` heading — their operational meaning is
+/// "done, keep off", never todo.
+///
+/// Composition only: every signal is read from the same source its
+/// own axis serves (store stub flags, `verify_mem_anchors`,
+/// `constraint_findings`, `collect_dangling_links`, the pipeline
+/// store), so this axis can never disagree with the per-signal axes.
+/// Best-effort on the process leg: an unreadable pipeline store means
+/// no process sections, never an axis failure.
+pub fn health_open_questions_axis(
+    engine: &crate::engine::Engine,
+    mem_filter: Option<&str>,
+) -> serde_json::Value {
+    let cap = OPEN_QUESTIONS_ITEM_CAP;
+    let capped = |mut items: Vec<serde_json::Value>| -> serde_json::Value {
+        let count = items.len();
+        let more = count.saturating_sub(cap);
+        items.truncate(cap);
+        let mut o = serde_json::Map::new();
+        o.insert("count".into(), serde_json::json!(count));
+        o.insert("items".into(), serde_json::Value::Array(items));
+        if more > 0 {
+            o.insert("more".into(), serde_json::json!(more));
+        }
+        serde_json::Value::Object(o)
+    };
+
+    // Bindings by destination mem — the pairing plan 14 will make
+    // declarative; until then the ingest-name convention (process mem
+    // named after the binding) is the resolution mechanism.
+    let bindings: Vec<(String, String)> = engine
+        .workspace_root()
+        .and_then(|root| crate::pipeline_store::load_pipeline_configs(root).ok())
+        .map(|c| {
+            c.bindings
+                .iter()
+                .map(|r| (r.config.destination_mem.clone(), r.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mounted: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
+
+    let mut mems: Vec<String> = mounted.clone();
+    mems.sort();
+    let mut out = serde_json::Map::new();
+    for mem in &mems {
+        if let Some(f) = mem_filter
+            && f != mem
+        {
+            continue;
+        }
+
+        // Stubs — same source as the stubs axis (store stub flag).
+        let stubs = capped(
+            engine
+                .store()
+                .all_entities()
+                .filter(|e| e.stub && e.id.mem() == mem)
+                .map(|e| serde_json::json!({ "kind": "stub", "id": e.id.to_string() }))
+                .collect(),
+        );
+
+        // Anchors — same per-anchor mechanism as the anchors axis;
+        // only the never-confirmed and unreachable states are holes.
+        let (mut recheck, mut unresolvable) = (Vec::new(), Vec::new());
+        if let Ok(report) = engine.verify_mem_anchors(mem) {
+            for a in &report.anchors {
+                let item = serde_json::json!({
+                    "kind": format!("anchor_{}", a.state),
+                    "id": a.entity_id,
+                    "artifact": a.artifact,
+                });
+                match a.state.as_str() {
+                    "recheck" => recheck.push(item),
+                    "unresolvable" => unresolvable.push(item),
+                    _ => {}
+                }
+            }
+        }
+
+        // Unsatisfied constraints — same collector as the
+        // constraints axis.
+        let constraints = capped(
+            engine
+                .constraint_findings(Some(mem))
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "kind": "unsatisfied_constraint",
+                        "id": r.id.to_string(),
+                        "violations": r.violations.len(),
+                    })
+                })
+                .collect(),
+        );
+
+        // Dangling links — same collector as the overview include.
+        let dangling = capped(
+            collect_dangling_links(engine.store(), Some(mem))
+                .iter()
+                .map(|d| {
+                    serde_json::json!({
+                        "kind": "dangling_link",
+                        "id": d.from.to_string(),
+                        "target": d.target_id.to_string(),
+                    })
+                })
+                .collect(),
+        );
+
+        // Paired process mems: open entries are work; negative
+        // findings are the opposite — already searched, keep off.
+        let mut process = Vec::new();
+        for (dest, binding) in bindings.iter().filter(|(d, _)| d == mem) {
+            let _ = dest;
+            if mounted.iter().any(|m| m == binding) {
+                let mut open = Vec::new();
+                let mut searched = Vec::new();
+                for e in engine.store().all_entities().filter(|e| {
+                    !e.stub && e.id.mem() == binding.as_str()
+                }) {
+                    let item = serde_json::json!({
+                        "kind": e.entity_type,
+                        "id": e.id.to_string(),
+                        "title": e.title,
+                    });
+                    if e.entity_type == "negative_finding" {
+                        searched.push(item);
+                    } else {
+                        open.push(item);
+                    }
+                }
+                process.push(serde_json::json!({
+                    "binding": binding,
+                    "process_mem": binding,
+                    "resolvable": true,
+                    "open_entries": capped(open),
+                    "already_searched": capped(searched),
+                }));
+            } else {
+                process.push(serde_json::json!({
+                    "binding": binding,
+                    "resolvable": false,
+                }));
+            }
+        }
+
+        let total_open = stubs["count"].as_u64().unwrap_or(0)
+            + recheck.len() as u64
+            + unresolvable.len() as u64
+            + constraints["count"].as_u64().unwrap_or(0)
+            + dangling["count"].as_u64().unwrap_or(0)
+            + process
+                .iter()
+                .filter_map(|p| p["open_entries"]["count"].as_u64())
+                .sum::<u64>();
+
+        let mut entry = serde_json::Map::new();
+        entry.insert("stubs".into(), stubs);
+        entry.insert("anchors_recheck".into(), capped(recheck));
+        entry.insert("anchors_unresolvable".into(), capped(unresolvable));
+        entry.insert("unsatisfied_constraints".into(), constraints);
+        entry.insert("dangling_links".into(), dangling);
+        if !process.is_empty() {
+            entry.insert("process".into(), serde_json::Value::Array(process));
+        } else {
+            // No binding targets this mem: the absence of a process
+            // section is stated, never silent.
+            entry.insert("process_mem_resolvable".into(), serde_json::json!(false));
+        }
+        entry.insert("total_open".into(), serde_json::json!(total_open));
+        out.insert(mem.clone(), serde_json::Value::Object(entry));
+    }
+    let mut top = serde_json::Map::new();
+    top.insert("_item_cap".into(), serde_json::json!(cap));
+    for (k, v) in out {
+        top.insert(k, v);
+    }
+    serde_json::Value::Object(top)
+}
+
 pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value {
     let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
     mems.sort();
