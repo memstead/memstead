@@ -1102,7 +1102,7 @@ impl FilesystemMcpServer {
         } else {
             None
         };
-        let structured = memstead_base::render::build_entity_envelope(
+        let mut structured = memstead_base::render::build_entity_envelope(
             &entity,
             rendered_body_tokens,
             full_tokens,
@@ -1110,6 +1110,18 @@ impl FilesystemMcpServer {
             None,
             engine.store().outgoing(&entity.id),
         );
+        // Mutation provenance (agent-trust plan 13), opt-in — same
+        // block and key the full flavour serves; default responses
+        // are byte-unchanged.
+        if p.include_provenance.unwrap_or(false)
+            && let Some(obj) = structured.as_object_mut()
+        {
+            let block = match engine.entity_provenance(id.mem(), id.as_ref()) {
+                Ok(prov) => serde_json::to_value(&prov).unwrap_or(serde_json::Value::Null),
+                Err(e) => serde_json::json!({ "unavailable": e.to_string() }),
+            };
+            obj.insert("mutation_provenance".into(), block);
+        }
         md_with_structured(md, structured)
     }
 
@@ -2329,6 +2341,7 @@ mod tests {
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         };
         let entity_result = server.memstead_entity(Parameters(entity_params));
         assert!(!entity_result.is_error.unwrap_or(false));
@@ -2483,6 +2496,7 @@ mod tests {
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(
             entity.is_error.unwrap_or(false),
@@ -2812,6 +2826,7 @@ mod tests {
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3791,6 +3806,7 @@ mod tests {
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = result
@@ -3820,6 +3836,7 @@ mod tests {
             include_context: Some(true),
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = result

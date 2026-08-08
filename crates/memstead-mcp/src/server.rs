@@ -2046,6 +2046,25 @@ impl McpServer {
                 }
                 obj.insert("provenance".into(), serde_json::Value::Object(block));
             }
+            // Mutation provenance (agent-trust plan 13), opt-in:
+            // created-by / last-modified-by with actor, client,
+            // declared role, and timestamp — derived from the
+            // append-only mutation record, which no verb can edit.
+            // Distinct key from the archive-provenance block above
+            // (that one describes an installed archive's authoring
+            // payload). Default responses are byte-unchanged; on a
+            // mount whose seam records no history (archives) the
+            // block states unavailability instead of fabricating.
+            if p.include_provenance.unwrap_or(false) {
+                let block = match engine.entity_provenance(id.mem(), id.as_ref()) {
+                    Ok(prov) => serde_json::to_value(&prov)
+                        .unwrap_or(serde_json::Value::Null),
+                    Err(e) => serde_json::json!({
+                        "unavailable": e.to_string(),
+                    }),
+                };
+                obj.insert("mutation_provenance".into(), block);
+            }
             // Provenance anchors (E3a). Additive, emitted only when the
             // entity has anchors so a pre-E3a reader is unaffected. Carries
             // the stored anchor records plus their class/grain composition
@@ -4808,6 +4827,7 @@ mod tests {
                 sections: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             let sc = r.structured_content.as_ref().unwrap_or_else(|| {
                 panic!(
@@ -6817,6 +6837,7 @@ community:
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
@@ -6834,6 +6855,7 @@ community:
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let text = extract_text(&result);
@@ -6898,6 +6920,7 @@ community:
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let sc = writable_entity.structured_content.clone().unwrap();
         assert_eq!(
@@ -6913,6 +6936,7 @@ community:
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let sc = readonly_entity.structured_content.clone().unwrap();
         assert_eq!(
@@ -7418,6 +7442,7 @@ community:
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
@@ -7432,6 +7457,7 @@ community:
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(missing.is_error.unwrap_or(false));
         assert!(extract_text(&missing).contains("not found"));
@@ -8313,6 +8339,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert_text_carries_code(&missing_read, "ENTITY_NOT_FOUND");
 
@@ -8435,6 +8462,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let sc = read
             .structured_content
@@ -8470,6 +8498,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(missing.is_error.unwrap_or(false), "entity was not written");
 
@@ -8620,6 +8649,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(
             !read.is_error.unwrap_or(false),
@@ -8727,6 +8757,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(
             read.is_error.unwrap_or(false),
@@ -8853,6 +8884,7 @@ write_rules: []
                 sections: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             assert!(
                 !read.is_error.unwrap_or(false),
@@ -9439,6 +9471,7 @@ write_rules: []
             sections: Some(vec!["identity".to_string()]),
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let text = extract_text(&result);
         assert!(text.contains("## Identity"));
@@ -9456,6 +9489,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let text = extract_text(&result);
         assert!(
@@ -9501,6 +9535,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let text = extract_text(&result);
         assert!(
@@ -9526,6 +9561,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let text = extract_text(&result);
         assert!(text.contains("# Entity A"));
@@ -11484,6 +11520,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let text = extract_text(&result);
@@ -11547,6 +11584,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(result.is_error.unwrap_or(false));
     }
@@ -11720,6 +11758,7 @@ write_rules: []
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let hash = extract_text(&read)
             .lines()
@@ -11829,6 +11868,7 @@ write_rules: []
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let hash = extract_text(&read)
             .lines()
@@ -11924,6 +11964,7 @@ write_rules: []
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(
             read.is_error.unwrap_or(false),
@@ -11970,6 +12011,7 @@ write_rules: []
             include_context: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
 
         let result = server.memstead_relate(Parameters(RelateParams {
@@ -12077,6 +12119,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         assert!(extract_text(&result).contains("must not be empty"));
@@ -12093,6 +12136,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         assert!(extract_text(&result).contains("too long"));
@@ -12340,6 +12384,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         let entity_text = extract_text(&entity_result);
         let initial_hash = entity_text
@@ -12575,6 +12620,7 @@ write_rules: []
             sections: None,
             token_budget: None,
             chunk: None,
+            include_provenance: None,
         }));
         assert!(
             !entity_result.is_error.unwrap_or(false),
@@ -14437,6 +14483,7 @@ write_rules: []
                         sections: None,
                         token_budget: None,
                         chunk: None,
+                        include_provenance: None,
                     }));
                     let text = extract_text(&entity);
                     // Markdown rendering includes the frontmatter
@@ -14622,6 +14669,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             let read_text = extract_text(&read);
             let hash_line = read_text
@@ -14680,6 +14728,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             let read_text = extract_text(&read);
             let hash_line = read_text
@@ -14798,6 +14847,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             assert!(
                 read.is_error.unwrap_or(false),
@@ -14870,6 +14920,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             assert!(read.is_error.unwrap_or(false), "rehearsed stub must not exist");
             // The real list on the unchanged mems lands.
@@ -14896,6 +14947,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             let text = extract_text(&result);
             assert!(
@@ -14931,6 +14983,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             let text = extract_text(&result);
             assert!(
@@ -15030,6 +15083,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             // The lookup fails (NotFound). The response shape varies
             // (sometimes a markdown body, sometimes an error envelope on
@@ -16522,6 +16576,7 @@ write_rules: []
                 include_context: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }));
             let read_text = extract_text(&read);
             let hash = read_text
@@ -16872,6 +16927,7 @@ write_rules: []
                 sections: None,
                 token_budget: None,
                 chunk: None,
+                include_provenance: None,
             }))
         }
 

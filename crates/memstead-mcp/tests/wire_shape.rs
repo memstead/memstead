@@ -2945,6 +2945,20 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         .output()
         .expect("folder create");
     assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stdout));
+    let ok = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args([
+            "--role",
+            "checker",
+            "update",
+            "plainws--ledger-roled",
+            "--force",
+            "--section",
+            "claim=Checked.",
+        ])
+        .output()
+        .expect("folder update");
+    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stdout));
     let ledger = std::fs::read_to_string(
         ws.join("plainws").join(".memstead").join("changes.jsonl"),
     )
@@ -2968,6 +2982,104 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     };
     assert!(
         ledger.contains("\"role\":\"verifier\""),
-        "folder ledger records the role: {ledger}"
+        "folder ledger records the create role: {ledger}"
     );
+    assert!(
+        ledger.contains("\"role\":\"checker\""),
+        "folder ledger records the update role: {ledger}"
+    );
+
+    // ---- Serve half: the entity read's opt-in provenance block. ----
+
+    // Default read: byte-unchanged — no mutation_provenance key.
+    let plain_read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--derived-conclusion" }),
+    );
+    assert!(plain_read["isError"] != true, "{plain_read}");
+    assert!(
+        plain_read["structuredContent"].get("mutation_provenance").is_none(),
+        "default entity reads carry no provenance block: {plain_read}"
+    );
+
+    // Opt-in read: created-by author, last-modified-by checker — the
+    // criterion-1 fixture retrieved end to end.
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--derived-conclusion", "include_provenance": true }),
+    );
+    assert!(read["isError"] != true, "{read}");
+    let prov = &read["structuredContent"]["mutation_provenance"];
+    assert_eq!(prov["created_by"]["role"], "author", "{prov}");
+    assert_eq!(prov["last_modified_by"]["role"], "checker", "{prov}");
+    assert!(
+        prov["created_by"]["client"].as_str().is_some(),
+        "identity recorded: {prov}"
+    );
+    assert!(prov["created_by"]["timestamp"].as_i64().unwrap() > 0);
+    // Identities compared across operations — the gate primitive:
+    // both records carry actor identity, distinct roles.
+    assert_ne!(
+        prov["created_by"]["role"], prov["last_modified_by"]["role"],
+        "author≠checker distinguishable from records"
+    );
+
+    // The role-less entity serves `unspecified` — recorded absence,
+    // never defaulted to a real role.
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--plain-entity", "include_provenance": true }),
+    );
+    let prov = &read["structuredContent"]["mutation_provenance"];
+    assert_eq!(prov["created_by"]["role"], "unspecified", "{prov}");
+
+    // Immutability complement: reading provenance changes nothing —
+    // `_hash` identical before/after, and the checker update did not
+    // rewrite the creation record (append-only history is the
+    // storage; no verb edits past provenance).
+    let hash_now = read_hash_of(&mut harness, "specs--derived-conclusion");
+    let reread = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--derived-conclusion", "include_provenance": true }),
+    );
+    assert_eq!(
+        reread["structuredContent"]["_hash"], hash_now,
+        "provenance reads are pure"
+    );
+    assert_eq!(
+        reread["structuredContent"]["mutation_provenance"]["created_by"]["role"],
+        "author",
+        "the later checker update never altered the creation record"
+    );
+
+    // CLI parity on the SAME mem-repo workspace…
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args(["--json", "entity", "specs--derived-conclusion", "--provenance"])
+        .output()
+        .expect("run memstead CLI");
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["mutation_provenance"]["created_by"]["role"], "author", "{v}");
+    assert_eq!(v["mutation_provenance"]["last_modified_by"]["role"], "checker");
+
+    // …and on the FOLDER workspace (backend parity: same shape for
+    // the same operation sequence).
+    let out = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args(["--json", "entity", "plainws--ledger-roled", "--provenance"])
+        .output()
+        .expect("run memstead CLI");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let p = &v["mutation_provenance"];
+    assert_eq!(p["created_by"]["role"], "verifier", "folder parity: {v}");
+    assert_eq!(p["last_modified_by"]["role"], "checker", "folder parity: {v}");
+    assert!(p["created_by"]["timestamp"].as_i64().unwrap() > 0);
+}
+
+/// Current `_hash` of an entity via a plain read.
+fn read_hash_of(harness: &mut WireHarness, id: &str) -> Value {
+    let r = harness.call_tool("memstead_entity", json!({ "id": id }));
+    r["structuredContent"]["_hash"].clone()
 }

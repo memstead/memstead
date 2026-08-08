@@ -145,7 +145,89 @@ fn parse_rename_pair(field: &str) -> Option<(String, String)> {
     Some((old.to_string(), new.to_string()))
 }
 
+/// One derived provenance record — who performed a boundary touch of
+/// an entity's story, in what declared role, when (agent-trust plan
+/// 13). Served by the entity read's opt-in provenance block.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProvenanceRecord {
+    /// Actor category (`agent` / `cli` / `app` / `external` /
+    /// `unknown`), from the recorded trailer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    /// Client identity (`name@version`) when recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
+    /// The caller-declared role, or `"unspecified"` — absence is
+    /// served as the explicit cannot-confirm value, never as any
+    /// real role.
+    pub role: String,
+    /// Touch time, seconds since unix epoch.
+    pub timestamp: i64,
+    /// Backend-native reference (commit sha / ledger timestamp).
+    pub reference: String,
+}
+
+/// The entity read's derived provenance block: created-by and
+/// last-modified-by, derived from the append-only history record —
+/// never from anything an agent can edit after the fact.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EntityProvenance {
+    /// The creation record. `None` when the recorded story does not
+    /// start at the entity's creation (adopted/migrated mems) — the
+    /// honesty pattern: absence stated, never fabricated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<ProvenanceRecord>,
+    /// The newest recorded touch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_modified_by: Option<ProvenanceRecord>,
+    /// True when the recorded story is truncated (its oldest touch is
+    /// not the creation) — `created_by` is then absent.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub story_truncated: bool,
+}
+
+fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
+    ProvenanceRecord {
+        actor: t.actor.clone(),
+        client: t.client.clone(),
+        role: t.role.clone().unwrap_or_else(|| "unspecified".to_string()),
+        timestamp: t.timestamp,
+        reference: t.reference.clone(),
+    }
+}
+
 impl Engine {
+    /// Derive an entity's provenance block (agent-trust plan 13):
+    /// created-by (the oldest recorded touch, only when it IS the
+    /// creation) and last-modified-by (the newest touch), each with
+    /// actor identity, client, declared role, and timestamp — read
+    /// from the same append-only record `entity_history` serves, so
+    /// no verb can alter it after the fact. Pages through the full
+    /// story to reach the creation record when histories exceed one
+    /// page.
+    pub fn entity_provenance(
+        &self,
+        mem: &str,
+        entity_id: &str,
+    ) -> Result<EntityProvenance, EngineError> {
+        let mut report = self.entity_history(mem, entity_id, Some(HISTORY_PAGE_MAX), None)?;
+        let newest = report.touches.first().cloned();
+        // Walk to the last page for the oldest touch.
+        while let Some(cursor) = report.next_cursor.clone() {
+            report = self.entity_history(mem, entity_id, Some(HISTORY_PAGE_MAX), Some(&cursor))?;
+        }
+        let oldest = report.touches.last().or(newest.as_ref()).cloned();
+        let truncated = !matches!(report.story_start, StoryStart::Recorded);
+        Ok(EntityProvenance {
+            created_by: match (&oldest, truncated) {
+                (Some(t), false) => Some(touch_to_record(t)),
+                _ => None,
+            },
+            last_modified_by: newest.as_ref().map(touch_to_record),
+            story_truncated: truncated,
+        })
+    }
+
     /// An entity's recorded history: every touch, newest-first, with
     /// rename chains followed so the story starts at the entity's
     /// first appearance under any prior id. Bounded and pageable —

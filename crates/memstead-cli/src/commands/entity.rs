@@ -31,6 +31,13 @@ pub struct Args {
     /// 1-based chunk index to return (requires `--token-budget`).
     #[arg(long)]
     pub chunk: Option<usize>,
+
+    /// Append the derived mutation-provenance block: created-by and
+    /// last-modified-by with actor, client, declared role (or
+    /// `unspecified`), and timestamp — read from the append-only
+    /// mutation record, which no verb can edit after the fact.
+    #[arg(long = "provenance")]
+    pub provenance: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -59,7 +66,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // authoritative `EdgeSource` discriminator (`Explicit` /
     // `BodyLink` / `Hierarchy`); the entity's `relationships` vec
     // doesn't encode it.
-    let (entity, output, outgoing_snapshot) = match ctx.cli_engine()? {
+    // Derived mutation-provenance block (agent-trust plan 13), only
+    // when `--provenance` asked for it — default output stays
+    // byte-unchanged. Unavailability (an archive seam with no
+    // history) is stated, never fabricated.
+    let provenance_block = |engine: &memstead_base::Engine| -> Option<serde_json::Value> {
+        if !args.provenance {
+            return None;
+        }
+        Some(match engine.entity_provenance(id.mem(), id.as_ref()) {
+            Ok(prov) => serde_json::to_value(&prov).unwrap_or(serde_json::Value::Null),
+            Err(e) => serde_json::json!({ "unavailable": e.to_string() }),
+        })
+    };
+    let (entity, output, outgoing_snapshot, provenance) = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             let entity = engine
@@ -68,7 +88,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .ok_or_else(|| miss(&engine))?;
             let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
             let outgoing = engine.store().outgoing(&id).to_vec();
-            (entity, md, outgoing)
+            let prov = provenance_block(&engine);
+            (entity, md, outgoing, prov)
         }
         CliEngine::Filesystem(engine) => {
             let entity = engine
@@ -77,7 +98,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .ok_or_else(|| miss(&engine))?;
             let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
             let outgoing = engine.store().outgoing(&id).to_vec();
-            (entity, md, outgoing)
+            let prov = provenance_block(&engine);
+            (entity, md, outgoing, prov)
         }
     };
 
@@ -112,7 +134,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         } else {
             None
         };
-        let envelope = render::build_entity_envelope(
+        let mut envelope = render::build_entity_envelope(
             &entity,
             rendered_body_tokens,
             full_tokens,
@@ -120,9 +142,48 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             None,
             &outgoing_snapshot,
         );
+        if let (Some(prov), Some(obj)) = (&provenance, envelope.as_object_mut()) {
+            obj.insert("mutation_provenance".into(), prov.clone());
+        }
         crate::output::print_json(&envelope)?;
     } else {
-        print_markdown(&chunked);
+        let mut text = chunked.clone();
+        if let Some(prov) = &provenance {
+            let render_rec = |label: &str, key: &str| -> Option<String> {
+                let r = prov.get(key)?;
+                Some(format!(
+                    "- {label}: {} ({}), role {}, at {}",
+                    r["client"].as_str().unwrap_or("unknown client"),
+                    r["actor"].as_str().unwrap_or("unknown actor"),
+                    r["role"].as_str().unwrap_or("unspecified"),
+                    r["timestamp"],
+                ))
+            };
+            text.push_str("
+
+## Mutation provenance
+");
+            match prov.get("unavailable") {
+                Some(reason) => {
+                    text.push_str(&format!("- unavailable: {}
+", reason.as_str().unwrap_or("")));
+                }
+                None => {
+                    if let Some(l) = render_rec("created by", "created_by") {
+                        text.push_str(&l);
+                        text.push('\n');
+                    } else {
+                        text.push_str("- created by: not recorded (story truncated)
+");
+                    }
+                    if let Some(l) = render_rec("last modified by", "last_modified_by") {
+                        text.push_str(&l);
+                        text.push('\n');
+                    }
+                }
+            }
+        }
+        print_markdown(&text);
     }
     Ok(())
 }

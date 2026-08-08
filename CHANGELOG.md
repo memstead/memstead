@@ -56,6 +56,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Mutation provenance: who acted, in what role — recorded, not
+  declared.** Every mutation records a caller-declared role from the
+  closed vocabulary `author` | `checker` | `verifier` (or
+  unspecified) immutably alongside the mutation, extending the
+  existing trailer/ledger mechanism: a `Role:` commit trailer on
+  mem-repo backends, a `role` field in the folder JSONL ledger — one
+  shape across backends, absence recorded as absence. Declared per
+  call (a `role` parameter on all five MCP mutation verbs) or per
+  session (`--role` on both binaries; per-call wins); unknown values
+  refuse `INVALID_ROLE` naming the vocabulary; omitting the role is
+  legal forever and records unspecified — never refused, never
+  defaulted to a real role. The entity read serves the derived
+  record opt-in (`include_provenance` on `memstead_entity`,
+  `--provenance` on `memstead entity`): a `mutation_provenance`
+  block with `created_by` and `last_modified_by` — actor, client,
+  role, timestamp, backend reference — derived from append-only
+  history; when the recorded story does not start at creation,
+  `created_by` is absent and `story_truncated` is true. Default
+  responses stay byte-unchanged, and provenance never participates
+  in entity markdown or `_hash`. Trust model: roles are
+  caller-declared but tamper-evident — bound to specific operations
+  in history no verb can edit afterwards, so process gates compare
+  recorded identities across operations instead of trusting
+  self-written metadata fields.
 - **Derivation staleness: "my source changed" is computed, never
   stamped.** A schema can declare a rel-type `derivation: true` —
   the source derives from the target. Explicitly writing such an edge
