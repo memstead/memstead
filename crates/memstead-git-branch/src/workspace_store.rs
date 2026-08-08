@@ -165,20 +165,29 @@ fn migrate_legacy_read_mems(
     })
 }
 
-pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootError> {
-    let workspace = match detect_layout(workspace_root) {
+/// Load the workspace description (mount roster + settings) for a
+/// root, without instantiating backends, resolving schemas, or loading
+/// entities. The shared first step of [`engine_from_workspace_root`]
+/// and the below-boot repair surface ([`crate::repair`]) — one loader,
+/// so repair sees exactly the workspace the boot would.
+pub(crate) fn load_workspace_description(
+    workspace_root: &Path,
+) -> Result<memstead_base::Workspace, BootError> {
+    match detect_layout(workspace_root) {
         // Standalone collapse: a bare folder mem (`.memstead/config.json`,
         // no `workspace.toml`) roots as a one-mount workspace. The macOS app
         // boots through this full entry, so the unified lone-mem experience
         // must hold here too, not only in the lean boot path.
         memstead_base::Layout::Empty => match memstead_base::standalone_workspace(workspace_root) {
-            Some(ws) => ws,
-            None => {
-                return Err(BootError::NotInitialised(workspace_root.to_path_buf()));
-            }
+            Some(ws) => Ok(ws),
+            None => Err(BootError::NotInitialised(workspace_root.to_path_buf())),
         },
-        memstead_base::Layout::New => FileWorkspaceStore::new().load(workspace_root)?,
-    };
+        memstead_base::Layout::New => Ok(FileWorkspaceStore::new().load(workspace_root)?),
+    }
+}
+
+pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootError> {
+    let workspace = load_workspace_description(workspace_root)?;
 
     let settings = workspace.settings.clone();
     // The shadow set is WRITABLE mounts only — archive read-mounts in

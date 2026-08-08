@@ -18,15 +18,18 @@
 //! shadows the built-in per the resolution order — the customization
 //! entry point. Idempotent: re-running reproduces the same files.
 //! Git-branch (mem-repo) workspaces are a destination too: install
-//! routes through the engine's `install_schema`, which seals the
-//! package onto the `__MEMSTEAD:schemas/` ref (see
-//! `install_to_git_branch`).
+//! routes through the engine's below-boot repair surface
+//! (`memstead_git_branch::repair::install_schema_below_boot`), which
+//! runs the same validation gate as the booted `Engine::install_schema`
+//! and seals the package onto the `__MEMSTEAD:schemas/` ref.
 //!
 //! `validate` is flavour-agnostic and touches no workspace. `install`
-//! dispatches on the workspace shape: the folder flavour writes
-//! `.memstead/schemas/` directly (the documented folder authoring
-//! mechanism, no engine needed); the mem-repo flavour boots an engine
-//! because the `__MEMSTEAD` ref is engine-owned state.
+//! never boots the workspace on either flavour — it is a named remedy
+//! for boot-blocking states (repair-below-boot rule), so it operates on
+//! configuration and schema storage only: the folder flavour writes
+//! `.memstead/schemas/` directly, the mem-repo flavour writes the
+//! engine-owned `__MEMSTEAD` ref through the engine's own repair
+//! surface.
 
 use std::path::{Path, PathBuf};
 
@@ -605,36 +608,39 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
 }
 
 /// Install onto the git-branch backend — write the package onto the
-/// workspace's `__MEMSTEAD:schemas/` ref through the engine (which owns
-/// mem-repo state). Only present in the `mem-repo`-featured build;
-/// the lean binary refuses (it has no git-branch engine).
+/// workspace's `__MEMSTEAD:schemas/` ref through the engine's
+/// below-boot repair surface (`memstead_git_branch::repair`), which
+/// runs the same `validate_schema_package` gate and the same ref
+/// writer as the booted `Engine::install_schema`. Deliberately never
+/// boots the workspace: `schema install` is a named remedy for
+/// boot-blocking states (an unresolvable pin whose package was never
+/// installed), so it must work on exactly the workspace whose boot it
+/// repairs — the plenum outage's failed escape route. Only present in
+/// the `mem-repo`-featured build; the lean binary refuses (it has no
+/// git-branch ref writer).
 #[cfg(feature = "mem-repo")]
 fn install_to_git_branch(
     ctx: &CliContext,
     schema_ref: &SchemaRef,
     files: &[memstead_schema::SchemaSourceFile],
 ) -> anyhow::Result<()> {
-    use crate::setup::CliEngine;
-    let engine = match ctx.cli_engine()? {
-        CliEngine::MemRepo(e) => e,
-        CliEngine::Filesystem(_) => {
-            return Err(CliError::new(
-                ExitKind::Generic,
-                "INTERNAL",
-                "workspace resolved as mem-repo but engine came back filesystem".to_string(),
-            )
-            .into());
-        }
+    let Some((_shape, root)) = ctx.workspace_shape() else {
+        return Err(crate::setup::workspace_not_initialised_error(
+            "No workspace found. Run from a directory containing `.memstead/workspace.toml`.",
+        )
+        .into());
     };
     let pairs: Vec<(String, Vec<u8>)> = files
         .iter()
         .map(|f| (f.archive_path.clone(), f.bytes.clone()))
         .collect();
-    let commit = engine
-        .install_schema(&schema_ref.name, &schema_ref.version.to_string(), &pairs)
-        .map_err(|e| {
-            CliError::new(ExitKind::Generic, e.code(), e.to_string()).with_details(e.details())
-        })?;
+    let commit = memstead_git_branch::repair::install_schema_below_boot(
+        &root,
+        &schema_ref.name,
+        &schema_ref.version.to_string(),
+        &pairs,
+    )
+    .map_err(|e| crate::setup::boot_error_to_cli(&root, e))?;
     if ctx.json {
         print_json(&json!({
             "ok": true,

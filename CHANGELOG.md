@@ -8,6 +8,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Repair below boot: a fix for a boot failure no longer requires the
+  boot.** The verbs boot-failure messages name as remedies now run on
+  exactly the workspace whose boot they repair. `memstead mem
+  set-schema` falls back to a below-boot repair path when the
+  workspace does not boot: it repins through the same target-ref
+  resolver and the same value-level config-pin writer the booted path
+  uses (no second validation regime), skips only the entity-conformance
+  gate (entities are unreadable before boot — the output says so, and
+  the next boot's health carries any findings), and never force-writes
+  a pin that resolves nowhere. `memstead schema install` never boots at
+  all on the mem-repo flavour — it validates through the same
+  `validate_schema_package` gate and seals onto the
+  `__MEMSTEAD:schemas/` ref directly, so the full plenum recovery path
+  (install the missing package, repin, boot green) works end to end on
+  an unbootable workspace. `memstead projection migrate` no longer
+  deadlocks when its reconcile-cursor seeding meets a workspace that
+  still doesn't boot: seeding is explicitly deferred with a
+  `RECONCILE_CURSORS_DEFERRED` notice naming the follow-up, and the
+  cursor file is kept. The rule itself — repair verbs operate below
+  boot — is recorded in the handbook's engine chapter.
 - **Built-in retention and version stamps: shipped versions never
   vanish.** The `ingest@0.1.0` built-in — deleted from the catalogue
   by the 2026-08-06 in-place version bump, stranding a workspace

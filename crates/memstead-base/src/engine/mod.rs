@@ -69,7 +69,7 @@ pub use outcomes::{
 };
 pub use review::{ReviewMarkStatus, SetReviewMarkOutcome};
 
-pub use boot::{SchemaResolver, resolve_builtin_schema_pin_pub};
+pub use boot::{SchemaResolver, load_workspace_schemas, resolve_builtin_schema_pin_pub};
 
 /// One mem attachment, paired with the backend that serves it.
 /// Constructed by [`Engine::from_mounts`] and held internally.

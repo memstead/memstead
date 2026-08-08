@@ -859,10 +859,10 @@ fn propose_workspace_toml(root: &std::path::Path) -> Option<String> {
 fn consume_reconcile_cursors(
     ctx: &CliContext,
     root: &std::path::Path,
-) -> anyhow::Result<Vec<String>> {
+) -> anyhow::Result<(Vec<String>, Option<String>)> {
     let cursor_path = root.join(".memstead").join("reconcile-cursors.json");
     if !cursor_path.exists() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     let cursors: std::collections::BTreeMap<String, String> = std::fs::read(&cursor_path)
         .ok()
@@ -872,7 +872,27 @@ fn consume_reconcile_cursors(
     let mut seeded: Vec<String> = Vec::new();
     if !cursors.is_empty() {
         let configs = load_pipeline_configs(root).map_err(migrate_load_err)?;
-        let mut cli_engine = ctx.cli_engine_at(root)?;
+        // Repair-below-boot rule: cursor seeding needs a booted engine
+        // (`set_mem_sync_state`), but `projection migrate` is itself a
+        // named boot repair — when the workspace still does not boot
+        // (e.g. a schema-pin failure alongside the projection
+        // migration), seeding is explicitly DEFERRED rather than
+        // deadlocking the repair verb or silently dropping the
+        // cursors: the file is kept untouched and the notice names the
+        // follow-up.
+        let mut cli_engine = match ctx.cli_engine_at(root) {
+            Ok(e) => e,
+            Err(boot_err) => {
+                return Ok((
+                    Vec::new(),
+                    Some(format!(
+                        "RECONCILE_CURSORS_DEFERRED: the workspace does not boot yet \
+                         ({boot_err:#}); reconcile-cursors.json was kept — repair the boot, \
+                         then re-run `memstead projection migrate` to seed the sync baselines"
+                    )),
+                ));
+            }
+        };
         let engine = cli_engine.base_mut();
         for (cursor_key, sha) in &cursors {
             // Key is `"<mem>:<abs-path>"` — split on the first ':'.
@@ -907,7 +927,7 @@ fn consume_reconcile_cursors(
     }
     // Consumed — delete regardless of matches (D10: the file is retired here).
     let _ = std::fs::remove_file(&cursor_path);
-    Ok(seeded)
+    Ok((seeded, None))
 }
 
 fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
@@ -1069,8 +1089,8 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
     // AC12/D10: consume `reconcile-cursors.json` (seed `#synced` baselines, then
     // delete it) and surface a `workspace.toml` proposal for any retired-vocab
     // references — never rewriting workspace.toml. Both are no-ops in `--dry-run`.
-    let (seeded, proposal) = if args.dry_run {
-        (Vec::new(), None)
+    let ((seeded, cursors_deferred), proposal) = if args.dry_run {
+        ((Vec::new(), None), None)
     } else {
         (
             consume_reconcile_cursors(ctx, &root)?,
@@ -1088,6 +1108,7 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
             "bindings": bindings,
             "warnings": warnings,
             "cursors_seeded": seeded,
+            "cursors_deferred": cursors_deferred,
             "workspace_toml_proposal": proposal,
         }))?;
     } else {
@@ -1119,6 +1140,9 @@ fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
             for key in &seeded {
                 out.push_str(&format!("- `{key}`\n"));
             }
+        }
+        if let Some(notice) = &cursors_deferred {
+            out.push_str(&format!("\n## Reconcile cursors deferred\n\n{notice}\n"));
         }
         if let Some(block) = &proposal {
             out.push('\n');

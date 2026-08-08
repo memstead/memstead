@@ -1235,13 +1235,25 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
         .schema
         .parse()
         .map_err(|e| invalid_input_error(format!("invalid schema ref {:?}: {e}", args.schema)))?;
-    let outcome = match ctx.cli_engine()? {
-        crate::setup::CliEngine::MemRepo(mut engine) => engine
+    let outcome = match ctx.cli_engine() {
+        Ok(crate::setup::CliEngine::MemRepo(mut engine)) => engine
             .set_mem_schema(&args.name, &target)
             .map_err(crate::CliError::from_engine_op)?,
-        crate::setup::CliEngine::Filesystem(mut engine) => engine
+        Ok(crate::setup::CliEngine::Filesystem(mut engine)) => engine
             .set_mem_schema(&args.name, &target)
             .map_err(crate::CliError::from_engine_op)?,
+        // Below-boot repair: this verb is the named remedy for an
+        // unresolvable schema pin, so a failing boot must not block it
+        // (plenum 2026-08-06/07: both named remedies failed on the very
+        // boot they were supposed to repair). Requires a workspace root
+        // to exist — with none, the boot error (typically
+        // WORKSPACE_NOT_INITIALISED) stands.
+        Err(boot_err) => {
+            let Some((_shape, root)) = ctx.workspace_shape() else {
+                return Err(boot_err);
+            };
+            return run_set_schema_below_boot(ctx, &root, &args.name, &target);
+        }
     };
     if ctx.json {
         crate::output::print_json(&outcome)?;
@@ -1263,6 +1275,41 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
             outcome.schema_pin,
             outcome.migration_target.as_deref().unwrap_or("<none>"),
             findings,
+        ));
+    }
+    Ok(())
+}
+
+/// The below-boot leg of `memstead mem set-schema` — runs when the
+/// workspace boot failed. Routes through the engine's below-boot
+/// repair surface (`memstead_git_branch::repair`), which shares the
+/// booted path's target-ref resolution and pin-write implementation.
+/// The booted path's conformance gate over loaded entities cannot run
+/// here (entities are unreadable before boot); the output says so and
+/// the next boot's health carries any findings.
+fn run_set_schema_below_boot(
+    ctx: &CliContext,
+    root: &std::path::Path,
+    mem: &str,
+    target: &memstead_schema::SchemaRef,
+) -> anyhow::Result<()> {
+    let outcome = memstead_git_branch::repair::set_mem_schema_below_boot(root, mem, target)
+        .map_err(|e| crate::setup::boot_error_to_cli(root, e))?;
+    if ctx.json {
+        crate::output::print_json(&serde_json::json!({
+            "mem": outcome.mem,
+            "schema_pin": outcome.schema_pin,
+            "below_boot": true,
+            "config_updated": outcome.config_updated,
+            "conformance_checked": outcome.conformance_checked,
+        }))?;
+    } else {
+        crate::output::print_markdown(&format!(
+            "# Mem `{}` schema repinned below boot\n\n- Pin: {}\n- Backend config updated: {}\n\n\
+             The workspace did not boot, so this repair switched the pin without the booted \
+             path's entity-conformance gate. Boot again — health will surface any conformance \
+             findings against the new schema.",
+            outcome.mem, outcome.schema_pin, outcome.config_updated,
         ));
     }
     Ok(())

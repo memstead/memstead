@@ -55,6 +55,7 @@ pub mod mem_cache;
 pub mod mem_repo_config;
 pub mod mem_repo_schemas;
 pub mod ops;
+pub mod repair;
 pub mod storage;
 pub mod storage_memstead;
 pub mod vcs;

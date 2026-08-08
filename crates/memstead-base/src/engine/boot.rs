@@ -556,9 +556,11 @@ impl<'a> SchemaResolver<'a> {
 /// Walk `schemas_dir` and load every immediate subdirectory as a
 /// workspace-authored schema. Each subdirectory must contain a
 /// `schema.yaml` manifest (and optional `types/*.yaml`) — silently
-/// skips entries that don't carry the manifest. `pub(crate)` so the
-/// folder `SchemaSource` reads through the same walker the boot path uses.
-pub(crate) fn load_workspace_schemas(
+/// skips entries that don't carry the manifest. `pub` so the folder
+/// `SchemaSource` and the below-boot repair path (memstead-git-branch)
+/// read through the same walker the boot path uses — one loader, no
+/// resolution fork between the booted and below-boot surfaces.
+pub fn load_workspace_schemas(
     schemas_dir: Option<&Path>,
 ) -> Result<Vec<Arc<memstead_schema::Schema>>, EngineError> {
     let Some(dir) = schemas_dir else {

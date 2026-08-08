@@ -142,7 +142,11 @@ impl Engine {
     /// matches the `(name, version)` the package is being installed
     /// under — a mismatch would seal the schema under a ref its own
     /// manifest contradicts.
-    fn validate_schema_package(
+    ///
+    /// `pub` so the below-boot install path (memstead-git-branch's
+    /// repair surface) runs the SAME gate as this booted path — the
+    /// two must never fork into separate validation regimes.
+    pub fn validate_schema_package(
         name: &str,
         version: &str,
         files: &[(String, Vec<u8>)],
@@ -963,25 +967,12 @@ impl Engine {
         mount_idx: usize,
         target: &memstead_schema::SchemaRef,
     ) -> Result<(), EngineError> {
-        let Some(bytes) = self.mounts[mount_idx]
-            .backend
-            .read_mem_config()
-            .map_err(|e| EngineError::Mem(format!("read mem config for pin update: {e}")))?
-        else {
-            return Ok(());
-        };
-        let mut value: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|e| EngineError::Mem(format!("parse mem config for pin update: {e}")))?;
-        value["schema"] = serde_json::Value::String(target.as_display());
-        let new_bytes = serde_json::to_vec_pretty(&value)
-            .map_err(|e| EngineError::Mem(format!("serialize mem config for pin update: {e}")))?;
-        self.mounts[mount_idx]
-            .backend
-            .write_mem_config(&new_bytes)
-            .map_err(|e| EngineError::Mem(format!("write mem config for pin update: {e}")))?;
+        let value = bump_backend_schema_pin(self.mounts[mount_idx].backend.as_ref(), target)?;
         // Refresh the cached parsed config so in-session reads observe the
         // new pin without a reload.
-        if let Ok(cfg) = memstead_schema::config::parse_mem_config(&value) {
+        if let Some(value) = value
+            && let Ok(cfg) = memstead_schema::config::parse_mem_config(&value)
+        {
             self.mounts[mount_idx].mem_config = Some(cfg);
         }
         Ok(())
@@ -2037,6 +2028,39 @@ impl Engine {
         }
         Ok(out)
     }
+}
+
+/// Value-level schema-pin bump on a backend's mem config: read the
+/// config blob, rewrite ONLY the `"schema"` string, write it back —
+/// every other field (`readMems`, write guidance, sync state, …) is
+/// preserved verbatim. Config-absent backends (no `config.json`) are a
+/// clean no-op returning `None`; the caller's `Mount.schema` then
+/// stays the settled pin. Returns the updated JSON value on a write so
+/// callers can refresh caches.
+///
+/// One shared implementation for the booted path
+/// (`Engine::persist_mem_schema_pin`) and the below-boot repair path
+/// (memstead-git-branch) — the two must never fork: a pin written by
+/// repair must be byte-shaped exactly as one written by the engine.
+pub fn bump_backend_schema_pin(
+    backend: &dyn crate::backend::MemBackend,
+    target: &memstead_schema::SchemaRef,
+) -> Result<Option<serde_json::Value>, EngineError> {
+    let Some(bytes) = backend
+        .read_mem_config()
+        .map_err(|e| EngineError::Mem(format!("read mem config for pin update: {e}")))?
+    else {
+        return Ok(None);
+    };
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| EngineError::Mem(format!("parse mem config for pin update: {e}")))?;
+    value["schema"] = serde_json::Value::String(target.as_display());
+    let new_bytes = serde_json::to_vec_pretty(&value)
+        .map_err(|e| EngineError::Mem(format!("serialize mem config for pin update: {e}")))?;
+    backend
+        .write_mem_config(&new_bytes)
+        .map_err(|e| EngineError::Mem(format!("write mem config for pin update: {e}")))?;
+    Ok(Some(value))
 }
 
 #[cfg(test)]
