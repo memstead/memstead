@@ -712,6 +712,7 @@ mod tests {
             let ctx = CliContext {
                 json: false,
                 quiet: false,
+        role: Default::default(),
             };
             run_with_root(
                 &ctx,
@@ -752,6 +753,7 @@ mod tests {
         let ctx = CliContext {
             json: false,
             quiet: false,
+        role: Default::default(),
         };
         let err = run_with_root(
             &ctx,
@@ -787,6 +789,7 @@ mod tests {
         let ctx = CliContext {
             json: false,
             quiet: false,
+        role: Default::default(),
         };
         let err = run_with_root(
             &ctx,
@@ -817,6 +820,7 @@ mod tests {
         let ctx = CliContext {
             json: false,
             quiet: false,
+        role: Default::default(),
         };
         let err = run(
             &ctx,
@@ -854,6 +858,7 @@ mod tests {
             let ctx = CliContext {
                 json: false,
                 quiet: false,
+        role: Default::default(),
             };
             run_with_root(
                 &ctx,

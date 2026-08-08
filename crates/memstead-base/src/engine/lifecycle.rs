@@ -65,6 +65,20 @@ impl Engine {
         self.mutation_clock = clock;
     }
 
+    /// Set the caller-declared role for subsequent mutations
+    /// (agent-trust plan 13). The surface calls this before every
+    /// mutation with the per-call parameter resolved against its
+    /// session default (per-call wins); `Role::Unspecified` records
+    /// as absence.
+    pub fn set_role(&mut self, role: crate::vcs::Role) {
+        self.current_role = role;
+    }
+
+    /// The currently declared role — what the next mutation records.
+    pub fn current_role(&self) -> crate::vcs::Role {
+        self.current_role
+    }
+
     /// Current mutation timestamp as the second-granularity ISO form
     /// the stamping paths write. Reads [`Self::mutation_clock`] — the
     /// system clock unless a test pinned it.

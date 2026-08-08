@@ -71,6 +71,10 @@ pub struct ParsedCommit {
     /// Value of the `Logical-Op:` trailer when present. Round-trips
     /// with `memstead_base::vcs::format_commit_message`'s emission.
     pub logical_operation_id: Option<String>,
+    /// Value of the `Role:` trailer (agent-trust plan 13) when
+    /// present. Absent trailer = unspecified role — absence recorded
+    /// as absence.
+    pub role: Option<String>,
     /// Ids from the `Entities:` trailer (multi-entity commits, e.g.
     /// `batch_update`). Empty when the trailer is absent — single-entity
     /// commits carry their id in `entity_id` instead. Round-trips with
@@ -116,6 +120,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     let mut actor: Option<String> = None;
     let mut client: Option<String> = None;
     let mut logical_operation_id: Option<String> = None;
+    let mut role: Option<String> = None;
     let mut entity_ids: Vec<String> = Vec::new();
     if let Some(start) = first_trailer_idx {
         for line in &body_lines[start..] {
@@ -127,6 +132,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
                     "Logical-Op" if logical_operation_id.is_none() => {
                         logical_operation_id = Some(value.to_string());
                     }
+                    "Role" if role.is_none() => role = Some(value.to_string()),
                     "Entities" if entity_ids.is_empty() => {
                         entity_ids = value
                             .split(',')
@@ -150,6 +156,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
         tool,
         client,
         logical_operation_id,
+        role,
         entity_ids,
     }
 }
@@ -328,6 +335,7 @@ pub fn agent_notes_since(
             tool: parsed.tool,
             client: parsed.client,
             logical_operation_id: parsed.logical_operation_id,
+            role: parsed.role,
             entity_ids: parsed.entity_ids,
             timestamp,
         });
@@ -357,6 +365,7 @@ mod tests {
             }),
             tool: Some("memstead_create"),
             note: Some("Demoting drift hook to engine surface.".into()),
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         }
@@ -378,6 +387,7 @@ mod tests {
             }),
             tool: Some("rename_entity"),
             note: None,
+            role: Default::default(),
             logical_operation_id: Some("logop-abc123def456"),
             entity_ids: None,
         };
@@ -405,6 +415,7 @@ mod tests {
             client: None,
             tool: Some("batch_update"),
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: Some(vec![
                 "specs--alpha".to_string(),
@@ -467,6 +478,7 @@ mod tests {
             client: None,
             tool: None,
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -496,6 +508,7 @@ mod tests {
             }),
             tool: None,
             note: Some("edited via the workspace room".into()),
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };

@@ -161,6 +161,7 @@ impl Engine {
                 client: None,
                 tool: Some("mem rename"),
                 note: note.map(String::from),
+                role: self.current_role,
                 logical_operation_id: Some(logical_op_id.as_str()),
                 entity_ids: None,
             };

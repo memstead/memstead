@@ -206,6 +206,7 @@ impl Engine {
                 client: client.cloned(),
                 tool: Some("delete_entity"),
                 note: note.map(String::from),
+                role: self.current_role,
                 logical_operation_id: None,
                 entity_ids: None,
             };
@@ -219,7 +220,7 @@ impl Engine {
             actor,
             client.cloned(),
             note.map(String::from),
-        ))?;
+        ).with_role(self.current_role))?;
 
         if !commit_sha.is_empty() {
             self.record_self_write(mount_idx, &commit_sha);

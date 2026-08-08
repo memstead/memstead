@@ -53,6 +53,14 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     pub workspace: Option<std::path::PathBuf>,
 
+    /// Declare the role this invocation's mutations are performed in
+    /// (agent-trust plan 13): `author` | `checker` | `verifier`.
+    /// Recorded immutably alongside each mutation (commit trailer /
+    /// ledger). Omit to record mutations as unspecified — legal
+    /// forever, never refused.
+    #[arg(long = "role", global = true)]
+    pub role: Option<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }

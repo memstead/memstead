@@ -423,6 +423,7 @@ impl Engine {
             )),
             pending_mem_changed: Vec::new(),
             mutation_clock: Arc::new(std::time::SystemTime::now),
+            current_role: crate::vcs::Role::Unspecified,
         })
     }
 

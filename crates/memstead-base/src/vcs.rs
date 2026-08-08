@@ -76,6 +76,57 @@ pub struct ClientId {
     pub version: String,
 }
 
+/// The caller-declared ROLE a mutation was performed in (agent-trust
+/// plan 13) — a closed vocabulary recorded immutably alongside every
+/// mutation (commit trailer / ledger field). Caller-declared but
+/// tamper-evident: bound to specific operations in append-only
+/// history, so it cannot be edited after the fact and identities can
+/// be cross-checked across operations — which no self-written
+/// metadata field can provide. `Unspecified` is legal forever: old
+/// clients, casual sessions, and humans at the CLI are never refused
+/// for not declaring; absence is recorded as absence (no trailer),
+/// and downstream gates treat it as "cannot confirm", never as any
+/// specific role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Author,
+    Checker,
+    Verifier,
+    #[default]
+    Unspecified,
+}
+
+impl Role {
+    /// The declared-role wire vocabulary — what a `role` parameter
+    /// accepts. `unspecified` is deliberately NOT declarable: it is
+    /// the recorded absence of a declaration, not a value.
+    pub const DECLARABLE: &'static [&'static str] = &["author", "checker", "verifier"];
+
+    /// Trailer/wire form. `None` for `Unspecified` — absence is
+    /// recorded as absence (no `Role:` trailer, no ledger field).
+    pub fn as_trailer(&self) -> Option<&'static str> {
+        match self {
+            Role::Author => Some("author"),
+            Role::Checker => Some("checker"),
+            Role::Verifier => Some("verifier"),
+            Role::Unspecified => None,
+        }
+    }
+
+    /// Parse a caller-declared role. Returns `None` for anything
+    /// outside [`Self::DECLARABLE`] — the surface refuses typed with
+    /// the vocabulary named rather than defaulting.
+    pub fn from_wire(s: &str) -> Option<Self> {
+        match s {
+            "author" => Some(Role::Author),
+            "checker" => Some(Role::Checker),
+            "verifier" => Some(Role::Verifier),
+            _ => None,
+        }
+    }
+}
+
 /// Provenance bundle for a single commit. Produced at the caller boundary
 /// (`memstead-mcp` tool handler, `memstead-cli` subcommand, engine-internal drift
 /// flush) and threaded through to the VCS commit path.
@@ -94,6 +145,11 @@ pub struct CommitContext<'a> {
     /// (`NOTE_MAX_LEN`, 280 chars) before the mutation touches disk;
     /// callers must not feed unbounded input to this field.
     pub note: Option<String>,
+    /// The caller-declared role this mutation is performed in
+    /// (agent-trust plan 13). `Unspecified` (the default) emits no
+    /// trailer — absence recorded as absence; declared roles emit
+    /// `Role: <value>` in the trailer block.
+    pub role: Role,
     /// Correlation id linking every commit produced by a single
     /// logical operation (notably multi-mem `memstead_rename`). When
     /// `Some`, [`format_commit_message`] emits a `Logical-Op: <id>`
@@ -127,6 +183,7 @@ impl<'a> CommitContext<'a> {
             client: None,
             tool: None,
             note: None,
+            role: Role::Unspecified,
             logical_operation_id: None,
             entity_ids: None,
         }
@@ -232,6 +289,11 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     trailers.push(format!("Actor: {}", ctx.actor.as_trailer()));
     if let Some(c) = ctx.client.as_ref() {
         trailers.push(format!("Client: {}@{}", c.name, c.version));
+    }
+    // `Role:` records the caller-declared role (plan 13); omitted for
+    // `Unspecified` — the absent trailer IS the record of absence.
+    if let Some(role) = ctx.role.as_trailer() {
+        trailers.push(format!("Role: {role}"));
     }
     // `Logical-Op:` is the wire-stable trailer key. Recognised by
     // `parse_commit_message` and threaded back into

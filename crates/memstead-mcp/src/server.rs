@@ -40,6 +40,10 @@ pub struct McpServer {
     /// `EffectiveSettings::token_budget` (config file `[mcp] token_budget`,
     /// or `DEFAULT_TOKEN_BUDGET` when absent).
     token_budget: usize,
+    /// Session-level default role (agent-trust plan 13), from the
+    /// binary's `--role` flag. Per-call `role` params win; when both
+    /// are absent, mutations record unspecified.
+    default_role: memstead_base::vcs::Role,
     /// Effective set of tool names hidden from this server. Resolved once
     /// from `[mcp].disabled_tools` at construction. Unknown names from
     /// the raw config are filtered out by `validate_disabled_tools` in
@@ -147,6 +151,7 @@ impl McpServer {
         Self {
             unified_engine: Arc::new(Mutex::new(engine)),
             token_budget,
+            default_role: memstead_base::vcs::Role::Unspecified,
             disabled_tools: Arc::new(disabled_tools),
             config_source: config_source.map(Arc::new),
             client: Arc::new(OnceLock::new()),
@@ -161,6 +166,43 @@ impl McpServer {
     /// `memstead-mcp --operator-mode` boot path is authorised to call
     /// this with `true`; agent-spawned servers leave it on the
     /// default `false`.
+    /// Set the session-level default role (the binary's `--role`
+    /// flag). Per-call `role` parameters win over this default.
+    pub fn with_default_role(mut self, role: memstead_base::vcs::Role) -> Self {
+        self.default_role = role;
+        self
+    }
+
+    /// Resolve a per-call `role` parameter against the session
+    /// default. An unknown value refuses typed with the declarable
+    /// vocabulary named (agent-trust plan 13).
+    fn resolve_role(
+        &self,
+        raw: Option<&str>,
+    ) -> Result<memstead_base::vcs::Role, Box<CallToolResult>> {
+        match raw {
+            None => Ok(self.default_role),
+            Some(s) => memstead_base::vcs::Role::from_wire(s).ok_or_else(|| {
+                let msg = format!(
+                    "unknown role {s:?} — declarable roles: {}",
+                    memstead_base::vcs::Role::DECLARABLE.join(", ")
+                );
+                Box::new(tool_error_with_payload(
+                    "INVALID_ROLE",
+                    &msg,
+                    envelope(
+                        "INVALID_ROLE",
+                        msg.clone(),
+                        serde_json::json!({
+                            "role": s,
+                            "allowed": memstead_base::vcs::Role::DECLARABLE,
+                        }),
+                    ),
+                ))
+            }),
+        }
+    }
+
     pub fn with_operator_mode(mut self, operator_mode: bool) -> Self {
         self.operator_mode = operator_mode;
         self
@@ -2472,10 +2514,15 @@ impl McpServer {
         }
         let mem = self.resolve_mem(p.mem.as_deref());
         let dry_run = p.dry_run.unwrap_or(false);
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
 
         // Wire JSON matches the `CreateResult` contract.
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
         let relations: Vec<memstead_base::ops::RelateArg> = p
             .relations
             .clone()
@@ -2574,10 +2621,15 @@ impl McpServer {
         let id = EntityId::canonical(&p.id);
         let mem_for_anchor = id.mem().to_string();
         let dry_run = p.dry_run.unwrap_or(false);
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
 
         // Wire JSON matches the `UpdateResult` contract.
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
         let patch_sections: indexmap::IndexMap<String, memstead_base::ops::PatchArg> = p
             .patch_sections
             .clone()
@@ -2719,6 +2771,10 @@ impl McpServer {
         if let Some(err) = validate_note(p.note.as_deref()) {
             return err;
         }
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
         if p.relations.is_empty() {
             let msg = "relations must carry at least one operation";
             return tool_error_with_payload(
@@ -2759,6 +2815,7 @@ impl McpServer {
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
         let client = self.client.get().cloned();
+        engine.set_role(role);
 
         // A list of one routes through the single-op engine path so it
         // behaves byte-identically to the historical single call —
@@ -3007,8 +3064,13 @@ impl McpServer {
             Some(p.expected_hash.clone())
         };
 
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
         // Capture the schema-ref BEFORE the delete — mem may
         // drop with the last entity.
         let mem_for_anchor = mem_schema_ref_unified(&engine, id.mem());
@@ -3084,11 +3146,16 @@ impl McpServer {
         }
         let id = EntityId::canonical(&p.id);
         let mem_for_anchor = id.mem().to_string();
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
 
         // Unified outcome exposes `old_path` / `new_path` directly
         // (matching full's `RenameResult` shape).
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
             expected_hash: Some(p.expected_hash.clone()),
@@ -4857,6 +4924,8 @@ mod tests {
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(stale.is_error.unwrap_or(false), "stale hash must error");
@@ -5120,6 +5189,7 @@ mod tests {
                 relations: None,
                 dry_run: None,
                 note: None,
+                role: None,
             }));
             assert!(
                 !r.is_error.unwrap_or(false),
@@ -5141,6 +5211,7 @@ mod tests {
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             assert!(
@@ -5275,6 +5346,7 @@ mod tests {
                 relations: None,
                 dry_run: None,
                 note: None,
+                role: None,
             }));
             assert!(
                 !r.is_error.unwrap_or(false),
@@ -5292,6 +5364,7 @@ mod tests {
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             assert!(
@@ -5421,6 +5494,7 @@ mod tests {
                 relations: None,
                 dry_run: None,
                 note: None,
+                role: None,
             }));
             assert!(
                 !r.is_error.unwrap_or(false),
@@ -5439,6 +5513,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(!r.is_error.unwrap_or(false), "relate: {}", extract_text(&r));
@@ -7883,6 +7958,7 @@ write_rules: []
             anchors: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -7967,6 +8043,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(bad_rel.is_error.unwrap_or(false));
@@ -8003,6 +8080,7 @@ write_rules: []
             metadata_unset: None,
             dry_run: None,
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(bad_section.is_error.unwrap_or(false));
@@ -8056,6 +8134,7 @@ write_rules: []
             metadata_unset: None,
             dry_run: None,
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(bad_hash.is_error.unwrap_or(false));
@@ -8069,6 +8148,7 @@ write_rules: []
             new_title: "New Name".to_string(),
             expected_hash: "anything".to_string(),
             note: None,
+            role: None,
         }));
         assert!(missing.is_error.unwrap_or(false));
         let body = missing.structured_content.unwrap();
@@ -8096,6 +8176,7 @@ write_rules: []
             new_title: "X".to_string(),
             expected_hash: "anything".to_string(),
             note: None,
+            role: None,
         }));
         let body = missing.structured_content.unwrap();
         assert_eq!(body["code"], "ENTITY_NOT_FOUND");
@@ -8189,6 +8270,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert_text_carries_code(&unknown_mem, "UNKNOWN_MEM");
 
@@ -8203,6 +8285,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert_text_carries_code(&unknown_type, "UNKNOWN_ENTITY_TYPE");
 
@@ -8212,6 +8295,7 @@ write_rules: []
             new_title: "New Name".to_string(),
             expected_hash: "anything".to_string(),
             note: None,
+            role: None,
         }));
         assert_text_carries_code(&missing, "ENTITY_NOT_FOUND");
 
@@ -8248,6 +8332,7 @@ write_rules: []
             metadata_unset: None,
             dry_run: None,
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert_text_carries_code(&hash_mismatch, "HASH_MISMATCH");
@@ -8262,6 +8347,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert_text_carries_code(&bad_rel_type, "INVALID_REL_TYPE");
@@ -8277,6 +8363,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert_text_carries_code(&bad_id, "INVALID_ENTITY_ID");
@@ -8297,6 +8384,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         let dup = server.memstead_create(Parameters(CreateParams {
             anchors: None,
@@ -8308,6 +8396,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert_text_carries_code(&dup, "ENTITY_ALREADY_EXISTS");
     }
@@ -8433,6 +8522,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             !created.is_error.unwrap_or(false),
@@ -8449,6 +8539,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -8513,6 +8604,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             !ok.is_error.unwrap_or(false),
@@ -8547,6 +8639,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             too_long.is_error.unwrap_or(false),
@@ -8614,6 +8707,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             create.is_error.unwrap_or(false),
@@ -8654,6 +8748,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             !ok.is_error.unwrap_or(false),
@@ -8690,6 +8785,7 @@ write_rules: []
             dry_run: None,
             declare_relations: None,
             note: None,
+            role: None,
         }));
         assert!(
             update.is_error.unwrap_or(false),
@@ -8730,6 +8826,7 @@ write_rules: []
                 relations: None,
                 dry_run: None,
                 note: None,
+                role: None,
             }));
             assert!(
                 !create.is_error.unwrap_or(false),
@@ -8776,6 +8873,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             assert!(
@@ -8807,6 +8905,7 @@ write_rules: []
             relations: None,
             dry_run: Some(true),
             note: None,
+            role: None,
         }));
         assert!(
             create.is_error.unwrap_or(false),
@@ -8853,6 +8952,7 @@ write_rules: []
             relations: None,
             dry_run: Some(true),
             note: None,
+            role: None,
         }));
         assert!(
             create.is_error.unwrap_or(false),
@@ -8916,6 +9016,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -8950,6 +9051,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(!stub_relate.is_error.unwrap_or(false));
@@ -9016,6 +9118,7 @@ write_rules: []
             metadata_unset: None,
             dry_run: None,
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -9089,6 +9192,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -9133,6 +9237,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         // Seed
@@ -9151,6 +9256,7 @@ write_rules: []
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(!adopt.is_error.unwrap_or(false), "{}", extract_text(&adopt));
         let adopt_text = extract_text(&adopt);
@@ -9200,6 +9306,7 @@ write_rules: []
             id: "specs--entity-a".to_string(),
             expected_hash: entity_hash,
             note: None,
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -9276,6 +9383,7 @@ write_rules: []
             new_title: "Renamed Entity A".to_string(),
             expected_hash: entity_hash.clone(),
             note: None,
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -9311,6 +9419,7 @@ write_rules: []
             new_title: "Entity  B".to_string(), // collapses to entity-b
             expected_hash: entity_b_hash,
             note: None,
+            role: None,
         }));
         assert!(!noop.is_error.unwrap_or(false), "{}", extract_text(&noop));
         let noop_text = extract_text(&noop);
@@ -10730,6 +10839,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -10966,6 +11076,8 @@ write_rules: []
             dry_run: None,
 
             note: None,
+
+            role: None,
         }));
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
@@ -11016,6 +11128,8 @@ write_rules: []
             dry_run: Some(true),
 
             note: None,
+
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -11049,6 +11163,8 @@ write_rules: []
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
         }));
         let real_json: serde_json::Value = serde_json::from_str(&extract_text(&real)).unwrap();
         assert_eq!(real_json["_hash"], json["_hash"]);
@@ -11343,6 +11459,8 @@ write_rules: []
             dry_run: None,
 
             note: None,
+
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -11389,6 +11507,8 @@ write_rules: []
             dry_run: None,
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -11410,6 +11530,8 @@ write_rules: []
             expected_hash: post_update_hash,
 
             note: None,
+
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -11441,6 +11563,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11469,6 +11592,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(!first.is_error.unwrap_or(false));
@@ -11483,6 +11607,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11525,6 +11650,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11560,6 +11686,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11615,6 +11742,7 @@ write_rules: []
             metadata_unset: Some(vec!["tags".to_string()]),
             dry_run: Some(true),
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -11651,6 +11779,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         // Step 2: now relate FROM the stub — must surface
@@ -11665,6 +11794,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11728,6 +11858,7 @@ write_rules: []
             metadata_unset: None,
             dry_run: Some(true),
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -11764,6 +11895,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11849,6 +11981,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -11924,6 +12057,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -12074,6 +12208,8 @@ write_rules: []
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
         }));
         let create_json: serde_json::Value = serde_json::from_str(&extract_text(&create)).unwrap();
         let id = create_json["id"].as_str().unwrap().to_string();
@@ -12111,6 +12247,8 @@ write_rules: []
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -12229,6 +12367,8 @@ write_rules: []
             dry_run: Some(true),
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -12276,6 +12416,8 @@ write_rules: []
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -12330,6 +12472,8 @@ write_rules: []
             dry_run: Some(true),
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -12368,6 +12512,8 @@ write_rules: []
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
             declare_relations: None,
         }));
         assert!(
@@ -12391,6 +12537,8 @@ write_rules: []
                 .to_string(),
 
             note: None,
+
+            role: None,
         }));
         assert!(
             result.is_error.unwrap_or(false),
@@ -12459,6 +12607,8 @@ write_rules: []
             dry_run: Some(false),
 
             note: None,
+
+            role: None,
         }));
         let create_json: serde_json::Value = serde_json::from_str(&extract_text(&create)).unwrap();
         let id = create_json["id"].as_str().unwrap().to_string();
@@ -12471,6 +12621,8 @@ write_rules: []
             expected_hash: create_hash.clone(),
 
             note: None,
+
+            role: None,
         }));
         assert!(
             !real.is_error.unwrap_or(false),
@@ -12494,6 +12646,8 @@ write_rules: []
             expected_hash: real_hash.to_string(),
 
             note: None,
+
+            role: None,
         }));
         assert!(
             !noop.is_error.unwrap_or(false),
@@ -12529,6 +12683,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -12559,6 +12714,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -12595,6 +12751,7 @@ write_rules: []
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(
@@ -14221,6 +14378,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(false),
                 note: Some("documenting the foo invariant".into()),
+                role: None,
             }));
             assert!(
                 result.is_error.is_none() || result.is_error == Some(false),
@@ -14300,6 +14458,7 @@ write_rules: []
                 metadata_unset: None,
                 dry_run: Some(false),
                 note: None,
+                role: None,
                 declare_relations: None,
             }));
             assert!(
@@ -14357,6 +14516,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(false),
                 note: Some("   \t ".into()),
+                role: None,
             }));
             let json: serde_json::Value = serde_json::from_str(&extract_text(&result)).unwrap();
             let warnings = json["warnings"].as_array().expect("warnings array");
@@ -14388,6 +14548,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(false),
                 note: Some(oversized),
+                role: None,
             }));
             assert_eq!(result.is_error, Some(true));
             let payload = result
@@ -14438,6 +14599,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             assert!(!result.is_error.unwrap_or(false));
             assert_eq!(
@@ -14486,6 +14648,7 @@ write_rules: []
                 metadata_unset: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
                 declare_relations: None,
             }));
             assert!(
@@ -14538,6 +14701,7 @@ write_rules: []
                 metadata_unset: None,
                 dry_run: None,
                 note: None,
+                role: None,
                 declare_relations: Some(vec![crate::tools::mutation::RelationInput {
                     to: "specs--entity-b".to_string(),
                     r#type: "USES".to_string(),
@@ -14577,6 +14741,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             assert!(
@@ -14607,6 +14772,7 @@ write_rules: []
                         description: None,
                     }],
                     note: None,
+                    role: None,
                     dry_run: dry,
                 }))
             };
@@ -14680,6 +14846,7 @@ write_rules: []
             let rehearsed = server.memstead_relate(Parameters(RelateParams {
                 relations: ops(),
                 note: None,
+                role: None,
                 dry_run: Some(true),
             }));
             assert!(
@@ -14709,6 +14876,7 @@ write_rules: []
             let real = server.memstead_relate(Parameters(RelateParams {
                 relations: ops(),
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             assert!(!real.is_error.unwrap_or(false), "{}", extract_text(&real));
@@ -14752,6 +14920,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
 
@@ -16143,6 +16312,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             // create now refuses with a typed envelope; fish the
             // structured_content for the recovery payload.
@@ -16207,6 +16377,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let payload = result
                 .structured_content
@@ -16238,6 +16409,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             let env = envelope_payload(&result);
@@ -16274,6 +16446,7 @@ write_rules: []
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: None,
             }));
             let env = envelope_payload(&result);
@@ -16308,6 +16481,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("INVALID_ENUM_VALUE"));
@@ -16370,6 +16544,7 @@ write_rules: []
                 metadata_unset: Some(vec!["level".to_string()]),
                 dry_run: Some(true),
                 note: None,
+                role: None,
                 declare_relations: None,
             }));
             let env = envelope_payload(&result);
@@ -16409,6 +16584,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("UNKNOWN_SECTION"));
@@ -16439,6 +16615,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let env = envelope_payload(&result);
             assert_eq!(env["code"].as_str(), Some("UNKNOWN_METADATA_FIELD"));
@@ -16484,6 +16661,7 @@ write_rules: []
                 }]),
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let payload = result
                 .structured_content
@@ -16531,6 +16709,7 @@ write_rules: []
                 }]),
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let create_payload = create_res
                 .structured_content
@@ -16565,6 +16744,7 @@ write_rules: []
                 metadata_unset: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
                 declare_relations: Some(vec![crate::tools::mutation::RelationInput {
                     r#type: "USES".to_string(),
                     to: "specs--update-ghost".to_string(),
@@ -16618,6 +16798,7 @@ write_rules: []
                 relations: None,
                 dry_run: Some(true),
                 note: None,
+                role: None,
             }));
             let payload = result
                 .structured_content
@@ -16672,6 +16853,7 @@ write_rules: []
                 relations: None,
                 dry_run: None,
                 note: None,
+                role: None,
             }));
             assert!(
                 !r.is_error.unwrap_or(false),
@@ -16853,6 +17035,7 @@ write_rules: []
                 dry_run: None,
                 declare_relations: None,
                 note: None,
+                role: None,
             }));
             assert_eq!(r.is_error, Some(true), "stale-hash write refuses");
             let text = extract_text(&r);

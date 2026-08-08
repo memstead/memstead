@@ -45,6 +45,8 @@ pub struct CreateParams {
     pub dry_run: Option<bool>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+    #[schemars(description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.")]
+    pub role: Option<String>,
 }
 
 /// One `anchors[]` element on `memstead_create` / `memstead_update` — a
@@ -212,6 +214,8 @@ pub struct UpdateParams {
     pub anchors_unset: Option<Vec<AnchorUnsetParam>>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+    #[schemars(description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.")]
+    pub role: Option<String>,
 }
 
 /// One `anchors_unset[]` entry on `memstead_update` — an explicit anchor-
@@ -310,6 +314,8 @@ pub struct RelateParams {
     pub relations: Vec<RelateOpInput>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+    #[schemars(description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.")]
+    pub role: Option<String>,
     #[schemars(
         description = "Validate and preview the relation operations without executing — no edge lands, no stub is created, no VCS commit. dry_run runs the SAME validation a real call runs (cross-mem policy, vocabulary, description posture, acyclicity, self-loop refusal); an illegal operation refuses with the IDENTICAL typed envelope a real call would return, and a legal one reports the would-be action with `_hash` set to the PROSPECTIVE post-write source hash, `commit_sha` empty (the rehearsal marker), and any would-be `AUTO_STUB_CREATED` warning for an absent target — reported, never created. The follow-up real call on an unchanged mem succeeds; like create's dry_run, its `_hash` diverges from the rehearsed one whenever a wall-clock second ticks between the calls (the auto-stamped `last_modified` enters the hash) — a timestamp shift, not drift."
     )]
@@ -328,6 +334,8 @@ pub struct DeleteParams {
     pub expected_hash: String,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+    #[schemars(description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.")]
+    pub role: Option<String>,
 }
 
 /// Parameters for memstead_rename.
@@ -344,4 +352,6 @@ pub struct RenameParams {
     pub expected_hash: String,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]
     pub note: Option<String>,
+    #[schemars(description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.")]
+    pub role: Option<String>,
 }

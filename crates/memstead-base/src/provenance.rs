@@ -98,6 +98,10 @@ pub struct Provenance {
     /// mutations may carry an id too (a logical-op with one commit),
     /// or `None` — both are valid wire shapes.
     pub logical_operation_id: Option<String>,
+    /// The caller-declared role (agent-trust plan 13).
+    /// `Unspecified` records as absence on both backends (no trailer,
+    /// no ledger field) — old records read back as `Unspecified`.
+    pub role: crate::vcs::Role,
 }
 
 impl Provenance {
@@ -127,7 +131,14 @@ impl Provenance {
             client,
             note,
             logical_operation_id: None,
+            role: crate::vcs::Role::Unspecified,
         }
+    }
+
+    /// Builder: attach the caller-declared role (agent-trust plan 13).
+    pub fn with_role(mut self, role: crate::vcs::Role) -> Self {
+        self.role = role;
+        self
     }
 
     /// Builder: attach a correlation id so multiple commits produced

@@ -193,6 +193,7 @@ impl Engine {
             client: client.cloned(),
             tool: Some("relate_entity"),
             note: note.map(String::from),
+            role: self.current_role,
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -205,7 +206,7 @@ impl Engine {
             actor,
             client.cloned(),
             note.map(String::from),
-        ))?;
+        ).with_role(self.current_role))?;
 
         self.record_self_write(prepared.mount_idx, &commit_sha);
         self.stamp_mutation_versions(prepared.mount_idx);
@@ -311,6 +312,7 @@ impl Engine {
             client: client.cloned(),
             tool: Some("relate_entity"),
             note: note.map(String::from),
+            role: self.current_role,
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1156,6 +1158,7 @@ impl Engine {
                 client: client.cloned(),
                 tool: Some("batch_relate"),
                 note: None,
+                role: self.current_role,
                 logical_operation_id: None,
                 entity_ids: Some(entity_ids),
             };
@@ -1189,7 +1192,7 @@ impl Engine {
                     actor,
                     client.cloned(),
                     note.clone(),
-                ))?;
+                ).with_role(self.current_role))?;
             self.record_self_write(p.mount_idx, &commit_sha);
             self.stamp_mutation_versions(p.mount_idx);
         }

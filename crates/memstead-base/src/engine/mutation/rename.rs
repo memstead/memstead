@@ -455,6 +455,7 @@ impl Engine {
             client: client.cloned(),
             tool: Some("rename_entity"),
             note: note.map(String::from),
+            role: self.current_role,
             logical_operation_id: Some(logical_op_id.as_str()),
             entity_ids: None,
         };
@@ -468,7 +469,7 @@ impl Engine {
                 actor,
                 client.cloned(),
                 note.map(String::from),
-            )
+            ).with_role(self.current_role)
             .with_logical_operation_id(logical_op_id.clone()),
         )?;
 
@@ -515,6 +516,7 @@ impl Engine {
                 client: client.cloned(),
                 tool: Some("rename_entity"),
                 note: note.map(String::from),
+                role: self.current_role,
                 logical_operation_id: Some(logical_op_id.as_str()),
                 entity_ids: None,
             };
@@ -543,7 +545,7 @@ impl Engine {
                     actor,
                     client.cloned(),
                     note.map(String::from),
-                )
+                ).with_role(self.current_role)
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
             self.record_self_write(plan.mount_idx, &peer_commit_sha);

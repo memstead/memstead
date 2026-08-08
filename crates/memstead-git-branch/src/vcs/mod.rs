@@ -955,6 +955,7 @@ mod tests {
             }),
             tool: Some("memstead_update"),
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -982,6 +983,7 @@ mod tests {
             client: None,
             tool: None,
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1010,6 +1012,7 @@ mod tests {
             client: None,
             tool: None,
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1031,6 +1034,7 @@ mod tests {
             }),
             tool: None,
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1071,6 +1075,7 @@ mod tests {
             client: None,
             tool: Some("memstead_create"),
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1097,6 +1102,7 @@ mod tests {
             }),
             tool: Some("memstead_update"),
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1145,6 +1151,7 @@ mod tests {
             }),
             tool: Some("memstead_update"),
             note: Some("documenting the foo invariant".into()),
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1166,6 +1173,7 @@ mod tests {
             client: None,
             tool: Some("memstead_update"),
             note: Some("   \n  \t ".into()),
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1182,6 +1190,7 @@ mod tests {
             client: None,
             tool: Some("memstead_create"),
             note: Some(String::new()),
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };

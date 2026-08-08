@@ -1608,6 +1608,7 @@ pub fn create_mem(
         client: params.client.clone(),
         tool: Some("memstead_mem_create"),
         note: params.note.clone(),
+        role: Default::default(),
         logical_operation_id: None,
         entity_ids: None,
     };

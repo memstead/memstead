@@ -2776,3 +2776,198 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     assert_eq!(ghost["isError"], true, "{ghost}");
     assert_eq!(ghost["structuredContent"]["code"], "UNKNOWN_MEM", "{ghost}");
 }
+
+// ---------------------------------------------------------------------------
+// Provenance at mutation (agent-trust plan 13) — the record half.
+// ---------------------------------------------------------------------------
+
+/// A declared role is recorded immutably where history lives: MCP
+/// create-as-author lands `Role: author` in the mem-repo commit
+/// trailer; a CLI update-as-checker against the same workspace lands
+/// `Role: checker`; a mutation without a role writes NO Role trailer
+/// (absence recorded as absence, never defaulted); an illegal role
+/// refuses typed with the vocabulary named on both surfaces; and the
+/// folder backend records the same shape in its JSONL ledger.
+#[test]
+fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    // MCP create-as-author.
+    let created = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Derived Conclusion",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." },
+            "role": "author"
+        }),
+    );
+    assert!(created["isError"] != true, "{created}");
+    let hash = created["structuredContent"]["_hash"].as_str().unwrap().to_string();
+
+    // MCP illegal role → typed refusal naming the vocabulary.
+    let bad = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Nope",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." },
+            "role": "reviewer"
+        }),
+    );
+    assert_eq!(bad["isError"], true, "{bad}");
+    assert_eq!(bad["structuredContent"]["code"], "INVALID_ROLE", "{bad}");
+    assert!(
+        serde_json::to_string(&bad["structuredContent"]["details"]["allowed"])
+            .unwrap()
+            .contains("checker"),
+        "vocabulary named: {bad}"
+    );
+
+    // CLI update-as-checker against the SAME workspace.
+    let cli_bin = Path::new(memstead_mcp_bin())
+        .parent()
+        .expect("binary has a parent dir")
+        .join("memstead");
+    assert!(cli_bin.exists(), "memstead CLI binary not built");
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "--role",
+            "checker",
+            "update",
+            "specs--derived-conclusion",
+            "--expected-hash",
+            &hash,
+            "--append",
+            "purpose= Checked.",
+        ])
+        .output()
+        .expect("run memstead CLI");
+    assert!(
+        out.status.success(),
+        "checker update must land: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // A mutation WITHOUT a role — no trailer, never defaulted.
+    let plain = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Plain Entity",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." }
+        }),
+    );
+    assert!(plain["isError"] != true, "{plain}");
+
+    // CLI illegal role → typed refusal.
+    let bad_cli = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args(["--json", "--role", "boss", "entity", "specs--plain-entity"])
+        .output()
+        .expect("run memstead CLI");
+    assert!(!bad_cli.status.success());
+    let v: Value = serde_json::from_slice(&bad_cli.stdout).unwrap();
+    assert_eq!(v["code"], "INVALID_ROLE", "{v}");
+    assert!(
+        v["message"].as_str().unwrap().contains("author, checker, verifier"),
+        "vocabulary named: {v}"
+    );
+
+    // The append-only record: commit trailers carry exactly the
+    // declared roles, and the role-less commit carries none.
+    let log = Command::new("git")
+        .arg("--git-dir")
+        .arg(tmp.path().join("mem-repo").join(".git"))
+        .args(["log", "--format=%H%n%B%n---", "refs/heads/specs"])
+        .output()
+        .expect("git log");
+    let log = String::from_utf8_lossy(&log.stdout).to_string();
+    let commits: Vec<&str> = log.split("\n---").collect();
+    let author_commit = commits
+        .iter()
+        .find(|c| c.contains("create specs--derived-conclusion"))
+        .expect("create commit present");
+    assert!(
+        author_commit.contains("Role: author"),
+        "author role recorded: {author_commit}"
+    );
+    let checker_commit = commits
+        .iter()
+        .find(|c| c.contains("update specs--derived-conclusion"))
+        .expect("update commit present");
+    assert!(
+        checker_commit.contains("Role: checker"),
+        "checker role recorded: {checker_commit}"
+    );
+    let plain_commit = commits
+        .iter()
+        .find(|c| c.contains("create specs--plain-entity"))
+        .expect("plain create commit present");
+    assert!(
+        !plain_commit.contains("Role:"),
+        "unspecified role records NO trailer: {plain_commit}"
+    );
+
+    // Folder-backend parity: a quickstart (folder) workspace's JSONL
+    // ledger records the same shape for the same operations.
+    let folder = TempDir::new().unwrap();
+    let ws = folder.path().join("plainws");
+    std::fs::create_dir_all(&ws).unwrap();
+    let ok = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .output()
+        .expect("quickstart");
+    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+    let ok = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args([
+            "--role",
+            "verifier",
+            "create",
+            "--title",
+            "Ledger Roled",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Recorded.",
+            "--section",
+            "context=Role test.",
+        ])
+        .output()
+        .expect("folder create");
+    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stdout));
+    let ledger = std::fs::read_to_string(
+        ws.join("plainws").join(".memstead").join("changes.jsonl"),
+    )
+    .or_else(|_| {
+        std::fs::read_to_string(ws.join(".memstead").join("changes.jsonl"))
+    });
+    let ledger = match ledger {
+        Ok(l) => l,
+        Err(_) => {
+            // Quickstart mem dir name derives from the folder; find it.
+            let mut found = String::new();
+            for entry in std::fs::read_dir(&ws).unwrap().flatten() {
+                let p = entry.path().join(".memstead").join("changes.jsonl");
+                if p.exists() {
+                    found = std::fs::read_to_string(p).unwrap();
+                    break;
+                }
+            }
+            found
+        }
+    };
+    assert!(
+        ledger.contains("\"role\":\"verifier\""),
+        "folder ledger records the role: {ledger}"
+    );
+}

@@ -329,6 +329,14 @@ pub struct Engine {
     /// format (second-granularity RFC 3339, see
     /// `mutation::iso_from_system_time`) is unchanged.
     mutation_clock: MutationClock,
+    /// The caller-declared role for mutations in this session
+    /// (agent-trust plan 13). Set by the surface before each mutation
+    /// (per-call parameter wins over the surface's session default);
+    /// `Unspecified` records as absence. Session state on the engine
+    /// — the `mutation_clock` precedent — so the role travels into
+    /// every commit context and provenance record without widening
+    /// every mutation signature.
+    current_role: crate::vcs::Role,
 }
 
 /// Clock the engine reads when stamping mutation timestamps. `Arc`'d

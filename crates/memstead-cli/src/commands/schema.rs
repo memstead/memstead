@@ -929,6 +929,7 @@ mod tests {
         CliContext {
             json: false,
             quiet: true,
+        role: Default::default(),
         }
     }
 

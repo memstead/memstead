@@ -283,6 +283,7 @@ mod tests {
             }),
             tool: Some("test"),
             note: None,
+            role: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         }

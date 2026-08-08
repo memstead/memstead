@@ -83,6 +83,11 @@ pub struct EntityTouch {
     /// Correlation id linking commits of one logical operation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logical_op: Option<String>,
+    /// Caller-declared role this touch was performed in (agent-trust
+    /// plan 13). Absent = unspecified — recorded as absence, never
+    /// defaulted to a real role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// Where the returned story starts — the visible-truncation contract:
@@ -340,6 +345,7 @@ fn filter_notes_for_entity(
             renamed_to: None,
             batch_entity_ids: Vec::new(),
             logical_op: n.logical_operation_id.clone(),
+            role: n.role.clone(),
         };
         if n.tool_verb.as_deref() == Some("rename") {
             if let Some((old, new)) = n.entity_id.as_deref().and_then(parse_rename_pair)
@@ -415,6 +421,7 @@ fn filter_provenance_for_entity(
                 renamed_to: is_rename.then(|| entity_id.to_string()),
                 batch_entity_ids: Vec::new(),
                 logical_op: p.logical_operation_id.clone(),
+                role: p.role.as_trailer().map(str::to_string),
             }
         })
         .collect();

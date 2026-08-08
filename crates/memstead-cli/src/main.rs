@@ -90,9 +90,27 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         })?;
     }
 
+    let role = match cli.role.as_deref() {
+        None => memstead_base::vcs::Role::Unspecified,
+        Some(s) => match memstead_base::vcs::Role::from_wire(s) {
+            Some(r) => r,
+            None => {
+                return Err(CliError::new(
+                    ExitKind::Validation,
+                    "INVALID_ROLE",
+                    format!(
+                        "unknown role {s:?} — declarable roles: {}",
+                        memstead_base::vcs::Role::DECLARABLE.join(", ")
+                    ),
+                )
+                .into());
+            }
+        },
+    };
     let ctx = setup::CliContext {
         json: cli.json,
         quiet: cli.quiet,
+        role,
     };
 
     match cli.command {

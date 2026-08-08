@@ -230,6 +230,33 @@ fn mem_is_durable(engine: &memstead_base::Engine, mem: &str) -> bool {
 /// defaulted-empty / absent / `false` param is left alone — the caller
 /// intended no effect, so the call proceeds unchanged (backward-compatible).
 /// Returns `None` when nothing meaningful was dropped.
+/// Resolve a per-call `role` parameter (agent-trust plan 13) on the
+/// lean flavour. No session default here (the lean binary carries no
+/// `--role`); absent records unspecified. Unknown values refuse typed
+/// with the declarable vocabulary named — same contract as the full
+/// flavour.
+fn resolve_role_lean(
+    raw: Option<&str>,
+) -> Result<memstead_base::vcs::Role, Box<CallToolResult>> {
+    match raw {
+        None => Ok(memstead_base::vcs::Role::Unspecified),
+        Some(s) => memstead_base::vcs::Role::from_wire(s).ok_or_else(|| {
+            let msg = format!(
+                "unknown role {s:?} — declarable roles: {}",
+                memstead_base::vcs::Role::DECLARABLE.join(", ")
+            );
+            Box::new(tool_error_with_details(
+                "INVALID_ROLE",
+                &msg,
+                Some(serde_json::json!({
+                    "role": s,
+                    "allowed": memstead_base::vcs::Role::DECLARABLE,
+                })),
+            ))
+        }),
+    }
+}
+
 fn reject_unsupported_params(params: &[(&str, bool)]) -> Option<CallToolResult> {
     let dropped: Vec<&str> = params
         .iter()
@@ -1111,6 +1138,10 @@ impl FilesystemMcpServer {
             return err;
         }
         let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         // Resolve the target mem. An explicit, non-empty `mem` is
         // honoured verbatim — so a multi-mount engine (e.g. a read-only
@@ -1207,6 +1238,10 @@ impl FilesystemMcpServer {
             return err;
         }
         let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         let args = UpdateEntityArgs {
             anchors: p
@@ -1297,6 +1332,10 @@ impl FilesystemMcpServer {
     )]
     fn memstead_delete(&self, Parameters(p): Parameters<DeleteParams>) -> CallToolResult {
         let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         let args = DeleteEntityArgs {
             id: EntityId(p.id),
@@ -1351,6 +1390,10 @@ impl FilesystemMcpServer {
             );
         }
         let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         // Relate is hash-stable on the section bodies but the
         // Relationships section regenerates, so `_hash` per entry is
@@ -1930,6 +1973,10 @@ impl FilesystemMcpServer {
     )]
     fn memstead_rename(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
         let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         let args = RenameEntityArgs {
             id: EntityId(p.id),
@@ -2254,6 +2301,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: Some("first via mcp".to_string()),
+            role: None,
         };
         let create_result = server.memstead_create(Parameters(create_params));
         assert!(
@@ -2344,6 +2392,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }
     }
 
@@ -2466,6 +2515,7 @@ mod tests {
             relations_unset: None,
             anchors_unset: None,
             note: None,
+            role: None,
         };
         let mut u = base();
         u.append_sections = Some(IndexMap::from([("purpose".to_string(), "x".to_string())]));
@@ -2505,6 +2555,7 @@ mod tests {
                     description: None,
                 }],
                 note: None,
+                role: None,
                 dry_run: dry,
             }))
         };
@@ -2591,6 +2642,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -2621,6 +2673,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -2665,6 +2718,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(result.is_error.unwrap_or(false), "create must refuse");
         let body = result.structured_content.unwrap();
@@ -2705,6 +2759,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -2736,6 +2791,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -2781,6 +2837,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -2816,6 +2873,7 @@ mod tests {
             metadata_unset: None,
             dry_run: None,
             note: Some("touched body".into()),
+            role: None,
             declare_relations: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
@@ -2845,6 +2903,7 @@ mod tests {
             metadata_unset: None,
             dry_run: None,
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -2879,6 +2938,7 @@ mod tests {
                 metadata_unset: None,
                 dry_run: None,
                 note: None,
+                role: None,
                 declare_relations: None,
             }));
             assert!(
@@ -2918,6 +2978,7 @@ mod tests {
                 metadata_unset: Some(keys.into_iter().map(String::from).collect()),
                 dry_run: None,
                 note: None,
+                role: None,
                 declare_relations: None,
             })
         };
@@ -2973,6 +3034,7 @@ mod tests {
             metadata_unset: None,
             dry_run: None,
             note: None,
+            role: None,
             declare_relations: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -2999,6 +3061,7 @@ mod tests {
             id: id.clone(),
             expected_hash: hash,
             note: Some("retired".into()),
+            role: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3027,6 +3090,7 @@ mod tests {
                 description: None,
             }],
             note: Some("first".into()),
+            role: None,
             dry_run: None,
         }));
         assert!(!added.is_error.unwrap_or(false));
@@ -3044,6 +3108,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(!dup.is_error.unwrap_or(false));
@@ -3079,6 +3144,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -3107,6 +3173,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -3712,6 +3779,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
 
@@ -3791,6 +3859,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
         let mut other_secs = indexmap::IndexMap::new();
         other_secs.insert("identity".to_string(), "other identity".to_string());
@@ -3805,6 +3874,7 @@ mod tests {
             relations: None,
             dry_run: None,
             note: None,
+            role: None,
         }));
 
         // Issue a search using the structured query shape.
@@ -3996,6 +4066,7 @@ mod tests {
                 description: None,
             }],
             note: None,
+            role: None,
             dry_run: None,
         }));
 
@@ -4058,6 +4129,7 @@ mod tests {
             metadata_unset: None,
             dry_run: None,
             note: Some("seed dangling link".into()),
+            role: None,
             // Body wiki-link `[[gone]]` is auto-emitted as REFERENCES
             // via the alias-synthesis pass — explicit author refused
             // under the schema's `manual_authoring: forbidden` posture.
@@ -4152,6 +4224,7 @@ mod tests {
             new_title: "New Title".into(),
             expected_hash: hash,
             note: Some("renamed".into()),
+            role: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();

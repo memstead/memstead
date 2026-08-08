@@ -48,6 +48,13 @@ struct Args {
     #[cfg(feature = "mem-repo")]
     #[arg(long = "operator-mode", default_value_t = false)]
     operator_mode: bool,
+
+    /// Session-level default role for every mutation this server
+    /// performs (agent-trust plan 13): `author` | `checker` |
+    /// `verifier`. Per-call `role` parameters win. Omit to record
+    /// mutations as unspecified unless a call declares otherwise.
+    #[arg(long = "role")]
+    role: Option<String>,
 }
 
 #[tokio::main]
@@ -144,6 +151,16 @@ async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     use memstead_mcp::config::{DEFAULT_TOKEN_BUDGET, validate_disabled_tools};
     use memstead_mcp::read_mems;
+
+    let default_role = match args.role.as_deref() {
+        None => memstead_base::vcs::Role::Unspecified,
+        Some(s) => memstead_base::vcs::Role::from_wire(s).ok_or_else(|| {
+            anyhow::anyhow!(
+                "memstead-mcp: ERROR [INVALID_ROLE]: unknown role {s:?} — declarable roles: {}",
+                memstead_base::vcs::Role::DECLARABLE.join(", ")
+            )
+        })?,
+    };
 
     init_tracing();
 
@@ -259,7 +276,8 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
         mutations,
         plugin,
     )
-    .with_operator_mode(args.operator_mode);
+    .with_operator_mode(args.operator_mode)
+    .with_default_role(default_role);
 
     let service = server.serve(stdio()).await?;
     service.waiting().await?;

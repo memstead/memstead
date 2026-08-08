@@ -127,6 +127,9 @@ pub struct ChangeEntry<'a> {
     /// correlation. Round-trips through the JSONL wire shape; reader
     /// reconstructs the same value on `read_provenance`.
     pub logical_operation_id: Option<&'a str>,
+    /// Caller-declared role (agent-trust plan 13); `Unspecified`
+    /// omits the field — absence recorded as absence.
+    pub role: crate::vcs::Role,
 }
 
 /// Errors surfaced by [`append_change`].
@@ -252,6 +255,8 @@ pub fn append_change_at(
         client: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", rename = "logical_op")]
         logical_operation_id: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        role: Option<&'static str>,
     }
 
     let mut line = serde_json::to_string(&Wire {
@@ -261,6 +266,7 @@ pub fn append_change_at(
         actor: entry.actor.as_trailer(),
         note,
         client,
+        role: entry.role.as_trailer(),
         logical_operation_id: entry.logical_operation_id,
     })?;
     line.push('\n');
@@ -435,6 +441,7 @@ mod tests {
                 client: Some(&client),
                 note: Some("first draft"),
                 logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
             },
             ts(1_715_000_000, 1),
         )
@@ -468,6 +475,7 @@ mod tests {
                 client: None,
                 note: None,
                 logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
             },
             ts(0, 0),
         )
@@ -490,6 +498,7 @@ mod tests {
                 client: None,
                 note: Some("   \t   "),
                 logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
             },
             ts(0, 0),
         )
@@ -511,6 +520,7 @@ mod tests {
                 client: None,
                 note: Some("multi-entity refactor"),
                 logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
             },
             ts(0, 0),
         )
@@ -538,6 +548,7 @@ mod tests {
                     client: None,
                     note: None,
                     logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
                 },
                 ts(t, 0),
             )
@@ -571,6 +582,7 @@ mod tests {
                 client: None,
                 note: None,
                 logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
             },
             ts(0, 0),
         )
@@ -625,6 +637,7 @@ mod tests {
             client: None,
             note: None,
             logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
         }
     }
 

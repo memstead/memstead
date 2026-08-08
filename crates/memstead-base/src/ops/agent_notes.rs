@@ -46,6 +46,10 @@ pub struct CommitNote {
     /// Populated from the `Logical-Op:` trailer when present.
     #[serde(skip_serializing_if = "Option::is_none", rename = "logical_op")]
     pub logical_operation_id: Option<String>,
+    /// Caller-declared role from the `Role:` trailer (agent-trust
+    /// plan 13); absent = unspecified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
     /// Ids a multi-entity commit touched (notably `batch_update`),
     /// recovered from the `Entities:` commit trailer. Lets an
     /// `--include-notes` consumer name every entity a batch changed from

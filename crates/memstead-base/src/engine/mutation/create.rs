@@ -799,6 +799,7 @@ impl Engine {
             client: client.cloned(),
             tool: Some("create_entity"),
             note: note.map(String::from),
+            role: self.current_role,
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -813,7 +814,7 @@ impl Engine {
             actor,
             client.cloned(),
             note.map(String::from),
-        ))?;
+        ).with_role(self.current_role))?;
 
         // Self-write bookkeeping: jump `last_known_head` to the SHA
         // we just produced so the next read doesn't surface
@@ -1211,6 +1212,7 @@ impl Engine {
                 client: client.cloned(),
                 tool: Some("batch_create"),
                 note: None,
+                role: self.current_role,
                 logical_operation_id: None,
                 entity_ids: Some(entity_ids),
             };
@@ -1242,7 +1244,7 @@ impl Engine {
                     actor,
                     client.cloned(),
                     note.clone(),
-                ))?;
+                ).with_role(self.current_role))?;
             self.record_self_write(p.mount_idx, &commit_sha);
             self.stamp_mutation_versions(p.mount_idx);
             let parse_result =

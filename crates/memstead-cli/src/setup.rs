@@ -94,6 +94,10 @@ pub struct CliContext {
     /// engine in-process and never installs a `tracing_subscriber`,
     /// so the flag is informational.
     pub quiet: bool,
+    /// The invocation-level declared role (`--role`, agent-trust
+    /// plan 13), already validated at parse time. Stamped onto every
+    /// engine this context constructs so mutations record it.
+    pub role: memstead_base::vcs::Role,
 }
 
 /// Workspace flavour resolved from cwd. Subcommands dispatch on this
@@ -230,8 +234,9 @@ impl CliContext {
         if root.join("mem-repo").join(".git").is_dir() {
             #[cfg(feature = "mem-repo")]
             {
-                let engine =
+                let mut engine =
                     engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
+                engine.set_role(self.role);
                 return Ok(CliEngine::MemRepo(engine));
             }
             #[cfg(not(feature = "mem-repo"))]
@@ -247,8 +252,9 @@ impl CliContext {
                 .into());
             }
         }
-        let engine =
+        let mut engine =
             BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
+        engine.set_role(self.role);
         Ok(CliEngine::Filesystem(engine))
     }
 
@@ -290,9 +296,10 @@ impl CliContext {
             .into());
         }
 
-        engine_from_workspace_root(&root)
-            .map_err(|e| boot_error_to_cli(&root, e))
-            .map_err(anyhow::Error::from)
+        let mut engine =
+            engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
+        engine.set_role(self.role);
+        Ok(engine)
     }
 }
 
@@ -380,6 +387,7 @@ pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
         client: Some(cli_client_id()),
         tool: None,
         note,
+        role: Default::default(),
         logical_operation_id: None,
         entity_ids: None,
     }
@@ -423,9 +431,10 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
         .into());
     }
 
-    engine_from_workspace_root(&root)
-        .map_err(|e| boot_error_to_cli(&root, e))
-        .map_err(anyhow::Error::from)
+    let mut engine =
+        engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
+    engine.set_role(_ctx.role);
+    Ok(engine)
 }
 
 #[cfg(test)]

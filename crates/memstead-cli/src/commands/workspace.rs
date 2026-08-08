@@ -724,6 +724,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     let setup_ctx = CliContext {
         json: true,
         quiet: false,
+        role: Default::default(),
     };
     // Engine init can fail for several reasons; `WORKSPACE_NOT_INITIALISED`
     // is the dominant one for cold-start usage and the only one the test
