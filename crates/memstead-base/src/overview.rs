@@ -764,6 +764,11 @@ pub fn compose_overview(
     if let Some(root) = engine.workspace_root() {
         md.push_str(&format!("_workspace_root: {}\n", root.display()));
     }
+    // Engine crate version of the serving binary — the session-start
+    // "which version am I talking to" answer (agent-trust plan 05); a
+    // returning agent that sees a changed value re-reads the tool
+    // roster in the server instructions.
+    md.push_str(&format!("_engine_version: {}\n", crate::ENGINE_VERSION));
     if let Some(ref s) = policy_flow {
         md.push_str(&format!("_policy: {s}\n"));
     }

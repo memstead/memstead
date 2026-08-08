@@ -8,6 +8,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Surface honesty: the MCP instructions tell the whole truth about
+  the surface.** Session start now answers "what can this engine do,
+  on which surface, at which version" with no out-of-band knowledge:
+  both server flavours' instructions carry the engine version, the
+  complete grouped tool roster (24 tools full / 12 lean — previously
+  13 of 24 were named), and a CLI-companion note naming the verb
+  families that deliberately live on the CLI (batch mutation,
+  export/install, distribution, bootstrap/repair) and when to reach
+  for them — ending the capability-blindness class where an agent
+  hand-rolled 175 single-entity calls beside an unannounced
+  `batch-create`. The MCP serverInfo version now equals the crate
+  version on both flavours (the hardcoded `"0.1.0"` is gone), and
+  `memstead_overview` frontmatter gains `_engine_version`. The
+  instructions are registry-tested: a bidirectional test fails when
+  the text lags or leads the tool registry, the version is pinned to
+  the crate by test, and a byte-budget tripwire guards against
+  unbounded instruction growth.
 - **Quarantine boot: a broken mem disables itself, never the
   workspace.** Mem-level boot failures (unresolvable or missing schema
   pin, backend instantiation or read failure) no longer take the

@@ -1988,13 +1988,37 @@ impl FilesystemMcpServer {
     }
 }
 
-#[tool_handler(
-    router = FilesystemMcpServer::tool_router(),
-    name = "memstead-mcp",
-    version = "0.1.0",
-    instructions = "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities (operating costs measured in docs/sizing-curve.md; larger holdings work at proportionally higher load cost); an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating."
-)]
+/// The lean (filesystem-mem) server's session-start instructions —
+/// one named const so the registry-honesty tests read the SAME string
+/// the handler serves. Built with `concat!` so the engine version is
+/// baked in at compile time; the roster must name every tool this
+/// flavour registers (bidirectionally test-enforced).
+pub const FS_SERVER_INSTRUCTIONS: &str = concat!(
+    "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities (operating costs measured in docs/sizing-curve.md; larger holdings work at proportionally higher load cost); an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating.",
+    " Engine version: ",
+    env!("CARGO_PKG_VERSION"),
+    " — serverInfo.version carries the same value; a version different from your last session means this surface may have changed: re-read the roster below. Tool roster (complete, 12 tools): READ — memstead_overview (workspace dashboard: schemas, mems, communities, quarantine roster), memstead_entity (one entity + _hash), memstead_search (text + metadata filter), memstead_schema (the pinned schema, lite/full), memstead_health (drift, conformance, quarantine roster, boot diagnosis), memstead_diff (two-ref structural diff), memstead_changes_since (change deltas for incremental sync). WRITE — memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete (entity mutations, optimistic _hash locking). CLI companion: the `memstead` CLI serves this same engine with verb families that deliberately live only there — bulk mutation (batch-create, batch-update, batch-relate: reach for these instead of looping single MCP mutation calls when writing many entities), archive export (export), distribution/registry (publish, unpublish, login, logout, domain), workspace bootstrap and repair (init, quickstart, projection migrate, schema install), and read/report verbs (status, list, context). If a task feels like N repetitive single-entity calls, check the CLI first."
+);
+
+#[tool_handler(router = FilesystemMcpServer::tool_router())]
 impl ServerHandler for FilesystemMcpServer {
+    /// Hand-written so `instructions` can be the named
+    /// [`FS_SERVER_INSTRUCTIONS`] const (the macro only accepts string
+    /// literals) and the serverInfo version is the crate version by
+    /// construction — the historical hardcoded `"0.1.0"` cannot recur.
+    fn get_info(&self) -> rmcp::model::ServerInfo {
+        rmcp::model::ServerInfo::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+        )
+        .with_server_info(rmcp::model::Implementation::new(
+            "memstead-mcp",
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .with_instructions(FS_SERVER_INSTRUCTIONS.to_string())
+    }
+
     async fn initialize(
         &self,
         request: InitializeRequestParams,
