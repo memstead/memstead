@@ -44,3 +44,33 @@ sha256 = "fb9a00b3850c1ba7bf6c29ecce9317e5cd286794e58bd2e9c014c31598654c74"
 name = "software"
 version = "0.1.0"
 sha256 = "8c7f45686d9c29a965c9593c4086b355383563edb764eca4a3336cda5dbb1c69"
+
+[[shipped]]
+name = "default"
+version = "1.1.0"
+sha256 = "802b39ff40ff666c2f8eacb244ca6619cd5215ed0da6ba25d76fefb5c0aa03bd"
+
+[[shipped]]
+name = "engineering"
+version = "0.2.0"
+sha256 = "3ea2266715778e4e452dc8b8348df5953b01034235325a1ceb1d5db86fcf4285"
+
+[[shipped]]
+name = "ingest"
+version = "0.3.0"
+sha256 = "cc0158f532aed225dcec987b59a6241c2764d7159e4bab38405d2581e2133029"
+
+[[shipped]]
+name = "planning"
+version = "0.3.0"
+sha256 = "1bf3212909533e0b8c212a1862b9aca8fa6084e3315e1d6e9722893d9accf378"
+
+[[shipped]]
+name = "project"
+version = "0.2.0"
+sha256 = "2fad31859970f42a82f3817b7f3372da4fff8cca838fa877dc444986d2b6559b"
+
+[[shipped]]
+name = "software"
+version = "0.2.0"
+sha256 = "9112d76f0d810a66f396d1d38c4b43cedd56796f58652d5aa72619b46ad52fe7"

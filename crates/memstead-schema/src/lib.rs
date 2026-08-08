@@ -475,7 +475,9 @@ mod tests {
         let reg = SchemaRegistry::builtin();
         assert!(!reg.is_empty());
         let versions = reg.available_versions("default");
-        assert_eq!(versions.len(), 1);
+        // 1.0.0 (sealed, retired vocabulary) + 1.1.0 (current
+        // generation, plan-06 rename) — retention keeps both.
+        assert_eq!(versions.len(), 2);
     }
 
     #[test]
@@ -505,8 +507,7 @@ mod tests {
     fn software_lifecycle_date_fields_are_optional() {
         let reg = SchemaRegistry::builtin();
         let software = reg
-            .resolve_by_name("software")
-            .unwrap()
+            .get("software", &semver::Version::new(0, 2, 0))
             .expect("software builtin present");
 
         let requirement = software.get_type("requirement").expect("requirement type");
@@ -580,7 +581,7 @@ metadata_fields: []
 title_weight: 1.0
 text_fields: [body]
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields: [title, body]
 health_required_fields: [body]
 staleness_threshold_days: 30
@@ -643,9 +644,8 @@ write_rules: []
             // No workspace dir → only builtins remain.
             let reg = SchemaRegistry::load_for_workspace(Some(tmp.path()), None)
                 .expect("builtin-only load succeeds");
-            let resolved = reg.resolve_by_name("default").expect("unique");
             assert!(
-                resolved.is_some(),
+                reg.get("default", &semver::Version::new(1, 1, 0)).is_some(),
                 "builtin default must be registered when no other layers contribute"
             );
         }

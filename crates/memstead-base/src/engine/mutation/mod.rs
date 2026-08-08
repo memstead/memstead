@@ -768,7 +768,7 @@ pub(super) fn route_edge_validation(
 /// intra-batch cycle refuses like a stored one):
 ///
 /// - **Self-loop on a propagating rel-type.** `from == to` on any
-///   rel-type the source type lists in `propagating_relationships` is
+///   rel-type the source type lists in `no_self_loop_relationships` is
 ///   always a weight-bomb, regardless of the `acyclic` flag.
 /// - **Cycle on an acyclic rel-type.** An add closing a back-path
 ///   `to → … → from` (via [`crate::graph::query::would_cycle`]) refuses
@@ -785,7 +785,7 @@ pub(super) fn validate_edge_acyclicity(
     to: &EntityId,
     rel_type: &str,
 ) -> Result<(), EngineError> {
-    if from == to && schema.type_propagates(from_type, rel_type) {
+    if from == to && schema.type_refuses_self_loop(from_type, rel_type) {
         return Err(EngineError::RelationshipCycle {
             rel_type: rel_type.to_string(),
             from: from.clone(),

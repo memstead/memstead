@@ -69,7 +69,7 @@ text_fields: [definition, explanation, boundaries, significance]
 hierarchy_relationship: PART_OF
 edge_weight_overrides:
   DEPENDS_ON: 1.5
-propagating_relationships: [DEPENDS_ON, GENERALIZES]
+no_self_loop_relationships: [DEPENDS_ON, GENERALIZES]
 updatable_fields: [title, definition, explanation, boundaries, significance, maturity, abstraction_level, tags]
 health_required_fields: [definition, explanation]
 staleness_threshold_days: 90

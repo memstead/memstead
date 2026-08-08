@@ -69,7 +69,7 @@ text_fields: [claim, context, substance, alternatives, outcome]
 hierarchy_relationship: PART_OF
 edge_weight_overrides:
   DERIVED_FROM: 2.0
-propagating_relationships: [DERIVED_FROM, MOTIVATED_BY]
+no_self_loop_relationships: [DERIVED_FROM, MOTIVATED_BY]
 updatable_fields: [title, claim, context, substance, alternatives, outcome, status, tags]
 health_required_fields: [claim, context]
 staleness_threshold_days: 90

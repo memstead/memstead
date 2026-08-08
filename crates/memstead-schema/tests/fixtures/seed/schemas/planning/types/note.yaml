@@ -63,7 +63,7 @@ metadata_fields:
 title_weight: 100.0
 text_fields: [content, context, outcome]
 hierarchy_relationship: PART_OF
-propagating_relationships: [DERIVED_FROM, CONSTRAINS, RAISES, ANSWERS]
+no_self_loop_relationships: [DERIVED_FROM, CONSTRAINS, RAISES, ANSWERS]
 updatable_fields: [title, content, context, outcome, kind, session_id, session_date, tags]
 health_required_fields: [content]
 staleness_threshold_days: 90

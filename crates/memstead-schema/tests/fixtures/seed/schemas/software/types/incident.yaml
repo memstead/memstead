@@ -101,7 +101,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   VIOLATES: 3.0
   CAUSED: 2.5
-propagating_relationships: [VIOLATES, CAUSED, MOTIVATED_BY]
+no_self_loop_relationships: [VIOLATES, CAUSED, MOTIVATED_BY]
 updatable_fields: [title, summary, timeline, impact, root_cause, remediation, analysis, severity, status, detected_at, mitigated_at, resolved_at, blast_radius, on_call, tags]
 health_required_fields: [summary, timeline, impact]
 staleness_threshold_days: 180

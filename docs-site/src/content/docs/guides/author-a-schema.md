@@ -122,7 +122,7 @@ Beyond what is *legal to write*, a type can declare what is *unhealthy to keep* 
 - **`required_outgoing` severity** — each required-edge block on the type can carry `severity: block`, promoting its historical `MISSING_REQUIRED_OUTGOING` warning to a refusal.
 - **`unique`** — a tuple of metadata fields unique among entities of this type within the mem. Defaults to `block`: the point is bouncing the duplicate at write time.
 - **`enum_from_neighbour`** — a field whose legal values are the bullet-list entries of a named section on the entity reached via a named outgoing edge; a value nothing backs is a violation. Defaults to `warn`.
-- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it via a named rel-type and direction; tainted entities surface as health findings naming their tainting ancestor. Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes `propagating_relationships`, which keeps only its self-edge-refusal behaviour.
+- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it via a named rel-type and direction; tainted entities surface as health findings naming their tainting ancestor. Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes the retired `propagating_relationships` key, whose sole self-loop-refusal behaviour now lives under the honestly named `no_self_loop_relationships` (optional; the old key refuses at authoring load with a typed rename error).
 
 ```yaml
 # types/recipe.yaml

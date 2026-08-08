@@ -74,7 +74,7 @@ metadata_fields:
 title_weight: 100.0
 text_fields: [statement, scope, justification, exceptions, consequences]
 hierarchy_relationship: PART_OF
-propagating_relationships: [GOVERNS, CONSTRAINS]
+no_self_loop_relationships: [GOVERNS, CONSTRAINS]
 updatable_fields: [title, statement, scope, justification, exceptions, consequences, authority, universality, tags]
 health_required_fields: [statement, scope]
 staleness_threshold_days: 120

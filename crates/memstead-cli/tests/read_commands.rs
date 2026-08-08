@@ -605,7 +605,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -704,7 +704,7 @@ text_fields:
   - answers
   - notes
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - answers

@@ -1100,7 +1100,7 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
             flags.push("hierarchy");
         }
         if schema
-            .propagating_relationships
+            .no_self_loop_relationships
             .iter()
             .any(|r| r == rel_type)
         {
@@ -1341,7 +1341,7 @@ pub fn build_schema_payload(
         .map(|d| {
             // Surface the `acyclic` flag so agents can predict cycle-check
             // refusal from introspection without trial-and-error.
-            // Combined with each type's `propagating_relationships`
+            // Combined with each type's `no_self_loop_relationships`
             // list (below), the schema response fully describes the
             // self-loop / long-cycle gates.
             //
@@ -1474,7 +1474,7 @@ pub fn build_schema_payload(
                 })
                 .collect();
 
-            // Expose the per-type `propagating_relationships` list so agents
+            // Expose the per-type `no_self_loop_relationships` list so agents
             // can predict self-loop refusal. The engine refuses
             // `memstead_relate type=R from=X(type=T) to=X` whenever R
             // appears here, independent of R's `acyclic` flag.
@@ -1568,7 +1568,7 @@ pub fn build_schema_payload(
                 "writing_guidance": td.write_rules,
                 "system_context": td.system_message_str(),
                 "staleness_threshold_days": td.staleness_threshold_days,
-                "propagating_relationships": td.propagating_relationships,
+                "no_self_loop_relationships": td.no_self_loop_relationships,
                 "required_outgoing": required_outgoing,
                 "constraints": constraints,
             });
@@ -1635,20 +1635,20 @@ pub fn build_schema_payload(
         }
     }
 
-    // One-line effect note for the per-type `propagating_relationships`
+    // One-line effect note for the per-type `no_self_loop_relationships`
     // arrays — present in BOTH modes, right where the field is read.
-    // The name has misled outside schema authors into declaring it to
-    // express impact propagation or evidence obligations; its single
-    // functional effect is the self-loop refusal. Top-level (not
+    // The retired `propagating_relationships` name misled outside
+    // schema authors into declaring impact propagation; the renamed
+    // key states the single functional effect. Top-level (not
     // per-type) so the note costs one key, not one per type.
     obj.insert(
-        "propagating_relationships_effect".into(),
+        "no_self_loop_relationships_effect".into(),
         serde_json::Value::String(
-            "Per-type `propagating_relationships` governs exactly one behaviour: \
+            "Per-type `no_self_loop_relationships` governs exactly one behaviour: \
              memstead_relate refuses a self-loop (from == to) on a rel-type the \
              source type lists here. It does not propagate impact, imply an \
-             evidence obligation, or have any other effect. Deprecated for new \
-             schemas: to declare real impact propagation, use the \
+             evidence obligation, or have any other effect (the name says it \
+             all). To declare real impact propagation, use the \
              `status_propagation` constraint (`constraints:` on the type), which \
              taints dependents of a terminal status value via a named rel-type \
              and direction and surfaces them as health findings."
@@ -1771,11 +1771,11 @@ pub fn build_schema_payload(
 
         // Lite entity-type form: name + section keys (each with its
         // `required` marker) + metadata-field shapes (name, required,
-        // `enum`, `default`) + `propagating_relationships` +
+        // `enum`, `default`) + `no_self_loop_relationships` +
         // `required_outgoing` — the structural minimum to author a
         // legal write — with the type/section prose (descriptions,
         // write_rules, writing_guidance, system_context) dropped.
-        // `propagating_relationships` rides along because it governs
+        // `no_self_loop_relationships` rides along because it governs
         // the self-loop relate refusal (relate R X→X when R propagates
         // on type T), one of the refusals the lite view must let an
         // agent avoid. `required_outgoing` rides along because it is
@@ -1835,7 +1835,7 @@ pub fn build_schema_payload(
                     "name": t["name"],
                     "sections": sections,
                     "fields": fields,
-                    "propagating_relationships": t["propagating_relationships"],
+                    "no_self_loop_relationships": t["no_self_loop_relationships"],
                     "required_outgoing": t["required_outgoing"],
                     "constraints": t["constraints"],
                 });
@@ -2316,7 +2316,8 @@ mod tests {
             hierarchy_relationship: "PART_OF".to_string(),
             edge_weight_overrides: indexmap::IndexMap::new(),
             edge_weights: indexmap::IndexMap::new(),
-            propagating_relationships: vec![],
+            no_self_loop_relationships: vec![],
+            legacy_propagating_relationships: None,
             leaf: false,
             updatable_fields: vec![],
             health_required_fields: vec![],
@@ -3160,7 +3161,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -3318,7 +3319,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -3552,15 +3553,14 @@ write_rules: []
     /// at BOTH verbosity levels, and a type declaring none reports an
     /// empty list (never a missing key). The `project` built-in is the
     /// live fixture: `evidence` declares one block, `decision` (among
-    /// others) declares none. The `propagating_relationships_effect`
+    /// others) declares none. The `no_self_loop_relationships_effect`
     /// note ships at both levels and claims nothing beyond the
     /// self-loop refusal.
     #[test]
     fn required_outgoing_reported_with_cardinality_at_both_levels() {
         let reg = memstead_schema::SchemaRegistry::builtin();
         let project = reg
-            .resolve_by_name("project")
-            .expect("unambiguous")
+            .get("project", &semver::Version::new(0, 2, 0))
             .expect("project is a built-in");
 
         for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
@@ -3604,9 +3604,9 @@ write_rules: []
             assert!(saw_evidence, "project schema carries the evidence type");
             assert!(saw_memo, "project schema carries the memo type");
 
-            // The effect note for propagating_relationships ships at both
+            // The effect note for no_self_loop_relationships ships at both
             // levels and states the single real effect.
-            let note = payload["propagating_relationships_effect"]
+            let note = payload["no_self_loop_relationships_effect"]
                 .as_str()
                 .expect("effect note present at both verbosity levels");
             assert!(note.contains("self-loop"), "names the actual effect");
@@ -3688,12 +3688,12 @@ write_rules: []
                 t.get("system_context").is_none(),
                 "lite type drops system_context"
             );
-            // `propagating_relationships` rides along — it governs the
+            // `no_self_loop_relationships` rides along — it governs the
             // self-loop relate refusal, a write-time refusal lite must let
             // an agent avoid.
             assert!(
-                t.get("propagating_relationships").is_some(),
-                "lite type keeps propagating_relationships"
+                t.get("no_self_loop_relationships").is_some(),
+                "lite type keeps no_self_loop_relationships"
             );
             // `required_outgoing` rides along — the only declared
             // legality condition on outgoing edges. Always an array,

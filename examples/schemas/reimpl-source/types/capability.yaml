@@ -90,7 +90,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   SUPPORTS: 4.0
   CONTRADICTS: 3.0
-propagating_relationships: [PART_OF, SUPPORTS, CONTRADICTS]
+no_self_loop_relationships: [PART_OF, SUPPORTS, CONTRADICTS]
 updatable_fields: [title, behavior, inputs, outputs, invariants, edge_cases, notes, area, verified, last_reviewed, tags]
 health_required_fields: [behavior, inputs, outputs]
 staleness_threshold_days: 180

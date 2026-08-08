@@ -82,7 +82,7 @@ fn unresolvable_pin_quarantines_typed_with_repair_command_for_both_trails() {
     assert_eq!(q["reason_code"], "SCHEMA_NOT_FOUND", "got: {health}");
     let msg = q["reason_message"].as_str().unwrap();
     assert!(
-        msg.contains("memstead mem set-schema mem1 default@1.0.0"),
+        msg.contains("memstead mem set-schema mem1 default@1.1.0"),
         "wrong-version trail must end in the concrete repin command: {msg}"
     );
 

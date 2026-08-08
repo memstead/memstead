@@ -1458,7 +1458,7 @@ text_fields:
   - answers
   - notes
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - answers
@@ -1673,8 +1673,7 @@ write_rules: []
 
         let registry = SchemaRegistry::builtin();
         let software = registry
-            .resolve_by_name("software")
-            .unwrap()
+            .get("software", &semver::Version::new(0, 2, 0))
             .expect("software schema ships as a builtin");
 
         let mut store = Store::new();
@@ -1742,8 +1741,7 @@ write_rules: []
 
         let registry = SchemaRegistry::builtin();
         let software = registry
-            .resolve_by_name("software")
-            .unwrap()
+            .get("software", &semver::Version::new(0, 2, 0))
             .expect("software schema ships as a builtin");
 
         let mut store = Store::new();
@@ -2211,7 +2209,7 @@ community:
   resolution: 1.0
   seed: 42
 "#;
-        let body_section = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\npropagating_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let body_section = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
         let decision_yaml = format!(
             "name: decision\ndescription: t\nwhen_to_use: Here\n{body_section}required_outgoing:\n  - relationships: [CHOSEN]\n    cardinality: at_least_one\n  - relationships: [REJECTED]\n    cardinality: at_least_one\n",
         );

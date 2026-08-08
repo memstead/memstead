@@ -44,20 +44,20 @@ impl Schema {
             .any(|d| d.name == name && d.acyclic)
     }
 
-    /// Returns `true` iff entities of `source_type` propagate `rel_type`
-    /// outward — i.e. the type's `propagating_relationships` list
-    /// declares this rel-type. A propagating-from-source self-loop is a
-    /// weight-bomb (the propagation accumulates into the entity that
-    /// originated it), so the engine
-    /// refuses self-loops on any `(source_type,
-    /// rel_type)` pair where this returns `true`, independent of the
-    /// rel-type's `acyclic` flag (which governs longer cycles, a
-    /// different concern). Unknown `source_type` returns `false`
-    /// (permissive — the type's existence is checked elsewhere).
-    pub fn type_propagates(&self, source_type: &str, rel_type: &str) -> bool {
+    /// Returns `true` iff `source_type`'s `no_self_loop_relationships`
+    /// list declares `rel_type` — the engine then refuses a SELF-LOOP
+    /// (from == to) on that pair, independent of the rel-type's
+    /// `acyclic` flag (which governs longer cycles, a different
+    /// concern). That refusal is the declaration's only effect —
+    /// nothing propagates (the historical "weight-bomb" rationale was
+    /// backed by no weight code anywhere; agent-trust plan 06 renamed
+    /// the field and this predicate to match reality). Unknown
+    /// `source_type` returns `false` (permissive — the type's
+    /// existence is checked elsewhere).
+    pub fn type_refuses_self_loop(&self, source_type: &str, rel_type: &str) -> bool {
         self.types
             .get(source_type)
-            .map(|td| td.propagating_relationships.iter().any(|r| r == rel_type))
+            .map(|td| td.no_self_loop_relationships.iter().any(|r| r == rel_type))
             .unwrap_or(false)
     }
 

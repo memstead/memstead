@@ -82,7 +82,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   SUBSTITUTES_FOR: 2.5
 
-propagating_relationships: [SUBSTITUTES_FOR]
+no_self_loop_relationships: [SUBSTITUTES_FOR]
 
 updatable_fields: [title, profile, storage, substitutions, pantry_category, tags]
 health_required_fields: [profile]

@@ -88,7 +88,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   SUPERSEDES: 3.0
   DERIVED_FROM: 2.5
-propagating_relationships: [SUPERSEDES, DERIVED_FROM, MOTIVATED_BY]
+no_self_loop_relationships: [SUPERSEDES, DERIVED_FROM, MOTIVATED_BY]
 updatable_fields: [title, context, options, decision, consequences, notes, status, decided_on, deciders, scope, tags]
 health_required_fields: [context, decision, consequences]
 staleness_threshold_days: 365

@@ -47,7 +47,7 @@
     "name": {
       "type": "string"
     },
-    "propagating_relationships": {
+    "no_self_loop_relationships": {
       "type": "array",
       "items": {
         "type": "string"
@@ -114,7 +114,7 @@
     "title_weight",
     "text_fields",
     "hierarchy_relationship",
-    "propagating_relationships",
+    "no_self_loop_relationships",
     "updatable_fields",
     "health_required_fields",
     "staleness_threshold_days",

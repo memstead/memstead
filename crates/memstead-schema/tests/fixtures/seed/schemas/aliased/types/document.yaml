@@ -27,7 +27,7 @@ text_fields:
   - body
 
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 
 updatable_fields:
   - title

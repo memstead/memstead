@@ -1290,7 +1290,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -1420,7 +1420,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: [PART_OF]
+no_self_loop_relationships: [PART_OF]
 updatable_fields:
   - title
   - body
@@ -1779,7 +1779,7 @@ write_rules: []
         );
     }
 
-    /// Regression pin for `propagating_relationships`' single
+    /// Regression pin for `no_self_loop_relationships`' single
     /// functional behavior: a self-loop (`from == to`) on a rel-type
     /// the source type lists there refuses with `RELATIONSHIP_CYCLE`.
     /// The constraint vocabulary settles the field's semantics — the
@@ -1788,7 +1788,7 @@ write_rules: []
     #[test]
     fn propagating_rel_type_self_loop_refusal_is_pinned() {
         let tmp = TempDir::new().unwrap();
-        // The `constr` fixture declares `propagating_relationships:
+        // The `constr` fixture declares `no_self_loop_relationships:
         // [PART_OF]` on `task`.
         let mut engine = engine_with_constraints_schema(&tmp, "warn", "warn");
         let (actor, client) = cli_actor();
@@ -1949,7 +1949,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -1986,7 +1986,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -2187,7 +2187,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -2231,7 +2231,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -5413,7 +5413,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body

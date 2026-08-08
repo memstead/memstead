@@ -83,7 +83,7 @@ edge_weight_overrides:
   EXECUTES: 3.0
   REQUIRES: 2.5
   MITIGATES: 2.5
-propagating_relationships: [EXECUTES, REQUIRES, PRODUCES, MITIGATES]
+no_self_loop_relationships: [EXECUTES, REQUIRES, PRODUCES, MITIGATES]
 updatable_fields: [title, what, how, expected_outcome, validation, rollback, notes, status, order, estimated_effort, actual_effort, tags]
 health_required_fields: [what, expected_outcome, validation]
 staleness_threshold_days: 30

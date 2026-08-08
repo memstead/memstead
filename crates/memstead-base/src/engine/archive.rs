@@ -112,7 +112,7 @@ impl Engine {
         };
         let backend: Box<dyn MemBackend> = Box::new(ArchiveBackend::from_bytes(bytes));
 
-        let engine = Self::from_mounts_inner(vec![(mount, backend)], extra_schemas)?;
+        let engine = Self::from_mounts_inner(vec![(mount, backend)], extra_schemas, Vec::new())?;
         Ok(engine)
     }
 

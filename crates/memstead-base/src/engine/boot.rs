@@ -44,7 +44,7 @@ impl Engine {
     /// callers will reject empty inputs at the persistence-adapter
     /// layer.
     pub fn from_mounts(mounts: Vec<(Mount, Box<dyn MemBackend>)>) -> Result<Self, EngineError> {
-        Self::from_mounts_inner(mounts, Vec::new())
+        Self::from_mounts_inner(mounts, Vec::new(), Vec::new())
     }
 
     /// Construct an engine from mounts plus an optional workspace
@@ -61,8 +61,8 @@ impl Engine {
         mounts: Vec<(Mount, Box<dyn MemBackend>)>,
         schemas_dir: Option<&Path>,
     ) -> Result<Self, EngineError> {
-        let extra_schemas = load_workspace_schemas(schemas_dir)?;
-        Self::from_mounts_inner(mounts, extra_schemas)
+        let (extra_schemas, failed) = load_workspace_schemas_with_failures(schemas_dir);
+        Self::from_mounts_inner(mounts, extra_schemas, failed)
     }
 
     /// Like [`Self::from_mounts_with_schemas_dir`] but layers additional,
@@ -78,14 +78,15 @@ impl Engine {
         schemas_dir: Option<&Path>,
         mut extra: Vec<Arc<memstead_schema::Schema>>,
     ) -> Result<Self, EngineError> {
-        let mut local = load_workspace_schemas(schemas_dir)?;
+        let (mut local, failed) = load_workspace_schemas_with_failures(schemas_dir);
         local.append(&mut extra);
-        Self::from_mounts_inner(mounts, local)
+        Self::from_mounts_inner(mounts, local, failed)
     }
 
     pub(crate) fn from_mounts_inner(
         mounts: Vec<(Mount, Box<dyn MemBackend>)>,
         extra_schemas: Vec<Arc<memstead_schema::Schema>>,
+        failed_schema_packages: Vec<FailedSchemaPackage>,
     ) -> Result<Self, EngineError> {
         let mut seen: std::collections::HashSet<String> =
             std::collections::HashSet::with_capacity(mounts.len());
@@ -245,17 +246,41 @@ impl Engine {
                 Ok(schema) => schema,
                 Err(sources) => {
                     // Unresolvable pin: the plenum failure class —
-                    // quarantine this mem, serve the rest.
-                    let e = EngineError::SchemaNotFound {
-                        mem: m.mount.mem.clone(),
-                        pin: effective_pin.as_display(),
-                        sources,
-                        install_hint: None,
+                    // quarantine this mem, serve the rest. When the
+                    // pin names a workspace-authored package that
+                    // FAILED to load (e.g. one still on the retired
+                    // `propagating_relationships` key), that load
+                    // failure is the honest reason — not a generic
+                    // not-found.
+                    let failed = failed_schema_packages.iter().find(|f| {
+                        f.name.as_deref() == Some(effective_pin.name.as_str())
+                            && f.version
+                                .as_deref()
+                                .is_none_or(|v| v == effective_pin.version.to_string())
+                    });
+                    let (reason_code, reason_message) = match failed {
+                        Some(f) => (
+                            "SCHEMA_LOAD_FAILED".to_string(),
+                            format!(
+                                "schema package at {} failed to load: {}",
+                                f.path.display(),
+                                f.error
+                            ),
+                        ),
+                        None => {
+                            let e = EngineError::SchemaNotFound {
+                                mem: m.mount.mem.clone(),
+                                pin: effective_pin.as_display(),
+                                sources,
+                                install_hint: None,
+                            };
+                            (e.code().to_string(), e.to_string())
+                        }
                     };
                     quarantined.push(crate::engine::QuarantinedMem {
                         mount: m.mount.clone(),
-                        reason_code: e.code().to_string(),
-                        reason_message: e.to_string(),
+                        reason_code,
+                        reason_message,
                     });
                     quarantined_idx.insert(m_idx);
                     continue;
@@ -463,13 +488,11 @@ impl Engine {
         // workspace that authored no schemas resolves exactly as before —
         // built-ins only). This is the lean flavour's schema-authoring
         // path, which it lacked.
-        use crate::schema_source::SchemaSource as _;
-        let local = crate::schema_source::FolderSchemaSource::for_workspace(workspace_root)
-            .read_schemas()
-            .map_err(|e| EngineError::SchemaResolverInit(e.to_string()))?;
+        let fixed_dir = workspace_root.join(".memstead").join("schemas");
+        let (local, failed) = load_workspace_schemas_with_failures(Some(fixed_dir.as_path()));
         // Root is known here, so an unresolved pin can be enriched with
         // the never-installed-package hint before it surfaces.
-        let mut engine = Engine::from_mounts_inner(mounts, local)
+        let mut engine = Engine::from_mounts_inner(mounts, local, failed)
             .map_err(|e| e.with_schema_install_probe(Some(workspace_root)))?;
         engine.quarantined.extend(instantiate_quarantine);
         engine.set_settings(settings);
@@ -630,17 +653,44 @@ impl<'a> SchemaResolver<'a> {
 pub fn load_workspace_schemas(
     schemas_dir: Option<&Path>,
 ) -> Result<Vec<Arc<memstead_schema::Schema>>, EngineError> {
+    Ok(load_workspace_schemas_with_failures(schemas_dir).0)
+}
+
+/// One workspace-authored schema package that failed to load — the
+/// package is SKIPPED (never fails the boot; degrade, never
+/// disappear), and a mem pinning it quarantines with this failure as
+/// its typed reason. `name`/`version` are best-effort peeks at the
+/// package's `schema.yaml` header so the pin match works even though
+/// the full load refused.
+#[derive(Debug, Clone)]
+pub struct FailedSchemaPackage {
+    pub path: PathBuf,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    /// The loader's typed failure, rendered.
+    pub error: String,
+}
+
+/// Tolerant form of [`load_workspace_schemas`]: broken packages are
+/// skipped and recorded instead of failing the whole walk (the
+/// historical `?` made one refusing package — e.g. a schema still on
+/// the retired `propagating_relationships` key after a binary
+/// upgrade — take every mem in the workspace down).
+pub fn load_workspace_schemas_with_failures(
+    schemas_dir: Option<&Path>,
+) -> (Vec<Arc<memstead_schema::Schema>>, Vec<FailedSchemaPackage>) {
     let Some(dir) = schemas_dir else {
-        return Ok(Vec::new());
+        return (Vec::new(), Vec::new());
     };
     if !dir.is_dir() {
-        return Ok(Vec::new());
+        return (Vec::new(), Vec::new());
     }
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => return (Vec::new(), Vec::new()),
     };
     let mut schemas: Vec<Arc<memstead_schema::Schema>> = Vec::new();
+    let mut failures: Vec<FailedSchemaPackage> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
@@ -649,11 +699,30 @@ pub fn load_workspace_schemas(
         if !path.join("schema.yaml").is_file() {
             continue;
         }
-        let schema = memstead_schema::load_schema_from_dir(&path)
-            .map_err(|e| EngineError::SchemaResolverInit(e.to_string()))?;
-        schemas.push(Arc::new(schema));
+        match memstead_schema::load_schema_from_dir(&path) {
+            Ok(schema) => schemas.push(Arc::new(schema)),
+            Err(e) => {
+                // Best-effort header peek without a YAML dependency:
+                // top-level `name:` / `version:` are single-line
+                // scalars in every real package.
+                let header = std::fs::read_to_string(path.join("schema.yaml")).unwrap_or_default();
+                let peek = |k: &str| {
+                    header
+                        .lines()
+                        .find_map(|l| l.strip_prefix(&format!("{k}:")))
+                        .map(|v| v.trim().trim_matches('"').to_string())
+                        .filter(|v| !v.is_empty())
+                };
+                failures.push(FailedSchemaPackage {
+                    path: path.clone(),
+                    name: peek("name"),
+                    version: peek("version"),
+                    error: e.to_string(),
+                });
+            }
+        }
     }
-    Ok(schemas)
+    (schemas, failures)
 }
 
 pub(super) fn resolve_builtin_schema_pin(
@@ -2420,6 +2489,119 @@ pattern = "exec-*"
         );
     }
 
+    /// Agent-trust plan 06, criterion 3 complement: a workspace where
+    /// one mem pins an authored schema still on the retired
+    /// `propagating_relationships` key boots — that mem quarantines
+    /// with the rename error as its reason (never workspace-fatal),
+    /// while healthy mems load and serve.
+    #[test]
+    fn old_key_authored_schema_quarantines_pinning_mem_never_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // Workspace marker + two folder mems.
+        std::fs::create_dir_all(root.join(".memstead").join("state")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        for m in ["healthy", "oldkey"] {
+            std::fs::create_dir_all(root.join(m)).unwrap();
+        }
+        std::fs::write(
+            root.join(".memstead").join("state").join("mounts.json"),
+            r#"{ "format": "memstead-mounts-3", "mounts": [
+                { "mem": "healthy", "schema": "default@1.1.0", "storage": { "type": "folder", "path": "healthy" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true },
+                { "mem": "oldkey", "schema": "fieldschema@0.1.0", "storage": { "type": "folder", "path": "oldkey" }, "capability": "write", "lifecycle": "eager", "cross_linkable": true }
+            ] }"#,
+        )
+        .unwrap();
+        // The authored package, still on the retired key.
+        let pkg = root
+            .join(".memstead")
+            .join("schemas")
+            .join("fieldschema@0.1.0");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            "name: fieldschema\nversion: 0.1.0\ndescription: field schema\nwhen_to_use: tests\ntypes:\n  - thing\nrelationships:\n  mode: strict\n  definitions:\n    - name: PART_OF\n      description: h\n      default_weight: 1.0\n      acyclic: true\n    - name: _default\n      description: f\n      default_weight: 1.0\ncommunity:\n  resolution: 1.0\n  seed: 42\n",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("thing.yaml"),
+            "name: thing\ndescription: t\nwhen_to_use: h\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\npropagating_relationships: []\nupdatable_fields:\n  - title\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n",
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root)
+            .expect("the old-key schema quarantines its mem, never the workspace");
+        assert!(engine.mounts().iter().any(|m| m.mem == "healthy"));
+        let q = engine
+            .quarantine_reason("oldkey")
+            .expect("oldkey mem is quarantined");
+        assert_eq!(q.reason_code, "SCHEMA_LOAD_FAILED");
+        assert!(
+            q.reason_message.contains("no_self_loop_relationships"),
+            "quarantine reason is the rename error naming the new key: {}",
+            q.reason_message
+        );
+    }
+
+    /// Agent-trust plan 06, criterion 2: a mem pinned to the new
+    /// ingest@0.3.0 reports its edge-less entry entities as leaf
+    /// population, zero false orphans; the prior version (0.2.0) is
+    /// unchanged — the same entity still counts as an orphan there.
+    #[test]
+    fn ingest_0_3_entries_are_leaves_prior_version_unchanged() {
+        let entry_md = "---\ntype: coverage_gap\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nstatus: open\n---\n# Gap\n\n## Area\n\nan uncovered area.\n";
+        let boot = |pin: &str| {
+            let tmp = TempDir::new().unwrap();
+            let dir = tmp.path().to_path_buf();
+            std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+            std::fs::write(
+                dir.join(".memstead").join("config.json"),
+                format!("{{ \"schema\": \"{pin}\" }}"),
+            )
+            .unwrap();
+            std::fs::write(dir.join("gap.md"), entry_md).unwrap();
+            let writer = FilesystemMemWriter::new(dir.clone());
+            let mount = Mount {
+                mem: "proc".to_string(),
+                schema: None,
+                storage: MountStorage::Folder { path: dir },
+                capability: MountCapability::Write,
+                lifecycle: MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            };
+            let engine =
+                Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
+                    .unwrap();
+            (engine.health(), tmp)
+        };
+
+        let (health_new, _t1) = boot("ingest@0.3.0");
+        assert_eq!(
+            health_new.orphan_count, 0,
+            "0.3.0 entry types are leaves — zero false orphans"
+        );
+        assert_eq!(
+            health_new
+                .leaf_entities_by_type
+                .get("ingest@0.3.0:coverage_gap"),
+            Some(&1),
+            "the population stays visible: {:?}",
+            health_new.leaf_entities_by_type
+        );
+
+        let (health_old, _t2) = boot("ingest@0.2.0");
+        assert_eq!(
+            health_old.orphan_count, 1,
+            "the prior version's behaviour is unchanged"
+        );
+        assert!(health_old.leaf_entities_by_type.is_empty());
+    }
+
     /// A workspace mixing one broken mem with healthy siblings boots,
     /// serves the healthy mems fully, and refuses typed on the
     /// quarantined one — the plenum shape (one bad pin, thirteen
@@ -2735,7 +2917,7 @@ text_fields:
   - answers
   - notes
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - answers
@@ -2867,7 +3049,7 @@ text_fields:
   - answers
   - notes
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - answers

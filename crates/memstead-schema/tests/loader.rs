@@ -62,7 +62,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -314,8 +314,8 @@ fn catch_all_exactly_one_two_fails() {
 #[test]
 fn edge_weight_override_validates_against_declared_relationships() {
     let t = minimal_type().replace(
-        "propagating_relationships: []",
-        "propagating_relationships: []\nedge_weight_overrides:\n  NOT_DECLARED: 2.0",
+        "no_self_loop_relationships: []",
+        "no_self_loop_relationships: []\nedge_weight_overrides:\n  NOT_DECLARED: 2.0",
     );
     let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
     assert!(
@@ -371,8 +371,8 @@ fn edge_weights_resolved_at_load_without_overrides() {
 #[test]
 fn edge_weights_resolved_at_load_with_overrides() {
     let t = minimal_type().replace(
-        "propagating_relationships: []",
-        "propagating_relationships: []\nedge_weight_overrides:\n  PART_OF: 9.0",
+        "no_self_loop_relationships: []",
+        "no_self_loop_relationships: []\nedge_weight_overrides:\n  PART_OF: 9.0",
     );
     let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("load ok");
     let td = schema.get_type("sample").unwrap();
@@ -841,7 +841,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -1587,7 +1587,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -1787,7 +1787,7 @@ fn constraint_requires_when_value_outside_enum_rejected() {
 
 /// The `kind` tag is closed: a constraint form the engine does not
 /// evaluate fails deserialization — no declaration can load and be
-/// silently ignored (the `propagating_relationships` lesson).
+/// silently ignored (the `no_self_loop_relationships` lesson).
 #[test]
 fn constraint_unknown_kind_rejected() {
     let t = minimal_type()
@@ -2156,5 +2156,95 @@ fn section_format_lone_severity_and_cross_section_aggregation_refuse() {
     assert!(
         msg.contains("alsonope"),
         "second section's problem named too: {msg}"
+    );
+}
+
+/// Agent-trust plan 06: the retired `propagating_relationships` key
+/// refuses at AUTHORING load (directory context) with the typed rename
+/// error naming the new key; sealed content (in-memory: built-ins,
+/// installed refs) loads with the old key translated so shipped
+/// versions keep serving — install-time strict, sealed-tolerant.
+#[test]
+fn retired_propagating_relationships_key_refuses_authoring_and_translates_sealed() {
+    use memstead_schema::SchemaLoadError;
+
+    let manifest = r#"name: oldkey
+version: 0.1.0
+description: retired-key test schema
+when_to_use: tests
+types:
+  - thing
+relationships:
+  mode: strict
+  definitions:
+    - name: SUPERSEDES
+      description: s
+      default_weight: 1.0
+    - name: PART_OF
+      description: h
+      default_weight: 1.0
+      acyclic: true
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+    let type_yaml = "name: thing\ndescription: t\nwhen_to_use: h\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\npropagating_relationships: [SUPERSEDES]\nupdatable_fields:\n  - title\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+
+    // Sealed context (in-memory): loads, value TRANSLATED to the new
+    // field.
+    let sealed = memstead_schema::load_schema_from_memory(
+        manifest,
+        &[("thing".to_string(), type_yaml.to_string())],
+    )
+    .expect("sealed content keeps loading with the old key translated");
+    assert_eq!(
+        sealed
+            .types
+            .get("thing")
+            .unwrap()
+            .no_self_loop_relationships,
+        vec!["SUPERSEDES".to_string()],
+        "the old key's value survives translation"
+    );
+
+    // Authoring context (directory): refuses with the rename error
+    // naming the new key.
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("types")).unwrap();
+    std::fs::write(tmp.path().join("schema.yaml"), manifest).unwrap();
+    std::fs::write(tmp.path().join("types").join("thing.yaml"), type_yaml).unwrap();
+    let err = memstead_schema::load_schema_from_dir(tmp.path())
+        .expect_err("authoring load refuses the retired key");
+    match &err {
+        SchemaLoadError::PropagatingRelationshipsRenamed { type_name } => {
+            assert_eq!(type_name, "thing");
+        }
+        other => panic!("expected the rename refusal, got {other:?}"),
+    }
+    assert!(
+        err.to_string().contains("no_self_loop_relationships"),
+        "refusal names the new key: {err}"
+    );
+}
+
+/// Sealed built-ins that ship the old key serve payload values under
+/// the NEW name — the translation preserves the declared lists (the
+/// engineering@0.1.0 decision type is the live example).
+#[test]
+fn sealed_builtin_old_key_values_survive_translation() {
+    let reg = memstead_schema::SchemaRegistry::builtin();
+    let engineering = reg
+        .get("engineering", &semver::Version::new(0, 1, 0))
+        .expect("sealed engineering@0.1.0 keeps loading");
+    let decision = engineering.types.get("decision").expect("decision type");
+    assert!(
+        decision
+            .no_self_loop_relationships
+            .contains(&"SUPERSEDES".to_string()),
+        "sealed old-key values reach the renamed field: {:?}",
+        decision.no_self_loop_relationships
     );
 }

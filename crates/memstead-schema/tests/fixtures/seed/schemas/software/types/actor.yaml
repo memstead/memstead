@@ -66,7 +66,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   OWNS: 3.0
   MAINTAINS: 2.0
-propagating_relationships: [OWNS, MAINTAINS]
+no_self_loop_relationships: [OWNS, MAINTAINS]
 updatable_fields: [title, role, responsibilities, contact, notes, kind, active, handle, tags]
 health_required_fields: [role]
 staleness_threshold_days: 365

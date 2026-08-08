@@ -31,7 +31,24 @@ pub struct TypeDefinition {
     pub hierarchy_relationship: String,
     #[serde(default)]
     pub edge_weight_overrides: IndexMap<String, f32>,
-    pub propagating_relationships: Vec<String>,
+    /// Rel-types on which `memstead_relate` refuses a SELF-LOOP
+    /// (from == to) when this type is the source. That refusal is this
+    /// field's ONLY effect — it propagates nothing, implies no
+    /// evidence obligation (real impact propagation is the
+    /// `status_propagation` constraint). Renamed from the misleading
+    /// `propagating_relationships` (agent-trust plan 06): the old key
+    /// refuses at authoring/install load with a typed error naming
+    /// this one; sealed content (built-ins, installed refs) loads
+    /// with the old key translated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_self_loop_relationships: Vec<String>,
+    /// Legacy-key sentinel: captures a `propagating_relationships:`
+    /// value during deserialization so the loader can refuse (strict
+    /// authoring contexts) or translate (sealed contexts). Never
+    /// serialized; never part of the payload surface.
+    #[serde(default, rename = "propagating_relationships", skip_serializing)]
+    #[schemars(skip)]
+    pub legacy_propagating_relationships: Option<Vec<String>>,
     /// Terminal-by-construction marker: entities of this type are
     /// leaves — they carry no edges BY DESIGN, so health's orphan
     /// axis exempts their edge-less entities and reports them as a

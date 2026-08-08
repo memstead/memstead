@@ -513,7 +513,7 @@ text_fields: [summary, details]
 # Which declared relationship expresses hierarchy for this type.
 hierarchy_relationship: PART_OF
 # Edge types whose community signal propagates through this type.
-propagating_relationships: [PART_OF]
+no_self_loop_relationships: [PART_OF]
 # Fields `memstead update` may touch on this type.
 updatable_fields: [title, summary, details, status, tags]
 # Sections the health report treats as required.
@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn validate_accepts_builtin_default_schema() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../memstead-schema/builtins/schemas/default");
+            .join("../memstead-schema/builtins/schemas/default-1.1");
         assert!(
             path.join("schema.yaml").is_file(),
             "fixture moved: {path:?}"
@@ -948,11 +948,10 @@ mod tests {
     /// `name@version` is accepted; an unknown name refuses typed.
     #[test]
     fn resolve_builtin_ref_handles_name_pin_and_unknown() {
-        // `software` ships a single version, so the bare name
-        // resolves; `planning` ships two since the 0.2.0
-        // section-format bump, so its bare name is ambiguous by
-        // design and both pins resolve explicitly.
-        let bare = resolve_builtin_ref("software").expect("software resolves");
+        // Every built-in ships multiple versions since the plan-06
+        // vocabulary bump, so bare names are ambiguous by design and
+        // pins resolve explicitly.
+        let bare = resolve_builtin_ref("software@0.2.0").expect("software pin resolves");
         assert_eq!(bare.name, "software");
         let pinned = resolve_builtin_ref("planning@0.1.0").expect("explicit pin resolves");
         assert_eq!(pinned.name, "planning");

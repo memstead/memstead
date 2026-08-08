@@ -355,7 +355,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: _default
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -379,7 +379,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: _default
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body

@@ -103,7 +103,7 @@ edge_weight_overrides:
   falls_back_to: 2.0
   uses: 1.5
   governed_by: 2.5
-propagating_relationships: [uses, governed_by]
+no_self_loop_relationships: [uses, governed_by]
 updatable_fields: [title, intent, success_check, transitions, error_handling, notes_for_agent, notes, kind, terminal_outcome, idempotent, max_retries, tags]
 health_required_fields: [intent, success_check, transitions]
 staleness_threshold_days: 90

@@ -91,7 +91,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   DIVERGES_FROM: 4.0
   MANIFESTS_IN: 3.0
-propagating_relationships: [DIVERGES_FROM, MANIFESTS_IN]
+no_self_loop_relationships: [DIVERGES_FROM, MANIFESTS_IN]
 updatable_fields: [title, rationale, original_behavior, new_behavior, tradeoffs, notes, kind, status, decided_on, deciders, tags]
 health_required_fields: [rationale, original_behavior, kind]
 staleness_threshold_days: 365

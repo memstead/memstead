@@ -73,7 +73,7 @@ metadata_fields:
 title_weight: 100.0
 text_fields: [statement, rationale, success_criteria, in_scope, out_of_scope, notes]
 hierarchy_relationship: PART_OF
-propagating_relationships: [MOTIVATED_BY]
+no_self_loop_relationships: [MOTIVATED_BY]
 updatable_fields: [title, statement, rationale, success_criteria, in_scope, out_of_scope, notes, priority, status, tags]
 health_required_fields: [statement, rationale, success_criteria]
 staleness_threshold_days: 60

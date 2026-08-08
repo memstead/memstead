@@ -82,7 +82,7 @@ edge_weight_overrides:
   entry: 3.0
   governed_by: 2.5
   MOTIVATED_BY: 2.5
-propagating_relationships: [entry, governed_by, MOTIVATED_BY]
+no_self_loop_relationships: [entry, governed_by, MOTIVATED_BY]
 updatable_fields: [title, purpose, entry_signature, exit_criteria, failure_modes, notes, mode, loop_interval, replaces_skill, status, tags]
 health_required_fields: [purpose, entry_signature, exit_criteria]
 staleness_threshold_days: 90

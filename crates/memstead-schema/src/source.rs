@@ -369,7 +369,7 @@ metadata_fields: []
 title_weight: 1.0
 text_fields: [body]
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields: [title, body]
 health_required_fields: [body]
 staleness_threshold_days: 30

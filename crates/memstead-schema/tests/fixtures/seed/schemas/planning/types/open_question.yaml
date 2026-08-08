@@ -71,7 +71,7 @@ metadata_fields:
 title_weight: 100.0
 text_fields: [question, context, answer_approach, answer, notes]
 hierarchy_relationship: PART_OF
-propagating_relationships: [BLOCKS]
+no_self_loop_relationships: [BLOCKS]
 updatable_fields: [title, question, context, answer_approach, answer, notes, status, urgency, tags]
 health_required_fields: [question, context]
 staleness_threshold_days: 14

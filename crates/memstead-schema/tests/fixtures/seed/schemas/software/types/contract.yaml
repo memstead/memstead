@@ -104,7 +104,7 @@ edge_weight_overrides:
   DEPRECATES: 3.0
   REALIZES: 2.5
   IMPLEMENTS: 2.5
-propagating_relationships: [DEPENDS_ON, IMPLEMENTS, REALIZES, DEPRECATES]
+no_self_loop_relationships: [DEPENDS_ON, IMPLEMENTS, REALIZES, DEPRECATES]
 updatable_fields: [title, summary, request_shape, response_shape, errors, versioning, deprecation, notes, protocol, version, stable_since, deprecation_status, deprecated_on, removal_on, tags]
 health_required_fields: [summary]
 staleness_threshold_days: 180

@@ -78,7 +78,7 @@ metadata_fields:
 title_weight: 100.0
 text_fields: [identity, purpose, realization, specifies, constraints, rationale]
 hierarchy_relationship: PART_OF
-propagating_relationships: [DEPENDS_ON, USES, REALIZES]
+no_self_loop_relationships: [DEPENDS_ON, USES, REALIZES]
 updatable_fields: [title, identity, purpose, realization, specifies, constraints, rationale, level, stability, tags]
 health_required_fields: [identity, purpose]
 staleness_threshold_days: 90

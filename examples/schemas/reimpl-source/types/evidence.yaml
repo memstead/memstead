@@ -71,7 +71,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   SUPPORTS: 4.0
   CONTRADICTS: 3.0
-propagating_relationships: [SUPPORTS, CONTRADICTS]
+no_self_loop_relationships: [SUPPORTS, CONTRADICTS]
 updatable_fields: [title, content, context, notes, kind, source_ref, captured_on, confidence, tags]
 health_required_fields: [content, context, kind, source_ref]
 staleness_threshold_days: 365

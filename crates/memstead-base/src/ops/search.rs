@@ -3785,8 +3785,7 @@ mod tests {
         use memstead_schema::SchemaRegistry;
 
         let software = SchemaRegistry::builtin()
-            .resolve_by_name("software")
-            .unwrap()
+            .get("software", &semver::Version::new(0, 2, 0))
             .expect("software builtin present");
         let req_type = software.get_type("requirement").expect("requirement type");
 
@@ -3908,7 +3907,7 @@ search_weight: 1.0\n    write_rules: []\nmetadata_fields:\n  - key: labels\n    
 description: csv labels\n    field_type: string\n    serialization: csv_array\n    \
 filterable: equality\n  - key: priority\n    description: prio\n    field_type: string\n    \
 enum_values: [low, mid, high]\n    filterable: equality\ntitle_weight: 1.0\ntext_fields:\n  - body\n\
-hierarchy_relationship: PART_OF\npropagating_relationships: []\n\
+hierarchy_relationship: PART_OF\nno_self_loop_relationships: []\n\
 updatable_fields: [title, body, labels]\nhealth_required_fields: []\n\
 staleness_threshold_days: 90\nwrite_rules: []\n";
         std::sync::Arc::new(

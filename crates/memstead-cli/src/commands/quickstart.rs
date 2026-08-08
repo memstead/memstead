@@ -473,11 +473,14 @@ fn prompt_line(msg: &str) -> anyhow::Result<String> {
     Ok(line)
 }
 
-/// Resolve the default builtin schema to its concrete pin.
+/// Resolve the default builtin schema to its concrete pin — the
+/// current generation (1.1.0, the `no_self_loop_relationships`
+/// spelling), so fresh workspaces never start on a superseded
+/// vocabulary.
 fn default_schema_pin() -> anyhow::Result<memstead_schema::SchemaRef> {
     let reg = memstead_schema::SchemaRegistry::builtin();
-    match reg.resolve_by_name("default") {
-        Ok(Some(schema)) => {
+    match reg.get("default", &semver::Version::new(1, 1, 0)) {
+        Some(schema) => {
             let (name, version) = schema.id();
             Ok(memstead_schema::SchemaRef::new(name, version))
         }

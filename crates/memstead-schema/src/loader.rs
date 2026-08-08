@@ -62,6 +62,22 @@ pub enum SchemaLoadError {
         "type file '{file}.yaml' has `name: {declared}` — filename and `name` field must match"
     )]
     TypeNameMismatch { file: String, declared: String },
+    /// The retired `propagating_relationships:` key was used in an
+    /// authoring context (a schema package loaded from a directory —
+    /// workspace `.memstead/schemas/`, `schema install`, `schema
+    /// validate`). The key's name promised propagation the engine
+    /// never performed; its only effect — refusing self-loops on the
+    /// listed rel-types — now lives under `no_self_loop_relationships`.
+    /// Sealed content (built-ins, installed refs) keeps loading with
+    /// the old key translated; only authoring refuses, so the fix is
+    /// one mechanical key rename per schema.
+    #[error(
+        "type '{type_name}': `propagating_relationships` was renamed — its only effect is \
+         refusing self-loops on the listed rel-types, so the key is now \
+         `no_self_loop_relationships` (optional; empty lists can simply be deleted). \
+         Rename the key and retry."
+    )]
+    PropagatingRelationshipsRenamed { type_name: String },
 
     #[error("schema relationship vocabulary must include a '_default' definition")]
     MissingDefaultWeight,
@@ -657,6 +673,24 @@ fn load_with_context(
             });
         }
 
+        // Legacy-key gate: authoring contexts (loaded from a
+        // directory — `types_dir` is `Some`) refuse the retired
+        // `propagating_relationships` key with the rename error;
+        // sealed contexts (in-memory: built-ins, installed refs)
+        // translate it so shipped content keeps loading (install-time
+        // strict, sealed-tolerant — the section-heading round-trip
+        // doctrine).
+        if let Some(legacy) = td.legacy_propagating_relationships.take() {
+            if types_dir.is_some() {
+                return Err(SchemaLoadError::PropagatingRelationshipsRenamed {
+                    type_name: td.name.clone(),
+                });
+            }
+            if td.no_self_loop_relationships.is_empty() {
+                td.no_self_loop_relationships = legacy;
+            }
+        }
+
         // Record the raw author-declared metadata keys BEFORE the
         // base-metadata merge, so the install-path reserved-key check
         // ([`check_reserved_metadata_keys`]) can tell a declared
@@ -939,10 +973,10 @@ fn validate_type(
         rel_names,
         available_rels,
     )?;
-    for r in &td.propagating_relationships {
+    for r in &td.no_self_loop_relationships {
         check_rel(
             &td.name,
-            "propagating_relationships",
+            "no_self_loop_relationships",
             r,
             rel_names,
             available_rels,

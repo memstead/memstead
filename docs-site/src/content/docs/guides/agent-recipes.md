@@ -125,7 +125,7 @@ Idempotency · Retry
         },
         "… type, created_date, last_modified, abstraction_level, tags …"
       ],
-      "propagating_relationships": ["DEPENDS_ON", "GENERALIZES"]
+      "no_self_loop_relationships": ["DEPENDS_ON", "GENERALIZES"]
     },
     "… 9 more types …"
   ]

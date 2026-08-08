@@ -160,9 +160,9 @@ edge_weight_overrides:
   CONTAINS: 4.0        # recipes weight CONTAINS higher than the default
   DERIVED_FROM: 2.5    # variant relationships matter for browsing
 
-# propagating_relationships — health / staleness propagates along these
+# no_self_loop_relationships — health / staleness propagates along these
 # edges so a stale ingredient flags recipes that use it.
-propagating_relationships: [CONTAINS, DERIVED_FROM]
+no_self_loop_relationships: [CONTAINS, DERIVED_FROM]
 
 # updatable_fields — which fields the agent may modify via memstead_update.
 # "title" is always updatable; the rest must be section keys or metadata

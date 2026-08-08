@@ -5564,7 +5564,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             pkg.join("types").join("question.yaml"),
-            "name: question\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: answers\n    heading: Answers argued\n    required: true\n    search_weight: 10.0\n    write_rules: []\n  - key: notes\n    heading: Notes\n    required: false\n    search_weight: 3.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - answers\n  - notes\nhierarchy_relationship: PART_OF\npropagating_relationships: []\nupdatable_fields:\n  - title\n  - answers\nhealth_required_fields:\n  - answers\nstaleness_threshold_days: 90\nwrite_rules: []\n",
+            "name: question\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: answers\n    heading: Answers argued\n    required: true\n    search_weight: 10.0\n    write_rules: []\n  - key: notes\n    heading: Notes\n    required: false\n    search_weight: 3.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - answers\n  - notes\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - answers\nhealth_required_fields:\n  - answers\nstaleness_threshold_days: 90\nwrite_rules: []\n",
         )
         .unwrap();
         let mem_dir = tmp.path().join("mem");
@@ -7757,7 +7757,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: _default
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -11428,7 +11428,7 @@ write_rules: []
     /// propagating-from-source self-loop refuses with
     /// `RELATIONSHIP_CYCLE`, independent of the rel-type's `acyclic`
     /// flag. The default schema's spec type declares
-    /// `propagating_relationships: [DEPENDS_ON, USES]`, so a
+    /// `no_self_loop_relationships: [DEPENDS_ON, USES]`, so a
     /// `USES from spec--X to spec--X` self-loop fires the gate even
     /// though USES carries `acyclic: false`.
     #[test]
@@ -15062,7 +15062,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -15156,7 +15156,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -15246,7 +15246,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -15314,7 +15314,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -15391,7 +15391,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -15528,7 +15528,7 @@ title_weight: 100.0
 text_fields:
   - body
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields:
   - title
   - body
@@ -15570,11 +15570,11 @@ write_rules: []
         }
 
         /// Schema response
-        /// surfaces `acyclic` per rel-type and `propagating_relationships`
+        /// surfaces `acyclic` per rel-type and `no_self_loop_relationships`
         /// per type. Agents predict cycle-check + self-loop refusal from
         /// introspection without trial-and-error.
         #[test]
-        fn schema_payload_carries_acyclic_and_propagating_relationships() {
+        fn schema_payload_carries_acyclic_and_no_self_loop_relationships() {
             let (server, tmp) = setup();
             let payload = create_and_get_payload(&server, &tmp, "introspection-cycle");
             // The default schema declares DEPENDS_ON as acyclic.
@@ -15591,7 +15591,7 @@ write_rules: []
                 "DEPENDS_ON must carry acyclic=true: {depends_on}"
             );
             // The default schema's spec type lists [DEPENDS_ON, USES]
-            // in propagating_relationships.
+            // in no_self_loop_relationships.
             let types = payload["schema"]["types"]
                 .as_array()
                 .expect("types array present");
@@ -15599,13 +15599,13 @@ write_rules: []
                 .iter()
                 .find(|t| t["name"] == "spec")
                 .expect("spec type present in default schema");
-            let propagating = spec["propagating_relationships"]
+            let propagating = spec["no_self_loop_relationships"]
                 .as_array()
-                .expect("propagating_relationships array present");
+                .expect("no_self_loop_relationships array present");
             let names: Vec<&str> = propagating.iter().filter_map(|v| v.as_str()).collect();
             assert!(
                 names.contains(&"DEPENDS_ON") && names.contains(&"USES"),
-                "spec's propagating_relationships must list DEPENDS_ON and USES: {names:?}"
+                "spec's no_self_loop_relationships must list DEPENDS_ON and USES: {names:?}"
             );
         }
 

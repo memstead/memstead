@@ -77,7 +77,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   REALIZES_CAPABILITY: 4.0
   EVOLVES_INTO: 2.5
-propagating_relationships: [PART_OF, REALIZES_CAPABILITY, DEPENDS_ON]
+no_self_loop_relationships: [PART_OF, REALIZES_CAPABILITY, DEPENDS_ON]
 updatable_fields: [title, purpose, design, realization, open_points, status, tech, owner, tags]
 health_required_fields: [purpose, design]
 staleness_threshold_days: 90

@@ -2121,7 +2121,7 @@ mod plan05_subsystem_tests {
             "wrong-version case must be named in the message: {msg}"
         );
         assert!(
-            msg.contains("memstead mem set-schema specs default@1.0.0"),
+            msg.contains("memstead mem set-schema specs default@1.1.0"),
             "wrong-version case ends in the concrete repin command: {msg}"
         );
 
@@ -2252,7 +2252,7 @@ mod plan05_subsystem_tests {
             "version mismatch must not hint install: {mismatch_msg}"
         );
         assert!(
-            mismatch_msg.contains("memstead mem set-schema specs default@1.0.0"),
+            mismatch_msg.contains("memstead mem set-schema specs default@1.1.0"),
             "version mismatch hints version repair instead: {mismatch_msg}"
         );
 

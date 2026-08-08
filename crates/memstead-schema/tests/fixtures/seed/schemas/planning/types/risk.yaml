@@ -84,7 +84,7 @@ hierarchy_relationship: PART_OF
 edge_weight_overrides:
   THREATENS: 2.5
   MITIGATES: 2.5
-propagating_relationships: [THREATENS]
+no_self_loop_relationships: [THREATENS]
 updatable_fields: [title, description, impact_if, probability, mitigations, triggers, notes, severity, likelihood, mitigation_status, tags]
 health_required_fields: [description, impact_if]
 staleness_threshold_days: 60

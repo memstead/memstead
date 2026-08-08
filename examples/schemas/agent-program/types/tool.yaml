@@ -93,7 +93,7 @@ metadata_fields:
 title_weight: 100.0
 text_fields: [description, inputs, outputs, preconditions, error_codes, notes]
 hierarchy_relationship: PART_OF
-propagating_relationships: []
+no_self_loop_relationships: []
 updatable_fields: [title, description, inputs, outputs, preconditions, error_codes, notes, kind, tool_name, idempotent, destructive, cost, tags]
 health_required_fields: [description, inputs]
 staleness_threshold_days: 180

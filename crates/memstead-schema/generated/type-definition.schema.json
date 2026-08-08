@@ -57,7 +57,8 @@
     "name": {
       "type": "string"
     },
-    "propagating_relationships": {
+    "no_self_loop_relationships": {
+      "description": "Rel-types on which `memstead_relate` refuses a SELF-LOOP\n(from == to) when this type is the source. That refusal is this\nfield's ONLY effect — it propagates nothing, implies no\nevidence obligation (real impact propagation is the\n`status_propagation` constraint). Renamed from the misleading\n`propagating_relationships` (agent-trust plan 06): the old key\nrefuses at authoring/install load with a typed error naming\nthis one; sealed content (built-ins, installed refs) loads\nwith the old key translated.",
       "type": "array",
       "items": {
         "type": "string"
@@ -124,7 +125,6 @@
     "title_weight",
     "text_fields",
     "hierarchy_relationship",
-    "propagating_relationships",
     "updatable_fields",
     "health_required_fields",
     "staleness_threshold_days",

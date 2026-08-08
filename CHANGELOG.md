@@ -7,6 +7,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **`propagating_relationships` renamed to
+  `no_self_loop_relationships` — the name stops lying.** The field's
+  only functional effect was always the self-loop refusal on
+  `memstead_relate`; its name promised propagation the engine never
+  performed, and two external schemas were designed around the
+  misreading. The new key says exactly what it does and is now
+  optional (empty lists can simply be deleted). The old key refuses
+  at authoring/install load with a typed error naming the new key —
+  one mechanical rename per schema — while SEALED content (compiled
+  built-ins, installed refs) keeps loading with the old key
+  translated, so shipped versions never break (install-time strict,
+  sealed-tolerant). On a workspace where one mem pins an old-key
+  authored schema, that mem quarantines with the rename error as its
+  reason (`SCHEMA_LOAD_FAILED`) while every healthy mem serves —
+  broken authored schema packages in general no longer take the
+  workspace down (the schema-dir walk skips-and-records instead of
+  failing boot). Every built-in that carried the old key ships a new
+  version with the new spelling (default@1.1.0, engineering@0.2.0,
+  ingest@0.3.0, planning@0.3.0, project@0.2.0, software@0.2.0 —
+  ingest@0.3.0 additionally declares its three entry types `leaf`);
+  the old versions stay sealed and loadable per the retention
+  manifest. `memstead quickstart` now pins the current default
+  generation.
+
 ### Added
 - **Leaf declaration: a type can say its entities are terminal by
   construction.** A schema type may declare `leaf: true`; health's
