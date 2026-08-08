@@ -42,6 +42,70 @@ pub fn builtin_mem_template(name: &str) -> Option<serde_json::Value> {
     serde_json::from_slice(file.contents()).ok()
 }
 
+/// One embedded built-in schema package: its identity plus every file
+/// it ships, addressed relative to the package directory and sorted by
+/// path. The raw-bytes view of the catalogue — [`load_builtin_schemas`]
+/// is the parsed view. Consumed by the retention guard
+/// (`tests/builtin_retention.rs`), which seals each shipped package's
+/// content hash in `builtins/MANIFEST.toml`: a shipped `(name,
+/// version)` must exist in every future binary with byte-identical
+/// content, so a rebuild can never strand a workspace pinning it.
+pub struct BuiltinPackage {
+    pub name: String,
+    pub version: String,
+    /// `(path-relative-to-package-dir, bytes)`, sorted by path.
+    pub files: Vec<(String, &'static [u8])>,
+}
+
+/// Enumerate every embedded built-in package with its raw file bytes.
+/// Identity comes from each package's `schema.yaml` (`name:` /
+/// `version:` keys); the directory name is organisational only.
+pub fn builtin_packages() -> Vec<BuiltinPackage> {
+    fn collect_files(dir: &Dir<'static>, root: &str, out: &mut Vec<(String, &'static [u8])>) {
+        for file in dir.files() {
+            let rel = file
+                .path()
+                .strip_prefix(root)
+                .unwrap_or(file.path())
+                .display()
+                .to_string();
+            out.push((rel, file.contents()));
+        }
+        for sub in dir.dirs() {
+            collect_files(sub, root, out);
+        }
+    }
+
+    let mut out = Vec::new();
+    for dir in BUILTIN_SCHEMAS.dirs() {
+        let root = dir.path().display().to_string();
+        let manifest = dir
+            .get_file(format!("{root}/schema.yaml").as_str())
+            .and_then(|f| f.contents_utf8());
+        let Some(manifest) = manifest else { continue };
+        let header: Option<(String, String)> =
+            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(manifest)
+                .ok()
+                .and_then(|v| {
+                    let name = v.get("name")?.as_str()?.to_string();
+                    let version = v.get("version")?.as_str()?.to_string();
+                    Some((name, version))
+                });
+        let Some((name, version)) = header else {
+            continue;
+        };
+        let mut files = Vec::new();
+        collect_files(dir, &root, &mut files);
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        out.push(BuiltinPackage {
+            name,
+            version,
+            files,
+        });
+    }
+    out
+}
+
 /// Load every embedded schema into owned `Schema` values.
 pub fn load_builtin_schemas() -> Result<Vec<Arc<Schema>>, SchemaLoadError> {
     let mut out = Vec::new();

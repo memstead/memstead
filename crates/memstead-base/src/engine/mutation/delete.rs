@@ -223,6 +223,7 @@ impl Engine {
 
         if !commit_sha.is_empty() {
             self.record_self_write(mount_idx, &commit_sha);
+            self.stamp_mutation_versions(mount_idx);
         }
 
         let mut warnings: Vec<WarningHint> = Vec::new();

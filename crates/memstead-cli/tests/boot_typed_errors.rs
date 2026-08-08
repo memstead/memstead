@@ -44,7 +44,10 @@ fn filesystem_workspace_with_pin(tmp: &TempDir, broken_pin: &str) -> std::path::
         .success();
     let config = ws.join(".memstead").join("config.json");
     let body = std::fs::read_to_string(&config).unwrap();
-    assert!(body.contains("default@1.0.0"), "fixture: pin must be present");
+    assert!(
+        body.contains("default@1.0.0"),
+        "fixture: pin must be present"
+    );
     std::fs::write(&config, body.replace("default@1.0.0", broken_pin)).unwrap();
     ws
 }
@@ -193,7 +196,10 @@ fn missing_pin_refuses_typed() {
 
     let env = status_error_envelope(&ws);
     let code = env["code"].as_str().unwrap_or_default();
-    assert_ne!(code, "INTERNAL", "missing pin must not leak INTERNAL: {env}");
+    assert_ne!(
+        code, "INTERNAL",
+        "missing pin must not leak INTERNAL: {env}"
+    );
     assert!(!code.is_empty(), "missing pin must carry a code: {env}");
 }
 
@@ -228,6 +234,31 @@ fn healthy_workspace_boots_successfully() {
     let ws = tmp.path().join("ws");
     memstead()
         .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args(["--json", "status"])
+        .assert()
+        .success();
+}
+
+/// Retention complement (agent-trust plan 02): a workspace pinning the
+/// restored `ingest@0.1.0` — the version the 2026-08-06 in-place bump
+/// deleted from every binary built after it — boots green again.
+#[test]
+fn workspace_pinning_restored_ingest_0_1_0_boots_green() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args([
+            "init",
+            "--name",
+            "plenum",
+            "--schema",
+            "ingest@0.1.0",
+            ws.to_str().unwrap(),
+        ])
         .assert()
         .success();
     memstead()

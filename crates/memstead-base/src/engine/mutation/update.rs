@@ -178,6 +178,7 @@ impl Engine {
             note.map(String::from),
         ))?;
         self.record_self_write(prepared.mount_idx, &commit_sha);
+        self.stamp_mutation_versions(prepared.mount_idx);
 
         let applied = self.apply_prepared_to_store(&prepared)?;
 
@@ -882,8 +883,12 @@ impl Engine {
         // Declared-constraints evaluation — same single evaluation the
         // health `constraints` include runs, against this update's
         // final state. Block-tier violations refuse; warn-tier warn.
-        let violated =
-            crate::ops::health::unsatisfied_constraints(&self.store, &next, type_def.as_ref(), Some(id));
+        let violated = crate::ops::health::unsatisfied_constraints(
+            &self.store,
+            &next,
+            type_def.as_ref(),
+            Some(id),
+        );
         if !violated.is_empty() {
             let blocked: Vec<_> = violated
                 .iter()
@@ -1280,6 +1285,7 @@ impl Engine {
                     note.clone(),
                 ))?;
             self.record_self_write(p.mount_idx, &commit_sha);
+            self.stamp_mutation_versions(p.mount_idx);
             self.apply_prepared_to_store(p)?;
         }
 
@@ -1307,7 +1313,7 @@ impl Engine {
             .collect();
 
         Ok(crate::ops::BatchResult {
-                orphan_stubs_removed: Vec::new(),
+            orphan_stubs_removed: Vec::new(),
             errors_suppressed: 0,
             applied: true,
             results,

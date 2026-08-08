@@ -34,6 +34,9 @@ strsim = "0.11"
 
 [dev-dependencies]
 tempfile.workspace = true
+# Retention guard only (tests/builtin_retention.rs): seals shipped
+# built-in packages against the MANIFEST.toml content hashes.
+sha2.workspace = true
 
 [lints]
 workspace = true

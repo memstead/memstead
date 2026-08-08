@@ -33,12 +33,12 @@ pub mod pipeline_edit;
 pub mod pipeline_migrate;
 pub mod pipeline_store;
 pub mod provenance;
-pub mod section_format;
 pub mod render;
 pub mod runtime_validator;
 pub mod schema_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search_index;
+pub mod section_format;
 pub mod storage;
 pub mod store;
 pub mod validator;
@@ -77,6 +77,12 @@ pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
 pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};
+
+/// The engine crate version of the running binary — the value the
+/// per-mem mutation stamp (`MemConfig.mutation_stamp`) records and the
+/// boot-time `ENGINE_VERSION_SKEW` comparison runs against. One
+/// constant so stamp writes and skew checks can never disagree.
+pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use mem_management::{CreateRuleSet, DeleteRuleSet, MatcherSet, MatcherSetError};
 pub use ops::{
     BackendChanges, BatchEntry, BatchError, BatchResult, ChangeEnvelope, ChangesReport,

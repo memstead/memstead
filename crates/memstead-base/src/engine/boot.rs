@@ -193,6 +193,25 @@ impl Engine {
                     mount_pin: mp.as_display(),
                 });
             }
+            // Boot-honesty skew check: a mem whose engine-owned
+            // mutation stamp names a different engine version than
+            // this binary gets a warn-tier hint — informative, never
+            // fatal, and a stamp-less (pre-stamp) mem is silent by
+            // construction. Read-only: the stamp is only ever
+            // rewritten by the next mutation.
+            if let Some(stamp) = m
+                .mem_config
+                .as_ref()
+                .and_then(|c| c.mutation_stamp.as_ref())
+                && stamp.engine_version != crate::ENGINE_VERSION
+            {
+                load_warnings.push(WarningHint::EngineVersionSkew {
+                    mem: m.mount.mem.clone(),
+                    stamped_engine: stamp.engine_version.clone(),
+                    running_engine: crate::ENGINE_VERSION.to_string(),
+                    stamped_schema: stamp.schema.clone(),
+                });
+            }
             // Authoritative pin first (the backend config), then the
             // mount assertion as fallback when the config carries none.
             let settled_pin = config_pin.or(mount_pin);

@@ -801,6 +801,7 @@ impl Engine {
         // we just produced so the next read doesn't surface
         // `MEM_RELOADED` for our own commit.
         self.record_self_write(mount_idx, &commit_sha);
+        self.stamp_mutation_versions(mount_idx);
 
         // 10. Update the in-memory store via re-parse so the store
         //     mirrors the on-disk shape (content_hash, heading_spans).
@@ -1159,6 +1160,7 @@ impl Engine {
                     note.clone(),
                 ))?;
             self.record_self_write(p.mount_idx, &commit_sha);
+            self.stamp_mutation_versions(p.mount_idx);
             let parse_result =
                 parse_markdown(&p.markdown, &p.file_path, p.type_def.as_ref(), &p.mem)
                     .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
@@ -1197,7 +1199,7 @@ impl Engine {
             })
             .collect();
         Ok(crate::ops::BatchResult {
-                orphan_stubs_removed: Vec::new(),
+            orphan_stubs_removed: Vec::new(),
             errors_suppressed: 0,
             applied: true,
             results,
@@ -1513,11 +1515,8 @@ write_rules: []
         assert_eq!(when_value, "checked");
 
         // Health parity — same single evaluation.
-        let reports = crate::ops::health::collect_constraint_findings(
-            engine.store(),
-            None,
-            engine.schemas(),
-        );
+        let reports =
+            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].id, outcome.id);
         assert_eq!(reports[0].violations.len(), 1);
@@ -1538,10 +1537,10 @@ write_rules: []
             .create_entity(satisfied_args, actor, Some(&client), None)
             .unwrap();
         assert!(
-            !satisfied.warnings.iter().any(|w| matches!(
-                w,
-                WarningHint::ConstraintUnsatisfied { .. }
-            )),
+            !satisfied
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::ConstraintUnsatisfied { .. })),
             "satisfied constraint emits no warning: {:?}",
             satisfied.warnings
         );
@@ -1557,10 +1556,10 @@ write_rules: []
             )
             .unwrap();
         assert!(
-            !untriggered.warnings.iter().any(|w| matches!(
-                w,
-                WarningHint::ConstraintUnsatisfied { .. }
-            )),
+            !untriggered
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::ConstraintUnsatisfied { .. })),
             "untriggered constraint emits no warning"
         );
     }
@@ -2020,8 +2019,14 @@ write_rules: []
 
         // A fallen root, a child standing on it, a grandchild standing
         // on the child (transitive), plus an untainted sibling chain.
-        let root = proof_create(&mut engine, "anchor", "Root", &[("status", "fallen")], vec![])
-            .unwrap();
+        let root = proof_create(
+            &mut engine,
+            "anchor",
+            "Root",
+            &[("status", "fallen")],
+            vec![],
+        )
+        .unwrap();
         let child = proof_create(
             &mut engine,
             "anchor",
@@ -2075,11 +2080,8 @@ write_rules: []
 
         // Question 1 — descendants of the fallen anchor are flagged,
         // naming their ancestor; the standing chain is not.
-        let findings = crate::ops::health::collect_constraint_findings(
-            engine.store(),
-            None,
-            engine.schemas(),
-        );
+        let findings =
+            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
         let tainted_of = |id: &crate::entity::EntityId| -> Vec<String> {
             findings
                 .iter()
@@ -2101,7 +2103,10 @@ write_rules: []
             "the taint is transitive and names the terminal ancestor"
         );
         assert!(tainted_of(&standing_child.id).is_empty());
-        assert!(tainted_of(&root.id).is_empty(), "the source is not its own finding");
+        assert!(
+            tainted_of(&root.id).is_empty(),
+            "the source is not its own finding"
+        );
 
         // Question 3 — checked-without-checker is flagged.
         assert!(
@@ -2317,11 +2322,8 @@ write_rules: []
                 .any(|w| matches!(w, WarningHint::ConstraintUnsatisfied { .. })),
             "warn tier surfaces the duplicate as a warning and commits"
         );
-        let findings = crate::ops::health::collect_constraint_findings(
-            engine.store(),
-            None,
-            engine.schemas(),
-        );
+        let findings =
+            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
         assert_eq!(
             findings.len(),
             2,
@@ -2375,11 +2377,8 @@ write_rules: []
             vec![rel(&vocab.id.0, "REFERENCES")],
         )
         .unwrap();
-        let findings = crate::ops::health::collect_constraint_findings(
-            engine.store(),
-            None,
-            engine.schemas(),
-        );
+        let findings =
+            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
         assert!(
             findings.iter().all(|r| r.id != holder.id),
             "backed value produces no finding: {findings:?}"
@@ -2411,11 +2410,8 @@ write_rules: []
                 None,
             )
             .unwrap();
-        let findings = crate::ops::health::collect_constraint_findings(
-            engine.store(),
-            None,
-            engine.schemas(),
-        );
+        let findings =
+            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
         let stale = findings
             .iter()
             .find(|r| r.id == holder.id)
@@ -5438,7 +5434,11 @@ write_rules: []
         )
     }
 
-    fn plan_create_args(title: &str, meilensteine: Option<&str>, notizen: Option<&str>) -> CreateEntityArgs {
+    fn plan_create_args(
+        title: &str,
+        meilensteine: Option<&str>,
+        notizen: Option<&str>,
+    ) -> CreateEntityArgs {
         let mut sections = IndexMap::new();
         sections.insert("body".to_string(), "a plan body.".to_string());
         if let Some(m) = meilensteine {
@@ -5635,12 +5635,13 @@ write_rules: []
             Some("### Phase 1\n- **Kickoff** — 2026-09-01\n"),
             None,
         );
-        args.sections
-            .insert("body".to_string(), "intro\n# Injected Title\ntail".to_string());
+        args.sections.insert(
+            "body".to_string(),
+            "intro\n# Injected Title\ntail".to_string(),
+        );
         let err = engine
             .create_entity(args, actor, Some(&client), None)
             .unwrap_err();
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
     }
-
 }

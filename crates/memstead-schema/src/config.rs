@@ -329,6 +329,24 @@ pub struct MemSubject {
     pub exclusions: Vec<String>,
 }
 
+/// Engine-owned version stamp of the last successful mutation on a
+/// mem — see [`MemConfig::mutation_stamp`]. Both values are recorded
+/// at mutation time: `engine_version` is the engine crate version the
+/// acting binary was built from, `schema` the resolved
+/// `<name>@<version>` the mutation validated against (the resolved
+/// schema, not merely the pin — mid-migration mems stamp the target
+/// they validated against).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MutationStamp {
+    /// Engine crate version (`memstead-base`'s `CARGO_PKG_VERSION`)
+    /// of the binary that performed the last mutation.
+    pub engine_version: String,
+    /// Resolved schema `<name>@<version>` the last mutation validated
+    /// against.
+    pub schema: String,
+}
+
 /// Full mem configuration loaded from .memstead/config.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -494,6 +512,27 @@ pub struct MemConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub review_mark: Option<String>,
+
+    /// Engine-owned version stamp of the last successful mutation:
+    /// which engine version and which resolved schema performed it.
+    /// Written by the engine after a mutation and only when the values
+    /// changed (a binary upgrade or a schema repin), never by authors,
+    /// never on read-only loads — a boot writes nothing. Boot compares
+    /// the running binary against the stamp and surfaces a divergence
+    /// as the warn-tier `ENGINE_VERSION_SKEW` hint; absence of a stamp
+    /// is a first-class state (pre-stamp mems), never skew. The stamp
+    /// is the substrate any future migration machinery would consult —
+    /// deliberately built without that machinery.
+    ///
+    /// Stripped from `PublishedMemConfig` (allowlist projection) —
+    /// workspace-local engine bookkeeping, not published identity.
+    /// Wire key `mutationStamp` (camelCase per the config convention).
+    #[serde(
+        default,
+        rename = "mutationStamp",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mutation_stamp: Option<MutationStamp>,
 
     /// Extra fields not in the known set (captured for round-tripping).
     ///
@@ -1000,6 +1039,7 @@ mod tests {
             unregistered_at: None,
             sync_state: Default::default(),
             review_mark: None,
+            mutation_stamp: None,
             extra: Default::default(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
@@ -1394,6 +1434,7 @@ mod tests {
             unregistered_at: None,
             sync_state,
             review_mark: None,
+            mutation_stamp: None,
             extra,
         };
         let published = published_config_from(&cfg, "").expect("publish projection");
@@ -1751,6 +1792,7 @@ mod tests {
             unregistered_at: None,
             sync_state: BTreeMap::new(),
             review_mark: None,
+            mutation_stamp: None,
             extra: HashMap::new(),
         };
         cfg.vcs = Some(VcsConfig {

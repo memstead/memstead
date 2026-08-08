@@ -1,0 +1,46 @@
+# Append-only ledger of every built-in schema version ever shipped.
+# Sealed by tests/builtin_retention.rs: each entry must exist in the
+# compiled catalogue with a byte-identical content hash, and every
+# catalogue entry must be listed here. Shipping a new version appends
+# one [[shipped]] block (the failing test prints it); nothing here is
+# ever edited or removed.
+
+[[shipped]]
+name = "default"
+version = "1.0.0"
+sha256 = "7ab0c74dc4c270fb8b1237a57dff8e0a7e9f1b254b7d267b310b76dba9029eaf"
+
+[[shipped]]
+name = "engineering"
+version = "0.1.0"
+sha256 = "d632e0239ae410ae1041aeff70457936f30281a64661cc40e3ac8abe854a5e99"
+
+[[shipped]]
+name = "ingest"
+version = "0.1.0"
+sha256 = "e2eade6d307a90423454c69f11c96bed6079a7b5e1fa440945c31f5a96e0b7d1"
+
+[[shipped]]
+name = "ingest"
+version = "0.2.0"
+sha256 = "c81227986af9a0bd7fac4dd50788c89a0f05a7a13c1fbb5cf4f39bf0c2b0c17c"
+
+[[shipped]]
+name = "planning"
+version = "0.1.0"
+sha256 = "6df000689555ef4906e54014bf6577870662f395520caedf32a4e294fc166274"
+
+[[shipped]]
+name = "planning"
+version = "0.2.0"
+sha256 = "268d831812f5d0de959c1b23099c2eae3c878a91bd34def6e3c55aa1736ccbb7"
+
+[[shipped]]
+name = "project"
+version = "0.1.0"
+sha256 = "fb9a00b3850c1ba7bf6c29ecce9317e5cd286794e58bd2e9c014c31598654c74"
+
+[[shipped]]
+name = "software"
+version = "0.1.0"
+sha256 = "8c7f45686d9c29a965c9593c4086b355383563edb764eca4a3336cda5dbb1c69"

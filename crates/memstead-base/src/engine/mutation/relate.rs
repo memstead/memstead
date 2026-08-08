@@ -127,6 +127,7 @@ impl Engine {
         ))?;
 
         self.record_self_write(prepared.mount_idx, &commit_sha);
+        self.stamp_mutation_versions(prepared.mount_idx);
 
         let content_hash = self.apply_prepared_relate_to_store(&prepared)?;
 
@@ -954,6 +955,7 @@ impl Engine {
                     note.clone(),
                 ))?;
             self.record_self_write(p.mount_idx, &commit_sha);
+            self.stamp_mutation_versions(p.mount_idx);
         }
 
         // Orphan-stub GC over every removed edge's target — same
@@ -988,7 +990,7 @@ impl Engine {
             .collect();
 
         Ok(crate::ops::BatchResult {
-                orphan_stubs_removed,
+            orphan_stubs_removed,
             errors_suppressed: 0,
             applied: true,
             results,

@@ -1482,6 +1482,7 @@ pub fn create_mem(
     // pre-fix `INTERNAL` collapse on the first archive attempt.
     let mem_config = memstead_schema::config::MemConfig {
         review_mark: None,
+        mutation_stamp: None,
         name: None,
         title: None,
         subject: None,

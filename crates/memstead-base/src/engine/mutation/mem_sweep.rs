@@ -70,11 +70,9 @@ impl Engine {
         // The renamed mem itself sweeps first (self-references +
         // anchors move with the mem), then peers in name order.
         let mut mem_order: Vec<usize> = Vec::new();
-        if let Some(own_idx) = self
-            .mounts
-            .iter()
-            .position(|m| m.mount.mem == old_mem && m.mount.capability == crate::workspace::MountCapability::Write)
-        {
+        if let Some(own_idx) = self.mounts.iter().position(|m| {
+            m.mount.mem == old_mem && m.mount.capability == crate::workspace::MountCapability::Write
+        }) {
             mem_order.push(own_idx);
         }
         let mut peer_idxs: Vec<usize> = self
@@ -180,6 +178,7 @@ impl Engine {
                 Err(e) => return Err(e.into()),
             };
             self.record_self_write(mount_idx, &commit_sha);
+            self.stamp_mutation_versions(mount_idx);
             rewritten_mems.push(mem_name);
         }
 

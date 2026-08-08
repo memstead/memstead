@@ -473,6 +473,7 @@ impl Engine {
         )?;
 
         self.record_self_write(mount_idx, &commit_sha);
+        self.stamp_mutation_versions(mount_idx);
 
         // ----- Apply: cross-mem peer mems (parent-pinned) -----
         // Snapshot every peer mem's current head before any peer
@@ -546,6 +547,7 @@ impl Engine {
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
             self.record_self_write(plan.mount_idx, &peer_commit_sha);
+            self.stamp_mutation_versions(plan.mount_idx);
             committed_mems.push(plan.mem.clone());
         }
 

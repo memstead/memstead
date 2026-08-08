@@ -8,6 +8,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Built-in retention and version stamps: shipped versions never
+  vanish.** The `ingest@0.1.0` built-in — deleted from the catalogue
+  by the 2026-08-06 in-place version bump, stranding a workspace
+  pinned to it — is restored as a side-by-side directory, and the
+  whole failure class is now impossible to reintroduce:
+  `builtins/MANIFEST.toml` is the append-only ledger of every
+  ever-shipped built-in `(name, version)` with a sealed content hash,
+  and a retention test fails CI on removal, in-place edit, or an
+  unlisted new version (appending the printed `[[shipped]]` block is
+  the whole ceremony). Separately, every mutation now stamps the mem's
+  engine-owned config (`mutationStamp`: engine version + resolved
+  schema ref, written only when the value changes, riding the
+  `__MEMSTEAD` ref so mem-branch cursors never move); boot compares
+  the stamp against the running binary and surfaces a divergence as
+  the warn-tier `ENGINE_VERSION_SKEW` hint on boot output and
+  `memstead health` — informative, never fatal, and silent for
+  stamp-less mems and read-only sessions.
 - **Typed boot errors: every boot failure names its code and its
   fix.** Boot failures no longer collapse to `ERROR [INTERNAL]` with
   no next step. `BootError` now carries `code()` / `details()` /

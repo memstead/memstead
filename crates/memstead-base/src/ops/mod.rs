@@ -693,6 +693,22 @@ pub enum WarningHint {
         mems: Vec<String>,
         from_host_mems: Vec<String>,
     },
+    /// Boot-honesty skew: the mem's engine-owned mutation stamp
+    /// (`MemConfig.mutation_stamp`, written after mutations) records a
+    /// different engine version than the running binary. Informative,
+    /// never fatal — the next mutation under this binary re-stamps.
+    /// Absence of a stamp (a pre-stamp mem) never fires this; only a
+    /// present, disagreeing stamp does. Surfaces on boot output and
+    /// `memstead health` without an include gate.
+    EngineVersionSkew {
+        mem: String,
+        /// Engine version the last mutation was performed under.
+        stamped_engine: String,
+        /// Engine version of the running binary.
+        running_engine: String,
+        /// Resolved schema the last mutation validated against.
+        stamped_schema: String,
+    },
     /// The mem was created on storage with no version control (a
     /// folder mount). Provenance means something WEAKER there than the
     /// headline "every mutation a reasoned commit": mutations ARE
@@ -1485,6 +1501,20 @@ impl fmt::Display for WarningHint {
                 mems.join(", "),
                 from_host_mems.join(", "),
             ),
+            WarningHint::EngineVersionSkew {
+                mem,
+                stamped_engine,
+                running_engine,
+                stamped_schema,
+            } => write!(
+                f,
+                "mem '{mem}': the last mutation was performed by engine \
+                 v{stamped_engine} (against schema {stamped_schema}); \
+                 this binary is engine v{running_engine}. Informative \
+                 only — the next mutation re-stamps. If behaviour \
+                 differs from the last session, the binary changed \
+                 between them.",
+            ),
             WarningHint::FolderMemProvenance { mem } => write!(
                 f,
                 "mem '{mem}' was created on folder storage with no \
@@ -1629,6 +1659,7 @@ impl WarningHint {
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
+            Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
             Self::SchemaHeadingRoundtripViolation { .. } => "SCHEMA_HEADING_ROUNDTRIP_VIOLATION",
             Self::SectionHeadingDivergence { .. } => "SECTION_HEADING_DIVERGENCE",
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
@@ -1671,6 +1702,7 @@ impl WarningHint {
             Self::MemFilesNotDeleted { mem, .. } => Some(mem.as_str()),
             Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
             Self::ReadMemsMigratedToMounts { .. } => None,
+            Self::EngineVersionSkew { mem, .. } => Some(mem.as_str()),
             Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
             Self::ConstraintUnsatisfied { entity_id, .. } => Some(entity_id.mem()),
@@ -1713,6 +1745,12 @@ impl WarningHint {
     /// that's the forcing function.
     pub fn all_samples() -> Vec<WarningHint> {
         vec![
+            WarningHint::EngineVersionSkew {
+                mem: "m".into(),
+                stamped_engine: "0.3.0".into(),
+                running_engine: "0.4.0".into(),
+                stamped_schema: "default@1.0.0".into(),
+            },
             WarningHint::MissingRequiredSection {
                 entity_type: "t".into(),
                 key: "k".into(),
@@ -2129,6 +2167,19 @@ impl WarningHint {
                 "mem": mem,
                 "unregistered_at": unregistered_at,
             }),
+            Self::EngineVersionSkew {
+                mem,
+                stamped_engine,
+                running_engine,
+                stamped_schema,
+            } => {
+                serde_json::json!({
+                    "mem": mem,
+                    "stamped_engine": stamped_engine,
+                    "running_engine": running_engine,
+                    "stamped_schema": stamped_schema,
+                })
+            }
             Self::ReadMemsMigratedToMounts {
                 mems,
                 from_host_mems,

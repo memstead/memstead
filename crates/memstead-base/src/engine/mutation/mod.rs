@@ -264,7 +264,63 @@ impl super::Engine {
             &ctx,
         )?;
         self.record_self_write(mount_idx, &commit_sha);
+        self.stamp_mutation_versions(mount_idx);
         Ok(written)
+    }
+
+    /// Record on the mem which engine version and which resolved
+    /// schema performed the mutation that just committed
+    /// (`MemConfig.mutation_stamp`). Called by every mutation verb
+    /// after `record_self_write` — one shared implementation, per the
+    /// one-guard-on-all-write-paths principle — and deliberately NOT
+    /// by `apply_external_commit`: a replayed sibling commit was
+    /// stamped by the engine that performed it, and this engine must
+    /// not claim it.
+    ///
+    /// Write-cheap by construction: the config write happens only when
+    /// the stamp VALUE changes (a binary upgrade or a schema repin) —
+    /// steady-state mutations compare and return. The write is
+    /// best-effort: a failed stamp never fails the mutation that
+    /// preceded it. On git-branch backends the config rides the
+    /// `__MEMSTEAD` ref, so a stamp write never moves the mem branch
+    /// head — mutation `commit_sha` cursors stay valid.
+    pub(crate) fn stamp_mutation_versions(&mut self, mount_idx: usize) {
+        let Some(state) = self.mounts.get(mount_idx) else {
+            return;
+        };
+        let mem = state.mount.mem.clone();
+        let Some(schema) = self.schemas.get(&mem) else {
+            return;
+        };
+        let (name, version) = schema.id();
+        let stamp = memstead_schema::MutationStamp {
+            engine_version: crate::ENGINE_VERSION.to_string(),
+            schema: format!("{name}@{version}"),
+        };
+        let Some(state) = self.mounts.get_mut(mount_idx) else {
+            return;
+        };
+        // A mem with no loaded config has nowhere to carry the stamp;
+        // skip silently (in-memory sketches, minimal fixtures).
+        let Some(config) = state.mem_config.as_ref() else {
+            return;
+        };
+        if config.mutation_stamp.as_ref() == Some(&stamp) {
+            return;
+        }
+        let mut updated = config.clone();
+        updated.mutation_stamp = Some(stamp);
+        let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) else {
+            return;
+        };
+        bytes.push(b'\n');
+        if state
+            .backend
+            .write_mem_config_with_note(&bytes, Some("engine version stamp"))
+            .is_ok()
+        {
+            state.mem_config = Some(updated);
+        }
     }
 }
 
@@ -1179,5 +1235,168 @@ mod tests {
             .unwrap();
         assert_eq!(deleted.id, renamed.new_id);
         assert!(engine.store().get(&renamed.new_id).is_none());
+    }
+
+    /// Minimal on-disk MemConfig pinning `default@1.0.0`, with an
+    /// optional pre-set mutation stamp — the carrier the stamp path
+    /// and the boot skew check both read.
+    fn write_config(dir: &std::path::Path, stamp: Option<memstead_schema::MutationStamp>) {
+        let meta = dir.join(memstead_schema::MEM_META_DIR);
+        std::fs::create_dir_all(&meta).unwrap();
+        let mut config: memstead_schema::MemConfig =
+            serde_json::from_str(r#"{"schema": "default@1.0.0"}"#).unwrap();
+        config.mutation_stamp = stamp;
+        std::fs::write(
+            meta.join("config.json"),
+            serde_json::to_vec_pretty(&config).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn stamped_engine_fixture(mem_dir: std::path::PathBuf) -> Engine {
+        Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(FilesystemMemWriter::new(mem_dir)) as Box<dyn MemBackend>,
+        )])
+        .unwrap()
+    }
+
+    fn disk_stamp(dir: &std::path::Path) -> Option<memstead_schema::MutationStamp> {
+        let bytes =
+            std::fs::read(dir.join(memstead_schema::MEM_META_DIR).join("config.json")).unwrap();
+        let config: memstead_schema::MemConfig = serde_json::from_slice(&bytes).unwrap();
+        config.mutation_stamp
+    }
+
+    fn spec_create_args(title: &str) -> CreateEntityArgs {
+        CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "specs".to_string(),
+            title: title.to_string(),
+            entity_type: "spec".to_string(),
+            sections: IndexMap::from_iter([
+                ("identity".to_string(), "seed identity".to_string()),
+                ("purpose".to_string(), "seed purpose".to_string()),
+            ]),
+            metadata: IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        }
+    }
+
+    /// Criterion 3 (agent-trust plan 02): a mutation stamps the mem's
+    /// engine-owned state with the running engine version and resolved
+    /// schema; a read-only load writes nothing.
+    #[test]
+    fn mutation_writes_version_stamp_and_read_only_load_does_not() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(&mem_dir, None);
+
+        // Read-only session: boot and drop without mutating — the
+        // stamp stays absent.
+        drop(stamped_engine_fixture(mem_dir.clone()));
+        assert!(
+            disk_stamp(&mem_dir).is_none(),
+            "a read-only load must not write a stamp"
+        );
+
+        // A mutation stamps engine version + resolved schema.
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+        engine
+            .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
+            .unwrap();
+        let stamp = disk_stamp(&mem_dir).expect("mutation must write the stamp");
+        assert_eq!(stamp.engine_version, crate::ENGINE_VERSION);
+        assert_eq!(stamp.schema, "default@1.0.0");
+
+        // A second mutation under the same binary leaves the stamp at
+        // the same value (the write path compares and no-ops).
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+        engine
+            .create_entity_with_ctx(spec_create_args("Second"), &CommitContext::internal())
+            .unwrap();
+        let again = disk_stamp(&mem_dir).expect("stamp survives");
+        assert_eq!(again, stamp);
+    }
+
+    /// Criterion 3/4 (agent-trust plan 02): boot under a different
+    /// binary version surfaces the warn-tier `ENGINE_VERSION_SKEW`
+    /// naming both versions, on load warnings AND in `health()`;
+    /// a stamp-less mem and a matching stamp are silent.
+    #[test]
+    fn boot_skew_warning_fires_only_on_disagreeing_stamp() {
+        use crate::ops::WarningHint;
+
+        // Disagreeing stamp → warning on boot and in health.
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: "0.0.1".to_string(),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+        let engine = stamped_engine_fixture(mem_dir);
+        let skew: Vec<_> = engine
+            .load_warnings()
+            .iter()
+            .filter(|w| matches!(w, WarningHint::EngineVersionSkew { .. }))
+            .collect();
+        assert_eq!(skew.len(), 1, "one skewed mem, one warning: {skew:?}");
+        if let WarningHint::EngineVersionSkew {
+            mem,
+            stamped_engine,
+            running_engine,
+            stamped_schema,
+        } = skew[0]
+        {
+            assert_eq!(mem, "specs");
+            assert_eq!(stamped_engine, "0.0.1");
+            assert_eq!(running_engine, crate::ENGINE_VERSION);
+            assert_eq!(stamped_schema, "default@1.0.0");
+        }
+        let health = engine.health();
+        assert!(
+            health
+                .warnings
+                .iter()
+                .any(|w| w.code() == "ENGINE_VERSION_SKEW"),
+            "health() must surface the skew without an include gate: {:?}",
+            health.warnings,
+        );
+
+        // Matching stamp → silent.
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: crate::ENGINE_VERSION.to_string(),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+        let engine = stamped_engine_fixture(mem_dir);
+        assert!(
+            !engine
+                .load_warnings()
+                .iter()
+                .any(|w| matches!(w, WarningHint::EngineVersionSkew { .. })),
+            "a matching stamp is not skew"
+        );
+
+        // No stamp → silent (absence of a stamp is not skew).
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(&mem_dir, None);
+        let engine = stamped_engine_fixture(mem_dir);
+        assert!(
+            !engine
+                .load_warnings()
+                .iter()
+                .any(|w| matches!(w, WarningHint::EngineVersionSkew { .. })),
+            "a stamp-less (pre-plan) mem boots without warning noise"
+        );
     }
 }

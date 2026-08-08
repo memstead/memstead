@@ -28,15 +28,14 @@ pub use archive_provenance::{
 pub use config::{
     ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_META_DIR,
     ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX, CommunityOverride, ConfigCheckResult,
-    ConfigError, MEM_META_DIR, MemConfig, MemSubject, PUBLISHED_MEM_FORMAT, PublishConfig,
-    PublishConversionError, PublishedMemConfig, ReadMemSource, ReadMemSpec, RoleConfig, SchemaRef,
-    VcsConfig, check_config, load_and_validate, load_config, parse_mem_config,
-    published_config_from, published_format_accepted,
+    ConfigError, MEM_META_DIR, MemConfig, MemSubject, MutationStamp, PUBLISHED_MEM_FORMAT,
+    PublishConfig, PublishConversionError, PublishedMemConfig, ReadMemSource, ReadMemSpec,
+    RoleConfig, SchemaRef, VcsConfig, check_config, load_and_validate, load_config,
+    parse_mem_config, published_config_from, published_format_accepted,
 };
 pub use loader::{
-    HeadingKeyViolation, SchemaLoadError, check_reserved_metadata_keys,
-    check_section_formats, check_section_heading_roundtrip, load_schema_from_dir,
-    load_schema_from_memory,
+    HeadingKeyViolation, SchemaLoadError, check_reserved_metadata_keys, check_section_formats,
+    check_section_heading_roundtrip, load_schema_from_dir, load_schema_from_memory,
 };
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
@@ -50,8 +49,7 @@ pub use source::{
 pub use types::{
     ConstraintDef, ConstraintSeverity, FieldType, Filterable, MetadataFieldDef,
     PropagationDirection, RequiredCardinality, RequiredOutgoing, SectionDef, Serialization,
-    TableFormat,
-    TypeDefinition, TypeExample, derive_section_key,
+    TableFormat, TypeDefinition, TypeExample, derive_section_key,
 };
 
 /// Name constants for the 10 built-in knowledge types shipped in the

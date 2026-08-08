@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: inconsistency
+description: |
+  Two destination claims contradict each other, or a destination
+  claim contradicts the source. A flag for follow-up that another
+  run resolves by either correcting one of the claims or
+  reconciling the source reading.
+when_to_use: |
+  Use when an agent run identifies a concrete contradiction it
+  cannot or should not resolve in the same run (because the right
+  resolution requires re-reading material the agent has not loaded,
+  or because more than one destination entity needs editing and the
+  agent's context is exhausted). The defining test: are the two
+  contradicting claims identifiable? "Some specs disagree" is not
+  an inconsistency; "spec X says the engine binary is read-only,
+  spec Y describes a write path through the same binary" is.
+boundaries:
+  - Not a coverage gap — both contradicting claims must already be present somewhere (in destination, or one in destination and one in source).
+  - Not a verification_target — `verification_target` flags a single claim with uncertain source agreement; `inconsistency` flags a known contradiction.
+  - Not a vague "things look incoherent" feeling — the entry names both sides of the contradiction concretely.
+system_message: |
+  An inconsistency carries two sides and the nature of the conflict.
+  The two sides are wiki-linked when they live in the destination;
+  if one side is in the source, the source location is named in
+  `claim_b`. The next agent acting on this entry resolves the
+  contradiction by editing the destination — and deletes the entry
+  in the same run.
+sections:
+  - key: claim_a
+    heading: Claim A
+    required: true
+    search_weight: 25.0
+    write_rules:
+      - "First claim. Wiki-link the destination entity carrying it (`[[entity-id]]`). Standalone-readable in a search snippet — paraphrase the claim, do not just cite the entity."
+  - key: claim_b
+    heading: Claim B
+    required: true
+    search_weight: 25.0
+    write_rules:
+      - "Second claim. Wiki-link the destination entity carrying it, or — if the contradiction is destination-vs-source — name the source location concretely (path, range, contract). Paraphrase the claim."
+  - key: nature
+    heading: Nature
+    required: true
+    search_weight: 15.0
+    write_rules:
+      - "How the two claims contradict — what one would have to change for them to agree. One or two sentences. The next agent uses this to decide which side is wrong."
+  - key: notes
+    heading: Notes
+    required: false
+    search_weight: 3.0
+    catch_all: true
+metadata_fields: []
+title_weight: 100.0
+text_fields: [claim_a, claim_b, nature, notes]
+hierarchy_relationship: PART_OF
+propagating_relationships: []
+updatable_fields: [title, claim_a, claim_b, nature, notes, tags]
+health_required_fields: [claim_a, claim_b, nature]
+staleness_threshold_days: 30
+write_rules:
+  - "Both sides must be identifiable. Wiki-link any side that lives in the destination; for source-side claims, cite a concrete source location."
+  - "Paraphrase the claims — do not just cite the entities. The reader should be able to understand the contradiction without opening either entity."
+  - "`nature` names the form of the conflict — what would have to change for the two to agree. Without this, the resolution is ambiguous."
+  - "Re-verify on every run. If the contradiction has been resolved (one side edited, both reconciled, source clarified), delete the entry."
+  - "An inconsistency that proves to be a misreading of source belongs nowhere — delete it without a destination edit."
