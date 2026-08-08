@@ -24,22 +24,19 @@ boundaries:
     in a separate schema or, for now, in the recipe's Notes section.
   - Not a shopping list — ingredients describe the thing, not a purchase.
 
-examples:
-  - title: "Canned San Marzano Tomatoes"
-    sections:
-      profile: "Whole peeled plum tomatoes in juice, low-acid variety from Campania. Sweet, meaty, gold standard for long-simmered sauces."
-      storage: "Shelf-stable unopened. After opening, transfer to a sealed container and refrigerate; use within 5 days or freeze."
-      substitutions: |
-        - Canned Roma tomatoes: close substitute, slightly more acidic.
-        - Fresh tomatoes: need blanching, peeling, longer cook — not a 1:1 swap.
-
-  - title: "Soy Sauce"
-    sections:
-      profile: "Fermented soybean sauce. Salty, umami-rich. Light soy is saltier; dark soy is sweeter and used for colour."
-      storage: "Shelf-stable before opening. Refrigerate after opening to preserve flavour."
-      substitutions: |
-        - Tamari: gluten-free, slightly less salty — use 1:1.
-        - Coconut aminos: soy-free, noticeably sweeter — reduce other sugar.
+exemplar:
+  title: "Canned San Marzano Tomatoes"
+  metadata:
+    pantry_category: pantry_canned
+  sections:
+    profile: "Whole peeled plum tomatoes in juice, low-acid variety from Campania. Sweet, meaty, gold standard for long-simmered sauces."
+    storage: "Shelf-stable unopened. After opening, transfer to a sealed container and refrigerate; use within 5 days or freeze."
+    substitutions: |
+      - Canned Roma tomatoes: close substitute, slightly more acidic.
+      - Fresh tomatoes: need blanching, peeling, longer cook — not a 1:1 swap.
+  relations:
+    - to: canned-roma-tomatoes
+      type: SUBSTITUTES_FOR
 
 system_message: |
   Ingredients are terse. Profile, storage, substitutions — that is all.

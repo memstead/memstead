@@ -56,6 +56,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Schemas teach by example: a type can carry one engine-validated
+  exemplar.** A schema type may declare `exemplar:` — one canonical
+  entity in the mem markdown shape (title, metadata, sections,
+  relations with bare placeholder-slug targets). The engine validates
+  every exemplar against its own type through the REAL create path
+  (`dry_run` on an in-memory engine) at `memstead schema validate` and
+  at install/seal on both backends: a package whose exemplar does not
+  conform refuses with a typed error naming the type and the defect —
+  no warn-and-carry mode exists, so an exemplar can never drift into
+  teaching the wrong shape. `memstead_schema` at `verbosity: full`
+  serves each type's exemplar; the lite skeleton is byte-unchanged.
+  `memstead type <name>` renders it in the full-depth CLI view. The
+  never-validated, never-served `examples:` list is retired: authoring
+  loads refuse it with a pointer at `exemplar:`; sealed content keeps
+  loading with the key dropped. The worked-example teaching package
+  (`memstead-schema/examples/minimal`) models the practice, gated by
+  the same validator in CI.
 - **Friction ledger: the engine measures its own surface's
   learnability.** Every typed refusal the CLI or MCP surface returns
   appends one content-free entry — code, verb, timestamp, surface;

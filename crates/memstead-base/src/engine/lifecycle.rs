@@ -189,6 +189,111 @@ impl Engine {
                  being installed as '{name}@{version}'"
             )));
         }
+        Self::validate_schema_exemplars(&std::sync::Arc::new(schema))
+            .map_err(invalid)?;
+        Ok(())
+    }
+
+    /// Validate every type exemplar a schema carries by running it
+    /// through the REAL create validation stage (agent-trust plan 09):
+    /// an in-memory engine is booted with the candidate schema pinned
+    /// on a virtual mem, and each exemplar is submitted as a
+    /// `dry_run` create — the same gates a real write runs (sections,
+    /// metadata + enums, rel-type vocabulary, edge shape, description
+    /// posture), commit-free by construction. Placeholder relation
+    /// targets are bare slugs scoped to the virtual mem, so target
+    /// existence is never checked (an absent target is the legal
+    /// would-be-stub path).
+    ///
+    /// Returns the defect as a message naming the type — the caller
+    /// wraps it in its own typed envelope (`SchemaPackageInvalid` on
+    /// the install path). There is deliberately no warn-and-carry
+    /// mode: a non-conformant exemplar refuses, because the whole
+    /// value of an exemplar is the impossibility of drift.
+    ///
+    /// `pub` so the built-in suite gates every shipped exemplar
+    /// through the SAME validator (a broken built-in exemplar fails
+    /// CI), and the below-boot install path shares the gate via
+    /// [`Self::validate_schema_package`].
+    pub fn validate_schema_exemplars(
+        schema: &std::sync::Arc<memstead_schema::Schema>,
+    ) -> Result<(), String> {
+        use indexmap::IndexMap;
+
+        let with_exemplars: Vec<&str> = schema
+            .manifest
+            .types
+            .iter()
+            .filter(|t| {
+                schema
+                    .types
+                    .get(t.as_str())
+                    .is_some_and(|td| td.exemplar.is_some())
+            })
+            .map(String::as_str)
+            .collect();
+        if with_exemplars.is_empty() {
+            return Ok(());
+        }
+
+        let (name, version) = schema.id();
+        let mem = "exemplar";
+        let mount = crate::workspace::Mount {
+            mem: mem.to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(name, version)),
+            storage: crate::workspace::MountStorage::InMemory,
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let backend = Box::new(crate::storage::InMemoryBackend::new()) as Box<dyn MemBackend>;
+        let mut engine = Engine::from_mounts_with_schemas_dir_and_extra(
+            vec![(mount, backend)],
+            None,
+            vec![schema.clone()],
+        )
+        .map_err(|e| format!("exemplar validation could not boot: {e}"))?;
+
+        for type_name in with_exemplars {
+            let td = schema
+                .types
+                .get(type_name)
+                .expect("filtered on presence above");
+            let ex = td.exemplar.as_ref().expect("filtered on presence above");
+            let mut relations = Vec::with_capacity(ex.relations.len());
+            for r in &ex.relations {
+                if r.to.contains("--") || r.to.trim().is_empty() {
+                    return Err(format!(
+                        "type '{type_name}' exemplar relation target '{}' must be a bare \
+                         placeholder slug (no `--`, non-empty) — exemplars live outside \
+                         any mem",
+                        r.to
+                    ));
+                }
+                relations.push(crate::ops::RelateArg {
+                    to: crate::entity::EntityId::new(mem, &r.to),
+                    rel_type: r.rel_type.clone(),
+                    description: r.description.clone(),
+                });
+            }
+            let args = crate::engine::CreateEntityArgs {
+                anchors: Vec::new(),
+                mem: mem.to_string(),
+                title: ex.title.clone(),
+                entity_type: type_name.to_string(),
+                sections: ex.sections.clone(),
+                metadata: ex.metadata.clone(),
+                relations,
+                dry_run: true,
+            };
+            if let Err(e) = engine.create_entity(args, crate::vcs::Actor::Cli, None, None) {
+                return Err(format!(
+                    "type '{type_name}' exemplar does not conform: [{}] {e}",
+                    e.code()
+                ));
+            }
+        }
         Ok(())
     }
     /// Unregister a writable mem at runtime. Engine-level
@@ -2347,6 +2452,236 @@ write_rules: []
             }
             other => panic!("expected SchemaPackageInvalid, got {other:?}"),
         }
+    }
+
+    /// Build a package whose single type carries an exemplar assembled
+    /// from the given pieces — the fixture for the exemplar-gate
+    /// tests. The type declares a required `body` section, a `status`
+    /// enum field, PART_OF (unpinned), and REFINES pinned to
+    /// `source_types: [other]` so a REFINES exemplar edge from
+    /// `sample` violates shape.
+    fn exemplar_package_files(
+        section_key: &str,
+        status_value: &str,
+        rel_type: &str,
+    ) -> Vec<(String, Vec<u8>)> {
+        let manifest = r#"name: gate
+version: 1.0.0
+description: exemplar gate fixture
+when_to_use: tests
+types:
+  - sample
+  - other
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: REFINES
+      description: pinned
+      default_weight: 1.0
+      source_types: [other]
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#
+        .to_string();
+        let type_yaml = format!(
+            r#"name: sample
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: workflow state
+    field_type: string
+    optional: true
+    enum_values: [draft, final]
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+exemplar:
+  title: A Conforming Sample
+  metadata:
+    status: "{status_value}"
+  sections:
+    {section_key}: "One canonical body paragraph."
+  relations:
+    - to: parent-placeholder
+      type: {rel_type}
+"#
+        );
+        let other_yaml = r#"name: other
+description: shape-pin partner
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#
+        .to_string();
+        vec![
+            ("schema.yaml".to_string(), manifest.into_bytes()),
+            ("types/sample.yaml".to_string(), type_yaml.into_bytes()),
+            ("types/other.yaml".to_string(), other_yaml.into_bytes()),
+        ]
+    }
+
+    /// The exemplar gate (agent-trust plan 09): a package whose type
+    /// carries a CONFORMANT exemplar installs; the same package broken
+    /// three ways — wrong section key, illegal enum value, relationship
+    /// shape violation — refuses with a typed error naming the type
+    /// and the defect. No warn-and-carry path exists: the refusal is
+    /// `SchemaPackageInvalid`, same as every other install-gate class.
+    #[test]
+    fn install_gate_validates_exemplars_through_the_real_create_path() {
+        // Conformant exemplar → the package installs.
+        let ok = Engine::validate_schema_package(
+            "gate",
+            "1.0.0",
+            &exemplar_package_files("body", "draft", "PART_OF"),
+        );
+        assert!(ok.is_ok(), "conformant exemplar passes: {ok:?}");
+
+        // Variant 1 — wrong section key.
+        let err = Engine::validate_schema_package(
+            "gate",
+            "1.0.0",
+            &exemplar_package_files("bogus_section", "draft", "PART_OF"),
+        )
+        .expect_err("wrong section key must refuse");
+        match &err {
+            EngineError::SchemaPackageInvalid { message, .. } => {
+                assert!(
+                    message.contains("'sample'") && message.contains("exemplar"),
+                    "names type and calls out the exemplar: {message}"
+                );
+                assert!(
+                    message.contains("UNKNOWN_SECTION")
+                        || message.contains("MISSING_REQUIRED_SECTION"),
+                    "carries the typed defect code: {message}"
+                );
+            }
+            other => panic!("expected SchemaPackageInvalid, got {other:?}"),
+        }
+
+        // Variant 2 — illegal enum value.
+        let err = Engine::validate_schema_package(
+            "gate",
+            "1.0.0",
+            &exemplar_package_files("body", "not-a-legal-status", "PART_OF"),
+        )
+        .expect_err("illegal enum value must refuse");
+        assert!(
+            matches!(&err, EngineError::SchemaPackageInvalid { message, .. }
+                if message.contains("'sample'") && message.contains("INVALID_ENUM_VALUE")),
+            "got {err:?}"
+        );
+
+        // Variant 3 — relationship shape violation (REFINES is pinned
+        // to source_types [other]; the exemplar's type is `sample`).
+        let err = Engine::validate_schema_package(
+            "gate",
+            "1.0.0",
+            &exemplar_package_files("body", "draft", "REFINES"),
+        )
+        .expect_err("relationship shape violation must refuse");
+        assert!(
+            matches!(&err, EngineError::SchemaPackageInvalid { message, .. }
+                if message.contains("'sample'") && message.contains("INVALID_REL_SHAPE")),
+            "got {err:?}"
+        );
+    }
+
+    /// The worked-example teaching package (`memstead-schema/examples/
+    /// minimal`) models the exemplar practice — its exemplars validate
+    /// through the same gate, so the material that teaches schema
+    /// authoring can never itself teach a non-conformant shape.
+    #[test]
+    fn worked_example_package_exemplars_validate() {
+        let pkg = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../memstead-schema/examples/minimal");
+        let schema = std::sync::Arc::new(
+            memstead_schema::load_schema_from_dir(&pkg).expect("worked example loads"),
+        );
+        assert!(
+            schema.types.values().all(|td| td.exemplar.is_some()),
+            "every worked-example type models the exemplar practice"
+        );
+        Engine::validate_schema_exemplars(&schema).expect("worked-example exemplars conform");
+    }
+
+    /// Every built-in schema's exemplars validate through the SAME
+    /// gate the install path runs — a built-in exemplar broken by a
+    /// future edit fails CI here. (Completeness — every built-in type
+    /// CARRYING an exemplar — is asserted separately once the built-in
+    /// generation shipping exemplars lands; this test is the validity
+    /// teeth from day one.)
+    #[test]
+    fn builtin_exemplars_validate_through_the_install_gate() {
+        let schemas =
+            memstead_schema::builtins::load_builtin_schemas().expect("built-in schemas always load");
+        for schema in schemas {
+            if let Err(defect) = Engine::validate_schema_exemplars(&schema) {
+                let (name, version) = schema.id();
+                panic!("built-in {name}@{version}: {defect}");
+            }
+        }
+    }
+
+    /// Exemplar relation targets are PLACEHOLDERS: a bare slug is
+    /// legal (target existence is never checked — the absent target
+    /// is the would-be-stub path), while a mem-prefixed target
+    /// refuses with the placeholder rule named.
+    #[test]
+    fn exemplar_relation_targets_are_bare_placeholder_slugs() {
+        let mut files = exemplar_package_files("body", "draft", "PART_OF");
+        let patched = String::from_utf8(files[1].1.clone())
+            .unwrap()
+            .replace("to: parent-placeholder", "to: other--real-entity");
+        files[1].1 = patched.into_bytes();
+        let err = Engine::validate_schema_package("gate", "1.0.0", &files)
+            .expect_err("mem-prefixed exemplar target must refuse");
+        assert!(
+            matches!(&err, EngineError::SchemaPackageInvalid { message, .. }
+                if message.contains("bare") && message.contains("'sample'")),
+            "got {err:?}"
+        );
     }
 
     /// A manifest whose declared identity contradicts the install ref

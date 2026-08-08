@@ -534,6 +534,19 @@ fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
         .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
     {
         Ok(schema) => {
+            // Exemplar gate — same validator the install/seal path
+            // runs; the authoring pre-flight must not pass a package
+            // installation would refuse.
+            let schema = std::sync::Arc::new(schema);
+            if let Err(defect) = memstead_base::Engine::validate_schema_exemplars(&schema) {
+                return Err(CliError::new(
+                    ExitKind::Validation,
+                    "SCHEMA_VALIDATION_FAILED",
+                    format!("schema at {} is invalid: {defect}", args.path.display()),
+                )
+                .with_details(json!({ "path": args.path, "error": defect }))
+                .into());
+            }
             let (name, version) = schema.id();
             let type_count = schema.types.len();
             if ctx.json {
@@ -699,6 +712,19 @@ fn resolve_source(
                 )
                 .with_details(json!({ "path": source, "error": e.to_string() }))
             })?;
+        // Exemplar gate — the same real-create-path validation the
+        // mem-repo install runs via `validate_schema_package`; a
+        // non-conformant exemplar never seals on either backend.
+        let schema = std::sync::Arc::new(schema);
+        if let Err(defect) = memstead_base::Engine::validate_schema_exemplars(&schema) {
+            return Err(CliError::new(
+                ExitKind::Validation,
+                "SCHEMA_VALIDATION_FAILED",
+                format!("package at {source} is invalid: {defect}"),
+            )
+            .with_details(json!({ "path": source, "error": defect }))
+            .into());
+        }
         let (name, version) = schema.id();
         let mut files = collect_dir_package(as_path)?;
         // Stamp the seal with its authoring provenance: the canonical

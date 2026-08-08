@@ -79,6 +79,14 @@ pub enum SchemaLoadError {
     )]
     PropagatingRelationshipsRenamed { type_name: String },
 
+    #[error(
+        "type '{type_name}' declares the retired `examples:` list — it was never \
+         validated nor served and is replaced by the engine-validated `exemplar:` \
+         (one canonical entity: title, metadata, sections, relations with \
+         placeholder targets). Move the material into `exemplar:` and retry."
+    )]
+    ExamplesRetired { type_name: String },
+
     #[error("schema relationship vocabulary must include a '_default' definition")]
     MissingDefaultWeight,
 
@@ -689,6 +697,17 @@ fn load_with_context(
             if td.no_self_loop_relationships.is_empty() {
                 td.no_self_loop_relationships = legacy;
             }
+        }
+
+        // Retired `examples:` list (agent-trust plan 09): dead
+        // vocabulary — never validated, never served. Authoring
+        // contexts refuse with the pointer at `exemplar:`; sealed
+        // contexts tolerate and drop (nothing consumed it, so
+        // dropping is lossless).
+        if td.legacy_examples.take().is_some() && types_dir.is_some() {
+            return Err(SchemaLoadError::ExamplesRetired {
+                type_name: td.name.clone(),
+            });
         }
 
         // Record the raw author-declared metadata keys BEFORE the

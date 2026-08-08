@@ -1138,6 +1138,39 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
         lines.push(String::new());
     }
 
+    // Canonical exemplar (agent-trust plan 09) — the engine-validated
+    // few-shot entity, rendered in the mem markdown shape. The CLI's
+    // full-depth type view matches `memstead_schema verbosity: full`.
+    if let Some(ex) = &schema.exemplar {
+        lines.push("## Exemplar (engine-validated)".to_string());
+        lines.push(String::new());
+        lines.push(format!("Title: {}", ex.title));
+        if !ex.metadata.is_empty() {
+            lines.push("Metadata:".to_string());
+            for (k, v) in &ex.metadata {
+                lines.push(format!("- {k}: {v}"));
+            }
+        }
+        for (key, body) in &ex.sections {
+            let heading = schema
+                .section(key)
+                .map(|s| s.heading.clone())
+                .unwrap_or_else(|| key.clone());
+            lines.push(format!("### {heading}"));
+            lines.push(body.clone());
+        }
+        if !ex.relations.is_empty() {
+            lines.push("Relations (placeholder targets):".to_string());
+            for r in &ex.relations {
+                match &r.description {
+                    Some(d) => lines.push(format!("- {} → {} — {d}", r.rel_type, r.to)),
+                    None => lines.push(format!("- {} → {}", r.rel_type, r.to)),
+                }
+            }
+        }
+        lines.push(String::new());
+    }
+
     lines.join("\n")
 }
 
@@ -1577,6 +1610,34 @@ pub fn build_schema_payload(
             // undeclared schemas keep their payload bytes unchanged.
             if td.leaf {
                 obj["leaf"] = serde_json::json!(true);
+            }
+            // The type's canonical exemplar (agent-trust plan 09) —
+            // engine-validated at install/seal, so what it teaches is
+            // exactly what the validator accepts. Rides FULL mode only
+            // (this array); the lite projection below drops it by
+            // allowlist, so the per-session skeleton stays unchanged.
+            // Relation targets are placeholder slugs by contract.
+            if let Some(ex) = &td.exemplar {
+                let relations: Vec<serde_json::Value> = ex
+                    .relations
+                    .iter()
+                    .map(|r| {
+                        let mut o = serde_json::json!({
+                            "to": r.to,
+                            "type": r.rel_type,
+                        });
+                        if let Some(d) = &r.description {
+                            o["description"] = serde_json::json!(d);
+                        }
+                        o
+                    })
+                    .collect();
+                obj["exemplar"] = serde_json::json!({
+                    "title": ex.title,
+                    "metadata": ex.metadata,
+                    "sections": ex.sections,
+                    "relations": relations,
+                });
             }
             obj
         })
@@ -2292,7 +2353,8 @@ mod tests {
             description: "test".to_string(),
             when_to_use: "test".to_string(),
             boundaries: vec![],
-            examples: vec![],
+            exemplar: None,
+            legacy_examples: None,
             system_message: None,
             sections: vec![SectionDef {
                 key: "note".to_string(),
@@ -3081,6 +3143,128 @@ mod tests {
         assert_eq!(SchemaVerbosity::Full.as_wire(), "full");
         assert_eq!(SchemaVerbosity::Lite.as_wire(), "lite");
         assert_eq!(SchemaVerbosity::default(), SchemaVerbosity::Full);
+    }
+
+    /// Exemplar serving (agent-trust plan 09): `verbosity: full`
+    /// carries each type's exemplar (title, metadata, sections,
+    /// relations with placeholder targets); the lite skeleton is
+    /// BYTE-unchanged between the same schema with and without an
+    /// exemplar — the per-session lite fetch never grows.
+    #[test]
+    fn exemplar_serves_at_full_and_lite_stays_byte_unchanged() {
+        let manifest = r#"name: servefix
+version: 1.0.0
+description: serving fixture
+when_to_use: tests
+types:
+  - sample
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let base_type = r#"name: sample
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: state
+    field_type: string
+    enum_values: [draft, final]
+    optional: true
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+        let with_exemplar = format!(
+            "{base_type}exemplar:\n  title: A Conforming Sample\n  metadata:\n    status: draft\n  sections:\n    body: \"One canonical body paragraph.\"\n  relations:\n    - to: parent-placeholder\n      type: PART_OF\n"
+        );
+
+        let plain = Arc::new(
+            memstead_schema::loader::load_schema_from_memory(
+                manifest,
+                &[("sample".to_string(), base_type.to_string())],
+            )
+            .expect("fixture loads"),
+        );
+        let exemplary = Arc::new(
+            memstead_schema::loader::load_schema_from_memory(
+                manifest,
+                &[("sample".to_string(), with_exemplar)],
+            )
+            .expect("fixture loads"),
+        );
+
+        // FULL serves the exemplar with the type.
+        let full = build_schema_payload(
+            &exemplary,
+            vec![],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
+        let ex = &full["types"][0]["exemplar"];
+        assert_eq!(ex["title"], "A Conforming Sample", "{full}");
+        assert_eq!(ex["metadata"]["status"], "draft");
+        assert_eq!(ex["sections"]["body"], "One canonical body paragraph.");
+        assert_eq!(ex["relations"][0]["to"], "parent-placeholder");
+        assert_eq!(ex["relations"][0]["type"], "PART_OF");
+
+        // FULL without an exemplar: no key (absent, not null).
+        let full_plain = build_schema_payload(
+            &plain,
+            vec![],
+            SchemaVerbosity::Full,
+            OriginClass::FirstParty,
+        );
+        assert!(full_plain["types"][0].get("exemplar").is_none());
+
+        // LITE is byte-identical with and without the exemplar — the
+        // skeleton every session fetches does not grow.
+        let lite_with = build_schema_payload(
+            &exemplary,
+            vec![],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
+        let lite_without = build_schema_payload(
+            &plain,
+            vec![],
+            SchemaVerbosity::Lite,
+            OriginClass::FirstParty,
+        );
+        assert_eq!(
+            serde_json::to_string(&lite_with).unwrap(),
+            serde_json::to_string(&lite_without).unwrap(),
+            "lite must not change when an exemplar exists"
+        );
+        assert!(
+            !serde_json::to_string(&lite_with).unwrap().contains("exemplar"),
+            "lite must not mention exemplars at all"
+        );
     }
 
     /// A first-party schema labels its origin and serves its full prose

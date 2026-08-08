@@ -28,12 +28,16 @@
       },
       "default": {}
     },
-    "examples": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/TypeExample"
-      }
+    "exemplar": {
+      "description": "One canonical, ENGINE-VALIDATED exemplar entity for this type\n(agent-trust plan 09) — the few-shot material an authoring\nagent actually learns from. Validated against this very type\nthrough the real create path (`dry_run`) at schema\ninstall/seal time: a package whose exemplar does not conform\nrefuses with a typed error naming the type and the defect —\nthere is no warn-and-carry mode, so an exemplar can never\ndrift into teaching the wrong shape. Served at\n`verbosity: full` only (the lite skeleton stays unchanged).\nOptional per type; the built-in reference schemas are complete.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Exemplar"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "health_required_fields": {
       "type": "array",
@@ -281,6 +285,67 @@
         }
       ]
     },
+    "Exemplar": {
+      "description": "One canonical exemplar entity for a type — a complete entity in the\nmem markdown shape: title, metadata overrides, section bodies, and\nrelationship entries with placeholder targets. Engine-validated at\nschema install/seal through the real create path, so it can never\nteach a shape the validator would refuse.",
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "description": "Metadata overrides, keyed by declared field key — validated\nlike a real create's metadata (enums included). Engine-stamped\nfields (`created_date`, …) are omitted; the engine fills them.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "relations": {
+          "description": "Relationship entries with PLACEHOLDER targets: each `to` is a\nbare slug (no `mem--` prefix — an exemplar lives outside any\nmem); validation checks rel-type legality and shape, never\ntarget existence.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExemplarRelation"
+          }
+        },
+        "sections": {
+          "description": "Section bodies keyed by section key. Required sections must all\nbe present — the validator enforces it like any create.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "title": {
+          "description": "The exemplar entity's title (drives the id slug exactly as a\nreal create would).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "ExemplarRelation": {
+      "description": "One relationship entry on an [`Exemplar`].",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Optional per-edge description — validated against the\nrel-type's `per_edge_description` posture.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "description": "Placeholder target: a bare slug, scoped to the exemplar's own\n(virtual) mem at validation time.",
+          "type": "string"
+        },
+        "type": {
+          "description": "Relationship type (UPPER_SNAKE_CASE; validated against the\nschema's declared vocabulary).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "to",
+        "type"
+      ]
+    },
     "FieldType": {
       "type": "string",
       "enum": [
@@ -505,26 +570,6 @@
       "additionalProperties": false,
       "required": [
         "columns"
-      ]
-    },
-    "TypeExample": {
-      "description": "Inline few-shot example — concrete entity content matching this type.",
-      "type": "object",
-      "properties": {
-        "sections": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "title",
-        "sections"
       ]
     }
   }

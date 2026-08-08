@@ -20,8 +20,26 @@ pub struct TypeDefinition {
     pub when_to_use: String,
     #[serde(default)]
     pub boundaries: Vec<String>,
-    #[serde(default)]
-    pub examples: Vec<TypeExample>,
+    /// One canonical, ENGINE-VALIDATED exemplar entity for this type
+    /// (agent-trust plan 09) — the few-shot material an authoring
+    /// agent actually learns from. Validated against this very type
+    /// through the real create path (`dry_run`) at schema
+    /// install/seal time: a package whose exemplar does not conform
+    /// refuses with a typed error naming the type and the defect —
+    /// there is no warn-and-carry mode, so an exemplar can never
+    /// drift into teaching the wrong shape. Served at
+    /// `verbosity: full` only (the lite skeleton stays unchanged).
+    /// Optional per type; the built-in reference schemas are complete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exemplar: Option<Exemplar>,
+    /// Legacy-key sentinel for the retired `examples:` list — a field
+    /// that promised few-shot teaching but was never validated nor
+    /// served by any surface (dead vocabulary). Authoring contexts
+    /// refuse it with a typed error naming `exemplar`; sealed
+    /// contexts tolerate and drop it. Never serialized.
+    #[serde(default, rename = "examples", skip_serializing)]
+    #[schemars(skip)]
+    pub legacy_examples: Option<serde_yaml_ng::Value>,
     #[serde(default)]
     pub system_message: Option<String>,
     pub sections: Vec<SectionDef>,
@@ -321,12 +339,49 @@ impl TypeDefinition {
     }
 }
 
-/// Inline few-shot example — concrete entity content matching this type.
+/// One canonical exemplar entity for a type — a complete entity in the
+/// mem markdown shape: title, metadata overrides, section bodies, and
+/// relationship entries with placeholder targets. Engine-validated at
+/// schema install/seal through the real create path, so it can never
+/// teach a shape the validator would refuse.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TypeExample {
+pub struct Exemplar {
+    /// The exemplar entity's title (drives the id slug exactly as a
+    /// real create would).
     pub title: String,
+    /// Metadata overrides, keyed by declared field key — validated
+    /// like a real create's metadata (enums included). Engine-stamped
+    /// fields (`created_date`, …) are omitted; the engine fills them.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub metadata: IndexMap<String, String>,
+    /// Section bodies keyed by section key. Required sections must all
+    /// be present — the validator enforces it like any create.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub sections: IndexMap<String, String>,
+    /// Relationship entries with PLACEHOLDER targets: each `to` is a
+    /// bare slug (no `mem--` prefix — an exemplar lives outside any
+    /// mem); validation checks rel-type legality and shape, never
+    /// target existence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relations: Vec<ExemplarRelation>,
+}
+
+/// One relationship entry on an [`Exemplar`].
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExemplarRelation {
+    /// Placeholder target: a bare slug, scoped to the exemplar's own
+    /// (virtual) mem at validation time.
+    pub to: String,
+    /// Relationship type (UPPER_SNAKE_CASE; validated against the
+    /// schema's declared vocabulary).
+    #[serde(rename = "type")]
+    pub rel_type: String,
+    /// Optional per-edge description — validated against the
+    /// rel-type's `per_edge_description` posture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Derive the storage key a `## Heading` line resolves to.

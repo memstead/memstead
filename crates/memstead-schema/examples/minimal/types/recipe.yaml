@@ -29,42 +29,38 @@ boundaries:
     those belong in a separate schema (e.g. `cooking-notes`).
   - Not a shopping list — recipes describe dishes, not purchases.
 
-# examples — encouraged. Few-shot material injected into MCP tool context.
-# 2–3 concrete examples are enough; more adds cost without adding clarity.
-examples:
-  - title: "Classic Bolognese"
-    sections:
-      summary: "Slow-simmered Italian meat sauce over fresh pasta."
-      ingredients: |
-        | Item | Amount |
-        |---|---|
-        | Ground beef | 500 g |
-        | Onion | 1 medium |
-        | Carrot | 1 |
-        | Celery stalk | 1 |
-        | Canned tomatoes | 400 g |
-      steps: |
-        1. Dice onion, carrot, celery. Sweat in olive oil until soft.
-        2. Add beef, brown completely.
-        3. Add tomatoes. Simmer 90 minutes on low.
-        4. Serve over fresh tagliatelle.
-      notes: "Can be made a day ahead; flavour deepens overnight."
-  - title: "Weeknight Pesto Pasta"
-    sections:
-      summary: "Fast green-sauce pasta for a 15-minute dinner."
-      ingredients: |
-        | Item | Amount |
-        |---|---|
-        | Spaghetti | 200 g |
-        | Fresh basil | 50 g |
-        | Pine nuts | 30 g |
-        | Parmesan | 40 g |
-        | Garlic | 1 clove |
-        | Olive oil | 60 ml |
-      steps: |
-        1. Cook spaghetti in salted water until al dente.
-        2. Blend basil, pine nuts, garlic, parmesan, oil smooth.
-        3. Toss hot pasta with pesto. Reserve pasta water to thin.
+# exemplar — encouraged. ONE canonical, ENGINE-VALIDATED entity of this
+# type: title, metadata, sections, and relations with placeholder targets
+# (bare slugs — an exemplar lives outside any mem). The engine validates
+# it through the real create path at `schema validate` / install time, so
+# it can never drift into teaching a shape the validator would refuse.
+# Served to agents at `memstead_schema verbosity: full`.
+exemplar:
+  title: "Classic Bolognese"
+  metadata:
+    cuisine: italian
+    total_minutes: "120"
+  sections:
+    summary: "Slow-simmered Italian meat sauce over fresh pasta."
+    ingredients: |
+      | Item | Amount |
+      |---|---|
+      | Ground beef | 500 g |
+      | Onion | 1 medium |
+      | Carrot | 1 |
+      | Celery stalk | 1 |
+      | Canned tomatoes | 400 g |
+    steps: |
+      1. Dice onion, carrot, celery. Sweat in olive oil until soft.
+      2. Add beef, brown completely.
+      3. Add tomatoes. Simmer 90 minutes on low.
+      4. Serve over fresh tagliatelle.
+    notes: "Can be made a day ahead; flavour deepens overnight."
+  relations:
+    - to: canned-san-marzano-tomatoes
+      type: CONTAINS
+    - to: ground-beef
+      type: CONTAINS
 
 # system_message — encouraged. Injected when the agent works with this
 # type. Keep it tight: invariants + common mistakes.
