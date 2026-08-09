@@ -224,26 +224,48 @@ fn try_collect_dir(
 fn collect_builtin_source(
     schema_ref: &SchemaRef,
 ) -> Result<Option<Vec<SchemaSourceFile>>, SchemaSourceError> {
-    let Some(schema_dir) = builtin_schemas_dir().get_dir(schema_ref.name.as_str()) else {
-        return Ok(None);
-    };
+    // Name-exact directory first — the current generation lives there.
+    if let Some(schema_dir) = builtin_schemas_dir().get_dir(schema_ref.name.as_str())
+        && let Some(files) = collect_builtin_dir(schema_dir, schema_ref)?
+    {
+        return Ok(Some(files));
+    }
+    // Retained older generations live in suffixed sibling directories
+    // (`planning` vs `planning-0.2`, …) under the append-only
+    // retention pattern — the directory name is organisational only,
+    // identity comes from each package's manifest. Scan the whole
+    // embedded catalogue for the (name, version) the ref pins; the
+    // registry registers every retained version, so the collect path
+    // must resolve them all.
+    for schema_dir in builtin_schemas_dir().dirs() {
+        if let Some(files) = collect_builtin_dir(schema_dir, schema_ref)? {
+            return Ok(Some(files));
+        }
+    }
+    Ok(None)
+}
 
+/// Collect one embedded schema directory's files when its manifest
+/// matches `schema_ref` — `Ok(None)` on a manifest mismatch (or a
+/// directory without a manifest, e.g. a non-package entry) so the
+/// caller can keep scanning.
+fn collect_builtin_dir(
+    schema_dir: &include_dir::Dir<'static>,
+    schema_ref: &SchemaRef,
+) -> Result<Option<Vec<SchemaSourceFile>>, SchemaSourceError> {
     // `include_dir`'s paths are always relative to the include root (the
     // `builtins/schemas` dir), so every entry's path starts with the
-    // schema name. Build lookups by constructing the same prefix.
-    let schema_name = schema_ref.name.as_str();
-    let manifest_key = format!("{schema_name}/schema.yaml");
-    let manifest_file = schema_dir.get_file(manifest_key.as_str()).ok_or_else(|| {
-        SchemaSourceError::MalformedManifest {
-            path: PathBuf::from(&manifest_key),
-            reason: "embedded schema directory is missing schema.yaml".into(),
-        }
-    })?;
+    // directory name. Build lookups by constructing the same prefix.
+    let prefix = schema_dir.path().display().to_string();
+    let manifest_key = format!("{prefix}/schema.yaml");
+    let Some(manifest_file) = schema_dir.get_file(manifest_key.as_str()) else {
+        return Ok(None);
+    };
     let manifest_bytes = manifest_file.contents().to_vec();
     if !manifest_matches(
         &manifest_bytes,
         schema_ref,
-        &PathBuf::from(format!("<builtin:{schema_name}>/schema.yaml")),
+        &PathBuf::from(format!("<builtin:{prefix}>/schema.yaml")),
     )? {
         return Ok(None);
     }
@@ -253,7 +275,7 @@ fn collect_builtin_source(
         bytes: manifest_bytes,
     }];
 
-    let types_key = format!("{schema_name}/types");
+    let types_key = format!("{prefix}/types");
     if let Some(types_dir) = schema_dir.get_dir(types_key.as_str()) {
         for file in types_dir.files() {
             if file.path().extension().and_then(|s| s.to_str()) != Some("yaml") {
@@ -308,10 +330,15 @@ fn manifest_matches(
         // paths that selected `dir` by name — a workspace author bumping
         // the pin without editing the manifest should hear about it
         // loudly, not get a silent fallthrough to the next layer.
-        // Builtin dirs are keyed by name only (one version per builtin),
-        // so the `collect_builtin_source` path turns `Ok(false)` into
-        // "no match; try NotFound" at the call site.
-        if source_path.starts_with("<builtin:") {
+        // Builtin retention keeps every generation in sibling
+        // directories (`planning`, `planning-0.2`, …), so the
+        // `collect_builtin_source` path turns `Ok(false)` into "keep
+        // scanning; NotFound only when no directory matches". String
+        // prefix, deliberately: `Path::starts_with` is
+        // component-based and never matched the `<builtin:…>` marker
+        // (which made every non-name-exact builtin version refuse
+        // with a hard VersionMismatch instead of falling through).
+        if source_path.to_string_lossy().starts_with("<builtin:") {
             return Ok(false);
         }
         return Err(SchemaSourceError::VersionMismatch {
@@ -397,6 +424,43 @@ write_rules: []
         for pair in files.windows(2) {
             assert!(pair[0].archive_path < pair[1].archive_path, "sorted");
         }
+    }
+
+    /// The append-only retention pattern keeps older generations in
+    /// suffixed sibling directories (`planning` holds 0.1.0,
+    /// `planning-0.3` holds 0.3.0, …). Every RETAINED version the
+    /// registry registers must resolve through the collect path — the
+    /// historical name-exact-only lookup refused every version but
+    /// the one in the name-exact directory.
+    #[test]
+    fn collects_builtin_source_for_every_retained_version() {
+        for (name, version) in [
+            ("planning", semver::Version::new(0, 2, 0)),
+            ("planning", semver::Version::new(0, 4, 0)),
+            ("ingest", semver::Version::new(0, 1, 0)),
+            ("ingest", semver::Version::new(0, 5, 0)),
+        ] {
+            let schema_ref = SchemaRef::new(name, version.clone());
+            let files = collect_schema_source(None, None, &schema_ref)
+                .unwrap_or_else(|e| panic!("{name}@{version} must resolve: {e}"));
+            let manifest = files
+                .iter()
+                .find(|f| f.archive_path == "schema.yaml")
+                .expect("manifest present");
+            let text = String::from_utf8_lossy(&manifest.bytes);
+            assert!(
+                text.contains(&format!("version: {version}")),
+                "{name}@{version}: collected manifest must carry the requested version"
+            );
+        }
+
+        // An unregistered version still refuses — the scan resolves
+        // retained versions, it never invents one.
+        let ghost = SchemaRef::new("planning", semver::Version::new(9, 9, 9));
+        assert!(matches!(
+            collect_schema_source(None, None, &ghost),
+            Err(SchemaSourceError::NotFound { .. })
+        ));
     }
 
     #[test]

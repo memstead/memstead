@@ -2795,19 +2795,25 @@ fn instructions_carry_crate_version_and_cli_companion_note() {
     }
 }
 
-/// Criterion 2: the MCP serverInfo version equals the crate version on
-/// both flavours — the historical hardcoded `"0.1.0"` cannot recur.
+/// Criterion 2: the MCP serverInfo version equals the engine's FULL
+/// build version (crate semver plus git build sha for dev builds) on
+/// both flavours — the historical hardcoded `"0.1.0"` cannot recur,
+/// and two dev builds between releases stay distinguishable.
 /// Asserted against the LIVE `get_info()` of constructed servers.
+/// The full flavour's served instructions keep the compile-time
+/// const verbatim as their prefix and append a runtime `Build:`
+/// sentence exactly when a build sha exists.
 #[test]
-fn server_info_version_equals_crate_version_on_both_flavours() {
+fn server_info_version_equals_full_build_version_on_both_flavours() {
     use rmcp::ServerHandler as _;
+    let full_version = memstead_base::build_info::full_version();
     let lean_engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
     let lean = memstead_mcp::filesystem_server::FilesystemMcpServer::from_engine(
         lean_engine,
         std::path::PathBuf::from("."),
     );
     let info = lean.get_info();
-    assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(info.server_info.version, full_version);
     assert_eq!(
         info.instructions.as_deref(),
         Some(memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS),
@@ -2823,11 +2829,23 @@ fn server_info_version_equals_crate_version_on_both_flavours() {
         Default::default(),
     );
     let info = full.get_info();
-    assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(
-        info.instructions.as_deref(),
-        Some(memstead_mcp::server::SERVER_INSTRUCTIONS),
+    assert_eq!(info.server_info.version, full_version);
+    let served = info.instructions.as_deref().unwrap();
+    assert!(
+        served.starts_with(memstead_mcp::server::SERVER_INSTRUCTIONS),
+        "served instructions keep the const as their verbatim prefix"
     );
+    if memstead_base::build_info::BUILD_SHA.is_empty() {
+        assert_eq!(served, memstead_mcp::server::SERVER_INSTRUCTIONS);
+    } else {
+        assert_eq!(
+            served,
+            format!(
+                "{} Build: {full_version}.",
+                memstead_mcp::server::SERVER_INSTRUCTIONS
+            )
+        );
+    }
 }
 
 /// Criterion 4: instruction length stays within a stated budget — a

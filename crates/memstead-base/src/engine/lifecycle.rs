@@ -2747,11 +2747,12 @@ write_rules: []
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
-        let mut engine = Engine::from_mounts(vec![(
-            folder_mount("specs", mem_dir.clone()),
-            Box::new(writer) as Box<dyn MemBackend>,
-        )])
-        .unwrap();
+        // Newest default generation so the clean-boot baseline isn't
+        // tripped by the SCHEMA_GENERATIONS_BEHIND hint.
+        let mut mount = folder_mount("specs", mem_dir.clone());
+        mount.schema = Some("default@1.2.0".parse().unwrap());
+        let mut engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         assert!(
             engine.load_warnings().is_empty(),
             "clean boot has no warnings"

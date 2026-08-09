@@ -1559,8 +1559,11 @@ impl FilesystemMcpServer {
                     && absent_targets.contains(&to.to_string())
                     && engine.store().get(&to).map(|e| e.stub).unwrap_or(false)
                 {
+                    // Real batch only (this flavour has no relate
+                    // rehearsal): the stub exists post-commit.
                     warnings.push(memstead_base::ops::WarningHint::AutoStubCreated {
                         stub_id: to.clone(),
+                        pending: false,
                     });
                 }
                 let source_label = engine
@@ -2156,8 +2159,10 @@ pub const FS_SERVER_INSTRUCTIONS: &str = concat!(
 impl ServerHandler for FilesystemMcpServer {
     /// Hand-written so `instructions` can be the named
     /// [`FS_SERVER_INSTRUCTIONS`] const (the macro only accepts string
-    /// literals) and the serverInfo version is the crate version by
-    /// construction — the historical hardcoded `"0.1.0"` cannot recur.
+    /// literals) and the serverInfo version is the engine's full
+    /// build version (semver + git build sha for dev builds) by
+    /// construction — the historical hardcoded `"0.1.0"` cannot recur,
+    /// and two dev builds between releases stay distinguishable.
     fn get_info(&self) -> rmcp::model::ServerInfo {
         rmcp::model::ServerInfo::new(
             rmcp::model::ServerCapabilities::builder()
@@ -2166,7 +2171,7 @@ impl ServerHandler for FilesystemMcpServer {
         )
         .with_server_info(rmcp::model::Implementation::new(
             "memstead-mcp",
-            env!("CARGO_PKG_VERSION"),
+            memstead_base::build_info::full_version(),
         ))
         .with_instructions(FS_SERVER_INSTRUCTIONS.to_string())
     }

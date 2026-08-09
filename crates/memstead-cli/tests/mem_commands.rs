@@ -2201,14 +2201,15 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     assert_eq!(v["unresolvable"], 2, "{v}");
 }
 
-/// Agent-trust plan 14, criterion 2 regression (grader refutation,
-/// 2026-08-09): on a FOLDER workspace, an entity authored and
-/// ok-checked by the same CLI binary must read `self_checked` — the
-/// CLI's folder mutation path now records its client identity, so
-/// the gate compares full (actor, client) pairs instead of calling a
-/// client-less author "independent" of its own checker.
+/// Field feedback on the agent-trust plan 14 gate: transport is not
+/// identity. On a FOLDER workspace, an entity authored and ok-checked
+/// through the same CLI binary reads `unconfirmable` — the recorded
+/// (actor, client) pair names the surface, not who acted, so without
+/// a caller-declared identity (the caller-identity follow-up) the
+/// gate can neither convict (`self_checked`) nor acquit
+/// (`confirmed_independent`).
 #[test]
-fn folder_backend_same_identity_check_reads_self_checked() {
+fn folder_backend_same_transport_check_reads_unconfirmable() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     let ws = root.join("gatews");
@@ -2258,11 +2259,61 @@ fn folder_backend_same_identity_check_reads_self_checked() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let gate = &v["checks"]["gatews"]["independence"];
     assert_eq!(
-        gate["self_checked"]["items"],
+        gate["unconfirmable"]["items"],
         serde_json::json!(["gatews--gate-probe"]),
-        "same binary authored and checked — never confirmed_independent: {v}"
+        "transport is not identity — neither self_checked nor \
+         confirmed_independent without a caller-declared identity: {v}"
     );
+    assert_eq!(gate["self_checked"]["count"], 0, "{v}");
     assert_eq!(gate["confirmed_independent"]["count"], 0, "{v}");
+}
+
+/// Health markdown parity (the text channel says what JSON says):
+/// the `checks` and `stale_derivations` includes render their own
+/// sections — populated content or the explicit zero statement — and
+/// without the includes the sections are absent (byte-unchanged
+/// default output). Same wording as the MCP text renderer.
+#[test]
+fn health_markdown_renders_checks_and_stale_derivations_sections() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("mdws");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["health", "--include", "checks,stale_derivations"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    // Populated checks axis: the quickstart seed is never-checked.
+    assert!(md.contains("## Checks (1 mems)"), "{md}");
+    assert!(md.contains("never_checked 1"), "{md}");
+    assert!(md.contains("unconfirmable 0"), "{md}");
+    // Requested-but-empty derivations axis: the explicit zero line.
+    assert!(md.contains("## Stale derivations (0 findings)"), "{md}");
+
+    // Without the includes, neither section renders.
+    let plain = memstead()
+        .current_dir(&ws)
+        .args(["health"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plain = String::from_utf8(plain).unwrap();
+    assert!(
+        !plain.contains("## Checks") && !plain.contains("## Stale derivations"),
+        "{plain}"
+    );
 }
 
 /// Agent-trust plan 14, criterion 3: a binding-less mem's verify

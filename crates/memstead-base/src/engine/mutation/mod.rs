@@ -294,8 +294,11 @@ impl super::Engine {
             return;
         };
         let (name, version) = schema.id();
+        // Full build version (semver + git build sha when present) so
+        // a rebuild between mutations is a recordable — and hence
+        // skew-detectable — event even between releases.
         let stamp = memstead_schema::MutationStamp {
-            engine_version: crate::ENGINE_VERSION.to_string(),
+            engine_version: crate::build_info::full_version().to_string(),
             schema: format!("{name}@{version}"),
         };
         let Some(state) = self.mounts.get_mut(mount_idx) else {
@@ -1348,7 +1351,7 @@ mod tests {
             .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
             .unwrap();
         let stamp = disk_stamp(&mem_dir).expect("mutation must write the stamp");
-        assert_eq!(stamp.engine_version, crate::ENGINE_VERSION);
+        assert_eq!(stamp.engine_version, crate::build_info::full_version());
         assert_eq!(stamp.schema, "default@1.0.0");
 
         // A second mutation under the same binary leaves the stamp at
@@ -1395,7 +1398,7 @@ mod tests {
         {
             assert_eq!(mem, "specs");
             assert_eq!(stamped_engine, "0.0.1");
-            assert_eq!(running_engine, crate::ENGINE_VERSION);
+            assert_eq!(running_engine, crate::build_info::full_version());
             assert_eq!(stamped_schema, "default@1.0.0");
         }
         let health = engine.health();
@@ -1414,7 +1417,7 @@ mod tests {
         write_config(
             &mem_dir,
             Some(memstead_schema::MutationStamp {
-                engine_version: crate::ENGINE_VERSION.to_string(),
+                engine_version: crate::build_info::full_version().to_string(),
                 schema: "default@1.0.0".to_string(),
             }),
         );

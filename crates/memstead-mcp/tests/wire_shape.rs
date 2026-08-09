@@ -2781,15 +2781,17 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
 // Provenance at mutation (agent-trust plan 13) — the record half.
 // ---------------------------------------------------------------------------
 
-/// A declared role is recorded immutably where history lives: MCP
-/// create-as-author lands `Role: author` in the mem-repo commit
-/// trailer; a CLI update-as-checker against the same workspace lands
-/// `Role: checker`; a mutation without a role writes NO Role trailer
-/// (absence recorded as absence, never defaulted); an illegal role
-/// refuses typed with the vocabulary named on both surfaces; and the
-/// folder backend records the same shape in its JSONL ledger.
+/// The checks axis serves the four derived states, and the
+/// independence gate refuses to manufacture identity from transport:
+/// the recorded `(actor, client)` pair names the surface a record
+/// arrived through, not who acted, so until a caller-declared
+/// identity exists (caller-identity follow-up) every ok-checked
+/// entity is `unconfirmable` — same-surface author+check is never
+/// `self_checked`, cross-surface author/check is never
+/// `confirmed_independent`. Both categories stay in the wire shape
+/// as explicit empties.
 #[test]
-fn checks_health_axis_gates_independence_on_recorded_identities() {
+fn checks_health_axis_serves_unconfirmable_without_caller_identity() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
     let mut harness = WireHarness::start(tmp.path());
@@ -2821,9 +2823,10 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
         assert!(created["isError"] != true, "{created}");
     }
 
-    // Alpha: ok-checked via MCP as checker — same identity as the
-    // author (agent + same client) → self_checked despite the
-    // distinct role: the gate compares identities, not roles.
+    // Alpha: ok-checked via MCP as checker — same transport as the
+    // author, but transport is not identity: without a
+    // caller-declared identity (caller-identity follow-up) the gate
+    // cannot establish sameness → unconfirmable.
     let r = harness.call_tool(
         "memstead_check",
         json!({ "entity": "specs--alpha-claim", "verdict": "ok", "role": "checker" }),
@@ -2831,7 +2834,9 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
     assert!(r["isError"] != true, "{r}");
 
     // Beta: ok-checked via the CLI as checker — a different recorded
-    // identity (cli + memstead-cli client) → confirmed_independent.
+    // transport pair (cli + memstead-cli client), which does NOT
+    // establish a different actor → unconfirmable, never a false
+    // acquittal via transport.
     let out = Command::new(&cli_bin)
         .current_dir(tmp.path())
         .args([
@@ -2900,19 +2905,19 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
     assert_eq!(axis["check_failed"], 1, "{axis}");
     assert!(axis["never_checked"].as_u64().unwrap() >= 1, "{axis}");
     let gate = &axis["independence"];
-    assert_eq!(
-        gate["self_checked"]["items"],
-        json!(["specs--alpha-claim"]),
-        "{gate}"
-    );
-    assert_eq!(
-        gate["confirmed_independent"]["items"],
-        json!(["specs--beta-claim"]),
-        "{gate}"
-    );
+    // Transport is not identity: until a caller-declared identity
+    // exists (caller-identity follow-up) every ok-checked entity is
+    // unconfirmable; self_checked / confirmed_independent stay as
+    // categories whose empty lists are a statement.
+    assert_eq!(gate["self_checked"]["items"], json!([]), "{gate}");
+    assert_eq!(gate["confirmed_independent"]["items"], json!([]), "{gate}");
     assert_eq!(
         gate["unconfirmable"]["items"],
-        json!(["specs--gamma-claim"]),
+        json!([
+            "specs--alpha-claim",
+            "specs--beta-claim",
+            "specs--gamma-claim"
+        ]),
         "{gate}"
     );
 
@@ -2929,8 +2934,12 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
     );
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
-        v["checks"]["specs"]["independence"]["self_checked"]["items"],
-        json!(["specs--alpha-claim"]),
+        v["checks"]["specs"]["independence"]["unconfirmable"]["items"],
+        json!([
+            "specs--alpha-claim",
+            "specs--beta-claim",
+            "specs--gamma-claim"
+        ]),
         "{v}"
     );
 }

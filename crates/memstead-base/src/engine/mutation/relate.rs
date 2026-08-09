@@ -753,8 +753,13 @@ impl Engine {
         let mut stub_target: Option<EntityId> = None;
         if matches!(action, RelateAction::Added) && !self.store.contains(&args.target) {
             stub_target = Some(args.target.clone());
+            // Rehearsal honesty: on the dry-run path nothing is
+            // written, so the warning's `pending` flag branches the
+            // message to the would-be form — the code stays
+            // AUTO_STUB_CREATED either way.
             warnings.push(WarningHint::AutoStubCreated {
                 stub_id: args.target.clone(),
+                pending: args.dry_run,
             });
             // If the target mem is unmounted, the
             // auto-stub above has no `_mem_schema` resolution. Layer
@@ -1597,11 +1602,23 @@ mod tests {
             .warnings
             .iter()
             .find_map(|w| match w {
-                crate::ops::WarningHint::AutoStubCreated { stub_id } => Some(stub_id.clone()),
+                crate::ops::WarningHint::AutoStubCreated { stub_id, .. } => Some(stub_id.clone()),
                 _ => None,
             })
             .expect("AutoStubCreated warning must surface when target was absent");
         assert_eq!(stub_warning, absent_target);
+        // The real path keeps the performed-effect wording exactly —
+        // only the dry-run path carries the conditional form.
+        let msg = outcome
+            .warnings
+            .iter()
+            .find(|w| matches!(w, crate::ops::WarningHint::AutoStubCreated { .. }))
+            .unwrap()
+            .message();
+        assert!(
+            msg.contains("stub auto-created"),
+            "real relate keeps the performed-effect wording: {msg}"
+        );
 
         // Stub now in-store, marked as stub, no body.
         let stub = engine.store().get(&absent_target).expect("stub upserted");
@@ -3700,10 +3717,23 @@ community:
         assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
         assert!(
             rehearsed.warnings.iter().any(
-                |w| matches!(w, crate::ops::WarningHint::AutoStubCreated { stub_id } if *stub_id == absent)
+                |w| matches!(w, crate::ops::WarningHint::AutoStubCreated { stub_id, pending: true } if *stub_id == absent)
             ),
-            "would-be stub must be reported: {:?}",
+            "would-be stub must be reported as pending: {:?}",
             rehearsed.warnings
+        );
+        // The rehearsed warning must not claim a performed effect —
+        // conditional wording, code unchanged (AUTO_STUB_CREATED).
+        let rehearsed_stub = rehearsed
+            .warnings
+            .iter()
+            .find(|w| matches!(w, crate::ops::WarningHint::AutoStubCreated { .. }))
+            .unwrap();
+        assert_eq!(rehearsed_stub.code(), "AUTO_STUB_CREATED");
+        let msg = rehearsed_stub.message();
+        assert!(
+            msg.contains("would be auto-created") && !msg.contains("stub auto-created."),
+            "dry-run wording must be conditional: {msg}"
         );
         assert!(
             !engine.store().contains(&absent),
@@ -3727,6 +3757,22 @@ community:
             "prospective hash must equal the real post-write hash"
         );
         assert!(engine.store().get(&absent).expect("real call stubs").stub);
+        // The real call keeps the performed-effect wording exactly.
+        let real_msg = real
+            .warnings
+            .iter()
+            .find(|w| {
+                matches!(
+                    w,
+                    crate::ops::WarningHint::AutoStubCreated { pending: false, .. }
+                )
+            })
+            .expect("real relate carries the non-pending stub warning")
+            .message();
+        assert!(
+            real_msg.contains("did not exist — stub auto-created."),
+            "real wording unchanged: {real_msg}"
+        );
     }
 
     /// Rehearsal refusal parity — single relate: an illegal rehearsed

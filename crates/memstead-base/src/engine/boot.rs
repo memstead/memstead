@@ -209,17 +209,22 @@ impl Engine {
             // this binary gets a warn-tier hint — informative, never
             // fatal, and a stamp-less (pre-stamp) mem is silent by
             // construction. Read-only: the stamp is only ever
-            // rewritten by the next mutation.
+            // rewritten by the next mutation. Full build versions
+            // (semver + git build sha) compare as full strings, so a
+            // rebuild between mutations fires the hint even between
+            // releases; a plain-semver stamp from an older binary
+            // comparing against a sha-carrying build fires too — that
+            // is desired, no migration.
             if let Some(stamp) = m
                 .mem_config
                 .as_ref()
                 .and_then(|c| c.mutation_stamp.as_ref())
-                && stamp.engine_version != crate::ENGINE_VERSION
+                && stamp.engine_version != crate::build_info::full_version()
             {
                 load_warnings.push(WarningHint::EngineVersionSkew {
                     mem: m.mount.mem.clone(),
                     stamped_engine: stamp.engine_version.clone(),
-                    running_engine: crate::ENGINE_VERSION.to_string(),
+                    running_engine: crate::build_info::full_version().to_string(),
                     stamped_schema: stamp.schema.clone(),
                 });
             }
@@ -287,6 +292,34 @@ impl Engine {
                 }
             };
             schemas.insert(m.mount.mem.clone(), schema.clone());
+
+            // Generation-behind hint (warn-tier, ungated, never
+            // blocking): the pin resolved from the BUILT-IN catalogue
+            // and the catalogue registers at least one strictly-higher
+            // version of the same name. Locally-installed
+            // (workspace-storage) pins are silent — the engine only
+            // knows generations for built-ins, and a local install
+            // shadowing a built-in (name, version) counts as local
+            // (that is also the resolver's precedence). Real semver
+            // ordering via `semver::Version`, never string ordering.
+            let locally_installed = workspace_schemas.iter().any(|s| {
+                s.manifest.name == effective_pin.name && s.version == effective_pin.version
+            });
+            let is_builtin = builtin_schemas_only.iter().any(|s| {
+                s.manifest.name == effective_pin.name && s.version == effective_pin.version
+            });
+            if !locally_installed
+                && is_builtin
+                && let Some(newest) =
+                    newest_builtin_version(&effective_pin.name, &builtin_schemas_only)
+                && *newest > effective_pin.version
+            {
+                load_warnings.push(WarningHint::SchemaGenerationsBehind {
+                    mem: m.mount.mem.clone(),
+                    pinned: effective_pin.as_display(),
+                    newest: newest.to_string(),
+                });
+            }
 
             // Sealed schemas keep loading even when they violate the
             // heading round-trip rule new installs are refused for —
@@ -601,6 +634,21 @@ pub fn resolve_builtin_schema_pin_pub(
     resolve_builtin_schema_pin(pin, catalogue)
 }
 
+/// The newest version registered in the built-in catalogue under
+/// `name` — real `semver::Version` ordering (0.10.0 beats 0.9.0),
+/// never string ordering. `None` when no built-in carries the name.
+/// Feeds the `SCHEMA_GENERATIONS_BEHIND` boot hint.
+fn newest_builtin_version<'a>(
+    name: &str,
+    builtins: &'a [Arc<memstead_schema::Schema>],
+) -> Option<&'a semver::Version> {
+    builtins
+        .iter()
+        .filter(|s| s.manifest.name == name)
+        .map(|s| &s.version)
+        .max()
+}
+
 /// The engine's schema-pin resolver — the single named entry point a
 /// load path resolves a `name@version` pin through. Consults schema
 /// sources in a fixed order: **local storage** (the mem's own storage
@@ -856,6 +904,159 @@ mod tests {
                 .any(|w| matches!(w, WarningHint::DuplicateSectionHeading { .. })),
             "load_warnings must surface DuplicateSectionHeading: {warnings:?}",
         );
+    }
+
+    /// Generation-behind hint: a mem pinning an OLD built-in
+    /// generation (`default@1.0.0`; the catalogue retains up to
+    /// 1.2.0) boots with the warn-tier `SCHEMA_GENERATIONS_BEHIND`
+    /// naming the pinned ref and the newest version — and the hint
+    /// never blocks: the boot serves and mutations succeed. A mem
+    /// pinning the NEWEST generation stays silent, so its health
+    /// output is unchanged.
+    #[test]
+    fn generation_behind_hint_fires_for_old_builtin_pin_only() {
+        // Old pin → hint, non-blocking.
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let behind: Vec<_> = engine
+            .load_warnings()
+            .iter()
+            .filter_map(|w| match w {
+                WarningHint::SchemaGenerationsBehind {
+                    mem,
+                    pinned,
+                    newest,
+                } => Some((mem.clone(), pinned.clone(), newest.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            behind,
+            vec![(
+                "specs".to_string(),
+                "default@1.0.0".to_string(),
+                "1.2.0".to_string()
+            )],
+            "old built-in pin must surface the generation-behind hint"
+        );
+        assert!(
+            engine
+                .health()
+                .warnings
+                .iter()
+                .any(|w| w.code() == "SCHEMA_GENERATIONS_BEHIND"),
+            "the hint rides health without an include gate"
+        );
+        // Never blocking: the warned mem still mutates.
+        engine
+            .create_entity_with_ctx(
+                crate::engine::CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "specs".to_string(),
+                    title: "Still writable".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: indexmap::IndexMap::from_iter([
+                        ("identity".to_string(), "i".to_string()),
+                        ("purpose".to_string(), "p".to_string()),
+                    ]),
+                    metadata: indexmap::IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                &crate::vcs::CommitContext::internal(),
+            )
+            .expect("generation-behind hint must never block mutations");
+
+        // Newest pin → silent (health output unchanged).
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut mount = folder_mount("specs", mem_dir);
+        mount.schema = Some("default@1.2.0".parse().unwrap());
+        let engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
+        assert!(
+            !engine
+                .load_warnings()
+                .iter()
+                .any(|w| w.code() == "SCHEMA_GENERATIONS_BEHIND"),
+            "newest built-in pin must stay silent: {:?}",
+            engine.load_warnings()
+        );
+        let health_json = serde_json::to_string(&engine.health().warnings).unwrap();
+        assert!(
+            !health_json.contains("SCHEMA_GENERATIONS_BEHIND"),
+            "newest pin: health output carries no generation hint"
+        );
+    }
+
+    /// The newest-generation lookup uses real semver ordering — a
+    /// two-digit minor beats a one-digit one (string ordering would
+    /// invert them).
+    #[test]
+    fn newest_builtin_version_orders_by_semver_not_string() {
+        let manifest = |version: &str| {
+            format!(
+                r#"name: gen-test
+version: {version}
+description: test
+when_to_use: test
+types:
+  - note
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: default
+      default_weight: 1.0
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+community:
+  resolution: 1.0
+  seed: 42
+"#
+            )
+        };
+        let type_yaml = r#"name: note
+description: test
+when_to_use: test
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+metadata_fields: []
+title_weight: 1.0
+text_fields: [body]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields: [title, body]
+health_required_fields: [body]
+staleness_threshold_days: 30
+write_rules: []
+"#;
+        let types = vec![("note".to_string(), type_yaml.to_string())];
+        let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = ["0.9.0", "0.10.0", "0.2.0"]
+            .iter()
+            .map(|v| {
+                std::sync::Arc::new(
+                    memstead_schema::load_schema_from_memory(&manifest(v), &types)
+                        .expect("fixture schema loads"),
+                )
+            })
+            .collect();
+        let newest = super::newest_builtin_version("gen-test", &catalogue)
+            .expect("name present in catalogue");
+        assert_eq!(newest.to_string(), "0.10.0", "semver, not string, ordering");
+        assert!(super::newest_builtin_version("absent", &catalogue).is_none());
     }
 
     /// Parse-time relation validation drops relations whose `rel_type`

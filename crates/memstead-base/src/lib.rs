@@ -17,6 +17,7 @@ pub mod anchor;
 pub mod backend;
 pub mod binding;
 pub mod binding_migrate;
+pub mod build_info;
 pub mod chunking;
 pub mod domain_authority_wire;
 pub mod engine;
@@ -81,10 +82,13 @@ pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use graph::{ClusterInfo, LouvainOutput};
 pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};
 
-/// The engine crate version of the running binary — the value the
-/// per-mem mutation stamp (`MemConfig.mutation_stamp`) records and the
-/// boot-time `ENGINE_VERSION_SKEW` comparison runs against. One
-/// constant so stamp writes and skew checks can never disagree.
+/// The engine crate SEMVER of the running binary. Version-carrying
+/// surfaces — the per-mem mutation stamp (`MemConfig.mutation_stamp`),
+/// the boot-time `ENGINE_VERSION_SKEW` comparison, the overview's
+/// `_engine_version`, CLI `--version`, MCP `serverInfo.version` — use
+/// [`build_info::full_version`] instead (semver plus the git build sha
+/// when present), so dev builds between releases stay distinguishable;
+/// this constant is the bare semver component.
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use mem_management::{CreateRuleSet, DeleteRuleSet, MatcherSet, MatcherSetError};
 pub use ops::{

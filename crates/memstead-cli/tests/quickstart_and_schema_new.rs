@@ -540,6 +540,41 @@ fn schema_new_follow_up_from_quickstart_workspace_ends_pinned() {
         .success();
 }
 
+/// `schema install <builtin>@<version>` resolves every RETAINED
+/// built-in version: the registry registers all generations, and the
+/// collect path scans the suffixed retention directories
+/// (`planning-0.3`, …) instead of refusing everything but the
+/// name-exact directory's version. An unregistered version still
+/// refuses.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn schema_install_resolves_retained_builtin_versions() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("retained");
+    memstead().arg("quickstart").arg(&ws).assert().success();
+
+    // planning@0.3.0 lives in the retained `planning-0.3` directory
+    // (name-exact `planning/` holds 0.1.0) — resolve + collect must
+    // both succeed through the real command.
+    memstead()
+        .current_dir(&ws)
+        .args(["schema", "install", "planning@0.3.0"])
+        .assert()
+        .success();
+
+    let err = stderr_of(
+        memstead()
+            .current_dir(&ws)
+            .args(["schema", "install", "planning@9.9.9"])
+            .assert()
+            .failure(),
+    );
+    assert!(
+        err.contains("planning@9.9.9"),
+        "unregistered version refuses, naming the pin; got: {err}"
+    );
+}
+
 /// Preflight AC: a malformed agent config file refuses BEFORE anything
 /// is created — the printed "re-run memstead quickstart" must still be
 /// able to succeed, so no workspace may exist after the refusal.

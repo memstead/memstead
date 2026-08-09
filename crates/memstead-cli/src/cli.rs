@@ -32,7 +32,10 @@ Exit codes:
 
 /// Query and mutate Memstead knowledge graphs from the shell.
 #[derive(Parser, Debug)]
-#[command(name = "memstead", version, about, long_about = None, after_long_help = EXIT_CODES_HELP)]
+// `--version` prints the full build version (engine semver plus the
+// git build sha for dev builds) so two builds between releases stay
+// distinguishable in the field.
+#[command(name = "memstead", version = memstead_base::build_info::full_version(), about, long_about = None, after_long_help = EXIT_CODES_HELP)]
 pub struct Cli {
     /// Emit JSON instead of markdown. Matches MCP `structured_content` shape.
     #[arg(long, global = true)]

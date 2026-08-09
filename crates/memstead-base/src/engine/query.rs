@@ -2618,11 +2618,12 @@ community:
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
-        let engine = Engine::from_mounts(vec![(
-            folder_mount("specs", mem_dir),
-            Box::new(writer) as Box<dyn MemBackend>,
-        )])
-        .unwrap();
+        // Newest default generation so the clean-boot assertion below
+        // isn't tripped by the SCHEMA_GENERATIONS_BEHIND hint.
+        let mut mount = folder_mount("specs", mem_dir);
+        mount.schema = Some("default@1.2.0".parse().unwrap());
+        let engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         assert!(
             engine.workspace_root().is_none(),
             "from_mounts has no workspace path",

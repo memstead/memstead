@@ -117,6 +117,32 @@ fn health_json(ws: &std::path::Path) -> serde_json::Value {
     parse_envelope(&out)
 }
 
+/// Health markdown parity: the quarantine roster is ungated in the
+/// JSON (present whenever non-empty), so the markdown channel renders
+/// it whenever present — per mem the reason code plus the message,
+/// which carries the repair command. A healthy workspace renders no
+/// such section (the key is absent).
+#[test]
+fn health_markdown_renders_quarantine_roster_when_present() {
+    let tmp = TempDir::new().unwrap();
+    let ws = filesystem_workspace_with_pin(&tmp, "default@99.0.0");
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["health"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).expect("markdown output is UTF-8");
+    assert!(md.contains("## Quarantined mems (1)"), "{md}");
+    assert!(md.contains("[SCHEMA_NOT_FOUND]"), "{md}");
+    assert!(
+        md.contains("memstead mem set-schema"),
+        "the repair command rides the rendered message: {md}"
+    );
+}
+
 /// Criterion 2 — re-routed by agent-trust plan 04 (binding
 /// quarantine): a legacy pre-v2 projection config no longer fails the
 /// workspace; the affected binding quarantines and its projection

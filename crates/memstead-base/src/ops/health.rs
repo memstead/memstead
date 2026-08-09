@@ -56,17 +56,22 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 /// MCP server so the axis cannot drift between surfaces.
 /// The `include=["checks"]` axis (agent-trust plan 14): per mem,
 /// counts of the four derived check states plus the author≠checker
-/// independence gate over ok-checked entities. The gate compares
-/// RECORDED identities (actor + client) across operations — the
-/// entity's created-by record against its newest ok-check record:
-/// equal → `self_checked` ("twice-asserted, not verified"); different
-/// → `confirmed_independent`; an unspecified-role check or an
-/// unknowable author identity (truncated story) → `unconfirmable` —
-/// unknown identity can't confirm independence, stated distinctly
-/// from self-checked. Derivation only: nothing here is stamped, and
-/// a workspace without a check ledger serves all-never-checked.
-/// Identity lists are capped at [`OPEN_QUESTIONS_ITEM_CAP`] with an
-/// explicit `more` count.
+/// independence gate over ok-checked entities. Transport is not
+/// identity: the recorded `(actor, client)` pair names the SURFACE a
+/// record arrived through (Agent|Cli|App plus a client binary), not
+/// who acted — the same actor reaches the engine over several
+/// surfaces, and one surface serves many actors across sessions. So
+/// until a caller-declared identity exists (the caller-identity
+/// follow-up, plan 15), NO author/checker comparison can be
+/// established and every ok-checked entity with recorded provenance
+/// lands in `unconfirmable`. `self_checked` and
+/// `confirmed_independent` remain as categories — their empty lists
+/// are a statement — but stay unreachable until real identity
+/// exists: a same pair does NOT establish the same actor, and
+/// different pairs do NOT establish different actors. Derivation
+/// only: nothing here is stamped, and a workspace without a check
+/// ledger serves all-never-checked. Identity lists are capped at
+/// [`OPEN_QUESTIONS_ITEM_CAP`] with an explicit `more` count.
 pub fn health_checks_axis(
     engine: &crate::engine::Engine,
     mem_filter: Option<&str>,
@@ -113,50 +118,30 @@ pub fn health_checks_axis(
             ("check_failed", 0usize),
             ("check_stale", 0usize),
         ]);
-        let mut self_checked: Vec<String> = Vec::new();
-        let mut confirmed_independent: Vec<String> = Vec::new();
+        // Unreachable until a caller-declared identity exists (the
+        // caller-identity follow-up, plan 15) — kept so the wire shape
+        // states the categories explicitly rather than dropping them.
+        let self_checked: Vec<String> = Vec::new();
+        let confirmed_independent: Vec<String> = Vec::new();
         let mut unconfirmable: Vec<String> = Vec::new();
         for e in engine.store().all_entities().filter(|e| e.mem == mem) {
             let id = e.id.0.clone();
-            let state =
-                crate::check::derive_state(latest.get(&id), &e.content_hash);
+            let state = crate::check::derive_state(latest.get(&id), &e.content_hash);
             *counts.entry(state.as_str()).or_insert(0) += 1;
             if state != crate::check::CheckState::CheckedOk {
                 continue;
             }
-            let check = latest.get(&id).expect("checked_ok implies a record");
-            if check.role == "unspecified" {
-                unconfirmable.push(id);
-                continue;
-            }
-            // Author identity from the append-only mutation record.
-            // Provenance lookup is bounded to ok-checked entities.
-            let author = engine
-                .entity_provenance(&mem, &id)
-                .ok()
-                .and_then(|p| p.created_by);
-            match author {
-                None => unconfirmable.push(id),
-                Some(a) => {
-                    // Identity is the (actor, client) pair. When either
-                    // record's client half is unrecorded, equality can be
-                    // neither confirmed nor refuted — unconfirmable, never
-                    // a false independence confirmation (a same-binary
-                    // author+check must not read as independent just
-                    // because one record dropped its client).
-                    match (a.client, &check.client) {
-                        (Some(ac), Some(cc)) => {
-                            let same_actor = a.actor.as_deref() == Some(check.actor.as_str());
-                            if same_actor && ac == *cc {
-                                self_checked.push(id);
-                            } else {
-                                confirmed_independent.push(id);
-                            }
-                        }
-                        _ => unconfirmable.push(id),
-                    }
-                }
-            }
+            // Transport is not identity. The recorded (actor, client)
+            // pair names the surface each record arrived through, not
+            // who acted — a same pair does not establish the same
+            // actor (CLI-authored + CLI-checked across sessions/days
+            // is the norm, not conviction), and different pairs do
+            // not establish different actors (one actor reaches the
+            // engine over several surfaces). Without a
+            // caller-declared identity no author/checker comparison
+            // can be established, so every ok-checked entity lands
+            // here — never a false acquittal via transport.
+            unconfirmable.push(id);
         }
         let mut m = serde_json::Map::new();
         for (k, v) in counts {

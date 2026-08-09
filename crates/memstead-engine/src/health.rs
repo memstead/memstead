@@ -759,6 +759,78 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
         }
     }
 
+    // Checks axis — an object (mem → state counts + independence
+    // gate). Null-is-a-statement (the Friction pattern): a requested
+    // axis with no mems renders the explicit zero heading; an absent
+    // key (not requested) renders nothing.
+    if let Some(obj) = v.get("checks").and_then(|x| x.as_object()) {
+        let _ = writeln!(s, "\n## Checks ({} mems)", obj.len());
+        for (mem, c) in obj {
+            let count = |key: &str| c.get(key).and_then(|x| x.as_u64()).unwrap_or(0);
+            let gate = |key: &str| {
+                c.get("independence")
+                    .and_then(|g| g.get(key))
+                    .and_then(|e| e.get("count"))
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0)
+            };
+            let _ = writeln!(
+                s,
+                "- `{mem}`: never_checked {}, checked_ok {}, check_failed {}, \
+                 check_stale {}; independence: self_checked {}, \
+                 confirmed_independent {}, unconfirmable {}",
+                count("never_checked"),
+                count("checked_ok"),
+                count("check_failed"),
+                count("check_stale"),
+                gate("self_checked"),
+                gate("confirmed_independent"),
+                gate("unconfirmable"),
+            );
+        }
+    }
+
+    // Stale-derivations axis — an object (mem → findings list). Same
+    // requested-vs-absent contract as the checks axis above.
+    if let Some(obj) = v.get("stale_derivations").and_then(|x| x.as_object()) {
+        let total: usize = obj
+            .values()
+            .filter_map(|a| a.as_array().map(|a| a.len()))
+            .sum();
+        let _ = writeln!(s, "\n## Stale derivations ({total} findings)");
+        for (mem, findings) in obj {
+            for f in findings.as_array().into_iter().flatten() {
+                let _ = writeln!(
+                    s,
+                    "- `{mem}`: {} -[{}]-> {} ({})",
+                    f.get("source").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("rel_type").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("target").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("state").and_then(|x| x.as_str()).unwrap_or(""),
+                );
+            }
+        }
+    }
+
+    // Quarantine roster — ungated in the JSON (present whenever
+    // non-empty), so the text channel renders it whenever present:
+    // per mem the reason code plus the message, which carries the
+    // repair command.
+    if let Some(arr) = v.get("quarantined").and_then(|x| x.as_array()) {
+        let _ = writeln!(s, "\n## Quarantined mems ({})", arr.len());
+        for q in arr {
+            let _ = writeln!(
+                s,
+                "- `{}` [{}] {}",
+                q.get("mem").and_then(|x| x.as_str()).unwrap_or(""),
+                q.get("reason_code").and_then(|x| x.as_str()).unwrap_or(""),
+                q.get("reason_message")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or(""),
+            );
+        }
+    }
+
     if let Some(arr) = v.get("warnings").and_then(|x| x.as_array())
         && !arr.is_empty()
     {
@@ -808,5 +880,98 @@ fn summarize_health_item(item: &serde_json::Value) -> String {
         format!("{from} → {target}")
     } else {
         serde_json::to_string(item).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_health_markdown;
+    use serde_json::json;
+
+    fn base_payload() -> serde_json::Value {
+        json!({
+            "summary": { "total_entities": 1 },
+            "total_nodes": 1,
+        })
+    }
+
+    /// Text-channel parity: the `checks` / `stale_derivations` axes
+    /// and the quarantine roster render their own sections — content
+    /// when populated, the explicit zero statement when requested but
+    /// empty (null is a statement), and NOTHING when the JSON key is
+    /// absent: a payload without the keys renders byte-identically to
+    /// itself with sections appended, never mutated.
+    #[test]
+    fn render_health_markdown_covers_checks_derivations_and_quarantine() {
+        // Populated.
+        let mut v = base_payload();
+        v["checks"] = json!({
+            "specs": {
+                "never_checked": 2, "checked_ok": 1,
+                "check_failed": 0, "check_stale": 0,
+                "independence": {
+                    "self_checked": { "count": 0, "items": [] },
+                    "confirmed_independent": { "count": 0, "items": [] },
+                    "unconfirmable": { "count": 1, "items": ["specs--a"] },
+                },
+            }
+        });
+        v["stale_derivations"] = json!({
+            "specs": [{
+                "source": "specs--a", "rel_type": "DERIVES_FROM",
+                "target": "specs--b", "state": "stale",
+                "baseline": "aaa", "current": "bbb",
+            }]
+        });
+        v["quarantined"] = json!([{
+            "mem": "broken",
+            "reason_code": "SCHEMA_NOT_FOUND",
+            "reason_message": "no schema; repair via memstead mem set-schema",
+        }]);
+        let md = render_health_markdown(&v);
+        assert!(md.contains("## Checks (1 mems)"), "{md}");
+        assert!(
+            md.contains(
+                "- `specs`: never_checked 2, checked_ok 1, check_failed 0, \
+                 check_stale 0; independence: self_checked 0, \
+                 confirmed_independent 0, unconfirmable 1"
+            ),
+            "{md}"
+        );
+        assert!(md.contains("## Stale derivations (1 findings)"), "{md}");
+        assert!(
+            md.contains("- `specs`: specs--a -[DERIVES_FROM]-> specs--b (stale)"),
+            "{md}"
+        );
+        assert!(md.contains("## Quarantined mems (1)"), "{md}");
+        assert!(
+            md.contains(
+                "- `broken` [SCHEMA_NOT_FOUND] no schema; repair via memstead mem set-schema"
+            ),
+            "{md}"
+        );
+
+        // Requested but empty → the explicit zero statement.
+        let mut empty = base_payload();
+        empty["checks"] = json!({});
+        empty["stale_derivations"] = json!({ "specs": [] });
+        let md = render_health_markdown(&empty);
+        assert!(md.contains("## Checks (0 mems)"), "{md}");
+        assert!(md.contains("## Stale derivations (0 findings)"), "{md}");
+
+        // Keys absent (not requested) → byte-unchanged: no section,
+        // and the populated render is the base render plus appendix.
+        let base_md = render_health_markdown(&base_payload());
+        for heading in ["## Checks", "## Stale derivations", "## Quarantined mems"] {
+            assert!(
+                !base_md.contains(heading),
+                "absent key must render nothing: {base_md}"
+            );
+        }
+        let appended = render_health_markdown(&v);
+        assert!(
+            appended.starts_with(&base_md),
+            "sections append; the base output stays byte-identical"
+        );
     }
 }

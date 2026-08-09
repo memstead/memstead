@@ -339,8 +339,13 @@ pub struct MemSubject {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct MutationStamp {
-    /// Engine crate version (`memstead-base`'s `CARGO_PKG_VERSION`)
-    /// of the binary that performed the last mutation.
+    /// Full build version of the binary that performed the last
+    /// mutation — `memstead-base`'s `build_info::full_version()`:
+    /// the crate semver, plus `+g<sha>[-dirty]` build metadata when
+    /// built inside a git checkout, so dev builds between releases
+    /// stamp distinguishably. Older stamps carry the plain semver
+    /// and compare against the full current value — firing the skew
+    /// hint on the first post-upgrade boot is desired, no migration.
     pub engine_version: String,
     /// Resolved schema `<name>@<version>` the last mutation validated
     /// against.

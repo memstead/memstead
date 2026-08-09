@@ -34,8 +34,10 @@ pub struct Args {
     /// edges — re-assert via `memstead relate` to refresh), checks
     /// (per-mem counts of the four derived check states plus the
     /// author≠checker independence gate: self_checked /
-    /// confirmed_independent / unconfirmable, compared over recorded
-    /// identities).
+    /// confirmed_independent / unconfirmable — transport is not
+    /// identity, so until a caller-declared identity exists every
+    /// ok-checked entity reports unconfirmable; the other two
+    /// categories are explicit empties).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -639,6 +641,78 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     }
                 }
             }
+        }
+        lines.push(String::new());
+    }
+
+    // Checks axis — same wording as the MCP text renderer
+    // (`render_health_markdown`). Null-is-a-statement: requested with
+    // no mems renders the explicit zero heading; not requested
+    // renders nothing.
+    if let Some(axis) = checks_axis.as_ref().and_then(|a| a.as_object()) {
+        lines.push(format!("## Checks ({} mems)", axis.len()));
+        for (mem, c) in axis {
+            let count = |key: &str| c.get(key).and_then(|x| x.as_u64()).unwrap_or(0);
+            let gate = |key: &str| {
+                c.get("independence")
+                    .and_then(|g| g.get(key))
+                    .and_then(|e| e.get("count"))
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0)
+            };
+            lines.push(format!(
+                "- `{mem}`: never_checked {}, checked_ok {}, check_failed {}, \
+                 check_stale {}; independence: self_checked {}, \
+                 confirmed_independent {}, unconfirmable {}",
+                count("never_checked"),
+                count("checked_ok"),
+                count("check_failed"),
+                count("check_stale"),
+                gate("self_checked"),
+                gate("confirmed_independent"),
+                gate("unconfirmable"),
+            ));
+        }
+        lines.push(String::new());
+    }
+
+    // Stale-derivations axis — same requested-vs-absent contract and
+    // wording as the MCP text renderer.
+    if let Some(axis) = stale_derivations_axis.as_ref().and_then(|a| a.as_object()) {
+        let total: usize = axis
+            .values()
+            .filter_map(|a| a.as_array().map(|a| a.len()))
+            .sum();
+        lines.push(format!("## Stale derivations ({total} findings)"));
+        for (mem, findings) in axis {
+            for f in findings.as_array().into_iter().flatten() {
+                lines.push(format!(
+                    "- `{mem}`: {} -[{}]-> {} ({})",
+                    f.get("source").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("rel_type").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("target").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("state").and_then(|x| x.as_str()).unwrap_or(""),
+                ));
+            }
+        }
+        lines.push(String::new());
+    }
+
+    // Quarantine roster — ungated (present in the JSON whenever
+    // non-empty), so the markdown renders it whenever present: per
+    // mem the reason code plus the message, which carries the repair
+    // command.
+    if let Some(arr) = obj.get("quarantined").and_then(|v| v.as_array()) {
+        lines.push(format!("## Quarantined mems ({})", arr.len()));
+        for q in arr {
+            lines.push(format!(
+                "- `{}` [{}] {}",
+                q.get("mem").and_then(|x| x.as_str()).unwrap_or(""),
+                q.get("reason_code").and_then(|x| x.as_str()).unwrap_or(""),
+                q.get("reason_message")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or(""),
+            ));
         }
         lines.push(String::new());
     }

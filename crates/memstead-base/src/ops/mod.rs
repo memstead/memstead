@@ -581,8 +581,12 @@ pub enum WarningHint {
     /// surface non-fatal findings silently skipped the auto-stub case.
     /// Carries the materialised stub id so the agent can pin a
     /// follow-up `memstead_create` (or `memstead_relate remove=true` to drop
-    /// the edge before authoring).
-    AutoStubCreated { stub_id: EntityId },
+    /// the edge before authoring). `pending` marks the dry-run path:
+    /// the rehearsal validated the add and REPORTS the would-be stub
+    /// without writing it — the code stays `AUTO_STUB_CREATED`
+    /// (response-shape stability), only the message branches, so a
+    /// rehearsed response never claims a performed effect.
+    AutoStubCreated { stub_id: EntityId, pending: bool },
     /// A duplicate-add `memstead_relate` on a derivation-declared
     /// rel-type refreshed the edge's baseline (agent-trust plan 12) —
     /// the agent's explicit "I have reviewed the target's change; the
@@ -719,6 +723,23 @@ pub enum WarningHint {
         running_engine: String,
         /// Resolved schema the last mutation validated against.
         stamped_schema: String,
+    },
+    /// Generation-behind hint: the mem's pinned schema resolved from
+    /// the BUILT-IN catalogue and the catalogue registers at least
+    /// one strictly-higher version of the same name (real semver
+    /// ordering). Warn-tier, ungated, never blocking — retention
+    /// seals every shipped version, so the pin keeps working; the
+    /// hint names the newest available generation and the migration
+    /// verb. Locally-installed (workspace-storage) pins are silent:
+    /// the engine only knows generations for built-ins. Surfaces on
+    /// boot output and `memstead health` without an include gate,
+    /// like the skew hint above.
+    SchemaGenerationsBehind {
+        mem: String,
+        /// The pinned ref (`name@version`).
+        pinned: String,
+        /// The newest built-in version registered under the same name.
+        newest: String,
     },
     /// The mem was created on storage with no version control (a
     /// folder mount). Provenance means something WEAKER there than the
@@ -1399,12 +1420,24 @@ impl fmt::Display for WarningHint {
                  `memstead_changes_since since={old_head}` for the per-entity \
                  diff."
             ),
-            WarningHint::AutoStubCreated { stub_id } => write!(
-                f,
-                "target '{stub_id}' did not exist — stub auto-created. \
-                 Promote it via memstead_create when authoring the real \
-                 entity (stub adoption preserves the incoming edge)."
-            ),
+            WarningHint::AutoStubCreated { stub_id, pending } => {
+                if *pending {
+                    write!(
+                        f,
+                        "target '{stub_id}' does not exist — a stub would be \
+                         auto-created by the real call. Promote it via \
+                         memstead_create first, or let the real call create \
+                         the stub (adoption preserves the incoming edge)."
+                    )
+                } else {
+                    write!(
+                        f,
+                        "target '{stub_id}' did not exist — stub auto-created. \
+                         Promote it via memstead_create when authoring the real \
+                         entity (stub adoption preserves the incoming edge)."
+                    )
+                }
+            }
             WarningHint::DerivationBaselineRefreshed { from, rel_type, to } => write!(
                 f,
                 "derivation baseline refreshed: '{from}' -[{rel_type}]-> '{to}' — the edge \
@@ -1531,6 +1564,17 @@ impl fmt::Display for WarningHint {
                  only — the next mutation re-stamps. If behaviour \
                  differs from the last session, the binary changed \
                  between them.",
+            ),
+            WarningHint::SchemaGenerationsBehind {
+                mem,
+                pinned,
+                newest,
+            } => write!(
+                f,
+                "mem '{mem}' pins built-in schema {pinned}, but the \
+                 catalogue registers newer generations up to {newest}. \
+                 The pin keeps working (retained versions stay sealed); \
+                 migrate via `memstead mem set-schema` when ready.",
             ),
             WarningHint::FolderMemProvenance { mem } => write!(
                 f,
@@ -1677,6 +1721,7 @@ impl WarningHint {
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
+            Self::SchemaGenerationsBehind { .. } => "SCHEMA_GENERATIONS_BEHIND",
             Self::SchemaHeadingRoundtripViolation { .. } => "SCHEMA_HEADING_ROUNDTRIP_VIOLATION",
             Self::SectionHeadingDivergence { .. } => "SECTION_HEADING_DIVERGENCE",
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
@@ -1721,6 +1766,7 @@ impl WarningHint {
             Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
             Self::ReadMemsMigratedToMounts { .. } => None,
             Self::EngineVersionSkew { mem, .. } => Some(mem.as_str()),
+            Self::SchemaGenerationsBehind { mem, .. } => Some(mem.as_str()),
             Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
             Self::ConstraintUnsatisfied { entity_id, .. } => Some(entity_id.mem()),
@@ -1729,7 +1775,7 @@ impl WarningHint {
             Self::InlineWikiLinkAutoStubbed { from, .. } => Some(from.mem()),
             Self::SelfLinkIgnored { id } => Some(id.mem()),
             Self::CrossMemTargetMemUncreated { from_mem, .. } => Some(from_mem.as_str()),
-            Self::AutoStubCreated { stub_id } => Some(stub_id.mem()),
+            Self::AutoStubCreated { stub_id, .. } => Some(stub_id.mem()),
             Self::DerivationBaselineRefreshed { from, .. } => Some(from.mem()),
             Self::UpdateNoop { id } => Some(id.mem()),
             Self::ParsedRelationInvalid { entity_id, .. } => Some(entity_id.mem()),
@@ -1769,6 +1815,11 @@ impl WarningHint {
                 stamped_engine: "0.3.0".into(),
                 running_engine: "0.4.0".into(),
                 stamped_schema: "default@1.0.0".into(),
+            },
+            WarningHint::SchemaGenerationsBehind {
+                mem: "m".into(),
+                pinned: "default@1.0.0".into(),
+                newest: "1.2.0".into(),
             },
             WarningHint::MissingRequiredSection {
                 entity_type: "t".into(),
@@ -1912,6 +1963,7 @@ impl WarningHint {
             },
             WarningHint::AutoStubCreated {
                 stub_id: EntityId("specs--future-target".into()),
+                pending: false,
             },
             WarningHint::ParsedRelationInvalid {
                 entity_id: EntityId("specs--example-source".into()),
@@ -2146,7 +2198,7 @@ impl WarningHint {
                 "new_head": new_head,
                 "entities_loaded": entities_loaded,
             }),
-            Self::AutoStubCreated { stub_id } => serde_json::json!({ "stub_id": stub_id }),
+            Self::AutoStubCreated { stub_id, .. } => serde_json::json!({ "stub_id": stub_id }),
             Self::DerivationBaselineRefreshed { from, rel_type, to } => serde_json::json!({
                 "from": from,
                 "rel_type": rel_type,
@@ -2204,6 +2256,15 @@ impl WarningHint {
                     "stamped_schema": stamped_schema,
                 })
             }
+            Self::SchemaGenerationsBehind {
+                mem,
+                pinned,
+                newest,
+            } => serde_json::json!({
+                "mem": mem,
+                "pinned": pinned,
+                "newest": newest,
+            }),
             Self::ReadMemsMigratedToMounts {
                 mems,
                 from_host_mems,

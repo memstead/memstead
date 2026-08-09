@@ -56,6 +56,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   generation.
 
 ### Added
+- **Dev builds are distinguishable: every version surface carries the
+  full build version.** Between releases every dev build reported the
+  same crate semver, so the "engine version changed → re-read the
+  tool roster" hint and the `ENGINE_VERSION_SKEW` stamp comparison
+  could never fire in dogfood or field use. A build script in
+  `memstead-base` now best-effort captures the git commit at build
+  time (short sha, `-dirty` suffix on a modified tree; empty — and
+  harmless — outside a git checkout, e.g. crates.io builds), and
+  `build_info::full_version()` renders `<semver>+g<sha>[-dirty]`.
+  Consumers: CLI `--version`, both MCP flavours' `serverInfo.version`
+  (the full server additionally appends a runtime `Build: …` sentence
+  to its instructions when a sha exists; the compile-time semver line
+  is unchanged), the overview's `_engine_version`, and the per-mem
+  mutation stamp — whose skew comparison now compares full strings,
+  so a rebuild between mutations fires the existing warn-tier,
+  non-blocking hint. Old plain-semver stamps compare against the full
+  value and may fire once — desired, no migration.
+- **A pinned built-in with newer generations says so:
+  `SCHEMA_GENERATIONS_BEHIND`.** A new default (ungated, warn-tier,
+  never blocking) health signal: a mem whose pinned schema resolves
+  from the built-in catalogue while the catalogue registers at least
+  one strictly-higher version (real semver ordering) surfaces a
+  warning naming the pinned ref, the newest available version, and
+  the migration verb (`memstead mem set-schema`). The pin keeps
+  working — retention seals every shipped version. Locally-installed
+  (workspace-storage) pins are silent: the engine only knows
+  generations for built-ins. Rides the health JSON `warnings` and
+  both markdown renderers, like the skew hint.
 - **The check operation: "checked and sound" vs "never checked" vs
   "checked, but changed since" is derived, never declared.** A new
   verb — `memstead_check` (MCP, both flavours; the deliberate single
@@ -935,6 +963,44 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   previously two of the three curation fields were writable over MCP
   but invisible on the roster, readable only via a configure
   no-field read-back.
+- **The independence gate stops manufacturing identity from
+  transport.** The checks axis' author≠checker gate compared the
+  recorded `(actor, client)` pair — but that pair names the SURFACE a
+  record arrived through, not who acted, so CLI-authored +
+  CLI-checked always read `self_checked` even across sessions (false
+  conviction, the norm) and a cross-surface author/check read
+  `confirmed_independent` (false acquittal via transport). Until a
+  caller-declared identity exists, no author/checker comparison can
+  be established: every ok-checked entity with recorded provenance
+  now lands in `unconfirmable`. `self_checked` and
+  `confirmed_independent` stay in the wire shape as explicit empties
+  — categories awaiting the caller-identity substrate.
+- **Health markdown parity: the text channel says what the JSON
+  says.** Both markdown renderers — the MCP text channel's and the
+  CLI's — lacked sections for three JSON payloads: `checks` (state
+  counts plus the independence gate), `stale_derivations`, and the
+  ungated `quarantined` roster (per mem the reason code and the
+  message carrying the repair command). Both renderers now render all
+  three with consistent wording, following the null-is-a-statement
+  pattern: a requested-but-empty axis renders its explicit zero line,
+  an absent key renders nothing, and without the includes the output
+  is byte-unchanged.
+- **A rehearsed relate no longer claims it created a stub.** The
+  dry-run relate path reused the real path's `AUTO_STUB_CREATED`
+  message ("stub auto-created") although rehearsals write nothing.
+  The warning code is unchanged (response-shape stability); the
+  message now branches — the rehearsal says the stub "would be
+  auto-created by the real call" and names the two follow-ups
+  (promote via `memstead_create` first, or let the real call stub).
+- **`schema install <builtin>@<version>` resolves every retained
+  version.** The collect path looked up the built-in by its
+  name-exact directory alone, so any version living in a suffixed
+  retention sibling (`planning-0.3`, …) refused `SCHEMA_NOT_FOUND`
+  even though the registry registers all retained versions. The path
+  now falls back to scanning the embedded catalogue for the (name,
+  version) the ref pins — identity from each package's manifest, the
+  directory name stays organisational — and an unregistered version
+  still refuses.
 
 ## [0.4.0] - 2026-07-20
 
