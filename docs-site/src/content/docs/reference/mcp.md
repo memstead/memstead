@@ -6,11 +6,12 @@ title: "MCP tools"
 
 Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpServer` (the lean `--no-default-features` build) and `McpServer` (the full default build). Every tool the running server exposes appears below; each section is tagged with the flavour pair (`lean + full`, `lean only`, or `full only`).
 
-**Counts:** the lean build exposes 12 tools; the full build exposes 24 (a strict superset on shared names).
+**Counts:** the lean build exposes 13 tools; the full build exposes 25 (a strict superset on shared names).
 
 ## Index
 
 - [`memstead_changes_since`](#memstead-changes-since)
+- [`memstead_check`](#memstead-check)
 - [`memstead_create`](#memstead-create)
 - [`memstead_delete`](#memstead-delete)
 - [`memstead_diff`](#memstead-diff)
@@ -75,6 +76,51 @@ Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead
   "required": [
     "mem",
     "since"
+  ],
+  "type": "object"
+}
+```
+
+## `memstead_check`
+
+**Flavour:** lean + full
+
+Record a check: "entity E checked, verdict ok | failed, via method M" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and mem commits are untouched; that non-mutation is what makes check-staleness computable). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger — a newer check supersedes older ones for state derivation but never erases them. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — stale means the entity changed after its last check, computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed in this response as `check_state`. Verdict vocabulary is closed (`ok` | `failed`) — nuance goes in `method` or in process-mem entities; an unknown verdict refuses `INVALID_VERDICT`. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), unknown/quarantined mems, read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED` — recording is never best-effort). A check with an unspecified role records honestly but cannot confirm independence downstream.
+
+**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "entity": {
+      "description": "Full entity id (`mem--slug`) of the entity that was checked",
+      "type": "string"
+    },
+    "method": {
+      "description": "Optional free-text method note — how the check was performed (e.g. \"diffed against source spec\").",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "description": "The role this check is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably on the check record — same trust model as mutation roles: caller-declared but tamper-evident. Omit to record the session default (or unspecified — legal, but an unspecified-role check cannot confirm independence downstream).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verdict": {
+      "description": "The verdict, from the closed vocabulary `ok` | `failed`. Nuance goes in `method` or in process-mem entities — an unknown value refuses `INVALID_VERDICT` naming the vocabulary.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "entity",
+    "verdict"
   ],
   "type": "object"
 }
@@ -284,6 +330,13 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
         "null"
       ]
     },
+    "role": {
+      "description": "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sections": {
       "additionalProperties": {
         "type": "string"
@@ -332,6 +385,13 @@ Remove an entity permanently. Deletes the entity's store record, every edge touc
     },
     "note": {
       "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "description": "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.",
       "type": [
         "string",
         "null"
@@ -436,6 +496,13 @@ Read one entity. Dual channel: text carries rendered markdown for direct prose c
         "null"
       ]
     },
+    "include_provenance": {
+      "description": "Append a `mutation_provenance` block to structured_content: `created_by` and `last_modified_by`, each with actor, client, the caller-declared `role` (or `unspecified` — absence served as cannot-confirm, never as a real role), timestamp, and the backend reference. Derived from the append-only mutation record (commit trailers / ledger), which no verb can edit after the fact — the tamper-evident half of the role trust model. When the recorded story does not start at the entity's creation, `created_by` is absent and `story_truncated` is true (stated, never fabricated). Default false: responses are byte-unchanged without the flag.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "include_relations": {
       "description": "Append a `## Relations` section with typed edges grouped by direction.",
       "type": [
@@ -474,7 +541,7 @@ Read one entity. Dual channel: text carries rendered markdown for direct prose c
 
 **Flavour:** lean + full
 
-Return graph health metrics. Typed payload on `structured_content` (always whole); text chunkable past `token_budget` (page via `chunk`). Default: summary counts (per-schema `orphans_by_schema`/`communities_by_schema`), node/edge totals, type/edge distributions, `writable_mems`/`read_mems` rosters, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `constraints`, `conformance`, `integrity`, `config`, `anchors`. `missing_fields` adds per-issue `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH`) beside the legacy `missing` names. `config` = the `include_config` projection (rendered once if both). `conformance` lints entities against `target_schema` or each mem's pin into `findings` `{id, axis, code, detail}` (write-time typed codes); `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body `[[id]]` refs lacking files. `tags` aggregates into `tag_distribution` (`limit`-capped), `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied `required_outgoing` blocks. `constraints` lists standing declared-constraint violations with `severity`. `anchors` adds per-mem counts of the four anchor states `resolved`/`drifted`/`recheck`/`unresolvable`. `most_connected` entries: `total`/`incoming`/`outgoing` plus `typed_*` counterparts. Unknown `include` keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps `most_connected`/`tag_distribution` at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings (`SUSPICIOUS_NESTED_PREFIX`, `DUPLICATE_SECTION_HEADING`, `MEM_RELOADED`) — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; edge counts turn source-in-mem; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).
+Return graph health metrics. Typed payload on `structured_content`; text chunkable past `token_budget` via `chunk`. Default: summary counts (`orphans_by_schema`/`communities_by_schema`), node/edge totals, distributions, `writable_mems`/`read_mems`, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `constraints`, `conformance`, `integrity`, `config`, `anchors`, `friction` (refusal-ledger counts), `open_questions` (per-mem worklist of unknowns — stubs, open anchors, unsatisfied constraints, dangling links, process-mem entries; negative findings separated as already-searched; capped with explicit `more`), `stale_derivations` (derivation edges whose target changed since baseline), `checks` (check-state counts + gate: `unconfirmable` until caller identity; `self_checked`/`confirmed_independent` empty). `missing_fields` adds `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH`) beside `missing`. `config` = the `include_config` projection. `conformance` lints entities against `target_schema` or each pin into `findings` `{id, axis, code, detail}`; `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body refs lacking files. `tags` aggregates into `tag_distribution` (`limit`-capped), `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied blocks. `constraints` lists standing declared-constraint violations. `anchors` adds per-mem counts of `resolved`/`drifted`/`recheck`/`unresolvable`. Unknown keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).
 
 **Hints:** `read_only` = true, `destructive` = false, `idempotent` = true, `open_world` = false
 
@@ -495,7 +562,7 @@ Return graph health metrics. Typed payload on `structured_content` (always whole
       ]
     },
     "include": {
-      "description": "Detail sections to include (default: none — summary counts only). Allowed keys: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity. `conformance` lints every entity against the effective schema and returns per-entity `findings` (`{id, axis, code, detail}` with write-time typed codes); `integrity` additionally projects the consistency axis (dangling links, stubs) into the same findings list. Unknown keys surface as UNKNOWN_INCLUDE_KEY on warnings.",
+      "description": "Detail sections to include (default: none — summary counts only). Allowed keys: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, conformance, integrity, friction, open_questions, stale_derivations. `conformance` lints every entity against the effective schema and returns per-entity `findings` (`{id, axis, code, detail}` with write-time typed codes); `integrity` additionally projects the consistency axis (dangling links, stubs) into the same findings list. `friction` summarizes the workspace-local refusal ledger — counts per typed refusal code and per verb, whole-ledger plus a recent 24h window; the ledger is local-only, refusals-only, content-free (code/verb/timestamp/surface, never parameters or payload text). `open_questions` composes a per-mem worklist of what the holding does not know — stubs, recheck/unresolvable anchors, unsatisfied constraints, dangling links, and a paired process mem's open entries with negative findings under a distinct already-searched heading (done, keep off); every list is capped with an explicit `more` remainder. `stale_derivations` lists per mem every explicit edge on a derivation-declared rel-type whose target's current hash differs from the recorded baseline (`stale`) or that has no baseline (`unbaselined` — never fabricated as fresh or stale); re-assert the edge via memstead_relate to refresh the baseline. Unknown keys surface as UNKNOWN_INCLUDE_KEY on warnings.",
       "items": {
         "type": "string"
       },
@@ -1011,7 +1078,7 @@ Start here. Returns the schema catalogue, mem inventory, and community clusters 
 
 **Flavour:** lean + full
 
-Connect entities with typed edges — a list of relation operations applied atomically. `relations` carries one or more `{from, to, type, remove?, description?}` entries; the whole list is all-or-nothing in ONE commit per touched mem, per-entry validation identical to a single operation, in-order semantics (later entries validate against the state earlier entries produced; an acyclic check sees edges added earlier in the list). A single-relation call is a list of one. Pre-fetch the mem's schema via `memstead_schema` (see server instructions). Type names case-insensitive; stored UPPER_SNAKE_CASE. One failing entry refuses the WHOLE list — nothing commits, every failing entry reported: a list of one surfaces its entry's own typed code top-level (`INVALID_REL_TYPE` with `details.allowed` + `suggestion`, `INVALID_REL_SHAPE`, `CROSS_MEM_LINK_NOT_ALLOWED`, `CROSS_MEM_TARGET_NOT_FOUND`, `RELATIONSHIP_CYCLE` with `details.existing_path`, `INVALID_ENTITY_ID`); larger lists wrap under `BATCH_REFUSED` with `details.entries[]` of `{index, from, to, rel_type, code, message, details}` (`errors_suppressed` counts envelopes past the cap). Remove skips shape validation. Per entry: `remove: true` deletes; `from` must be real; `to` may auto-stub (`AUTO_STUB_CREATED`; into an uncreated mem: `CROSS_MEM_TARGET_MEM_UNCREATED`). Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, `action: "noop"`). Response: `results[]` in submission order, each `{from, to, rel_type, action, source, _hash}` — `_hash` is that source's next `expected_hash`; top-level `commit_sha` (empty when all no-op), `warnings`, `orphan_stubs_removed` (stubs GC'd when a removed edge was their last referrer; surviving body wiki-links refuse `RELATION_HAS_BODY_LINKS`). Optional `note` rides every entry. Edges never move files.
+Connect entities with typed edges — a list of relation operations applied atomically. `relations` carries one or more `{from, to, type, remove?, description?}` entries; the whole list is all-or-nothing in ONE commit per touched mem, per-entry validation identical to a single operation, in-order semantics (later entries validate against the state earlier entries produced; an acyclic check sees edges added earlier in the list). A single-relation call is a list of one. Pre-fetch the mem's schema via `memstead_schema` (see server instructions). Type names case-insensitive; stored UPPER_SNAKE_CASE. One failing entry refuses the WHOLE list — nothing commits, every failing entry reported: a list of one surfaces its entry's own typed code top-level (`INVALID_REL_TYPE` with `details.allowed` + `suggestion`, `INVALID_REL_SHAPE`, `CROSS_MEM_LINK_NOT_ALLOWED`, `CROSS_MEM_TARGET_NOT_FOUND`, `RELATIONSHIP_CYCLE` with `details.existing_path`, `INVALID_ENTITY_ID`); larger lists wrap under `BATCH_REFUSED` with `details.entries[]` of `{index, from, to, rel_type, code, message, details}` (`errors_suppressed` counts envelopes past the cap). Remove skips shape validation. Per entry: `remove: true` deletes; `from` must be real; `to` may auto-stub (`AUTO_STUB_CREATED`; into an uncreated mem: `CROSS_MEM_TARGET_MEM_UNCREATED`). Add-existing / remove-missing are typed-warning no-ops (`DUPLICATE_RELATIONSHIP` / `NO_SUCH_RELATIONSHIP`, `action: "noop"`). Response: `results[]` in submission order, each `{from, to, rel_type, action, source, _hash}` — `_hash` is that source's next `expected_hash`; top-level `commit_sha` (empty when all no-op), `warnings`, `orphan_stubs_removed` (stubs GC'd when a removed edge was their last referrer; surviving body wiki-links refuse `RELATION_HAS_BODY_LINKS`). Optional `note` rides every entry. `dry_run: true` rehearses the list: same validation and refusals, would-be actions and stubs reported, nothing lands; `commit_sha` stays empty (the rehearsal marker). Edges never move files.
 
 **Hints:** `read_only` = false, `destructive` = false, `idempotent` = true, `open_world` = false
 
@@ -1064,6 +1131,13 @@ Connect entities with typed edges — a list of relation operations applied atom
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "dry_run": {
+      "description": "Validate and preview the relation operations without executing — no edge lands, no stub is created, no VCS commit. dry_run runs the SAME validation a real call runs (cross-mem policy, vocabulary, description posture, acyclicity, self-loop refusal); an illegal operation refuses with the IDENTICAL typed envelope a real call would return, and a legal one reports the would-be action with `_hash` set to the PROSPECTIVE post-write source hash, `commit_sha` empty (the rehearsal marker), and any would-be `AUTO_STUB_CREATED` warning for an absent target — reported, never created. The follow-up real call on an unchanged mem succeeds; like create's dry_run, its `_hash` diverges from the rehearsed one whenever a wall-clock second ticks between the calls (the auto-stamped `last_modified` enters the hash) — a timestamp shift, not drift.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "note": {
       "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
       "type": [
@@ -1077,6 +1151,13 @@ Connect entities with typed edges — a list of relation operations applied atom
         "$ref": "#/$defs/RelateOpInput"
       },
       "type": "array"
+    },
+    "role": {
+      "description": "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -1149,6 +1230,13 @@ Rename an entity by changing its title. Updates the entity ID (mem prefix preser
     },
     "note": {
       "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "description": "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.",
       "type": [
         "string",
         "null"
@@ -1737,6 +1825,13 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
       },
       "type": [
         "array",
+        "null"
+      ]
+    },
+    "role": {
+      "description": "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary.",
+      "type": [
+        "string",
         "null"
       ]
     },

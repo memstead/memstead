@@ -46,6 +46,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead recover`↴](#memstead-recover)
 * [`memstead anchors`↴](#memstead-anchors)
 * [`memstead changes`↴](#memstead-changes)
+* [`memstead check`↴](#memstead-check)
 * [`memstead review-mark`↴](#memstead-review-mark)
 * [`memstead review-mark list`↴](#memstead-review-mark-list)
 * [`memstead review-mark set`↴](#memstead-review-mark-set)
@@ -150,6 +151,7 @@ Exit codes:
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+* `check` — Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
 * `review-mark` — Read and move the per-mem review mark — the engine's one pointer per mem to the last human-approved state. `list` shows every mem's mark and head; `set`/`clear` move it (explicit target only); `diff` reports the unreviewed delta. Marks never gate writes
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
 * `fetch` — Fetch a mem's branch refs from a git remote into the mem-repo (no local branch moves — inspect first, then `pull`). Requires a git-branch-backed mem (`INVALID_INPUT` on folder mounts); refuses `UNKNOWN_REMOTE` when the remote is not configured
@@ -167,6 +169,7 @@ Exit codes:
 * `--json` — Emit JSON instead of markdown. Matches MCP `structured_content` shape
 * `--quiet` — Suppress engine startup logs on stderr
 * `--workspace <PATH>` — Operate on the workspace at PATH instead of walking up from the current directory (like `git -C`: the process runs as if invoked from PATH, so relative path arguments resolve against it). Also settable via the `MEMSTEAD_WORKSPACE` environment variable; the flag wins when both are present. A PATH without the `.memstead/workspace.toml` marker refuses with `WORKSPACE_NOT_INITIALISED` naming the path — it never falls back to the directory walk
+* `--role <ROLE>` — Declare the role this invocation's mutations are performed in (agent-trust plan 13): `author` | `checker` | `verifier`. Recorded immutably alongside each mutation (commit trailer / ledger). Omit to record mutations as unspecified — legal forever, never refused
 
 
 
@@ -194,6 +197,7 @@ Read one entity as markdown
 * `--include-relations` — Append relations as a trailing JSON code block
 * `--token-budget <TOKEN_BUDGET>` — Token budget for chunking. Omit for no chunking
 * `--chunk <CHUNK>` — 1-based chunk index to return (requires `--token-budget`)
+* `--provenance` — Append the derived mutation-provenance block: created-by and last-modified-by with actor, client, declared role (or `unspecified`), and timestamp — read from the append-only mutation record, which no verb can edit after the fact
 
 
 
@@ -365,7 +369,7 @@ Health summary (orphans, stubs, stale entities, missing fields)
 
 ###### **Options:**
 
-* `--include <INCLUDE>` — Opt heavy content into the response: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, constraints (standing violations of declared schema constraints), conformance, integrity, config, anchors (per-mem counts of the four standalone anchor-verification states). `conformance` lints every entity against the effective schema into a `findings` array (write-time typed codes); `integrity` adds the consistency axis (dangling links, stubs) to the same list. `config` renders the workspace-config projection (per-mem origin/storage/vcs detail, `mutations`, `plugin`) — the same block MCP's `include_config: true` serves. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead overview --include`
+* `--include <INCLUDE>` — Opt heavy content into the response: orphans, stubs, most_connected, missing_fields, stale, dangling_links, tags, missing_required_outgoing, constraints (standing violations of declared schema constraints), conformance, integrity, config, anchors (per-mem counts of the four standalone anchor-verification states), friction (the workspace-local refusal ledger's summary — counts per typed refusal code and per verb, whole-ledger plus a recent 24h window; local-only, content-free), open_questions (per-mem composed worklist of what the holding does not know: stubs, recheck/unresolvable anchors, unsatisfied constraints, dangling links, and a paired process mem's open entries — negative findings separated as already-searched; capped per kind with an explicit `more` count), stale_derivations (per-mem derivation edges whose target changed since the recorded baseline, plus unbaselined edges — re-assert via `memstead relate` to refresh), checks (per-mem counts of the four derived check states plus the author≠checker independence gate: self_checked / confirmed_independent / unconfirmable — transport is not identity, so until a caller-declared identity exists every ok-checked entity reports unconfirmable; the other two categories are explicit empties). `conformance` lints every entity against the effective schema into a `findings` array (write-time typed codes); `integrity` adds the consistency axis (dangling links, stubs) to the same list. `config` renders the workspace-config projection (per-mem origin/storage/vcs detail, `mutations`, `plugin`) — the same block MCP's `include_config: true` serves. Repeatable (`--include K --include K`) AND comma-string (`--include K1,K2`) forms both parse — uniform with `memstead overview --include`
 * `--target-schema <TARGET_SCHEMA>` — Schema ref (`name@x.y.z`) the conformance/integrity includes lint against instead of each mem's current pin
 * `--limit <LIMIT>` — Max rows for `most_connected` and `tag_distribution` (default: 10)
 
@@ -760,6 +764,7 @@ Add or remove a typed relationship between two entities
 * `--remove` — Remove the relationship instead of creating it
 * `--description <DESCRIPTION>` — Per-edge description applied on add. Validated against the rel-type's `per_edge_description` posture; rel-types declared `forbidden` reject this flag, `required` reject its absence
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
+* `--dry-run` — Rehearse the relate: run the full validation (identical refusals and warnings) and report the would-be edge — including a would-be auto-stub, which is reported, never created — without writing anything. `commit_sha` stays empty (the rehearsal marker); `_hash` is the prospective post-write hash
 
 
 
@@ -829,11 +834,12 @@ Slug derivation:
 
 Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
 
-**Usage:** `memstead batch-update --from <FILE>`
+**Usage:** `memstead batch-update [OPTIONS] --from <FILE>`
 
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `updates: [...]` array
+* `--dry-run` — Rehearse the whole batch: run the full per-entry validation (identical refusals, report-all) and report the would-be receipt, committing nothing. `commit_sha` stays empty (the rehearsal marker)
 
 
 
@@ -841,11 +847,12 @@ Update many entities in one atomic call. Input is a JSON file with a top-level `
 
 Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
 
-**Usage:** `memstead batch-create --from <FILE>`
+**Usage:** `memstead batch-create [OPTIONS] --from <FILE>`
 
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `creates: [...]` array
+* `--dry-run` — Rehearse the whole batch: run the full validation pass (intra-batch references resolve, identical refusals, report-all) and report the would-be receipt, creating nothing. `commit_sha` stays empty (the rehearsal marker)
 
 
 
@@ -853,11 +860,12 @@ Create many entities in one atomic call. Input is a JSON file with a top-level `
 
 Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
 
-**Usage:** `memstead batch-relate --from <FILE>`
+**Usage:** `memstead batch-relate [OPTIONS] --from <FILE>`
 
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `relates: [...]` array
+* `--dry-run` — Rehearse the whole batch: run the full in-order validation (identical refusals, report-all) and report the would-be receipt, committing nothing — no edge, no stub. `commit_sha` stays empty (the rehearsal marker)
 
 
 
@@ -901,6 +909,23 @@ Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` fr
 * `--since <SINCE>` — Commit SHA to diff against. Pass a prior mutation's `commit_sha`, or the git canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync
 * `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors the MCP `rename_similarity` parameter. Default 0.6. Engine-authored renames pair via commit-note provenance and bypass this threshold; the value drives the rename-similarity fallback for non-engine renames (external `git mv`, pre-provenance migrations). Lower widens the recall window at the cost of false-positive pairing on that path
 * `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level schema/registry ref tip (unified schemas + per-mem configs) into the response. Default off — entity- delta only. Commit-mirroring clients turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
+
+
+
+## `memstead check`
+
+Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
+
+**Usage:** `memstead check [OPTIONS] --verdict <VERDICT> <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Full entity id (`mem--slug`) of the entity that was checked
+
+###### **Options:**
+
+* `--verdict <VERDICT>` — The verdict: `ok` | `failed`. The vocabulary is closed — nuance goes in `--method` or in process-mem entities
+* `--method <METHOD>` — Free-text method note — how the check was performed
 
 
 

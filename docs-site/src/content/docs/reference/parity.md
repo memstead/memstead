@@ -58,6 +58,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 
 ### Unaligned — MCP
 
+- `memstead_check`
 - `memstead_diff`
 - `memstead_mem_configure`
 - `memstead_mem_set_schema`
@@ -69,6 +70,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `batch-create`
 - `batch-relate`
 - `batch-update`
+- `check`
 - `domain`
 - `export`
 - `init`
