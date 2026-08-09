@@ -31,7 +31,11 @@ pub struct Args {
     /// already-searched; capped per kind with an explicit `more`
     /// count), stale_derivations (per-mem derivation edges whose
     /// target changed since the recorded baseline, plus unbaselined
-    /// edges — re-assert via `memstead relate` to refresh).
+    /// edges — re-assert via `memstead relate` to refresh), checks
+    /// (per-mem counts of the four derived check states plus the
+    /// author≠checker independence gate: self_checked /
+    /// confirmed_independent / unconfirmable, compared over recorded
+    /// identities).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -107,6 +111,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         anchors_axis,
         open_questions_axis,
         stale_derivations_axis,
+        checks_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -286,6 +291,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &stale_derivations_axis {
         obj.insert("stale_derivations".to_string(), axis.clone());
+    }
+    if let Some(axis) = &checks_axis {
+        obj.insert("checks".to_string(), axis.clone());
     }
     // `--include friction`: the friction ledger's read surface
     // (agent-trust plan 08) — counts per refusal code / per verb,
@@ -741,6 +749,10 @@ struct GatheredHealth {
     /// stale_derivations`: per-mem derivation-staleness findings from
     /// the shared `health_stale_derivations_axis` helper.
     stale_derivations_axis: Option<serde_json::Value>,
+    /// `--include checks` — per-mem check-state counts + the
+    /// author≠checker independence gate, via the shared
+    /// `health_checks_axis` helper.
+    checks_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -809,6 +821,7 @@ fn gather_mem_repo(
     fill_anchors_axis(engine, include, &mut g);
     fill_open_questions_axis(engine, include, &mut g);
     fill_stale_derivations_axis(engine, include, &mut g);
+    fill_checks_axis(engine, include, &mut g);
     g
 }
 
@@ -834,6 +847,7 @@ fn gather_filesystem(
     fill_anchors_axis(engine, include, &mut g);
     fill_open_questions_axis(engine, include, &mut g);
     fill_stale_derivations_axis(engine, include, &mut g);
+    fill_checks_axis(engine, include, &mut g);
     g
 }
 
@@ -892,6 +906,12 @@ fn fill_stale_derivations_axis(
         g.stale_derivations_axis = Some(
             memstead_base::ops::health::health_stale_derivations_axis(engine, None),
         );
+    }
+}
+
+fn fill_checks_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
+    if include.iter().any(|s| s == "checks") {
+        g.checks_axis = Some(memstead_base::ops::health::health_checks_axis(engine, None));
     }
 }
 
@@ -988,6 +1008,7 @@ fn gather_from_store(
         anchors_axis: None,
         open_questions_axis: None,
         stale_derivations_axis: None,
+        checks_axis: None,
     }
 }
 

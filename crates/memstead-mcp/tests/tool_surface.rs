@@ -1583,6 +1583,12 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // agent-trust plan 12.
             "stale_derivations",
             "unbaselined",
+            // Checks axis (include=checks) — agent-trust plan 14's
+            // derived check states + the independence gate.
+            "checks",
+            "self_checked",
+            "confirmed_independent",
+            "unconfirmable",
             // Friction-ledger axis (include=friction) — agent-trust
             // plan 08's refusal-ledger summary.
             "friction",

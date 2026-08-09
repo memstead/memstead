@@ -2789,6 +2789,115 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
 /// refuses typed with the vocabulary named on both surfaces; and the
 /// folder backend records the same shape in its JSONL ledger.
 #[test]
+fn checks_health_axis_gates_independence_on_recorded_identities() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+    let cli_bin = Path::new(memstead_mcp_bin())
+        .parent()
+        .expect("binary has a parent dir")
+        .join("memstead");
+
+    // Four entities, all authored via MCP (same recorded author
+    // identity: agent + the harness client).
+    for title in ["Alpha Claim", "Beta Claim", "Gamma Claim", "Delta Claim"] {
+        let created = harness.call_tool(
+            "memstead_create",
+            json!({
+                "title": title,
+                "entity_type": "spec",
+                "mem": "specs",
+                "sections": { "identity": "I.", "purpose": "P." },
+                "role": "author"
+            }),
+        );
+        assert!(created["isError"] != true, "{created}");
+    }
+
+    // Alpha: ok-checked via MCP as checker — same identity as the
+    // author (agent + same client) → self_checked despite the
+    // distinct role: the gate compares identities, not roles.
+    let r = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--alpha-claim", "verdict": "ok", "role": "checker" }),
+    );
+    assert!(r["isError"] != true, "{r}");
+
+    // Beta: ok-checked via the CLI as checker — a different recorded
+    // identity (cli + memstead-cli client) → confirmed_independent.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "--role",
+            "checker",
+            "check",
+            "specs--beta-claim",
+            "--verdict",
+            "ok",
+        ])
+        .output()
+        .expect("run memstead CLI check");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Gamma: ok-checked with NO role — records honestly, but an
+    // unspecified-role check cannot confirm independence.
+    let r = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--gamma-claim", "verdict": "ok" }),
+    );
+    assert!(r["isError"] != true, "{r}");
+
+    // Delta stays never-checked.
+    let health = harness.call_tool(
+        "memstead_health",
+        json!({ "include": ["checks"] }),
+    );
+    assert!(health["isError"] != true, "{health}");
+    let axis = &health["structuredContent"]["checks"]["specs"];
+    assert_eq!(axis["checked_ok"], 3, "{axis}");
+    assert!(axis["never_checked"].as_u64().unwrap() >= 1, "{axis}");
+    let gate = &axis["independence"];
+    assert_eq!(
+        gate["self_checked"]["items"],
+        json!(["specs--alpha-claim"]),
+        "{gate}"
+    );
+    assert_eq!(
+        gate["confirmed_independent"]["items"],
+        json!(["specs--beta-claim"]),
+        "{gate}"
+    );
+    assert_eq!(
+        gate["unconfirmable"]["items"],
+        json!(["specs--gamma-claim"]),
+        "{gate}"
+    );
+
+    // CLI parity: the same axis through `memstead health`.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args(["--json", "health", "--include", "checks"])
+        .output()
+        .expect("run memstead CLI health");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v["checks"]["specs"]["independence"]["self_checked"]["items"],
+        json!(["specs--alpha-claim"]),
+        "{v}"
+    );
+}
+
+#[test]
 fn check_operation_records_derives_state_and_mutates_nothing() {
     let tmp = TempDir::new().unwrap();
     seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);

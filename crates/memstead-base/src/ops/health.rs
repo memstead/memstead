@@ -46,6 +46,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "friction",
     "open_questions",
     "stale_derivations",
+    "checks",
 ];
 
 /// The `include=["anchors"]` axis — per-mem counts of the four
@@ -53,6 +54,121 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 /// per-anchor mechanism `verify-anchors` and the binding verify use.
 /// Shared by the full composer, the CLI health command, and the lean
 /// MCP server so the axis cannot drift between surfaces.
+/// The `include=["checks"]` axis (agent-trust plan 14): per mem,
+/// counts of the four derived check states plus the author≠checker
+/// independence gate over ok-checked entities. The gate compares
+/// RECORDED identities (actor + client) across operations — the
+/// entity's created-by record against its newest ok-check record:
+/// equal → `self_checked` ("twice-asserted, not verified"); different
+/// → `confirmed_independent`; an unspecified-role check or an
+/// unknowable author identity (truncated story) → `unconfirmable` —
+/// unknown identity can't confirm independence, stated distinctly
+/// from self-checked. Derivation only: nothing here is stamped, and
+/// a workspace without a check ledger serves all-never-checked.
+/// Identity lists are capped at [`OPEN_QUESTIONS_ITEM_CAP`] with an
+/// explicit `more` count.
+pub fn health_checks_axis(
+    engine: &crate::engine::Engine,
+    mem_filter: Option<&str>,
+) -> serde_json::Value {
+    let cap = OPEN_QUESTIONS_ITEM_CAP;
+    let capped = |mut items: Vec<String>| -> serde_json::Value {
+        items.sort();
+        let count = items.len();
+        let more = count.saturating_sub(cap);
+        items.truncate(cap);
+        let mut o = serde_json::Map::new();
+        o.insert("count".into(), serde_json::json!(count));
+        o.insert("items".into(), serde_json::json!(items));
+        if more > 0 {
+            o.insert("more".into(), serde_json::json!(more));
+        }
+        serde_json::Value::Object(o)
+    };
+
+    let ledger = engine
+        .workspace_root()
+        .map(crate::check::CheckLedger::for_workspace);
+    // Newest record per entity, one ledger read for the whole axis.
+    let mut latest: std::collections::BTreeMap<String, crate::check::CheckRecord> =
+        std::collections::BTreeMap::new();
+    if let Some(l) = &ledger {
+        for rec in l.all() {
+            latest.insert(rec.entity.clone(), rec);
+        }
+    }
+
+    let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
+    mems.sort();
+    let mut out = serde_json::Map::new();
+    for mem in mems {
+        if let Some(f) = mem_filter
+            && f != mem
+        {
+            continue;
+        }
+        let mut counts = std::collections::BTreeMap::from([
+            ("never_checked", 0usize),
+            ("checked_ok", 0usize),
+            ("check_failed", 0usize),
+            ("check_stale", 0usize),
+        ]);
+        let mut self_checked: Vec<String> = Vec::new();
+        let mut confirmed_independent: Vec<String> = Vec::new();
+        let mut unconfirmable: Vec<String> = Vec::new();
+        for e in engine.store().all_entities().filter(|e| e.mem == mem) {
+            let id = e.id.0.clone();
+            let state =
+                crate::check::derive_state(latest.get(&id), &e.content_hash);
+            *counts.entry(state.as_str()).or_insert(0) += 1;
+            if state != crate::check::CheckState::CheckedOk {
+                continue;
+            }
+            let check = latest.get(&id).expect("checked_ok implies a record");
+            if check.role == "unspecified" {
+                unconfirmable.push(id);
+                continue;
+            }
+            // Author identity from the append-only mutation record.
+            // Provenance lookup is bounded to ok-checked entities.
+            let author = engine
+                .entity_provenance(&mem, &id)
+                .ok()
+                .and_then(|p| p.created_by);
+            match author {
+                None => unconfirmable.push(id),
+                Some(a) => {
+                    let author_identity =
+                        (a.actor.unwrap_or_default(), a.client.unwrap_or_default());
+                    let checker_identity = (
+                        check.actor.clone(),
+                        check.client.clone().unwrap_or_default(),
+                    );
+                    if author_identity == checker_identity {
+                        self_checked.push(id);
+                    } else {
+                        confirmed_independent.push(id);
+                    }
+                }
+            }
+        }
+        let mut m = serde_json::Map::new();
+        for (k, v) in counts {
+            m.insert(k.to_string(), serde_json::json!(v));
+        }
+        m.insert(
+            "independence".into(),
+            serde_json::json!({
+                "self_checked": capped(self_checked),
+                "confirmed_independent": capped(confirmed_independent),
+                "unconfirmable": capped(unconfirmable),
+            }),
+        );
+        out.insert(mem, serde_json::Value::Object(m));
+    }
+    serde_json::Value::Object(out)
+}
+
 /// One derivation-staleness finding (agent-trust plan 12): an
 /// explicit edge on a derivation-declared rel-type whose baseline
 /// differs from the target's current hash (`stale`), or that has no

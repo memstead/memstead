@@ -546,6 +546,12 @@ pub fn compose_health(
             memstead_base::ops::health::health_stale_derivations_axis(engine, args.mem),
         );
     }
+    if include.iter().any(|s| s == "checks") {
+        obj.insert(
+            "checks".into(),
+            memstead_base::ops::health::health_checks_axis(engine, args.mem),
+        );
+    }
     if include.iter().any(|s| s == "open_questions") {
         obj.insert(
             "open_questions".into(),

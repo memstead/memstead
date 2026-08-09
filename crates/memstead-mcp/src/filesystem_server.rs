@@ -1752,11 +1752,13 @@ impl FilesystemMcpServer {
         let wants_friction = include.iter().any(|s| s == "friction");
         let wants_open_questions = include.iter().any(|s| s == "open_questions");
         let wants_stale_derivations = include.iter().any(|s| s == "stale_derivations");
+        let wants_checks = include.iter().any(|s| s == "checks");
         if wants_anchors
             || wants_constraints
             || wants_friction
             || wants_open_questions
             || wants_stale_derivations
+            || wants_checks
         {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
@@ -1786,6 +1788,10 @@ impl FilesystemMcpServer {
             if wants_stale_derivations {
                 value["stale_derivations"] =
                     memstead_base::ops::health::health_stale_derivations_axis(&engine, None);
+            }
+            if wants_checks {
+                value["checks"] =
+                    memstead_base::ops::health::health_checks_axis(&engine, None);
             }
             return json_response(&value);
         }

@@ -78,6 +78,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `INVALID_VERDICT` names it); unknown entities, read-only and
   quarantined mems refuse typed. A check with an unspecified role
   records honestly but cannot confirm independence downstream.
+  The `checks` health axis aggregates per mem: counts of the four
+  derived states plus the author≠checker independence gate over
+  ok-checked entities — the entity's created-by identity compared
+  against its newest check's recorded identity (`self_checked` when
+  equal: twice-asserted, not verified; `confirmed_independent` when
+  different; `unconfirmable` for an unspecified-role check or an
+  unknowable author) — the first real gate built on recorded
+  mutation provenance, computed from records, never from fields.
 - **Mutation provenance: who acted, in what role — recorded, not
   declared.** Every mutation records a caller-declared role from the
   closed vocabulary `author` | `checker` | `verifier` (or
