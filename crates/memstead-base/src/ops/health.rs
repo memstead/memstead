@@ -138,16 +138,22 @@ pub fn health_checks_axis(
             match author {
                 None => unconfirmable.push(id),
                 Some(a) => {
-                    let author_identity =
-                        (a.actor.unwrap_or_default(), a.client.unwrap_or_default());
-                    let checker_identity = (
-                        check.actor.clone(),
-                        check.client.clone().unwrap_or_default(),
-                    );
-                    if author_identity == checker_identity {
-                        self_checked.push(id);
-                    } else {
-                        confirmed_independent.push(id);
+                    // Identity is the (actor, client) pair. When either
+                    // record's client half is unrecorded, equality can be
+                    // neither confirmed nor refuted — unconfirmable, never
+                    // a false independence confirmation (a same-binary
+                    // author+check must not read as independent just
+                    // because one record dropped its client).
+                    match (a.client, &check.client) {
+                        (Some(ac), Some(cc)) => {
+                            let same_actor = a.actor.as_deref() == Some(check.actor.as_str());
+                            if same_actor && ac == *cc {
+                                self_checked.push(id);
+                            } else {
+                                confirmed_independent.push(id);
+                            }
+                        }
+                        _ => unconfirmable.push(id),
                     }
                 }
             }
@@ -337,15 +343,43 @@ pub fn health_open_questions_axis(
 
         // Paired process mems: open entries are work; negative
         // findings are the opposite — already searched, keep off.
+        // Pairing runs through the ONE resolution function the brief
+        // renderer uses (agent-trust plan 14): a destination's
+        // declaration wins regardless of naming — and pairs even
+        // with no binding at all (the process tier stands without
+        // one); the binding-name convention remains the fallback. A
+        // declaration naming an unmounted mem is a typed finding,
+        // never a silent fallback.
         let mut process = Vec::new();
-        for (dest, binding) in bindings.iter().filter(|(d, _)| d == mem) {
-            let _ = dest;
-            if mounted.iter().any(|m| m == binding) {
+        let mem_bindings: Vec<&String> = bindings
+            .iter()
+            .filter(|(d, _)| d == mem)
+            .map(|(_, b)| b)
+            .collect();
+        let mut resolutions: Vec<(Option<String>, crate::ingest::resolve::ProcessMemResolution)> =
+            Vec::new();
+        if mem_bindings.is_empty() {
+            let r = crate::ingest::resolve::resolve_process_mem(engine, mem, "");
+            if r.declared {
+                resolutions.push((None, r));
+            }
+        } else {
+            for binding in &mem_bindings {
+                resolutions.push((
+                    Some((*binding).clone()),
+                    crate::ingest::resolve::resolve_process_mem(engine, mem, binding),
+                ));
+            }
+        }
+        for (binding, r) in resolutions {
+            if r.mounted {
                 let mut open = Vec::new();
                 let mut searched = Vec::new();
-                for e in engine.store().all_entities().filter(|e| {
-                    !e.stub && e.id.mem() == binding.as_str()
-                }) {
+                for e in engine
+                    .store()
+                    .all_entities()
+                    .filter(|e| !e.stub && e.id.mem() == r.mem.as_str())
+                {
                     let item = serde_json::json!({
                         "kind": e.entity_type,
                         "id": e.id.to_string(),
@@ -359,10 +393,19 @@ pub fn health_open_questions_axis(
                 }
                 process.push(serde_json::json!({
                     "binding": binding,
-                    "process_mem": binding,
+                    "process_mem": r.mem,
+                    "declared": r.declared,
                     "resolvable": true,
                     "open_entries": capped(open),
                     "already_searched": capped(searched),
+                }));
+            } else if r.declared {
+                process.push(serde_json::json!({
+                    "binding": binding,
+                    "process_mem": r.mem,
+                    "declared": true,
+                    "resolvable": false,
+                    "finding": "DECLARED_PROCESS_MEM_MISSING",
                 }));
             } else {
                 process.push(serde_json::json!({
@@ -1733,6 +1776,82 @@ mod tests {
     use crate::store::Store;
     use indexmap::IndexMap;
     use memstead_schema::type_by_name;
+
+    /// Agent-trust plan 14, criterion 4: a destination config
+    /// declaring its process mem resolves the pairing regardless of
+    /// naming — with no binding at all — and a declaration naming a
+    /// missing mem surfaces as the typed finding, never a silent
+    /// fallback.
+    #[test]
+    fn declared_process_mem_pairs_and_missing_declaration_is_typed() {
+        use crate::engine::test_helpers::folder_mount;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dest_dir = tmp.path().join("dest");
+        let proc_dir = tmp.path().join("oddly-named-process");
+        std::fs::create_dir_all(dest_dir.join(".memstead")).unwrap();
+        std::fs::create_dir_all(&proc_dir).unwrap();
+        // Declaration: the destination pairs with a mem whose name no
+        // convention would derive.
+        std::fs::write(
+            dest_dir.join(".memstead").join("config.json"),
+            r#"{ "schema": "default@1.0.0", "processMem": "oddly-named-process" }"#,
+        )
+        .unwrap();
+        let engine = crate::Engine::from_mounts(vec![
+            (
+                folder_mount("dest", dest_dir.clone()),
+                Box::new(crate::storage::FilesystemMemWriter::new(dest_dir.clone()))
+                    as Box<dyn crate::backend::MemBackend>,
+            ),
+            (
+                folder_mount("oddly-named-process", proc_dir.clone()),
+                Box::new(crate::storage::FilesystemMemWriter::new(proc_dir))
+                    as Box<dyn crate::backend::MemBackend>,
+            ),
+        ])
+        .unwrap();
+
+        // The one resolution function: declaration wins.
+        let r = crate::ingest::resolve::resolve_process_mem(&engine, "dest", "dest-derived");
+        assert!(r.declared && r.mounted);
+        assert_eq!(r.mem, "oddly-named-process");
+        // No declaration → derivation fallback, byte-identical to the
+        // pre-declaration behaviour.
+        let r = crate::ingest::resolve::resolve_process_mem(
+            &engine,
+            "oddly-named-process",
+            "whatever",
+        );
+        assert!(!r.declared && !r.mounted);
+        assert_eq!(r.mem, "whatever");
+
+        // The axis pairs the declared mem with no binding present.
+        let axis = health_open_questions_axis(&engine, Some("dest"));
+        let process = &axis["dest"]["process"];
+        assert_eq!(process[0]["process_mem"], "oddly-named-process", "{axis}");
+        assert_eq!(process[0]["declared"], true, "{axis}");
+        assert_eq!(process[0]["resolvable"], true, "{axis}");
+
+        // Declaration naming a missing mem: typed finding.
+        std::fs::write(
+            dest_dir.join(".memstead").join("config.json"),
+            r#"{ "schema": "default@1.0.0", "processMem": "nowhere" }"#,
+        )
+        .unwrap();
+        let engine2 = crate::Engine::from_mounts(vec![(
+            folder_mount("dest", dest_dir.clone()),
+            Box::new(crate::storage::FilesystemMemWriter::new(dest_dir))
+                as Box<dyn crate::backend::MemBackend>,
+        )])
+        .unwrap();
+        let axis = health_open_questions_axis(&engine2, Some("dest"));
+        let process = &axis["dest"]["process"];
+        assert_eq!(
+            process[0]["finding"], "DECLARED_PROCESS_MEM_MISSING",
+            "{axis}"
+        );
+        assert_eq!(process[0]["resolvable"], false, "{axis}");
+    }
 
     fn make_entity(name: &str, has_required: bool) -> Entity {
         let mut metadata = IndexMap::new();

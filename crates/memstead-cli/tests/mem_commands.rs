@@ -2201,6 +2201,70 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     assert_eq!(v["unresolvable"], 2, "{v}");
 }
 
+/// Agent-trust plan 14, criterion 2 regression (grader refutation,
+/// 2026-08-09): on a FOLDER workspace, an entity authored and
+/// ok-checked by the same CLI binary must read `self_checked` — the
+/// CLI's folder mutation path now records its client identity, so
+/// the gate compares full (actor, client) pairs instead of calling a
+/// client-less author "independent" of its own checker.
+#[test]
+fn folder_backend_same_identity_check_reads_self_checked() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let ws = root.join("gatews");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "--role",
+            "author",
+            "create",
+            "--title",
+            "Gate Probe",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Recorded.",
+            "--section",
+            "context=Gate test.",
+        ])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "--role",
+            "checker",
+            "check",
+            "gatews--gate-probe",
+            "--verdict",
+            "ok",
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "health", "--include", "checks"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let gate = &v["checks"]["gatews"]["independence"];
+    assert_eq!(
+        gate["self_checked"]["items"],
+        serde_json::json!(["gatews--gate-probe"]),
+        "same binary authored and checked — never confirmed_independent: {v}"
+    );
+    assert_eq!(gate["confirmed_independent"]["count"], 0, "{v}");
+}
+
 /// Agent-trust plan 14, criterion 3: a binding-less mem's verify
 /// findings persist under the mem-scoped standalone key and the next
 /// pass re-serves them as already-seen — observe-and-forget is gone.

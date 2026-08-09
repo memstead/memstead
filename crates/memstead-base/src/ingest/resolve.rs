@@ -488,3 +488,52 @@ mod tests {
         assert_eq!(find_git_root(plain.path()), None, "no .git anywhere above");
     }
 }
+
+/// How a destination mem's process mem was resolved (agent-trust
+/// plan 14): by explicit declaration (`MemConfig.process_mem` on the
+/// destination — wins where present) or by the binding-name
+/// convention (the fallback, byte-identical to the pre-declaration
+/// behaviour). One resolution function for every consumer — the
+/// brief renderer and the open-questions health axis read this and
+/// nothing else, so pairing can never drift between surfaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessMemResolution {
+    /// The resolved process-mem name.
+    pub mem: String,
+    /// Whether that mem is actually mounted.
+    pub mounted: bool,
+    /// True when the name came from the destination's declaration
+    /// rather than the naming convention. A declared-but-unmounted
+    /// resolution is a typed finding for the caller to surface —
+    /// never a silent fallback to derivation.
+    pub declared: bool,
+}
+
+/// Resolve the process mem for `destination_mem`. `derived_name` is
+/// the convention-derived candidate (the binding / ingest name);
+/// pass it even when a declaration might exist — the declaration
+/// wins, the derivation remains the fallback.
+pub fn resolve_process_mem(
+    engine: &crate::Engine,
+    destination_mem: &str,
+    derived_name: &str,
+) -> ProcessMemResolution {
+    let mounted_names = engine.mem_names();
+    if let Some(declared) = engine
+        .mem_config_for(destination_mem)
+        .and_then(|c| c.process_mem.clone())
+    {
+        let mounted = mounted_names.iter().any(|m| *m == declared);
+        return ProcessMemResolution {
+            mem: declared,
+            mounted,
+            declared: true,
+        };
+    }
+    let mounted = mounted_names.iter().any(|m| *m == derived_name);
+    ProcessMemResolution {
+        mem: derived_name.to_string(),
+        mounted,
+        declared: false,
+    }
+}

@@ -1491,6 +1491,7 @@ pub fn create_mem(
         authors: None,
         schema: Some(canonical_schema_ref.clone()),
         write_guidance: params.write_guidance.clone(),
+        process_mem: None,
         rules: None,
         publish: None,
         language: None,

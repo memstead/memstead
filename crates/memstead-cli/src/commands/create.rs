@@ -385,7 +385,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 dry_run: false,
             };
             let outcome = engine
-                .create_entity(create_args, Actor::Cli, None, note.as_deref())
+                .create_entity(
+                    create_args,
+                    Actor::Cli,
+                    Some(&crate::setup::cli_client_id()),
+                    note.as_deref(),
+                )
                 .map_err(CliError::from_engine_op)?;
 
             if ctx.json {

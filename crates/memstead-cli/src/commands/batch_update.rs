@@ -148,7 +148,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .map(|entry| build_update_args(&engine, entry))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let result = engine
-        .batch_update(updates, Actor::Cli, None, args.dry_run)
+        .batch_update(
+            updates,
+            Actor::Cli,
+            Some(&crate::setup::cli_client_id()),
+            args.dry_run,
+        )
         .map_err(CliError::from_engine_op)?;
     // Reload-before-op runs inside `batch_update` for every mem the
     // batch touches; drain any `mem_changed` notice it stashed.

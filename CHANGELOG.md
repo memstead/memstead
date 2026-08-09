@@ -92,7 +92,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   store — a keyspace that can never collide with a binding's
   `hash(D)` and never shares its file — and the next pass re-serves
   them as `already_seen` (a repaired source closes its finding).
-  Binding-backed findings flows are byte-untouched.
+  Binding-backed findings flows are byte-untouched. And process-mem
+  pairing is declarative: a destination mem's config can declare its
+  process mem (`processMem` in the mem config) — the declaration wins
+  over the binding-name convention through one shared resolution
+  function serving both the brief renderer and the open-questions
+  health axis, which now pairs even with no binding at all; a
+  declaration naming an unmounted mem surfaces as the typed
+  `DECLARED_PROCESS_MEM_MISSING` finding, never a silent fallback.
+  Without a declaration, name-derivation behaves exactly as before.
+  Gate-hardening from the plan's own grading: the CLI's folder-backend
+  mutation paths now record their client identity (previously only
+  mem-repo commits carried `Client:`), and the independence gate
+  treats a record with an unrecorded client half as `unconfirmable` —
+  a same-binary author+check can never read as independent.
 - **Mutation provenance: who acted, in what role — recorded, not
   declared.** Every mutation records a caller-declared role from the
   closed vocabulary `author` | `checker` | `verifier` (or

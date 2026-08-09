@@ -2800,7 +2800,14 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
 
     // Four entities, all authored via MCP (same recorded author
     // identity: agent + the harness client).
-    for title in ["Alpha Claim", "Beta Claim", "Gamma Claim", "Delta Claim"] {
+    for title in [
+        "Alpha Claim",
+        "Beta Claim",
+        "Gamma Claim",
+        "Delta Claim",
+        "Epsilon Claim",
+        "Zeta Claim",
+    ] {
         let created = harness.call_tool(
             "memstead_create",
             json!({
@@ -2852,6 +2859,35 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
     );
     assert!(r["isError"] != true, "{r}");
 
+    // Epsilon: ok-checked, then edited — the axis serves check_stale.
+    let r = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--epsilon-claim", "verdict": "ok", "role": "checker" }),
+    );
+    assert!(r["isError"] != true, "{r}");
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--epsilon-claim" }),
+    );
+    let eps_hash = read["structuredContent"]["_hash"].as_str().unwrap().to_string();
+    let r = harness.call_tool(
+        "memstead_update",
+        json!({
+            "id": "specs--epsilon-claim",
+            "expected_hash": eps_hash,
+            "sections": { "purpose": "P2." },
+            "role": "author"
+        }),
+    );
+    assert!(r["isError"] != true, "{r}");
+
+    // Zeta: failed check — the axis serves check_failed.
+    let r = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--zeta-claim", "verdict": "failed", "role": "checker" }),
+    );
+    assert!(r["isError"] != true, "{r}");
+
     // Delta stays never-checked.
     let health = harness.call_tool(
         "memstead_health",
@@ -2860,6 +2896,8 @@ fn checks_health_axis_gates_independence_on_recorded_identities() {
     assert!(health["isError"] != true, "{health}");
     let axis = &health["structuredContent"]["checks"]["specs"];
     assert_eq!(axis["checked_ok"], 3, "{axis}");
+    assert_eq!(axis["check_stale"], 1, "{axis}");
+    assert_eq!(axis["check_failed"], 1, "{axis}");
     assert!(axis["never_checked"].as_u64().unwrap() >= 1, "{axis}");
     let gate = &axis["independence"];
     assert_eq!(

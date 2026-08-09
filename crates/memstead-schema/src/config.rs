@@ -393,6 +393,17 @@ pub struct MemConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
 
+    /// Declared process-mem pairing (agent-trust plan 14): the name
+    /// of the mem holding this mem's process tier (verification
+    /// targets, findings, inquiry entries). Declaration wins over the
+    /// binding-name derivation the brief renderer and the
+    /// open-questions health axis otherwise use; a declaration naming
+    /// an unmounted mem surfaces as a typed health finding, never a
+    /// silent fallback. Absent means "derive by convention" — the
+    /// pre-declaration behaviour, unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_mem: Option<String>,
+
     /// Schema this mem is pinned to. Exact `<name>@<version>` pin
     /// only — bare-name forms are rejected at config load. Exactly one
     /// schema per mem. The `Option` keeps serde tolerant so a missing
@@ -1028,6 +1039,7 @@ mod tests {
             version: None,
             description: None,
             authors: None,
+            process_mem: None,
             schema: Some(SchemaRef::new("default", semver::Version::new(1, 0, 0))),
             write_guidance: Default::default(),
             rules: None,
@@ -1423,6 +1435,7 @@ mod tests {
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
             authors: None,
+            process_mem: None,
             schema: Some("default@1.0.0".parse().unwrap()),
             write_guidance: guidance,
             rules: None,
@@ -1781,6 +1794,7 @@ mod tests {
             version: Some(semver::Version::new(0, 1, 0)),
             description: None,
             authors: None,
+            process_mem: None,
             schema: Some("default@1.0.0".parse().unwrap()),
             write_guidance: HashMap::new(),
             rules: None,

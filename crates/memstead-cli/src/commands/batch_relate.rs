@@ -107,7 +107,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     let mut engine = crate::setup::full_engine(ctx)?;
     let result = engine
-        .batch_relate(relates, Actor::Cli, None, args.dry_run)
+        .batch_relate(
+            relates,
+            Actor::Cli,
+            Some(&crate::setup::cli_client_id()),
+            args.dry_run,
+        )
         .map_err(CliError::from_engine_op)?;
     // Reload-before-op runs inside `batch_relate` for every mem the
     // batch touches; drain any `mem_changed` notice it stashed.

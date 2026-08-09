@@ -111,3 +111,30 @@ impl Engine {
         Ok((derive_state(latest.as_ref(), &current_hash), latest))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::check::Verdict;
+    use crate::vcs::Actor;
+    use crate::workspace::MountCapability;
+
+    /// Criterion 5 complement: a read-only mount refuses a check
+    /// typed (`READ_ONLY_MOUNT`) — capability gating runs before the
+    /// entity lookup, same as every mutation-shaped guard.
+    #[test]
+    fn check_refuses_read_only_mounts_typed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut mount = crate::engine::test_helpers::folder_mount("ro", tmp.path().to_path_buf());
+        mount.capability = MountCapability::ReadOnly;
+        let mut engine = crate::Engine::from_mounts(vec![(
+            mount,
+            Box::new(crate::storage::FilesystemMemWriter::new(tmp.path().to_path_buf()))
+                as Box<dyn crate::backend::MemBackend>,
+        )])
+        .unwrap();
+        let err = engine
+            .record_check("ro", "ro--anything", Verdict::Ok, None, Actor::Cli, None)
+            .unwrap_err();
+        assert_eq!(err.code(), "READ_ONLY_MOUNT");
+    }
+}

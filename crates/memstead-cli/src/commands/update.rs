@@ -562,7 +562,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 anchors_unset: payload.anchors_unset,
             };
             let outcome = engine
-                .update_entity(update_args, Actor::Cli, None, note.as_deref())
+                .update_entity(
+                    update_args,
+                    Actor::Cli,
+                    Some(&crate::setup::cli_client_id()),
+                    note.as_deref(),
+                )
                 .map_err(CliError::from_engine_op)?;
 
             if ctx.json {

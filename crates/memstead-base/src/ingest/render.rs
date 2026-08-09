@@ -339,14 +339,33 @@ fn render_one_shot(engine: &Engine, resolved: &ResolvedIngest) -> String {
 /// a missing process mem is reported absent rather than auto-created (mutation
 /// belongs to the orchestration layer, not brief rendering).
 fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemInfo {
-    let leaf = resolved.name.clone();
     let skipped = resolved.mode == BuildMode::OneShot;
-    let present = !skipped && engine.mem_names().iter().any(|m| *m == leaf);
+    // One resolution mechanism (agent-trust plan 14): the
+    // destination's declaration wins, the ingest-name convention is
+    // the fallback. A declared-but-unmounted process mem is a stated
+    // notice, never a silent fallback to derivation.
+    let resolution = crate::ingest::resolve::resolve_process_mem(
+        engine,
+        &resolved.destination_mem,
+        &resolved.name,
+    );
+    let leaf = resolution.mem.clone();
+    let present = !skipped && resolution.mounted;
+    let notice = (!skipped && resolution.declared && !resolution.mounted).then(|| {
+        format!(
+            "destination `{}` declares process mem `{}`, which is not mounted",
+            resolved.destination_mem, resolution.mem
+        )
+    });
     ProcessMemInfo {
         present,
         skipped,
-        notice: None,
-        mem_label: format!("ingest/{leaf}"),
+        notice,
+        mem_label: if resolution.declared {
+            leaf.clone()
+        } else {
+            format!("ingest/{leaf}")
+        },
         leaf_name: leaf,
     }
 }

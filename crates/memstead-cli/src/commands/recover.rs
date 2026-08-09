@@ -36,7 +36,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let mut engine = crate::setup::full_engine(ctx)?;
     let note_ref = args.note.as_deref();
     let report = engine
-        .apply_parse_recovery(Actor::Cli, None, note_ref)
+        .apply_parse_recovery(Actor::Cli, Some(&crate::setup::cli_client_id()), note_ref)
         .map_err(CliError::from_engine_op)?;
 
     let (removed, skipped, failed) = recovery_counts(&report);
