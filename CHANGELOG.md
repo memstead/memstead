@@ -86,6 +86,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   different; `unconfirmable` for an unspecified-role check or an
   unknowable author) — the first real gate built on recorded
   mutation provenance, computed from records, never from fields.
+  And binding-less verification no longer observes-and-forgets:
+  `memstead verify-anchors` persists its flagged findings (drifted /
+  unresolvable) under a mem-scoped `standalone` key in the findings
+  store — a keyspace that can never collide with a binding's
+  `hash(D)` and never shares its file — and the next pass re-serves
+  them as `already_seen` (a repaired source closes its finding).
+  Binding-backed findings flows are byte-untouched.
 - **Mutation provenance: who acted, in what role — recorded, not
   declared.** Every mutation records a caller-declared role from the
   closed vocabulary `author` | `checker` | `verifier` (or

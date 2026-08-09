@@ -330,6 +330,103 @@ pub fn findings_store_path(workspace_root: &Path, mem: &str, name: &str) -> Path
         .join(format!("{name}.json"))
 }
 
+/// The mem-scoped findings key for binding-less (standalone) anchor
+/// verification (agent-trust plan 14). A distinguished constant that
+/// can never collide with a real `hash(D)` (which is always 64 hex
+/// chars): a hand-authored mem with no binding persists its verify
+/// findings under this key, in its own store file
+/// (`state/findings/<mem>/standalone.json`), closing the
+/// observe-and-forget gap. Binding-backed stores keep their `hash(D)`
+/// key and semantics untouched — the two keyspaces coexist and never
+/// share a file.
+pub const STANDALONE_KEY: &str = "standalone";
+
+/// One standalone finding with its already-seen annotation: `true`
+/// when the previous standalone pass recorded the same target and
+/// class — the re-serving that makes a second pass say "known" rather
+/// than rediscovering.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnnotatedStandaloneFinding {
+    #[serde(flatten)]
+    pub finding: Finding,
+    pub already_seen: bool,
+}
+
+/// Persist a standalone (binding-less) anchor-verification pass's
+/// flagged findings under the mem-scoped [`STANDALONE_KEY`], and
+/// annotate each against the previous pass. `drifted` and
+/// `unresolvable` anchors become durable findings (`recheck` is
+/// transient by definition and `resolved` is not a finding); a pass
+/// whose flagged set is empty still records — the empty batch IS the
+/// "everything resolved clean" statement that closes prior findings.
+pub fn record_standalone_findings(
+    workspace_root: &Path,
+    report: &crate::engine::query::MemAnchorVerification,
+) -> Result<Vec<AnnotatedStandaloneFinding>, StoreError> {
+    let mem = &report.mem;
+    let key = FindingKey {
+        binding_hash: STANDALONE_KEY.to_string(),
+        source_head: String::new(),
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .to_string();
+
+    let findings: Vec<Finding> = report
+        .anchors
+        .iter()
+        .filter_map(|a| {
+            let class = match a.state.as_str() {
+                "drifted" => FindingClass::Drifted,
+                "unresolvable" => FindingClass::UnresolvableAnchor,
+                _ => return None,
+            };
+            Some(Finding {
+                key: key.clone(),
+                facet: STANDALONE_KEY.to_string(),
+                target: FindingTarget::Anchor {
+                    entity: a.entity_id.clone(),
+                    artifact: a.artifact.clone(),
+                },
+                class,
+                detail: format!("{} ({} {})", a.state, a.class, a.grain),
+                created_at: now.clone(),
+            })
+        })
+        .collect();
+
+    let mut store = read_findings_store(workspace_root, mem, STANDALONE_KEY)?
+        .unwrap_or_else(|| FindingsStore {
+            binding: format!("{mem}/{STANDALONE_KEY}"),
+            ..Default::default()
+        });
+    let prior: BTreeSet<(String, String)> = store
+        .current(&key)
+        .iter()
+        .map(|f| {
+            (
+                serde_json::to_string(&f.target).unwrap_or_default(),
+                f.class.as_wire().to_string(),
+            )
+        })
+        .collect();
+    let annotated: Vec<AnnotatedStandaloneFinding> = findings
+        .iter()
+        .map(|f| AnnotatedStandaloneFinding {
+            finding: f.clone(),
+            already_seen: prior.contains(&(
+                serde_json::to_string(&f.target).unwrap_or_default(),
+                f.class.as_wire().to_string(),
+            )),
+        })
+        .collect();
+    store.record(key, now, findings);
+    write_findings_store(workspace_root, mem, STANDALONE_KEY, &store)?;
+    Ok(annotated)
+}
+
 /// Read the durable findings store for a binding, or `None` when none exists.
 /// A malformed file surfaces a typed [`StoreError::Parse`] naming the path.
 pub fn read_findings_store(

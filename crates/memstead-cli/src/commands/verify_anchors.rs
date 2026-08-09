@@ -34,7 +34,34 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .verify_mem_anchors(&args.mem_name)
         .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
 
+    // Persist the flagged findings under the mem-scoped standalone
+    // key (agent-trust plan 14): a binding-less mem's verification no
+    // longer observes-and-forgets — the next pass re-serves what the
+    // previous one recorded as `already_seen`. Binding-backed stores
+    // (keyed by hash(D), own files) are untouched. An engine without
+    // a workspace root has no durable store; stated, never silent.
+    let persisted = engine
+        .workspace_root()
+        .map(|root| {
+            memstead_base::ingest::findings::record_standalone_findings(root, &report)
+                .map_err(|e| {
+                    anyhow::Error::from(CliError::new(
+                        crate::output::ExitKind::Generic,
+                        "FINDINGS_STORE_ERROR",
+                        e.to_string(),
+                    ))
+                })
+        })
+        .transpose()?;
+
     if ctx.json {
+        let findings = persisted.as_ref().map(|fs| {
+            json!({
+                "new": fs.iter().filter(|f| !f.already_seen).count(),
+                "already_seen": fs.iter().filter(|f| f.already_seen).count(),
+                "items": fs,
+            })
+        });
         print_json(&json!({
             "mem": report.mem,
             "resolved": report.resolved,
@@ -42,6 +69,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "recheck": report.recheck,
             "unresolvable": report.unresolvable,
             "anchors": report.anchors,
+            "findings": findings,
         }))?;
     } else {
         let mut out = format!(
@@ -68,6 +96,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     ));
                 }
             }
+        }
+        match &persisted {
+            Some(fs) => {
+                let new = fs.iter().filter(|f| !f.already_seen).count();
+                let seen = fs.len() - new;
+                out.push_str(&format!(
+                    "\nFindings persisted (standalone store): {new} new, {seen} already seen.\n"
+                ));
+            }
+            None => out.push_str(
+                "\n_Findings not persisted — engine has no workspace root._\n",
+            ),
         }
         print_markdown(&out);
     }

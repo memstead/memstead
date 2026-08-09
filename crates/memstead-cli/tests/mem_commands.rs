@@ -2201,6 +2201,72 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     assert_eq!(v["unresolvable"], 2, "{v}");
 }
 
+/// Agent-trust plan 14, criterion 3: a binding-less mem's verify
+/// findings persist under the mem-scoped standalone key and the next
+/// pass re-serves them as already-seen — observe-and-forget is gone.
+#[test]
+fn verify_anchors_persists_standalone_findings_across_passes() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+
+    // Pass 1: the drifted + unresolvable anchors land as NEW findings
+    // (recheck is transient, resolved is not a finding).
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["findings"]["new"], 2, "{v}");
+    assert_eq!(v["findings"]["already_seen"], 0, "{v}");
+    assert_eq!(v["findings"]["items"].as_array().unwrap().len(), 2);
+
+    // The mem-scoped store file exists, keyed standalone — a separate
+    // keyspace from any binding's hash(D) store.
+    let store_path = root
+        .join(".memstead/state/findings/hold/standalone.json")
+        .to_path_buf();
+    let store = fs::read_to_string(&store_path).expect("standalone store persisted");
+    let parsed: serde_json::Value = serde_json::from_str(&store).unwrap();
+    assert_eq!(
+        parsed["batches"][0]["key"]["binding_hash"], "standalone",
+        "{store}"
+    );
+
+    // Pass 2: same observations — re-served as already seen, nothing
+    // rediscovered as new.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["findings"]["new"], 0, "{v}");
+    assert_eq!(v["findings"]["already_seen"], 2, "{v}");
+
+    // Repairing the unresolvable source closes its finding on the next
+    // pass: only the drifted one remains, still already-seen.
+    fs::write(root.join("src-d.txt"), "delta").unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["findings"]["already_seen"], 1, "{v}");
+    assert_eq!(v["findings"]["new"], 0, "{v}");
+}
+
 /// Criterion 4 + 5 remainders: the health anchors axis is include-gated
 /// (absent by default), an anchor-less mem reports empty, and an
 /// unknown mem refuses typed.
