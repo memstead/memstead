@@ -8,6 +8,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **Schema validation reports every violation at once.** The schema
+  loader (shared by `schema validate`, `schema install`, workspace
+  boot, and every other loader entry point) now accumulates all
+  semantic violations found on successfully parsed structure and
+  refuses once, each violation keeping its full recovery material
+  (offending object, declared/allowed set, nearest-match suggestion).
+  A seven-type schema with violations spread across its files is
+  fixed in one edit instead of one validate round per violation. A
+  single violation reports exactly as before — never as a one-element
+  list — and structural failures (unparseable manifest,
+  declared-vs-found type-file mismatch) still short-circuit, since
+  everything downstream of them would be noise. Accumulated order is
+  deterministic (declaration order; type files sorted by name).
 - **The batch family's no-dry-run contract is reversed: rehearsal now
   covers the whole write surface.** `batch-create` / `batch-update` /
   `batch-relate` accept `--dry-run` (engine: a batch-level `dry_run`

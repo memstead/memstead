@@ -284,6 +284,44 @@ pub enum SchemaLoadError {
     SectionHeadingMismatch {
         violations: Vec<HeadingKeyViolation>,
     },
+
+    /// Two or more independent semantic violations found in one load
+    /// pass. The loader accumulates every violation it can prove on
+    /// successfully parsed structure and refuses once, so the author
+    /// fixes the whole set in one edit instead of one violation per
+    /// validate round. Structural failures (a manifest that does not
+    /// parse, a declared-vs-found type-file mismatch) still
+    /// short-circuit — everything downstream of them would be noise
+    /// derived from a value that does not exist. A single violation is
+    /// returned bare, never as a one-element list.
+    #[error(
+        "schema has {} violations:\n{}",
+        errors.len(),
+        format_multiple(errors)
+    )]
+    Multiple { errors: Vec<SchemaLoadError> },
+}
+
+fn format_multiple(errors: &[SchemaLoadError]) -> String {
+    errors
+        .iter()
+        .enumerate()
+        .map(|(i, e)| format!("  {}. {e}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Fold an accumulated violation list into one error: a single
+/// violation stays bare (the common case keeps today's message shape),
+/// several wrap in [`SchemaLoadError::Multiple`]. Callers guarantee
+/// the list is non-empty.
+fn collapse(mut errors: Vec<SchemaLoadError>) -> SchemaLoadError {
+    debug_assert!(!errors.is_empty());
+    if errors.len() == 1 {
+        errors.remove(0)
+    } else {
+        SchemaLoadError::Multiple { errors }
+    }
 }
 
 /// One `(type, key, heading, derived_key)` tuple in a
@@ -449,6 +487,9 @@ pub fn load_schema_from_dir(path: &Path) -> Result<Schema, SchemaLoadError> {
             type_files.push((stem, contents));
         }
     }
+    // read_dir order is filesystem-dependent; accumulated violations
+    // must report in a stable order across runs on the same input.
+    type_files.sort_by(|a, b| a.0.cmp(&b.0));
 
     load_with_context(
         &manifest_text,
@@ -475,6 +516,16 @@ fn load_with_context(
     manifest_path: Option<&Path>,
     types_dir: Option<&Path>,
 ) -> Result<Schema, SchemaLoadError> {
+    // Semantic-violation accumulator. Every check operating on
+    // successfully parsed structure pushes here instead of returning,
+    // so the author sees the complete violation set in one refusal;
+    // only structural failures short-circuit (see
+    // [`SchemaLoadError::Multiple`]). Order is deterministic:
+    // manifest checks in declaration order, then type files in
+    // `types_yamls` order (sorted by stem when loaded from a
+    // directory).
+    let mut errors: Vec<SchemaLoadError> = Vec::new();
+
     let mut manifest: SchemaManifest =
         serde_yaml_ng::from_str(manifest_yaml).map_err(|e| SchemaLoadError::ParseManifest {
             path: manifest_path
@@ -483,24 +534,34 @@ fn load_with_context(
             source: e,
         })?;
 
-    validate_name(&manifest.name)?;
+    if let Err(e) = validate_name(&manifest.name) {
+        errors.push(e);
+    }
 
-    let version =
-        semver::Version::parse(&manifest.version).map_err(|_| SchemaLoadError::InvalidVersion {
-            value: manifest.version.clone(),
-        })?;
+    // `None` only ever coexists with a non-empty accumulator, so the
+    // `Schema` construction at the bottom (reached only when the
+    // accumulator is empty) can unwrap.
+    let version = match semver::Version::parse(&manifest.version) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            errors.push(SchemaLoadError::InvalidVersion {
+                value: manifest.version.clone(),
+            });
+            None
+        }
+    };
 
     // Relationship vocabulary: unique names + _default present
     let mut rel_names: HashSet<String> = HashSet::new();
     for def in &manifest.relationships.definitions {
         if !rel_names.insert(def.name.clone()) {
-            return Err(SchemaLoadError::DuplicateRelationship {
+            errors.push(SchemaLoadError::DuplicateRelationship {
                 name: def.name.clone(),
             });
         }
     }
     if !rel_names.contains("_default") {
-        return Err(SchemaLoadError::MissingDefaultWeight);
+        errors.push(SchemaLoadError::MissingDefaultWeight);
     }
     let available_rels: Vec<String> = manifest
         .relationships
@@ -518,7 +579,7 @@ fn load_with_context(
     {
         let mut declared = available_rels.clone();
         declared.sort();
-        return Err(SchemaLoadError::AliasTargetRelTypeNotDeclared {
+        errors.push(SchemaLoadError::AliasTargetRelTypeNotDeclared {
             schema: manifest.name.clone(),
             target: target.clone(),
             declared,
@@ -558,7 +619,7 @@ fn load_with_context(
     for def in &manifest.relationships.definitions {
         for t in &def.source_types {
             if !manifest.types.iter().any(|d| d == t) {
-                return Err(SchemaLoadError::UndeclaredRelationshipType {
+                errors.push(SchemaLoadError::UndeclaredRelationshipType {
                     relationship: def.name.clone(),
                     field: "source_types",
                     reference: t.clone(),
@@ -568,7 +629,7 @@ fn load_with_context(
         }
         for t in &def.target_types {
             if !manifest.types.iter().any(|d| d == t) {
-                return Err(SchemaLoadError::UndeclaredRelationshipType {
+                errors.push(SchemaLoadError::UndeclaredRelationshipType {
                     relationship: def.name.clone(),
                     field: "target_types",
                     reference: t.clone(),
@@ -597,40 +658,39 @@ fn load_with_context(
             // type; the wildcard extends that decision across the mem
             // boundary and introduces no new permission. Structural
             // rel-types stay per-destination-schema.
-            let Some(alias) = manifest.alias_target_rel_type.as_deref() else {
-                return Err(SchemaLoadError::CrossMemWildcardWithoutAliasTarget);
-            };
-            for def in &entry.definitions {
-                if def.name != alias {
-                    return Err(SchemaLoadError::CrossMemWildcardNonAliasRelType {
-                        rel_type: def.name.clone(),
-                        alias_target: alias.to_string(),
-                    });
+            match manifest.alias_target_rel_type.as_deref() {
+                None => errors.push(SchemaLoadError::CrossMemWildcardWithoutAliasTarget),
+                Some(alias) => {
+                    for def in &entry.definitions {
+                        if def.name != alias {
+                            errors.push(SchemaLoadError::CrossMemWildcardNonAliasRelType {
+                                rel_type: def.name.clone(),
+                                alias_target: alias.to_string(),
+                            });
+                        }
+                    }
                 }
             }
-        } else {
-            if entry.to_schema.contains('@') {
-                return Err(SchemaLoadError::InvalidCrossMemToSchema {
-                    value: entry.to_schema.clone(),
-                    reason: "must not carry a version or range".into(),
-                });
-            }
-            if let Err(reason) = name_shape(&entry.to_schema) {
-                return Err(SchemaLoadError::InvalidCrossMemToSchema {
-                    value: entry.to_schema.clone(),
-                    reason: reason.into(),
-                });
-            }
+        } else if entry.to_schema.contains('@') {
+            errors.push(SchemaLoadError::InvalidCrossMemToSchema {
+                value: entry.to_schema.clone(),
+                reason: "must not carry a version or range".into(),
+            });
+        } else if let Err(reason) = name_shape(&entry.to_schema) {
+            errors.push(SchemaLoadError::InvalidCrossMemToSchema {
+                value: entry.to_schema.clone(),
+                reason: reason.into(),
+            });
         }
         if !seen_to_schemas.insert(entry.to_schema.clone()) {
-            return Err(SchemaLoadError::DuplicateCrossMemToSchema {
+            errors.push(SchemaLoadError::DuplicateCrossMemToSchema {
                 to_schema: entry.to_schema.clone(),
             });
         }
         for def in &entry.definitions {
             for t in &def.source_types {
                 if !manifest.types.iter().any(|d| d == t) {
-                    return Err(SchemaLoadError::UndeclaredCrossMemSourceType {
+                    errors.push(SchemaLoadError::UndeclaredCrossMemSourceType {
                         to_schema: entry.to_schema.clone(),
                         relationship: def.name.clone(),
                         reference: t.clone(),
@@ -647,10 +707,14 @@ fn load_with_context(
     let mut declared = manifest.types.clone();
     declared.sort();
     if found_stems != declared {
-        return Err(SchemaLoadError::TypeFileMismatch {
+        // Structural: the per-type pass below would run against a file
+        // set the manifest never described. Refuse now, together with
+        // every manifest-level violation already proven.
+        errors.push(SchemaLoadError::TypeFileMismatch {
             declared,
             found: found_stems,
         });
+        return Err(collapse(errors));
     }
 
     // Per-type defaults map for edge_weights resolution
@@ -662,20 +726,31 @@ fn load_with_context(
         .collect();
 
     let mut types_map: HashMap<String, Arc<TypeDefinition>> = HashMap::new();
+    let mut had_type_parse_failure = false;
 
     for (stem, text) in types_yamls {
         let type_path = types_dir
             .map(|d| d.join(format!("{stem}.yaml")))
             .unwrap_or_else(|| PathBuf::from(format!("<memory>/{stem}.yaml")));
 
-        let mut td: TypeDefinition =
-            serde_yaml_ng::from_str(text).map_err(|e| SchemaLoadError::ParseType {
-                path: type_path.clone(),
-                source: e,
-            })?;
+        let mut td: TypeDefinition = match serde_yaml_ng::from_str(text) {
+            Ok(td) => td,
+            Err(e) => {
+                // A type file that does not parse cannot be checked
+                // semantically — record the parse failure, keep
+                // checking the other files, and skip the cross-type
+                // pass below (the missing type would make it noise).
+                errors.push(SchemaLoadError::ParseType {
+                    path: type_path.clone(),
+                    source: e,
+                });
+                had_type_parse_failure = true;
+                continue;
+            }
+        };
 
         if td.name != *stem {
-            return Err(SchemaLoadError::TypeNameMismatch {
+            errors.push(SchemaLoadError::TypeNameMismatch {
                 file: stem.clone(),
                 declared: td.name.clone(),
             });
@@ -690,11 +765,10 @@ fn load_with_context(
         // doctrine).
         if let Some(legacy) = td.legacy_propagating_relationships.take() {
             if types_dir.is_some() {
-                return Err(SchemaLoadError::PropagatingRelationshipsRenamed {
+                errors.push(SchemaLoadError::PropagatingRelationshipsRenamed {
                     type_name: td.name.clone(),
                 });
-            }
-            if td.no_self_loop_relationships.is_empty() {
+            } else if td.no_self_loop_relationships.is_empty() {
                 td.no_self_loop_relationships = legacy;
             }
         }
@@ -705,7 +779,7 @@ fn load_with_context(
         // contexts tolerate and drop (nothing consumed it, so
         // dropping is lossless).
         if td.legacy_examples.take().is_some() && types_dir.is_some() {
-            return Err(SchemaLoadError::ExamplesRetired {
+            errors.push(SchemaLoadError::ExamplesRetired {
                 type_name: td.name.clone(),
             });
         }
@@ -729,7 +803,7 @@ fn load_with_context(
             if base_metadata::is_base_key(&field.key)
                 && !reserved_metadata_field_keys().contains(&field.key.as_str())
             {
-                return Err(SchemaLoadError::RedeclaredBaseField {
+                errors.push(SchemaLoadError::RedeclaredBaseField {
                     type_name: td.name.clone(),
                     field: field.key.clone(),
                 });
@@ -744,7 +818,7 @@ fn load_with_context(
         td.metadata_fields = merged;
 
         compile_section_formats(&mut td);
-        validate_type(&td, &rel_names, &available_rels)?;
+        validate_type(&td, &rel_names, &available_rels, &mut errors);
 
         // Resolve edge_weights: start with schema defaults, apply overrides.
         let mut weights = defaults.clone();
@@ -760,30 +834,43 @@ fn load_with_context(
     // loaded. `enum_from_neighbour.section` names a section on the
     // *reached* entity, whose type this schema cannot pin statically;
     // requiring the key to exist on at least one declared type catches
-    // the typo class without over-constraining the endpoint.
-    let all_section_keys: HashSet<&str> = types_map
-        .values()
-        .flat_map(|t| t.sections.iter().map(|s| s.key.as_str()))
-        .collect();
-    for td in types_map.values() {
-        for c in &td.constraints {
-            if let crate::types::ConstraintDef::EnumFromNeighbour { section, .. } = c
-                && !all_section_keys.contains(section.as_str())
-            {
-                return Err(SchemaLoadError::InvalidConstraint {
-                    type_name: td.name.clone(),
-                    kind: "enum_from_neighbour",
-                    offender: section.clone(),
-                    reason: "`section` names a section key no type of this schema declares"
-                        .to_string(),
-                });
+    // the typo class without over-constraining the endpoint. Skipped
+    // when a type file failed to parse — the missing type's sections
+    // would make the existence check report noise.
+    if !had_type_parse_failure {
+        let all_section_keys: HashSet<&str> = types_map
+            .values()
+            .flat_map(|t| t.sections.iter().map(|s| s.key.as_str()))
+            .collect();
+        // Deterministic report order: sort type names (types_map is a
+        // HashMap); constraints keep declaration order within a type.
+        let mut type_names: Vec<&String> = types_map.keys().collect();
+        type_names.sort();
+        for type_name in type_names {
+            let td = &types_map[type_name];
+            for c in &td.constraints {
+                if let crate::types::ConstraintDef::EnumFromNeighbour { section, .. } = c
+                    && !all_section_keys.contains(section.as_str())
+                {
+                    errors.push(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "enum_from_neighbour",
+                        offender: section.clone(),
+                        reason: "`section` names a section key no type of this schema declares"
+                            .to_string(),
+                    });
+                }
             }
         }
     }
 
+    if !errors.is_empty() {
+        return Err(collapse(errors));
+    }
+
     Ok(Schema {
         manifest,
-        version,
+        version: version.expect("version parse failure would have accumulated an error"),
         types: types_map,
     })
 }
@@ -963,7 +1050,8 @@ fn validate_type(
     td: &TypeDefinition,
     rel_names: &HashSet<String>,
     available_rels: &[String],
-) -> Result<(), SchemaLoadError> {
+    errors: &mut Vec<SchemaLoadError>,
+) {
     // Reserved-section check. Section key `relationships` collides
     // with the parser's auto-managed `## Relationships` section.
     // Domain conventions (`identity`, `purpose`, ...) are NOT reserved.
@@ -973,7 +1061,7 @@ fn validate_type(
     // engine-injected keys.
     for section in &td.sections {
         if reserved_section_keys().contains(&section.key.as_str()) {
-            return Err(SchemaLoadError::ReservedSchemaKey {
+            errors.push(SchemaLoadError::ReservedSchemaKey {
                 type_name: td.name.clone(),
                 kind: "section",
                 offending_key: section.key.clone(),
@@ -985,34 +1073,43 @@ fn validate_type(
         }
     }
 
-    check_rel(
+    if let Err(e) = check_rel(
         &td.name,
         "hierarchy_relationship",
         &td.hierarchy_relationship,
         rel_names,
         available_rels,
-    )?;
+    ) {
+        errors.push(e);
+    }
     for r in &td.no_self_loop_relationships {
-        check_rel(
+        if let Err(e) = check_rel(
             &td.name,
             "no_self_loop_relationships",
             r,
             rel_names,
             available_rels,
-        )?;
+        ) {
+            errors.push(e);
+        }
     }
     for r in td.edge_weight_overrides.keys() {
-        check_rel(
+        if let Err(e) = check_rel(
             &td.name,
             "edge_weight_overrides",
             r,
             rel_names,
             available_rels,
-        )?;
+        ) {
+            errors.push(e);
+        }
     }
     for block in &td.required_outgoing {
         for r in &block.relationships {
-            check_rel(&td.name, "required_outgoing", r, rel_names, available_rels)?;
+            if let Err(e) = check_rel(&td.name, "required_outgoing", r, rel_names, available_rels)
+            {
+                errors.push(e);
+            }
         }
     }
 
@@ -1032,7 +1129,7 @@ fn validate_type(
                 ..
             } => {
                 if !field_keys.contains(field.as_str()) && !section_keys.contains(field.as_str()) {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "requires_when",
                         offender: field.clone(),
@@ -1042,17 +1139,18 @@ fn validate_type(
                 }
                 let Some(when_def) = td.metadata_fields.iter().find(|f| f.key == *when_field)
                 else {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "requires_when",
                         offender: when_field.clone(),
                         reason: "`when_field` names no metadata field of this type".to_string(),
                     });
+                    continue;
                 };
                 if let Some(allowed) = &when_def.enum_values
                     && !allowed.contains(when_value)
                 {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "requires_when",
                         offender: when_value.clone(),
@@ -1065,7 +1163,7 @@ fn validate_type(
             }
             crate::types::ConstraintDef::Unique { fields, .. } => {
                 if fields.is_empty() {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "unique",
                         offender: "(empty)".to_string(),
@@ -1074,7 +1172,7 @@ fn validate_type(
                 }
                 for f in fields {
                     if !field_keys.contains(f.as_str()) {
-                        return Err(SchemaLoadError::InvalidConstraint {
+                        errors.push(SchemaLoadError::InvalidConstraint {
                             type_name: td.name.clone(),
                             kind: "unique",
                             offender: f.clone(),
@@ -1088,7 +1186,7 @@ fn validate_type(
                 field, rel_type, ..
             } => {
                 if !field_keys.contains(field.as_str()) {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "enum_from_neighbour",
                         offender: field.clone(),
@@ -1096,7 +1194,7 @@ fn validate_type(
                     });
                 }
                 if !rel_names.contains(rel_type) {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "enum_from_neighbour",
                         offender: rel_type.clone(),
@@ -1115,29 +1213,33 @@ fn validate_type(
                 severity,
                 ..
             } => {
-                let Some(field_def) = td.metadata_fields.iter().find(|f| f.key == *field) else {
-                    return Err(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "status_propagation",
-                        offender: field.clone(),
-                        reason: "`field` names no metadata field of this type".to_string(),
-                    });
-                };
-                if let Some(allowed) = &field_def.enum_values
-                    && !allowed.contains(value)
-                {
-                    return Err(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "status_propagation",
-                        offender: value.clone(),
-                        reason: format!(
-                            "`value` is not in `{field}`'s enum_values [{}]",
-                            allowed.join(", ")
-                        ),
-                    });
+                match td.metadata_fields.iter().find(|f| f.key == *field) {
+                    None => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "status_propagation",
+                            offender: field.clone(),
+                            reason: "`field` names no metadata field of this type".to_string(),
+                        });
+                    }
+                    Some(field_def) => {
+                        if let Some(allowed) = &field_def.enum_values
+                            && !allowed.contains(value)
+                        {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "status_propagation",
+                                offender: value.clone(),
+                                reason: format!(
+                                    "`value` is not in `{field}`'s enum_values [{}]",
+                                    allowed.join(", ")
+                                ),
+                            });
+                        }
+                    }
                 }
                 if !rel_names.contains(rel_type) {
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "status_propagation",
                         offender: rel_type.clone(),
@@ -1151,7 +1253,7 @@ fn validate_type(
                     // `block` declaration would be a promise the
                     // engine will not keep — refuse it rather than
                     // load-and-downgrade.
-                    return Err(SchemaLoadError::InvalidConstraint {
+                    errors.push(SchemaLoadError::InvalidConstraint {
                         type_name: td.name.clone(),
                         kind: "status_propagation",
                         offender: "block".to_string(),
@@ -1168,7 +1270,7 @@ fn validate_type(
     // Exactly one catch_all section
     let catch_all_count = td.sections.iter().filter(|s| s.catch_all).count();
     if catch_all_count != 1 {
-        return Err(SchemaLoadError::CatchAllViolation {
+        errors.push(SchemaLoadError::CatchAllViolation {
             type_name: td.name.clone(),
             count: catch_all_count,
         });
@@ -1181,7 +1283,7 @@ fn validate_type(
     for f in &td.text_fields {
         // text_fields point at section content — not metadata.
         if !section_keys.contains(f.as_str()) {
-            return Err(SchemaLoadError::UnknownFieldReference {
+            errors.push(SchemaLoadError::UnknownFieldReference {
                 type_name: td.name.clone(),
                 field: "text_fields",
                 reference: f.clone(),
@@ -1190,7 +1292,7 @@ fn validate_type(
     }
     for f in &td.health_required_fields {
         if !section_keys.contains(f.as_str()) && !meta_keys.contains(f.as_str()) {
-            return Err(SchemaLoadError::UnknownFieldReference {
+            errors.push(SchemaLoadError::UnknownFieldReference {
                 type_name: td.name.clone(),
                 field: "health_required_fields",
                 reference: f.clone(),
@@ -1203,7 +1305,7 @@ fn validate_type(
             continue;
         }
         if !section_keys.contains(f.as_str()) && !meta_keys.contains(f.as_str()) {
-            return Err(SchemaLoadError::UnknownFieldReference {
+            errors.push(SchemaLoadError::UnknownFieldReference {
                 type_name: td.name.clone(),
                 field: "updatable_fields",
                 reference: f.clone(),
@@ -1216,7 +1318,7 @@ fn validate_type(
         if let (Some(default), Some(allowed)) = (m.default_value.as_ref(), m.enum_values.as_ref())
             && !allowed.contains(default)
         {
-            return Err(SchemaLoadError::DefaultValueNotInEnum {
+            errors.push(SchemaLoadError::DefaultValueNotInEnum {
                 type_name: td.name.clone(),
                 field: m.key.clone(),
                 default: default.clone(),
@@ -1224,8 +1326,6 @@ fn validate_type(
             });
         }
     }
-
-    Ok(())
 }
 
 fn check_rel(

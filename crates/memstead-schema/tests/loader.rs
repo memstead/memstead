@@ -2248,3 +2248,176 @@ fn sealed_builtin_old_key_values_survive_translation() {
         decision.no_self_loop_relationships
     );
 }
+
+// ---------------------------------------------------------------------------
+// Report-all accumulation — every semantic violation in one refusal
+// ---------------------------------------------------------------------------
+
+fn two_type_manifest() -> String {
+    minimal_manifest().replace("types:\n  - sample\n", "types:\n  - sample\n  - extra\n")
+}
+
+/// `hierarchy_relationship` names an undeclared rel-type.
+fn broken_sample() -> String {
+    minimal_type().replace(
+        "hierarchy_relationship: PART_OF",
+        "hierarchy_relationship: BELONGS_TO",
+    )
+}
+
+/// Two independent violations: `text_fields` and
+/// `health_required_fields` each reference a key that does not exist.
+fn broken_extra() -> String {
+    minimal_type()
+        .replace("name: sample", "name: extra")
+        .replace("text_fields:\n  - body", "text_fields:\n  - missing_section")
+        .replace(
+            "health_required_fields:\n  - body",
+            "health_required_fields:\n  - absent_field",
+        )
+}
+
+#[test]
+fn three_violations_across_two_type_files_refuse_once_naming_all() {
+    let err = load(
+        &two_type_manifest(),
+        &[("sample", &broken_sample()), ("extra", &broken_extra())],
+    )
+    .expect_err("must fail");
+    let SchemaLoadError::Multiple { errors } = &err else {
+        panic!("expected Multiple, got: {err}");
+    };
+    assert_eq!(errors.len(), 3, "got: {err}");
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            SchemaLoadError::UndeclaredRelationship { relationship, .. } if relationship == "BELONGS_TO")),
+        "got: {err}"
+    );
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            SchemaLoadError::UnknownFieldReference { field: "text_fields", reference, .. } if reference == "missing_section")),
+        "got: {err}"
+    );
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            SchemaLoadError::UnknownFieldReference { field: "health_required_fields", reference, .. } if reference == "absent_field")),
+        "got: {err}"
+    );
+    // The single rendered refusal names all three offenders.
+    let msg = err.to_string();
+    assert!(msg.contains("BELONGS_TO"), "got: {msg}");
+    assert!(msg.contains("missing_section"), "got: {msg}");
+    assert!(msg.contains("absent_field"), "got: {msg}");
+}
+
+#[test]
+fn accumulated_violations_keep_recovery_material() {
+    let err = load(
+        &two_type_manifest(),
+        &[("sample", &broken_sample()), ("extra", &broken_extra())],
+    )
+    .expect_err("must fail");
+    let msg = err.to_string();
+    // The undeclared-relationship entry keeps the declared set and the
+    // nearest-match suggestion it carries in the single-violation form.
+    assert!(msg.contains("Available: ["), "got: {msg}");
+    assert!(msg.contains("Did you mean"), "got: {msg}");
+}
+
+#[test]
+fn single_violation_stays_bare_not_a_one_element_list() {
+    let err = load(&minimal_manifest(), &[("sample", &broken_sample())]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::UndeclaredRelationship { .. }),
+        "got: {err}"
+    );
+    assert!(
+        !err.to_string().contains("violations:"),
+        "single violation must not render as a list: {err}"
+    );
+}
+
+#[test]
+fn unparseable_manifest_short_circuits_before_semantic_checks() {
+    // Both the manifest and a type file carry problems — only the
+    // manifest parse error reports; nothing derives from a half-read
+    // structure.
+    let err = load("name: [unclosed", &[("sample", &broken_sample())]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::ParseManifest { .. }),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn type_parse_failure_reports_alongside_other_files_violations() {
+    let err = load(
+        &two_type_manifest(),
+        &[("sample", &broken_sample()), ("extra", "name: [unclosed")],
+    )
+    .expect_err("must fail");
+    let SchemaLoadError::Multiple { errors } = &err else {
+        panic!("expected Multiple, got: {err}");
+    };
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, SchemaLoadError::ParseType { .. })),
+        "got: {err}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, SchemaLoadError::UndeclaredRelationship { .. })),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn manifest_and_type_violations_accumulate_together() {
+    // A manifest-level violation (undeclared source type on a rel
+    // definition) and a type-level violation report in one refusal.
+    let manifest = minimal_manifest().replace(
+        "    - name: PART_OF\n      description: Hierarchical containment\n      default_weight: 3.0\n",
+        "    - name: PART_OF\n      description: Hierarchical containment\n      default_weight: 3.0\n      source_types: [ghost]\n",
+    );
+    let err = load(&manifest, &[("sample", &broken_sample())]).expect_err("must fail");
+    let SchemaLoadError::Multiple { errors } = &err else {
+        panic!("expected Multiple, got: {err}");
+    };
+    assert!(
+        errors.iter().any(|e| matches!(e,
+            SchemaLoadError::UndeclaredRelationshipType { reference, .. } if reference == "ghost")),
+        "got: {err}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, SchemaLoadError::UndeclaredRelationship { .. })),
+        "got: {err}"
+    );
+}
+
+/// Accumulated refusals must render identically across runs on the
+/// same input — the CI schema check and built-in schema tests compare
+/// output. Exercised through `load_schema_from_dir` (the entry the
+/// `validate` and `install` surfaces share), whose directory scan is
+/// explicitly sorted.
+#[test]
+fn accumulated_order_is_deterministic_from_dir() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir(root.join("types")).unwrap();
+    std::fs::write(root.join("schema.yaml"), two_type_manifest()).unwrap();
+    std::fs::write(root.join("types/sample.yaml"), broken_sample()).unwrap();
+    std::fs::write(root.join("types/extra.yaml"), broken_extra()).unwrap();
+
+    let first = memstead_schema::loader::load_schema_from_dir(root)
+        .expect_err("must fail")
+        .to_string();
+    let second = memstead_schema::loader::load_schema_from_dir(root)
+        .expect_err("must fail")
+        .to_string();
+    assert_eq!(first, second);
+    assert!(first.contains("3 violations"), "got: {first}");
+}
