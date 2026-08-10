@@ -124,7 +124,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
             # ---- relate + verify in entity ---------------------------------
             relate = server.call(
                 "memstead_relate",
-                {"from": source_id, "to": target_id, "type": "USES"},
+                {"relations": [{"from": source_id, "to": target_id, "type": "USES"}]},
             )
             assert_eq(relate.is_error, False, "relate")
 
