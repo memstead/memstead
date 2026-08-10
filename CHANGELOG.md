@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-10
+
 **The doorway release.** A first-time schema author, modelling a domain the
 project had never seen, hit a wall before writing a single entity. This release
 takes the wall down, and it is the first release cut on the rule that made it
@@ -1788,7 +1790,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/memstead/memstead/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/memstead/memstead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/memstead/memstead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/memstead/memstead/compare/v0.1.0...v0.2.0
