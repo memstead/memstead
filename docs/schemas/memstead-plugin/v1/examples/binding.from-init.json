@@ -16,7 +16,12 @@
   ],
   "reference_mems": [],
   "destination_mem": "docs",
-  "deny_paths": [],
+  "deny_paths": [
+    "**/.DS_Store",
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/Thumbs.db"
+  ],
   "prune": {
     "guarantee": "never-clobber"
   },

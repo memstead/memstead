@@ -666,13 +666,30 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // source has no change signal this cycle, so sync/verify are stripped and
     // the deferral is named in `warnings[]` (operator decision 7). Every other
     // medium keeps build+sync+verify.
+    // Default deny paths — materialised into the record at scaffold
+    // time (not injected at load) so the author sees, edits, and can
+    // delete them, and bindings created before the default existed
+    // keep behaving as recorded. Engine self-exclusion is separate:
+    // unconditional in the strategy layer, never a record entry.
+    let deny_paths: Vec<String> = if matches!(
+        medium_type,
+        memstead_base::MediumType::Codebase | memstead_base::MediumType::Filesystem
+    ) {
+        memstead_base::binding::DEFAULT_SCAFFOLD_DENY_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let mut binding = Binding {
         version: BINDING_VERSION,
         intent: args.intent.clone(),
         sources: vec![source],
         reference_mems: Vec::new(),
         destination_mem: mem.clone(),
-        deny_paths: Vec::new(),
+        deny_paths,
         // Unstated: the scaffold asserts nothing — the effective value
         // resolves per medium (enumerable → exhaustive, web → curated).
         coverage_semantics: None,
@@ -699,6 +716,34 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     };
 
     let mut warnings: Vec<String> = Vec::new();
+
+    // Out-of-workspace medium base — legitimate but fragile: artifact
+    // ids are rendered workspace-relative (`../../…` chains), and
+    // anchors hand-written against source-relative paths resolve as
+    // orphaned. Name the consequence NOW, before any work is wasted;
+    // the operation still succeeds.
+    if matches!(
+        medium_type,
+        memstead_base::MediumType::Codebase | memstead_base::MediumType::Filesystem
+    ) {
+        let base = memstead_base::ingest::cursor::medium_base(&args.source, &root);
+        // Canonicalize both sides when possible so symlinked roots
+        // (macOS /tmp) don't false-positive; fall back to the lexical
+        // forms for not-yet-existing paths.
+        let canon_base = std::fs::canonicalize(&base).unwrap_or(base);
+        let canon_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        if !canon_base.starts_with(&canon_root) {
+            warnings.push(format!(
+                "medium base '{}' resolves outside the workspace root '{}': artifact ids will be \
+                 workspace-relative ('../…' chains), and anchors written against source-relative \
+                 paths will fail to resolve (orphaned). Consider rooting the workspace at the \
+                 source tree.",
+                canon_base.display(),
+                canon_root.display()
+            ));
+        }
+    }
+
     if let Err(refusals) = validate_binding(&binding) {
         for r in &refusals {
             if let CapabilityError::OperationOutOfScope { operation, .. } = r {

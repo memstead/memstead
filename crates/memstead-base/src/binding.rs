@@ -247,6 +247,23 @@ pub struct Operations {
     pub verify: Option<VerifyOperation>,
 }
 
+/// Default `deny_paths` scaffolded onto a fresh enumerable
+/// (`codebase` / `filesystem`) binding: ordinary platform/tooling
+/// debris that would otherwise flood a first denominator. A default,
+/// not an invariant — the scaffold materialises the list into the
+/// binding record, so an author who wants one of these in scope
+/// deletes the entry and gets the files back; bindings created before
+/// the default existed keep their recorded (empty) list. Engine state
+/// (`.memstead/`, `.memstead.cache/`, mount storage) is NOT on this
+/// list — its exclusion is unconditional in the strategy layer, never
+/// a deletable record entry.
+pub const DEFAULT_SCAFFOLD_DENY_PATHS: &[&str] = &[
+    "**/.DS_Store",
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/Thumbs.db",
+];
+
 /// A **binding**, format version 2 — one record per pipeline. The single
 /// versioned file at `projections/<mem>/<name>.json` that alone fully defines
 /// the obligation: `intent`, inline [`Source`] entries (each carrying the

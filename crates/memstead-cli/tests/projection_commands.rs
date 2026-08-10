@@ -350,7 +350,18 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
         env["operations"],
         serde_json::json!(["build", "sync", "verify"])
     );
-    assert_eq!(env["warnings"], serde_json::json!([]));
+    // `--source ../public` resolves outside this workspace root — init
+    // names the consequence (workspace-relative ids, orphaned anchors)
+    // as a warning and still succeeds.
+    let warnings = env["warnings"].as_array().expect("warnings array");
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(
+        warnings[0]
+            .as_str()
+            .unwrap()
+            .contains("outside the workspace root"),
+        "got: {warnings:?}"
+    );
     // Exactly the four contract keys — no extras leaked.
     let keys: Vec<&str> = env
         .as_object()
@@ -485,7 +496,17 @@ fn init_filesystem_scaffolds_full_operations() {
         env["operations"],
         serde_json::json!(["build", "sync", "verify"])
     );
-    assert_eq!(env["warnings"], serde_json::json!([]));
+    // `../docs` is outside the workspace root — the consequence-naming
+    // warning fires here too (filesystem medium).
+    let warnings = env["warnings"].as_array().expect("warnings array");
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(
+        warnings[0]
+            .as_str()
+            .unwrap()
+            .contains("outside the workspace root"),
+        "got: {warnings:?}"
+    );
 }
 
 /// A `web` source scaffolds build-only, with the deferral named in `warnings[]`

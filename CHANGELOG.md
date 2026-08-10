@@ -8,6 +8,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **A binding's scope excludes the engine and states its own reach.**
+  The engine's own state — `.memstead/`, `.memstead.cache/` (by name,
+  wherever they appear), and every mount's *resolved* storage
+  location (mem-repo working copy, folder-mem root, archive file) —
+  is excluded from every strategy's input set unconditionally: the
+  exclusion is not a configurable deny entry, an explicit allow glob
+  does not admit it, and it applies identically to the mtime
+  enumeration and the git diff pathspecs, so the coverage denominator
+  is strategy-invariant and `projection verify`'s own findings store
+  never enters its next run's input. Freshly scaffolded
+  `codebase`/`filesystem` bindings additionally carry default
+  `deny_paths` for platform/tooling debris (`**/.DS_Store`,
+  `**/.git/**`, `**/node_modules/**`, `**/Thumbs.db`) —
+  **materialised into the record at scaffold time, not injected at
+  load**, so the author can see and delete them, and bindings created
+  before this change keep behaving exactly as recorded. `projection
+  init` whose resolved medium base falls outside the workspace root
+  now warns, naming the consequence (workspace-relative `../…`
+  artifact ids; source-relative anchors resolving as orphaned) while
+  still succeeding.
 - **Two refusals now name the fact their caller needs to recover.**
   `MEM_PATH_NOT_ALLOWED` with reason `no_allowlist_configured` names
   the concrete grant command (`memstead workspace allow-create

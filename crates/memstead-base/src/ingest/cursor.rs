@@ -132,13 +132,65 @@ fn relative_path(from: &Path, to: &Path) -> PathBuf {
     result
 }
 
-/// The medium pointer resolved to an absolute base directory.
-fn medium_base(pointer: &str, workspace_root: &Path) -> PathBuf {
+/// The medium pointer resolved to an absolute base directory. Public
+/// so init-time surfaces (CLI `projection init`) can resolve a medium
+/// base exactly as the strategies do — e.g. to warn when it falls
+/// outside the workspace root.
+pub fn medium_base(pointer: &str, workspace_root: &Path) -> PathBuf {
     if pointer.is_empty() {
         workspace_root.to_path_buf()
     } else {
         normalize_lexical(&workspace_root.join(pointer))
     }
+}
+
+/// Workspace-relative deny globs excluding the engine's own state from
+/// every strategy's input set. Unconditional and non-configurable: a
+/// binding can never legitimately model `.memstead/`,
+/// `.memstead.cache/`, or a mount's resolved storage location as
+/// source artifacts — an allow glob covering them does not admit them.
+/// The dot-directories key on their *names* (the names are the
+/// contract, and a foreign workspace's `.memstead/` is still engine
+/// state); the mount storage locations key on their *resolved* paths
+/// because their directory names are configurable. Fail-open on an
+/// unreadable mount list: the name-based excludes stay in force.
+fn engine_state_denies(workspace_root: &Path) -> Vec<String> {
+    use crate::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
+
+    let mut denies: Vec<String> = vec![
+        ".memstead/**".to_string(),
+        ".memstead.cache/**".to_string(),
+        "**/.memstead/**".to_string(),
+        "**/.memstead.cache/**".to_string(),
+    ];
+    if let Ok(ws) = FileWorkspaceStore.load(workspace_root) {
+        for mount in &ws.mounts {
+            let dir: Option<PathBuf> = match &mount.storage {
+                crate::workspace::MountStorage::GitBranch { gitdir, .. } => {
+                    gitdir.parent().map(Path::to_path_buf)
+                }
+                crate::workspace::MountStorage::Folder { path } => Some(path.clone()),
+                crate::workspace::MountStorage::Archive { path, .. } => {
+                    // A sealed archive is one file, not a tree.
+                    let rel = relative_path(workspace_root, &normalize_lexical(path));
+                    denies.push(rel.to_string_lossy().to_string());
+                    None
+                }
+                // No on-disk footprint to exclude.
+                crate::workspace::MountStorage::InMemory => None,
+            };
+            if let Some(dir) = dir {
+                let rel = relative_path(workspace_root, &normalize_lexical(&dir));
+                // A collapsed single-mem folder workspace stores the mem
+                // AT the workspace root — excluding `**` there would
+                // empty every denominator; skip it.
+                if !rel.as_os_str().is_empty() {
+                    denies.push(format!("{}/**", rel.to_string_lossy()));
+                }
+            }
+        }
+    }
+    denies
 }
 
 /// `git rev-parse HEAD` in `git_root`, or `None` on any failure.
@@ -270,6 +322,13 @@ pub fn enumerate_facet_files(
     for dp in deny_paths {
         denies.push(dp);
     }
+    // Engine self-exclusion — unconditional, below configuration; the
+    // git strategy pushes the same set as exclude pathspecs so the
+    // denominator stays strategy-invariant.
+    let forced = engine_state_denies(workspace_root);
+    for f in &forced {
+        denies.push(f);
+    }
     if allows.is_empty() {
         return Vec::new();
     }
@@ -300,11 +359,14 @@ pub fn enumerate_facet_files(
             };
             let path = entry.path();
             if file_type.is_dir() {
-                let vcs_internal = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| VCS_INTERNAL_DIRS.contains(&n));
-                if !vcs_internal {
+                let skip = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                    // VCS internals and engine state are never source
+                    // artifacts — pruning here saves the walk; the
+                    // forced deny globs enforce the same exclusion for
+                    // anything that still slips into a candidate list.
+                    VCS_INTERNAL_DIRS.contains(&n) || n == ".memstead" || n == ".memstead.cache"
+                });
+                if !skip {
                     stack.push(path);
                 }
             } else if file_type.is_file() {
@@ -370,6 +432,13 @@ fn compute_git_slice(
     }
     for dp in deny_paths {
         denies.push(dp);
+    }
+    // Engine self-exclusion — same forced set the mtime strategy's
+    // enumeration applies, pushed down as exclude pathspecs so the
+    // slice never names engine state either.
+    let forced = engine_state_denies(workspace_root);
+    for f in &forced {
+        denies.push(f);
     }
     let mut specs: Vec<String> = Vec::with_capacity(allows.len() + denies.len());
     for a in &allows {
@@ -1664,5 +1733,153 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    /// Engine self-exclusion: `.memstead/**`, `.memstead.cache/**`, and
+    /// every mount's resolved storage location (here a mem-repo at a
+    /// NON-default directory name) are absent from the enumeration
+    /// regardless of configuration — explicit allow globs covering them
+    /// do not admit them.
+    #[test]
+    fn engine_state_never_enumerates_even_when_allowed() {
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        for rel in [
+            ".memstead/state/findings/muehle/f.json",
+            ".memstead/projections/muehle/f.json",
+            ".memstead.cache/ingest/source-cursor/muehle/f/f.json",
+            "custom-repo/README.md",
+            "Allgemein/Protokoll.md",
+            "Allgemein/Vertrag.md",
+        ] {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "x").unwrap();
+        }
+        // Engine-managed workspace state resolving the mem-repo at
+        // `custom-repo/` — the exclusion must key on this resolved
+        // location, not on the literal default name `mem-repo/`.
+        std::fs::write(
+            root.join(".memstead/workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".memstead/state/mounts.json"),
+            serde_json::json!({
+                "format": "memstead-mounts-3",
+                "mounts": [{
+                    "mem": "muehle",
+                    "schema": "default@1.0.0",
+                    "storage": {
+                        "type": "git-branch",
+                        "gitdir": "custom-repo/.git",
+                        "branch": "refs/heads/muehle"
+                    },
+                    "capability": "write",
+                    "lifecycle": "eager",
+                    "cross_linkable": true
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        // Allow everything AND explicitly try to admit engine state.
+        let source = primary(vec![
+            PatternEntry {
+                path: "**/*".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: ".memstead/**".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "custom-repo/**".to_string(),
+                mode: PatternMode::Allow,
+            },
+        ]);
+        let got = enumerate_facet_files(&source, &[], root);
+        assert_eq!(
+            got,
+            vec!["Allgemein/Protokoll.md", "Allgemein/Vertrag.md"],
+            "only source artifacts may enter the denominator"
+        );
+    }
+
+    /// The git strategy pushes the same engine-state excludes as
+    /// pathspecs: a diff touching `.memstead/**` and the resolved
+    /// mem-repo path yields a slice naming neither — denominator and
+    /// slice stay strategy-invariant.
+    #[test]
+    fn git_slice_excludes_engine_state() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        git(root, &["init", "-q"]);
+        std::fs::write(
+            root.join("workspace.rs"), // placeholder so base commit is non-empty
+            "x",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead/state")).unwrap();
+        std::fs::write(
+            root.join(".memstead/workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".memstead/state/mounts.json"),
+            serde_json::json!({
+                "format": "memstead-mounts-3",
+                "mounts": [{
+                    "mem": "muehle",
+                    "schema": "default@1.0.0",
+                    "storage": {
+                        "type": "git-branch",
+                        "gitdir": "custom-repo/.git",
+                        "branch": "refs/heads/muehle"
+                    },
+                    "capability": "write",
+                    "lifecycle": "eager",
+                    "cross_linkable": true
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        // Move: one real file, one engine-state file, one mem-repo file.
+        std::fs::write(root.join("real.md"), "signal").unwrap();
+        std::fs::write(root.join(".memstead/state/findings.json"), "self").unwrap();
+        std::fs::create_dir_all(root.join("custom-repo")).unwrap();
+        std::fs::write(root.join("custom-repo/README.md"), "repo").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "move"]);
+
+        let source = primary(vec![PatternEntry {
+            path: "**/*".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        match compute_git_slice(&source, &[], root, Some(&baseline)) {
+            SliceOutcome::Changed { slice, .. } => {
+                assert_eq!(slice.added, vec!["real.md"], "engine state leaked: {slice:?}");
+                assert!(slice.modified.is_empty(), "{slice:?}");
+            }
+            other => panic!("expected Changed, got {other:?}"),
+        }
     }
 }
