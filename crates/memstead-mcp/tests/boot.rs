@@ -162,8 +162,7 @@ fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
     // expected line against the same base path.
     let ws = tmp.path().canonicalize().unwrap();
     let boot_err = memstead_git_branch::workspace_store::engine_from_workspace_root(&ws)
-        .err()
-        .expect("fixture must fail the in-process boot");
+        .expect_err("fixture must fail the in-process boot");
     assert_eq!(boot_err.code(), "WORKSPACE_STORE_PARSE");
     let expected = format!(
         "memstead-mcp: ERROR [{}]: {}",

@@ -85,7 +85,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -149,7 +149,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         let mark = mount
             .mem_config
             .as_ref()

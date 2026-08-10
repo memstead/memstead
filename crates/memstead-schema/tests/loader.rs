@@ -581,7 +581,7 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
             .iter()
             .find(|f| f.key == key)
             .unwrap_or_else(|| panic!("principle lacks {key}"));
-        assert!(!f.is_required() == required_absent_default && f.default_value.is_none());
+        assert!(f.is_required() != required_absent_default && f.default_value.is_none());
     }
     for (key, still) in [("status", "active"), ("category", "")] {
         let f = principle.metadata_fields.iter().find(|f| f.key == key);

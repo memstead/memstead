@@ -25,7 +25,7 @@ use crate::error_envelope::{tool_error, tool_error_with_payload};
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams, ReloadParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CheckParams, CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams,
+    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams,
     UpdateParams,
 };
 
@@ -4545,7 +4545,7 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::mutation::PatchInput;
+    use crate::tools::mutation::{PatchInput, RelateOpInput};
     use indexmap::IndexMap;
     use memstead_base::Query;
     use std::fs;

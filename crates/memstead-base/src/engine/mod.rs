@@ -76,7 +76,9 @@ pub use boot::{SchemaResolver, load_workspace_schemas, resolve_builtin_schema_pi
 
 /// One mem attachment, paired with the backend that serves it.
 /// Constructed by [`Engine::from_mounts`] and held internally.
-struct MountedBackend {
+/// `pub(crate)` only so the crate-internal `boot::build_mem_router_from_mounts`
+/// can name it in its signature — never re-exported.
+pub(crate) struct MountedBackend {
     mount: Mount,
     backend: Box<dyn MemBackend>,
     /// Last cursor returned by `backend.current_head()`. Seeded in

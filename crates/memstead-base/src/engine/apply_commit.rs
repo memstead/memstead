@@ -73,12 +73,12 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
         let schema = self
             .schemas
             .get(mem)
             .cloned()
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
 
         // 2. Walk the changes. Stage parse outputs so a parse failure
         //    on a late change rolls back the entire apply (the store

@@ -323,13 +323,12 @@ pub fn reduce_section(source: &str) -> ReducedSection {
                         {
                             let end = range.end.min(source.len());
                             let slice = &source[para_range_start..end];
-                            let mut line_no = line_of(source, para_range_start);
-                            for l in slice.lines() {
+                            let first_line = line_of(source, para_range_start);
+                            for (line_no, l) in (first_line..).zip(slice.lines()) {
                                 let t = l.trim();
                                 if !t.is_empty() {
                                     lines.push((line_no, t.to_string()));
                                 }
-                                line_no += 1;
                             }
                         }
                         if let Some(st) = item.as_mut()

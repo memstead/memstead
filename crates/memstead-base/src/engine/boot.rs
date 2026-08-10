@@ -2467,7 +2467,7 @@ community:
             engine
                 .get_entity(&crate::EntityId::new("broken", "anything"))
                 .is_none()
-                && engine.mem_names().iter().any(|m| *m == "notes"),
+                && engine.mem_names().contains(&"notes"),
             "other mounts unaffected"
         );
     }

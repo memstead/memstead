@@ -106,7 +106,7 @@ impl Engine {
             })?;
         let latest = self
             .workspace_root()
-            .map(|root| CheckLedger::for_workspace(root))
+            .map(CheckLedger::for_workspace)
             .and_then(|l| l.latest_for(entity_id));
         Ok((derive_state(latest.as_ref(), &current_hash), latest))
     }

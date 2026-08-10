@@ -744,7 +744,7 @@ impl Engine {
     pub fn gitdir_for(&self, mem_name: &str) -> Result<PathBuf, EngineError> {
         let m = self
             .mount(mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         match &m.storage {
             MountStorage::GitBranch { gitdir, .. } => Ok(gitdir.clone()),
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
@@ -772,7 +772,7 @@ impl Engine {
     pub fn worktree_for(&self, mem_name: &str) -> Result<PathBuf, EngineError> {
         let m = self
             .mount(mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         match &m.storage {
             MountStorage::Folder { path } => Ok(path.clone()),
             MountStorage::GitBranch { .. } => {
@@ -879,7 +879,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         Ok(m.last_known_head.clone())
     }
 
@@ -902,7 +902,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         let live = m.backend.current_head().ok().flatten();
         Ok(live != m.last_known_head)
     }
@@ -1115,7 +1115,7 @@ impl Engine {
         let pinned = self
             .schemas
             .get(mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
         let effective: Arc<Schema> = match target_schema {
             None => pinned.clone(),
             Some(target) => self.resolve_schema_by_ref(target).ok_or_else(|| {
@@ -1646,7 +1646,7 @@ impl Engine {
         self.mounts
             .iter()
             .find(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))
+            .ok_or_else(|| self.unknown_mem_error(mem))
     }
 }
 

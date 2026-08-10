@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use memstead_schema::{Schema, load_schema_from_memory};
+use memstead_schema::Schema;
 
 use crate::backend::MemBackend;
 use crate::storage::ArchiveBackend;
@@ -39,6 +39,10 @@ use super::{Engine, EngineError};
 /// does not collapse validation failures into a generic error. The
 /// remaining variants cover the small ladder of engine-side failures
 /// (config parse, embedded schema load, downstream construction).
+// The `Validation` variant carries the lower-layer error verbatim, which is
+// what makes `#[from]` lifting possible; boxing it to equalise variant sizes
+// would trade a cold-path allocation for a colder-path byte count.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, thiserror::Error)]
 pub enum FromArchiveBytesError {
     /// Archive bytes failed validation by `extract_entries`. Carries
@@ -139,7 +143,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         let config = self.mem_config_for(mem_name).ok_or_else(|| {
             EngineError::InvalidInput(format!(
                 "mem '{mem_name}' has no loaded MemConfig — cannot export"
@@ -292,7 +296,7 @@ pub(crate) fn load_embedded_schemas(
     } else {
         memstead_schema::MetadataPolarityFormat::Legacy
     };
-    let schema = memstead_schema::load_schema_from_memory_with_format(&manifest_yaml, &types, format)
+    let schema = memstead_schema::load_schema_from_memory_with_format(manifest_yaml, &types, format)
         .map_err(|e| FromArchiveBytesError::EmbeddedSchemaInvalid(e.to_string()))?;
     Ok(vec![Arc::new(schema)])
 }

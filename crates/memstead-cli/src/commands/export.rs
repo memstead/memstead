@@ -499,24 +499,6 @@ fn default_output_path(
     Ok(PathBuf::from(filename))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    /// Mem selection is `--mem`, converged onto the convention every
-    /// other subcommand uses; the former `--mem-name` outlier is gone.
-    #[test]
-    fn export_mem_selection_flag_is_mem_not_mem_name() {
-        let parsed = Args::try_parse_from(["export", "--mem", "specs", "--format", "mem"]).unwrap();
-        assert_eq!(parsed.mem_name.as_deref(), Some("specs"));
-        assert!(
-            Args::try_parse_from(["export", "--mem-name", "specs"]).is_err(),
-            "the retired --mem-name flag must not parse"
-        );
-    }
-}
-
 /// `--format html` — one self-contained HTML file per mem (the read
 /// surface for non-operators). Backend-uniform via [`CliEngine::base`]
 /// and observably read-only. The export date is stamped once (UTC);
@@ -568,7 +550,7 @@ fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     );
     let html = engine
         .render_html_export(&mem, &export_date)
-        .map_err(|e| CliError::from_engine_op(e))?;
+        .map_err(CliError::from_engine_op)?;
     let out_path = args
         .output
         .clone()
@@ -596,4 +578,22 @@ fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// Mem selection is `--mem`, converged onto the convention every
+    /// other subcommand uses; the former `--mem-name` outlier is gone.
+    #[test]
+    fn export_mem_selection_flag_is_mem_not_mem_name() {
+        let parsed = Args::try_parse_from(["export", "--mem", "specs", "--format", "mem"]).unwrap();
+        assert_eq!(parsed.mem_name.as_deref(), Some("specs"));
+        assert!(
+            Args::try_parse_from(["export", "--mem-name", "specs"]).is_err(),
+            "the retired --mem-name flag must not parse"
+        );
+    }
 }

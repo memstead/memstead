@@ -133,7 +133,7 @@ fn markdown_to_safe_html(md: &str, exported_ids: &[String]) -> String {
     // dropped, inner text stays, the destination surfaces as text.
     let mut suppressed_link: Option<String> = None;
     for ev in parser {
-        if let Some((url, alt)) = skipping_image.as_mut() {
+        if let Some((_url, alt)) = skipping_image.as_mut() {
             match ev {
                 Event::End(TagEnd::Image) => {
                     let (url, alt) = skipping_image.take().unwrap();
@@ -246,7 +246,7 @@ impl Engine {
         let doc_title = config
             .and_then(|c| c.title.clone())
             .unwrap_or_else(|| mem.to_string());
-        let _ = write!(out, "<title>{}</title>\n", esc(&doc_title));
+        let _ = writeln!(out, "<title>{}</title>", esc(&doc_title));
         out.push_str(
             "<style>\n\
              body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;\
@@ -270,26 +270,26 @@ impl Engine {
 
         // Identity block.
         let _ = write!(out, "<h1>{}</h1>\n<div class=\"identity\">\n", esc(&doc_title));
-        let _ = write!(out, "<div><strong>Mem:</strong> {}</div>\n", esc(mem));
+        let _ = writeln!(out, "<div><strong>Mem:</strong> {}</div>", esc(mem));
         if let Some(desc) = config.and_then(|c| c.description.as_deref())
             && !desc.is_empty()
         {
-            let _ = write!(out, "<div><strong>Description:</strong> {}</div>\n", esc(desc));
+            let _ = writeln!(out, "<div><strong>Description:</strong> {}</div>", esc(desc));
         }
         if let Some(subject) = config.and_then(|c| c.subject.as_ref()) {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "<div><strong>Subject:</strong> {}</div>\n",
+                "<div><strong>Subject:</strong> {}</div>",
                 esc(&subject.scope)
             );
         }
-        let _ = write!(out, "<div><strong>Schema:</strong> {}</div>\n", esc(&schema_ref));
+        let _ = writeln!(out, "<div><strong>Schema:</strong> {}</div>", esc(&schema_ref));
         let trust = if third_party {
             "third-party (read-only mount — someone else's published content, quoted here)"
         } else {
             "first-party (writable mem of this workspace)"
         };
-        let _ = write!(out, "<div><strong>Origin:</strong> {trust}</div>\n");
+        let _ = writeln!(out, "<div><strong>Origin:</strong> {trust}</div>");
         let _ = write!(
             out,
             "<div><strong>Exported:</strong> {} · {} entities</div>\n</div>\n",
@@ -306,10 +306,10 @@ impl Engine {
         for (ty, list) in &by_type {
             let _ = write!(out, "<h3>{} ({})</h3>\n<ul>\n", esc(ty), list.len());
             for e in list {
-                let _ = write!(
+                let _ = writeln!(
                     out,
-                    "<li><a href=\"#{}\">{}</a></li>\n",
-                    esc(&e.id.to_string()),
+                    "<li><a href=\"#{}\">{}</a></li>",
+                    esc(e.id.as_ref()),
                     esc(&e.title)
                 );
             }
@@ -322,17 +322,17 @@ impl Engine {
             let _ = write!(
                 out,
                 "<section class=\"entity\" id=\"{}\">\n<h2>{}</h2>\n<span class=\"badge\">{}</span> <span class=\"badge\">{}</span>\n",
-                esc(&e.id.to_string()),
+                esc(e.id.as_ref()),
                 esc(&e.title),
                 esc(&e.entity_type),
-                esc(&e.id.to_string()),
+                esc(e.id.as_ref()),
             );
             if !e.metadata.is_empty() {
                 out.push_str("<table class=\"meta\">\n");
                 for (k, v) in &e.metadata {
-                    let _ = write!(
+                    let _ = writeln!(
                         out,
-                        "<tr><td>{}</td><td>{}</td></tr>\n",
+                        "<tr><td>{}</td><td>{}</td></tr>",
                         esc(k),
                         esc(&v.to_frontmatter_string())
                     );
@@ -343,7 +343,7 @@ impl Engine {
                 if body.trim().is_empty() {
                     continue;
                 }
-                let _ = write!(out, "<h3>{}</h3>\n", esc(key));
+                let _ = writeln!(out, "<h3>{}</h3>", esc(key));
                 let resolved = resolve_wiki_links(body, mem, &exported_ids);
                 out.push_str(&markdown_to_safe_html(&resolved, &exported_ids));
             }
@@ -360,24 +360,24 @@ impl Engine {
                     let in_doc = exported_ids.iter().any(|id| id == &target_id);
                     let is_stub_target = self.store.get(&r.target).map(|t| t.stub).unwrap_or(false);
                     if in_doc {
-                        let _ = write!(
+                        let _ = writeln!(
                             out,
-                            "<li>{} → <a href=\"#{}\">{}</a></li>\n",
+                            "<li>{} → <a href=\"#{}\">{}</a></li>",
                             esc(&r.rel_type),
                             esc(&target_id),
                             esc(&target_id)
                         );
                     } else if is_stub_target {
-                        let _ = write!(
+                        let _ = writeln!(
                             out,
-                            "<li>{} → <span class=\"stub\">{} (stub — unresolved reference)</span></li>\n",
+                            "<li>{} → <span class=\"stub\">{} (stub — unresolved reference)</span></li>",
                             esc(&r.rel_type),
                             esc(&target_id)
                         );
                     } else {
-                        let _ = write!(
+                        let _ = writeln!(
                             out,
-                            "<li>{} → {} <span class=\"badge\">other mem</span></li>\n",
+                            "<li>{} → {} <span class=\"badge\">other mem</span></li>",
                             esc(&r.rel_type),
                             esc(&target_id)
                         );
@@ -391,10 +391,10 @@ impl Engine {
         if !stubs.is_empty() {
             out.push_str("<section class=\"entity\">\n<h2>Unresolved references (stubs)</h2>\n<ul>\n");
             for s in &stubs {
-                let _ = write!(
+                let _ = writeln!(
                     out,
-                    "<li class=\"stub\">{} — referenced but never written</li>\n",
-                    esc(&s.id.to_string())
+                    "<li class=\"stub\">{} — referenced but never written</li>",
+                    esc(s.id.as_ref())
                 );
             }
             out.push_str("</ul>\n</section>\n");
@@ -411,7 +411,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::backend::MemBackend;
-    use crate::engine::test_helpers::{cli_actor, empty_create_args, folder_mount};
+    use crate::engine::test_helpers::{cli_actor, folder_mount};
     use crate::storage::FilesystemMemWriter;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
 

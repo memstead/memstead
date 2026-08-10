@@ -225,7 +225,7 @@ impl super::Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }

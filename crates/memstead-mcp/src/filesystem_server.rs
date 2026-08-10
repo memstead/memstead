@@ -38,7 +38,7 @@ use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
     CheckParams,
-    CreateParams, DeleteParams, RelateOpInput, RelateParams, RenameParams, UpdateParams,
+    CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
 };
 
 /// MCP server backed by the unified [`memstead_base::Engine`].
@@ -2230,6 +2230,7 @@ impl ServerHandler for FilesystemMcpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::mutation::RelateOpInput;
     use indexmap::IndexMap;
     use memstead_base::filesystem::config::{WorkspaceConfig, write_workspace_config};
     use memstead_schema::SchemaRef;

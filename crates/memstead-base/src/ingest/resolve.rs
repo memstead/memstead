@@ -530,7 +530,7 @@ pub fn resolve_process_mem(
             declared: true,
         };
     }
-    let mounted = mounted_names.iter().any(|m| *m == derived_name);
+    let mounted = mounted_names.contains(&derived_name);
     ProcessMemResolution {
         mem: derived_name.to_string(),
         mounted,

@@ -243,7 +243,7 @@ impl Engine {
     pub fn validate_schema_exemplars(
         schema: &std::sync::Arc<memstead_schema::Schema>,
     ) -> Result<(), String> {
-        use indexmap::IndexMap;
+        
 
         let with_exemplars: Vec<&str> = schema
             .manifest
@@ -974,7 +974,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
         // Capability gate, identical in shape and position to the six
         // sibling setters (`set_mem_version` … `set_mem_sync_state`):
         // a schema-pin change starts a migration — the one lifecycle
@@ -1158,7 +1158,7 @@ impl Engine {
                 .mounts
                 .iter()
                 .find(|m| m.mount.mem == name)
-                .ok_or_else(|| self.unknown_mem_error(&name))?;
+                .ok_or_else(|| self.unknown_mem_error(name))?;
             if !matches!(mount.mount.storage, MountStorage::Folder { .. }) {
                 return Err(EngineError::MarkdownExportUnsupportedBackend {
                     mem: name.to_string(),
@@ -1256,7 +1256,7 @@ impl Engine {
             .mounts
             .iter()
             .find(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         let config = self.mem_config_for(mem_name).ok_or_else(|| {
             EngineError::InvalidInput(format!(
                 "mem '{mem_name}' has no loaded MemConfig — cannot export"
@@ -1382,7 +1382,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1455,7 +1455,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1510,7 +1510,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1562,7 +1562,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1622,7 +1622,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -1695,7 +1695,7 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem_name)
-            .ok_or_else(|| self.unknown_mem_error(&mem_name))?;
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
@@ -2000,12 +2000,12 @@ impl Engine {
             .mounts
             .iter()
             .position(|m| m.mount.mem == mem)
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
         let schema = self
             .schemas
             .get(mem)
             .cloned()
-            .ok_or_else(|| self.unknown_mem_error(&mem))?;
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
 
         // Snapshot pre-reload (id, content_hash) for this mem.
         let pre: HashMap<EntityId, String> = self

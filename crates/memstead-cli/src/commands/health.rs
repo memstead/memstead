@@ -1022,6 +1022,11 @@ fn fill_schema_breakdowns(engine: &memstead_base::Engine, g: &mut GatheredHealth
 /// Engine-agnostic gather pipeline. The two engine-shaped callbacks
 /// (`most_connected_fn`, `missing_required_outgoing_fn`) handle the
 /// surfaces that are not available off the bare `&Store`.
+///
+/// Ten parameters is deliberate: five of them are the engine-shaped callbacks
+/// that keep this function engine-agnostic. Bundling them into a struct would
+/// move the same arity behind a type that exists for one call site.
+#[allow(clippy::too_many_arguments)]
 fn gather_from_store(
     health: HealthSummary,
     store: &Store,

@@ -1052,7 +1052,7 @@ impl Engine {
         let mut errors: Vec<(usize, EngineError)> = Vec::new();
         let mut ids_in_order: Vec<EntityId> = Vec::new();
         let skeleton_ids: HashSet<EntityId> = batch_ids.keys().cloned().collect();
-        for (i, ((args, note), row)) in creates.into_iter().zip(rows.into_iter()).enumerate() {
+        for (i, ((args, note), row)) in creates.into_iter().zip(rows).enumerate() {
             let fallback_id = row
                 .id
                 .clone()

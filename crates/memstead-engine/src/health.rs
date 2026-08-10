@@ -41,6 +41,10 @@ pub struct HealthConfig {
 /// Typed input failures the composer surfaces. The MCP wrapper maps each
 /// variant to its existing envelope (`UNKNOWN_MEM`, `INVALID_INPUT`) and
 /// the engine fault to its typed translator, so the wire `code` stays put.
+// The engine-fault variant carries the lower-layer error verbatim so the typed
+// translator keeps its input; the size gap is inherent to that lifting, and a
+// health composition runs once per call.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, thiserror::Error)]
 pub enum ComposeHealthError {
     /// `args.mem` names a mem that isn't writable in this workspace. The

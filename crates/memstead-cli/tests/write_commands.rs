@@ -1754,7 +1754,7 @@ fn shared_from_template_feeds_create_and_update() {
     let template_live = tmp.path().join("template-live.json");
     fs::write(
         &template_live,
-        &fs::read_to_string(&template)
+        fs::read_to_string(&template)
             .unwrap()
             .replace("\"dry_run\": true", "\"dry_run\": false"),
     )
@@ -1778,7 +1778,7 @@ fn shared_from_template_feeds_create_and_update() {
     let update_doc = tmp.path().join("template-update.json");
     fs::write(
         &update_doc,
-        &fs::read_to_string(&template_live)
+        fs::read_to_string(&template_live)
             .unwrap()
             .replace("Template identity.", "Updated identity."),
     )
@@ -1806,7 +1806,7 @@ fn shared_from_template_feeds_create_and_update() {
     let update_doc2 = tmp.path().join("template-update2.json");
     fs::write(
         &update_doc2,
-        &fs::read_to_string(&update_doc)
+        fs::read_to_string(&update_doc)
             .unwrap()
             .replace("Updated identity.", "Third identity."),
     )

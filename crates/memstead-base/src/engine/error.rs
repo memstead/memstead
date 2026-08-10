@@ -1979,6 +1979,10 @@ fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
 /// (folder + archive vs git-branch), and engine construction
 /// (duplicate-mem checks). `#[from]` lifts the lower-layer types so
 /// callers branch on a single error envelope.
+// Variants lift lower-layer error types verbatim via `#[from]`, so the enum is
+// as wide as its widest member. Boot errors are constructed at most once per
+// process; boxing to equalise them would buy nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, thiserror::Error)]
 pub enum BootError {
     /// `detect_layout` returned [`crate::Layout::Empty`] — workspace
