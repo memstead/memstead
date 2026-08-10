@@ -2598,3 +2598,74 @@ fn absence_means_optional_for_fields_and_sections_on_authoring_path() {
     let extra = td.sections.iter().find(|s| s.key == "extra_notes").unwrap();
     assert!(!extra.required, "section without required key is optional");
 }
+
+// ---------------------------------------------------------------------------
+// Due-axis declaration validation (first-author-path plan 08)
+// ---------------------------------------------------------------------------
+
+fn due_type(due_block: &str) -> String {
+    format!(
+        "name: sample\ndescription: t\nwhen_to_use: due tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\n  - key: vorlauf\n    heading: Vorlauf\n    search_weight: 1.0\n    write_rules: []\nmetadata_fields:\n  - key: faellig_am\n    description: due date\n    field_type: date\n  - key: status\n    description: state\n    field_type: string\n    enum_values: [offen, erledigt]\n  - key: freitext\n    description: plain string\n    field_type: string\n{due_block}title_weight: 100.0\ntext_fields: [body]\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields: [title, body]\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n"
+    )
+}
+
+/// A well-formed declaration loads; a schema without `due:` loads and
+/// carries no axis — behaves exactly as today.
+#[test]
+fn due_axis_well_formed_loads_and_absence_is_inert() {
+    let ok = due_type(
+        "due:\n  date_field: faellig_am\n  status_field: status\n  open_values: [offen]\n  lead_section: vorlauf\n",
+    );
+    let schema = load(&minimal_manifest(), &[("sample", &ok)]).expect("well-formed due loads");
+    let td = schema.get_type("sample").unwrap();
+    let due = td.due.as_ref().unwrap();
+    assert_eq!(due.date_field, "faellig_am");
+    assert_eq!(due.lead_section.as_deref(), Some("vorlauf"));
+
+    let none = due_type("");
+    let schema = load(&minimal_manifest(), &[("sample", &none)]).expect("no due loads");
+    assert!(schema.get_type("sample").unwrap().due.is_none());
+}
+
+/// Every malformed reference refuses at load with the recovery
+/// quality, and several defects report together through the shared
+/// accumulation.
+#[test]
+fn due_axis_malformed_references_refuse_with_accumulation() {
+    // Missing date field + non-enum status + undeclared open value +
+    // bad lead section, all at once.
+    let bad = due_type(
+        "due:\n  date_field: nonexistent\n  status_field: freitext\n  open_values: [offen, unbekannt]\n  lead_section: nosuch\n",
+    );
+    let err = load(&minimal_manifest(), &[("sample", &bad)]).expect_err("must refuse");
+    let msg = err.to_string();
+    assert!(msg.contains("violations"), "accumulated: {msg}");
+    assert!(msg.contains("'nonexistent'"), "{msg}");
+    assert!(
+        msg.contains("`status_field` must name an enum-typed metadata field"),
+        "{msg}"
+    );
+    assert!(msg.contains("'nosuch'"), "{msg}");
+
+    // Non-date date_field refuses alone with the shape rule.
+    let non_date = due_type(
+        "due:\n  date_field: freitext\n  status_field: status\n  open_values: [offen]\n",
+    );
+    let err = load(&minimal_manifest(), &[("sample", &non_date)]).expect_err("must refuse");
+    assert!(
+        err.to_string()
+            .contains("`date_field` must name a date-typed metadata field"),
+        "{err}"
+    );
+
+    // Undeclared open value names the enum.
+    let bad_value = due_type(
+        "due:\n  date_field: faellig_am\n  status_field: status\n  open_values: [unbekannt]\n",
+    );
+    let err = load(&minimal_manifest(), &[("sample", &bad_value)]).expect_err("must refuse");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("`open_values` entry is not in `status`'s enum_values [offen, erledigt]"),
+        "{msg}"
+    );
+}

@@ -130,6 +130,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Overview(args) => commands::overview::run(&ctx, args),
         Command::Type(args) => commands::type_cmd::run(&ctx, args),
         Command::Health(args) => commands::health::run(&ctx, args),
+        Command::Due(args) => commands::due::run(&ctx, args),
         Command::Export(args) => commands::export::run(&ctx, args),
         Command::Init(args) => commands::init::run(&ctx, args),
         Command::Quickstart(args) => commands::quickstart::run(&ctx, args),

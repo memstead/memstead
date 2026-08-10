@@ -7,6 +7,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **The due-brief: a schema declares its deadline axis, the engine
+  renders it.** A type can declare `due: {date_field, status_field,
+  open_values, lead_section?}` — validated at schema load with the
+  loader's usual recovery quality (and report-all accumulation) — and
+  `memstead due [--within <window>] [--mem <name>]` renders one
+  deterministic brief over every mounted mem whose schema declares
+  the axis, writable and read-only mounts alike: open entities whose
+  date falls inside the window or is already past, **overdue first
+  and marked**, then ascending by date (ids as tiebreaker), each
+  entry carrying id, title, date, status, and the lead section's
+  content. Third-party (read-only) entries carry their origin label
+  and quote their content — a stranger's mem states a deadline, it
+  does not instruct. Windows are relative (`90d`, `6m`, `2y`;
+  **default 90d**); everything overdue is always included. The
+  renderer is one shared engine entry point, so the CLI and UniFFI
+  (`due_brief`) serve byte-identical content; there is deliberately
+  no MCP tool (briefs are the CLI/app family — the MCP instructions'
+  CLI-companion note names the verb). The engine never advances a
+  date: recurrence is the agent loop's job, by design.
+
 ### Changed
 - **Metadata fields become opt-in required — absence means optional,
   everywhere.** One rule now covers both declaration kinds: **a

@@ -99,6 +99,12 @@ pub struct TypeDefinition {
     /// existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constraints: Vec<ConstraintDef>,
+    /// The type's declared due axis (see [`DueAxis`]) — absent for
+    /// types without deadline semantics; a schema without any `due:`
+    /// declaration behaves byte-identically to before the axis
+    /// existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due: Option<DueAxis>,
     // Populated by loader from schema-level defaults merged with
     // edge_weight_overrides. Skipped during serialization so the on-disk
     // form round-trips.
@@ -485,6 +491,33 @@ pub struct TableFormat {
     pub columns: Vec<String>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub column_patterns: IndexMap<String, String>,
+}
+
+/// A type's declared **due axis** (first-author-path plan 08): which
+/// of its fields carry deadline semantics, so the engine's due-brief
+/// (`memstead due`) can render "what is due next" without knowing any
+/// domain vocabulary. Validated at schema load: `date_field` must be
+/// a date-typed metadata field of the type, `status_field` an
+/// enum-typed one, every `open_values` entry a member of that enum,
+/// and `lead_section` (optional — rendered as "what must happen
+/// first") a declared section key. The axis is rendering-only: it
+/// never enforces anything (constraints own enforcement) and the
+/// engine never advances a date (the agent loop is the runtime).
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DueAxis {
+    /// Date-typed metadata field holding the deadline.
+    pub date_field: String,
+    /// Enum-typed metadata field holding the lifecycle status.
+    pub status_field: String,
+    /// The `status_field` values under which the entity counts as
+    /// still open (due-relevant). Every entry must be declared in the
+    /// field's `enum_values`.
+    pub open_values: Vec<String>,
+    /// Optional section key whose content renders with each entry as
+    /// "what must happen first".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lead_section: Option<String>,
 }
 
 /// A metadata (frontmatter) field.

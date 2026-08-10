@@ -48,7 +48,7 @@ pub use source::{
     INSTALL_PROVENANCE_FILE, SchemaSourceError, SchemaSourceFile, collect_schema_source,
 };
 pub use types::{
-    ConstraintDef, ConstraintSeverity, FieldType, Filterable, MetadataFieldDef,
+    ConstraintDef, ConstraintSeverity, DueAxis, FieldType, Filterable, MetadataFieldDef,
     PropagationDirection, RequiredCardinality, RequiredOutgoing, SectionDef, Serialization,
     TableFormat, TypeDefinition, derive_section_key,
 };

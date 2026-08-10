@@ -18,6 +18,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead overview`↴](#memstead-overview)
 * [`memstead type`↴](#memstead-type)
 * [`memstead health`↴](#memstead-health)
+* [`memstead due`↴](#memstead-due)
 * [`memstead export`↴](#memstead-export)
 * [`memstead init`↴](#memstead-init)
 * [`memstead quickstart`↴](#memstead-quickstart)
@@ -127,6 +128,7 @@ Exit codes:
 * `overview` — All clusters with summaries and member lists. The full build renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-engine`
 * `type` — Describe one type, or list all types when no name given
 * `health` — Health summary (orphans, stubs, stale entities, missing fields)
+* `due` — Render the due-brief: open entities whose schema-declared due date falls inside the window (default 90d), overdue first
 * `export` — Export the write mem as markdown (in place) or as a portable `.mem` archive
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
@@ -375,6 +377,21 @@ Health summary (orphans, stubs, stale entities, missing fields)
 
   Default value: `10`
 * `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations, or when the always-on authoring-drift axis reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` / `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in). The output is rendered first, then the non-zero exit fires. Include-gated participation today: `missing_required_outgoing`, `constraints`; new Tier-2 codes opt in additively without breaking the flag's semantics
+
+
+
+## `memstead due`
+
+Render the due-brief: open entities whose schema-declared due date falls inside the window (default 90d), overdue first
+
+**Usage:** `memstead due [OPTIONS]`
+
+###### **Options:**
+
+* `--within <WITHIN>` — Relative window against today: `<N>d` days, `<N>m` calendar months, `<N>y` calendar years (e.g. 90d, 6m, 2y). Everything already overdue is always included. Default: 90d
+
+  Default value: `90d`
+* `--mem <MEM>` — Restrict the brief to one mem (default: every mounted mem whose schema declares a due axis)
 
 
 

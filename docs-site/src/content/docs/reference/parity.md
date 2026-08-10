@@ -72,6 +72,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `batch-update`
 - `check`
 - `domain`
+- `due`
 - `export`
 - `init`
 - `install`

@@ -209,6 +209,7 @@ pub fn render_mem_changed_block(notices: &[memstead_base::ops::MemChangedNotice]
 pub mod admin;
 pub mod delete;
 pub mod domain;
+pub mod due;
 pub mod entity;
 pub mod export;
 pub mod health;

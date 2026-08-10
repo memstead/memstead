@@ -41,6 +41,15 @@ namespace memstead {
     // entry point. Discovery mode today.
     [Throws=MemsteadError]
     string projection_brief(string workspace_root, string binding_id);
+
+    // Render the due-brief for the workspace at `workspace_root` —
+    // open entities whose schema-declared due date falls inside the
+    // window (`within`: 90d/6m/2y forms; null applies the engine
+    // default), overdue first. Byte-identical to `memstead due`: both
+    // call the one shared engine entry point. `today` (YYYY-MM-DD)
+    // overrides the current date for deterministic rendering.
+    [Throws=MemsteadError]
+    string due_brief(string workspace_root, string? within, string? mem, string? today);
 };
 
 // ---------------------------------------------------------------------------

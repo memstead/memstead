@@ -99,6 +99,10 @@ pub enum Command {
     /// Health summary (orphans, stubs, stale entities, missing fields).
     Health(commands::health::Args),
 
+    /// Render the due-brief: open entities whose schema-declared due
+    /// date falls inside the window (default 90d), overdue first.
+    Due(commands::due::Args),
+
     /// Export the write mem as markdown (in place) or as a portable `.mem` archive.
     Export(commands::export::Args),
 
@@ -348,6 +352,7 @@ impl Command {
             Command::Overview(_) => "overview",
             Command::Type(_) => "type",
             Command::Health(_) => "health",
+            Command::Due(_) => "due",
             Command::Export(_) => "export",
             Command::Init(_) => "init",
             Command::Quickstart(_) => "quickstart",

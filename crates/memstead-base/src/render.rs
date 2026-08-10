@@ -2393,6 +2393,7 @@ mod tests {
             edge_weights: indexmap::IndexMap::new(),
             no_self_loop_relationships: vec![],
             legacy_propagating_relationships: None,
+            due: None,
             leaf: false,
             updatable_fields: vec![],
             health_required_fields: vec![],

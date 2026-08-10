@@ -100,6 +100,18 @@ pub enum SchemaLoadError {
     )]
     OptionalRetired { type_name: String, field: String },
 
+    /// A `due:` declaration referencing fields the type does not have
+    /// in the required shapes. `offender` names the bad reference,
+    /// `reason` states the shape rule it violates — the due axis is
+    /// spec (an external declaration), so its references validate at
+    /// load with the loader's usual recovery quality.
+    #[error("type '{type_name}' due axis is invalid: {reason} — offending name: '{offender}'")]
+    InvalidDueAxis {
+        type_name: String,
+        offender: String,
+        reason: String,
+    },
+
     #[error("schema relationship vocabulary must include a '_default' definition")]
     MissingDefaultWeight,
 
@@ -1380,6 +1392,73 @@ fn validate_type(
                     });
                 }
             }
+        }
+    }
+
+    // Due axis (first-author-path plan 08): the declaration's
+    // references must exist on this type in the declared shapes.
+    if let Some(due) = &td.due {
+        match td.metadata_fields.iter().find(|f| f.key == due.date_field) {
+            None => errors.push(SchemaLoadError::InvalidDueAxis {
+                type_name: td.name.clone(),
+                offender: due.date_field.clone(),
+                reason: "`date_field` names no metadata field of this type".to_string(),
+            }),
+            Some(f) if f.field_type != crate::types::FieldType::Date => {
+                errors.push(SchemaLoadError::InvalidDueAxis {
+                    type_name: td.name.clone(),
+                    offender: due.date_field.clone(),
+                    reason: "`date_field` must name a date-typed metadata field".to_string(),
+                })
+            }
+            Some(_) => {}
+        }
+        match td.metadata_fields.iter().find(|f| f.key == due.status_field) {
+            None => errors.push(SchemaLoadError::InvalidDueAxis {
+                type_name: td.name.clone(),
+                offender: due.status_field.clone(),
+                reason: "`status_field` names no metadata field of this type".to_string(),
+            }),
+            Some(f) => match &f.enum_values {
+                None => errors.push(SchemaLoadError::InvalidDueAxis {
+                    type_name: td.name.clone(),
+                    offender: due.status_field.clone(),
+                    reason: "`status_field` must name an enum-typed metadata field \
+                             (declare enum_values)"
+                        .to_string(),
+                }),
+                Some(allowed) => {
+                    for v in &due.open_values {
+                        if !allowed.contains(v) {
+                            errors.push(SchemaLoadError::InvalidDueAxis {
+                                type_name: td.name.clone(),
+                                offender: v.clone(),
+                                reason: format!(
+                                    "`open_values` entry is not in `{}`'s enum_values [{}]",
+                                    due.status_field,
+                                    allowed.join(", ")
+                                ),
+                            });
+                        }
+                    }
+                }
+            },
+        }
+        if due.open_values.is_empty() {
+            errors.push(SchemaLoadError::InvalidDueAxis {
+                type_name: td.name.clone(),
+                offender: "(empty)".to_string(),
+                reason: "`open_values` must name at least one open status value".to_string(),
+            });
+        }
+        if let Some(lead) = &due.lead_section
+            && !td.sections.iter().any(|s| s.key == *lead)
+        {
+            errors.push(SchemaLoadError::InvalidDueAxis {
+                type_name: td.name.clone(),
+                offender: lead.clone(),
+                reason: "`lead_section` names no section of this type".to_string(),
+            });
         }
     }
 

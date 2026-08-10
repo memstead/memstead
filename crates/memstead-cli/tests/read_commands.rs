@@ -1251,3 +1251,37 @@ Nachweis für Suche in Metadaten.
         .success()
         .stdout(contains("cli-test--akte").and(contains("\"metadata\"")));
 }
+
+/// `memstead due` (first-author-path plan 08): the CLI wiring — a
+/// workspace whose schema declares no due axis renders the honest
+/// empty brief; a bad window refuses typed naming the accepted forms;
+/// the default window is stated in `--help`; `--today` makes the
+/// brief deterministic.
+#[test]
+fn due_brief_cli_wiring() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = seed_cli_test_mem(tmp.path());
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["due", "--today", "2026-08-10"])
+        .assert()
+        .success()
+        .stdout(contains("# Due brief — 2026-08-10, window 90d"))
+        .stdout(contains("No mounted mem's schema declares a due axis"));
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["due", "--within", "90w"])
+        .assert()
+        .failure()
+        .stderr(contains("INVALID_INPUT"))
+        .stderr(contains("<N>d"));
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["due", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("90d"));
+}

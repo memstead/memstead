@@ -20,6 +20,17 @@
     "description": {
       "type": "string"
     },
+    "due": {
+      "description": "The type's declared due axis (see [`DueAxis`]) — absent for\ntypes without deadline semantics; a schema without any `due:`\ndeclaration behaves byte-identically to before the axis\nexisted.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DueAxis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "edge_weight_overrides": {
       "type": "object",
       "additionalProperties": {
@@ -283,6 +294,40 @@
           "type": "string",
           "const": "block"
         }
+      ]
+    },
+    "DueAxis": {
+      "description": "A type's declared **due axis** (first-author-path plan 08): which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).",
+      "type": "object",
+      "properties": {
+        "date_field": {
+          "description": "Date-typed metadata field holding the deadline.",
+          "type": "string"
+        },
+        "lead_section": {
+          "description": "Optional section key whose content renders with each entry as\n\"what must happen first\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "open_values": {
+          "description": "The `status_field` values under which the entity counts as\nstill open (due-relevant). Every entry must be declared in the\nfield's `enum_values`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status_field": {
+          "description": "Enum-typed metadata field holding the lifecycle status.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "date_field",
+        "status_field",
+        "open_values"
       ]
     },
     "Exemplar": {

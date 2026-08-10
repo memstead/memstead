@@ -142,6 +142,44 @@ pub fn projection_brief(
     })
 }
 
+/// Render the due-brief — the same Markdown `memstead due` emits,
+/// byte-identical because both call the one shared engine entry point
+/// [`memstead_base::engine::Engine::render_due_brief`]. `within` is a
+/// relative window (`90d`, `6m`, `2y`; `None` applies the engine
+/// default), `mem` optionally restricts to one mem, `today` overrides
+/// the current date (ISO `YYYY-MM-DD`) for deterministic rendering —
+/// `None` takes today (UTC).
+pub fn due_brief(
+    workspace_root: String,
+    within: Option<String>,
+    mem: Option<String>,
+    today: Option<String>,
+) -> Result<String, MemsteadError> {
+    let root = Path::new(&workspace_root);
+    let engine =
+        memstead_git_branch::workspace_store::engine_from_workspace_root(root).map_err(|e| {
+            MemsteadError::Internal {
+                message: format!("failed to load workspace at {}: {e}", root.display()),
+            }
+        })?;
+    let within = within.unwrap_or_else(|| memstead_base::engine::due::DEFAULT_DUE_WINDOW.to_string());
+    let window = memstead_base::engine::due::parse_due_window(&within)
+        .map_err(|message| MemsteadError::ValidationFailed { message })?;
+    let today = today.unwrap_or_else(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        // Days-since-epoch to civil date, UTC.
+        let days = (now / 86_400) as i64;
+        let (y, m, d) = memstead_base::engine::due::civil_from_days_pub(days);
+        format!("{y:04}-{m:02}-{d:02}")
+    });
+    engine
+        .render_due_brief(&today, &window, mem.as_deref())
+        .map_err(|message| MemsteadError::ValidationFailed { message })
+}
+
 /// In-process handle to the Memstead engine. Wraps `memstead_base::Engine` behind
 /// a `Mutex` — same shape as `memstead-mcp::McpServer` — so multiple Swift
 /// callers can share one engine instance.
