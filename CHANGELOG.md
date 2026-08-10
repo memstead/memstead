@@ -7,6 +7,54 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+**The doorway release.** A first-time schema author, modelling a domain the
+project had never seen, hit a wall before writing a single entity. This release
+takes the wall down, and it is the first release cut on the rule that made it
+overdue: **a schema-language change means the next release is due within days**
+— no released binary should refuse a key this repository's own examples,
+built-ins, and `schema new` scaffold emit.
+
+**The doorway itself** is the headline. Titles are display text — `Bösenberg
+Grundstücks GmbH & Co. KG`, `Wohnung 2.OG rechts`, `RFC 2119 §5` all create and
+render verbatim, deriving their slug exactly as the pipeline always did, with a
+lossy derivation now *warning* rather than refusing. And one polarity rule
+covers both declaration kinds: **a section or metadata field is optional unless
+it declares `required: true`** — no more silent default on one side and an
+explicit key on the other. Around them, the refusals themselves grew up: schema
+validation reports every violation in one pass instead of the first, two
+refusals now name the fact that would let the caller recover, a binding's scope
+excludes the engine's own files, and the friction ledger records *why* a
+refusal happened.
+
+**Second beat: a deadline becomes a first-class axis.** A type declares
+`due: {date_field, status_field, open_values}` and `memstead due` renders one
+deterministic brief across every mounted mem that declares it — the engine
+learns one declaration, not one domain. `obligation@0.1.0`, the first
+non-software built-in, is that axis's first declarer: the
+document-and-deadline pattern (a dated duty with a stated consequence, the
+parties, the agreement, the decision trail) with nothing in it naming a domain
+or jurisdiction. `export --format html` completes the beat from the other end —
+one self-contained file, zero network requests, handed to a person who has
+installed nothing. The docs now state the operating model these three assume:
+the agent writes, the engine enforces, and a periodically-invoked agent run
+measures and advances — the engine does not calculate, and recurrence is the
+loop's property, not a missing engine feature.
+
+**Third: the field's friction, closed.** The agent-trust bundle that preceded
+the doorway — repair below boot, boot failures that name their cause, anchors
+that resolve per medium, rehearsal as the default for batch writes, atomic
+`memstead_relate`, read-mems as ordinary mounts, mem rename, dev builds that
+identify themselves — plus the fixes the dogfood loop surfaced along the way.
+
+**Breaking changes** (pre-1.0, but an upgrade needs to see them): the metadata
+polarity flip retires `optional:` in favour of `required:` — authored schemas
+refuse it with a one-sentence inversion, while sealed packages keep their
+written meaning through a format marker, so nothing flips silently;
+`memstead_relate` takes a `relations: [...]` list instead of a single triple;
+and legacy `readMems` config entries migrate one-way to mounts at boot. Every
+built-in that changed shipped a *new* version — every prior version stays
+byte-sealed and loadable, so out-of-repo pins keep working unchanged.
+
 ### Added
 - **`export --format html` — a read surface for non-operators.** One
   self-contained HTML file per mem: every entity as a section (title,
