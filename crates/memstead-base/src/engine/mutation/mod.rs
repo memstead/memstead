@@ -811,9 +811,10 @@ pub(super) fn route_edge_validation(
 /// batch paths, which stage prior items' edges into `store` so an
 /// intra-batch cycle refuses like a stored one):
 ///
-/// - **Self-loop on a propagating rel-type.** `from == to` on any
-///   rel-type the source type lists in `no_self_loop_relationships` is
-///   always a weight-bomb, regardless of the `acyclic` flag.
+/// - **Self-loop on a listed no-self-loop rel-type.** `from == to` on
+///   any rel-type the source type lists in `no_self_loop_relationships`
+///   refuses, regardless of the `acyclic` flag — the declaration's one
+///   effect (see `TypeDefinition::no_self_loop_relationships`).
 /// - **Cycle on an acyclic rel-type.** An add closing a back-path
 ///   `to → … → from` (via [`crate::graph::query::would_cycle`]) refuses
 ///   with the existing path, capped at [`RELATIONSHIP_CYCLE_PATH_CAP`].

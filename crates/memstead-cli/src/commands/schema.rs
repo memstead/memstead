@@ -512,7 +512,9 @@ title_weight: 100.0
 text_fields: [summary, details]
 # Which declared relationship expresses hierarchy for this type.
 hierarchy_relationship: PART_OF
-# Edge types whose community signal propagates through this type.
+# One effect only: relate refuses a self-loop (from == to) on the rel-types
+# listed here. Nothing propagates; for impact propagation declare a
+# `status_propagation` constraint instead.
 no_self_loop_relationships: [PART_OF]
 # Fields `memstead update` may touch on this type.
 updatable_fields: [title, summary, details, status, tags]

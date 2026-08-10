@@ -7,6 +7,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **Two source comments no longer describe retired behaviour.** The
+  `schema new` scaffold's annotation on `no_self_loop_relationships`
+  claimed community-signal propagation — the exact promise the
+  `propagating_relationships` rename retired; it now states the
+  field's single effect (self-loop refusal on relate) in agreement
+  with the `no_self_loop_relationships_effect` note the schema
+  response serves. The slug pipeline's doc comment claimed
+  Obsidian-style `[[<title>]]` authoring "round-trips without lookup"
+  generally; it now states the property's real scope — it holds for
+  titles already in slug form (case-less scripts, lowercase
+  single-token Latin), while any other title derives a different slug
+  and the strict wiki-link decoder refuses the natural form. No
+  behaviour changed.
+
 ### Changed
 - **The friction ledger records why a refusal happened.** For refusals
   whose typed envelope carries a closed, engine-owned reason

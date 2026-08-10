@@ -1551,7 +1551,7 @@ fn apply_declare_relations(
         )?;
 
         // Cycle family — the same shared gate `memstead_relate` runs
-        // (self-loop on propagating types, long cycle on acyclic
+        // (self-loop on listed no-self-loop rel-types, long cycle on acyclic
         // types), against the current store state.
         super::validate_edge_acyclicity(
             &engine.store,
@@ -5736,7 +5736,7 @@ community:
     /// `update.declare_relations` runs the same cycle family as
     /// `memstead_relate`: a cycle-closing edge on an acyclic rel-type
     /// refuses `RELATIONSHIP_CYCLE` with the relate path's recovery
-    /// detail, a self-loop on a propagating rel-type refuses
+    /// detail, a self-loop on a listed no-self-loop rel-type refuses
     /// identically, and — refusal complement — a non-cycle edge on the
     /// acyclic type is accepted exactly as today.
     #[test]
@@ -5817,7 +5817,7 @@ community:
             "the refused edge must not land"
         );
 
-        // Self-loop on a propagating rel-type (spec propagates USES).
+        // Self-loop on a listed no-self-loop rel-type (spec lists USES).
         // Alpha's hash moved with the relate above — read the live one.
         let alpha_hash = engine.get_entity(&alpha.id).unwrap().content_hash.clone();
         let err = engine

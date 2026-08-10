@@ -325,8 +325,8 @@ fn resolve_two_pass(
 /// `validate_rel_type` + `validate_rel_shape` before the write, and
 /// every edge-writing verb (relate, `create.relations[]`,
 /// `update.declare_relations`, and the batch paths) runs the shared
-/// cycle family (`validate_edge_acyclicity`: self-loop on propagating
-/// rel-types, `would_cycle` on acyclic ones) in the same call. This
+/// cycle family (`validate_edge_acyclicity`: self-loop on listed
+/// no-self-loop rel-types, `would_cycle` on acyclic ones) in the same call. This
 /// sweep therefore covers pre-existing on-disk data only — entities
 /// written before the write-path gates closed, or edited out-of-band.
 pub fn validate_loaded_relations(

@@ -644,7 +644,7 @@ pub(super) mod test_helpers {
 
     /// Write a schema manifest + minimal type bodies under
     /// `<root>/<name>/`. Each type gets a body with a single
-    /// `body` section and `_default` hierarchy/propagation — enough
+    /// `body` section and `_default` hierarchy/no-self-loop lists — enough
     /// to load and parse markdown that uses that type. Used by tests
     /// that need a custom schema with shape or vocabulary constraints.
     pub(crate) fn write_schema_files_with_default_type(

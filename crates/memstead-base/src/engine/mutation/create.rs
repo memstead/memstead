@@ -448,8 +448,8 @@ impl Engine {
             // `manual_authoring` posture.
             super::validate_manual_authoring_posture(self, &rel.rel_type, &args.mem, &id, &rel.to)?;
             // Cycle family — the same shared gate `memstead_relate` runs
-            // (self-loop on propagating types, long cycle on acyclic
-            // types), against the current store. A stub being promoted
+            // (self-loop on listed no-self-loop rel-types, long cycle
+            // on acyclic ones), against the current store. A stub being promoted
             // by this create already carries its incoming edges, so a
             // back-path through the new id is visible; on the batch
             // path prior items' edges are staged into the store, so an
@@ -1888,7 +1888,7 @@ write_rules: []
     /// new propagation declaration gets a distinct name, and this pin
     /// guards that the old field keeps exactly this effect.
     #[test]
-    fn propagating_rel_type_self_loop_refusal_is_pinned() {
+    fn no_self_loop_rel_type_self_loop_refusal_is_pinned() {
         let tmp = TempDir::new().unwrap();
         // The `constr` fixture declares `no_self_loop_relationships:
         // [PART_OF]` on `task`.
@@ -5375,7 +5375,8 @@ community:
     /// `create.relations[]` runs the same cycle family as
     /// `memstead_relate`: an edge closing a cycle through a promoted
     /// stub refuses `RELATIONSHIP_CYCLE` (acyclic rel-type), a
-    /// self-loop on a propagating rel-type refuses identically, and —
+    /// self-loop on a listed no-self-loop rel-type refuses
+    /// identically, and —
     /// refusal complement — a non-cycle edge on the acyclic type lands
     /// exactly as today.
     #[test]
@@ -5414,7 +5415,7 @@ community:
             "the refused entity must not be written"
         );
 
-        // Self-loop on a propagating rel-type (spec propagates USES).
+        // Self-loop on a listed no-self-loop rel-type (spec lists USES).
         let err = engine
             .create_entity(
                 create_with_relation("specs", "Selfy", "USES", "specs--selfy"),

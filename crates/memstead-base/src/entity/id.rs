@@ -157,9 +157,14 @@ pub fn enforce_id_length(id: &str) -> Result<(), SlugError> {
 /// Always returns `Ok(...)`. When the filter leaves the slug empty
 /// (all-emoji titles, all-punctuation, all-symbol titles), the slug
 /// degrades to a deterministic short hash of the title
-/// (`entity-<8-hex>`) rather than failing. Common titles still
-/// produce slug == title in their native script — Obsidian-style
-/// `[[<title>]]` wiki-link authoring round-trips without lookup.
+/// (`entity-<8-hex>`) rather than failing. Titles that are already
+/// slug-form — case-less scripts (`知識グラフ`) and lowercase
+/// single-token Latin (`wohnung`) — produce slug == title, so
+/// Obsidian-style `[[<title>]]` authoring round-trips without lookup
+/// for exactly those titles; any other title (a capital, a space:
+/// `Knowledge Graph`) derives a different slug, and the strict
+/// wiki-link decoder below refuses the natural form as a link target
+/// — such entities are linked by slug (`[[knowledge-graph]]`).
 pub fn title_to_slug(title: &str) -> Result<String, SlugError> {
     let normalized: String = title.nfc().collect();
     let slug: String = normalized

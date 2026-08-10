@@ -1104,7 +1104,7 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
             .iter()
             .any(|r| r == rel_type)
         {
-            flags.push("propagating");
+            flags.push("no-self-loop");
         }
         let flag_str = if flags.is_empty() {
             String::new()
@@ -1850,8 +1850,8 @@ pub fn build_schema_payload(
         // legal write — with the type/section prose (descriptions,
         // write_rules, writing_guidance, system_context) dropped.
         // `no_self_loop_relationships` rides along because it governs
-        // the self-loop relate refusal (relate R X→X when R propagates
-        // on type T), one of the refusals the lite view must let an
+        // the self-loop relate refusal (relate R X→X when type T lists
+        // R), one of the refusals the lite view must let an
         // agent avoid. `required_outgoing` rides along because it is
         // the only declared legality condition on outgoing edges —
         // dropping it would make "enough to plan a legal write" false.

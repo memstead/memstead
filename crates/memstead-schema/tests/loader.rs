@@ -448,8 +448,8 @@ fn builtin_default_loads_ten_types() {
 /// vocabulary admits every edge type live standing-knowledge content
 /// carries (census-driven: REFERENCES, GOVERNS, MOTIVATED_BY,
 /// SUPERSEDES, IMPLEMENTS, GENERALIZES) plus the type files' own
-/// references (PART_OF hierarchy, DERIVED_FROM overrides, CONSTRAINS
-/// propagation).
+/// references (PART_OF hierarchy, DERIVED_FROM overrides, the
+/// GOVERNS/CONSTRAINS no-self-loop declarations).
 #[test]
 fn builtin_engineering_is_knowledge_only() {
     let all = memstead_schema::builtins::load_builtin_schemas().expect("builtins load");

@@ -605,7 +605,7 @@ impl Engine {
         }
 
         // Cycle family on the real-add path — the self-loop refusal
-        // (propagating rel-types) and the acyclic long-cycle refusal,
+        // (listed no-self-loop rel-types) and the acyclic long-cycle refusal,
         // via the shared gate every edge-writing verb runs
         // (`validate_edge_acyclicity`). Skipped on the remove path:
         // removal can only break cycles, never close one.

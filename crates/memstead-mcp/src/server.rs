@@ -11761,15 +11761,15 @@ write_rules: []
         assert_eq!(path[1], "specs--entity-b");
     }
 
-    /// `memstead_relate` on a
-    /// propagating-from-source self-loop refuses with
+    /// `memstead_relate` on a self-loop over a rel-type the source
+    /// type lists in `no_self_loop_relationships` refuses with
     /// `RELATIONSHIP_CYCLE`, independent of the rel-type's `acyclic`
     /// flag. The default schema's spec type declares
     /// `no_self_loop_relationships: [DEPENDS_ON, USES]`, so a
     /// `USES from spec--X to spec--X` self-loop fires the gate even
     /// though USES carries `acyclic: false`.
     #[test]
-    fn relate_self_loop_refuses_on_propagating_rel_type() {
+    fn relate_self_loop_refuses_on_listed_no_self_loop_rel_type() {
         let (server, _tmp) = setup_dual_test_engine();
         let result = server.memstead_relate(Parameters(RelateParams {
             relations: vec![RelateOpInput {
@@ -11785,7 +11785,7 @@ write_rules: []
         }));
         assert!(
             result.is_error.unwrap_or(false),
-            "self-loop on a propagating-from-source rel-type must refuse: {}",
+            "self-loop on a listed no-self-loop rel-type must refuse: {}",
             extract_text(&result)
         );
         let sc = result
@@ -16147,10 +16147,10 @@ write_rules: []
                 .iter()
                 .find(|t| t["name"] == "spec")
                 .expect("spec type present in default schema");
-            let propagating = spec["no_self_loop_relationships"]
+            let no_self_loop = spec["no_self_loop_relationships"]
                 .as_array()
                 .expect("no_self_loop_relationships array present");
-            let names: Vec<&str> = propagating.iter().filter_map(|v| v.as_str()).collect();
+            let names: Vec<&str> = no_self_loop.iter().filter_map(|v| v.as_str()).collect();
             assert!(
                 names.contains(&"DEPENDS_ON") && names.contains(&"USES"),
                 "spec's no_self_loop_relationships must list DEPENDS_ON and USES: {names:?}"
