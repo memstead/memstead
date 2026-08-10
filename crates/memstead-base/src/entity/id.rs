@@ -16,8 +16,8 @@ pub const ENTITY_ID_MAX_LEN: usize = 200;
 /// total — any title produces a slug (residual cases like
 /// all-emoji collapse to a deterministic short-hash id) — so it never
 /// returns these variants directly. The strict mutation-entry gate
-/// [`validate_and_derive_slug`] returns them when the input would have
-/// fallen back to the hash slug or would have had characters dropped;
+/// [`validate_and_derive_slug`] returns them for control characters
+/// and for input that would have fallen back to the hash slug;
 /// [`enforce_id_length`] returns [`Self::IdTooLong`] when the
 /// derived `mem--slug` exceeds the read-path length cap.
 ///
@@ -56,22 +56,6 @@ pub enum SlugError {
     /// with at least one alphanumeric character. F4.
     #[error("title is empty or contains no slug-meaningful characters")]
     TitleEmpty { input: String },
-    /// Strict mutation-entry rejection: one or more characters in the
-    /// title would have been dropped by the slug pipeline (anything
-    /// that isn't Unicode alphanumeric, whitespace, or hyphen after
-    /// NFC + case-fold). `invalid_chars` lists each distinct offending
-    /// character in source order; `proposed_slug` is the slug the
-    /// permissive pipeline would have produced, suitable for a
-    /// mechanical retry against a sanitised title. F10 + F19.
-    #[error(
-        "title \"{input}\" contains character(s) that the slug pipeline drops: {invalid_chars:?} — \
-         retry with a sanitised title (proposed slug: \"{proposed_slug}\")"
-    )]
-    TitleHasInvalidChars {
-        input: String,
-        invalid_chars: Vec<char>,
-        proposed_slug: String,
-    },
     /// Strict mutation-entry rejection: the title contains control
     /// characters (newline, tab, other C0/C1 controls). These are
     /// Unicode whitespace, so the slug pipeline silently folds them to
@@ -102,7 +86,6 @@ impl SlugError {
         match self {
             SlugError::IdTooLong { .. } => "id_too_long",
             SlugError::TitleEmpty { .. } => "empty",
-            SlugError::TitleHasInvalidChars { .. } => "invalid_chars",
             SlugError::TitleHasControlChars { .. } => "control_chars",
         }
     }
@@ -192,26 +175,41 @@ pub fn title_to_slug(title: &str) -> Result<String, SlugError> {
 /// conformance test in this module asserts
 /// [`validate_and_derive_slug`]'s behaviour matches the sentence's
 /// claim — so neither the prose nor the validator can drift alone.
-pub const TITLE_GRAMMAR_RULE: &str = "Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected";
+pub const TITLE_GRAMMAR_RULE: &str = "Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them";
+
+/// A strict-gate derivation result: the slug plus the distinct title
+/// characters (source order, post NFC + case-fold) the pipeline
+/// dropped on the way. `dropped_chars` non-empty means the title and
+/// its id diverge beyond case/whitespace — the mutation surfaces it
+/// as the typed `TITLE_CHARS_DROPPED_FROM_SLUG` warning so the
+/// divergence stays visible without being fatal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlugDerivation {
+    pub slug: String,
+    pub dropped_chars: Vec<char>,
+}
 
 /// Strict slug derivation for mutation entry (`memstead_create`,
-/// `memstead_rename`). Runs the same pipeline as [`title_to_slug`] but
-/// rejects two residual cases the permissive variant tolerates:
+/// `memstead_rename`). Runs the same pipeline as [`title_to_slug`] —
+/// byte-identical slugs for every title — but refuses the residual
+/// cases the permissive variant tolerates:
 ///
-/// 1. **Empty / collapses-to-empty.** Empty input, whitespace-only,
-///    or hyphen-only input — anything that would force the loader-
-///    path hash fallback. Returns [`SlugError::TitleEmpty`].
-/// 2. **Character drops.** Any character that the pipeline would
-///    strip (non-alphanumeric, non-whitespace, non-hyphen after NFC +
-///    Unicode case-fold) causes the mutation to refuse with
-///    [`SlugError::TitleHasInvalidChars`] carrying the offending
-///    characters and the pipeline's proposed slug for a mechanical
-///    retry.
+/// 1. **Control characters.** They would survive verbatim into the
+///    stored `# H1` and split it across lines. Returns
+///    [`SlugError::TitleHasControlChars`].
+/// 2. **Empty / collapses-to-empty.** Empty input, whitespace-only,
+///    hyphen-only, or all-dropped input — anything that would force
+///    the loader-path hash fallback. Returns [`SlugError::TitleEmpty`].
+///
+/// Any other character is admitted: the title is display text, stored
+/// verbatim, and characters outside the slug alphabet are dropped from
+/// the derived slug and reported in
+/// [`SlugDerivation::dropped_chars`] ([`TITLE_GRAMMAR_RULE`]).
 ///
 /// Loader paths continue to call [`title_to_slug`] so pre-gate
 /// entities created with the old permissive pipeline remain
 /// readable — only mutation entry runs this strict gate.
-pub fn validate_and_derive_slug(title: &str) -> Result<String, SlugError> {
+pub fn validate_and_derive_slug(title: &str) -> Result<SlugDerivation, SlugError> {
     let normalized: String = title.nfc().collect();
     let case_folded: String = normalized.chars().flat_map(|c| c.to_lowercase()).collect();
 
@@ -219,8 +217,7 @@ pub fn validate_and_derive_slug(title: &str) -> Result<String, SlugError> {
     // whitespace, so the slug pipeline below would fold them to hyphens
     // and accept the title — but they survive into the stored `# H1`,
     // splitting it across lines and truncating every read of the title.
-    // Refuse them before the slug derivation, ahead of the invalid-char
-    // check so the more specific control-char condition is reported.
+    // Refuse them before the slug derivation.
     let mut control_chars: Vec<char> = Vec::new();
     for c in case_folded.chars() {
         if c.is_control() && !control_chars.contains(&c) {
@@ -236,27 +233,23 @@ pub fn validate_and_derive_slug(title: &str) -> Result<String, SlugError> {
         });
     }
 
-    let mut invalid_chars: Vec<char> = Vec::new();
+    // Characters outside the slug alphabet are dropped from the id —
+    // recorded, not refused: the title is display text, the slug is
+    // the sanitised identifier, and the divergence rides back to the
+    // caller as a typed warning.
+    let mut dropped_chars: Vec<char> = Vec::new();
     for c in case_folded.chars() {
         if c.is_whitespace() || c == '-' || c.is_alphanumeric() {
             continue;
         }
-        if !invalid_chars.contains(&c) {
-            invalid_chars.push(c);
+        if !dropped_chars.contains(&c) {
+            dropped_chars.push(c);
         }
-    }
-
-    if !invalid_chars.is_empty() {
-        let proposed = title_to_slug(title).unwrap_or_default();
-        return Err(SlugError::TitleHasInvalidChars {
-            input: title.to_string(),
-            invalid_chars,
-            proposed_slug: proposed,
-        });
     }
 
     let slug: String = case_folded
         .chars()
+        .filter(|c| c.is_whitespace() || *c == '-' || c.is_alphanumeric())
         .map(|c| if c.is_whitespace() { '-' } else { c })
         .collect::<String>()
         .split('-')
@@ -270,7 +263,10 @@ pub fn validate_and_derive_slug(title: &str) -> Result<String, SlugError> {
         });
     }
 
-    Ok(slug)
+    Ok(SlugDerivation {
+        slug,
+        dropped_chars,
+    })
 }
 
 /// Deterministic 8-char hex digest used as the fallback slug when
@@ -841,10 +837,12 @@ mod tests {
 
     /// F10 + F19: any character the permissive pipeline would drop
     /// (emoji, punctuation, math/currency symbols, path separators)
-    /// causes the strict gate to refuse with the offending chars and
-    /// a `proposed_slug` for mechanical retry.
+    /// is admitted — the title is display text — with the dropped
+    /// characters reported and the slug derived exactly as the
+    /// permissive pipeline would (the old refusal's `proposed_slug`
+    /// is now simply the slug).
     #[test]
-    fn validate_and_derive_slug_rejects_invalid_chars() {
+    fn validate_and_derive_slug_admits_and_reports_dropped_chars() {
         let cases: &[(&str, &[char], &str)] = &[
             ("Hello, World!", &[',', '!'], "hello-world"),
             ("Café — résumé", &['—'], "café-résumé"),
@@ -853,20 +851,21 @@ mod tests {
             ("../escape", &['.', '/'], "escape"),
             ("path/to/entity", &['/'], "pathtoentity"),
             ("a\\b", &['\\'], "ab"),
+            ("Wohnung 2.OG rechts", &['.'], "wohnung-2og-rechts"),
+            ("Anlage 4a – Leistungsbeschreibung", &['–'], "anlage-4a-leistungsbeschreibung"),
+            (
+                "Bösenberg Grundstücks GmbH & Co. KG",
+                &['&', '.'],
+                "bösenberg-grundstücks-gmbh-co-kg",
+            ),
         ];
-        for (title, expected_invalid, expected_proposed) in cases {
-            let err = validate_and_derive_slug(title).unwrap_err();
-            let SlugError::TitleHasInvalidChars {
-                input,
-                invalid_chars,
-                proposed_slug,
-            } = err
-            else {
-                panic!("expected TitleHasInvalidChars for {title:?}, got {err:?}");
-            };
-            assert_eq!(input, *title);
-            assert_eq!(invalid_chars, *expected_invalid, "title={title:?}");
-            assert_eq!(proposed_slug, *expected_proposed, "title={title:?}");
+        for (title, expected_dropped, expected_slug) in cases {
+            let got = validate_and_derive_slug(title)
+                .unwrap_or_else(|e| panic!("expected ok for {title:?}, got {e:?}"));
+            assert_eq!(got.slug, *expected_slug, "title={title:?}");
+            assert_eq!(got.dropped_chars, *expected_dropped, "title={title:?}");
+            // Byte-identical to the permissive pipeline, always.
+            assert_eq!(got.slug, title_to_slug(title).unwrap(), "title={title:?}");
         }
     }
 
@@ -907,7 +906,7 @@ mod tests {
     /// narrow ordinary whitespace handling).
     #[test]
     fn validate_and_derive_slug_space_is_not_control() {
-        assert_eq!(validate_and_derive_slug("a b c").unwrap(), "a-b-c");
+        assert_eq!(validate_and_derive_slug("a b c").unwrap().slug, "a-b-c");
     }
 
     /// Success path — titles whose every character survives the
@@ -925,9 +924,11 @@ mod tests {
         for (title, expected) in cases {
             let got = validate_and_derive_slug(title)
                 .unwrap_or_else(|e| panic!("expected ok for {title:?}, got {e:?}"));
-            assert_eq!(&got, expected, "title={title:?}");
+            assert_eq!(&got.slug, expected, "title={title:?}");
+            // A title the old grammar admitted drops nothing.
+            assert!(got.dropped_chars.is_empty(), "title={title:?}");
             // Must agree with the permissive pipeline for accepted titles.
-            assert_eq!(got, title_to_slug(title).unwrap(), "title={title:?}");
+            assert_eq!(got.slug, title_to_slug(title).unwrap(), "title={title:?}");
         }
     }
 
@@ -939,8 +940,8 @@ mod tests {
         let nfc = "Café";
         let nfd = "Cafe\u{0301}";
         assert_eq!(
-            validate_and_derive_slug(nfc).unwrap(),
-            validate_and_derive_slug(nfd).unwrap(),
+            validate_and_derive_slug(nfc).unwrap().slug,
+            validate_and_derive_slug(nfd).unwrap().slug,
         );
     }
 
@@ -952,12 +953,6 @@ mod tests {
             input: "".to_string(),
         };
         assert_eq!(e.reason(), "empty");
-        let e = SlugError::TitleHasInvalidChars {
-            input: "x!".to_string(),
-            invalid_chars: vec!['!'],
-            proposed_slug: "x".to_string(),
-        };
-        assert_eq!(e.reason(), "invalid_chars");
         let e = SlugError::IdTooLong {
             input: "specs--x".to_string(),
             length: 201,
@@ -1483,14 +1478,15 @@ mod tests {
     }
 
     /// TITLE_GRAMMAR_RULE conformance: the documented sentence and the
-    /// validator agree — for the characters the plenum channel found
-    /// by collision (`.`, `(`, `)`, `/`, `:`, em dash) and for
-    /// non-ASCII alphanumerics. If this test fails, either the
-    /// validator's accept set or the constant changed alone; change
-    /// them together.
+    /// validator agree — any single-line text is admitted, characters
+    /// outside the slug alphabet are dropped from the slug and
+    /// reported, and control characters are the rejection. If this
+    /// test fails, either the validator's behaviour or the constant
+    /// changed alone; change them together.
     #[test]
     fn title_grammar_rule_matches_validator_behaviour() {
-        // Accepted per the rule: Unicode alphanumerics, whitespace, hyphen.
+        // Admitted with nothing dropped: Unicode alphanumerics,
+        // whitespace, hyphen.
         for ok in [
             "Plain Title",
             "hyphen-ated",
@@ -1498,14 +1494,14 @@ mod tests {
             "日本語 タイトル",
             "nbsp\u{a0}space", // non-control whitespace folds to hyphen
         ] {
-            assert!(
-                validate_and_derive_slug(ok).is_ok(),
-                "rule says {ok:?} is accepted"
-            );
+            let got = validate_and_derive_slug(ok)
+                .unwrap_or_else(|e| panic!("rule says {ok:?} is accepted, got {e:?}"));
+            assert!(got.dropped_chars.is_empty(), "{ok:?} drops nothing");
         }
-        // Rejected per the rule: every other character — the plenum
+        // Admitted per the rule, with characters outside the slug
+        // alphabet dropped from the slug and reported — the plenum
         // collision list plus representative symbol/punctuation cases.
-        for (title, bad) in [
+        for (title, dropped) in [
             ("v1.0", '.'),
             ("a (draft)", '('),
             ("a (draft", '('),
@@ -1514,26 +1510,20 @@ mod tests {
             ("a \u{2014} b", '\u{2014}'), // em dash
             ("hello!", '!'),
         ] {
-            match validate_and_derive_slug(title) {
-                Err(SlugError::TitleHasInvalidChars {
-                    invalid_chars,
-                    proposed_slug,
-                    ..
-                }) => {
-                    assert!(
-                        invalid_chars.contains(&bad),
-                        "{title:?}: rejection names {bad:?}, got {invalid_chars:?}"
-                    );
-                    assert!(
-                        !proposed_slug.is_empty(),
-                        "{title:?}: char-class refusal carries a proposed_slug"
-                    );
-                }
-                other => panic!("rule says {title:?} is rejected on {bad:?}, got {other:?}"),
-            }
+            let got = validate_and_derive_slug(title)
+                .unwrap_or_else(|e| panic!("rule says {title:?} is admitted, got {e:?}"));
+            assert!(
+                got.dropped_chars.contains(&dropped),
+                "{title:?}: the divergence report names {dropped:?}, got {:?}",
+                got.dropped_chars
+            );
+            assert!(
+                !got.slug.is_empty(),
+                "{title:?}: a slug still derives from the surviving characters"
+            );
         }
-        // Control-class whitespace (tab, newline) is rejected too, per
-        // the rule's parenthetical — via its own more specific refusal.
+        // Control-class whitespace (tab, newline) is the rejection,
+        // per the rule's parenthetical.
         for title in ["tabs\tinside", "line\nbreak"] {
             assert!(
                 matches!(

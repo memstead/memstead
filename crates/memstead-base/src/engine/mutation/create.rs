@@ -239,7 +239,8 @@ impl Engine {
         //    real entity while preserving its incoming edges (store.
         //    upsert leaves in_edges in place). Mirrors full's
         //    `if let Some(existing) = store.get(&id) && !existing.stub`.
-        let slug = validate_and_derive_slug(&args.title)?;
+        let derivation = validate_and_derive_slug(&args.title)?;
+        let slug = derivation.slug.clone();
         let id = EntityId::new(&args.mem, &slug);
         crate::entity::id::enforce_id_length(id.as_ref())?;
         if let Some(existing) = self.store.get(&id)
@@ -369,6 +370,16 @@ impl Engine {
         // Auto-managed fields the caller tried to set (computed during
         // the stamp loop above) — the supplied values were discarded.
         warnings.append(&mut ignored_readonly);
+
+        // Title↔slug divergence: the widened title grammar admits
+        // characters the slug alphabet drops — visible, not fatal.
+        if !derivation.dropped_chars.is_empty() {
+            warnings.push(WarningHint::TitleCharsDroppedFromSlug {
+                title: args.title.trim().to_string(),
+                dropped_chars: derivation.dropped_chars.clone(),
+                slug: slug.clone(),
+            });
+        }
 
         // Surface the title-trim drift (computed pre-validation) so the
         // audit trail records what the caller sent.
@@ -976,7 +987,9 @@ impl Engine {
         for (args, _) in &creates {
             let identity = (|| -> Result<EntityId, EngineError> {
                 let title = args.title.trim();
-                let slug = validate_and_derive_slug(title)?;
+                // Divergence warnings ride the per-entry prepare pass
+                // below, which re-derives; this pass only needs the id.
+                let slug = validate_and_derive_slug(title)?.slug;
                 let id = EntityId::new(&args.mem, &slug);
                 crate::entity::id::enforce_id_length(id.as_ref())?;
                 if let Some(existing) = self.store.get(&id)
@@ -2979,7 +2992,7 @@ write_rules: []
                 vec![
                     plain("Fine One"),
                     plain("Existing"),  // duplicate vs pre-batch store
-                    plain("Bad/Title"), // invalid title character
+                    plain("Bad\nTitle"), // control character in title
                     plain("Fine Two"),
                     plain("Fine Two"), // duplicate WITHIN the batch
                 ],
@@ -3040,7 +3053,7 @@ write_rules: []
         let (actor, client) = cli_actor();
         let n = Engine::BATCH_ERROR_REPORT_CAP + 10;
         let batch: Vec<_> = (0..n)
-            .map(|i| (empty_create_args("specs", &format!("Bad/Title {i}")), None))
+            .map(|i| (empty_create_args("specs", &format!("Bad\nTitle {i}")), None))
             .collect();
         let result = engine.batch_create(batch, actor, Some(&client), false).unwrap();
         assert!(!result.applied);
@@ -4131,44 +4144,49 @@ write_rules: []
             other => panic!("expected InvalidTitle/TitleEmpty, got {other:?}"),
         }
 
-        // F10 + F19: char-drop titles refuse with reason `invalid_chars`
-        // and a `proposed_slug` for mechanical retry.
-        let err = engine
+        // Widened grammar: char-drop titles land, with the divergence
+        // reported as the typed warning naming the dropped characters
+        // and the derived slug.
+        let outcome = engine
             .create_entity(
                 empty_create_args("specs", "Hello, World!"),
                 actor,
                 Some(&client),
                 None,
             )
-            .unwrap_err();
-        match err {
-            EngineError::InvalidTitle(crate::SlugError::TitleHasInvalidChars {
-                invalid_chars,
-                proposed_slug,
-                ..
-            }) => {
-                assert!(invalid_chars.contains(&',') && invalid_chars.contains(&'!'));
-                assert_eq!(proposed_slug, "hello-world");
-            }
-            other => panic!("expected InvalidTitle/TitleHasInvalidChars, got {other:?}"),
-        }
+            .expect("char-drop title lands under the widened grammar");
+        assert_eq!(outcome.id.as_ref(), "specs--hello-world");
+        let dropped = outcome
+            .warnings
+            .iter()
+            .find_map(|w| match w {
+                WarningHint::TitleCharsDroppedFromSlug {
+                    dropped_chars,
+                    slug,
+                    ..
+                } => Some((dropped_chars.clone(), slug.clone())),
+                _ => None,
+            })
+            .expect("divergence warning rides the outcome");
+        assert!(dropped.0.contains(&',') && dropped.0.contains(&'!'));
+        assert_eq!(dropped.1, "hello-world");
 
-        // F19: path-traversal-shaped titles fall under the same gate
-        // (the `/` and `.` chars are pipeline-dropped).
-        let err = engine
+        // Path-traversal-shaped titles are display text too — the
+        // dropped `/` and `.` never reach the slug, so the id stays
+        // sanitised (no traversal), and the divergence is reported.
+        let outcome = engine
             .create_entity(
                 empty_create_args("specs", "../etc/passwd"),
                 actor,
                 Some(&client),
                 None,
             )
-            .unwrap_err();
-        match err {
-            EngineError::InvalidTitle(slug_err) => {
-                assert_eq!(slug_err.reason(), "invalid_chars");
-            }
-            other => panic!("expected InvalidTitle, got {other:?}"),
-        }
+            .expect("traversal-shaped title lands with a sanitised slug");
+        assert_eq!(outcome.id.as_ref(), "specs--etcpasswd");
+        assert!(outcome.warnings.iter().any(|w| matches!(
+            w,
+            WarningHint::TitleCharsDroppedFromSlug { .. }
+        )));
     }
 
     #[test]

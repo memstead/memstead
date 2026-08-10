@@ -325,20 +325,6 @@ impl CliError {
                         "reason": reason,
                         "input": input,
                     }),
-                    SlugError::TitleHasInvalidChars {
-                        input,
-                        invalid_chars,
-                        proposed_slug,
-                    } => {
-                        let invalid_chars_str: Vec<String> =
-                            invalid_chars.iter().map(|c| c.to_string()).collect();
-                        serde_json::json!({
-                            "reason": reason,
-                            "input": input,
-                            "invalid_chars": invalid_chars_str,
-                            "proposed_slug": proposed_slug,
-                        })
-                    }
                     SlugError::TitleHasControlChars {
                         input,
                         control_chars,

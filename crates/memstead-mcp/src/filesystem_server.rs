@@ -331,20 +331,6 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     "reason": reason,
                     "input": input,
                 }),
-                SlugError::TitleHasInvalidChars {
-                    input,
-                    invalid_chars,
-                    proposed_slug,
-                } => {
-                    let invalid_chars_str: Vec<String> =
-                        invalid_chars.iter().map(|c| c.to_string()).collect();
-                    serde_json::json!({
-                        "reason": reason,
-                        "input": input,
-                        "invalid_chars": invalid_chars_str,
-                        "proposed_slug": proposed_slug,
-                    })
-                }
                 SlugError::TitleHasControlChars {
                     input,
                     control_chars,
@@ -1132,7 +1118,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_create",
-        description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected (`INVALID_TITLE`, `proposed_slug` to retry). Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
+        description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` refusals remain for control characters, empty-deriving titles, and over-long ids). Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1989,7 +1975,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_rename",
-        description = "Rename an entity by changing its title. The slug, id, and on-disk file path follow. Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected (`INVALID_TITLE`, `proposed_slug` to retry). `expected_hash` is required. Atomic referrer rewrite: every Write-Mem entity whose relationships or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit; ReadOnly referrers leave a residual stub at the old id holding the surviving incoming edges.",
+        description = "Rename an entity by changing its title. The slug, id, and on-disk file path follow. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` refusals remain for control characters, empty-deriving titles, and over-long ids). `expected_hash` is required. Atomic referrer rewrite: every Write-Mem entity whose relationships or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit; ReadOnly referrers leave a residual stub at the old id holding the surviving incoming edges.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

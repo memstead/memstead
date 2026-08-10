@@ -7,6 +7,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **Titles are display text: the grammar widens, the slug stays, the
+  divergence warns.** A title is now any single-line text —
+  `Bösenberg Grundstücks GmbH & Co. KG`, `Wohnung 2.OG rechts`,
+  `Anlage 4a – Leistungsbeschreibung`, `Acme Inc.`, `RFC 2119 §5` all
+  create, render verbatim as the H1 and on every read surface, and
+  derive their slug exactly as the permissive pipeline always did
+  (characters outside Unicode alphanumerics/whitespace/hyphen
+  dropped, whitespace to hyphens, lowercased). When the derivation
+  drops characters, the response carries the new typed warning
+  `TITLE_CHARS_DROPPED_FROM_SLUG` naming the dropped characters and
+  the derived slug — the title↔id divergence stays visible, it just
+  stops being fatal. `INVALID_TITLE` refusals remain for control
+  characters, titles whose slug derives empty (`§§§`), and over-long
+  composed ids. Every title the old grammar admitted produces a
+  byte-identical entity; the slug and wiki-link grammars are
+  untouched (`[[Natural Title]]` still refuses — link by slug). The
+  `TITLE_GRAMMAR_RULE` sentence moved at every embedding site (CLI
+  help, MCP descriptions, conformance tests, API reference).
+
 ### Fixed
 - **Two source comments no longer describe retired behaviour.** The
   `schema new` scaffold's annotation on `no_self_loop_relationships`

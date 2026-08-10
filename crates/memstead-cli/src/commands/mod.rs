@@ -29,19 +29,21 @@ Slug derivation:
     4. drop every character that is not Unicode alphanumeric and not '-';
     5. collapse hyphen runs, trim leading/trailing hyphens.
 
-  The mutation entry refuses titles where step 4 would drop any
-  character, or where the pipeline output is empty (whitespace- or
-  hyphen-only input). Errors carry a `proposed_slug` recovery hint
-  so a sanitised retry is mechanical.
+  When step 4 drops any character, the mutation still lands and the
+  response carries warning TITLE_CHARS_DROPPED_FROM_SLUG naming the
+  dropped characters and the derived slug — the title stays verbatim
+  display text; only the id is sanitised. The mutation entry refuses
+  control characters (they would split the stored heading), titles
+  whose pipeline output is empty, and over-long composed ids; those
+  refusals carry a `proposed_slug` recovery hint where applicable.
 
   The title body is stored as-sent (byte-form preserved); slug bytes
   derive from the NFC-normalised form. An NFD-spelled title therefore
   produces an NFC-spelled slug — the two byte forms are semantically
   equivalent and compare equal under NFC normalization.
 
-  Pre-gate entities (created before this stricter rule landed) remain
-  readable. The gate runs at mutation entry only — it does not
-  retroactively reject entities loaded from disk.";
+  The gate runs at mutation entry only — it does not retroactively
+  reject entities loaded from disk.";
 
 /// `--help` epilog for `memstead create` and `memstead update`. The CLI
 /// stores `--section` / `--append` / `--patch` flag values as bytes

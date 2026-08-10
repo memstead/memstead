@@ -222,8 +222,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // second entity beside the intended one. `expected_hash` is
     // tolerated and ignored (nothing exists yet to compare against).
     if let Some(template_id) = payload.id.as_deref() {
-        let derived_slug = memstead_base::entity::id::validate_and_derive_slug(&payload.title)
+        let derived = memstead_base::entity::id::validate_and_derive_slug(&payload.title)
             .map_err(|e| CliError::new(ExitKind::Validation, "INVALID_TITLE", e.to_string()))?;
+        let derived_slug = derived.slug;
         let slug_part = template_id
             .rsplit_once("--")
             .map(|(_, s)| s)

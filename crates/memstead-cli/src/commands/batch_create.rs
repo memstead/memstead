@@ -185,7 +185,7 @@ fn build_create_args(
     };
 
     if let Some(template_id) = entry.id.as_deref() {
-        let derived_slug = memstead_base::entity::id::validate_and_derive_slug(&entry.title)
+        let derived = memstead_base::entity::id::validate_and_derive_slug(&entry.title)
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,
@@ -193,6 +193,7 @@ fn build_create_args(
                     format!("entry {idx}: {e}"),
                 )
             })?;
+        let derived_slug = derived.slug;
         let slug_part = template_id
             .rsplit_once("--")
             .map(|(_, s)| s)

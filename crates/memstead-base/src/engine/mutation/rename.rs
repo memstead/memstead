@@ -100,7 +100,8 @@ impl Engine {
             });
         }
 
-        let new_slug = validate_and_derive_slug(&args.new_title)?;
+        let derivation = validate_and_derive_slug(&args.new_title)?;
+        let new_slug = derivation.slug.clone();
         let new_id = EntityId::new(&mem, &new_slug);
         crate::entity::id::enforce_id_length(new_id.as_ref())?;
 
@@ -594,6 +595,15 @@ impl Engine {
         let mut outcome_warnings: Vec<WarningHint> = Vec::new();
         // Reload-before-operation drift notice, surfaced first.
         outcome_warnings.append(&mut drift_warnings);
+        // Title↔slug divergence of the NEW title — same visibility
+        // contract as create's.
+        if !derivation.dropped_chars.is_empty() {
+            outcome_warnings.push(WarningHint::TitleCharsDroppedFromSlug {
+                title: args.new_title.trim().to_string(),
+                dropped_chars: derivation.dropped_chars.clone(),
+                slug: new_slug.clone(),
+            });
+        }
         if readonly_referrers.is_empty() {
             self.store.remove(id);
         } else {

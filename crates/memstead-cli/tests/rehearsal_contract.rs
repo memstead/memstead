@@ -507,7 +507,7 @@ fn batch_create_rehearsal_refuses_identically_to_real() {
             "creates": [
                 { "title": "Fine", "entity_type": "spec",
                   "sections": { "identity": "A.", "purpose": "P." } },
-                { "title": "Bad/Title", "entity_type": "spec",
+                { "title": "Bad\tTitle", "entity_type": "spec",
                   "sections": { "identity": "B.", "purpose": "P." } }
             ]
         })

@@ -1240,20 +1240,6 @@ fn engine_err_unified(
                     "reason": reason,
                     "input": input,
                 }),
-                SlugError::TitleHasInvalidChars {
-                    input,
-                    invalid_chars,
-                    proposed_slug,
-                } => {
-                    let invalid_chars_str: Vec<String> =
-                        invalid_chars.iter().map(|c| c.to_string()).collect();
-                    serde_json::json!({
-                        "reason": reason,
-                        "input": input,
-                        "invalid_chars": invalid_chars_str,
-                        "proposed_slug": proposed_slug,
-                    })
-                }
                 SlugError::TitleHasControlChars {
                     input,
                     control_chars,
@@ -2515,7 +2501,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_create",
-        description = "Create a new entity. Read the target mem's schema first via `memstead_schema` (schema-discovery contract — see server instructions). Required: `title`, `entity_type`, plus the type's required sections. The entity ID is the mem name plus a Unicode-aware slug of the title. Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected — `INVALID_TITLE` with a `proposed_slug` to retry (empty-slug titles too). `mem` defaults to the primary writable mem. Pass `relations` to wire edges inline (e.g. `[{to: \"specs--parent-id\", type: \"PART_OF\"}]`); unresolved targets auto-create stubs at that ID. Optional `note` (≤280 chars; see server instructions). Schema-bound failures (`UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, `INVALID_REL_TYPE`) carry recovery payloads — declared/allowed values, nearest-match `suggestion`, `write_rules` (see server instructions). Create-specific: `REQUIRED_FIELD_UNSET` also fires when the caller omits a required-no-default metadata field (supersedes the `MISSING_REQUIRED_FIELD` warning); `MISSING_REQUIRED_SECTION` refuses on create — an entity never lands with a placeholder body — shipping per-section `write_rules` plus the top-level `type_guidance` map. Warnings (entity still lands): `UNDECLARED_RELATIONSHIP_OPEN`; `INLINE_WIKI_LINK_AUTO_STUBBED` (body `[[wiki-links]]` auto-stub unresolved targets — review `details.stubs` for prose-induced ghosts); `MISSING_REQUIRED_OUTGOING` (`details.missing[]={relationships, cardinality}`; follow up with memstead_relate). Real writes return `commit_sha` for memstead_changes_since polling (see server instructions). `dry_run: true` previews a VALID entity (prospective `id`, `file_path`, `_hash`, warnings, `type_guidance`, `incoming` edges adopted from a pre-existing stub; empty `commit_sha`) — an INVALID entity refuses with the same typed envelope a real call returns.",
+        description = "Create a new entity. Read the target mem's schema first via `memstead_schema` (schema-discovery contract — see server instructions). Required: `title`, `entity_type`, plus the type's required sections. The id joins the mem name with a Unicode-aware slug of the title. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` remains for control chars, empty-deriving titles, over-long ids). `mem` defaults to the primary writable mem. Pass `relations` to wire edges inline (`[{to, type}]`); unresolved targets auto-create stubs. Optional `note` (see server instructions). Schema-bound failures (`UNKNOWN_SECTION`, `UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `REQUIRED_FIELD_UNSET`, `INVALID_REL_TYPE`) carry recovery payloads (see server instructions). Create-specific: `REQUIRED_FIELD_UNSET` also fires on an omitted required-no-default metadata field (supersedes warning `MISSING_REQUIRED_FIELD`); `MISSING_REQUIRED_SECTION` refuses on create — an entity never lands with a placeholder body — shipping per-section `write_rules` plus the top-level `type_guidance` map. Warnings (entity still lands): `UNDECLARED_RELATIONSHIP_OPEN`; `INLINE_WIKI_LINK_AUTO_STUBBED` (body `[[wiki-links]]` auto-stub unresolved targets — review `details.stubs` for prose-induced ghosts); `MISSING_REQUIRED_OUTGOING` (`details.missing[]={relationships, cardinality}`; follow up with memstead_relate). Real writes return `commit_sha` for memstead_changes_since polling (see server instructions). `dry_run: true` previews a VALID entity (prospective `id`, `file_path`, `_hash`, warnings, `type_guidance`, `incoming` edges adopted from a pre-existing stub; empty `commit_sha`) — an INVALID entity refuses with the same typed envelope a real call returns.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -3224,7 +3210,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_rename",
-        description = "Rename an entity by changing its title. Updates the entity ID (mem prefix preserved) and its markdown file path (`{new_slug}.md` at mem root). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's actual direction (`referrer_mem → renamed_mem`) — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers[{from_mem, to_mem, count}]`) before any write lands. Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) so the agent retries the failed mem after reloading. Per-mem commits share a `logical_operation_id` — correlate via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id demotes to an in-memory stub holding their edges — warning `RESIDUAL_STUB_FOR_READONLY_REFERRERS` names each. Requires `expected_hash` (read via memstead_entity first); mismatch emits `HASH_MISMATCH` (`details.current`). Slug-noop: a new title whose slug matches the current one returns `old_id` == `new_id`, empty `commit_sha`, and warning `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Titles accept Unicode alphanumerics, whitespace (not tab/newline or other control characters), and hyphen; every other character is rejected (`INVALID_TITLE`, `proposed_slug` to retry). Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response: `old_id`, `new_id`, `_hash` (post-rename on-disk hash — the next `expected_hash`, mirrors `memstead_relate`), `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`), and `warnings`. Provenance anchors move to the new id in the same commit.",
+        description = "Rename an entity by changing its title. Updates the entity id and its file path (`{new_slug}.md`). Atomic referrer rewrite: every Write-Mem entity whose `relationships` or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit. Cross-mem referrers are gated by `cross_mem_links` policy in the propagated edge's direction — a blocked direction aborts up-front with `RENAME_BLOCKED_BY_CROSS_MEM_POLICY` (`details.from_mem`, `details.blocked_referrers`). Per-peer commits are parent-pinned; sibling-writer drift mid-rename surfaces `RENAME_PARTIAL_FAILURE` (`details.committed_mems`, `details.failed_mem`, `details.failure_cause`) — retry after reloading. Per-mem commits share a `logical_operation_id` — correlate via `memstead_changes_since`. ReadOnly referrers can't be rewritten; the old id demotes to a stub holding their edges (warning `RESIDUAL_STUB_FOR_READONLY_REFERRERS`). Requires `expected_hash`; mismatch emits `HASH_MISMATCH` (`details.current`). Slug-noop: a new title whose slug matches the current one returns `old_id` == `new_id`, empty `commit_sha`, and warning `TITLE_NORMALIZED_TO_SLUG_NOOP`. ID collisions error — pick a different title. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` remains for control chars, empty-deriving titles, over-long ids). Stubs cannot be renamed (create a real entity instead). Optional `note` (≤280 chars) — shared provenance contract, see memstead_create. Response: `old_id`, `new_id`, `_hash` (the next `expected_hash`), `warnings`, and `commit_sha` (per-mem git; gitdir via `memstead_health include_config=true`). Provenance anchors move to the new id in the same commit.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -9011,11 +8997,97 @@ write_rules: []
     /// F4 / F10: the strict mutation-entry gate refuses titles whose
     /// alphanumeric filter would strip every character (all-emoji,
     /// all-symbol, all-punctuation). Pre-gate the create used to fall
-    /// back to a `entity-<hash>` slug; the gate now surfaces
-    /// `INVALID_TITLE` with `reason: invalid_chars` and a
-    /// `proposed_slug` recovery hint. The loader-path
-    /// `title_to_slug` keeps the hash backstop so pre-gate entities
-    /// remain readable — see `entity::id::title_to_slug` unit tests.
+    /// back to a `entity-<hash>` slug; the gate surfaces
+    /// `INVALID_TITLE` with `reason: empty` (everything drops, so the
+    /// slug derives empty). The loader-path `title_to_slug` keeps the
+    /// hash backstop so pre-gate entities remain readable — see
+    /// `entity::id::title_to_slug` unit tests.
+    /// The widened title grammar: a title with characters outside the
+    /// slug alphabet lands, the title round-trips verbatim on the
+    /// entity read, and the divergence rides as the typed
+    /// `TITLE_CHARS_DROPPED_FROM_SLUG` warning naming the dropped
+    /// characters and the derived slug. Complement: a clean title
+    /// carries no such warning.
+    #[test]
+    fn title_chars_dropped_warning_rides_create_and_clean_titles_stay_silent() {
+        let (server, _tmp) = setup_test_engine();
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "I.".to_string());
+        sections.insert("purpose".to_string(), "P.".to_string());
+        let create = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
+            mem: Some("specs".to_string()),
+            title: "Bösenberg Grundstücks GmbH & Co. KG".to_string(),
+            entity_type: "spec".to_string(),
+            sections: Some(sections.clone()),
+            metadata: None,
+            relations: None,
+            dry_run: None,
+            note: None,
+            role: None,
+        }));
+        assert!(
+            !create.is_error.unwrap_or(false),
+            "widened grammar admits the title: {}",
+            extract_text(&create),
+        );
+        let payload = create.structured_content.as_ref().expect("payload");
+        assert_eq!(payload["id"], "specs--bösenberg-grundstücks-gmbh-co-kg");
+        let warning = payload["warnings"]
+            .as_array()
+            .expect("warnings array")
+            .iter()
+            .find(|w| w["code"] == "TITLE_CHARS_DROPPED_FROM_SLUG")
+            .expect("divergence warning present")
+            .clone();
+        let dropped: Vec<&str> = warning["details"]["dropped_chars"]
+            .as_array()
+            .expect("dropped_chars array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(dropped.contains(&"&") && dropped.contains(&"."), "{warning}");
+        assert_eq!(
+            warning["details"]["slug"],
+            "bösenberg-grundstücks-gmbh-co-kg"
+        );
+        // Verbatim title on the entity read.
+        let read = server.memstead_entity(Parameters(EntityParams {
+            id: "specs--bösenberg-grundstücks-gmbh-co-kg".to_string(),
+            sections: None,
+            token_budget: None,
+            chunk: None,
+            include_relations: None,
+            include_context: None,
+            include_provenance: None,
+        }));
+        let entity = read.structured_content.as_ref().expect("entity payload");
+        assert_eq!(entity["title"], "Bösenberg Grundstücks GmbH & Co. KG");
+
+        // Complement: a clean title carries no divergence warning.
+        let clean = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
+            mem: Some("specs".to_string()),
+            title: "Plain Title".to_string(),
+            entity_type: "spec".to_string(),
+            sections: Some(sections),
+            metadata: None,
+            relations: None,
+            dry_run: None,
+            note: None,
+            role: None,
+        }));
+        assert!(!clean.is_error.unwrap_or(false));
+        let clean_payload = clean.structured_content.as_ref().expect("payload");
+        assert!(
+            clean_payload["warnings"]
+                .as_array()
+                .map(|ws| ws.iter().all(|w| w["code"] != "TITLE_CHARS_DROPPED_FROM_SLUG"))
+                .unwrap_or(true),
+            "clean title must not warn: {clean_payload}"
+        );
+    }
+
     #[test]
     fn all_emoji_title_refuses_with_invalid_title_envelope() {
         let (server, _tmp) = setup_test_engine();
@@ -9046,14 +9118,10 @@ write_rules: []
             .as_ref()
             .expect("INVALID_TITLE must carry structured_content");
         assert_eq!(payload["code"], "INVALID_TITLE");
-        assert_eq!(payload["details"]["reason"], "invalid_chars");
-        let invalid_chars = payload["details"]["invalid_chars"]
-            .as_array()
-            .expect("invalid_chars must be an array");
-        assert!(
-            invalid_chars.iter().any(|v| v.as_str() == Some("🚀")),
-            "invalid_chars must enumerate the offending emoji: {payload}",
-        );
+        // Under the widened grammar the emoji are admitted as display
+        // text, but everything drops from the slug — the refusal is
+        // the empty-derivation case, not a character-class one.
+        assert_eq!(payload["details"]["reason"], "empty");
     }
 
     /// F8: a title with embedded control

@@ -300,6 +300,17 @@ pub enum WarningHint {
         requested_title: String,
         current_slug: String,
     },
+    /// The title grammar admits any single-line text, but the slug
+    /// alphabet stays narrow — this create/rename derived an id that
+    /// dropped one or more title characters (`&`, `.`, `§`, …). The
+    /// entity lands with the verbatim title; the warning keeps the
+    /// title↔id divergence visible without being fatal, naming each
+    /// distinct dropped character and the derived slug.
+    TitleCharsDroppedFromSlug {
+        title: String,
+        dropped_chars: Vec<char>,
+        slug: String,
+    },
     /// `memstead_update` produced a post-mutation entity whose regenerated
     /// markdown is bytes-identical to the on-disk content — no field,
     /// section, metadata value, relation, or auto-timestamp actually
@@ -1145,6 +1156,15 @@ impl fmt::Display for WarningHint {
                 "requested title '{requested_title}' normalises to the existing slug \
                  '{current_slug}' — no change written to disk"
             ),
+            WarningHint::TitleCharsDroppedFromSlug {
+                title,
+                dropped_chars,
+                slug,
+            } => write!(
+                f,
+                "title '{title}' keeps its characters as display text, but the derived \
+                 slug '{slug}' drops {dropped_chars:?} — link this entity by its slug"
+            ),
             WarningHint::UpdateNoop { id } => write!(
                 f,
                 "update on {id} produced bytes-identical content — no \
@@ -1672,6 +1692,7 @@ impl WarningHint {
             Self::UnknownIncludeKey { .. } => "UNKNOWN_INCLUDE_KEY",
             Self::LimitClamped { .. } => "LIMIT_CLAMPED",
             Self::TitleNormalizedToSlugNoop { .. } => "TITLE_NORMALIZED_TO_SLUG_NOOP",
+            Self::TitleCharsDroppedFromSlug { .. } => "TITLE_CHARS_DROPPED_FROM_SLUG",
             Self::UpdateNoop { .. } => "UPDATE_NOOP",
             Self::StubFilterExcludesAll { .. } => "STUB_FILTER_EXCLUDES_ALL",
             // One code per outcome:
@@ -1862,6 +1883,11 @@ impl WarningHint {
             WarningHint::TitleNormalizedToSlugNoop {
                 requested_title: "Hello World!".into(),
                 current_slug: "hello-world".into(),
+            },
+            WarningHint::TitleCharsDroppedFromSlug {
+                title: "Acme Inc. & Co".into(),
+                dropped_chars: vec!['.', '&'],
+                slug: "acme-inc-co".into(),
             },
             WarningHint::UpdateNoop {
                 id: EntityId("specs--example".into()),
@@ -2069,6 +2095,15 @@ impl WarningHint {
             } => serde_json::json!({
                 "requested_title": requested_title,
                 "current_slug": current_slug,
+            }),
+            Self::TitleCharsDroppedFromSlug {
+                title,
+                dropped_chars,
+                slug,
+            } => serde_json::json!({
+                "title": title,
+                "dropped_chars": dropped_chars,
+                "slug": slug,
             }),
             Self::UpdateNoop { id } => serde_json::json!({ "id": id }),
             Self::StubFilterExcludesAll { entity_type } => {
