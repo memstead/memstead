@@ -569,9 +569,7 @@ pub fn compose_health(
         // without a root (in-memory boots) or without a ledger yet
         // serves the empty summary — the axis never fails health.
         let summary = match engine.workspace_root() {
-            Some(root) => {
-                memstead_base::friction::FrictionLedger::for_workspace(root).summarize()
-            }
+            Some(root) => memstead_base::friction::FrictionLedger::for_workspace(root).summarize(),
             None => serde_json::json!({
                 "total": 0,
                 "by_code": {},

@@ -515,7 +515,10 @@ mod tests {
 
         let requirement = software.get_type("requirement").expect("requirement type");
         assert!(
-            !requirement.metadata_field("verified_on").unwrap().is_required(),
+            !requirement
+                .metadata_field("verified_on")
+                .unwrap()
+                .is_required(),
             "verified_on must be optional — an unverified requirement has no verification date"
         );
         // Sibling required field is untouched.

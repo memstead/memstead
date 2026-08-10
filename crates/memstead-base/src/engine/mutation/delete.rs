@@ -213,14 +213,17 @@ impl Engine {
             backend.commit(&commit_subject, &ctx)?
         };
 
-        backend.append_provenance(&Provenance::new(
-            std::time::SystemTime::now(),
-            ProvenanceKind::Delete,
-            Some(id.to_string()),
-            actor,
-            client.cloned(),
-            note.map(String::from),
-        ).with_role(self.current_role))?;
+        backend.append_provenance(
+            &Provenance::new(
+                std::time::SystemTime::now(),
+                ProvenanceKind::Delete,
+                Some(id.to_string()),
+                actor,
+                client.cloned(),
+                note.map(String::from),
+            )
+            .with_role(self.current_role),
+        )?;
 
         if !commit_sha.is_empty() {
             self.record_self_write(mount_idx, &commit_sha);

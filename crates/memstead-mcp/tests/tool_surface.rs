@@ -520,12 +520,14 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // `idempotent = false` across the board because a partial-failure
         // retry is not safe (duplicate-title collisions, pre-existing
         // state drift, renamed-out-of-existence scenarios).
-        "memstead_create" | "memstead_update" | "memstead_rename" | "memstead_check" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(false),
-            idempotent: Some(false),
-            open_world: Some(false),
-        },
+        "memstead_create" | "memstead_update" | "memstead_rename" | "memstead_check" => {
+            HintTriple {
+                read_only: Some(false),
+                destructive: Some(false),
+                idempotent: Some(false),
+                open_world: Some(false),
+            }
+        }
         // `memstead_delete` — the only genuinely destructive tool on the
         // surface. File + edges removed, not recoverable without a git
         // revert; agent must opt in via an explicit call.

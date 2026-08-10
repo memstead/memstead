@@ -548,7 +548,7 @@ mod tests {
                     client: None,
                     note: None,
                     logical_operation_id: None,
-                role: crate::vcs::Role::Unspecified,
+                    role: crate::vcs::Role::Unspecified,
                 },
                 ts(t, 0),
             )
@@ -637,7 +637,7 @@ mod tests {
             client: None,
             note: None,
             logical_operation_id: None,
-                role: crate::vcs::Role::Unspecified,
+            role: crate::vcs::Role::Unspecified,
         }
     }
 

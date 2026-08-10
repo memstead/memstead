@@ -190,7 +190,14 @@ fn build_workspace(root: &Path) {
     run_ok(root, &["schema", "install", pkg.to_str().unwrap()]);
     run_ok(
         root,
-        &["mem", "init", "qmem", "--schema", "qcheck@0.1.0", "--no-gitignore"],
+        &[
+            "mem",
+            "init",
+            "qmem",
+            "--schema",
+            "qcheck@0.1.0",
+            "--no-gitignore",
+        ],
     );
     run_ok(
         root,
@@ -334,7 +341,10 @@ fn axis_composes_all_signals_and_matches_per_signal_axes() {
     );
     assert!(hold["anchors_recheck"]["count"].as_u64().unwrap() >= 1);
     assert!(hold["anchors_unresolvable"]["count"].as_u64().unwrap() >= 1);
-    assert_eq!(hold["anchors_recheck"]["items"][0]["kind"], "anchor_recheck");
+    assert_eq!(
+        hold["anchors_recheck"]["items"][0]["kind"],
+        "anchor_recheck"
+    );
     assert!(
         hold["anchors_recheck"]["items"][0]["id"]
             .as_str()
@@ -366,7 +376,10 @@ fn axis_composes_all_signals_and_matches_per_signal_axes() {
         .iter()
         .filter(|c| c["mem"] == "qmem")
         .count() as u64;
-    assert!(constraints_axis_qmem >= 1, "fixture seeds a violation: {out}");
+    assert!(
+        constraints_axis_qmem >= 1,
+        "fixture seeds a violation: {out}"
+    );
     assert_eq!(
         qmem["unsatisfied_constraints"]["count"].as_u64().unwrap(),
         constraints_axis_qmem,

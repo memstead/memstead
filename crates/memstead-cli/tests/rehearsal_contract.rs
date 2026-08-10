@@ -62,7 +62,11 @@ fn tree_digest(root: &Path) -> BTreeMap<String, Vec<u8>> {
             if path.is_dir() {
                 walk(root, &path, out);
             } else {
-                let rel = path.strip_prefix(root).unwrap().to_string_lossy().to_string();
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
                 out.insert(rel, fs::read(&path).unwrap());
             }
         }
@@ -142,9 +146,15 @@ fn create_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
     );
     let real = refusal_envelope(
         tmp.path(),
-        &illegal(false).iter().map(String::as_str).collect::<Vec<_>>(),
+        &illegal(false)
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
     );
-    assert_eq!(rehearsed, real, "identical typed refusal, rehearsed vs real");
+    assert_eq!(
+        rehearsed, real,
+        "identical typed refusal, rehearsed vs real"
+    );
 
     // Byte-identity: a LEGAL rehearsed create touches nothing.
     let before = tree_digest(tmp.path());
@@ -259,9 +269,15 @@ fn update_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
     );
     let real = refusal_envelope(
         tmp.path(),
-        &illegal(false).iter().map(String::as_str).collect::<Vec<_>>(),
+        &illegal(false)
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
     );
-    assert_eq!(rehearsed, real, "identical typed refusal, rehearsed vs real");
+    assert_eq!(
+        rehearsed, real,
+        "identical typed refusal, rehearsed vs real"
+    );
 
     // Byte-identity for the legal rehearsal.
     let before = tree_digest(tmp.path());
@@ -354,14 +370,28 @@ fn relate_rehearsal_reports_would_be_stub_and_leaves_workspace_byte_identical() 
     let rehearsed = refusal_envelope(
         tmp.path(),
         &[
-            "--json", "relate", "cli-write--source", "USES", "not a valid id", "--dry-run",
+            "--json",
+            "relate",
+            "cli-write--source",
+            "USES",
+            "not a valid id",
+            "--dry-run",
         ],
     );
     let real = refusal_envelope(
         tmp.path(),
-        &["--json", "relate", "cli-write--source", "USES", "not a valid id"],
+        &[
+            "--json",
+            "relate",
+            "cli-write--source",
+            "USES",
+            "not a valid id",
+        ],
     );
-    assert_eq!(rehearsed, real, "identical typed refusal, rehearsed vs real");
+    assert_eq!(
+        rehearsed, real,
+        "identical typed refusal, rehearsed vs real"
+    );
 
     // Legal rehearsal to an ABSENT target: would-be stub reported,
     // nothing written anywhere.
@@ -827,7 +857,10 @@ fn rehearsal_against_quarantined_mem_refuses_identically_to_real() {
     );
     let real = refusal_envelope(
         &ws,
-        &illegal(false).iter().map(String::as_str).collect::<Vec<_>>(),
+        &illegal(false)
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
     );
     assert_eq!(rehearsed, real, "identical quarantine refusal");
     assert_eq!(rehearsed["code"], "MEM_QUARANTINED", "{rehearsed}");

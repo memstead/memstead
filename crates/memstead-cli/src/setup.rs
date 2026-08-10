@@ -431,8 +431,7 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
         .into());
     }
 
-    let mut engine =
-        engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
+    let mut engine = engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
     engine.set_role(_ctx.role);
     Ok(engine)
 }

@@ -37,16 +37,16 @@ pub mod archive;
 pub mod boot;
 pub mod check_ops;
 pub mod drift;
+pub mod due;
 pub mod error;
 pub mod events;
+pub mod export_html;
 #[cfg(feature = "file-watcher")]
 pub mod file_watcher;
 pub mod history;
 pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;
-pub mod due;
-pub mod export_html;
 pub mod query;
 pub mod review;
 

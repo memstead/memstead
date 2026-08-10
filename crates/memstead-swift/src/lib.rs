@@ -162,7 +162,8 @@ pub fn due_brief(
                 message: format!("failed to load workspace at {}: {e}", root.display()),
             }
         })?;
-    let within = within.unwrap_or_else(|| memstead_base::engine::due::DEFAULT_DUE_WINDOW.to_string());
+    let within =
+        within.unwrap_or_else(|| memstead_base::engine::due::DEFAULT_DUE_WINDOW.to_string());
     let window = memstead_base::engine::due::parse_due_window(&within)
         .map_err(|message| MemsteadError::ValidationFailed { message })?;
     let today = today.unwrap_or_else(|| {

@@ -111,7 +111,11 @@ impl Engine {
                 // sha) instead of a bare no-op. Undeclared rel-types
                 // keep today's exact no-op response; rehearsals
                 // refresh nothing.
-                if !dry_run && matches!(outcome.action, super::super::RelateAction::NoOpAlreadyPresent)
+                if !dry_run
+                    && matches!(
+                        outcome.action,
+                        super::super::RelateAction::NoOpAlreadyPresent
+                    )
                 {
                     return self.refresh_derivation_baseline_on_noop(outcome, actor, client, note);
                 }
@@ -199,14 +203,17 @@ impl Engine {
         };
         let commit_sha = backend.commit(&commit_subject, &ctx)?;
 
-        backend.append_provenance(&Provenance::new(
-            std::time::SystemTime::now(),
-            ProvenanceKind::Relate,
-            Some(prepared.from.to_string()),
-            actor,
-            client.cloned(),
-            note.map(String::from),
-        ).with_role(self.current_role))?;
+        backend.append_provenance(
+            &Provenance::new(
+                std::time::SystemTime::now(),
+                ProvenanceKind::Relate,
+                Some(prepared.from.to_string()),
+                actor,
+                client.cloned(),
+                note.map(String::from),
+            )
+            .with_role(self.current_role),
+        )?;
 
         self.record_self_write(prepared.mount_idx, &commit_sha);
         self.stamp_mutation_versions(prepared.mount_idx);
@@ -323,11 +330,13 @@ impl Engine {
         self.record_self_write(mount_idx, &commit_sha);
         self.stamp_mutation_versions(mount_idx);
         outcome.commit_sha = commit_sha;
-        outcome.warnings.push(WarningHint::DerivationBaselineRefreshed {
-            from: outcome.from.clone(),
-            rel_type: outcome.rel_type.clone(),
-            to: outcome.to.clone(),
-        });
+        outcome
+            .warnings
+            .push(WarningHint::DerivationBaselineRefreshed {
+                from: outcome.from.clone(),
+                rel_type: outcome.rel_type.clone(),
+                to: outcome.to.clone(),
+            });
         Ok(outcome)
     }
 
@@ -1188,16 +1197,17 @@ impl Engine {
                 .find(|(m, _)| *m == p.mount_idx)
                 .map(|(_, s)| s.clone())
                 .unwrap_or_default();
-            self.mounts[p.mount_idx]
-                .backend
-                .append_provenance(&Provenance::new(
+            self.mounts[p.mount_idx].backend.append_provenance(
+                &Provenance::new(
                     std::time::SystemTime::now(),
                     ProvenanceKind::Relate,
                     Some(p.from.to_string()),
                     actor,
                     client.cloned(),
                     note.clone(),
-                ).with_role(self.current_role))?;
+                )
+                .with_role(self.current_role),
+            )?;
             self.record_self_write(p.mount_idx, &commit_sha);
             self.stamp_mutation_versions(p.mount_idx);
         }
@@ -3714,7 +3724,10 @@ community:
             .relate_entity(args(true), actor, Some(&client), None)
             .unwrap();
         assert_eq!(rehearsed.action, RelateAction::Added);
-        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        assert!(
+            rehearsed.commit_sha.is_empty(),
+            "marker form: empty commit_sha"
+        );
         assert!(
             rehearsed.warnings.iter().any(
                 |w| matches!(w, crate::ops::WarningHint::AutoStubCreated { stub_id, pending: true } if *stub_id == absent)
@@ -3861,8 +3874,15 @@ community:
             .batch_relate(batch(), actor, Some(&client), true)
             .unwrap();
         assert!(rehearsed.applied, "{rehearsed:?}");
-        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
-        let actions: Vec<&str> = rehearsed.results.iter().map(|r| r.action.as_str()).collect();
+        assert!(
+            rehearsed.commit_sha.is_empty(),
+            "marker form: empty commit_sha"
+        );
+        let actions: Vec<&str> = rehearsed
+            .results
+            .iter()
+            .map(|r| r.action.as_str())
+            .collect();
         assert_eq!(
             actions,
             vec!["added", "added", "removed"],
@@ -3871,7 +3891,11 @@ community:
         // Nothing landed: no stub, no edge, no head movement.
         assert!(!engine.store().contains(&id("ghost")), "no stub created");
         assert!(
-            engine.get_entity(&id("a")).unwrap().relationships.is_empty(),
+            engine
+                .get_entity(&id("a"))
+                .unwrap()
+                .relationships
+                .is_empty(),
             "no edge landed"
         );
         let head_after = engine
@@ -3956,16 +3980,20 @@ community:
                     (
                         e.id.to_string(),
                         e.action.clone(),
-                        e.error
-                            .as_ref()
-                            .map(|err| (err.code.clone(), err.message.clone(), err.details.clone())),
+                        e.error.as_ref().map(|err| {
+                            (err.code.clone(), err.message.clone(), err.details.clone())
+                        }),
                     )
                 })
                 .collect::<Vec<_>>()
         };
         assert_eq!(envelope(&rehearsed), envelope(&real), "identical refusals");
         assert!(
-            engine.get_entity(&id("a")).unwrap().relationships.is_empty(),
+            engine
+                .get_entity(&id("a"))
+                .unwrap()
+                .relationships
+                .is_empty(),
             "neither run landed the valid entry"
         );
     }
@@ -4090,7 +4118,9 @@ mod derivation_tests {
     use tempfile::TempDir;
 
     use crate::backend::MemBackend;
-    use crate::engine::{CreateEntityArgs, Engine, RelateAction, RelateEntityArgs, UpdateEntityArgs};
+    use crate::engine::{
+        CreateEntityArgs, Engine, RelateAction, RelateEntityArgs, UpdateEntityArgs,
+    };
     use crate::ops::WarningHint;
     use crate::storage::FilesystemMemWriter;
     use crate::vcs::Actor;
@@ -4318,10 +4348,10 @@ write_rules: []
             "the sidecar refresh persists via a real commit"
         );
         assert!(
-            refreshed.warnings.iter().any(|w| matches!(
-                w,
-                WarningHint::DerivationBaselineRefreshed { .. }
-            )),
+            refreshed
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::DerivationBaselineRefreshed { .. })),
             "the refresh is STATED, never a bare no-op: {:?}",
             refreshed.warnings
         );
@@ -4387,7 +4417,11 @@ write_rules: []
         // The sidecar exists on disk but is not an entity.
         let sidecar = tmp.path().join(".memstead").join("derivations.json");
         assert!(sidecar.exists(), "baseline persisted to the sidecar");
-        assert!(engine.get_entity(&crate::EntityId::new("m", "derivations")).is_none());
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("m", "derivations"))
+                .is_none()
+        );
 
         // Simulate a pre-declaration edge: drop the sidecar out of
         // band (fixture surgery, the mounts.json precedent).

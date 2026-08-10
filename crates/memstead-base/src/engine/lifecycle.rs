@@ -214,8 +214,7 @@ impl Engine {
                  being installed as '{name}@{version}'"
             )));
         }
-        Self::validate_schema_exemplars(&std::sync::Arc::new(schema))
-            .map_err(invalid)?;
+        Self::validate_schema_exemplars(&std::sync::Arc::new(schema)).map_err(invalid)?;
         Ok(())
     }
 
@@ -243,8 +242,6 @@ impl Engine {
     pub fn validate_schema_exemplars(
         schema: &std::sync::Arc<memstead_schema::Schema>,
     ) -> Result<(), String> {
-        
-
         let with_exemplars: Vec<&str> = schema
             .manifest
             .types
@@ -2678,8 +2675,8 @@ write_rules: []
     /// predate the field).
     #[test]
     fn builtin_exemplars_validate_through_the_install_gate() {
-        let schemas =
-            memstead_schema::builtins::load_builtin_schemas().expect("built-in schemas always load");
+        let schemas = memstead_schema::builtins::load_builtin_schemas()
+            .expect("built-in schemas always load");
         // Validity: every exemplar anywhere in the catalogue conforms.
         for schema in &schemas {
             if let Err(defect) = Engine::validate_schema_exemplars(schema) {
@@ -2688,8 +2685,10 @@ write_rules: []
             }
         }
         // Completeness: the newest version per name is exemplar-complete.
-        let mut newest: std::collections::HashMap<String, &std::sync::Arc<memstead_schema::Schema>> =
-            std::collections::HashMap::new();
+        let mut newest: std::collections::HashMap<
+            String,
+            &std::sync::Arc<memstead_schema::Schema>,
+        > = std::collections::HashMap::new();
         for schema in &schemas {
             let name = schema.manifest.name.clone();
             match newest.get(&name) {

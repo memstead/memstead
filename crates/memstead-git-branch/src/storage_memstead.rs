@@ -558,10 +558,10 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
             &types_yamls,
             format,
         )
-            .map_err(|source| MemRepoSchemasError::Schema {
-                name: versioned_name.clone(),
-                source,
-            })?;
+        .map_err(|source| MemRepoSchemasError::Schema {
+            name: versioned_name.clone(),
+            source,
+        })?;
         out.push(Arc::new(schema));
     }
 

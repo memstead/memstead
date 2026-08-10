@@ -472,7 +472,8 @@ impl Engine {
                 actor,
                 client.cloned(),
                 note.map(String::from),
-            ).with_role(self.current_role)
+            )
+            .with_role(self.current_role)
             .with_logical_operation_id(logical_op_id.clone()),
         )?;
 
@@ -548,7 +549,8 @@ impl Engine {
                     actor,
                     client.cloned(),
                     note.map(String::from),
-                ).with_role(self.current_role)
+                )
+                .with_role(self.current_role)
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
             self.record_self_write(plan.mount_idx, &peer_commit_sha);

@@ -185,8 +185,8 @@ fn build_create_args(
     };
 
     if let Some(template_id) = entry.id.as_deref() {
-        let derived = memstead_base::entity::id::validate_and_derive_slug(&entry.title)
-            .map_err(|e| {
+        let derived =
+            memstead_base::entity::id::validate_and_derive_slug(&entry.title).map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,
                     "INVALID_TITLE",

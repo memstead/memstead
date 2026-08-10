@@ -511,10 +511,11 @@ fn check_embedded_schema(
     } else {
         memstead_schema::MetadataPolarityFormat::Legacy
     };
-    let schema = memstead_schema::load_schema_from_memory_with_format(manifest_yaml, &types, format)
-        .map_err(|e| ValidationError::EmbeddedSchemaInvalid {
-            reason: e.to_string(),
-        })?;
+    let schema =
+        memstead_schema::load_schema_from_memory_with_format(manifest_yaml, &types, format)
+            .map_err(|e| ValidationError::EmbeddedSchemaInvalid {
+                reason: e.to_string(),
+            })?;
 
     let (embedded_name, embedded_version) = schema.id();
     if embedded_name != config.schema.name || embedded_version != config.schema.version {

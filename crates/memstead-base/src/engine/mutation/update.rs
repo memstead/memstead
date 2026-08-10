@@ -192,14 +192,17 @@ impl Engine {
             entity_ids: None,
         };
         let commit_sha = backend.commit(&commit_subject, &ctx)?;
-        backend.append_provenance(&Provenance::new(
-            std::time::SystemTime::now(),
-            ProvenanceKind::Update,
-            Some(prepared.id.to_string()),
-            actor,
-            client.cloned(),
-            note.map(String::from),
-        ).with_role(self.current_role))?;
+        backend.append_provenance(
+            &Provenance::new(
+                std::time::SystemTime::now(),
+                ProvenanceKind::Update,
+                Some(prepared.id.to_string()),
+                actor,
+                client.cloned(),
+                note.map(String::from),
+            )
+            .with_role(self.current_role),
+        )?;
         self.record_self_write(prepared.mount_idx, &commit_sha);
         self.stamp_mutation_versions(prepared.mount_idx);
 
@@ -1306,11 +1309,8 @@ impl Engine {
                         .get(&r.target)
                         .map(|e| e.content_hash.clone())
                         .unwrap_or_default();
-                    let (from, rel, to) = (
-                        p.id.to_string(),
-                        r.rel_type.clone(),
-                        r.target.to_string(),
-                    );
+                    let (from, rel, to) =
+                        (p.id.to_string(), r.rel_type.clone(), r.target.to_string());
                     if let Err(e) = super::stage_derivation_sidecar(
                         self.mounts[p.mount_idx].backend.as_ref(),
                         |s| s.set(&from, &rel, &to, &hash),
@@ -1373,16 +1373,17 @@ impl Engine {
                 .find(|(m, _)| *m == p.mount_idx)
                 .map(|(_, s)| s.clone())
                 .unwrap_or_default();
-            self.mounts[p.mount_idx]
-                .backend
-                .append_provenance(&Provenance::new(
+            self.mounts[p.mount_idx].backend.append_provenance(
+                &Provenance::new(
                     std::time::SystemTime::now(),
                     ProvenanceKind::Update,
                     Some(p.id.to_string()),
                     actor,
                     client.cloned(),
                     note.clone(),
-                ).with_role(self.current_role))?;
+                )
+                .with_role(self.current_role),
+            )?;
             self.record_self_write(p.mount_idx, &commit_sha);
             self.stamp_mutation_versions(p.mount_idx);
             self.apply_prepared_to_store(p)?;
@@ -1723,7 +1724,9 @@ mod tests {
         )])
         .unwrap();
 
-        let result = engine.batch_update(Vec::new(), Actor::Cli, None, false).unwrap();
+        let result = engine
+            .batch_update(Vec::new(), Actor::Cli, None, false)
+            .unwrap();
         assert!(result.applied, "empty batch is a vacuous success");
         assert_eq!(result.results.len(), 0);
         assert_eq!(result.succeeded, 0);
@@ -1991,11 +1994,17 @@ mod tests {
             .unwrap();
         assert!(rehearsed.applied, "{rehearsed:?}");
         assert_eq!(rehearsed.succeeded, 2);
-        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        assert!(
+            rehearsed.commit_sha.is_empty(),
+            "marker form: empty commit_sha"
+        );
         assert!(rehearsed.results.iter().all(|e| e.action == "updated"));
         // Nothing persisted: body and hash unchanged.
         let a_now = engine.get_entity(&a.id).unwrap();
-        assert_eq!(a_now.sections.get("identity").map(String::as_str), Some("id"));
+        assert_eq!(
+            a_now.sections.get("identity").map(String::as_str),
+            Some("id")
+        );
         assert_eq!(a_now.content_hash, a.content_hash);
 
         // The real call with the same (pre-rehearsal) hashes lands.
@@ -2064,13 +2073,20 @@ mod tests {
         };
         let batch = || {
             vec![
-                (upd(created.id.clone(), Some("wrong-hash".to_string())), None),
+                (
+                    upd(created.id.clone(), Some("wrong-hash".to_string())),
+                    None,
+                ),
                 (upd(EntityId("specs--missing".to_string()), None), None),
             ]
         };
 
-        let rehearsed = engine.batch_update(batch(), Actor::Cli, None, true).unwrap();
-        let real = engine.batch_update(batch(), Actor::Cli, None, false).unwrap();
+        let rehearsed = engine
+            .batch_update(batch(), Actor::Cli, None, true)
+            .unwrap();
+        let real = engine
+            .batch_update(batch(), Actor::Cli, None, false)
+            .unwrap();
         assert!(!rehearsed.applied && !real.applied);
         let envelope = |r: &crate::ops::BatchResult| {
             r.results
@@ -2079,9 +2095,9 @@ mod tests {
                     (
                         e.id.to_string(),
                         e.action.clone(),
-                        e.error
-                            .as_ref()
-                            .map(|err| (err.code.clone(), err.message.clone(), err.details.clone())),
+                        e.error.as_ref().map(|err| {
+                            (err.code.clone(), err.message.clone(), err.details.clone())
+                        }),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2254,7 +2270,12 @@ mod tests {
         assert!(engine.get_entity(&stub_target).is_none());
 
         let result = engine
-            .batch_update(vec![(item1, None), (item2, None)], actor, Some(&client), false)
+            .batch_update(
+                vec![(item1, None), (item2, None)],
+                actor,
+                Some(&client),
+                false,
+            )
             .unwrap();
         assert!(!result.applied, "missing item 2 must refuse the batch");
 

@@ -572,7 +572,10 @@ pub const SCHEMA_FORMAT_MARKER_CONTENT: &str = "{\"metadata_polarity\":\"require
 /// the seal-path helper every installer runs so sealed copies carry
 /// their generation.
 pub fn with_format_marker(mut files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
-    if !files.iter().any(|(rel, _)| rel == SCHEMA_FORMAT_MARKER_FILE) {
+    if !files
+        .iter()
+        .any(|(rel, _)| rel == SCHEMA_FORMAT_MARKER_FILE)
+    {
         files.push((
             SCHEMA_FORMAT_MARKER_FILE.to_string(),
             SCHEMA_FORMAT_MARKER_CONTENT.as_bytes().to_vec(),
@@ -1234,8 +1237,7 @@ fn validate_type(
     }
     for block in &td.required_outgoing {
         for r in &block.relationships {
-            if let Err(e) = check_rel(&td.name, "required_outgoing", r, rel_names, available_rels)
-            {
+            if let Err(e) = check_rel(&td.name, "required_outgoing", r, rel_names, available_rels) {
                 errors.push(e);
             }
         }
@@ -1413,7 +1415,11 @@ fn validate_type(
             }
             Some(_) => {}
         }
-        match td.metadata_fields.iter().find(|f| f.key == due.status_field) {
+        match td
+            .metadata_fields
+            .iter()
+            .find(|f| f.key == due.status_field)
+        {
             None => errors.push(SchemaLoadError::InvalidDueAxis {
                 type_name: td.name.clone(),
                 offender: due.status_field.clone(),

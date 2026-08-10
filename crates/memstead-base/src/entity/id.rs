@@ -852,7 +852,11 @@ mod tests {
             ("path/to/entity", &['/'], "pathtoentity"),
             ("a\\b", &['\\'], "ab"),
             ("Wohnung 2.OG rechts", &['.'], "wohnung-2og-rechts"),
-            ("Anlage 4a – Leistungsbeschreibung", &['–'], "anlage-4a-leistungsbeschreibung"),
+            (
+                "Anlage 4a – Leistungsbeschreibung",
+                &['–'],
+                "anlage-4a-leistungsbeschreibung",
+            ),
             (
                 "Bösenberg Grundstücks GmbH & Co. KG",
                 &['&', '.'],

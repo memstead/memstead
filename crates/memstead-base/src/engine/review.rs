@@ -234,7 +234,7 @@ mod tests {
                 authors: None,
                 schema: Some("default@1.0.0".parse().unwrap()),
                 write_guidance: Default::default(),
-            process_mem: None,
+                process_mem: None,
                 rules: None,
                 publish: None,
                 language: None,

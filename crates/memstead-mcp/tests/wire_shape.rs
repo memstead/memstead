@@ -2534,8 +2534,7 @@ fn friction_ledger_records_both_surfaces_and_serves_the_axis() {
     assert_eq!(after_mcp[0]["surface"], "mcp");
     assert_eq!(after_mcp[0]["verb"], "memstead_entity");
     assert_eq!(
-        after_mcp[0]["code"],
-        refused["structuredContent"]["code"],
+        after_mcp[0]["code"], refused["structuredContent"]["code"],
         "ledger code matches the served refusal"
     );
     assert!(after_mcp[0]["ts"].as_u64().unwrap() > 0);
@@ -2606,7 +2605,10 @@ fn negative_finding_writes_on_both_surfaces_and_is_leaf_exempt() {
             }
         }),
     );
-    assert!(ok["isError"] != true, "legal negative_finding must land: {ok}");
+    assert!(
+        ok["isError"] != true,
+        "legal negative_finding must land: {ok}"
+    );
     assert_eq!(
         ok["structuredContent"]["id"], "proc--no-rollback-runbook-in-the-source-tree",
         "{ok}"
@@ -2684,8 +2686,7 @@ fn negative_finding_writes_on_both_surfaces_and_is_leaf_exempt() {
         .output()
         .expect("run memstead CLI");
     assert!(!bad.status.success());
-    let body: Value =
-        serde_json::from_slice(&bad.stdout).expect("CLI --json refusal parses");
+    let body: Value = serde_json::from_slice(&bad.stdout).expect("CLI --json refusal parses");
     assert_eq!(body["code"], "UNKNOWN_SECTION", "{body}");
 
     // Leaf exemption: both findings are edge-less, yet the orphan
@@ -2727,7 +2728,9 @@ fn open_questions_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     assert_eq!(axis["specs"]["total_open"], 0, "{served}");
     assert_eq!(axis["specs"]["stubs"]["count"], 0);
     assert!(
-        !serde_json::to_string(&served).unwrap().contains("\"INTERNAL\""),
+        !serde_json::to_string(&served)
+            .unwrap()
+            .contains("\"INTERNAL\""),
         "no leaf of the axis is INTERNAL: {served}"
     );
 
@@ -2753,7 +2756,9 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     let plain = harness.call_tool("memstead_health", json!({}));
     assert!(plain["isError"] != true, "{plain}");
     assert!(
-        plain["structuredContent"].get("stale_derivations").is_none(),
+        plain["structuredContent"]
+            .get("stale_derivations")
+            .is_none(),
         "axis must be include-gated: {plain}"
     );
 
@@ -2763,9 +2768,15 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     );
     assert!(served["isError"] != true, "{served}");
     let axis = &served["structuredContent"]["stale_derivations"];
-    assert_eq!(axis["specs"], json!([]), "undeclared schema → empty list: {served}");
+    assert_eq!(
+        axis["specs"],
+        json!([]),
+        "undeclared schema → empty list: {served}"
+    );
     assert!(
-        !serde_json::to_string(&served).unwrap().contains("\"INTERNAL\""),
+        !serde_json::to_string(&served)
+            .unwrap()
+            .contains("\"INTERNAL\""),
         "no leaf is INTERNAL: {served}"
     );
 
@@ -2870,11 +2881,11 @@ fn checks_health_axis_serves_unconfirmable_without_caller_identity() {
         json!({ "entity": "specs--epsilon-claim", "verdict": "ok", "role": "checker" }),
     );
     assert!(r["isError"] != true, "{r}");
-    let read = harness.call_tool(
-        "memstead_entity",
-        json!({ "id": "specs--epsilon-claim" }),
-    );
-    let eps_hash = read["structuredContent"]["_hash"].as_str().unwrap().to_string();
+    let read = harness.call_tool("memstead_entity", json!({ "id": "specs--epsilon-claim" }));
+    let eps_hash = read["structuredContent"]["_hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let r = harness.call_tool(
         "memstead_update",
         json!({
@@ -2894,10 +2905,7 @@ fn checks_health_axis_serves_unconfirmable_without_caller_identity() {
     assert!(r["isError"] != true, "{r}");
 
     // Delta stays never-checked.
-    let health = harness.call_tool(
-        "memstead_health",
-        json!({ "include": ["checks"] }),
-    );
+    let health = harness.call_tool("memstead_health", json!({ "include": ["checks"] }));
     assert!(health["isError"] != true, "{health}");
     let axis = &health["structuredContent"]["checks"]["specs"];
     assert_eq!(axis["checked_ok"], 3, "{axis}");
@@ -3031,8 +3039,15 @@ fn check_operation_records_derives_state_and_mutates_nothing() {
         json!({ "id": "specs--checked-claim", "include_provenance": true }),
     );
     let sc = &read["structuredContent"];
-    assert_eq!(sc["_hash"].as_str().unwrap(), hash, "check must not touch _hash");
-    assert_eq!(sc["mutation_provenance"]["check_state"], "checked_ok", "{sc}");
+    assert_eq!(
+        sc["_hash"].as_str().unwrap(),
+        hash,
+        "check must not touch _hash"
+    );
+    assert_eq!(
+        sc["mutation_provenance"]["check_state"], "checked_ok",
+        "{sc}"
+    );
     let last = &sc["mutation_provenance"]["last_check"];
     assert_eq!(last["verdict"], "ok");
     assert_eq!(last["role"], "checker");
@@ -3162,7 +3177,10 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         }),
     );
     assert!(created["isError"] != true, "{created}");
-    let hash = created["structuredContent"]["_hash"].as_str().unwrap().to_string();
+    let hash = created["structuredContent"]["_hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // MCP illegal role → typed refusal naming the vocabulary.
     let bad = harness.call_tool(
@@ -3233,7 +3251,10 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     let v: Value = serde_json::from_slice(&bad_cli.stdout).unwrap();
     assert_eq!(v["code"], "INVALID_ROLE", "{v}");
     assert!(
-        v["message"].as_str().unwrap().contains("author, checker, verifier"),
+        v["message"]
+            .as_str()
+            .unwrap()
+            .contains("author, checker, verifier"),
         "vocabulary named: {v}"
     );
 
@@ -3282,7 +3303,11 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         .args(["quickstart"])
         .output()
         .expect("quickstart");
-    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
     let ok = Command::new(&cli_bin)
         .current_dir(&ws)
         .args([
@@ -3300,7 +3325,11 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         ])
         .output()
         .expect("folder create");
-    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stdout));
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stdout)
+    );
     let ok = Command::new(&cli_bin)
         .current_dir(&ws)
         .args([
@@ -3314,13 +3343,14 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         ])
         .output()
         .expect("folder update");
-    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stdout));
-    let ledger = std::fs::read_to_string(
-        ws.join("plainws").join(".memstead").join("changes.jsonl"),
-    )
-    .or_else(|_| {
-        std::fs::read_to_string(ws.join(".memstead").join("changes.jsonl"))
-    });
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stdout)
+    );
+    let ledger =
+        std::fs::read_to_string(ws.join("plainws").join(".memstead").join("changes.jsonl"))
+            .or_else(|_| std::fs::read_to_string(ws.join(".memstead").join("changes.jsonl")));
     let ledger = match ledger {
         Ok(l) => l,
         Err(_) => {
@@ -3354,7 +3384,9 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     );
     assert!(plain_read["isError"] != true, "{plain_read}");
     assert!(
-        plain_read["structuredContent"].get("mutation_provenance").is_none(),
+        plain_read["structuredContent"]
+            .get("mutation_provenance")
+            .is_none(),
         "default entity reads carry no provenance block: {plain_read}"
     );
 
@@ -3403,21 +3435,31 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         "provenance reads are pure"
     );
     assert_eq!(
-        reread["structuredContent"]["mutation_provenance"]["created_by"]["role"],
-        "author",
+        reread["structuredContent"]["mutation_provenance"]["created_by"]["role"], "author",
         "the later checker update never altered the creation record"
     );
 
     // CLI parity on the SAME mem-repo workspace…
     let out = Command::new(&cli_bin)
         .current_dir(tmp.path())
-        .args(["--json", "entity", "specs--derived-conclusion", "--provenance"])
+        .args([
+            "--json",
+            "entity",
+            "specs--derived-conclusion",
+            "--provenance",
+        ])
         .output()
         .expect("run memstead CLI");
     assert!(out.status.success());
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["mutation_provenance"]["created_by"]["role"], "author", "{v}");
-    assert_eq!(v["mutation_provenance"]["last_modified_by"]["role"], "checker");
+    assert_eq!(
+        v["mutation_provenance"]["created_by"]["role"], "author",
+        "{v}"
+    );
+    assert_eq!(
+        v["mutation_provenance"]["last_modified_by"]["role"],
+        "checker"
+    );
 
     // …and on the FOLDER workspace (backend parity: same shape for
     // the same operation sequence).
@@ -3426,11 +3468,18 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
         .args(["--json", "entity", "plainws--ledger-roled", "--provenance"])
         .output()
         .expect("run memstead CLI");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     let p = &v["mutation_provenance"];
     assert_eq!(p["created_by"]["role"], "verifier", "folder parity: {v}");
-    assert_eq!(p["last_modified_by"]["role"], "checker", "folder parity: {v}");
+    assert_eq!(
+        p["last_modified_by"]["role"], "checker",
+        "folder parity: {v}"
+    );
     assert!(p["created_by"]["timestamp"].as_i64().unwrap() > 0);
 }
 

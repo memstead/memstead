@@ -61,7 +61,12 @@ fn parse_ymd(s: &str) -> Option<(i64, u32, u32)> {
     let mut it = s.splitn(3, '-');
     let y: i64 = it.next()?.parse().ok()?;
     let m: u32 = it.next()?.parse().ok()?;
-    let d: u32 = it.next()?.get(..2).unwrap_or(it.next().unwrap_or("")).parse().ok()?;
+    let d: u32 = it
+        .next()?
+        .get(..2)
+        .unwrap_or(it.next().unwrap_or(""))
+        .parse()
+        .ok()?;
     if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
         return None;
     }
@@ -158,12 +163,9 @@ impl Engine {
         window: &DueWindow,
         mem_filter: Option<&str>,
     ) -> Result<String, String> {
-        let today_ymd =
-            parse_ymd(today).ok_or_else(|| format!("invalid date {today:?}: expected YYYY-MM-DD"))?;
-        let today_iso = format!(
-            "{:04}-{:02}-{:02}",
-            today_ymd.0, today_ymd.1, today_ymd.2
-        );
+        let today_ymd = parse_ymd(today)
+            .ok_or_else(|| format!("invalid date {today:?}: expected YYYY-MM-DD"))?;
+        let today_iso = format!("{:04}-{:02}-{:02}", today_ymd.0, today_ymd.1, today_ymd.2);
         let end = window_end(today_ymd, window);
 
         // Mem → (schema, third_party) for every mount, capability
@@ -277,11 +279,7 @@ impl Engine {
         ));
         for e in &entries {
             let marker = if e.overdue { " **OVERDUE**" } else { "" };
-            let origin = if e.third_party {
-                " [third-party]"
-            } else {
-                ""
-            };
+            let origin = if e.third_party { " [third-party]" } else { "" };
             out.push_str(&format!(
                 "- `{}` — {} — **{}**{} (status: {}, mem: {}{})\n",
                 e.id, e.title, e.date, marker, e.status, e.mem, origin
@@ -380,7 +378,12 @@ mod tests {
         }
         std::fs::write(
             own.join("wartung.md"),
-            obligation_md("Wartung", "2026-09-01", "offen", Some("Handwerker beauftragen")),
+            obligation_md(
+                "Wartung",
+                "2026-09-01",
+                "offen",
+                Some("Handwerker beauftragen"),
+            ),
         )
         .unwrap();
         std::fs::write(
@@ -417,7 +420,12 @@ mod tests {
         // Third-party read-only mem with an overdue entry.
         std::fs::write(
             foreign.join("fremd-frist.md"),
-            obligation_md("Fremd Frist", "2026-06-15", "offen", Some("Nur zur Kenntnis")),
+            obligation_md(
+                "Fremd Frist",
+                "2026-06-15",
+                "offen",
+                Some("Nur zur Kenntnis"),
+            ),
         )
         .unwrap();
 
@@ -460,7 +468,10 @@ mod tests {
         // Order: overdue ascending first, then in-window ascending,
         // ties by id.
         let pos = |needle: &str| brief.find(needle).unwrap();
-        assert!(pos("foreign--fremd-frist") < pos("own--frist-alt"), "{brief}");
+        assert!(
+            pos("foreign--fremd-frist") < pos("own--frist-alt"),
+            "{brief}"
+        );
         assert!(pos("own--frist-alt") < pos("own--wartung"), "{brief}");
         assert!(pos("own--wartung") < pos("own--a-gleich"), "{brief}");
         assert!(pos("own--a-gleich") < pos("own--b-gleich"), "{brief}");
@@ -502,11 +513,26 @@ mod tests {
             assert!(err.contains("<N>d"), "error names accepted forms: {err}");
         }
         // Day clamping: Jan 31 + 1m = Feb 28 (2026 is not a leap year).
-        assert_eq!(window_end((2026, 1, 31), &DueWindow::Months(1)), "2026-02-28");
-        assert_eq!(window_end((2024, 1, 31), &DueWindow::Months(1)), "2024-02-29");
-        assert_eq!(window_end((2026, 8, 10), &DueWindow::Days(90)), "2026-11-08");
-        assert_eq!(window_end((2026, 11, 15), &DueWindow::Months(2)), "2027-01-15");
-        assert_eq!(window_end((2024, 2, 29), &DueWindow::Years(1)), "2025-02-28");
+        assert_eq!(
+            window_end((2026, 1, 31), &DueWindow::Months(1)),
+            "2026-02-28"
+        );
+        assert_eq!(
+            window_end((2024, 1, 31), &DueWindow::Months(1)),
+            "2024-02-29"
+        );
+        assert_eq!(
+            window_end((2026, 8, 10), &DueWindow::Days(90)),
+            "2026-11-08"
+        );
+        assert_eq!(
+            window_end((2026, 11, 15), &DueWindow::Months(2)),
+            "2027-01-15"
+        );
+        assert_eq!(
+            window_end((2024, 2, 29), &DueWindow::Years(1)),
+            "2025-02-28"
+        );
     }
 
     /// A workspace with no declaring schema renders the honest empty
@@ -524,7 +550,10 @@ mod tests {
         let brief = engine
             .render_due_brief("2026-08-10", &DueWindow::Days(90), None)
             .unwrap();
-        assert!(brief.contains("No mounted mem's schema declares a due axis"), "{brief}");
+        assert!(
+            brief.contains("No mounted mem's schema declares a due axis"),
+            "{brief}"
+        );
     }
 }
 

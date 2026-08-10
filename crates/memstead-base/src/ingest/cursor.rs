@@ -1876,7 +1876,11 @@ mod tests {
         }]);
         match compute_git_slice(&source, &[], root, Some(&baseline)) {
             SliceOutcome::Changed { slice, .. } => {
-                assert_eq!(slice.added, vec!["real.md"], "engine state leaked: {slice:?}");
+                assert_eq!(
+                    slice.added,
+                    vec!["real.md"],
+                    "engine state leaked: {slice:?}"
+                );
                 assert!(slice.modified.is_empty(), "{slice:?}");
             }
             other => panic!("expected Changed, got {other:?}"),

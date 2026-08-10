@@ -43,14 +43,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let persisted = engine
         .workspace_root()
         .map(|root| {
-            memstead_base::ingest::findings::record_standalone_findings(root, &report)
-                .map_err(|e| {
+            memstead_base::ingest::findings::record_standalone_findings(root, &report).map_err(
+                |e| {
                     anyhow::Error::from(CliError::new(
                         crate::output::ExitKind::Generic,
                         "FINDINGS_STORE_ERROR",
                         e.to_string(),
                     ))
-                })
+                },
+            )
         })
         .transpose()?;
 
@@ -105,9 +106,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     "\nFindings persisted (standalone store): {new} new, {seen} already seen.\n"
                 ));
             }
-            None => out.push_str(
-                "\n_Findings not persisted — engine has no workspace root._\n",
-            ),
+            None => out.push_str("\n_Findings not persisted — engine has no workspace root._\n"),
         }
         print_markdown(&out);
     }

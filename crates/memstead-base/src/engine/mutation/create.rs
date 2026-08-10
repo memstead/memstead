@@ -822,14 +822,17 @@ impl Engine {
 
         // 9. Append provenance. Folder writes a JSONL line; git-branch
         //    no-ops (the commit object already carries the data).
-        backend.append_provenance(&Provenance::new(
-            std::time::SystemTime::now(),
-            ProvenanceKind::Create,
-            Some(id.to_string()),
-            actor,
-            client.cloned(),
-            note.map(String::from),
-        ).with_role(self.current_role))?;
+        backend.append_provenance(
+            &Provenance::new(
+                std::time::SystemTime::now(),
+                ProvenanceKind::Create,
+                Some(id.to_string()),
+                actor,
+                client.cloned(),
+                note.map(String::from),
+            )
+            .with_role(self.current_role),
+        )?;
 
         // Self-write bookkeeping: jump `last_known_head` to the SHA
         // we just produced so the next read doesn't surface
@@ -1263,16 +1266,17 @@ impl Engine {
                 .find(|(m, _)| *m == p.mount_idx)
                 .map(|(_, s)| s.clone())
                 .unwrap_or_default();
-            self.mounts[p.mount_idx]
-                .backend
-                .append_provenance(&Provenance::new(
+            self.mounts[p.mount_idx].backend.append_provenance(
+                &Provenance::new(
                     std::time::SystemTime::now(),
                     ProvenanceKind::Create,
                     Some(p.id.to_string()),
                     actor,
                     client.cloned(),
                     note.clone(),
-                ).with_role(self.current_role))?;
+                )
+                .with_role(self.current_role),
+            )?;
             self.record_self_write(p.mount_idx, &commit_sha);
             self.stamp_mutation_versions(p.mount_idx);
             let parse_result =
@@ -2897,13 +2901,23 @@ write_rules: []
             }];
             (args, None)
         };
-        let batch =
-            || vec![with_rel("Alpha", "beta"), with_rel("Beta", "gamma"), with_rel("Gamma", "alpha")];
+        let batch = || {
+            vec![
+                with_rel("Alpha", "beta"),
+                with_rel("Beta", "gamma"),
+                with_rel("Gamma", "alpha"),
+            ]
+        };
 
-        let rehearsed = engine.batch_create(batch(), actor, Some(&client), true).unwrap();
+        let rehearsed = engine
+            .batch_create(batch(), actor, Some(&client), true)
+            .unwrap();
         assert!(rehearsed.applied, "{rehearsed:?}");
         assert_eq!(rehearsed.succeeded, 3);
-        assert!(rehearsed.commit_sha.is_empty(), "marker form: empty commit_sha");
+        assert!(
+            rehearsed.commit_sha.is_empty(),
+            "marker form: empty commit_sha"
+        );
         assert!(rehearsed.results.iter().all(|r| r.action == "created"));
         // The receipt names the prospective ids; nothing landed.
         for name in ["alpha", "beta", "gamma"] {
@@ -2912,12 +2926,17 @@ write_rules: []
                 rehearsed.results.iter().any(|r| r.id == id),
                 "receipt must name {id}: {rehearsed:?}"
             );
-            assert!(!engine.store().contains(&id), "rehearsal must create nothing");
+            assert!(
+                !engine.store().contains(&id),
+                "rehearsal must create nothing"
+            );
         }
         assert_eq!(engine.store().all_entities().count(), 0);
 
         // Identical validation: the real call on the unchanged mem lands.
-        let real = engine.batch_create(batch(), actor, Some(&client), false).unwrap();
+        let real = engine
+            .batch_create(batch(), actor, Some(&client), false)
+            .unwrap();
         assert!(real.applied, "{real:?}");
         assert!(!real.commit_sha.is_empty(), "the real batch commits");
         assert_eq!(real.succeeded, 3);
@@ -2941,8 +2960,12 @@ write_rules: []
             ]
         };
 
-        let rehearsed = engine.batch_create(batch(), actor, Some(&client), true).unwrap();
-        let real = engine.batch_create(batch(), actor, Some(&client), false).unwrap();
+        let rehearsed = engine
+            .batch_create(batch(), actor, Some(&client), true)
+            .unwrap();
+        let real = engine
+            .batch_create(batch(), actor, Some(&client), false)
+            .unwrap();
         assert!(!rehearsed.applied && !real.applied);
         assert_eq!(rehearsed.failed, real.failed);
         assert_eq!(rehearsed.errors_suppressed, real.errors_suppressed);
@@ -2953,15 +2976,19 @@ write_rules: []
                     (
                         e.id.to_string(),
                         e.action.clone(),
-                        e.error
-                            .as_ref()
-                            .map(|err| (err.code.clone(), err.message.clone(), err.details.clone())),
+                        e.error.as_ref().map(|err| {
+                            (err.code.clone(), err.message.clone(), err.details.clone())
+                        }),
                     )
                 })
                 .collect::<Vec<_>>()
         };
         assert_eq!(envelope(&rehearsed), envelope(&real), "identical refusals");
-        assert!(!engine.store().contains(&crate::entity::EntityId::new("specs", "fine-one")));
+        assert!(
+            !engine
+                .store()
+                .contains(&crate::entity::EntityId::new("specs", "fine-one"))
+        );
     }
 
     /// Atomicity + report-all: a batch with several invalid entries
@@ -2984,7 +3011,7 @@ write_rules: []
             .batch_create(
                 vec![
                     plain("Fine One"),
-                    plain("Existing"),  // duplicate vs pre-batch store
+                    plain("Existing"),   // duplicate vs pre-batch store
                     plain("Bad\nTitle"), // control character in title
                     plain("Fine Two"),
                     plain("Fine Two"), // duplicate WITHIN the batch
@@ -3048,7 +3075,9 @@ write_rules: []
         let batch: Vec<_> = (0..n)
             .map(|i| (empty_create_args("specs", &format!("Bad\nTitle {i}")), None))
             .collect();
-        let result = engine.batch_create(batch, actor, Some(&client), false).unwrap();
+        let result = engine
+            .batch_create(batch, actor, Some(&client), false)
+            .unwrap();
         assert!(!result.applied);
         assert_eq!(result.failed, n);
         let detailed = result
@@ -4176,10 +4205,12 @@ write_rules: []
             )
             .expect("traversal-shaped title lands with a sanitised slug");
         assert_eq!(outcome.id.as_ref(), "specs--etcpasswd");
-        assert!(outcome.warnings.iter().any(|w| matches!(
-            w,
-            WarningHint::TitleCharsDroppedFromSlug { .. }
-        )));
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::TitleCharsDroppedFromSlug { .. }))
+        );
     }
 
     #[test]

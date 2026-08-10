@@ -159,22 +159,29 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     r["timestamp"],
                 ))
             };
-            text.push_str("
+            text.push_str(
+                "
 
 ## Mutation provenance
-");
+",
+            );
             match prov.get("unavailable") {
                 Some(reason) => {
-                    text.push_str(&format!("- unavailable: {}
-", reason.as_str().unwrap_or("")));
+                    text.push_str(&format!(
+                        "- unavailable: {}
+",
+                        reason.as_str().unwrap_or("")
+                    ));
                 }
                 None => {
                     if let Some(l) = render_rec("created by", "created_by") {
                         text.push_str(&l);
                         text.push('\n');
                     } else {
-                        text.push_str("- created by: not recorded (story truncated)
-");
+                        text.push_str(
+                            "- created by: not recorded (story truncated)
+",
+                        );
                     }
                     if let Some(l) = render_rec("last modified by", "last_modified_by") {
                         text.push_str(&l);

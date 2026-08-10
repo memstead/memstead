@@ -87,7 +87,8 @@ fn percent_decode(s: &str) -> String {
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len()
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
             && let (Some(h), Some(l)) = (
                 (bytes[i + 1] as char).to_digit(16),
                 (bytes[i + 2] as char).to_digit(16),
@@ -269,12 +270,20 @@ impl Engine {
         );
 
         // Identity block.
-        let _ = write!(out, "<h1>{}</h1>\n<div class=\"identity\">\n", esc(&doc_title));
+        let _ = write!(
+            out,
+            "<h1>{}</h1>\n<div class=\"identity\">\n",
+            esc(&doc_title)
+        );
         let _ = writeln!(out, "<div><strong>Mem:</strong> {}</div>", esc(mem));
         if let Some(desc) = config.and_then(|c| c.description.as_deref())
             && !desc.is_empty()
         {
-            let _ = writeln!(out, "<div><strong>Description:</strong> {}</div>", esc(desc));
+            let _ = writeln!(
+                out,
+                "<div><strong>Description:</strong> {}</div>",
+                esc(desc)
+            );
         }
         if let Some(subject) = config.and_then(|c| c.subject.as_ref()) {
             let _ = writeln!(
@@ -283,7 +292,11 @@ impl Engine {
                 esc(&subject.scope)
             );
         }
-        let _ = writeln!(out, "<div><strong>Schema:</strong> {}</div>", esc(&schema_ref));
+        let _ = writeln!(
+            out,
+            "<div><strong>Schema:</strong> {}</div>",
+            esc(&schema_ref)
+        );
         let trust = if third_party {
             "third-party (read-only mount — someone else's published content, quoted here)"
         } else {
@@ -389,7 +402,9 @@ impl Engine {
         }
 
         if !stubs.is_empty() {
-            out.push_str("<section class=\"entity\">\n<h2>Unresolved references (stubs)</h2>\n<ul>\n");
+            out.push_str(
+                "<section class=\"entity\">\n<h2>Unresolved references (stubs)</h2>\n<ul>\n",
+            );
             for s in &stubs {
                 let _ = writeln!(
                     out,
@@ -474,10 +489,16 @@ mod tests {
         let html = engine.render_html_export("specs", "2026-08-10").unwrap();
 
         // Identity block + index + entities.
-        assert!(html.contains("<strong>Mem:</strong> specs"), "identity block");
+        assert!(
+            html.contains("<strong>Mem:</strong> specs"),
+            "identity block"
+        );
         assert!(html.contains("<strong>Exported:</strong> 2026-08-10"));
         assert!(html.contains("<nav>"), "type-grouped index");
-        assert!(html.contains("Bösenberg &amp; Söhne — Rev. 2.1"), "widened title escaped: {html}");
+        assert!(
+            html.contains("Bösenberg &amp; Söhne — Rev. 2.1"),
+            "widened title escaped: {html}"
+        );
         assert!(html.contains("äöüß"), "umlauts verbatim");
 
         // Sanitisation: no script tag survives; the text is escaped.
@@ -493,9 +514,15 @@ mod tests {
         assert!(html.contains("<a href=\"https://example.org/page\">docs</a>"));
 
         // Wiki-links: in-mem → anchor; cross-mem → labelled, no anchor.
-        assert!(html.contains("href=\"#specs--target-entity\""), "in-doc anchor");
+        assert!(
+            html.contains("href=\"#specs--target-entity\""),
+            "in-doc anchor"
+        );
         assert!(html.contains("other--far-away"), "cross-mem labelled");
-        assert!(!html.contains("href=\"#other--far-away\""), "cross-mem never an anchor");
+        assert!(
+            !html.contains("href=\"#other--far-away\""),
+            "cross-mem never an anchor"
+        );
 
         // Umlaut-slug wiki-link: pulldown percent-encodes the href;
         // the checker decodes, so this is the form that used to be
@@ -504,13 +531,22 @@ mod tests {
 
         // User fragment link to nowhere: neutralised to text — never
         // a dangling anchor.
-        assert!(!html.contains("href=\"#bogus-frag\""), "dangling fragment neutralised");
+        assert!(
+            !html.contains("href=\"#bogus-frag\""),
+            "dangling fragment neutralised"
+        );
         assert!(html.contains("(#bogus-frag — link removed)"), "{html}");
 
         // javascript: scheme: never a clickable href — even on click,
         // the handed-over file must not execute user script.
-        assert!(!html.contains("href=\"javascript:"), "javascript scheme stripped: {html}");
-        assert!(html.contains("link removed"), "neutralised destination surfaced");
+        assert!(
+            !html.contains("href=\"javascript:"),
+            "javascript scheme stripped: {html}"
+        );
+        assert!(
+            html.contains("link removed"),
+            "neutralised destination surfaced"
+        );
         assert_no_dangling_anchors(&html);
 
         // Stub marking: the cross-mem auto-stub never lands in a
@@ -519,8 +555,20 @@ mod tests {
         // marked; asserted in the wiki-link block above via absence.)
 
         // Zero external resources: nothing in the markup fetches.
-        for fetching in ["<img", "<video", "<audio", "<iframe", "<link ", "<script src", "@import", "url("] {
-            assert!(!html.contains(fetching), "self-containment violated by {fetching}");
+        for fetching in [
+            "<img",
+            "<video",
+            "<audio",
+            "<iframe",
+            "<link ",
+            "<script src",
+            "@import",
+            "url(",
+        ] {
+            assert!(
+                !html.contains(fetching),
+                "self-containment violated by {fetching}"
+            );
         }
 
         // Determinism: same store + date → same bytes.
@@ -587,17 +635,15 @@ mod tests {
             cross_linkable: true,
             migration_target: None,
         };
-        let engine = Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)])
-            .unwrap();
+        let engine =
+            Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         let html = engine.render_html_export("foreign", "2026-08-10").unwrap();
         assert!(
             html.contains("third-party (read-only mount"),
             "trust class stated: {html}"
         );
 
-        let err = engine
-            .render_html_export("nope", "2026-08-10")
-            .unwrap_err();
+        let err = engine.render_html_export("nope", "2026-08-10").unwrap_err();
         assert_eq!(err.code(), "UNKNOWN_MEM");
     }
 }

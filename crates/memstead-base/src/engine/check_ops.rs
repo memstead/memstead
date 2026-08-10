@@ -128,8 +128,9 @@ mod tests {
         mount.capability = MountCapability::ReadOnly;
         let mut engine = crate::Engine::from_mounts(vec![(
             mount,
-            Box::new(crate::storage::FilesystemMemWriter::new(tmp.path().to_path_buf()))
-                as Box<dyn crate::backend::MemBackend>,
+            Box::new(crate::storage::FilesystemMemWriter::new(
+                tmp.path().to_path_buf(),
+            )) as Box<dyn crate::backend::MemBackend>,
         )])
         .unwrap();
         let err = engine

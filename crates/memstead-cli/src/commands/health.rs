@@ -980,9 +980,9 @@ fn fill_open_questions_axis(
     g: &mut GatheredHealth,
 ) {
     if include.iter().any(|s| s == "open_questions") {
-        g.open_questions_axis = Some(
-            memstead_base::ops::health::health_open_questions_axis(engine, None),
-        );
+        g.open_questions_axis = Some(memstead_base::ops::health::health_open_questions_axis(
+            engine, None,
+        ));
     }
 }
 
@@ -995,9 +995,9 @@ fn fill_stale_derivations_axis(
     g: &mut GatheredHealth,
 ) {
     if include.iter().any(|s| s == "stale_derivations") {
-        g.stale_derivations_axis = Some(
-            memstead_base::ops::health::health_stale_derivations_axis(engine, None),
-        );
+        g.stale_derivations_axis = Some(memstead_base::ops::health::health_stale_derivations_axis(
+            engine, None,
+        ));
     }
 }
 

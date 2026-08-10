@@ -296,8 +296,9 @@ pub(crate) fn load_embedded_schemas(
     } else {
         memstead_schema::MetadataPolarityFormat::Legacy
     };
-    let schema = memstead_schema::load_schema_from_memory_with_format(manifest_yaml, &types, format)
-        .map_err(|e| FromArchiveBytesError::EmbeddedSchemaInvalid(e.to_string()))?;
+    let schema =
+        memstead_schema::load_schema_from_memory_with_format(manifest_yaml, &types, format)
+            .map_err(|e| FromArchiveBytesError::EmbeddedSchemaInvalid(e.to_string()))?;
     Ok(vec![Arc::new(schema)])
 }
 

@@ -3276,7 +3276,9 @@ write_rules: []
             "lite must not change when an exemplar exists"
         );
         assert!(
-            !serde_json::to_string(&lite_with).unwrap().contains("exemplar"),
+            !serde_json::to_string(&lite_with)
+                .unwrap()
+                .contains("exemplar"),
             "lite must not mention exemplars at all"
         );
     }

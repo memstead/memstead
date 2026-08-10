@@ -1802,11 +1802,8 @@ mod tests {
         assert_eq!(r.mem, "oddly-named-process");
         // No declaration → derivation fallback, byte-identical to the
         // pre-declaration behaviour.
-        let r = crate::ingest::resolve::resolve_process_mem(
-            &engine,
-            "oddly-named-process",
-            "whatever",
-        );
+        let r =
+            crate::ingest::resolve::resolve_process_mem(&engine, "oddly-named-process", "whatever");
         assert!(!r.declared && !r.mounted);
         assert_eq!(r.mem, "whatever");
 

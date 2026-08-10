@@ -2270,7 +2270,10 @@ fn broken_sample() -> String {
 fn broken_extra() -> String {
     minimal_type()
         .replace("name: sample", "name: extra")
-        .replace("text_fields:\n  - body", "text_fields:\n  - missing_section")
+        .replace(
+            "text_fields:\n  - body",
+            "text_fields:\n  - missing_section",
+        )
         .replace(
             "health_required_fields:\n  - body",
             "health_required_fields:\n  - absent_field",
@@ -2508,12 +2511,9 @@ staleness_threshold_days: 90
 write_rules: []
 "#;
     let types = [("sample".to_string(), bare_field_type.to_string())];
-    let legacy = load_schema_from_memory_with_format(
-        &manifest,
-        &types,
-        MetadataPolarityFormat::Legacy,
-    )
-    .unwrap();
+    let legacy =
+        load_schema_from_memory_with_format(&manifest, &types, MetadataPolarityFormat::Legacy)
+            .unwrap();
     let marked = load_schema_from_memory_with_format(
         &manifest,
         &types,
@@ -2648,9 +2648,8 @@ fn due_axis_malformed_references_refuse_with_accumulation() {
     assert!(msg.contains("'nosuch'"), "{msg}");
 
     // Non-date date_field refuses alone with the shape rule.
-    let non_date = due_type(
-        "due:\n  date_field: freitext\n  status_field: status\n  open_values: [offen]\n",
-    );
+    let non_date =
+        due_type("due:\n  date_field: freitext\n  status_field: status\n  open_values: [offen]\n");
     let err = load(&minimal_manifest(), &[("sample", &non_date)]).expect_err("must refuse");
     assert!(
         err.to_string()

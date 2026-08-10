@@ -993,7 +993,11 @@ fn commit_note_to_provenance(n: crate::ops::agent_notes::CommitNote) -> memstead
     if let Some(id) = n.logical_operation_id {
         record = record.with_logical_operation_id(id);
     }
-    if let Some(role) = n.role.as_deref().and_then(memstead_base::vcs::Role::from_wire) {
+    if let Some(role) = n
+        .role
+        .as_deref()
+        .and_then(memstead_base::vcs::Role::from_wire)
+    {
         record = record.with_role(role);
     }
     record

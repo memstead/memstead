@@ -333,7 +333,7 @@ mod tests {
         let ctx = CliContext {
             json: false,
             quiet: false,
-        role: Default::default(),
+            role: Default::default(),
         };
         run(
             &ctx,

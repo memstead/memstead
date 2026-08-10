@@ -170,7 +170,13 @@ fn unwritable_ledger_never_changes_the_refusal() {
         let out = memstead()
             .current_dir(&ws)
             .args([
-                "--json", "create", "--title", "Alpha", "--type", "spec", "--section",
+                "--json",
+                "create",
+                "--title",
+                "Alpha",
+                "--type",
+                "spec",
+                "--section",
                 "bogus-section=x",
             ])
             .assert()

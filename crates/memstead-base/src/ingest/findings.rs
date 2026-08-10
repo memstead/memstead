@@ -397,10 +397,12 @@ pub fn record_standalone_findings(
         })
         .collect();
 
-    let mut store = read_findings_store(workspace_root, mem, STANDALONE_KEY)?
-        .unwrap_or_else(|| FindingsStore {
-            binding: format!("{mem}/{STANDALONE_KEY}"),
-            ..Default::default()
+    let mut store =
+        read_findings_store(workspace_root, mem, STANDALONE_KEY)?.unwrap_or_else(|| {
+            FindingsStore {
+                binding: format!("{mem}/{STANDALONE_KEY}"),
+                ..Default::default()
+            }
         });
     let prior: BTreeSet<(String, String)> = store
         .current(&key)

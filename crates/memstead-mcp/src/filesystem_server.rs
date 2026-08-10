@@ -37,8 +37,7 @@ use std::path::Path;
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CheckParams,
-    CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
+    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
 };
 
 /// MCP server backed by the unified [`memstead_base::Engine`].
@@ -236,9 +235,7 @@ fn mem_is_durable(engine: &memstead_base::Engine, mem: &str) -> bool {
 /// `--role`); absent records unspecified. Unknown values refuse typed
 /// with the declarable vocabulary named — same contract as the full
 /// flavour.
-fn resolve_role_lean(
-    raw: Option<&str>,
-) -> Result<memstead_base::vcs::Role, Box<CallToolResult>> {
+fn resolve_role_lean(raw: Option<&str>) -> Result<memstead_base::vcs::Role, Box<CallToolResult>> {
     match raw {
         None => Ok(memstead_base::vcs::Role::Unspecified),
         Some(s) => memstead_base::vcs::Role::from_wire(s).ok_or_else(|| {
@@ -1782,8 +1779,7 @@ impl FilesystemMcpServer {
                     memstead_base::ops::health::health_stale_derivations_axis(&engine, None);
             }
             if wants_checks {
-                value["checks"] =
-                    memstead_base::ops::health::health_checks_axis(&engine, None);
+                value["checks"] = memstead_base::ops::health::health_checks_axis(&engine, None);
             }
             return json_response(&value);
         }
@@ -2663,7 +2659,12 @@ mod tests {
         let plain = server.memstead_health(Parameters(HealthParams::default()));
         assert!(!plain.is_error.unwrap_or(false));
         assert!(
-            plain.structured_content.as_ref().unwrap().get("open_questions").is_none(),
+            plain
+                .structured_content
+                .as_ref()
+                .unwrap()
+                .get("open_questions")
+                .is_none(),
             "axis must be include-gated on lean"
         );
 

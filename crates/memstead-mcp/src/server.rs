@@ -25,8 +25,7 @@ use crate::error_envelope::{tool_error, tool_error_with_payload};
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams, ReloadParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams,
-    UpdateParams,
+    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
 };
 
 /// The MCP server wrapping the Engine.
@@ -2039,8 +2038,7 @@ impl McpServer {
             // block states unavailability instead of fabricating.
             if p.include_provenance.unwrap_or(false) {
                 let block = match engine.entity_provenance(id.mem(), id.as_ref()) {
-                    Ok(prov) => serde_json::to_value(&prov)
-                        .unwrap_or(serde_json::Value::Null),
+                    Ok(prov) => serde_json::to_value(&prov).unwrap_or(serde_json::Value::Null),
                     Err(e) => serde_json::json!({
                         "unavailable": e.to_string(),
                     }),
@@ -2978,7 +2976,8 @@ impl McpServer {
                 // target of a validated add entry IS the would-be stub
                 // — same warning, reported instead of created.
                 let stubbed = engine.store().get(&to).map(|e| e.stub).unwrap_or(false);
-                let would_stub = dry_run && entry.action == "added" && engine.store().get(&to).is_none();
+                let would_stub =
+                    dry_run && entry.action == "added" && engine.store().get(&to).is_none();
                 if !op.remove.unwrap_or(false)
                     && absent_targets.contains(&to.to_string())
                     && (stubbed || would_stub)
@@ -9046,7 +9045,10 @@ write_rules: []
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert!(dropped.contains(&"&") && dropped.contains(&"."), "{warning}");
+        assert!(
+            dropped.contains(&"&") && dropped.contains(&"."),
+            "{warning}"
+        );
         assert_eq!(
             warning["details"]["slug"],
             "bösenberg-grundstücks-gmbh-co-kg"
@@ -9082,7 +9084,9 @@ write_rules: []
         assert!(
             clean_payload["warnings"]
                 .as_array()
-                .map(|ws| ws.iter().all(|w| w["code"] != "TITLE_CHARS_DROPPED_FROM_SLUG"))
+                .map(|ws| ws
+                    .iter()
+                    .all(|w| w["code"] != "TITLE_CHARS_DROPPED_FROM_SLUG"))
                 .unwrap_or(true),
             "clean title must not warn: {clean_payload}"
         );
@@ -15085,7 +15089,10 @@ write_rules: []
                 chunk: None,
                 include_provenance: None,
             }));
-            assert!(read.is_error.unwrap_or(false), "rehearsed stub must not exist");
+            assert!(
+                read.is_error.unwrap_or(false),
+                "rehearsed stub must not exist"
+            );
             // The real list on the unchanged mems lands.
             let real = server.memstead_relate(Parameters(RelateParams {
                 relations: ops(),

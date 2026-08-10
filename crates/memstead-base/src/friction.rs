@@ -257,7 +257,9 @@ impl FrictionLedger {
         let mut recent_total = 0u64;
         for e in &entries {
             *by_code.entry(e.code.clone()).or_default() += 1;
-            *by_verb.entry(format!("{}:{}", e.surface, e.verb)).or_default() += 1;
+            *by_verb
+                .entry(format!("{}:{}", e.surface, e.verb))
+                .or_default() += 1;
             if let Some(reason) = &e.reason {
                 *by_reason
                     .entry(e.code.clone())
