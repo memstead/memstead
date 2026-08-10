@@ -102,6 +102,10 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
 
   `memstead-mcp` walks up from its working directory looking for `.memstead/workspace.toml`, so spawn it from anywhere inside (or under) the workspace — no extra arguments needed. Restart the agent so it picks up the new server.
 
+## How a Memstead system runs
+
+Memstead ships no scheduler, no notifications, and no recurrence engine — by design. **The agent writes, the engine enforces, and a periodically-invoked agent run measures, maintains, and advances what needs advancing: curated by agents, enforced by schema, run by the agent loop.** The engine is the deterministic half — it validates every write, measures drift and due-ness (`memstead health`, `memstead due`, `memstead projection verify`), and renders briefs that tell the next agent run what to do. The loop is the runtime: an agent session invoked on whatever cadence the holding needs — a cron'd Claude Code run, a CI job, the plugin's `/sync` skill — reads the brief, does the work, advances recurring dates, and records the outcome. Evaluate the engine alone and you are measuring half the system; recurrence, freshness, and follow-through are the loop's job, not missing engine features.
+
 ## Share and reuse mems
 
 Publish a mem to the [memstead.io](https://memstead.io) registry, and install someone else's with one command. Domain roles: **memstead.io** hosts the registry and the install script; **memstead.com** hosts the docs and contact addresses (`hello@` / `security@memstead.com`).
@@ -153,6 +157,7 @@ Stated here so you don't have to discover it:
 
 - **No semantic / embedding search.** `memstead_search` is exact and structural (content match, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
 - **No one-shot import command.** Nothing turns a folder of notes into a mem in a single command — every entity enters through a schema-validated write. Bulk ingestion is a declared path instead: bind a source (a codebase, a docs tree, a URL) to a mem as a [projection](GLOSSARY.md), and the Claude Code plugin's `/ingest` and `/sync` skills build the graph from the binding's brief and keep it current, batch by batch.
+- **The engine does not calculate.** It can know a statement is due (`memstead due`), hold every input as typed entities (rates, allocation keys, receipts), and name exactly what is missing — and it will still never produce the statement, the sum, or the filled form. That output is the periodically-invoked agent's work; the engine's query path stays deterministic, with no model call and no computation in it.
 - **No built-in visualization.** The graph is queryable (status, overview, relations) but ships no renderer; projections and exports are the extension point.
 - **Windows is untested.** Developed and CI-tested on macOS and Linux. Release archives include a Windows build, but no Windows CI gate exists yet — expect rough edges, path handling especially.
 

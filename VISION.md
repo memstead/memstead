@@ -136,6 +136,8 @@ Keeping specs in sync with reality is the hardest problem the engine has to solv
 
 None of these alone solves freshness. Together they bound the rot.
 
+All of them run on one operating model: **the agent loop is the runtime.** The engine is deliberately the deterministic half — it enforces the schema on every write, measures drift and due-ness, and renders briefs; a periodically-invoked agent run consumes those briefs, does the maintenance, and advances what needs advancing — recurring dates included, which the engine never advances itself, just as it never calculates a derived result. Scheduling, notifications, and recurrence are properties of the loop that runs the system, not missing engine features: curated by agents, enforced by schema, run by the agent loop.
+
 In the spec-first / spec-anchored / spec-as-source taxonomy that Birgitta Böckeler and Thoughtworks named (martinfowler.com, 2025-10-15), the market adopted spec-*first* — specs as ephemeral per-feature fuel — and hit exactly this rot. Memstead targets the **spec-anchored** slot the wave left structurally empty: a persistent, typed, queryable knowledge layer whose freshness is a first-class mechanism rather than a manual chore.
 
 The project itself is the test case. Memstead must keep its own specs synchronised while it is being developed. If it cannot, the system has not solved the problem.

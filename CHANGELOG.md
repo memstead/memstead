@@ -8,6 +8,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **The docs state the operating model — the agent loop is the
+  runtime.** README gains "How a Memstead system runs" (the agent
+  writes, the engine enforces, and a periodically-invoked agent run
+  measures, maintains, and advances what needs advancing — curated
+  by agents, enforced by schema, run by the agent loop) and the
+  honesty list gains the computation boundary: **the engine does not
+  calculate** — it can know a statement is due, hold every input,
+  and name what is missing, and producing the output is the agent's
+  work. VISION states the same model beside the freshness problem.
+  Scheduling, notifications, and recurrence are the loop's
+  properties, not missing engine features.
 - **`obligation@0.1.0` — the first non-software built-in schema.**
   The document-and-deadline pattern: `obligation` (a dated duty with
   a stated consequence — a liability that forfeits, not a target
