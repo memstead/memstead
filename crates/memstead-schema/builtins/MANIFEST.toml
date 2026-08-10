@@ -109,3 +109,18 @@ sha256 = "358ccf91737cf72738e9870059cfd36124050e37bc8c100bb0083333f55fc45e"
 name = "ingest"
 version = "0.5.0"
 sha256 = "8d4b06d15546c88a6e403cb4ea39ff42e78bbedeed5e783197f973b9c15f299e"
+
+[[shipped]]
+name = "default"
+version = "1.3.0"
+sha256 = "15c9a92aa07db3e6ce7f0022805a8a93de77a61d2e03a60634862227ad641b6b"
+
+[[shipped]]
+name = "project"
+version = "0.4.0"
+sha256 = "c1d108753c4d1fd111c60e930255d913be98681c0a0936baeed2bbfcf11b2157"
+
+[[shipped]]
+name = "software"
+version = "0.4.0"
+sha256 = "bd184559b1f98e2b4be1f0350259f7bb95c4f52a7ba79db04d30cf8e1a009629"

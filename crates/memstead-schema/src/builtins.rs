@@ -156,7 +156,19 @@ fn load_builtin_dir(dir: &Dir<'_>) -> Result<Schema, SchemaLoadError> {
         }
     }
 
-    loader::load_schema_from_memory(manifest_text, &types)
+    // New builtin generations carry the format marker; sealed prior
+    // generations don't and keep their legacy written meaning.
+    let marker_path = format!(
+        "{}/{}",
+        dir.path().display(),
+        loader::SCHEMA_FORMAT_MARKER_FILE
+    );
+    let format = if dir.get_file(marker_path.as_str()).is_some() {
+        loader::MetadataPolarityFormat::RequiredOptIn
+    } else {
+        loader::MetadataPolarityFormat::Legacy
+    };
+    loader::load_schema_from_memory_with_format(manifest_text, &types, format)
 }
 
 #[cfg(test)]

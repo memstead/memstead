@@ -85,11 +85,9 @@ metadata_fields:
     description: state
     field_type: string
     enum_values: [open, checked]
-    optional: true
   - key: checked_by
     description: who checked
     field_type: string
-    optional: true
 title_weight: 100.0
 text_fields:
   - body

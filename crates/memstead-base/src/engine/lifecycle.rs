@@ -147,7 +147,11 @@ impl Engine {
         let ops = self.git_branch_ops.as_ref().ok_or_else(|| {
             EngineError::Mem("git-branch ops are not wired on this engine".to_string())
         })?;
-        (ops.write_schema)(&gitdir, name, version, files).map_err(EngineError::Backend)
+        // Seal the format marker with the package: readers of the
+        // sealed copy decide the metadata-polarity generation by its
+        // presence (absent marker = legacy semantics).
+        let files = memstead_schema::loader::with_format_marker(files.to_vec());
+        (ops.write_schema)(&gitdir, name, version, &files).map_err(EngineError::Backend)
     }
 
     /// Validate a schema package's files before they are sealed. Runs
@@ -188,8 +192,15 @@ impl Engine {
                     })
             })
             .collect();
-        let schema = memstead_schema::load_schema_from_memory(&manifest_yaml, &types)
-            .map_err(|e| invalid(e.to_string()))?;
+        // Install validates the CURRENT language (the author acts
+        // now) — the retired `optional:` key refuses here, and absent
+        // required keys mean optional.
+        let schema = memstead_schema::load_schema_from_memory_with_format(
+            &manifest_yaml,
+            &types,
+            memstead_schema::loader::MetadataPolarityFormat::RequiredOptIn,
+        )
+        .map_err(|e| invalid(e.to_string()))?;
         memstead_schema::check_section_heading_roundtrip(&schema)
             .map_err(|e| invalid(e.to_string()))?;
         memstead_schema::check_reserved_metadata_keys(&schema)
@@ -2519,7 +2530,6 @@ metadata_fields:
   - key: status
     description: workflow state
     field_type: string
-    optional: true
     enum_values: [draft, final]
 title_weight: 100.0
 text_fields:
@@ -2750,7 +2760,7 @@ write_rules: []
         // Newest default generation so the clean-boot baseline isn't
         // tripped by the SCHEMA_GENERATIONS_BEHIND hint.
         let mut mount = folder_mount("specs", mem_dir.clone());
-        mount.schema = Some("default@1.2.0".parse().unwrap());
+        mount.schema = Some("default@1.3.0".parse().unwrap());
         let mut engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         assert!(
@@ -4127,7 +4137,7 @@ community:
 
     fn mig_type_yaml(with_status: bool) -> String {
         let metadata = if with_status {
-            "metadata_fields:\n  - key: status\n    description: Lifecycle state\n    field_type: string\n    enum_values:\n      - open\n      - closed\n"
+            "metadata_fields:\n  - key: status\n    description: Lifecycle state\n    field_type: string\n    required: true\n    enum_values:\n      - open\n      - closed\n"
         } else {
             "metadata_fields: []\n"
         };

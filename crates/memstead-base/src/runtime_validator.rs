@@ -891,7 +891,7 @@ pub fn missing_required_fields(
             // independently of caller input; not the agent's
             // responsibility to supply.
             !READ_ONLY_METADATA_KEYS.contains(&f.key.as_str())
-                && !f.optional
+                && f.is_required()
                 && f.default_value.is_none()
                 && !f.init_timestamp
                 && !f.auto_timestamp

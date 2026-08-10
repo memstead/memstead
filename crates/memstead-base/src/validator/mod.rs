@@ -501,11 +501,20 @@ fn check_embedded_schema(
         });
     };
 
-    let schema = memstead_schema::load_schema_from_memory(manifest_yaml, &types).map_err(|e| {
-        ValidationError::EmbeddedSchemaInvalid {
+    let marker_path = format!(
+        "{}{}",
+        memstead_schema::ARCHIVE_SCHEMA_PREFIX,
+        memstead_schema::loader::SCHEMA_FORMAT_MARKER_FILE
+    );
+    let format = if schema_files.iter().any(|sf| sf.archive_path == marker_path) {
+        memstead_schema::MetadataPolarityFormat::RequiredOptIn
+    } else {
+        memstead_schema::MetadataPolarityFormat::Legacy
+    };
+    let schema = memstead_schema::load_schema_from_memory_with_format(manifest_yaml, &types, format)
+        .map_err(|e| ValidationError::EmbeddedSchemaInvalid {
             reason: e.to_string(),
-        }
-    })?;
+        })?;
 
     let (embedded_name, embedded_version) = schema.id();
     if embedded_name != config.schema.name || embedded_version != config.schema.version {

@@ -113,7 +113,7 @@ fn check_metadata(
 
     // 2. Required fields present, 3. types match, 4. enum violations.
     for field in &schema.metadata_fields {
-        let is_required = !field.optional;
+        let is_required = field.is_required();
         let value = entity.metadata.get(field.key.as_str());
         match (is_required, value) {
             (true, None) => {

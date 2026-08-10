@@ -104,7 +104,7 @@ fn build_metadata(entity: &Entity, schema: &TypeDefinition) -> String {
         let value = entity.metadata.get(field_def.key.as_str());
 
         // Optional fields: skip if absent
-        if field_def.optional && value.is_none() {
+        if !field_def.is_required() && value.is_none() {
             continue;
         }
 

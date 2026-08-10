@@ -1525,11 +1525,9 @@ metadata_fields:
     description: workflow state
     field_type: string
     enum_values: [open, checked]
-    optional: true
   - key: checked_by
     description: who checked
     field_type: string
-    optional: true
 title_weight: 100.0
 text_fields:
   - body
@@ -2056,11 +2054,9 @@ metadata_fields:
     description: lifecycle
     field_type: string
     enum_values: [open, checked, fallen]
-    optional: true
   - key: checked_by
     description: who checked
     field_type: string
-    optional: true
 title_weight: 100.0
 text_fields:
   - body
@@ -2290,15 +2286,12 @@ metadata_fields:
   - key: rede_id
     description: source id
     field_type: string
-    optional: true
   - key: rede_sha256
     description: content hash
     field_type: string
-    optional: true
   - key: kategorie
     description: category from the shared vocabulary
     field_type: string
-    optional: true
 title_weight: 100.0
 text_fields:
   - body

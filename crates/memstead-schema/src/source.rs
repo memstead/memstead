@@ -188,6 +188,21 @@ fn try_collect_dir(
         bytes: manifest_bytes,
     }];
 
+    // The sealed format marker rides as-found — it records the
+    // package's metadata-polarity generation, so a collected source
+    // seals with the same reading its origin carries.
+    let marker_path = dir.join(crate::loader::SCHEMA_FORMAT_MARKER_FILE);
+    if marker_path.is_file() {
+        let bytes = std::fs::read(&marker_path).map_err(|e| SchemaSourceError::Io {
+            path: marker_path.clone(),
+            source: e,
+        })?;
+        out.push(SchemaSourceFile {
+            archive_path: crate::loader::SCHEMA_FORMAT_MARKER_FILE.to_string(),
+            bytes,
+        });
+    }
+
     let types_dir = dir.join("types");
     if types_dir.is_dir() {
         let entries = std::fs::read_dir(&types_dir).map_err(|e| SchemaSourceError::Io {
@@ -274,6 +289,16 @@ fn collect_builtin_dir(
         archive_path: "schema.yaml".to_string(),
         bytes: manifest_bytes,
     }];
+
+    // The sealed format marker rides as-found (new builtin
+    // generations ship it; retained older generations don't).
+    let marker_key = format!("{prefix}/{}", crate::loader::SCHEMA_FORMAT_MARKER_FILE);
+    if let Some(marker) = schema_dir.get_file(marker_key.as_str()) {
+        out.push(SchemaSourceFile {
+            archive_path: crate::loader::SCHEMA_FORMAT_MARKER_FILE.to_string(),
+            bytes: marker.contents().to_vec(),
+        });
+    }
 
     let types_key = format!("{prefix}/types");
     if let Some(types_dir) = schema_dir.get_dir(types_key.as_str()) {
@@ -405,6 +430,30 @@ write_rules: []
             );
             std::fs::write(dir.join(format!("types/{t}.yaml")), td).unwrap();
         }
+    }
+
+    /// The collectors carry the sealed format marker as-found: the
+    /// current builtin generation ships it, a retained pre-flip
+    /// generation doesn't — so seals stay faithful in both directions.
+    #[test]
+    fn collectors_carry_format_marker_as_found() {
+        let marked: SchemaRef = "default@1.3.0".parse().unwrap();
+        let files = collect_schema_source(None, None, &marked).unwrap();
+        assert!(
+            files
+                .iter()
+                .any(|f| f.archive_path == crate::loader::SCHEMA_FORMAT_MARKER_FILE),
+            "current generation collects its marker"
+        );
+
+        let legacy: SchemaRef = "default@1.2.0".parse().unwrap();
+        let files = collect_schema_source(None, None, &legacy).unwrap();
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.archive_path == crate::loader::SCHEMA_FORMAT_MARKER_FILE),
+            "retained pre-flip generation stays unmarked"
+        );
     }
 
     #[test]

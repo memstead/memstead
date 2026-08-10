@@ -552,7 +552,7 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
                         format!("{:?}", f.field_type),
                         f.enum_values.clone(),
                         f.default_value.clone(),
-                        f.optional,
+                        f.is_required(),
                         format!("{:?}", f.serialization),
                     )
                 })
@@ -581,7 +581,7 @@ fn builtin_project_knowledge_extension_is_migration_compatible() {
             .iter()
             .find(|f| f.key == key)
             .unwrap_or_else(|| panic!("principle lacks {key}"));
-        assert!(f.optional == required_absent_default && f.default_value.is_none());
+        assert!(!f.is_required() == required_absent_default && f.default_value.is_none());
     }
     for (key, still) in [("status", "active"), ("category", "")] {
         let f = principle.metadata_fields.iter().find(|f| f.key == key);
@@ -754,7 +754,7 @@ fn base_metadata_carries_engine_flags() {
         "last_modified must keep auto_timestamp"
     );
     let tags = td.metadata_field("tags").unwrap();
-    assert!(tags.optional, "tags must be optional by default");
+    assert!(!tags.is_required(), "tags must be optional by default");
 }
 
 /// A schema declaring a reserved identity/discriminator metadata key
@@ -2420,4 +2420,181 @@ fn accumulated_order_is_deterministic_from_dir() {
         .to_string();
     assert_eq!(first, second);
     assert!(first.contains("3 violations"), "got: {first}");
+}
+
+// ---------------------------------------------------------------------------
+// Metadata-required polarity (first-author-path plan 07)
+// ---------------------------------------------------------------------------
+
+/// Old-format sealed fixture — written in the retired language, loaded
+/// through the legacy memory path (no format marker). `optional:
+/// false` still refuses absence (required), `optional: true` still
+/// admits it, and a field carrying NEITHER key reads as required —
+/// its written meaning under the old rule.
+#[test]
+fn sealed_old_format_fixture_loads_with_inverted_equivalent_semantics() {
+    let manifest = minimal_manifest();
+    let old_format_type = r#"name: sample
+description: Sealed old-format fixture
+when_to_use: Polarity tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: explicit_mandatory
+    description: optional false meant required
+    field_type: string
+    optional: false
+  - key: explicit_optional
+    description: optional true meant not required
+    field_type: string
+    optional: true
+  - key: absent_key
+    description: absence meant required under the old rule
+    field_type: string
+title_weight: 100.0
+text_fields: [body]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields: [title, body]
+health_required_fields: []
+staleness_threshold_days: 90
+write_rules: []
+"#;
+    let schema = load_schema_from_memory(&manifest, &[("sample".into(), old_format_type.into())])
+        .expect("sealed old-format fixture keeps loading");
+    let td = schema.get_type("sample").unwrap();
+    let req = |key: &str| td.metadata_field(key).unwrap().is_required();
+    assert!(req("explicit_mandatory"), "optional: false stays required");
+    assert!(!req("explicit_optional"), "optional: true stays optional");
+    assert!(
+        req("absent_key"),
+        "unmarked sealed package: absence keeps its legacy written meaning (required)"
+    );
+}
+
+/// The format marker decides the absent-key reading — the identical
+/// declaration in a marked (new-format) package reads as optional,
+/// never a heuristic over the document body.
+#[test]
+fn format_marker_decides_absent_key_reading() {
+    use memstead_schema::loader::{MetadataPolarityFormat, load_schema_from_memory_with_format};
+    let manifest = minimal_manifest();
+    let bare_field_type = r#"name: sample
+description: Marker-decided fixture
+when_to_use: Polarity tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: bare
+    description: no required key
+    field_type: string
+title_weight: 100.0
+text_fields: [body]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields: [title, body]
+health_required_fields: []
+staleness_threshold_days: 90
+write_rules: []
+"#;
+    let types = [("sample".to_string(), bare_field_type.to_string())];
+    let legacy = load_schema_from_memory_with_format(
+        &manifest,
+        &types,
+        MetadataPolarityFormat::Legacy,
+    )
+    .unwrap();
+    let marked = load_schema_from_memory_with_format(
+        &manifest,
+        &types,
+        MetadataPolarityFormat::RequiredOptIn,
+    )
+    .unwrap();
+    assert!(
+        legacy
+            .get_type("sample")
+            .unwrap()
+            .metadata_field("bare")
+            .unwrap()
+            .is_required(),
+        "legacy: absence means required"
+    );
+    assert!(
+        !marked
+            .get_type("sample")
+            .unwrap()
+            .metadata_field("bare")
+            .unwrap()
+            .is_required(),
+        "marked: absence means optional"
+    );
+}
+
+/// Authoring/directory loads refuse the retired `optional:` key with
+/// the inversion instructions, and mixing several offenders reports
+/// them all through the shared report-all accumulation.
+#[test]
+fn authoring_refuses_retired_optional_key_naming_the_inversion() {
+    let manifest = minimal_manifest();
+    let mixed_type = minimal_type().replace(
+        "metadata_fields:\n  - key: status",
+        "metadata_fields:\n  - key: extra\n    description: retired key user\n    field_type: string\n    optional: true\n  - key: extra2\n    description: second offender\n    field_type: string\n    optional: false\n  - key: status",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("types")).unwrap();
+    std::fs::write(root.join("schema.yaml"), &manifest).unwrap();
+    std::fs::write(root.join("types/sample.yaml"), &mixed_type).unwrap();
+    let err = memstead_schema::loader::load_schema_from_dir(root).expect_err("must refuse");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("retired `optional:` key"),
+        "names the retirement: {msg}"
+    );
+    assert!(
+        msg.contains("`required: true`") && msg.contains("delete `optional: true`"),
+        "states the executable inversion: {msg}"
+    );
+    // Both offenders in one refusal — the shared report-all path.
+    assert!(
+        msg.contains("'extra'") && msg.contains("'extra2'"),
+        "report-all accumulation names every offender: {msg}"
+    );
+}
+
+/// A schema declaring a metadata field with no `required` key
+/// validates on the authoring path, and a section without `required`
+/// is legal and optional — the uniform absence-means-optional rule.
+#[test]
+fn absence_means_optional_for_fields_and_sections_on_authoring_path() {
+    let manifest = minimal_manifest();
+    let bare = minimal_type()
+        .replace(
+            "metadata_fields:\n  - key: status",
+            "metadata_fields:\n  - key: note_source\n    description: bare field\n    field_type: string\n  - key: status",
+        )
+        .replace(
+            "  - key: body\n    heading: Body\n    required: true",
+            "  - key: extra_notes\n    heading: Extra Notes\n    search_weight: 1.0\n    write_rules: []\n  - key: body\n    heading: Body\n    required: true",
+        );
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("types")).unwrap();
+    std::fs::write(root.join("schema.yaml"), &manifest).unwrap();
+    std::fs::write(root.join("types/sample.yaml"), &bare).unwrap();
+    let schema = memstead_schema::loader::load_schema_from_dir(root).expect("bare keys validate");
+    let td = schema.get_type("sample").unwrap();
+    assert!(!td.metadata_field("note_source").unwrap().is_required());
+    let extra = td.sections.iter().find(|s| s.key == "extra_notes").unwrap();
+    assert!(!extra.required, "section without required key is optional");
 }

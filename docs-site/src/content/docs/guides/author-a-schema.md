@@ -33,9 +33,11 @@ Edit the package, then:
 The scaffold is a complete schema package — one folder, two files:
 
 - **`cookbook/schema.yaml`** — the manifest: name, version, description, the `types:` roster, the relationship vocabulary (`strict` mode with `PART_OF`, `RELATES_TO`, `REFERENCES`, and the required `_default` fallback), and `alias_target_rel_type: REFERENCES` so body wiki-links auto-emit edges.
-- **`cookbook/types/note.yaml`** — one commented example type: a required `summary` section, an optional catch-all `details` section, a filterable `status` metadata field, search weights, and `write_rules` guidance served to agents.
+- **`cookbook/types/note.yaml`** — one commented example type: a required `summary` section, an optional catch-all `details` section, one required and one optional metadata field, search weights, and `write_rules` guidance served to agents.
 
 Every line carries a comment explaining what to change. The scaffold validates clean *unmodified* — you can run the printed follow-up first and shape the schema afterwards.
+
+One rule covers sections and metadata fields alike: **a declaration is optional unless it says `required: true`** — absence means optional. A required metadata field with a `default_value` is auto-filled and never refused (required-with-default means "always present", not "caller must type it"). The retired `optional:` key refuses at authoring load with the one-line inversion fix; sealed schemas that still carry it keep loading with equivalent semantics.
 
 ## 2. Validate
 

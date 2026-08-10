@@ -540,7 +540,24 @@ pub fn load_schemas_from_memstead_ref_at_gitdir(
             types_yamls.sort_by(|a, b| a.0.cmp(&b.0));
         }
 
-        let schema = memstead_schema::loader::load_schema_from_memory(&manifest_yaml, &types_yamls)
+        // Format generation from the sealed marker's presence —
+        // unmarked packages read with legacy semantics (absent
+        // required/optional key = required), marked ones with the
+        // current rule (absence = optional).
+        let format = match schema_tree
+            .lookup_entry_by_path(memstead_schema::loader::SCHEMA_FORMAT_MARKER_FILE)
+            .map_err(|e| MemRepoSchemasError::GitTree(e.to_string()))?
+        {
+            Some(e) if e.mode().is_blob() => {
+                memstead_schema::loader::MetadataPolarityFormat::RequiredOptIn
+            }
+            _ => memstead_schema::loader::MetadataPolarityFormat::Legacy,
+        };
+        let schema = memstead_schema::loader::load_schema_from_memory_with_format(
+            &manifest_yaml,
+            &types_yamls,
+            format,
+        )
             .map_err(|source| MemRepoSchemasError::Schema {
                 name: versioned_name.clone(),
                 source,
@@ -1520,6 +1537,60 @@ mod tests {
         assert!(
             !entries.iter().any(|p| p.contains("repo.json")),
             "repo.json must not appear under __MEMSTEAD: {entries:?}"
+        );
+    }
+
+    /// The format marker decides the sealed reader's metadata-polarity
+    /// generation: the same package sealed WITHOUT the marker reads an
+    /// absent required/optional key as required (legacy written
+    /// meaning), and sealed WITH the marker (the install helper) as
+    /// optional.
+    #[test]
+    fn sealed_format_marker_decides_metadata_polarity() {
+        let manifest = b"name: tiny\nversion: 0.1.0\ndescription: t\nwhen_to_use: tests\ntypes:\n  - doc\nrelationships:\n  mode: strict\n  definitions:\n    - name: PART_OF\n      description: h\n      default_weight: 3.0\n    - name: _default\n      description: d\n      default_weight: 1.0\ncommunity:\n  resolution: 1.0\n  seed: 42\n".to_vec();
+        let doc = b"name: doc\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: bare\n    description: no required key\n    field_type: string\ntitle_weight: 100.0\ntext_fields: [body]\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields: [title, body]\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n".to_vec();
+        let files = vec![
+            ("schema.yaml".to_string(), manifest),
+            ("types/doc.yaml".to_string(), doc),
+        ];
+
+        // Unmarked seal (a package sealed before the polarity flip).
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+        write_schema_to_memstead_ref(&gitdir, "tiny", "0.1.0", &files).unwrap();
+        let LoadOutcome::Schemas(schemas) =
+            load_schemas_from_memstead_ref_at_gitdir(&gitdir).unwrap()
+        else {
+            panic!("schemas expected");
+        };
+        assert!(
+            schemas[0]
+                .get_type("doc")
+                .unwrap()
+                .metadata_field("bare")
+                .unwrap()
+                .is_required(),
+            "unmarked sealed package: absence keeps the legacy meaning (required)"
+        );
+
+        // Marked seal — the install helper appends the marker.
+        let tmp2 = TempDir::new().unwrap();
+        let gitdir2 = fresh_repo_dir(tmp2.path());
+        let marked = memstead_schema::loader::with_format_marker(files);
+        write_schema_to_memstead_ref(&gitdir2, "tiny", "0.1.0", &marked).unwrap();
+        let LoadOutcome::Schemas(schemas) =
+            load_schemas_from_memstead_ref_at_gitdir(&gitdir2).unwrap()
+        else {
+            panic!("schemas expected");
+        };
+        assert!(
+            !schemas[0]
+                .get_type("doc")
+                .unwrap()
+                .metadata_field("bare")
+                .unwrap()
+                .is_required(),
+            "marked sealed package: absence means optional"
         );
     }
 

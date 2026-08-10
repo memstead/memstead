@@ -2621,7 +2621,7 @@ community:
         // Newest default generation so the clean-boot assertion below
         // isn't tripped by the SCHEMA_GENERATIONS_BEHIND hint.
         let mut mount = folder_mount("specs", mem_dir);
-        mount.schema = Some("default@1.2.0".parse().unwrap());
+        mount.schema = Some("default@1.3.0".parse().unwrap());
         let engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         assert!(

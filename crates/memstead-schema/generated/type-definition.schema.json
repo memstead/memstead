@@ -405,9 +405,12 @@
         "key": {
           "type": "string"
         },
-        "optional": {
-          "type": "boolean",
-          "default": false
+        "required": {
+          "description": "Whether an entity must carry this field — **absence means\noptional**, the same rule sections follow. `required: true`\nrefuses a create that leaves the field unset\n(`REQUIRED_FIELD_UNSET`); a required field with a\n`default_value` (or an `init_timestamp`) is auto-filled and\ntherefore never refused — required-with-default means \"always\npresent\", not \"caller must type it\". Replaces the retired\n`optional:` key (opposite polarity): sealed schemas carrying\n`optional` keep loading with inverted-but-equivalent\nsemantics; authoring refuses it naming this key.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "serialization": {
           "$ref": "#/$defs/Serialization",
@@ -509,7 +512,9 @@
           "type": "string"
         },
         "required": {
-          "type": "boolean"
+          "description": "Whether an entity must carry this section — **absence means\noptional**, the same rule metadata fields follow. `required:\ntrue` refuses a create without the section\n(`MISSING_REQUIRED_SECTION`).",
+          "type": "boolean",
+          "default": false
         },
         "search_weight": {
           "type": "number",
@@ -538,7 +543,6 @@
       "required": [
         "key",
         "heading",
-        "required",
         "search_weight"
       ]
     },

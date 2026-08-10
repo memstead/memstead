@@ -8,6 +8,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **Metadata fields become opt-in required — absence means optional,
+  everywhere.** One rule now covers both declaration kinds: **a
+  section or metadata field is optional unless it declares
+  `required: true`.** `MetadataFieldDef` gains `required` (defaulted,
+  documented in the generated meta-schema); the retired `optional:`
+  key refuses on every authoring/install path with a one-sentence
+  inversion fix (delete `optional: true`; replace `optional: false`
+  with `required: true`), while **sealed** schemas carrying it keep
+  loading with inverted-but-equivalent semantics. Because an absent
+  key used to mean *required* and now means *optional*, sealed
+  packages gain a format marker (`schema-format.json`) written by the
+  install/seal path from this change on — **an unmarked sealed
+  package keeps its legacy written meaning (absence = required), so
+  nothing silently flips in either direction.** Built-ins migrate by
+  version bump per the append-only retention manifest:
+  `default@1.3.0`, `project@0.4.0`, `software@0.4.0` ship in the new
+  language; **every prior version stays byte-sealed and loadable, so
+  out-of-repo pins on earlier versions keep working unchanged.**
+  `quickstart` pins `default@1.3.0`; the `schema new` scaffold now
+  teaches the polarity with one required and one optional field.
+  A required field with a `default_value` is auto-filled and never
+  refused — required-with-default means "always present", not
+  "caller must type it".
 - **Titles are display text: the grammar widens, the slug stays, the
   divergence warns.** A title is now any single-line text —
   `Bösenberg Grundstücks GmbH & Co. KG`, `Wohnung 2.OG rechts`,

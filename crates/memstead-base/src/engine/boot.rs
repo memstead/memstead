@@ -941,7 +941,7 @@ mod tests {
             vec![(
                 "specs".to_string(),
                 "default@1.0.0".to_string(),
-                "1.2.0".to_string()
+                "1.3.0".to_string()
             )],
             "old built-in pin must surface the generation-behind hint"
         );
@@ -978,7 +978,7 @@ mod tests {
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
         let mut mount = folder_mount("specs", mem_dir);
-        mount.schema = Some("default@1.2.0".parse().unwrap());
+        mount.schema = Some("default@1.3.0".parse().unwrap());
         let engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
         assert!(

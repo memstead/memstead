@@ -87,6 +87,19 @@ pub enum SchemaLoadError {
     )]
     ExamplesRetired { type_name: String },
 
+    /// The retired `optional:` metadata-field key was used in an
+    /// authoring context. The polarity flipped (first-author-path
+    /// plan 07): a field is optional unless it declares
+    /// `required: true` — the same rule sections follow. Sealed
+    /// content keeps loading with the old key inverted; only
+    /// authoring refuses, so the fix is one mechanical edit.
+    #[error(
+        "type '{type_name}' metadata field '{field}' declares the retired `optional:` key — \
+         fields are optional unless they declare `required: true`. Fix: delete `optional: true`; \
+         replace `optional: false` with `required: true`. Then retry."
+    )]
+    OptionalRetired { type_name: String, field: String },
+
     #[error("schema relationship vocabulary must include a '_default' definition")]
     MissingDefaultWeight,
 
@@ -496,10 +509,70 @@ pub fn load_schema_from_dir(path: &Path) -> Result<Schema, SchemaLoadError> {
         &type_files,
         Some(&manifest_path),
         Some(&types_dir),
+        // Authoring context — the author writes the current language.
+        MetadataPolarityFormat::RequiredOptIn,
     )
 }
 
-/// Load a schema from in-memory YAML strings.
+/// The metadata-field polarity generation of a sealed package —
+/// decided by the presence of the package's format marker
+/// (`schema-format.json`), never by heuristics over the document body.
+///
+/// Under the pre-flip language an absent `required`/`optional` key
+/// meant **required**; under the current language absence means
+/// **optional**. The two are syntactically indistinguishable, so an
+/// unmarked sealed package reads with [`Self::Legacy`] semantics —
+/// its effective behaviour conserved — while packages sealed from
+/// this change on carry the marker and read as
+/// [`Self::RequiredOptIn`]. Directory (authoring) loads are always
+/// `RequiredOptIn`: the author writes against the current language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataPolarityFormat {
+    /// Pre-flip sealed content: an absent key means required.
+    Legacy,
+    /// Current language: an absent key means optional.
+    RequiredOptIn,
+}
+
+/// The format-marker file name sealed alongside a schema package on
+/// the genuinely sealed surfaces — the `__MEMSTEAD` ref, published
+/// `.mem` archives (the export carries it, the archive validator
+/// admits it, the archive loader honors it), and new builtin version
+/// directories. Presence ⇒ [`MetadataPolarityFormat::RequiredOptIn`];
+/// absence ⇒ legacy. Content is informative JSON; presence is the
+/// contract.
+///
+/// Directory loads (`load_schema_from_dir`: workspace
+/// `.memstead/schemas/`, cache extractions, `schema validate` /
+/// `install`) are the AUTHORING tier and never consult the marker —
+/// they always read the current language, with the retired
+/// `optional:` key refusing loudly. A pre-flip directory package
+/// relying on absent-key-means-required flips soft (fields become
+/// optional — admits more, refuses nothing); that is the fail-soft
+/// direction by design, with `health_required_fields` and
+/// constraints as the data-quality backstop.
+pub const SCHEMA_FORMAT_MARKER_FILE: &str = "schema-format.json";
+
+/// The marker file's canonical content.
+pub const SCHEMA_FORMAT_MARKER_CONTENT: &str = "{\"metadata_polarity\":\"required-opt-in\"}\n";
+
+/// Append the format marker to a package's file list if absent —
+/// the seal-path helper every installer runs so sealed copies carry
+/// their generation.
+pub fn with_format_marker(mut files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
+    if !files.iter().any(|(rel, _)| rel == SCHEMA_FORMAT_MARKER_FILE) {
+        files.push((
+            SCHEMA_FORMAT_MARKER_FILE.to_string(),
+            SCHEMA_FORMAT_MARKER_CONTENT.as_bytes().to_vec(),
+        ));
+    }
+    files
+}
+
+/// Load a schema from in-memory YAML strings — **legacy sealed
+/// semantics** (an absent required/optional key means required).
+/// Use [`load_schema_from_memory_with_format`] when the caller knows
+/// the package's format generation from its marker.
 ///
 /// `types_yamls` is a slice of `(filename_stem, contents)` tuples — the stems
 /// must match `manifest.types` exactly.
@@ -507,7 +580,24 @@ pub fn load_schema_from_memory(
     manifest_yaml: &str,
     types_yamls: &[(String, String)],
 ) -> Result<Schema, SchemaLoadError> {
-    load_with_context(manifest_yaml, types_yamls, None, None)
+    load_with_context(
+        manifest_yaml,
+        types_yamls,
+        None,
+        None,
+        MetadataPolarityFormat::Legacy,
+    )
+}
+
+/// Load a schema from in-memory YAML strings with an explicit
+/// metadata-polarity format generation (from the sealed package's
+/// format marker).
+pub fn load_schema_from_memory_with_format(
+    manifest_yaml: &str,
+    types_yamls: &[(String, String)],
+    format: MetadataPolarityFormat,
+) -> Result<Schema, SchemaLoadError> {
+    load_with_context(manifest_yaml, types_yamls, None, None, format)
 }
 
 fn load_with_context(
@@ -515,6 +605,7 @@ fn load_with_context(
     types_yamls: &[(String, String)],
     manifest_path: Option<&Path>,
     types_dir: Option<&Path>,
+    format: MetadataPolarityFormat,
 ) -> Result<Schema, SchemaLoadError> {
     // Semantic-violation accumulator. Every check operating on
     // successfully parsed structure pushes here instead of returning,
@@ -782,6 +873,31 @@ fn load_with_context(
             errors.push(SchemaLoadError::ExamplesRetired {
                 type_name: td.name.clone(),
             });
+        }
+
+        // Metadata-required polarity (first-author-path plan 07):
+        // authoring refuses the retired `optional:` key naming the
+        // inversion; sealed content inverts it. An absent key resolves
+        // by the package's format generation — legacy sealed content
+        // reads absence as required (its written meaning), everything
+        // else as optional.
+        for field in &mut td.metadata_fields {
+            // Current-language contexts (directory/authoring loads and
+            // install validation, both RequiredOptIn) refuse the
+            // retired key; only Legacy sealed loads invert silently.
+            if matches!(format, MetadataPolarityFormat::RequiredOptIn)
+                && field.legacy_optional.is_some()
+            {
+                errors.push(SchemaLoadError::OptionalRetired {
+                    type_name: td.name.clone(),
+                    field: field.key.clone(),
+                });
+            }
+            field.required_resolved = match (field.required, field.legacy_optional.take()) {
+                (Some(required), _) => required,
+                (None, Some(optional)) => !optional,
+                (None, None) => matches!(format, MetadataPolarityFormat::Legacy),
+            };
         }
 
         // Record the raw author-declared metadata keys BEFORE the

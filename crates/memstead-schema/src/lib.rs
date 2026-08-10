@@ -34,8 +34,9 @@ pub use config::{
     parse_mem_config, published_config_from, published_format_accepted,
 };
 pub use loader::{
-    HeadingKeyViolation, SchemaLoadError, check_reserved_metadata_keys, check_section_formats,
-    check_section_heading_roundtrip, load_schema_from_dir, load_schema_from_memory,
+    HeadingKeyViolation, MetadataPolarityFormat, SchemaLoadError, check_reserved_metadata_keys,
+    check_section_formats, check_section_heading_roundtrip, load_schema_from_dir,
+    load_schema_from_memory, load_schema_from_memory_with_format,
 };
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
@@ -476,9 +477,10 @@ mod tests {
         assert!(!reg.is_empty());
         let versions = reg.available_versions("default");
         // 1.0.0 (sealed, retired vocabulary) + 1.1.0 (plan-06 rename)
-        // + 1.2.0 (current generation, exemplars) — retention keeps
-        // every shipped version.
-        assert_eq!(versions.len(), 3);
+        // + 1.2.0 (exemplars) + 1.3.0 (current generation,
+        // required-opt-in metadata polarity) — retention keeps every
+        // shipped version.
+        assert_eq!(versions.len(), 4);
     }
 
     #[test]
@@ -513,26 +515,26 @@ mod tests {
 
         let requirement = software.get_type("requirement").expect("requirement type");
         assert!(
-            requirement.metadata_field("verified_on").unwrap().optional,
+            !requirement.metadata_field("verified_on").unwrap().is_required(),
             "verified_on must be optional — an unverified requirement has no verification date"
         );
         // Sibling required field is untouched.
         assert!(
-            !requirement.metadata_field("source").unwrap().optional,
+            requirement.metadata_field("source").unwrap().is_required(),
             "source stays required"
         );
 
         let contract = software.get_type("contract").expect("contract type");
         for field in ["deprecated_on", "removal_on"] {
             assert!(
-                contract.metadata_field(field).unwrap().optional,
+                !contract.metadata_field(field).unwrap().is_required(),
                 "{field} must be optional — a current contract has no deprecation/removal date"
             );
         }
         // Sibling required fields are untouched.
         for field in ["protocol", "version"] {
             assert!(
-                !contract.metadata_field(field).unwrap().optional,
+                contract.metadata_field(field).unwrap().is_required(),
                 "{field} stays required"
             );
         }

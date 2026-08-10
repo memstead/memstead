@@ -498,13 +498,26 @@ sections:
 
 # Typed, filterable frontmatter fields — beyond the built-in
 # type / created_date / last_modified / tags.
+# One rule for fields and sections alike: absence of `required` means
+# optional. `required: true` refuses a create that leaves the field
+# unset — unless a default fills it (required + default = always
+# present, never refused).
 metadata_fields:
   - key: status
+    # required + default_value: every entity carries a status, and the
+    # default means a create never has to supply one.
+    required: true
     description: Lifecycle state of the note.
     field_type: string
     default_value: active
     enum_values: [active, archived]
     filterable: equality
+  - key: source
+    # No `required` key: optional — an entity without a source is
+    # admitted. Use health_required_fields or a constraint if missing
+    # values should surface as findings instead.
+    description: Where the note's content came from.
+    field_type: string
 
 # Search ranking: how much a title match weighs.
 title_weight: 100.0
@@ -594,6 +607,10 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
     match shape {
         WorkspaceShape::Filesystem => {
             // Folder backend: write the package under `.memstead/schemas/`.
+            // Marked: the install gate validates the current language, so
+            // the installed copy carries its generation for every later
+            // seal (export/publish collects it as-found).
+            let files = marked_package(files);
             let pkg_dir = root
                 .join(".memstead")
                 .join("schemas")
@@ -856,6 +873,25 @@ fn collect_dir_package(dir: &Path) -> anyhow::Result<Vec<memstead_schema::Schema
     Ok(out)
 }
 
+/// Append the sealed format marker to a resolved package's file list
+/// if absent — the install gate validates the current language, so the
+/// installed copy carries its metadata-polarity generation for every
+/// later seal (export/publish collect it as-found).
+fn marked_package(
+    mut files: Vec<memstead_schema::SchemaSourceFile>,
+) -> Vec<memstead_schema::SchemaSourceFile> {
+    let marker = memstead_schema::loader::SCHEMA_FORMAT_MARKER_FILE;
+    if !files.iter().any(|f| f.archive_path == marker) {
+        files.push(memstead_schema::SchemaSourceFile {
+            archive_path: marker.to_string(),
+            bytes: memstead_schema::loader::SCHEMA_FORMAT_MARKER_CONTENT
+                .as_bytes()
+                .to_vec(),
+        });
+    }
+    files
+}
+
 /// Write the resolved package files under `pkg_dir`, creating parent
 /// directories. The `# yaml-language-server:` directive on each YAML is
 /// rewritten to the installed-location form so an editor resolves it
@@ -939,8 +975,11 @@ mod tests {
     /// command runs is the same one the engine boots with.
     #[test]
     fn validate_accepts_builtin_default_schema() {
+        // The CURRENT generation — older sealed generations use the
+        // retired `optional:` key and legitimately refuse under the
+        // authoring gate this command runs.
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../memstead-schema/builtins/schemas/default-1.1");
+            .join("../memstead-schema/builtins/schemas/default-1.3");
         assert!(
             path.join("schema.yaml").is_file(),
             "fixture moved: {path:?}"

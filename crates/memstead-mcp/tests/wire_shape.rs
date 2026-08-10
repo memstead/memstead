@@ -2708,7 +2708,7 @@ fn negative_finding_writes_on_both_surfaces_and_is_leaf_exempt() {
 #[test]
 fn open_questions_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
     let mut harness = WireHarness::start(tmp.path());
 
     // Without the include: no axis key.
@@ -2747,7 +2747,7 @@ fn open_questions_axis_is_include_gated_and_refuses_unknown_mem_typed() {
 #[test]
 fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
     let mut harness = WireHarness::start(tmp.path());
 
     let plain = harness.call_tool("memstead_health", json!({}));
@@ -2793,7 +2793,7 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
 #[test]
 fn checks_health_axis_serves_unconfirmable_without_caller_identity() {
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
     let mut harness = WireHarness::start(tmp.path());
     let cli_bin = Path::new(memstead_mcp_bin())
         .parent()
@@ -2947,7 +2947,7 @@ fn checks_health_axis_serves_unconfirmable_without_caller_identity() {
 #[test]
 fn check_operation_records_derives_state_and_mutates_nothing() {
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
     let mut harness = WireHarness::start(tmp.path());
     let cli_bin = Path::new(memstead_mcp_bin())
         .parent()
@@ -3147,7 +3147,7 @@ fn check_operation_records_derives_state_and_mutates_nothing() {
 #[test]
 fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     let tmp = TempDir::new().unwrap();
-    seed_full_workspace(tmp.path(), &[("specs", "default@1.2.0")]);
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
     let mut harness = WireHarness::start(tmp.path());
 
     // MCP create-as-author.

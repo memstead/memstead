@@ -281,7 +281,18 @@ pub(crate) fn load_embedded_schemas(
                 .to_string(),
         ));
     };
-    let schema = load_schema_from_memory(manifest_yaml, &types)
+    // The archive keeps its sealed generation: marker present ⇒
+    // current polarity; absent ⇒ legacy written meaning.
+    let marker_path = format!(
+        ".memstead/schema/{}",
+        memstead_schema::loader::SCHEMA_FORMAT_MARKER_FILE
+    );
+    let format = if schema_files.iter().any(|sf| sf.archive_path == marker_path) {
+        memstead_schema::MetadataPolarityFormat::RequiredOptIn
+    } else {
+        memstead_schema::MetadataPolarityFormat::Legacy
+    };
+    let schema = memstead_schema::load_schema_from_memory_with_format(&manifest_yaml, &types, format)
         .map_err(|e| FromArchiveBytesError::EmbeddedSchemaInvalid(e.to_string()))?;
     Ok(vec![Arc::new(schema)])
 }

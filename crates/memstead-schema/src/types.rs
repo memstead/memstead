@@ -407,6 +407,11 @@ pub fn derive_section_key(heading: &str) -> String {
 pub struct SectionDef {
     pub key: String,
     pub heading: String,
+    /// Whether an entity must carry this section — **absence means
+    /// optional**, the same rule metadata fields follow. `required:
+    /// true` refuses a create without the section
+    /// (`MISSING_REQUIRED_SECTION`).
+    #[serde(default)]
     pub required: bool,
     pub search_weight: f32,
     #[serde(default)]
@@ -493,8 +498,32 @@ pub struct MetadataFieldDef {
     pub default_value: Option<String>,
     #[serde(default)]
     pub enum_values: Option<Vec<String>>,
-    #[serde(default)]
-    pub optional: bool,
+    /// Whether an entity must carry this field — **absence means
+    /// optional**, the same rule sections follow. `required: true`
+    /// refuses a create that leaves the field unset
+    /// (`REQUIRED_FIELD_UNSET`); a required field with a
+    /// `default_value` (or an `init_timestamp`) is auto-filled and
+    /// therefore never refused — required-with-default means "always
+    /// present", not "caller must type it". Replaces the retired
+    /// `optional:` key (opposite polarity): sealed schemas carrying
+    /// `optional` keep loading with inverted-but-equivalent
+    /// semantics; authoring refuses it naming this key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    /// The retired `optional:` key, captured raw so sealed content
+    /// keeps loading (inverted) while authoring refuses it. Never
+    /// serialized, never part of the authoring language.
+    #[serde(default, rename = "optional", skip_serializing)]
+    #[schemars(skip)]
+    pub legacy_optional: Option<bool>,
+    /// Resolved requiredness — computed at load from `required`,
+    /// the retired `optional`, and the package's format generation
+    /// (an unmarked sealed package reads absence as required, the
+    /// legacy meaning; everything else reads absence as optional).
+    /// Read via [`Self::is_required`]; never parsed from YAML.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub required_resolved: bool,
     #[serde(default)]
     pub init_timestamp: bool,
     #[serde(default)]
@@ -503,6 +532,16 @@ pub struct MetadataFieldDef {
     pub serialization: Serialization,
     #[serde(default)]
     pub filterable: Filterable,
+}
+
+impl MetadataFieldDef {
+    /// Whether an entity must carry this field, after the load-time
+    /// polarity resolution. The single read every validator and
+    /// projection uses — `required`/`legacy_optional` are raw parse
+    /// captures, not behaviour.
+    pub fn is_required(&self) -> bool {
+        self.required_resolved
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

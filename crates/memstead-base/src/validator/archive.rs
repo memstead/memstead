@@ -318,6 +318,11 @@ fn is_schema_path(path: &str) -> bool {
     if rest == "schema.yaml" {
         return true;
     }
+    // The sealed format marker rides with the package so a published
+    // archive keeps its metadata-polarity generation.
+    if rest == memstead_schema::loader::SCHEMA_FORMAT_MARKER_FILE {
+        return true;
+    }
     let Some(rest) = rest.strip_prefix("types/") else {
         return false;
     };
@@ -568,6 +573,30 @@ mod tests {
                 ".memstead/schema/schema.yaml",
                 ".memstead/schema/types/spec.yaml"
             ]
+        );
+    }
+
+    /// The sealed format marker rides the archive: it is admitted by
+    /// the whitelist and lands in `schema_files` so the loaders can
+    /// honor the package's metadata-polarity generation.
+    #[test]
+    fn accepts_schema_format_marker() {
+        let zip = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            ("foo.md", b"# Foo\n"),
+            (".memstead/schema/schema.yaml", b"name: default\n"),
+            (
+                ".memstead/schema/schema-format.json",
+                b"{\"metadata_polarity\":\"required-opt-in\"}\n",
+            ),
+        ]);
+        let entries = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap();
+        assert!(
+            entries
+                .schema_files
+                .iter()
+                .any(|s| s.archive_path == ".memstead/schema/schema-format.json"),
+            "marker must ride in schema_files"
         );
     }
 

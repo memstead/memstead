@@ -474,11 +474,12 @@ fn prompt_line(msg: &str) -> anyhow::Result<String> {
 }
 
 /// Resolve the default builtin schema to its concrete pin — the
-/// current generation (1.2.0, the exemplar-carrying generation), so
-/// fresh workspaces never start on a superseded vocabulary.
+/// current generation (1.3.0, the required-opt-in metadata-polarity
+/// generation), so fresh workspaces never start on a superseded
+/// vocabulary.
 fn default_schema_pin() -> anyhow::Result<memstead_schema::SchemaRef> {
     let reg = memstead_schema::SchemaRegistry::builtin();
-    match reg.get("default", &semver::Version::new(1, 2, 0)) {
+    match reg.get("default", &semver::Version::new(1, 3, 0)) {
         Some(schema) => {
             let (name, version) = schema.id();
             Ok(memstead_schema::SchemaRef::new(name, version))

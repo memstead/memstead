@@ -1482,7 +1482,7 @@ pub fn build_schema_payload(
                     let mut obj = serde_json::json!({
                         "name": f.key,
                         "description": f.description,
-                        "required": !f.optional,
+                        "required": f.is_required(),
                     });
                     if let Some(enum_values) = &f.enum_values {
                         obj.as_object_mut()
@@ -1940,7 +1940,7 @@ fn describe_metadata_field(field: &memstead_schema::MetadataFieldDef) -> String 
     };
 
     let mut flags: Vec<&str> = Vec::new();
-    if field.optional {
+    if !field.is_required() {
         flags.push("optional");
     } else {
         flags.push("required");

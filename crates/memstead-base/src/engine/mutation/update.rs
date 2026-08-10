@@ -640,7 +640,7 @@ impl Engine {
             // enum_values, type_write_rules) so MCP envelopes surface
             // the full REQUIRED_FIELD_UNSET shape.
             let field_def = type_def.metadata_field(&key);
-            let is_required = field_def.map(|f| !f.optional).unwrap_or(false);
+            let is_required = field_def.map(|f| f.is_required()).unwrap_or(false);
             if is_required {
                 let (field_description, enum_values) = match field_def {
                     Some(f) => (

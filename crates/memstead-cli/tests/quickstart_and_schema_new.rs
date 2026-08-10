@@ -44,7 +44,7 @@ fn quickstart_fresh_dir_bootstraps_workspace_seed_and_wiring() {
 
     // Derived name + default schema pin.
     assert_eq!(payload["name"], "my-fresh-graph");
-    assert_eq!(payload["schema"], "default@1.2.0");
+    assert_eq!(payload["schema"], "default@1.3.0");
     // Non-TTY, no --agent: Claude Code default, explicitly flagged.
     assert_eq!(payload["agents_defaulted"], true);
     assert_eq!(payload["agents"][0]["target"], "claude-code");
