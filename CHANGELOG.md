@@ -8,6 +8,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **`export --format html` — a read surface for non-operators.** One
+  self-contained HTML file per mem: every entity as a section (title,
+  metadata table, sections rendered from markdown), a type-grouped
+  navigation index, and the mem's identity block (title, description,
+  subject, schema, export date, and — for read-only mounts — the
+  third-party trust class). Wiki-links and typed relationships
+  resolve to in-document anchors; cross-mem references render
+  labelled, never as anchors; stubs render marked. Self-containment
+  is a hard line: zero network requests on open — raw HTML in user
+  markdown is escaped as text, and external images degrade to plain
+  labelled links (an `<a href>` stays clickable; nothing fetches).
+  Byte-deterministic given store and export date. Backend-uniform,
+  CLI-only (the export family's surface policy) — a file you hand to
+  a person: no server, no account, no installed anything.
 - **The docs state the operating model — the agent loop is the
   runtime.** README gains "How a Memstead system runs" (the agent
   writes, the engine enforces, and a periodically-invoked agent run

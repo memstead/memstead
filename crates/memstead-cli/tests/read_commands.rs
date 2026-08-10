@@ -1285,3 +1285,37 @@ fn due_brief_cli_wiring() {
         .success()
         .stdout(contains("90d"));
 }
+
+/// `memstead export --format html` (first-author-path plan 11): the
+/// CLI wiring — the format appears in help, a fixture workspace
+/// exports one self-contained file, and an unknown mem refuses with
+/// the same typed code the other formats use.
+#[test]
+fn html_export_cli_wiring() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = seed_cli_test_mem(tmp.path());
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("html"));
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "export", "--format", "html", "-o", "out.html"])
+        .assert()
+        .success()
+        .stdout(contains("\"format\": \"html\""));
+    let html = std::fs::read_to_string(tmp.path().join("out.html")).unwrap();
+    assert!(html.starts_with("<!DOCTYPE html>"));
+    assert!(!html.contains("<img"), "self-contained");
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--format", "html", "--mem", "nope"])
+        .assert()
+        .failure()
+        .stderr(contains("UNKNOWN_MEM"));
+}

@@ -414,6 +414,8 @@ Export the write mem as markdown (in place) or as a portable `.mem` archive
     Write a `.mem` zip archive to `--output`
   - `json`:
     Print the full entity set as one JSON document on stdout
+  - `html`:
+    Write one self-contained HTML file — the read surface for non-operators: no server, no scripts, zero network requests
 
 * `-o`, `--output <PATH>` — Output path for `--format mem`. Defaults to `./<name>-<version>.mem` in the current directory, matching the "external vs cache filename" convention for portable mem archives. Ignored for `--format markdown`; refused for `--format json` (that document goes to stdout)
 * `--mem <NAME>` — Which mem to export (by name). For `--format markdown`, omitting this argument runs a workspace-wide export and reports any declined mounts under `skipped_mounts`. For `--format mem`, required when more than one write mem is loaded; defaults to the first writable mem otherwise. For `--format json`, omitting it exports every writable mem; naming a read-only mount exports that mount (read-mems are excluded from the workspace-wide default — they are someone else's published content)

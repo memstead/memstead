@@ -46,6 +46,7 @@ pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;
 pub mod due;
+pub mod export_html;
 pub mod query;
 pub mod review;
 

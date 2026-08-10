@@ -33,10 +33,10 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = Format::Markdown)]
     pub format: Format,
 
-    /// Output path for `--format mem`. Defaults to `./<name>-<version>.mem`
-    /// in the current directory, matching the "external vs cache filename"
-    /// convention for portable mem archives. Ignored for `--format markdown`;
-    /// refused for `--format json` (that document goes to stdout).
+    /// Output path for `--format mem` (default `./<name>-<version>.mem`)
+    /// and `--format html` (default `./<mem>.html`). Ignored for
+    /// `--format markdown`; refused for `--format json` (that document
+    /// goes to stdout).
     #[arg(long, short = 'o', value_name = "PATH")]
     pub output: Option<PathBuf>,
 
@@ -60,11 +60,17 @@ pub enum Format {
     Mem,
     /// Print the full entity set as one JSON document on stdout.
     Json,
+    /// Write one self-contained HTML file — the read surface for
+    /// non-operators: no server, no scripts, zero network requests.
+    Html,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if matches!(args.format, Format::Json) {
         return run_json(ctx, args);
+    }
+    if matches!(args.format, Format::Html) {
+        return run_html(ctx, args);
     }
     match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
@@ -72,6 +78,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Format::Markdown => run_markdown(ctx, &engine, args.mem_name.as_deref()),
             Format::Mem => run_mem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
+            Format::Html => unreachable!("dispatched to run_html above"),
         },
         CliEngine::Filesystem(engine) => match args.format {
             // `--format markdown` regenerates files in place. The
@@ -87,6 +94,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .into()),
             Format::Mem => run_mem_filesystem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
+            Format::Html => unreachable!("dispatched to run_html above"),
         },
     }
 }
@@ -507,4 +515,85 @@ mod tests {
             "the retired --mem-name flag must not parse"
         );
     }
+}
+
+/// `--format html` — one self-contained HTML file per mem (the read
+/// surface for non-operators). Backend-uniform via [`CliEngine::base`]
+/// and observably read-only. The export date is stamped once (UTC);
+/// `--today` on `memstead due` has no analogue here because the date
+/// only labels the export, it never filters.
+fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    let engine_holder = ctx.cli_engine()?;
+    let engine = engine_holder.base();
+    // Resolve the target mem like `--format mem`: explicit name wins
+    // (read-only mounts allowed); otherwise the sole writable mem.
+    let mem = match &args.mem_name {
+        Some(m) => m.clone(),
+        None => {
+            let writables: Vec<String> = engine
+                .writable_mem_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            match writables.as_slice() {
+                [one] => one.clone(),
+                [] => {
+                    return Err(CliError::new(
+                        ExitKind::Validation,
+                        "INVALID_INPUT",
+                        "no writable mem loaded — pass --mem <name>",
+                    )
+                    .into());
+                }
+                _ => {
+                    return Err(CliError::new(
+                        ExitKind::Validation,
+                        "INVALID_INPUT",
+                        format!(
+                            "multiple writable mems loaded ({}) — pass --mem <name>",
+                            writables.join(", ")
+                        ),
+                    )
+                    .into());
+                }
+            }
+        }
+    };
+    let now = time::OffsetDateTime::now_utc();
+    let export_date = format!(
+        "{:04}-{:02}-{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day()
+    );
+    let html = engine
+        .render_html_export(&mem, &export_date)
+        .map_err(|e| CliError::from_engine_op(e))?;
+    let out_path = args
+        .output
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(format!("{mem}.html")));
+    std::fs::write(&out_path, &html).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "IO_ERROR",
+            format!("write {}: {e}", out_path.display()),
+        )
+    })?;
+    if ctx.json {
+        print_json(&serde_json::json!({
+            "format": "html",
+            "mem": mem,
+            "path": out_path,
+            "bytes": html.len(),
+            "exported": export_date,
+        }))?;
+    } else {
+        print_markdown(&format!(
+            "# HTML export\n\n- Mem: `{mem}`\n- File: `{}`\n- Size: {} bytes\n- Exported: {export_date}\n\nSelf-contained — open it from anywhere, no server needed.\n",
+            out_path.display(),
+            html.len()
+        ));
+    }
+    Ok(())
 }
