@@ -252,9 +252,9 @@ pub struct InitArgs {
     pub reattach: bool,
 
     /// Destroy residual storage at this mem's path and proceed with a
-    /// fresh create: the residual branch and its `__MEMSTEAD` config
-    /// blob are pruned in one ref-edit transaction, then the normal
-    /// create path runs — the prior entities are gone by design.
+    /// fresh create: the residue is removed atomically — either it is
+    /// gone and the mem is created, or nothing changed — and the prior
+    /// entities are gone by design.
     /// Mutually exclusive with `--reattach` and `--hard-cleanup-first`.
     #[arg(long = "force-overwrite", group = "recovery_action")]
     pub force_overwrite: bool,
