@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: party
+description: |
+  Any counterparty: a person, an organization, or an authority — the
+  entity a commitment binds or an obligation points at.
+when_to_use: |
+  One entity per distinct counterparty that recurs across
+  commitments or obligations. A party named once in passing does not
+  need an entity — link it when it starts accumulating relationships.
+
+sections:
+  - key: identity
+    heading: Identity
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "Who this is and in what capacity they appear in this holding — one paragraph."
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+    write_rules:
+      - "Contact details, standing observations, anything durable that fits nowhere else."
+
+metadata_fields:
+  - key: kind
+    required: true
+    description: What sort of counterparty this is.
+    field_type: string
+    default_value: organization
+    enum_values: [person, organization, authority]
+    filterable: equality
+
+title_weight: 100.0
+text_fields: [identity, notes]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+leaf: true
+updatable_fields: [title, identity, notes, kind, tags]
+health_required_fields: [identity]
+staleness_threshold_days: 730
+
+write_rules:
+  - "Parties are mostly edge targets — PARTY_TO commitments, OBLIGES from them. An edge-less party is legal (leaf type) but check whether it still earns its entity."
+
+exemplar:
+  title: "Meridian Insurance Group Ltd."
+  metadata:
+    kind: organization
+  sections:
+    identity: "The coverage provider under the current master services agreement; issues the annual proof-of-coverage confirmations the renewal filings depend on."
+  relations:
+    - to: master-services-agreement
+      type: PARTY_TO

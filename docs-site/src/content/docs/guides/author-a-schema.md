@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-A [schema](../../glossary/#schema) is what makes a mem *typed*: it declares the entity types, the sections each type must carry, the metadata fields, and the relationship vocabulary — and the engine enforces all of it on every write. The built-in `default` schema is a general-purpose starting point; the moment your domain has its own vocabulary, author your own.
+A [schema](../../glossary/#schema) is what makes a mem *typed*: it declares the entity types, the sections each type must carry, the metadata fields, and the relationship vocabulary — and the engine enforces all of it on every write. The built-in `default` schema is a general-purpose starting point; the moment your domain has its own vocabulary, author your own — or fork a closer built-in. For document-and-deadline domains (contracts, compliance, permits, grants, maintenance), start from `obligation` — the first non-software built-in: dated duties with stated consequences, the agreements they arise from, the parties they bind, and the decisions taken over them, with the `due:` axis wired so `memstead due` answers "what is due next". Nothing in it names a domain; it is deliberately a fork target (`memstead schema install obligation@0.1.0`, copy, rename, extend).
 
 This guide takes you from a working workspace (see [Getting started](../../guides/getting-started/)) to a mem pinned to a custom schema. You never hand-copy YAML — `memstead schema new` scaffolds a valid package, and the whole remaining flow is the commands it prints.
 

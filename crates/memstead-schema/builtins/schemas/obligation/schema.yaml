@@ -1,0 +1,121 @@
+# yaml-language-server: $schema=../../../generated/schema-manifest.schema.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# obligation@0.1.0 — the document-and-deadline pattern.
+#
+# The first non-software built-in: dated duties with stated
+# consequences, the agreements they arise from, the parties they bind,
+# and the decisions taken along the way. The qualifying shape:
+# authoritative source artifacts, slowly changing, with obligations
+# and decisions accumulating over them — compliance, contracts,
+# grants, maintenance, permits, renewals.
+#
+# This schema is a PATTERN to fork, not a domain model: nothing in it
+# names a domain or jurisdiction. Fork it and add your domain's types
+# (assets, cases, correspondence) around this core.
+#
+# Four types: obligation (a dated duty that forfeits, not slips),
+# party (any counterparty), commitment (the modelled agreement
+# obligations arise from), decision (the why, with its rejected
+# alternatives). The obligation type declares the `due:` axis, so
+# `memstead due` answers "what is due next" over any mem pinned here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: obligation
+version: 0.1.0
+
+description: |
+  The document-and-deadline pattern: dated duties with stated
+  consequences (obligation), the agreements they arise from
+  (commitment), the parties they bind (party), and the decisions
+  taken over them (decision). Obligations are liabilities, not
+  targets — a missed one forfeits a right rather than slipping a
+  date. The obligation type declares the due axis, so `memstead due`
+  renders "what is due next" over any mem pinned to this schema.
+
+when_to_use: |
+  Use for any holding whose subject is authoritative documents plus
+  deadlines: contracts and their renewal windows, compliance and
+  filing duties, permits, grants, maintenance cycles. Fork it when
+  your domain needs its own surrounding types — this built-in is the
+  core pattern, deliberately small. Do not use it for target-shaped
+  planning (milestones slip; obligations forfeit — that is the
+  `planning` schema's register).
+
+types:
+  - obligation
+  - party
+  - commitment
+  - decision
+
+relationships:
+  mode: strict
+  definitions:
+    - name: CONCERNS
+      description: The obligation's subject — what the duty is about.
+      when_to_use: From an obligation to the entity it is about (a commitment, a party, or any subject entity, in this mem or another).
+      default_weight: 2.0
+    - name: OBLIGES
+      description: Who owes the duty — a commitment or obligation binding a party.
+      when_to_use: From a commitment or obligation to the party that owes performance.
+      default_weight: 2.0
+      source_types: [commitment, obligation]
+      target_types: [party]
+    - name: EVIDENCED_BY
+      description: Typed evidence edge — the entity that documents or proves this one.
+      when_to_use: From an obligation, commitment, or decision to the entity holding its documentary evidence. Distinct from REFERENCES; author it deliberately.
+      default_weight: 1.5
+      source_types: [obligation, commitment, decision]
+    - name: ARISES_FROM
+      description: The source of a duty — the agreement that creates it.
+      when_to_use: From an obligation to the commitment it arises from.
+      default_weight: 2.0
+      source_types: [obligation]
+      target_types: [commitment]
+    - name: REPLACES
+      description: Succession — this entity supersedes that one.
+      when_to_use: From a newer commitment or decision to the one it replaces. Acyclic.
+      default_weight: 1.5
+      acyclic: true
+      source_types: [commitment, decision]
+      target_types: [commitment, decision]
+    - name: BLOCKS
+      description: Ordering between duties — this one must complete before that one can.
+      when_to_use: From the blocking obligation to the blocked one. Acyclic.
+      default_weight: 1.5
+      acyclic: true
+      source_types: [obligation]
+      target_types: [obligation]
+    - name: PARTY_TO
+      description: Membership in an agreement.
+      when_to_use: From a party to a commitment it is bound by or signatory to.
+      default_weight: 1.5
+      source_types: [party]
+      target_types: [commitment]
+    - name: PART_OF
+      description: Hierarchical containment.
+      when_to_use: From a child entity to its parent grouping. Acyclic.
+      default_weight: 3.0
+      acyclic: true
+    - name: REFERENCES
+      description: Soft reference auto-emitted from body wiki-links.
+      when_to_use: Never author manually — write a wiki-link in a section body instead.
+      default_weight: 0.5
+    - name: _default
+      description: Fallback weight for undeclared relationship types.
+      default_weight: 1.0
+
+alias_target_rel_type: REFERENCES
+
+cross_mem_relationships:
+  - to_schema: "*"
+    definitions:
+      - name: REFERENCES
+        description: Soft reference from an obligation-mem entity into any other mem — whatever schema the destination pins.
+        when_to_use: Auto-emitted from inline wiki-links across the mem boundary. Do not author manually.
+        default_weight: 0.5
+        source_types: [obligation, party, commitment, decision]
+
+community:
+  resolution: 1.0
+  seed: 42

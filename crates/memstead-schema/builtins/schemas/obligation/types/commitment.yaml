@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: commitment
+description: |
+  The source of obligations: a contract, resolution, policy, or
+  permit as a MODELLED AGREEMENT — what it binds whom to. Distinct
+  from the artifact file itself, which anchors or evidences it.
+when_to_use: |
+  One entity per agreement whose duties this holding tracks.
+  Obligations ARISES_FROM commitments; parties are PARTY_TO them; a
+  renegotiated agreement REPLACES its predecessor rather than
+  editing it beyond recognition.
+
+sections:
+  - key: terms
+    heading: Terms
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "The binding substance: who commits to what, for how long, under which conditions. Summarize — the artifact holds the letter; this entity holds the model."
+  - key: scope
+    heading: Scope
+    search_weight: 5.0
+    write_rules:
+      - "What the agreement covers and, where telling, what it explicitly does not."
+  - key: notes
+    heading: Notes
+    catch_all: true
+    search_weight: 1.0
+    write_rules:
+      - "Amendments, side letters, interpretation history — dated lines, newest first."
+
+metadata_fields:
+  - key: status
+    required: true
+    description: Lifecycle state of the agreement.
+    field_type: string
+    default_value: active
+    enum_values: [draft, active, superseded, terminated]
+    filterable: equality
+  - key: effective_from
+    description: Date the agreement takes effect.
+    field_type: date
+    filterable: range
+  - key: effective_until
+    description: Date the agreement ends, when bounded.
+    field_type: date
+    filterable: range
+
+title_weight: 100.0
+text_fields: [terms, scope, notes]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: [REPLACES]
+updatable_fields: [title, terms, scope, notes, status, effective_from, effective_until, tags]
+health_required_fields: [terms]
+staleness_threshold_days: 730
+
+write_rules:
+  - "Model the agreement, don't transcribe it: Terms carries the operative summary; EVIDENCED_BY points at the entity anchoring the artifact."
+  - "A renegotiated agreement is a NEW commitment with REPLACES to the old one — the old entity's status flips to superseded and its history stays intact."
+
+exemplar:
+  title: "Master Services Agreement 2026 Rev. 2"
+  metadata:
+    status: active
+    effective_from: 2026-01-01
+  sections:
+    terms: "The operating entity maintains registration and coverage for the duration of the service term; the provider delivers confirmations within three weeks of request. Annual renewal per clause 7."
+    scope: "Covers registration, coverage, and filing duties. Explicitly excludes dispute-resolution procedure, which its own resolution governs."
+  relations:
+    - to: master-services-agreement-2026-rev-1
+      type: REPLACES

@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: obligation
+description: |
+  A dated duty with a stated consequence if missed. The defining
+  property: an obligation forfeits — a missed due date costs a right,
+  a fee, or a standing — where a milestone merely slips. Every
+  obligation names who owes what (with its cited source) and what
+  happens when the date passes.
+when_to_use: |
+  One entity per distinct duty: a filing, a renewal, a notice period,
+  a maintenance interval, a payment. Recurring duties are ONE entity
+  whose due date the maintaining agent advances after each completed
+  occurrence (recording the occurrence in History) — the engine never
+  advances a date; the agent loop is the runtime.
+
+sections:
+  - key: duty
+    heading: Duty
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "Who owes what, to whom, by when — one paragraph, citing the source (link the commitment or evidence entity)."
+  - key: consequence
+    heading: Consequence
+    required: true
+    search_weight: 8.0
+    write_rules:
+      - "What is forfeited, incurred, or lost when the due date passes unmet. State it concretely — this section is why the entity exists."
+  - key: lead_time
+    heading: Lead Time
+    search_weight: 3.0
+    write_rules:
+      - "What must happen before the duty can be met, and how long it takes (approvals, notice periods, procurement). Rendered by the due-brief as 'what must happen first'."
+  - key: history
+    heading: History
+    catch_all: true
+    search_weight: 1.0
+    write_rules:
+      - "One dated line per completed occurrence, newest first (e.g. `2026-03-31 — filed; confirmation ref 118-A`)."
+
+metadata_fields:
+  - key: due_date
+    required: true
+    description: The date the duty falls due (for recurring duties, the NEXT occurrence).
+    field_type: date
+    filterable: range
+  - key: status
+    required: true
+    description: Lifecycle state of the duty.
+    field_type: string
+    default_value: open
+    enum_values: [open, in_progress, done, forfeited, lapsed]
+    filterable: equality
+  - key: recurrence
+    description: "Free-text recurrence label (e.g. `annual`, `every 3 years`). A label for the maintaining agent, never engine automation: after completing an occurrence, the agent advances due_date and records the occurrence in History."
+    field_type: string
+  - key: criticality
+    required: true
+    description: How severe the consequence is if the duty is missed.
+    field_type: string
+    default_value: medium
+    enum_values: [low, medium, high]
+    filterable: equality
+  - key: responsible
+    description: The party responsible for meeting the duty (free text or a party entity's title).
+    field_type: string
+  - key: completed_on
+    description: Date the duty was (last) completed. Required once status is done.
+    field_type: date
+
+due:
+  date_field: due_date
+  status_field: status
+  open_values: [open, in_progress]
+  lead_section: lead_time
+
+constraints:
+  - kind: requires_when
+    field: completed_on
+    when_field: status
+    when_value: done
+    severity: block
+  - kind: requires_when
+    field: responsible
+    when_field: criticality
+    when_value: high
+    severity: block
+
+required_outgoing:
+  - relationships: [CONCERNS]
+    cardinality: at_least_one
+    severity: block
+
+title_weight: 100.0
+text_fields: [duty, consequence, lead_time]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: [BLOCKS, REPLACES]
+updatable_fields: [title, duty, consequence, lead_time, history, due_date, status, recurrence, criticality, responsible, completed_on, tags]
+health_required_fields: [duty, consequence]
+staleness_threshold_days: 365
+
+write_rules:
+  - "An obligation is a liability, not a target: if missing the date merely disappoints, model it in a planning schema instead."
+  - "Always wire CONCERNS to the duty's subject — an obligation about nothing is refused."
+  - "Recurring duties: ONE entity; advance due_date after each occurrence and append the occurrence to History. Never clone per occurrence."
+
+exemplar:
+  title: "Renew Registration No. 4711 & File Proof of Coverage"
+  metadata:
+    due_date: 2027-03-31
+    status: open
+    criticality: medium
+    recurrence: annual
+  sections:
+    duty: "The operating entity renews registration no. 4711 with the issuing authority and files proof of current coverage, per clause 7 of the [[master-services-agreement]]."
+    consequence: "Registration lapses at the deadline; reinstatement requires a new application, a reinstatement fee, and a coverage gap of at least four weeks."
+    lead_time: "Coverage confirmation must be requested from the insurer first — allow three weeks for issuance before the filing itself."
+  relations:
+    - to: master-services-agreement
+      type: CONCERNS
+    - to: master-services-agreement
+      type: ARISES_FROM

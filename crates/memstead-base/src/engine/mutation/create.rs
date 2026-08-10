@@ -4450,6 +4450,143 @@ write_rules: []
         );
     }
 
+    /// Obligation-schema counterpart of the ingest wildcard
+    /// (first-author-path plan 09, criterion 5): an obligation mem
+    /// body-links into a NON-SOFTWARE user-schema destination; the
+    /// wildcard alias grant admits the auto-emitted REFERENCES edge.
+    #[test]
+    fn obligation_wildcard_links_into_arbitrary_destination_schema() {
+        use crate::engine::test_helpers::write_schema_files_with_default_type;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let dest_dir = tmp.path().join("dest");
+        let duties_dir = tmp.path().join("duties");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        std::fs::create_dir_all(&duties_dir).unwrap();
+        let schemas_dir = tmp.path().join("schemas");
+        let user_manifest = r#"name: casefiles
+version: 0.1.0
+description: a user-written, non-software destination schema
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        write_schema_files_with_default_type(
+            &schemas_dir,
+            "casefiles@0.1.0",
+            user_manifest,
+            &["doc"],
+        );
+
+        let mount = |mem: &str, dir: &std::path::Path, schema: &str| crate::workspace::Mount {
+            mem: mem.to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                schema,
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder {
+                path: dir.to_path_buf(),
+            },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let mounts = vec![
+            (
+                mount("dest", &dest_dir, "casefiles"),
+                Box::new(FilesystemMemWriter::new(dest_dir.clone())) as Box<dyn MemBackend>,
+            ),
+            (
+                mount("duties", &duties_dir, "obligation"),
+                Box::new(FilesystemMemWriter::new(duties_dir.clone())) as Box<dyn MemBackend>,
+            ),
+        ];
+        let mut engine = Engine::from_mounts_with_schemas_dir(mounts, Some(schemas_dir.as_path()))
+            .expect("obligation + user schema boot");
+        let mut settings = crate::workspace::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            "duties".to_string(),
+            CrossLinkValue::List(vec!["dest".to_string()]),
+        );
+        engine.set_settings(settings);
+        let (actor, client) = cli_actor();
+
+        let target = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "dest".to_string(),
+                    title: "Case File 17".to_string(),
+                    entity_type: "doc".to_string(),
+                    sections: IndexMap::from_iter([(
+                        "body".to_string(),
+                        "destination content".to_string(),
+                    )]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let entry = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "duties".to_string(),
+                    title: "File Annual Report & Notice".to_string(),
+                    entity_type: "obligation".to_string(),
+                    sections: IndexMap::from_iter([
+                        (
+                            "duty".to_string(),
+                            "File the report cited in [[dest--case-file-17]].".to_string(),
+                        ),
+                        (
+                            "consequence".to_string(),
+                            "Standing lapses at the deadline.".to_string(),
+                        ),
+                    ]),
+                    metadata: IndexMap::from_iter([
+                        ("due_date".to_string(), "2026-12-31".to_string()),
+                        ("status".to_string(), "open".to_string()),
+                    ]),
+                    relations: vec![crate::ops::RelateArg {
+                        to: crate::entity::EntityId::new("duties", "subject"),
+                        rel_type: "CONCERNS".to_string(),
+                        description: None,
+                    }],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("wildcard admits the alias link into the non-software destination");
+        let stored = engine.get_entity(&entry.id).unwrap();
+        assert!(
+            stored
+                .relationships
+                .iter()
+                .any(|r| r.rel_type == "REFERENCES" && r.target == target.id),
+            "alias REFERENCES edge must emit cross-mem: {:?}",
+            stored.relationships
+        );
+    }
+
     /// Plan 11 end-to-end: an `ingest`-schema process mem body-links
     /// into a destination pinning an ARBITRARY user-written schema.
     /// The wildcard (bound to `alias_target_rel_type: REFERENCES`)

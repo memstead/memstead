@@ -8,6 +8,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **`obligation@0.1.0` — the first non-software built-in schema.**
+  The document-and-deadline pattern: `obligation` (a dated duty with
+  a stated consequence — a liability that forfeits, not a target
+  that slips), `party`, `commitment` (the modelled agreement,
+  distinct from the artifact evidencing it), and `decision` (the why,
+  with its rejected alternatives). Nine typed relationships
+  (CONCERNS, OBLIGES, EVIDENCED_BY, ARISES_FROM, REPLACES, BLOCKS,
+  PARTY_TO, PART_OF, plus alias REFERENCES with the wildcard
+  cross-mem grant, so an obligation mem cites into a mem of any
+  schema). The obligation type declares the `due:` axis — the
+  due-brief's first declarer — plus block-tier `requires_when`
+  (completed_on when done; responsible when criticality is high) and
+  a block-severity `required_outgoing` to its subject. Recurrence is
+  a label for the maintaining agent, never engine automation. Nothing
+  in the schema names a domain or jurisdiction — it is deliberately
+  the pattern many domains fork. Doubles as the doorway bundle's
+  integration fixture: exemplar titles exercise the widened title
+  grammar and fields the flipped `required:` polarity.
 - **The due-brief: a schema declares its deadline axis, the engine
   renders it.** A type can declare `due: {date_field, status_field,
   open_values, lead_section?}` — validated at schema load with the

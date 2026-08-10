@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=../../../../generated/type-definition.schema.json
+
+name: decision
+description: |
+  A decision taken over the holding, with its date and its rejected
+  alternatives — the "why" that rots fastest across multi-year
+  holdings.
+when_to_use: |
+  One entity per decision that shapes how obligations or commitments
+  are handled: which option was taken, what was rejected and why.
+  Record it when the choice is made — reconstructing it two years
+  later is exactly the failure this type prevents.
+
+sections:
+  - key: decision
+    heading: Decision
+    required: true
+    search_weight: 10.0
+    write_rules:
+      - "What was decided, by whom, in one paragraph."
+  - key: alternatives
+    heading: Alternatives
+    search_weight: 5.0
+    write_rules:
+      - "Each rejected option with the one-line reason it lost — the section future readers thank you for."
+  - key: context
+    heading: Context
+    catch_all: true
+    search_weight: 2.0
+    write_rules:
+      - "The situation that forced the choice; constraints that shaped it."
+
+metadata_fields:
+  - key: decided_on
+    required: true
+    description: The date the decision was taken.
+    field_type: date
+    filterable: range
+  - key: standing
+    required: true
+    description: Whether the decision still governs.
+    field_type: string
+    default_value: governing
+    enum_values: [governing, superseded]
+    filterable: equality
+
+title_weight: 100.0
+text_fields: [decision, alternatives, context]
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: [REPLACES]
+updatable_fields: [title, decision, alternatives, context, decided_on, standing, tags]
+health_required_fields: [decision]
+staleness_threshold_days: 1095
+
+write_rules:
+  - "A reversed decision is a NEW decision with REPLACES to the old one; the old entity's standing flips to superseded."
+  - "Wire CONCERNS-like context via wiki-links in the body — the auto-emitted REFERENCES edges carry the connection."
+
+exemplar:
+  title: "Consolidate Coverage With One Provider"
+  metadata:
+    decided_on: 2026-02-15
+    standing: governing
+  sections:
+    decision: "All coverage lines consolidate with the provider under the [[master-services-agreement]], effective at the next renewal."
+    alternatives: "Keeping split providers was rejected (duplicate filing duties, two proof chains); tendering annually was rejected (lead time exceeds the renewal window)."
+  relations: []

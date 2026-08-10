@@ -527,3 +527,195 @@ mod tests {
         assert!(brief.contains("No mounted mem's schema declares a due axis"), "{brief}");
     }
 }
+
+#[cfg(test)]
+mod obligation_builtin_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    use crate::backend::MemBackend;
+    use crate::engine::test_helpers::{cli_actor, empty_create_args};
+    use crate::storage::FilesystemMemWriter;
+    use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+
+    fn obligation_mount(mem: &str, path: std::path::PathBuf) -> Mount {
+        Mount {
+            mem: mem.to_string(),
+            schema: Some("obligation@0.1.0".parse().unwrap()),
+            storage: MountStorage::Folder { path },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        }
+    }
+
+    fn obligation_engine(tmp: &TempDir) -> Engine {
+        let mem_dir = tmp.path().join("duties");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead/config.json"),
+            "{\n  \"version\": \"1.0.0\",\n  \"description\": \"obligation fixture\",\n  \"schema\": \"obligation@0.1.0\"\n}",
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        Engine::from_mounts(vec![(
+            obligation_mount("duties", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap()
+    }
+
+    fn obligation_args(
+        mem: &str,
+        title: &str,
+        due_date: &str,
+        status: &str,
+    ) -> crate::engine::CreateEntityArgs {
+        let mut args = empty_create_args(mem, title);
+        args.entity_type = "obligation".to_string();
+        args.sections = indexmap::IndexMap::from_iter([
+            ("duty".to_string(), "Who owes what.".to_string()),
+            ("consequence".to_string(), "What forfeits.".to_string()),
+        ]);
+        args.metadata = indexmap::IndexMap::from_iter([
+            ("due_date".to_string(), due_date.to_string()),
+            ("status".to_string(), status.to_string()),
+        ]);
+        args.relations = vec![crate::ops::RelateArg {
+            to: crate::entity::EntityId::new(mem, "some-subject"),
+            rel_type: "CONCERNS".to_string(),
+            description: None,
+        }];
+        args
+    }
+
+    /// Criterion 1 + 3: a mem pinned to the shipped builtin accepts a
+    /// conformant obligation, refuses a nonconformant one with the
+    /// standard envelope, and `render_due_brief` renders the fixture
+    /// correctly under the declared axis.
+    #[test]
+    fn shipped_obligation_schema_accepts_refuses_and_renders_due() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = obligation_engine(&tmp);
+        let (actor, client) = cli_actor();
+
+        // Conformant — widened-grammar title with '&' and '.'.
+        engine
+            .create_entity(
+                obligation_args(
+                    "duties",
+                    "Renew Registration No. 4711 & File Proof",
+                    "2026-09-01",
+                    "open",
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("conformant obligation lands");
+        engine
+            .create_entity(
+                obligation_args("duties", "Overdue Filing", "2026-07-01", "in_progress"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("second obligation lands");
+        engine
+            .create_entity(
+                obligation_args("duties", "Done Duty", "2026-08-01", "done"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .map(|_| ())
+            .unwrap_err(); // done without completed_on → block (see below)
+
+        // Nonconformant: unknown enum value refuses with the standard
+        // recovery envelope.
+        let err = engine
+            .create_entity(
+                obligation_args("duties", "Bad Status", "2026-09-01", "unknown"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_ENUM_VALUE", "{err}");
+
+        // Due brief renders the two open entities, overdue first.
+        let brief = engine
+            .render_due_brief("2026-08-10", &DueWindow::Days(90), None)
+            .unwrap();
+        let pos = |n: &str| brief.find(n).unwrap_or(usize::MAX);
+        assert!(brief.contains("duties--overdue-filing"), "{brief}");
+        assert!(
+            brief.contains("duties--renew-registration-no-4711-file-proof"),
+            "{brief}"
+        );
+        assert!(pos("duties--overdue-filing") < pos("duties--renew-registration-no-4711"));
+        assert!(brief.contains("**OVERDUE**"), "{brief}");
+    }
+
+    /// Criterion 4: the shipped `requires_when` pair and the
+    /// block-severity `required_outgoing` refuse exactly the
+    /// field-schema writes.
+    #[test]
+    fn shipped_constraints_refuse_like_the_field_schema() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = obligation_engine(&tmp);
+        let (actor, client) = cli_actor();
+
+        // done without completed_on → block-tier requires_when.
+        let err = engine
+            .create_entity(
+                obligation_args("duties", "Done Without Date", "2026-08-01", "done"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED", "{err}");
+        assert!(err.to_string().contains("completed_on"), "{err}");
+
+        // criticality high without responsible → block-tier requires_when.
+        let mut args = obligation_args("duties", "Critical Unowned", "2026-09-01", "open");
+        args.metadata
+            .insert("criticality".to_string(), "high".to_string());
+        let err = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap_err();
+        assert_eq!(err.code(), "CONSTRAINT_UNSATISFIED", "{err}");
+        assert!(err.to_string().contains("responsible"), "{err}");
+
+        // No CONCERNS edge → block-severity required_outgoing refusal.
+        let mut args = obligation_args("duties", "About Nothing", "2026-09-01", "open");
+        args.relations.clear();
+        let err = engine
+            .create_entity(args, actor, Some(&client), None)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("CONCERNS") || err.code().contains("REQUIRED_OUTGOING"),
+            "required_outgoing must refuse: {err} ({})",
+            err.code()
+        );
+
+        // Complements: done WITH completed_on lands; high WITH
+        // responsible lands.
+        let mut args = obligation_args("duties", "Done Properly", "2026-08-01", "done");
+        args.metadata
+            .insert("completed_on".to_string(), "2026-08-01".to_string());
+        engine
+            .create_entity(args, actor, Some(&client), None)
+            .expect("done with completed_on lands");
+        let mut args = obligation_args("duties", "Critical Owned", "2026-09-01", "open");
+        args.metadata
+            .insert("criticality".to_string(), "high".to_string());
+        args.metadata
+            .insert("responsible".to_string(), "Operations".to_string());
+        engine
+            .create_entity(args, actor, Some(&client), None)
+            .expect("high with responsible lands");
+    }
+}
