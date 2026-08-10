@@ -170,7 +170,7 @@ Exit codes:
 
 * `--json` — Emit JSON instead of markdown. Matches MCP `structured_content` shape
 * `--quiet` — Suppress engine startup logs on stderr
-* `--workspace <PATH>` — Operate on the workspace at PATH instead of walking up from the current directory (like `git -C`: the process runs as if invoked from PATH, so relative path arguments resolve against it). Also settable via the `MEMSTEAD_WORKSPACE` environment variable; the flag wins when both are present. A PATH without the `.memstead/workspace.toml` marker refuses with `WORKSPACE_NOT_INITIALISED` naming the path — it never falls back to the directory walk
+* `--workspace <PATH>` — Operate on the workspace at PATH instead of walking up from the current directory (like `git -C`: the process runs as if invoked from PATH, so relative path arguments resolve against it). Also settable via the `MEMSTEAD_WORKSPACE` environment variable; the flag wins when both are present. A PATH that is not an initialised workspace refuses with `WORKSPACE_NOT_INITIALISED` naming the path — it never falls back to the directory walk
 * `--role <ROLE>` — Declare the role this invocation's mutations are performed in (agent-trust plan 13): `author` | `checker` | `verifier`. Recorded immutably alongside each mutation (commit trailer / ledger). Omit to record mutations as unspecified — legal forever, never refused
 
 
@@ -417,7 +417,7 @@ Export the write mem as markdown (in place) or as a portable `.mem` archive
   - `html`:
     Write one self-contained HTML file — the read surface for non-operators: no server, no scripts, zero network requests
 
-* `-o`, `--output <PATH>` — Output path for `--format mem`. Defaults to `./<name>-<version>.mem` in the current directory, matching the "external vs cache filename" convention for portable mem archives. Ignored for `--format markdown`; refused for `--format json` (that document goes to stdout)
+* `-o`, `--output <PATH>` — Output path for `--format mem` (default `./<name>-<version>.mem`) and `--format html` (default `./<mem>.html`). Ignored for `--format markdown`; refused for `--format json` (that document goes to stdout)
 * `--mem <NAME>` — Which mem to export (by name). For `--format markdown`, omitting this argument runs a workspace-wide export and reports any declined mounts under `skipped_mounts`. For `--format mem`, required when more than one write mem is loaded; defaults to the first writable mem otherwise. For `--format json`, omitting it exports every writable mem; naming a read-only mount exports that mount (read-mems are excluded from the workspace-wide default — they are someone else's published content)
 
 
@@ -1150,7 +1150,7 @@ Register a new mem via the engine's mem-management orchestrator
 * `--no-gitignore` — Skip outer-repo `.gitignore` auto-append. Useful when the user intends to track the workspace as a git submodule, or when the detection heuristic would pick the wrong outer repo
 * `--note <NOTE>` — Optional provenance note recorded in the seed commit's body (≤280 chars). Forwarded as the MCP tool's `note` parameter
 * `--reattach` — Adopt residual entities left by a prior `memstead mem unregister` at this mem's path instead of failing on detected residue. Default when the residue carries an `unregistered_at` tombstone (the deliberate unregister signal); pass `--reattach` explicitly to override for crash-residue you have verified is safe to adopt. Mutually exclusive with `--force-overwrite` and `--hard-cleanup-first`
-* `--force-overwrite` — Destroy residual storage at this mem's path and proceed with a fresh create: the residual branch and its `__MEMSTEAD` config blob are pruned in one ref-edit transaction, then the normal create path runs — the prior entities are gone by design. Mutually exclusive with `--reattach` and `--hard-cleanup-first`
+* `--force-overwrite` — Destroy residual storage at this mem's path and proceed with a fresh create: the residue is removed atomically — either it is gone and the mem is created, or nothing changed — and the prior entities are gone by design. Mutually exclusive with `--reattach` and `--hard-cleanup-first`
 * `--hard-cleanup-first` — Refuse with `MEM_STORAGE_RESIDUE_DETECTED` instructing the caller to run `memstead mem delete <name>` first — a hard barrier that keeps residue cleanup a separate, named operation rather than destructive auto-recovery. Mutually exclusive with `--reattach` and `--force-overwrite`
 * `--operator-mode` — Bypass the workspace `[[mem_management.create]]` allowlist for this invocation. The CLI honours the allowlist by default (matching the MCP-surface posture); operator-mode is explicit opt-in. Also settable via the `MEMSTEAD_OPERATOR_MODE=1` env var for script convenience; the flag wins when both are set. Use this when the CLI invocation is the operator administering the workspace itself (initial scaffold, recovery flows) rather than scripted/agent usage
 * `--storage <STORAGE>` — Explicit storage backend for the new mem. Omit to use the workspace-shape default (git-branch in a mem-repo workspace, folder otherwise). `folder` creates a plain-markdown folder mem at the mem's location even inside a mem-repo workspace — its files sit visibly in the outer tree; `git-branch` requires a mem-repo and refuses without one
