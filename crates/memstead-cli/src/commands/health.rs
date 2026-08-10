@@ -23,8 +23,11 @@ pub struct Args {
     /// anchors (per-mem counts of the four standalone
     /// anchor-verification states), friction (the workspace-local
     /// refusal ledger's summary — counts per typed refusal code and
-    /// per verb, whole-ledger plus a recent 24h window; local-only,
-    /// content-free), open_questions (per-mem composed worklist of
+    /// per verb, with per-code reason breakdowns where the code
+    /// carries a closed engine-owned discriminator, whole-ledger plus
+    /// a recent 24h window; local-only, values drawn from closed
+    /// engine-defined vocabularies only), open_questions (per-mem
+    /// composed worklist of
     /// what the holding does not know: stubs, recheck/unresolvable
     /// anchors, unsatisfied constraints, dangling links, and a paired
     /// process mem's open entries — negative findings separated as
@@ -732,6 +735,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
             for (code, count) in entries {
                 lines.push(format!("  - {code}: {count}"));
+                // Reason breakdown where recorded — a code without
+                // recorded reasons renders exactly as before.
+                if let Some(reasons) = f["by_reason"][code.as_str()]
+                    .as_object()
+                    .filter(|m| !m.is_empty())
+                {
+                    let mut rs: Vec<(&String, u64)> = reasons
+                        .iter()
+                        .map(|(k, v)| (k, v.as_u64().unwrap_or(0)))
+                        .collect();
+                    rs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+                    for (reason, count) in rs {
+                        lines.push(format!("    - {reason}: {count}"));
+                    }
+                }
             }
         }
         if let Some(by_verb) = f["by_verb"].as_object().filter(|m| !m.is_empty()) {

@@ -8,6 +8,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **The friction ledger records why a refusal happened.** For refusals
+  whose typed envelope carries a closed, engine-owned reason
+  discriminator (today `INVALID_TITLE` — `invalid_chars` /
+  `control_chars` / `id_too_long` / `empty` — and
+  `MEM_PATH_NOT_ALLOWED` — `no_allowlist_configured` / `no_match` /
+  `outside_workspace`), the ledger entry now carries that reason and
+  `health --include friction` (CLI and both MCP flavours, one shared
+  summary) breaks the code's count down by reason under `by_reason`.
+  Refusals without a discriminator record exactly as before — no
+  field, no placeholder — and pre-change ledger lines keep parsing
+  and counting. The privacy hard line is enforced by construction:
+  reasons enter the writer only as `&'static str` selected from a
+  per-code vocabulary table (`closed_reason`), so a caller-influenced
+  value can select from but never extend the closed set, and the
+  module contract now states that vocabulary rule instead of
+  enumerating the record's fields.
 - **A binding's scope excludes the engine and states its own reach.**
   The engine's own state — `.memstead/`, `.memstead.cache/` (by name,
   wherever they appear), and every mount's *resolved* storage
@@ -285,9 +301,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   retention manifest.
 - **Friction ledger: the engine measures its own surface's
   learnability.** Every typed refusal the CLI or MCP surface returns
-  appends one content-free entry — code, verb, timestamp, surface;
-  never parameters, ids, or message text — to a workspace-local,
-  gitignored, size-bounded ledger under `.memstead/state/friction/`.
+  appends one entry — every value drawn from a closed engine-defined
+  vocabulary; never parameters, ids, or message text — to a
+  workspace-local, gitignored, size-bounded ledger under
+  `.memstead/state/friction/`.
   `memstead health --include friction` (and the MCP counterpart on
   both flavours) summarizes it: counts per refusal code and per verb,
   whole-ledger plus a recent 24h window; without the include, health

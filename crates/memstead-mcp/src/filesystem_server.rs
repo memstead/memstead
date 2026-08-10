@@ -2229,8 +2229,13 @@ impl ServerHandler for FilesystemMcpServer {
                 .and_then(|v| v.get("code"))
                 .and_then(|c| c.as_str())
         {
-            memstead_base::friction::FrictionLedger::for_workspace(&self.workspace_root)
-                .record("mcp", &verb, code);
+            let details = r.structured_content.as_ref().and_then(|v| v.get("details"));
+            memstead_base::friction::FrictionLedger::for_workspace(&self.workspace_root).record(
+                "mcp",
+                &verb,
+                code,
+                memstead_base::friction::closed_reason(code, details),
+            );
         }
         result
     }

@@ -10,10 +10,16 @@
 //!
 //! ## Hard lines (recorded contract)
 //!
-//! - **Privacy**: an entry is `{ts, surface, verb, code}` — epoch
-//!   seconds, `"cli"`/`"mcp"`, the tool/subcommand name, and the
-//!   UPPER_SNAKE_CASE refusal code. Never parameters, entity ids,
-//!   message text, or any payload content.
+//! - **Privacy**: every recorded field's value space is a closed,
+//!   engine-defined vocabulary — values that exist as literals in
+//!   engine source (`"cli"`/`"mcp"`, the tool/subcommand name, the
+//!   UPPER_SNAKE_CASE refusal code, the per-code reason
+//!   discriminators in [`closed_reason`]) plus the epoch-seconds
+//!   timestamp. Never parameters, entity ids, message text, free-form
+//!   strings, or any payload content — a candidate field whose values
+//!   a caller can influence is out of bounds no matter how useful.
+//!   The write path enforces this by type: reasons enter only as
+//!   `&'static str` drawn from the vocabulary table.
 //! - **Local only, forever**: the ledger never leaves the machine —
 //!   no transmission, no registry involvement. The read surface is
 //!   `memstead health --include friction` (and the MCP counterpart).
@@ -51,7 +57,9 @@ pub const DEFAULT_CAP_BYTES: u64 = 512 * 1024;
 /// Seconds in the "recent" summary window (24 hours).
 const RECENT_WINDOW_SECS: u64 = 24 * 60 * 60;
 
-/// One ledger line. The full record — nothing else is ever written.
+/// One ledger line. Every field's value space follows the module's
+/// closed-vocabulary rule (see the privacy hard line above) — that
+/// rule, not this struct's current shape, is the contract.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrictionEntry {
     /// Unix epoch seconds at record time.
@@ -63,6 +71,35 @@ pub struct FrictionEntry {
     pub verb: String,
     /// The typed refusal code (`UNKNOWN_SECTION`, `HASH_MISMATCH`, …).
     pub code: String,
+    /// The refusal's closed engine-owned reason discriminator, for
+    /// the codes that compute one (see [`closed_reason`]) — absent
+    /// otherwise, never an empty string or placeholder. Entries
+    /// written before the field existed deserialize as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The per-code closed reason vocabularies, and the only gate through
+/// which a reason reaches the ledger. Given a refusal's `code` and its
+/// structured `details`, returns the matching engine-source literal
+/// when — and only when — the code has a declared vocabulary AND the
+/// details' `reason` value is a member. The return is the vocabulary's
+/// own `&'static str`, never the input string, so a caller-influenced
+/// value can only ever select from (not extend) the closed set; any
+/// other value records nothing.
+///
+/// Adding a code here requires its `details.reason` to be a closed,
+/// engine-defined discriminator (computed at refusal time from engine
+/// state, e.g. `SlugError::reason()`) — an open-ended or
+/// caller-derived `details.reason` must NOT be listed.
+pub fn closed_reason(code: &str, details: Option<&serde_json::Value>) -> Option<&'static str> {
+    let vocab: &[&'static str] = match code {
+        "INVALID_TITLE" => &["invalid_chars", "control_chars", "id_too_long", "empty"],
+        "MEM_PATH_NOT_ALLOWED" => &["no_allowlist_configured", "no_match", "outside_workspace"],
+        _ => return None,
+    };
+    let candidate = details?.get("reason")?.as_str()?;
+    vocab.iter().find(|v| **v == candidate).copied()
 }
 
 /// Append-side handle. Cheap to construct per refusal — no state
@@ -104,9 +141,13 @@ impl FrictionLedger {
 
     /// Append one refusal. Best-effort by contract: every failure —
     /// unwritable dir, full disk, rename race — is swallowed, and the
-    /// caller's refusal path proceeds unchanged. Never records
-    /// anything beyond the four entry fields.
-    pub fn record(&self, surface: &str, verb: &str, code: &str) {
+    /// caller's refusal path proceeds unchanged. Records only values
+    /// from closed engine-defined vocabularies (module hard line);
+    /// `reason` is `&'static str` by design — the only way to pass one
+    /// is an engine-source literal, normally [`closed_reason`]'s
+    /// return. A refusal whose reason cannot be determined records
+    /// with `None` rather than not recording.
+    pub fn record(&self, surface: &str, verb: &str, code: &str, reason: Option<&'static str>) {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -116,6 +157,7 @@ impl FrictionLedger {
             surface: surface.to_string(),
             verb: verb.to_string(),
             code: code.to_string(),
+            reason: reason.map(str::to_string),
         };
         let Ok(mut line) = serde_json::to_vec(&entry) else {
             return;
@@ -207,11 +249,22 @@ impl FrictionLedger {
 
         let mut by_code: BTreeMap<String, u64> = BTreeMap::new();
         let mut by_verb: BTreeMap<String, u64> = BTreeMap::new();
+        // Per-code reason breakdown — only codes with at least one
+        // recorded reason appear; codes without reasons report through
+        // `by_code` exactly as before.
+        let mut by_reason: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
         let mut recent_by_code: BTreeMap<String, u64> = BTreeMap::new();
         let mut recent_total = 0u64;
         for e in &entries {
             *by_code.entry(e.code.clone()).or_default() += 1;
             *by_verb.entry(format!("{}:{}", e.surface, e.verb)).or_default() += 1;
+            if let Some(reason) = &e.reason {
+                *by_reason
+                    .entry(e.code.clone())
+                    .or_default()
+                    .entry(reason.clone())
+                    .or_default() += 1;
+            }
             if e.ts >= cutoff {
                 recent_total += 1;
                 *recent_by_code.entry(e.code.clone()).or_default() += 1;
@@ -221,6 +274,7 @@ impl FrictionLedger {
             "total": entries.len(),
             "by_code": by_code,
             "by_verb": by_verb,
+            "by_reason": by_reason,
             "recent_24h": {
                 "total": recent_total,
                 "by_code": recent_by_code,
@@ -239,9 +293,9 @@ mod tests {
     fn record_appends_and_summarize_counts() {
         let tmp = TempDir::new().unwrap();
         let ledger = FrictionLedger::for_workspace(tmp.path());
-        ledger.record("cli", "create", "UNKNOWN_SECTION");
-        ledger.record("mcp", "memstead_create", "UNKNOWN_SECTION");
-        ledger.record("cli", "relate", "INVALID_REL_TYPE");
+        ledger.record("cli", "create", "UNKNOWN_SECTION", None);
+        ledger.record("mcp", "memstead_create", "UNKNOWN_SECTION", None);
+        ledger.record("cli", "relate", "INVALID_REL_TYPE", None);
         let s = ledger.summarize();
         assert_eq!(s["total"], 3);
         assert_eq!(s["by_code"]["UNKNOWN_SECTION"], 2);
@@ -260,7 +314,7 @@ mod tests {
         let cap = 2048u64;
         let ledger = FrictionLedger::at_path(tmp.path().join("refusals.jsonl"), cap);
         for i in 0..2000 {
-            ledger.record("cli", "create", &format!("CODE_{}", i % 7));
+            ledger.record("cli", "create", &format!("CODE_{}", i % 7), None);
         }
         let total = ledger.total_bytes();
         assert!(
@@ -277,7 +331,7 @@ mod tests {
     fn ledger_dir_is_self_ignoring() {
         let tmp = TempDir::new().unwrap();
         let ledger = FrictionLedger::for_workspace(tmp.path());
-        ledger.record("cli", "create", "UNKNOWN_SECTION");
+        ledger.record("cli", "create", "UNKNOWN_SECTION", None);
         let gitignore = friction_dir(tmp.path()).join(".gitignore");
         assert_eq!(std::fs::read_to_string(gitignore).unwrap(), "*\n");
     }
@@ -293,7 +347,7 @@ mod tests {
         std::fs::create_dir_all(&sealed).unwrap();
         std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o555)).unwrap();
         let ledger = FrictionLedger::at_path(sealed.join("sub").join("refusals.jsonl"), 1024);
-        ledger.record("cli", "create", "UNKNOWN_SECTION");
+        ledger.record("cli", "create", "UNKNOWN_SECTION", None);
         assert_eq!(ledger.entries().len(), 0);
         std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -312,7 +366,7 @@ mod tests {
                 let ledger = FrictionLedger::at_path(path.clone(), u64::MAX);
                 std::thread::spawn(move || {
                     for i in 0..per_thread {
-                        ledger.record("mcp", &format!("verb_{t}"), &format!("CODE_{i}"));
+                        ledger.record("mcp", &format!("verb_{t}"), &format!("CODE_{i}"), None);
                     }
                 })
             })
@@ -328,5 +382,111 @@ mod tests {
             parsed += 1;
         }
         assert_eq!(parsed, 4 * per_thread, "no entry lost or merged");
+    }
+
+    /// A refusal with a closed engine-owned discriminator records it,
+    /// and the summary breaks the code's count down by reason —
+    /// verified for two distinct codes.
+    #[test]
+    fn reasons_recorded_and_summarized_for_closed_vocab_codes() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = FrictionLedger::for_workspace(tmp.path());
+        let title_details = serde_json::json!({ "reason": "invalid_chars", "input": "x" });
+        let path_details = serde_json::json!({ "reason": "no_match", "candidate": "y" });
+        ledger.record(
+            "cli",
+            "create",
+            "INVALID_TITLE",
+            closed_reason("INVALID_TITLE", Some(&title_details)),
+        );
+        ledger.record(
+            "cli",
+            "create",
+            "INVALID_TITLE",
+            closed_reason("INVALID_TITLE", Some(&title_details)),
+        );
+        ledger.record(
+            "mcp",
+            "memstead_mem_create",
+            "MEM_PATH_NOT_ALLOWED",
+            closed_reason("MEM_PATH_NOT_ALLOWED", Some(&path_details)),
+        );
+        ledger.record("cli", "update", "UNKNOWN_SECTION", None);
+
+        let s = ledger.summarize();
+        assert_eq!(s["by_reason"]["INVALID_TITLE"]["invalid_chars"], 2);
+        assert_eq!(s["by_reason"]["MEM_PATH_NOT_ALLOWED"]["no_match"], 1);
+        // A code without recorded reasons reports through by_code only.
+        assert!(s["by_reason"].get("UNKNOWN_SECTION").is_none());
+        assert_eq!(s["by_code"]["UNKNOWN_SECTION"], 1);
+    }
+
+    /// No reason ⇒ no field: the serialized line omits `reason`
+    /// entirely — not an empty string, not a placeholder.
+    #[test]
+    fn entry_without_reason_omits_the_field() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("refusals.jsonl");
+        let ledger = FrictionLedger::at_path(path.clone(), u64::MAX);
+        ledger.record("cli", "create", "UNKNOWN_SECTION", None);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("reason"),
+            "reason key must be absent, got: {content}"
+        );
+    }
+
+    /// The closed-vocabulary gate: values outside a code's declared
+    /// vocabulary — including caller-influenced strings arriving via
+    /// `details.reason` — and codes with no vocabulary yield `None`,
+    /// so nothing outside engine-source literals can reach the ledger.
+    #[test]
+    fn closed_reason_rejects_unlisted_values_and_codes() {
+        let attacker = serde_json::json!({ "reason": "caller-supplied /etc/passwd" });
+        assert_eq!(closed_reason("INVALID_TITLE", Some(&attacker)), None);
+        // A code whose details carry an open-ended `reason` string is
+        // not in the table — nothing records even though the key exists.
+        let open_ended = serde_json::json!({ "reason": "must not carry a version or range" });
+        assert_eq!(closed_reason("CONFIG_ERROR", Some(&open_ended)), None);
+        assert_eq!(closed_reason("INVALID_TITLE", None), None);
+        // Members pass, and the returned value is the vocabulary's own
+        // static, usable as `&'static str`.
+        let ok = serde_json::json!({ "reason": "id_too_long" });
+        let got: Option<&'static str> = closed_reason("INVALID_TITLE", Some(&ok));
+        assert_eq!(got, Some("id_too_long"));
+    }
+
+    /// Pre-change ledger lines (no `reason` key) parse, count, and
+    /// summarize mixed with new-form lines in the same file and across
+    /// a rotated generation pair.
+    #[test]
+    fn pre_change_entries_parse_and_count_across_generations() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("refusals.jsonl");
+        // Rotated older generation: pre-change shape only.
+        std::fs::write(
+            tmp.path().join("refusals.jsonl.1"),
+            "{\"ts\":100,\"surface\":\"cli\",\"verb\":\"mem\",\"code\":\"MEM_PATH_NOT_ALLOWED\"}\n",
+        )
+        .unwrap();
+        // Current generation: one pre-change line, then a new-form append.
+        std::fs::write(
+            &path,
+            "{\"ts\":200,\"surface\":\"cli\",\"verb\":\"create\",\"code\":\"INVALID_TITLE\"}\n",
+        )
+        .unwrap();
+        let ledger = FrictionLedger::at_path(path, u64::MAX);
+        ledger.record("cli", "create", "INVALID_TITLE", Some("empty"));
+
+        let entries = ledger.entries();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].reason, None);
+        assert_eq!(entries[1].reason, None);
+        assert_eq!(entries[2].reason.as_deref(), Some("empty"));
+        let s = ledger.summarize();
+        assert_eq!(s["total"], 3);
+        assert_eq!(s["by_code"]["INVALID_TITLE"], 2);
+        assert_eq!(s["by_code"]["MEM_PATH_NOT_ALLOWED"], 1);
+        assert_eq!(s["by_reason"]["INVALID_TITLE"]["empty"], 1);
     }
 }

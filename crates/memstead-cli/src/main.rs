@@ -34,17 +34,24 @@ fn main() -> ExitCode {
             let code = cli_err.map(|c| c.effective_code()).unwrap_or("INTERNAL");
             let details = cli_err.and_then(|c| c.details.as_ref());
             // Friction ledger (best-effort, before rendering): every
-            // typed refusal this surface returns appends one
-            // content-free entry — code, verb, timestamp, surface —
-            // to the workspace-local ledger. Unresolvable workspace
-            // (pre-boot refusals outside any workspace) degrades to
-            // not-recording; the refusal below is unaffected either
-            // way.
+            // typed refusal this surface returns appends one entry to
+            // the workspace-local ledger, every value drawn from a
+            // closed engine-defined vocabulary (the module's privacy
+            // hard line). Unresolvable workspace (pre-boot refusals
+            // outside any workspace) degrades to not-recording; the
+            // refusal below is unaffected either way.
             if let Ok(cwd) = std::env::current_dir()
                 && let Some(root) = setup::find_workspace_root(&cwd)
             {
-                memstead_base::friction::FrictionLedger::for_workspace(&root)
-                    .record("cli", verb, code);
+                // The reason rides only when `closed_reason` matches
+                // the details' discriminator against its per-code
+                // closed vocabulary — free-form details never land.
+                memstead_base::friction::FrictionLedger::for_workspace(&root).record(
+                    "cli",
+                    verb,
+                    code,
+                    memstead_base::friction::closed_reason(code, details),
+                );
             }
             // `{e:#}` renders the whole anyhow chain (`context: cause`),
             // not just the outermost context line — an engine refusal

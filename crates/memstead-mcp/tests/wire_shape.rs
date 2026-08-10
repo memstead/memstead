@@ -2487,10 +2487,10 @@ fn full_f7_dynamic_mem_lifecycle_completes_via_mcp_only() {
 
 /// One fixture drives both surfaces: a refused MCP call (through the
 /// REAL dispatch seam — the spawned binary's `call_tool`) and a
-/// refused CLI call each append one content-free ledger entry with
-/// code, verb, timestamp, and surface; successful calls on both
-/// surfaces append nothing; the wire-served `include: ["friction"]`
-/// axis reports the combined counts.
+/// refused CLI call each append one ledger entry (values from closed
+/// engine-defined vocabularies only — the module's privacy rule);
+/// successful calls on both surfaces append nothing; the wire-served
+/// `include: ["friction"]` axis reports the combined counts.
 ///
 /// The CLI binary is resolved from the mcp binary's target directory —
 /// both are built by the canonical workspace test surface

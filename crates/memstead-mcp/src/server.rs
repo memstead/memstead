@@ -4494,10 +4494,11 @@ impl ServerHandler for McpServer {
     ///
     /// This is also the friction ledger's one recording seam for the
     /// whole tool surface (agent-trust plan 08): every dispatched
-    /// result that is a typed refusal appends one content-free entry
-    /// — code, tool name, timestamp, surface — best-effort, after the
-    /// response is already built, so recording can never perturb the
-    /// refusal it measures.
+    /// result that is a typed refusal appends one ledger entry whose
+    /// values all come from closed engine-defined vocabularies (the
+    /// module's privacy hard line — never parameters or payload text)
+    /// — best-effort, after the response is already built, so
+    /// recording can never perturb the refusal it measures.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
@@ -4541,8 +4542,16 @@ impl McpServer {
             Err(_) => None,
         };
         if let Some(root) = root {
-            memstead_base::friction::FrictionLedger::for_workspace(&root)
-                .record("mcp", verb, code);
+            let details = result
+                .structured_content
+                .as_ref()
+                .and_then(|v| v.get("details"));
+            memstead_base::friction::FrictionLedger::for_workspace(&root).record(
+                "mcp",
+                verb,
+                code,
+                memstead_base::friction::closed_reason(code, details),
+            );
         }
     }
 }
