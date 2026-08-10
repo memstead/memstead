@@ -273,7 +273,18 @@ impl CliError {
             StubCannotRelate { id } | StubNotUpdatable { id } | StubNotRenamable { id } => {
                 (ExitKind::Validation, Some(serde_json::json!({ "id": id })))
             }
-            AlreadyExists { id } => (ExitKind::Validation, Some(serde_json::json!({ "id": id }))),
+            AlreadyExists {
+                id,
+                existing_title,
+                existing_is_stub,
+            } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({
+                    "id": id,
+                    "existing_title": existing_title,
+                    "existing_is_stub": existing_is_stub,
+                })),
+            ),
             UnknownType {
                 name,
                 schema_ref,

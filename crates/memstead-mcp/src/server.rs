@@ -762,14 +762,12 @@ fn engine_err_unified(
                 ),
             )
         }
-        E::AlreadyExists { id } => tool_error_with_payload(
+        E::AlreadyExists { .. } => tool_error_with_payload(
             "ENTITY_ALREADY_EXISTS",
             &message,
-            envelope(
-                "ENTITY_ALREADY_EXISTS",
-                message.clone(),
-                serde_json::json!({ "id": id }),
-            ),
+            // Payload comes from `details()` so the occupying title
+            // cannot drift between the CLI and MCP envelopes.
+            envelope("ENTITY_ALREADY_EXISTS", message.clone(), e.details()),
         ),
         // Block-tier declared-constraint refusals — code and recovery
         // payload come from the error itself (`code()` / `details()`),
@@ -1731,30 +1729,18 @@ fn full_engine_err_unified(
     // inline rather than relying on the structured channel for
     // recovery context.
     let message = e.prose_render();
+    // Shared structured payload — computed before the match so the
+    // lifecycle arms cannot drift from the CLI envelope, which lifts
+    // the same `details()`.
+    let shared_details = e.details();
     match e {
         // #55: thread the engine so the wrapped-lean path enriches
         // not-found envelopes the same as every other call site.
         PE::Lean(inner) => engine_err_unified(inner, engine),
-        PE::MemPathNotAllowed {
-            attempted,
-            candidate,
-            patterns,
-            reason,
-            policy_table,
-        } => tool_error_with_payload(
+        PE::MemPathNotAllowed { .. } => tool_error_with_payload(
             "MEM_PATH_NOT_ALLOWED",
             &message,
-            envelope(
-                "MEM_PATH_NOT_ALLOWED",
-                message.clone(),
-                serde_json::json!({
-                    "attempted": attempted.display().to_string(),
-                    "candidate": candidate,
-                    "patterns": patterns,
-                    "reason": reason,
-                    "policy_table": policy_table,
-                }),
-            ),
+            envelope("MEM_PATH_NOT_ALLOWED", message.clone(), shared_details),
         ),
         PE::InvalidMemName { name, reason } => tool_error_with_payload(
             "INVALID_MEM_NAME",
@@ -13408,6 +13394,9 @@ write_rules: []
         assert!(details.get("attempted").is_some());
         assert_eq!(details["patterns"], serde_json::json!([]));
         assert_eq!(details["reason"], "no_allowlist_configured");
+        // The structured remedy reaches the MCP wire — the agent can
+        // recover from `details` without parsing prose.
+        assert_eq!(details["remedy"]["mcp"], "memstead_workspace_allow_create");
     }
 
     #[test]

@@ -8,6 +8,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **Two refusals now name the fact their caller needs to recover.**
+  `MEM_PATH_NOT_ALLOWED` with reason `no_allowlist_configured` names
+  the concrete grant command (`memstead workspace allow-create
+  '<pattern>' --schema <name@version>` / MCP
+  `memstead_workspace_allow_create`; the delete table names
+  `allow-delete`) in both the prose and a structured
+  `details.remedy` — the cold-start dead-end where the second
+  command of a fresh workspace refused without naming the way
+  forward is gone, while the default-deny posture stays. `no_match`
+  gets its own sentence (rules exist, none matched — with the
+  configured patterns and the covering-rule remedy);
+  `outside_workspace` gains no remedy, since adding a rule would not
+  fix it. `ENTITY_ALREADY_EXISTS` names the title of the entity
+  occupying the id (`details.existing_title` /
+  `details.existing_is_stub`, mirrored in the message) on every
+  producer — create, batch create, rename — so colliding titles that
+  derive the same slug are diagnosable from the refusal alone; a
+  stub occupant says it is a stub instead of rendering an empty
+  title.
 - **Schema validation reports every violation at once.** The schema
   loader (shared by `schema validate`, `schema install`, workspace
   boot, and every other loader entry point) now accumulates all

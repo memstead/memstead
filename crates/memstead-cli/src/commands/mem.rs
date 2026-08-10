@@ -1523,6 +1523,15 @@ mod tests {
         // The `policy_table` disambiguator reaches the CLI envelope.
         assert_eq!(details["policy_table"], "mem_management.create");
         assert_eq!(details["patterns"][1], "team/*");
+        // The structured remedy reaches the CLI envelope too — the
+        // caller can recover from `details` without parsing prose.
+        assert!(
+            details["remedy"]["cli"]
+                .as_str()
+                .expect("remedy.cli present")
+                .contains("allow-create"),
+            "got: {details}"
+        );
     }
 
     /// `VALIDATION_FAILED` is not

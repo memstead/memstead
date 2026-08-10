@@ -123,9 +123,11 @@ impl Engine {
                 }],
             });
         }
-        if self.store.contains(&new_id) {
+        if let Some(existing) = self.store.get(&new_id) {
             return Err(EngineError::AlreadyExists {
                 id: new_id.to_string(),
+                existing_title: existing.title.clone(),
+                existing_is_stub: existing.stub,
             });
         }
 
@@ -1950,7 +1952,11 @@ mod tests {
                 None,
             )
             .unwrap_err();
-        assert!(matches!(err, EngineError::AlreadyExists { id } if id == "specs--second"));
+        assert!(matches!(
+            err,
+            EngineError::AlreadyExists { ref id, ref existing_title, existing_is_stub: false }
+                if id == "specs--second" && existing_title == "Second"
+        ));
     }
 
     /// With `test → other` granted, an `IMPLEMENTS` edge from

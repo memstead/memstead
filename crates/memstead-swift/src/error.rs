@@ -90,8 +90,11 @@ impl From<EngineError> for MemsteadError {
 
             // --- Lookup ----------------------------------------------------
             EngineError::NotFound { id } => Self::NotFound { message: id },
-            EngineError::AlreadyExists { id } => Self::ValidationFailed {
-                message: format!("already exists: {id}"),
+            e @ EngineError::AlreadyExists { .. } => Self::ValidationFailed {
+                // Display names the occupying title — keep the
+                // surfaces consistent instead of re-formatting the id
+                // alone.
+                message: e.to_string(),
             },
             // Block-tier declared-constraint refusals — validation
             // failures with the engine's own message (names the

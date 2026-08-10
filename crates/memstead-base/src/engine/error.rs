@@ -60,6 +60,18 @@ fn format_blocked_referrers(items: &[BlockedReferrer]) -> String {
     format_inline_list_overflow(items, "blocked_referrers")
 }
 
+/// Occupant rendering for [`EngineError::AlreadyExists`]: a real
+/// entity renders its quoted title; a stub renders as "a stub" (with
+/// its title when it has one — a titleless stub must never render as
+/// an empty title).
+fn render_occupant(existing_title: &str, existing_is_stub: bool) -> String {
+    match (existing_is_stub, existing_title.is_empty()) {
+        (true, true) => "a stub".to_string(),
+        (true, false) => format!("a stub titled '{existing_title}'"),
+        (false, _) => format!("'{existing_title}'"),
+    }
+}
+
 /// Render a structured-list payload onto the text-mirror message. The
 /// first [`INLINE_LIST_CAP`] items appear inline, comma-separated; when
 /// the list is longer, the suffix " +N more — see details.<field>"
@@ -242,8 +254,20 @@ pub enum EngineError {
     #[error("title is invalid: {0}")]
     InvalidTitle(#[from] SlugError),
     /// Create attempted against an id already present in the store.
-    #[error("entity already exists: {id}")]
-    AlreadyExists { id: String },
+    /// Names the occupant's title — distinct titles can derive the
+    /// same slug, so the id alone does not tell the caller which
+    /// entity holds it. `existing_is_stub` marks a stub occupant
+    /// (reachable via rename; the create path adopts stubs instead
+    /// of refusing).
+    #[error(
+        "entity already exists: {id} — occupied by {}",
+        render_occupant(existing_title, *existing_is_stub)
+    )]
+    AlreadyExists {
+        id: String,
+        existing_title: String,
+        existing_is_stub: bool,
+    },
     /// Write refused: the entity as written would violate a
     /// block-tier declared constraint of its type (`severity: block`
     /// in the schema's `constraints`). Warn-tier violations warn
@@ -1203,6 +1227,15 @@ impl EngineError {
     pub fn details(&self) -> serde_json::Value {
         match self {
             EngineError::NotFound { id } => serde_json::json!({ "id": id }),
+            EngineError::AlreadyExists {
+                id,
+                existing_title,
+                existing_is_stub,
+            } => serde_json::json!({
+                "id": id,
+                "existing_title": existing_title,
+                "existing_is_stub": existing_is_stub,
+            }),
             EngineError::MemQuarantined {
                 mem,
                 reason_code,
@@ -2681,5 +2714,53 @@ mod inline_list_tests {
         // the recovery context.
         let err = EngineError::ReadOnlyMount("archive-2024".to_string());
         assert_eq!(err.prose_render(), err.to_string());
+    }
+
+    /// A slug collision names the occupying title on both channels —
+    /// two distinct titles can derive one id, and the id alone does
+    /// not tell the caller which one is already there.
+    #[test]
+    fn already_exists_names_the_occupying_title_on_both_channels() {
+        let err = EngineError::AlreadyExists {
+            id: "muehle--bösenberg-grundstücks-gmbh-co-kg".to_string(),
+            existing_title: "Bösenberg Grundstücks GmbH Co KG".to_string(),
+            existing_is_stub: false,
+        };
+        assert!(
+            err.to_string()
+                .contains("occupied by 'Bösenberg Grundstücks GmbH Co KG'"),
+            "got: {err}"
+        );
+        let details = err.details();
+        assert_eq!(
+            details["existing_title"],
+            "Bösenberg Grundstücks GmbH Co KG"
+        );
+        assert_eq!(details["existing_is_stub"], false);
+        assert_eq!(details["id"], "muehle--bösenberg-grundstücks-gmbh-co-kg");
+    }
+
+    /// A stub occupant states it is a stub; a titleless stub must not
+    /// render as an empty or missing title.
+    #[test]
+    fn already_exists_stub_occupant_never_renders_an_empty_title() {
+        let titled = EngineError::AlreadyExists {
+            id: "specs--x".to_string(),
+            existing_title: "X".to_string(),
+            existing_is_stub: true,
+        };
+        assert!(
+            titled.to_string().contains("a stub titled 'X'"),
+            "got: {titled}"
+        );
+
+        let untitled = EngineError::AlreadyExists {
+            id: "specs--x".to_string(),
+            existing_title: String::new(),
+            existing_is_stub: true,
+        };
+        let msg = untitled.to_string();
+        assert!(msg.contains("occupied by a stub"), "got: {msg}");
+        assert!(!msg.contains("''"), "empty title must not render: {msg}");
     }
 }

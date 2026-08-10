@@ -368,9 +368,12 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                 Some(details),
             )
         }
-        EngineError::AlreadyExists { id } => tool_error(
+        e @ EngineError::AlreadyExists { .. } => tool_error_with_details(
             "ENTITY_ALREADY_EXISTS",
-            &format!("entity already exists: {id}"),
+            // Display names the occupying title; ship the structured
+            // payload too so the lean server matches the full wire.
+            &e.to_string(),
+            Some(e.details()),
         ),
         // Block-tier declared-constraint refusals — code and recovery
         // payload come from the error itself so the lean server ships

@@ -173,6 +173,26 @@ impl RecoveryAction {
     }
 }
 
+/// The concrete grant command for a refusing allowlist table, CLI and
+/// MCP forms — the single source both the prose and the structured
+/// `details.remedy` render, so the two channels cannot drift. The
+/// create form names the pattern and the schema pin because
+/// `allow-create` requires both; delete rules have no schema
+/// dimension.
+fn allowlist_remedy(policy_table: &str) -> (&'static str, &'static str) {
+    if policy_table == "mem_management.delete" {
+        (
+            "memstead workspace allow-delete '<pattern>'",
+            "memstead_workspace_allow_delete",
+        )
+    } else {
+        (
+            "memstead workspace allow-create '<pattern>' --schema <name@version>",
+            "memstead_workspace_allow_create",
+        )
+    }
+}
+
 impl FullEngineError {
     /// Render rich, fully-inlined recovery prose for the agent-visible
     /// text channel. Closes the asymmetry where structured `details.X`
@@ -200,10 +220,31 @@ impl FullEngineError {
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
-                format!(
-                    "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') did not match any allowlist rule (reason: {reason}). Configured patterns: {patterns_inline}.",
-                    attempted.display()
-                )
+                // Each reason gets the sentence that fits ITS
+                // situation, and the allowlist remedy is named only
+                // where adding a rule actually is the remedy —
+                // `outside_workspace` is not fixed by a rule, so it
+                // keeps the plain refusal.
+                let verb = if *policy_table == "mem_management.delete" {
+                    "deletion"
+                } else {
+                    "creation"
+                };
+                let (allow_cmd, allow_tool) = allowlist_remedy(policy_table);
+                match *reason {
+                    "no_allowlist_configured" => format!(
+                        "mem {verb} is refused by default: this workspace has no `[[{policy_table}]]` allowlist rules (candidate '{candidate}', resolved location '{}'). Grant the permission first — `{allow_cmd}` (MCP: `{allow_tool}`), e.g. with pattern '{candidate}' — then retry.",
+                        attempted.display()
+                    ),
+                    "no_match" => format!(
+                        "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') matched none of the configured patterns: {patterns_inline}. Use a name matching an existing pattern, or add a covering rule — `{allow_cmd}` (MCP: `{allow_tool}`).",
+                        attempted.display()
+                    ),
+                    _ => format!(
+                        "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') did not match any allowlist rule (reason: {reason}). Configured patterns: {patterns_inline}.",
+                        attempted.display()
+                    ),
+                }
             }
             FullEngineError::MemSchemaNotAllowed {
                 candidate,
@@ -261,13 +302,23 @@ impl FullEngineError {
                 patterns,
                 reason,
                 policy_table,
-            } => serde_json::json!({
-                "attempted": attempted.display().to_string(),
-                "candidate": candidate,
-                "patterns": patterns,
-                "reason": reason,
-                "policy_table": policy_table,
-            }),
+            } => {
+                let mut d = serde_json::json!({
+                    "attempted": attempted.display().to_string(),
+                    "candidate": candidate,
+                    "patterns": patterns,
+                    "reason": reason,
+                    "policy_table": policy_table,
+                });
+                // The remedy rides only where adding a rule IS the
+                // remedy: `outside_workspace` is not fixed by an
+                // allowlist rule, so it carries none.
+                if matches!(*reason, "no_allowlist_configured" | "no_match") {
+                    let (cli, mcp) = allowlist_remedy(policy_table);
+                    d["remedy"] = serde_json::json!({ "cli": cli, "mcp": mcp });
+                }
+                d
+            }
             FullEngineError::InvalidMemName { name, reason } => {
                 serde_json::json!({ "name": name, "reason": reason })
             }
@@ -416,5 +467,112 @@ mod tests {
             prose.contains("mem_management.delete"),
             "prose must name the refusing allowlist: {prose}"
         );
+    }
+
+    /// `no_allowlist_configured` names the concrete grant command —
+    /// pattern and schema pin included — in both the prose and the
+    /// structured `details.remedy`, so the first-time caller can
+    /// proceed from the refusal alone.
+    #[test]
+    fn no_allowlist_configured_names_the_grant_command() {
+        let err = FullEngineError::MemPathNotAllowed {
+            attempted: PathBuf::from("/ws/muehle"),
+            candidate: "muehle".into(),
+            patterns: vec![],
+            reason: "no_allowlist_configured",
+            policy_table: "mem_management.create",
+        };
+        let prose = err.prose_render();
+        assert!(
+            prose.contains("memstead workspace allow-create"),
+            "prose names the CLI remedy: {prose}"
+        );
+        assert!(
+            prose.contains("--schema"),
+            "prose names the schema pin: {prose}"
+        );
+        assert!(
+            prose.contains("memstead_workspace_allow_create"),
+            "prose names the MCP remedy: {prose}"
+        );
+        let details = err.details();
+        assert!(
+            details["remedy"]["cli"]
+                .as_str()
+                .unwrap()
+                .contains("allow-create"),
+            "details carry the remedy: {details}"
+        );
+        assert_eq!(details["remedy"]["mcp"], "memstead_workspace_allow_create");
+
+        // Delete-path variant names allow-delete, without a schema pin.
+        let err = FullEngineError::MemPathNotAllowed {
+            attempted: PathBuf::from("/ws/muehle"),
+            candidate: "muehle".into(),
+            patterns: vec![],
+            reason: "no_allowlist_configured",
+            policy_table: "mem_management.delete",
+        };
+        let prose = err.prose_render();
+        assert!(prose.contains("memstead workspace allow-delete"), "{prose}");
+        assert!(!prose.contains("--schema"), "{prose}");
+        assert_eq!(
+            err.details()["remedy"]["mcp"],
+            "memstead_workspace_allow_delete"
+        );
+    }
+
+    /// `no_match` speaks to ITS situation — rules exist, none matched
+    /// — with a sentence distinct from the empty-allowlist one, while
+    /// still naming the covering-rule remedy.
+    #[test]
+    fn no_match_sentence_is_distinct_and_names_patterns() {
+        let no_match = FullEngineError::MemPathNotAllowed {
+            attempted: PathBuf::from("/ws/scratch"),
+            candidate: "scratch".into(),
+            patterns: vec!["specs".into(), "team/*".into()],
+            reason: "no_match",
+            policy_table: "mem_management.create",
+        };
+        let empty = FullEngineError::MemPathNotAllowed {
+            attempted: PathBuf::from("/ws/scratch"),
+            candidate: "scratch".into(),
+            patterns: vec![],
+            reason: "no_allowlist_configured",
+            policy_table: "mem_management.create",
+        };
+        let no_match_prose = no_match.prose_render();
+        let empty_prose = empty.prose_render();
+        assert_ne!(no_match_prose, empty_prose);
+        assert!(
+            no_match_prose.contains("'specs'") && no_match_prose.contains("'team/*'"),
+            "no_match names the configured patterns: {no_match_prose}"
+        );
+        assert!(
+            no_match_prose.contains("allow-create"),
+            "no_match still names the covering-rule remedy: {no_match_prose}"
+        );
+        assert!(no_match.details()["remedy"].is_object());
+    }
+
+    /// `outside_workspace` gains NO allowlist remedy — adding a rule
+    /// does not fix a workspace-external location, so suggesting one
+    /// would be wrong. Neither channel mentions the grant command.
+    #[test]
+    fn outside_workspace_carries_no_allowlist_remedy() {
+        let err = FullEngineError::MemPathNotAllowed {
+            attempted: PathBuf::from("/elsewhere/x"),
+            candidate: "../x".into(),
+            patterns: vec!["specs".into()],
+            reason: "outside_workspace",
+            policy_table: "mem_management.create",
+        };
+        let prose = err.prose_render();
+        assert!(!prose.contains("allow-create"), "{prose}");
+        assert!(!prose.contains("allow_create"), "{prose}");
+        let details = err.details();
+        assert!(details.get("remedy").is_none(), "{details}");
+        // The rest of the payload is unchanged.
+        assert_eq!(details["reason"], "outside_workspace");
     }
 }

@@ -246,7 +246,11 @@ impl Engine {
             && !existing.stub
             && !batch_skeleton_ids.is_some_and(|set| set.contains(&id))
         {
-            return Err(EngineError::AlreadyExists { id: id.to_string() });
+            return Err(EngineError::AlreadyExists {
+                id: id.to_string(),
+                existing_title: existing.title.clone(),
+                existing_is_stub: false,
+            });
         }
         let file_path = format!("{slug}.md");
 
@@ -966,7 +970,9 @@ impl Engine {
             error: Option<EngineError>,
         }
         let mut rows: Vec<IdentityRow> = Vec::with_capacity(creates.len());
-        let mut batch_ids: HashSet<EntityId> = HashSet::new();
+        // id → title of the batch entry that claimed it, so a
+        // within-batch duplicate can name the occupying title.
+        let mut batch_ids: HashMap<EntityId, String> = HashMap::new();
         for (args, _) in &creates {
             let identity = (|| -> Result<EntityId, EngineError> {
                 let title = args.title.trim();
@@ -976,19 +982,27 @@ impl Engine {
                 if let Some(existing) = self.store.get(&id)
                     && !existing.stub
                 {
-                    return Err(EngineError::AlreadyExists { id: id.to_string() });
+                    return Err(EngineError::AlreadyExists {
+                        id: id.to_string(),
+                        existing_title: existing.title.clone(),
+                        existing_is_stub: false,
+                    });
                 }
-                if batch_ids.contains(&id) {
+                if let Some(prior_title) = batch_ids.get(&id) {
                     // Duplicate WITHIN the batch — same typed code as
                     // the store collision; the index in the report
                     // localises it.
-                    return Err(EngineError::AlreadyExists { id: id.to_string() });
+                    return Err(EngineError::AlreadyExists {
+                        id: id.to_string(),
+                        existing_title: prior_title.clone(),
+                        existing_is_stub: false,
+                    });
                 }
                 Ok(id)
             })();
             match identity {
                 Ok(id) => {
-                    batch_ids.insert(id.clone());
+                    batch_ids.insert(id.clone(), args.title.trim().to_string());
                     rows.push(IdentityRow {
                         id: Some(id),
                         error: None,
@@ -1024,6 +1038,7 @@ impl Engine {
         let mut notes: Vec<Option<String>> = Vec::new();
         let mut errors: Vec<(usize, EngineError)> = Vec::new();
         let mut ids_in_order: Vec<EntityId> = Vec::new();
+        let skeleton_ids: HashSet<EntityId> = batch_ids.keys().cloned().collect();
         for (i, ((args, note), row)) in creates.into_iter().zip(rows.into_iter()).enumerate() {
             let fallback_id = row
                 .id
@@ -1039,7 +1054,7 @@ impl Engine {
             // below never short-circuits into a per-entry preview.
             let mut args = args;
             args.dry_run = false;
-            match self.prepare_create(args, Some(&batch_ids), Vec::new()) {
+            match self.prepare_create(args, Some(&skeleton_ids), Vec::new()) {
                 Ok(CreatePrepareOutcome::Prepared(p)) => {
                     // Stage this item's declared edges onto its skeleton
                     // so later items validate against the batch's own
@@ -4074,7 +4089,17 @@ write_rules: []
             )
             .unwrap_err();
         match err {
-            EngineError::AlreadyExists { id } => assert_eq!(id, "specs--same-slug"),
+            EngineError::AlreadyExists {
+                id,
+                existing_title,
+                existing_is_stub,
+            } => {
+                assert_eq!(id, "specs--same-slug");
+                // The refusal names the occupying title so the caller
+                // sees which existing title derived the colliding slug.
+                assert!(!existing_title.is_empty());
+                assert!(!existing_is_stub);
+            }
             other => panic!("expected AlreadyExists, got {other:?}"),
         }
     }
