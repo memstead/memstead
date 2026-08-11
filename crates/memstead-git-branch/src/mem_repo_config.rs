@@ -371,9 +371,62 @@ pub enum MemRepoWriteError {
     /// mismatch (the observed `main` tip moved between snapshot and
     /// commit) or a `MustNotExist` violation on a branch the caller
     /// thought it was creating fresh. The wrapped string surfaces the
-    /// underlying gix message for operator log lines.
+    /// underlying gix message — the full `source()` chain, not just its
+    /// headline (see [`error_chain`]).
     #[error("ref transaction rejected: {0}")]
     RefTransaction(String),
+}
+
+/// Render an error and every `source()` beneath it as `outer: inner: root`.
+///
+/// gix's transaction errors are headlines over a cause: the top-level
+/// Display of a reflog failure is the constant sentence "The reflog could
+/// not be created or updated", and the `io::Error` saying *why* — a
+/// permission, a missing directory, a bad signature — hangs off `source()`.
+/// `e.to_string()` renders the headline alone, so an operator (and CI) sees
+/// a symptom with the diagnosis deleted. Every conversion of a foreign
+/// error into [`MemRepoWriteError::RefTransaction`] goes through here.
+/// Identity the engine signs its own ref-log entries with.
+///
+/// Ref transactions request `RefLog::AndReference`, and gix refuses to write
+/// a reflog entry without a committer ("reflog messages need a committer
+/// which isn't set"). `edit_references` sources that committer from the
+/// ambient git config, so a machine with no `user.name` / `user.email` —
+/// a fresh laptop, a CI runner, a container — could not create a mem at all,
+/// while a developer's machine worked by accident of their global config.
+///
+/// The engine already signs its *commit* objects as `engine
+/// <noreply@memstead.io>` rather than borrowing the user's identity
+/// (`storage_memstead.rs`'s `COMMITTER_NAME` / `COMMITTER_EMAIL`); the reflog
+/// now does the same. Mem-repo history is engine-authored bookkeeping, not
+/// the user's authorship, so it should not depend on ambient config in either
+/// place.
+pub(crate) fn reflog_committer() -> gix::actor::Signature {
+    gix::actor::Signature {
+        name: "engine".into(),
+        email: "noreply@memstead.io".into(),
+        time: gix::date::Time::now_local_or_utc(),
+    }
+}
+
+/// Render an error and every `source()` beneath it as `outer: inner: root`.
+///
+/// gix's transaction errors are headlines over a cause: the top-level
+/// Display of a reflog failure is the constant sentence "The reflog could
+/// not be created or updated", and the error saying *why* hangs off
+/// `source()`. `e.to_string()` renders the headline alone, so an operator
+/// (and CI) sees a symptom with the diagnosis deleted — this cost a full
+/// debugging session on 2026-08-11. Every conversion of a foreign error into
+/// [`MemRepoWriteError::RefTransaction`] goes through here.
+pub(crate) fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut cur = e.source();
+    while let Some(inner) = cur {
+        use std::fmt::Write as _;
+        let _ = write!(out, ": {inner}");
+        cur = inner.source();
+    }
+    out
 }
 
 /// One ref edit inside a [`commit_refs`] batch. The caller has already
@@ -466,8 +519,11 @@ pub fn commit_refs_at_gitdir(gitdir: &Path, specs: &[RefSpec]) -> Result<(), Mem
         });
     }
 
-    repo.edit_references(edits)
-        .map_err(|e| MemRepoWriteError::RefTransaction(e.to_string()))?;
+    repo.edit_references_as(
+        edits,
+        Some(reflog_committer().to_ref(&mut Default::default())),
+    )
+    .map_err(|e| MemRepoWriteError::RefTransaction(error_chain(&e)))?;
 
     Ok(())
 }

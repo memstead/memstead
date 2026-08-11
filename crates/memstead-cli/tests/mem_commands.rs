@@ -2452,3 +2452,52 @@ fn verify_anchors_health_axis_and_refusals() {
     assert!(unknown.contains("UNKNOWN_MEM"), "got: {unknown}");
     assert!(!unknown.contains("INTERNAL"), "INTERNAL leaked: {unknown}");
 }
+
+/// A machine with no configured git identity can still create a mem.
+///
+/// Ref transactions write a reflog, and gix refuses a reflog entry without a
+/// committer ("reflog messages need a committer which isn't set"). That
+/// committer used to come from the ambient git config, so `mem init` worked on
+/// a developer's machine and failed on any environment without a global
+/// `user.name` / `user.email` — a fresh laptop, a container, a CI runner. It
+/// was CI-only in appearance and user-facing in fact: `quickstart` creates a
+/// mem as its first act.
+///
+/// The environment is scrubbed the way a fresh machine looks: `HOME` pointed
+/// at an empty directory (so no `~/.gitconfig` resolves) and the global /
+/// system config files disabled outright. Without this scrub the test passes
+/// everywhere and guards nothing — that is exactly how the original defect
+/// hid on the machine it was developed on.
+#[test]
+fn mem_init_succeeds_without_a_configured_git_identity() {
+    let tmp = TempDir::new().unwrap();
+    let empty_home = TempDir::new().unwrap();
+
+    let scrubbed = |args: &[&str]| -> assert_cmd::assert::Assert {
+        memstead()
+            .current_dir(tmp.path())
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .env("HOME", empty_home.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env_remove("GIT_AUTHOR_NAME")
+            .env_remove("GIT_AUTHOR_EMAIL")
+            .env_remove("GIT_COMMITTER_NAME")
+            .env_remove("GIT_COMMITTER_EMAIL")
+            .args(args)
+            .assert()
+    };
+
+    scrubbed(&["mem-repo", "init", "."]).success();
+    scrubbed(&["mem", "init", "alpha", "--no-gitignore"]).success();
+
+    // The mem is real, not merely un-refused: it answers a read.
+    let listed = scrubbed(&["mem", "list"])
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let listed = String::from_utf8(listed).unwrap();
+    assert!(listed.contains("alpha"), "mem not listed: {listed}");
+}

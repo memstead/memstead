@@ -165,6 +165,25 @@ byte-sealed and loadable, so out-of-repo pins keep working unchanged.
   help, MCP descriptions, conformance tests, API reference).
 
 ### Fixed
+- **A machine with no configured git identity can create a mem
+  again.** Ref transactions write a reflog, and the reflog entry's
+  committer was sourced from the ambient git config — so on any
+  environment without a global `user.name` / `user.email` (a fresh
+  laptop, a container, a CI runner) the very first step of
+  `memstead quickstart` refused with `MEM_ERROR: … ref transaction
+  rejected: The reflog could not be created or updated`. The engine
+  already signs its *commit* objects as `engine <noreply@memstead.io>`
+  rather than borrowing the user's identity; the reflog now does the
+  same, so mem-repo bookkeeping no longer depends on ambient config in
+  either place. Nothing about user-authored content changes — the
+  author identity on content commits is untouched.
+- **Ref-transaction failures name their cause.** The gix errors behind
+  a rejected transaction are headlines over a `source()` chain, and the
+  conversion rendered only the headline — "The reflog could not be
+  created or updated" with the reason deleted. Every such conversion now
+  renders the full chain, so the message above arrives as "… : reflog
+  messages need a committer which isn't set" and is diagnosable from one
+  line.
 - **Two source comments no longer describe retired behaviour.** The
   `schema new` scaffold's annotation on `no_self_loop_relationships`
   claimed community-signal propagation — the exact promise the

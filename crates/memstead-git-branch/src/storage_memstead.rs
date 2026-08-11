@@ -44,7 +44,8 @@ use std::sync::Arc;
 use memstead_schema::{MemConfig, Schema, loader::SchemaLoadError};
 
 use crate::mem_repo_config::{
-    MemRepoWriteError, RefSpec, commit_refs_at_gitdir, resolve_full_path_at_gitdir,
+    MemRepoWriteError, RefSpec, commit_refs_at_gitdir, error_chain, reflog_committer,
+    resolve_full_path_at_gitdir,
 };
 use crate::mem_repo_schemas::{LoadOutcome, MemRepoSchemasError};
 use crate::vcs::{CommitContext, author_identity, format_commit_message};
@@ -1156,8 +1157,11 @@ pub fn delete_mem_artifacts_at_gitdir(
         });
     }
 
-    repo.edit_references(edits)
-        .map_err(|e| MemRepoWriteError::RefTransaction(e.to_string()))?;
+    repo.edit_references_as(
+        edits,
+        Some(reflog_committer().to_ref(&mut Default::default())),
+    )
+    .map_err(|e| MemRepoWriteError::RefTransaction(error_chain(&e)))?;
 
     Ok(())
 }
@@ -1345,8 +1349,11 @@ pub fn rename_mem_artifacts_at_gitdir(
         });
     }
 
-    repo.edit_references(edits)
-        .map_err(|e| MemRepoWriteError::RefTransaction(e.to_string()))?;
+    repo.edit_references_as(
+        edits,
+        Some(reflog_committer().to_ref(&mut Default::default())),
+    )
+    .map_err(|e| MemRepoWriteError::RefTransaction(error_chain(&e)))?;
 
     Ok(())
 }
