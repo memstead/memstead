@@ -30,6 +30,9 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
         with:
           toolchain: stable
+          # run-tests.sh runs clippy and rustfmt itself — this job has no
+          # lint step of its own to reveal that need, so it is stated here.
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: . -> target
@@ -39,34 +42,6 @@ jobs:
           tool: cargo-nextest
       - name: Run the full test surface
         run: ./run-tests.sh
-
-  lint:
-    name: Clippy + rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
-        with:
-          toolchain: stable
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: . -> target
-      - name: Clippy (full flavour)
-        run: cargo clippy --workspace --all-targets --features mem-repo -- -D warnings
-      - name: Clippy (lean flavour)
-        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
-      # The workspace-wide lean pass never truly lints the CLI in lean
-      # mode: xtask depends on memstead-cli with `mem-repo` on and Cargo
-      # unifies features across the one build graph, so "lean" still
-      # compiles the CLI with `mem-repo`. This isolated leg closes that
-      # blind spot (the test-suite twin is documented in
-      # dev handbook testing notes).
-      - name: Clippy (lean CLI, isolated)
-        run: cargo clippy -p memstead-cli --all-targets --no-default-features -- -D warnings
-      - name: rustfmt
-        run: cargo fmt --check
 
   wasm:
     name: wasm32 dependency gate

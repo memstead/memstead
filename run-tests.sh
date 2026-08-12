@@ -1,6 +1,22 @@
 #!/bin/bash
 #
-# run-tests.sh — the open engine's test surface, root-hoisted.
+# run-tests.sh — THE definition of "green" for this repo.
+#
+# CI runs this script and nothing else (.github/workflows/ci.yml), so there is
+# exactly one answer to "does this tree pass?" and it is the same answer here
+# and there. Two gates that must be kept in sync always drift; one gate cannot.
+# Anything you want CI to check belongs in this file, not in a workflow.
+#
+# The two exceptions are declared, not accidental: the wasm32 dependency gate
+# needs a cross-compilation target installed, and the RustSec audit needs the
+# network and a fresh advisory database. Both stay their own CI jobs because
+# neither can honestly run on an offline laptop.
+#
+# Order is deliberate: seconds-long gates (format, lint, leak) run before
+# minutes-long ones, so a tree that cannot pass `cargo fmt` learns it in
+# seconds. Every leg still runs — the script reports ALL failures, never just
+# the first, because a run that stops at the first problem makes you pay the
+# full wall-clock cost once per problem.
 #
 # The engine workspace lives at the repo root (Cargo.toml + crates/ + xtask/),
 # so tests run from $ROOT directly — there is no engine/ subdir. The private
@@ -9,6 +25,36 @@
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 FAILED=()
+
+echo ""
+echo "══════════════════════════════════"
+echo "  Lint: rustfmt + clippy (both flavours)"
+echo "══════════════════════════════════"
+# Byte-identical to the commands CI runs. If you change one, change it HERE —
+# CI has no copy of its own; see the header note.
+if (cd "$ROOT" \
+  && cargo fmt --check \
+  && cargo clippy --workspace --all-targets --features mem-repo -- -D warnings \
+  && cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
+  && cargo clippy -p memstead-cli --all-targets --no-default-features -- -D warnings); then
+  echo "  ✓ rustfmt + clippy passed"
+else
+  FAILED+=("lint")
+  echo "  ✗ rustfmt + clippy FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
+echo "  Guards: nothing private or internal leaks to the public tree"
+echo "══════════════════════════════════"
+if "$ROOT/scripts/leak-scan.sh" "$ROOT" \
+  && "$ROOT/scripts/check-no-plan-refs.sh" \
+  && "$ROOT/scripts/check-no-mechanism-leak.sh"; then
+  echo "  ✓ publication guards passed"
+else
+  FAILED+=("guards")
+  echo "  ✗ publication guards FAILED"
+fi
 
 echo ""
 echo "══════════════════════════════════"
