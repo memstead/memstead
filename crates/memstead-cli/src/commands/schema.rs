@@ -57,11 +57,17 @@ pub enum SchemaCommand {
     New(NewArgs),
 
     /// Validate a schema package directory (`schema.yaml` plus an
-    /// optional `types/*.yaml`) against the engine's schema loader —
-    /// the same validation the engine runs at load. Exits non-zero
-    /// (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the
-    /// YAML line/column in the message where the parse layer provides
-    /// it.
+    /// optional `types/*.yaml`) against the engine's schema loader, as
+    /// the package you are AUTHORING — always read in the current
+    /// schema language, so retired keys (`optional:`,
+    /// `propagating_relationships`) refuse here by design. A package
+    /// already sealed under an older language can therefore be
+    /// refused by this command and still load: sealed content is read
+    /// under the generation it was sealed in, and that is the point of
+    /// sealing. Validate what you write, not what you installed.
+    /// Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance
+    /// error, with the YAML line/column in the message where the parse
+    /// layer provides it.
     Validate(ValidateArgs),
 
     /// Install a schema package into the current folder workspace's
