@@ -1529,7 +1529,7 @@ Author-time schema tooling. `memstead schema validate <path>` checks a schema pa
 ###### **Subcommands:**
 
 * `new` — Scaffold a new schema package at `./<name>/` — a manifest plus one commented example type — that `memstead schema validate` passes unmodified. Prints the follow-up commands that take the package from folder to pinned mem
-* `validate` — Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader — the same validation the engine runs at load. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
+* `validate` — Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader, as the package you are AUTHORING — always read in the current schema language, so retired keys (`optional:`, `propagating_relationships`) refuse here by design. A package already sealed under an older language can therefore be refused by this command and still load: sealed content is read under the generation it was sealed in, and that is the point of sealing. Validate what you write, not what you installed. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
 * `install` — Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a mem can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
 
 
@@ -1548,7 +1548,7 @@ Scaffold a new schema package at `./<name>/` — a manifest plus one commented e
 
 ## `memstead schema validate`
 
-Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader — the same validation the engine runs at load. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
+Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader, as the package you are AUTHORING — always read in the current schema language, so retired keys (`optional:`, `propagating_relationships`) refuse here by design. A package already sealed under an older language can therefore be refused by this command and still load: sealed content is read under the generation it was sealed in, and that is the point of sealing. Validate what you write, not what you installed. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
 
 **Usage:** `memstead schema validate <PATH>`
 
