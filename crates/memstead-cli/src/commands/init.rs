@@ -192,6 +192,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "name": args.name,
             "schema": schema_pin.as_display(),
             "format": FILESYSTEM_WORKSPACE_FORMAT,
+            "workspace_shape": crate::setup::WorkspaceShape::Filesystem.label(),
         });
         payload["warnings"] = json!(warnings);
         return print_json(&payload);
@@ -224,7 +225,13 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             provenance_notice.code(),
             provenance_notice.message()
         ),
+        String::new(),
     ]);
+    // `init` picks the same fork `quickstart` does — silently, and for
+    // the same reader. The disclosure is identical on both verbs.
+    lines.extend(crate::setup::shape_disclosure_lines(
+        crate::setup::WorkspaceShape::Filesystem,
+    ));
     print_markdown(&lines.join("\n"));
     Ok(())
 }

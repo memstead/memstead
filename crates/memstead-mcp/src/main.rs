@@ -119,8 +119,13 @@ fn init_tracing() {
 async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     init_tracing();
 
+    // Name the shape actually opened, not the build config: this line
+    // is what someone debugging an `UNSUPPORTED_WORKSPACE_SHAPE`
+    // refusal reads, and a boot line that disagrees with the refusal
+    // reads as a spurious error.
     tracing::info!(
-        "boot: lean workspace at {} (folder + archive backends only)",
+        "boot: {} workspace at {} (lean build: folder + archive backends only)",
+        memstead_base::workspace_shape_label(&workspace_root),
         workspace_root.display()
     );
 
@@ -164,7 +169,15 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 
     init_tracing();
 
-    tracing::info!("boot: mem-repo workspace at {}", workspace_root.display());
+    // Name the shape actually opened. The full build serves both
+    // shapes, and the mem-repo-only subcommands refuse on one of them —
+    // a boot line that always said "mem-repo" made that refusal look
+    // spurious to anyone reading the log.
+    tracing::info!(
+        "boot: {} workspace at {}",
+        memstead_base::workspace_shape_label(&workspace_root),
+        workspace_root.display()
+    );
 
     let mut engine =
         match memstead_git_branch::workspace_store::engine_from_workspace_root(&workspace_root) {

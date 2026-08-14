@@ -127,3 +127,31 @@ fn lean_binary_boots_against_new_layout_workspace() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+/// The lean build's boot line names the shape it opened too, in the
+/// same vocabulary the full build and the CLI refusals use — the build
+/// config is a parenthetical, not the shape.
+#[test]
+fn lean_binary_boot_line_names_the_shape_it_opened() {
+    let tmp = TempDir::new().unwrap();
+    seed_workspace(tmp.path());
+
+    let output = Command::new(memstead_mcp_bin())
+        .current_dir(tmp.path())
+        .env("RUST_LOG", "info")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn memstead-mcp — confirm the binary built before running tests");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr.contains("boot: filesystem-mem workspace at"),
+        "lean boot line must name the filesystem-mem shape\n--- stderr ---\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("mem-repo workspace at"),
+        "the mem-repo spelling must never name a filesystem-mem workspace\n--- stderr ---\n{stderr}"
+    );
+}

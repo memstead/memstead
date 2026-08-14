@@ -7,6 +7,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **The workspace shape is stated where the choice is made.** `memstead
+  quickstart`, `memstead init`, and `memstead mem-repo init` each close
+  their receipt with the shape they just created, one concrete thing
+  that shape cannot do, and the exact command for the other shape. The
+  fork was previously silent on both branches: a newcomer learned that
+  `quickstart`'s workspace cannot consume the registry only when
+  `memstead install` refused — after the workspace already existed and
+  had been modelled.
+- **`memstead-mcp`'s boot line names the shape it opened**, not the
+  build it was compiled as: `boot: filesystem-mem workspace at …` or
+  `boot: mem-repo workspace at …`. The full binary serves both shapes
+  and previously logged `mem-repo` for either, which made a genuine
+  `UNSUPPORTED_WORKSPACE_SHAPE` refusal read as spurious to anyone
+  debugging from the log.
+- **`memstead create --relation` works on filesystem-mem workspaces.**
+  The guard was CLI-local — the shared `prepare_create` validates and
+  materialises inline relations on any backend, and the MCP surface has
+  been creating entities with their edges on this shape all along.
+  `--help` no longer claims a mem-repo-only limit. (`--dry-run` remains
+  unimplemented on that path and still refuses.)
+- **`quickstart` names a check its own session can run.** The receipt
+  still names the restart for what the restart does — registering the
+  MCP tools — and additionally names two verifications that need no
+  restart: `<wired-binary> --version` and `memstead overview`. An agent
+  session that has just run onboarding cannot restart itself, so the
+  last mile of the wiring was previously unverifiable from inside it.
+
 ## [0.7.0] - 2026-08-14
 
 ### Changed

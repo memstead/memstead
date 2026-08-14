@@ -112,6 +112,84 @@ pub enum WorkspaceShape {
     Filesystem,
 }
 
+/// The command that produces the *other* shape than the one a
+/// disclosure is describing. Feature-gated because every command a
+/// message names must exist in the binary that prints it: the lean
+/// build has no `mem-repo` subcommand group, so it points at the full
+/// build rather than at a verb it would reject.
+#[cfg(feature = "mem-repo")]
+const MEM_REPO_INIT_HINT: &str = "`memstead mem-repo init` in a fresh folder";
+#[cfg(not(feature = "mem-repo"))]
+const MEM_REPO_INIT_HINT: &str = "the full build of memstead (this lean build has no `mem-repo` \
+     subcommand), then `memstead mem-repo init` in a fresh folder";
+
+impl WorkspaceShape {
+    /// Resolve the shape of an existing workspace root. Routes through
+    /// the engine's shared probe so the CLI, the refusals, and the MCP
+    /// boot line can never disagree about the same directory.
+    pub fn at(workspace_root: &Path) -> Self {
+        if memstead_base::is_mem_repo_shaped(workspace_root) {
+            WorkspaceShape::MemRepo
+        } else {
+            WorkspaceShape::Filesystem
+        }
+    }
+
+    /// The one spelling of this shape, shared with the engine.
+    pub fn label(self) -> &'static str {
+        match self {
+            WorkspaceShape::MemRepo => "mem-repo",
+            WorkspaceShape::Filesystem => "filesystem-mem",
+        }
+    }
+}
+
+/// Markdown lines disclosing the shape a workspace-creating command
+/// just produced: what the shape is, one concrete thing it cannot do,
+/// and the exact command for the other shape.
+///
+/// This block is printed by `quickstart`, `init`, and `mem-repo init`
+/// alike — the disclosure is symmetric, not a warning bolted onto one
+/// branch. It belongs in the creating command's own receipt because
+/// that is the moment the fork is decided and the output the newcomer
+/// is already reading; a sentence elsewhere (the `install --help`
+/// clause) demonstrably arrives after the workspace exists.
+pub fn shape_disclosure_lines(shape: WorkspaceShape) -> Vec<String> {
+    match shape {
+        WorkspaceShape::Filesystem => vec![
+            "## Workspace shape: filesystem-mem".to_string(),
+            String::new(),
+            "One mem, plain `.md` files in this folder, no git history — nothing else to \
+             set up."
+                .to_string(),
+            String::new(),
+            "- **It cannot install mems from the registry.** `memstead install \
+             <scope>/<name>` (and the other mem-repo-only subcommands) refuse here with \
+             `UNSUPPORTED_WORKSPACE_SHAPE`."
+                .to_string(),
+            format!(
+                "- **The other shape** — mem-repo: many mems, git-backed, registry-capable \
+                 — comes from {MEM_REPO_INIT_HINT}. Switching later means starting a second \
+                 workspace, so decide now if you intend to install mems."
+            ),
+        ],
+        WorkspaceShape::MemRepo => vec![
+            "## Workspace shape: mem-repo".to_string(),
+            String::new(),
+            "Many mems on git branches, full history — every subcommand works here, \
+             including `memstead install <scope>/<name>`."
+                .to_string(),
+            String::new(),
+            "- **It costs a git repository.** The mems live in `mem-repo/.git/` and every \
+             mutation is a commit — not a folder of files you can hand-edit."
+                .to_string(),
+            "- **The other shape** — filesystem-mem: one mem, plain `.md` files, no git — \
+             comes from `memstead quickstart` in a fresh folder."
+                .to_string(),
+        ],
+    }
+}
+
 /// Engine instance + the workspace flavour it serves. Subcommands
 /// match on the variant to call the right engine API; the read-side
 /// store accessor (`engine.store()`) lives on both flavours so simple
@@ -197,12 +275,7 @@ impl CliContext {
     pub fn workspace_shape(&self) -> Option<(WorkspaceShape, PathBuf)> {
         let cwd = std::env::current_dir().ok()?;
         let root = find_workspace_root(&cwd)?;
-        let shape = if root.join("mem-repo").join(".git").is_dir() {
-            WorkspaceShape::MemRepo
-        } else {
-            WorkspaceShape::Filesystem
-        };
-        Some((shape, root))
+        Some((WorkspaceShape::at(&root), root))
     }
 
     /// Build a [`CliEngine`] from the current cwd. The workspace
@@ -231,7 +304,7 @@ impl CliContext {
     /// the same factory selection as [`Self::cli_engine`]. The split
     /// also gives subcommands a chdir-free, unit-testable engine seam.
     pub fn cli_engine_at(&self, root: &Path) -> anyhow::Result<CliEngine> {
-        if root.join("mem-repo").join(".git").is_dir() {
+        if memstead_base::is_mem_repo_shaped(root) {
             #[cfg(feature = "mem-repo")]
             {
                 let mut engine =
@@ -284,7 +357,7 @@ impl CliContext {
         // folder-mount-only workspace. Surface the mem-repo-only
         // tag here so callers print an actionable message instead of
         // booting into a foldery engine and erroring later.
-        if !root.join("mem-repo").join(".git").is_dir() {
+        if !memstead_base::is_mem_repo_shaped(&root) {
             return Err(CliError {
                 kind: ExitKind::Generic,
                 code: "UNSUPPORTED_WORKSPACE_SHAPE",
@@ -423,7 +496,7 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
         .into());
     };
 
-    if !root.join("mem-repo").join(".git").is_dir() {
+    if !memstead_base::is_mem_repo_shaped(&root) {
         return Err(CliError {
             code: "UNSUPPORTED_WORKSPACE_SHAPE",
             kind: ExitKind::Generic,

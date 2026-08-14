@@ -717,10 +717,25 @@ fn report(
     mcp_bin: &McpBinary,
 ) -> anyhow::Result<()> {
     let restart_labels: Vec<&str> = wirings.iter().map(|w| w.target.label()).collect();
+    // The restart is what registers the MCP tools with the agent —
+    // it is named for exactly that, and never presented as skippable.
     let next_action = format!(
-        "Restart {} so the `memstead` MCP server registers — then try: memstead overview",
+        "Restart {} so the `memstead` MCP server registers its tools — then try: memstead \
+         overview",
         restart_labels.join(" / "),
     );
+    // …but an agent session that just ran onboarding cannot restart
+    // itself mid-run, so the wiring it wrote must be checkable from
+    // inside that session. Both checks are real: the first runs the
+    // exact binary the config points at, the second reads the graph the
+    // server will serve.
+    let verify_now = vec![
+        format!(
+            "- the wired binary answers: `{} --version`",
+            mcp_bin.command
+        ),
+        "- the graph is already readable: `memstead overview`".to_string(),
+    ];
 
     if ctx.json {
         return print_json(&json!({
@@ -738,7 +753,9 @@ fn report(
                 }))
                 .collect::<Vec<_>>(),
             "agents_defaulted": agents_defaulted,
+            "workspace_shape": crate::setup::WorkspaceShape::Filesystem.label(),
             "next_action": next_action,
+            "verify_now": verify_now,
             "warnings": mcp_bin.warning.as_ref().map(|w| vec![w.clone()]).unwrap_or_default(),
         }));
     }
@@ -764,8 +781,19 @@ fn report(
         lines.push(String::new());
         lines.push(format!("> warning: {warning}"));
     }
+    // The shape disclosure sits between the artifact list and the next
+    // action: quickstart picked one of two workspace shapes just now,
+    // and this receipt is the only output the newcomer is guaranteed
+    // to read before they hit the first mem-repo-only refusal.
+    lines.push(String::new());
+    lines.extend(crate::setup::shape_disclosure_lines(
+        crate::setup::WorkspaceShape::Filesystem,
+    ));
     lines.push(String::new());
     lines.push(format!("Next: {next_action}"));
+    lines.push(String::new());
+    lines.push("Verify from this session, no restart needed:".to_string());
+    lines.extend(verify_now);
     print_markdown(&lines.join("\n"));
     Ok(())
 }

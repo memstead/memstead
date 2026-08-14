@@ -966,6 +966,237 @@ fn every_refusal_on_these_paths_names_a_next_command() {
     }
 }
 
+// ---------------------------------------------------------------------
+// workspace-shape disclosure
+// ---------------------------------------------------------------------
+
+/// Every assertion the shape disclosure has to satisfy, in one place:
+/// which shape, one concrete thing it cannot do, and the exact command
+/// for the other shape. Applied to `quickstart` and `init` alike.
+fn assert_filesystem_shape_disclosure(out: &str, ctx: &str) {
+    for needle in [
+        "filesystem-mem",
+        "memstead install",
+        "UNSUPPORTED_WORKSPACE_SHAPE",
+        "memstead mem-repo init",
+    ] {
+        assert!(
+            out.contains(needle),
+            "{ctx}: shape disclosure must name `{needle}`; got:\n{out}",
+        );
+    }
+}
+
+/// The fork `quickstart` decides silently is stated in the receipt the
+/// newcomer is already reading — not discovered later by being refused.
+#[test]
+fn quickstart_receipt_discloses_the_shape_it_picked() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("disclosed-graph");
+    let out = stdout_of(
+        memstead()
+            .args(["quickstart", "--agent", "claude-code"])
+            .arg(&root)
+            .assert()
+            .success(),
+    );
+    assert_filesystem_shape_disclosure(&out, "quickstart receipt");
+}
+
+/// `memstead init` picks the same fork and discloses it the same way.
+#[test]
+fn init_receipt_discloses_the_shape_it_picked() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("strict-graph");
+    let out = stdout_of(
+        memstead()
+            .args([
+                "init",
+                "--name",
+                "strict-graph",
+                "--schema",
+                "default@1.3.0",
+            ])
+            .arg(&root)
+            .assert()
+            .success(),
+    );
+    assert_filesystem_shape_disclosure(&out, "init receipt");
+}
+
+/// Symmetry: the mem-repo verb reports its shape too, so the
+/// disclosure reads as a fork rather than as a warning bolted onto one
+/// branch. It names what mem-repo costs and the command for the other
+/// shape.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn mem_repo_init_discloses_its_shape_symmetrically() {
+    let tmp = TempDir::new().unwrap();
+    let out = stdout_of(
+        memstead()
+            .args(["mem-repo", "init"])
+            .arg(tmp.path())
+            .assert()
+            .success(),
+    );
+    for needle in ["mem-repo", "git", "memstead quickstart"] {
+        assert!(
+            out.contains(needle),
+            "mem-repo init receipt must name `{needle}`; got:\n{out}",
+        );
+    }
+}
+
+/// Disclosure is not permission: a mem-repo-only subcommand on the
+/// shape `quickstart` produces still refuses with the same typed code,
+/// and the message still names the recovering command.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn mem_repo_only_subcommand_still_refuses_after_disclosure() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("refusing-graph");
+    memstead()
+        .args(["quickstart", "--agent", "claude-code"])
+        .arg(&root)
+        .assert()
+        .success();
+
+    let assert = memstead()
+        .current_dir(&root)
+        .args(["install", "acme/notes", "--json"])
+        .assert()
+        .failure();
+    let body = stdout_of(assert);
+    let envelope: serde_json::Value =
+        serde_json::from_str(body.trim()).expect("--json refusal is JSON");
+    assert_eq!(
+        envelope["code"], "UNSUPPORTED_WORKSPACE_SHAPE",
+        "install must still refuse by shape; got: {envelope}",
+    );
+    let message = envelope["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("mem-repo"),
+        "refusal must still name the recovering shape; got: {message}",
+    );
+}
+
+/// F5: an agent session that has just run onboarding cannot restart
+/// itself, so the receipt names a check that works from inside that
+/// session — and still names the restart for what the restart does.
+#[test]
+fn quickstart_receipt_names_in_session_verification_and_the_restart() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("verifiable-graph");
+    let assert = memstead()
+        .args(["quickstart", "--json", "--agent", "claude-code"])
+        .arg(&root)
+        .assert()
+        .success();
+    let payload: serde_json::Value =
+        serde_json::from_str(&stdout_of(assert)).expect("quickstart --json emits JSON");
+
+    let next = payload["next_action"].as_str().unwrap_or_default();
+    assert!(
+        next.contains("Restart") && next.contains("registers"),
+        "the restart must still be named for what it does; got: {next}",
+    );
+
+    let verify = payload["verify_now"]
+        .as_array()
+        .expect("receipt carries in-session verification steps");
+    let rendered = verify
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("--version"),
+        "verification must exercise the binary the wiring points at; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("memstead overview"),
+        "verification must name a read of the graph itself; got:\n{rendered}",
+    );
+
+    // The named check is real: the wired binary answers right now.
+    let wired = payload["mcp_command"].as_str().expect("mcp_command");
+    let status = std::process::Command::new(wired)
+        .arg("--version")
+        .status()
+        .expect("the wired memstead-mcp binary must be runnable");
+    assert!(status.success(), "`{wired} --version` must succeed");
+
+    // …and the markdown receipt says the same thing.
+    let root2 = tmp.path().join("verifiable-graph-md");
+    let out = stdout_of(
+        memstead()
+            .args(["quickstart", "--agent", "claude-code"])
+            .arg(&root2)
+            .assert()
+            .success(),
+    );
+    assert!(
+        out.contains("--version") && out.contains("Restart"),
+        "markdown receipt must carry both the in-session check and the restart; got:\n{out}",
+    );
+}
+
+/// F8: `--relation` is no longer refused on a filesystem-mem
+/// workspace — the MCP surface has always performed this operation on
+/// this shape, and the CLI-local guard made the limit look like the
+/// engine's. The edge is readable afterwards.
+#[test]
+fn create_relation_lands_edges_on_a_filesystem_mem_workspace() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("edge-graph");
+    memstead()
+        .args(["quickstart", "--agent", "claude-code"])
+        .arg(&root)
+        .assert()
+        .success();
+
+    memstead()
+        .current_dir(&root)
+        .args([
+            "create",
+            "--title",
+            "Edge Source",
+            "--type",
+            "concept",
+            "--section",
+            "definition=A concept that points at the seed entity.",
+            "--section",
+            "explanation=Its only job is to carry one inline relation, so the edge is \
+             observable after creation.",
+            "--relation",
+            "CONTRASTS_WITH:edge-graph--welcome-to-memstead",
+        ])
+        .assert()
+        .success();
+
+    let out = stdout_of(
+        memstead()
+            .current_dir(&root)
+            .args(["entity", "edge-graph--edge-source", "--include-relations"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        out.contains("welcome-to-memstead"),
+        "the inline relation must be readable after creation; got:\n{out}",
+    );
+}
+
+/// The `--help` text no longer claims a restriction that is gone.
+#[test]
+fn create_help_no_longer_claims_a_mem_repo_only_relation_limit() {
+    let out = stdout_of(memstead().args(["create", "--help"]).assert().success());
+    assert!(
+        !out.contains("Mem-repo workspaces only"),
+        "create --help must not claim a lifted restriction; got:\n{out}",
+    );
+}
+
 /// The two commands exist on the declared CLI surface (the doc
 /// generator and `--help` read the same clap tree).
 #[test]

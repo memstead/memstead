@@ -14,9 +14,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 
 use memstead_base::CreateEntityArgs;
-#[cfg(feature = "mem-repo")]
 use memstead_base::EntityId;
-#[cfg(feature = "mem-repo")]
 use memstead_base::ops::RelateArg;
 use memstead_base::vcs::Actor;
 
@@ -52,8 +50,9 @@ pub struct Args {
     pub metadata: Vec<String>,
 
     /// Initial relationship: repeatable `--relation TYPE:target-id`.
-    /// Mem-repo workspaces only — on filesystem mems this refuses;
-    /// use `memstead relate` after creation there.
+    /// Works on both workspace shapes. A target that does not exist yet
+    /// is materialised as a forward-reference stub, same as on the MCP
+    /// surface.
     #[arg(long = "relation", value_name = "TYPE:TARGET")]
     pub relations: Vec<String>,
 
@@ -356,18 +355,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     )
                     .into());
             }
-            // `--relation` and `--dry-run` are not yet honoured on the
-            // filesystem path — the unified `Engine::create_entity`
-            // surface accepts neither. Surface that as a clear
-            // validation error rather than silently dropping the flags.
-            if !payload.relations.is_empty() {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "INVALID_INPUT",
-                    "--relation is not yet supported on filesystem-mem `memstead create` — use `memstead relate` after creation",
-                )
-                .into());
-            }
+            // `--relation` IS honoured here: `Engine::create_entity`
+            // and `create_entity_with_ctx` share one `prepare_create`,
+            // which validates and materialises inline relations
+            // regardless of which backend serves the mount — the MCP
+            // surface has been creating entities with their edges on
+            // this shape all along. The guard that used to sit here was
+            // CLI-local, and refusing what the sibling surface performs
+            // reads as an engine limit that does not exist.
+            //
+            // `--dry-run` is untouched by that lift and still refuses:
+            // this branch has never exercised the preview path, and a
+            // rehearsal that quietly landed a real write is the one
+            // failure mode worth keeping a refusal for.
             if dry_run {
                 return Err(CliError::new(
                     ExitKind::Validation,
@@ -384,7 +384,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 entity_type: payload.entity_type,
                 sections: payload.sections,
                 metadata: payload.metadata,
-                relations: Vec::new(),
+                relations: payload
+                    .relations
+                    .into_iter()
+                    .map(|r| RelateArg {
+                        to: EntityId::canonical(&r.to),
+                        rel_type: r.rel_type,
+                        description: r.description,
+                    })
+                    .collect(),
                 dry_run: false,
             };
             let outcome = engine

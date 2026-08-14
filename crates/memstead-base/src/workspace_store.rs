@@ -300,6 +300,31 @@ pub fn is_workspace_root(dir: &Path) -> bool {
     FileWorkspaceStore::workspace_toml_path(dir).is_file()
 }
 
+/// True when the workspace root carries `mem-repo/.git/` — the
+/// multi-mem, git-backed shape. False for the single-mem, history-free
+/// filesystem-mem shape. The `.memstead/workspace.toml` marker is
+/// shape-neutral, so this directory probe is what distinguishes the two.
+///
+/// The shared shape primitive: the CLI's `WorkspaceShape` resolution,
+/// the mem-repo-only refusals, and the MCP boot line all route through
+/// here so no surface can name a shape the others disagree with.
+pub fn is_mem_repo_shaped(workspace_root: &Path) -> bool {
+    workspace_root.join("mem-repo").join(".git").is_dir()
+}
+
+/// The one spelling of a workspace's shape, for any surface that names
+/// it to a human or an agent: `"mem-repo"` or `"filesystem-mem"`. Both
+/// spellings match the vocabulary the refusals use
+/// (`UNSUPPORTED_WORKSPACE_SHAPE`) and the commands that create each
+/// shape (`memstead mem-repo init` / `memstead quickstart`).
+pub fn workspace_shape_label(workspace_root: &Path) -> &'static str {
+    if is_mem_repo_shaped(workspace_root) {
+        "mem-repo"
+    } else {
+        "filesystem-mem"
+    }
+}
+
 impl WorkspaceStoreAdapter for FileWorkspaceStore {
     fn load(&self, workspace_root: &Path) -> Result<Workspace, StoreError> {
         let memstead_dir = workspace_root.join(WORKSPACE_STORE_DIR);

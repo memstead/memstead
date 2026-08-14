@@ -185,6 +185,53 @@ fn full_binary_boot_failure_prints_typed_code_and_shared_message() {
     );
 }
 
+/// Spawn the binary against `root`, let stdin EOF end it, return stderr.
+fn boot_stderr(root: &std::path::Path) -> String {
+    let output = Command::new(memstead_mcp_bin())
+        .current_dir(root)
+        .env("RUST_LOG", "info")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn memstead-mcp (full) — confirm the binary built before running tests");
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// The boot line names the shape actually opened, on both shapes. The
+/// full binary serves both, and the mem-repo-only subcommands refuse on
+/// one of them — a boot line that always said "mem-repo" made that
+/// refusal read as spurious to anyone debugging from the log.
+#[test]
+fn full_binary_boot_line_names_the_shape_it_opened() {
+    // mem-repo shape: `mem-repo/.git/` present.
+    let repo_ws = TempDir::new().unwrap();
+    seed_workspace(repo_ws.path());
+    memstead_git_branch::test_support::init_real_mem_repo(repo_ws.path(), &[]);
+    let stderr = boot_stderr(repo_ws.path());
+    assert!(
+        stderr.contains("boot: mem-repo workspace at"),
+        "mem-repo workspace must boot as mem-repo\n--- stderr ---\n{stderr}"
+    );
+
+    // filesystem-mem shape: the same marker, no `mem-repo/.git/` — the
+    // shape `memstead quickstart` produces.
+    let fs_ws = TempDir::new().unwrap();
+    seed_workspace(fs_ws.path());
+    let stderr = boot_stderr(fs_ws.path());
+    assert!(
+        stderr.contains("boot: filesystem-mem workspace at"),
+        "filesystem-mem workspace must boot as filesystem-mem\n--- stderr ---\n{stderr}"
+    );
+    // The false spelling never appears for this shape. "filesystem-mem
+    // workspace" does not contain "mem-repo workspace", so this is an
+    // exact discrimination, not a prefix accident.
+    assert!(
+        !stderr.contains("mem-repo workspace at"),
+        "the mem-repo spelling must never name a filesystem-mem workspace\n--- stderr ---\n{stderr}"
+    );
+}
+
 fn tools_call_request(id: i64, name: &str) -> String {
     serde_json::to_string(&serde_json::json!({
         "jsonrpc": "2.0",

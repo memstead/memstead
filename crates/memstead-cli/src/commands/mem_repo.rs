@@ -120,6 +120,7 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         crate::output::print_json(&serde_json::json!({
             "mem_repo_dir": outcome.mem_repo_dir.display().to_string(),
             "workspace_toml": outcome.workspace_toml.display().to_string(),
+            "workspace_shape": crate::setup::WorkspaceShape::MemRepo.label(),
         }))?;
     } else {
         println!(
@@ -131,6 +132,16 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "  __MEMSTEAD: empty (unified registry ref for workspace schemas + per-mem configs)"
         );
         println!("  config: {}", outcome.workspace_toml.display());
+        // Symmetric disclosure: whichever verb opened the workspace
+        // says which of the two shapes the user now has, what it costs,
+        // and the command for the other one. A shape statement attached
+        // only to the filesystem branch would read as a warning about
+        // that branch rather than as the fork it actually is.
+        println!();
+        println!(
+            "{}",
+            crate::setup::shape_disclosure_lines(crate::setup::WorkspaceShape::MemRepo).join("\n"),
+        );
     }
 
     // Outer-repo provenance is human-facing context, not part of the
