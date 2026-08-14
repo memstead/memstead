@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-14
+
 ### Changed
 - **The surfaces a newcomer reads stop withholding what they know.**
   From the 2026-08-13 cold-start run — an agent with no prior
@@ -1883,7 +1885,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/memstead/memstead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/memstead/memstead/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/memstead/memstead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/memstead/memstead/compare/v0.2.0...v0.3.0
