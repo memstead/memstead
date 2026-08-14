@@ -442,3 +442,71 @@ fn projection_migrate_dangling_ref_returns_typed_code() {
     assert_typed_code(&env, "projection migrate dangling ref");
     assert_eq!(env["code"], "PROJECTION_MIGRATE_DANGLING_REF", "got: {env}");
 }
+
+/// Every user-reachable refusal on the `memstead install` flow carries
+/// a typed code. The flow is short but every leg of it can fail on
+/// ordinary input: a path that is not there, bytes that are not an
+/// archive, an archive whose embedded schema will not load, a registry
+/// ref for something that was never published, and the workspace-shape
+/// gate. None of them may collapse into INTERNAL.
+#[test]
+fn install_refusals_are_all_typed() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("ws");
+    let cache = tmp.path().join("cache");
+    memstead()
+        .args([
+            "mem-repo",
+            "init",
+            workspace.to_str().unwrap(),
+            "--no-gitignore",
+        ])
+        .assert()
+        .success();
+
+    // Not a file.
+    let missing = tmp.path().join("nowhere.mem");
+    // Not an archive.
+    let garbage = tmp.path().join("garbage.mem");
+    std::fs::write(&garbage, b"definitely not a zip").unwrap();
+
+    let cases: [(&str, &str); 4] = [
+        ("missing local path", missing.to_str().unwrap()),
+        ("non-archive bytes", garbage.to_str().unwrap()),
+        // The legacy `@scope/name` shape — a user-triggerable input form.
+        ("legacy at-scope ref", "@memstead/knowledge"),
+        // A path-shaped source that is neither a registry ref nor a file.
+        ("directory as source", tmp.path().to_str().unwrap()),
+    ];
+    for (label, source) in cases {
+        let output = memstead()
+            .current_dir(&workspace)
+            .env("MEMSTEAD_MEM_CACHE", &cache)
+            .args(["--json", "install", source])
+            .assert()
+            .failure()
+            .get_output()
+            .stdout
+            .clone();
+        let env = parse_envelope(&output);
+        assert_typed_code(&env, &format!("install: {label}"));
+    }
+
+    // The workspace-shape gate: a folder workspace has no local schema
+    // storage a sealed third-party package could be staged into, so
+    // install refuses there — typed, and before any side effect.
+    let folder_ws = tmp.path().join("folder-ws");
+    std::fs::create_dir_all(folder_ws.join(".memstead")).unwrap();
+    std::fs::write(folder_ws.join(".memstead").join("workspace.toml"), "").unwrap();
+    let output = memstead()
+        .current_dir(&folder_ws)
+        .env("MEMSTEAD_MEM_CACHE", &cache)
+        .args(["--json", "install", garbage.to_str().unwrap()])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env = parse_envelope(&output);
+    assert_typed_code(&env, "install into a folder workspace");
+}

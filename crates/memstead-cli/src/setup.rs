@@ -404,11 +404,15 @@ pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
 /// on a folder-mount-only workspace.
 #[cfg(feature = "mem-repo")]
 pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
+    // Typed, not INTERNAL: an unreadable or deleted working directory
+    // is an environment condition the caller can act on (`cd` somewhere
+    // that exists), and no leaf of a user-triggerable command may
+    // collapse into the generic sentinel.
     let cwd = std::env::current_dir().map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            crate::INTERNAL_CODE,
-            format!("could not determine current directory: {e}"),
+            "INTERNAL_IO_ERROR",
+            format!("could not determine the current directory ({e}) — run from a directory that exists and is readable"),
         )
     })?;
 

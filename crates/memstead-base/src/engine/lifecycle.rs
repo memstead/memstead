@@ -28,6 +28,21 @@ use crate::workspace::{Mount, MountStorage, WorkspaceSettings};
 use super::boot::collect_source_entries;
 use super::{BackendFactory, Engine, EngineError, GitBranchOps, MountedBackend};
 
+/// What [`Engine::stage_sealed_schema`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaStaging {
+    /// The pin already resolves in this workspace — nothing written.
+    /// Re-installing a mem, and installing a second mem that pins the
+    /// same schema, both land here.
+    AlreadyResolvable,
+    /// The package was written into the workspace's local schema
+    /// storage and is resolvable in this process from now on.
+    Staged,
+    /// The archive carries no embedded schema tree. Nothing to stage;
+    /// the pin must resolve on its own or the mount refuses.
+    NoEmbeddedSchema,
+}
+
 impl Engine {
     /// Replace the workspace-level settings. Called by
     /// [`Self::from_workspace_root`] (and the full counterpart) after
@@ -152,6 +167,118 @@ impl Engine {
         // presence (absent marker = legacy semantics).
         let files = memstead_schema::loader::with_format_marker(files.to_vec());
         (ops.write_schema)(&gitdir, name, version, &files).map_err(EngineError::Backend)
+    }
+
+    /// Make a **sealed third-party** schema package resolvable in this
+    /// workspace — the install-time half of "a published mem installs
+    /// on the strength of the schema it carries".
+    ///
+    /// The package (package-relative files: `schema.yaml`,
+    /// `types/<t>.yaml`, `schema-format.json`) is written into the
+    /// workspace's local schema storage, the same storage
+    /// [`Self::install_schema`] writes to and the pin resolver reads —
+    /// so the mount that follows resolves without a fourth mechanism
+    /// and a second mem pinning the same schema finds it already
+    /// there. The loaded schema also lands in this engine's live
+    /// catalogue, so the caller mounts in the same process without a
+    /// reload.
+    ///
+    /// Two things it deliberately does NOT do. It does not run the
+    /// authoring gate ([`Self::validate_schema_package`]): these are a
+    /// third party's sealed bytes, the installing user cannot fix
+    /// them, and the archive validator has already admitted them under
+    /// the sealed reading — applying the authoring gate here would
+    /// make an archive that is valid to publish invalid to install.
+    /// And it does not append the format marker: presence of the
+    /// marker IS the package's metadata-polarity generation, so
+    /// injecting one would rewrite the meaning of bytes the publisher
+    /// sealed.
+    ///
+    /// Idempotent: a pin the engine can already resolve returns
+    /// [`SchemaStaging::AlreadyResolvable`] with nothing written.
+    pub fn stage_sealed_schema(
+        &mut self,
+        mem: &str,
+        pin: &memstead_schema::SchemaRef,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<SchemaStaging, EngineError> {
+        let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
+            .workspace_schemas
+            .iter()
+            .chain(self.builtin_schemas.iter())
+            .cloned()
+            .collect();
+        if crate::engine::SchemaResolver::new(&catalogue)
+            .resolve(pin)
+            .is_ok()
+        {
+            return Ok(SchemaStaging::AlreadyResolvable);
+        }
+        if files.is_empty() {
+            // Nothing embedded to stage. The caller's mount attempt
+            // reports the unresolved pin with its own source trail —
+            // that IS the actionable error here.
+            return Ok(SchemaStaging::NoEmbeddedSchema);
+        }
+
+        let unloadable = |reason: String| EngineError::EmbeddedSchemaInvalid {
+            mem: mem.to_string(),
+            pin: pin.as_display(),
+            reason,
+        };
+        // Read it exactly as the local schema source will read it back
+        // — one sealed reader, so admission and re-read cannot diverge.
+        let schema =
+            memstead_schema::load_sealed_package(files).map_err(|e| unloadable(e.to_string()))?;
+        let (name, version) = schema.id();
+        if name != pin.name || version != pin.version {
+            return Err(unloadable(format!(
+                "the package declares '{name}@{version}' but the mem pins {}",
+                pin.as_display()
+            )));
+        }
+
+        self.write_to_local_schema_source(&name, &version.to_string(), files)?;
+        self.workspace_schemas.push(std::sync::Arc::new(schema));
+        Ok(SchemaStaging::Staged)
+    }
+
+    /// Write a schema package into the workspace's local schema
+    /// storage — the git-branch `__MEMSTEAD:schemas/` ref when the
+    /// workspace is mem-repo-shaped. Shares
+    /// [`Self::install_schema`]'s gitdir resolution so authored and
+    /// staged packages land in one place.
+    fn write_to_local_schema_source(
+        &self,
+        name: &str,
+        version: &str,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<(), EngineError> {
+        let gitdir = self
+            .mounts
+            .iter()
+            .find_map(|m| match &m.mount.storage {
+                crate::workspace::MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.workspace_root()
+                    .map(|r| r.join("mem-repo").join(".git"))
+            })
+            .filter(|g| g.is_dir())
+            .ok_or_else(|| {
+                EngineError::Mem(
+                    "staging a schema requires a mem-repo workspace — the folder workspace's \
+                     `.memstead/schemas/` is the authoring tier and never holds sealed \
+                     third-party packages"
+                        .to_string(),
+                )
+            })?;
+        let ops = self.git_branch_ops.as_ref().ok_or_else(|| {
+            EngineError::Mem("git-branch ops are not wired on this engine".to_string())
+        })?;
+        (ops.write_schema)(&gitdir, name, version, files).map_err(EngineError::Backend)?;
+        Ok(())
     }
 
     /// Validate a schema package's files before they are sealed. Runs

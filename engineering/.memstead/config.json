@@ -3,7 +3,7 @@
   "schema": "engineering@0.1.0",
   "reviewMark": "2026-07-13T16:44:07.072Z",
   "mutationStamp": {
-    "engineVersion": "0.4.0",
+    "engineVersion": "0.4.0+g654bddb-dirty",
     "schema": "engineering@0.1.0"
   }
 }

@@ -72,11 +72,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
         // Stream the archive into a tempfile; the cache helper reads
         // from a path, so a tempfile is the cheapest bridge.
+        // Typed, not INTERNAL: a full or unwritable temp directory is
+        // an environment condition the user can act on, and no leaf of
+        // the install flow may collapse into the generic sentinel.
         let tmp = tempfile::NamedTempFile::new().map_err(|e| {
             CliError::new(
                 ExitKind::Generic,
-                crate::INTERNAL_CODE,
-                format!("tempfile: {e}"),
+                "INTERNAL_IO_ERROR",
+                format!(
+                    "could not create a temporary file to download into ({e}) — check that the \
+                     system temp directory is writable and has free space"
+                ),
             )
         })?;
         registry::download_mem(&client, &base, &scope, &name, tmp.path()).map_err(|e| {
@@ -214,7 +220,26 @@ fn emit_outcome(
 /// variants stay on the generic exit code with the underlying error
 /// message — they already carry the right shape for the CLI.
 fn install_err_to_cli(e: memstead_git_branch::mem_cache::InstallError) -> anyhow::Error {
+    use memstead_base::validator::ValidationError;
     use memstead_git_branch::mem_cache::InstallError;
+    // An archive whose own embedded schema will not load is its own
+    // refusal class, not a generic validation failure and emphatically
+    // not `SCHEMA_NOT_FOUND`: the package is inside the archive the
+    // user just handed us, so no amount of `memstead schema install`
+    // helps. Same code the engine raises when the staging half catches
+    // it, so one class reads as one code whichever gate fires.
+    if let InstallError::Validation(
+        ValidationError::EmbeddedSchemaInvalid { .. }
+        | ValidationError::EmbeddedSchemaMismatch { .. },
+    ) = &e
+    {
+        return CliError::new(
+            ExitKind::Validation,
+            "EMBEDDED_SCHEMA_INVALID",
+            e.to_string(),
+        )
+        .into();
+    }
     if let InstallError::ShadowsWritable {
         archive_name,
         shadows_writable,

@@ -21,10 +21,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use memstead_base::ops::WarningHint;
-use memstead_schema::{
-    ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, ARCHIVE_SCHEMA_PREFIX, PublishedMemConfig, SchemaRef,
-    SchemaRegistry,
-};
+use memstead_schema::{ARCHIVE_CONFIG_PATH, ARCHIVE_EXTENSION, PublishedMemConfig};
 
 use crate::entity::loader::LoadError;
 use crate::mem_repo_config::MemRepoWriteError;
@@ -197,6 +194,13 @@ pub struct CacheInstallOutcome {
     /// `true` if canonical bytes were written on this call; `false`
     /// on the idempotent dedup path.
     pub copied_to_cache: bool,
+    /// The archive's embedded schema package, package-relative
+    /// (`schema.yaml`, `types/<t>.yaml`, `schema-format.json`) and
+    /// byte-verbatim. Carried out of the validator because the mount
+    /// that follows can only be registered once this schema resolves,
+    /// and for a third party's vocabulary the archive is the only
+    /// place it exists. Empty when the archive embeds no schema tree.
+    pub schema_files: Vec<(String, Vec<u8>)>,
     /// Typed non-fatal issues surfaced by the install.
     pub warnings: Vec<WarningHint>,
 }
@@ -246,6 +250,7 @@ pub fn install_to_cache(
         cache_path: dest,
         cache_key,
         copied_to_cache,
+        schema_files: memstead_base::validator::archive::to_package_files(&validated.schema_files),
         warnings: Vec::new(),
     })
 }
@@ -271,11 +276,21 @@ pub enum MountRegistration {
 /// when the content changed. The caller persists the mount state
 /// (`engine.persist_state()`) after a `Registered` / `Refreshed`
 /// outcome.
+///
+/// Staging comes first and for a reason: a mem published under a
+/// third party's vocabulary carries that vocabulary inside the
+/// archive and nowhere else, so the pin the mount resolves against
+/// only exists once the embedded package has been written into the
+/// workspace's local schema storage. Staging is idempotent and
+/// refuses before any mount side effect, so a broken embedded schema
+/// leaves neither a staged package nor a registered mount behind.
 pub fn register_cached_archive(
     engine: &mut memstead_base::Engine,
     outcome: &CacheInstallOutcome,
     by_tool: &'static str,
 ) -> Result<MountRegistration, memstead_base::EngineError> {
+    engine.stage_sealed_schema(&outcome.mem_name, &outcome.schema, &outcome.schema_files)?;
+
     let registration = match engine.mount(&outcome.mem_name) {
         Some(existing) if existing.capability == memstead_base::MountCapability::ReadOnly => {
             match &existing.storage {
@@ -313,195 +328,6 @@ pub fn register_cached_archive(
     };
     engine.register_read_mount(mount, backend, origin)?;
     Ok(registration)
-}
-
-/// Outcome of `extract_archive_schema_if_needed` — so callers can log
-/// the specific reason a no-op happened, or know whether the mem's
-/// schema registry needs to be rebuilt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SchemaExtractionOutcome {
-    /// The archive's pinned schema is already registered — extraction
-    /// skipped. Author-layer schemas always shadow cache entries, so
-    /// skipping when the registry already knows the pin preserves the
-    /// documented precedence order.
-    AlreadyRegistered,
-    /// The archive carries no `.memstead/schema/` tree. Loading still works
-    /// if the pin happens to be in the registry; otherwise the normal
-    /// `resolve_mem_schema` path reports the missing schema with its
-    /// actionable error.
-    NoEmbeddedSchema,
-    /// A cache entry at
-    /// `<workspace_root>/.memstead.cache/schemas/<name>-<version>/`
-    /// already existed on disk — extraction skipped, but the registry
-    /// may still need a rebuild if the caller hadn't picked it up yet.
-    CacheAlreadyPopulated,
-    /// Fresh extraction wrote files into
-    /// `<workspace_root>/.memstead.cache/schemas/<name>-<version>/`. Caller
-    /// must rebuild the `SchemaRegistry` to pick it up.
-    Extracted { schema: SchemaRef, path: PathBuf },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum SchemaExtractionError {
-    #[error("could not read mem archive {}: {source}", .archive_path.display())]
-    Archive {
-        archive_path: PathBuf,
-        #[source]
-        source: LoadError,
-    },
-    #[error("archive {} failed strict validation: {source}", .archive_path.display())]
-    Validation {
-        archive_path: PathBuf,
-        #[source]
-        source: ValidationError,
-    },
-    #[error("i/o error extracting schema to {}: {source}", .path.display())]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-}
-
-/// Extract the schema embedded in `archive_path` into the writable
-/// mem's cache, but only when the pinned `(name, version)` is not
-/// already registered.
-///
-/// Idempotent: repeated calls on the same archive are safe. Runs the
-/// archive through `validate_and_normalize_archive` — which enforces
-/// embedded-schema integrity (the loader-based manifest check + name/
-/// version match against `.memstead/config.json`), so a corrupt schema
-/// surfaces here as a `Validation` error instead of silently polluting
-/// the cache.
-///
-/// The extraction path is atomic: files are written into a sibling
-/// `.tmp` directory and renamed into place only after every byte has
-/// landed. A mid-write crash leaves the `.tmp` sibling behind, never
-/// a half-populated `<name>-<version>/` that a subsequent
-/// `SchemaRegistry::load_for_mem` might try to load.
-pub fn extract_archive_schema_if_needed(
-    archive_path: &Path,
-    workspace_root: &Path,
-    registry: &SchemaRegistry,
-) -> Result<SchemaExtractionOutcome, SchemaExtractionError> {
-    // Cheap prefix pass: read only the archive's published config so we can skip
-    // the full validation for archives whose pin is already in the
-    // registry (the common case for repeat loads).
-    let config =
-        read_published_config(archive_path).map_err(|source| SchemaExtractionError::Archive {
-            archive_path: archive_path.to_path_buf(),
-            source,
-        })?;
-    if registry
-        .get(&config.schema.name, &config.schema.version)
-        .is_some()
-    {
-        return Ok(SchemaExtractionOutcome::AlreadyRegistered);
-    }
-
-    let dest = workspace_root
-        .join(".memstead.cache/schemas")
-        .join(format!("{}-{}", config.schema.name, config.schema.version));
-    if dest.is_dir() {
-        // Someone already extracted; the registry just hasn't rebuilt
-        // with the cache pass yet. Caller rebuilds.
-        return Ok(SchemaExtractionOutcome::CacheAlreadyPopulated);
-    }
-
-    // Full validation — loads the archive, validates the embedded schema
-    // via `check_embedded_schema`, produces canonical bytes. We only
-    // need the schema files, but paying for the full pipeline once on
-    // cache-miss is correct: an attacker who drops a tampered archive
-    // into the global cache doesn't get to seed the workspace from an
-    // unvalidated payload.
-    let bytes = std::fs::read(archive_path).map_err(|source| SchemaExtractionError::Io {
-        path: archive_path.to_path_buf(),
-        source,
-    })?;
-    let validated = validate_and_normalize_archive(&bytes).map_err(|source| {
-        SchemaExtractionError::Validation {
-            archive_path: archive_path.to_path_buf(),
-            source,
-        }
-    })?;
-
-    if validated.schema_files.is_empty() {
-        return Ok(SchemaExtractionOutcome::NoEmbeddedSchema);
-    }
-
-    extract_schema_files_atomic(&validated.schema_files, &dest).map_err(|source| {
-        SchemaExtractionError::Io {
-            path: dest.clone(),
-            source,
-        }
-    })?;
-
-    Ok(SchemaExtractionOutcome::Extracted {
-        schema: config.schema,
-        path: dest,
-    })
-}
-
-/// Write `schema_files` to `dest` via a sibling `.tmp` directory that
-/// is renamed into place once every file has been written. Rename
-/// atomicity varies by FS but every supported target (ext4, HFS+, APFS,
-/// NTFS) gives us "dest contains every file or nothing," which is the
-/// invariant the load path relies on. The incoming paths always start
-/// with `.memstead/schema/` (legacy archives are normalized at extract
-/// time) — we strip that prefix so the on-disk layout matches the
-/// schema-cache shape `schema.yaml` + `types/<t>.yaml` exactly.
-fn extract_schema_files_atomic(
-    schema_files: &[crate::validator::archive::SchemaFile],
-    dest: &Path,
-) -> std::io::Result<()> {
-    let parent = dest
-        .parent()
-        .ok_or_else(|| std::io::Error::other("schema cache destination has no parent directory"))?;
-    std::fs::create_dir_all(parent)?;
-
-    // Sibling tmp dir name is dot-prefixed so `list_schema_subdirs`
-    // ignores it if a crash between write and rename leaves a straggler.
-    // PID + monotonic counter guarantees uniqueness across concurrent
-    // extractions of the same pin; the atomic rename serializes the
-    // winner and the loser's tmp dir gets best-effort cleanup on the
-    // returned error.
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = parent.join(format!(
-        ".memstead-schema-extract-{}-{}",
-        std::process::id(),
-        ts,
-    ));
-
-    // Wipe any leftover from a previous failed extract with the same
-    // PID+time — the path is ours by construction.
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp)?;
-
-    for sf in schema_files {
-        let rel = sf
-            .archive_path
-            .strip_prefix(ARCHIVE_SCHEMA_PREFIX)
-            .unwrap_or(sf.archive_path.as_str());
-        let file_path = tmp.join(rel);
-        if let Some(file_parent) = file_path.parent() {
-            std::fs::create_dir_all(file_parent)?;
-        }
-        std::fs::write(&file_path, sf.content.as_bytes())?;
-    }
-
-    match std::fs::rename(&tmp, dest) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            // Rename lost (dest appeared from a racer, or some other
-            // filesystem error). Clean up our tmp so we don't leave a
-            // stray `.memstead-schema-extract-*` sibling behind.
-            let _ = std::fs::remove_dir_all(&tmp);
-            Err(e)
-        }
-    }
 }
 
 #[cfg(test)]

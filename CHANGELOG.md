@@ -42,6 +42,45 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     **schema** name, so the hint sent an agent into a typed error on
     its first schema lookup.
 
+### Fixed
+- **A published mem now installs on the strength of the schema it
+  carries.** `memstead install` could only install mems pinned to a
+  schema the installing engine already had — in practice, only the
+  built-ins. Every archive embeds its own schema and the archive
+  validator read and accepted it, but nothing ever wrote that package
+  into the storage the pin resolver consults, so the mount refused
+  with `SCHEMA_NOT_FOUND` and advised installing a package that was
+  sitting inside the archive. Three of the four mems published on
+  memstead.io failed this way, and had since the first release. The
+  install now stages the archive's embedded schema into the
+  workspace's own schema storage before registering the mount, so a
+  third party can publish under a vocabulary of their own authorship
+  and anyone can install and read it — offline, with no manual schema
+  step and no republishing.
+  - Sealed content is read under the generation it was sealed in, by
+    the same reader that admitted it: a package the archive validator
+    accepts is a package the mount can be registered against. Keys
+    retired after a package was sealed (`propagating_relationships`,
+    the `optional:` polarity) keep their written meaning on the way in
+    — the installing user is not the author and cannot fix a third
+    party's bytes. Authoring is unchanged and still strict: `memstead
+    schema validate` and `memstead schema install` refuse those keys
+    by name so the author can act.
+  - An archive whose embedded schema genuinely will not load now
+    refuses with `EMBEDDED_SCHEMA_INVALID`, quoting the loader's own
+    diagnosis, instead of `SCHEMA_NOT_FOUND` pointing at a package the
+    archive contains. Nothing is mounted and nothing staged after such
+    a refusal.
+  - No leaf of the install flow reports `code: INTERNAL` any more.
+
+### Removed
+- The `<workspace>/.memstead.cache/schemas/` layer, which the schema
+  registry and the publish-side collector both read and nothing ever
+  wrote, together with the dead archive-extraction helper that was to
+  have filled it and the `SCHEMA_CACHE_COLLISION` code that guarded
+  it. It offered the appearance of a staging mechanism while the pin
+  resolver looked elsewhere; there is now one staging path.
+
 ## [0.6.0] - 2026-08-10
 
 **The doorway release.** A first-time schema author, modelling a domain the

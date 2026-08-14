@@ -285,6 +285,11 @@ impl From<EngineError> for MemsteadError {
             EngineError::SchemaNotFound { mem, pin, .. } => Self::SchemaError {
                 message: format!("mem {mem}: schema pin {pin} not found"),
             },
+            EngineError::EmbeddedSchemaInvalid { mem, pin, reason } => Self::SchemaError {
+                message: format!(
+                    "mem {mem}: the schema {pin} embedded in the archive could not be loaded: {reason}"
+                ),
+            },
             EngineError::SchemaResolverInit(e) => Self::SchemaError {
                 message: format!("schema resolver init failed: {e}"),
             },

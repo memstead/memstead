@@ -665,6 +665,14 @@ impl CliError {
                 })),
             ),
             e @ SchemaNotFound { .. } => (ExitKind::Validation, Some(e.details())),
+            EmbeddedSchemaInvalid { mem, pin, reason } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({
+                    "mem": mem,
+                    "schema": pin,
+                    "error": reason,
+                })),
+            ),
             SchemaPackageInvalid {
                 name,
                 version,

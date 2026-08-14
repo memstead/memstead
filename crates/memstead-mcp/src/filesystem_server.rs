@@ -893,6 +893,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             })),
         ),
         e @ EngineError::SchemaNotFound { .. }
+        | e @ EngineError::EmbeddedSchemaInvalid { .. }
         | e @ EngineError::SchemaPackageInvalid { .. }
         | e @ EngineError::SchemaResolverInit(_)
         | e @ EngineError::DuplicateMem(_)

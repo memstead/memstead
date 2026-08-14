@@ -2588,6 +2588,7 @@ dependencies = [
  "tokio",
  "toml",
  "toml_edit",
+ "zip",
 ]
 
 [[package]]

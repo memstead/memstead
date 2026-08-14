@@ -73,7 +73,7 @@ pub use engine::{
     GitBranchExportFn, GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn,
     GitBranchPushFn, GitBranchReadTreeFn, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, INLINE_LIST_CAP,
     MutationClock, ReferrerInfo, RelateAction, RelateEntityArgs, RelateEntityOutcome,
-    RenameEntityArgs, RenameEntityOutcome, ReviewMarkStatus, SchemaSourceDiagnostic,
+    RenameEntityArgs, RenameEntityOutcome, ReviewMarkStatus, SchemaSourceDiagnostic, SchemaStaging,
     SetReviewMarkOutcome, StoryStart, UpdateEntityArgs, UpdateEntityOutcome,
     format_inline_list_overflow,
 };

@@ -10,9 +10,7 @@
 //! Resolution order (first match wins):
 //! 1. `<workspace>/<schemas_dir>/<name>/` — workspace-level shared
 //!    schemas (optional; when the caller supplies a workspace path)
-//! 2. `<workspace>/.memstead.cache/schemas/<name>-<version>/` — cache
-//!    extracted from a previously loaded archive (workspace-wide)
-//! 3. Embedded built-in (via `include_dir!`) — ships inside the binary
+//! 2. Embedded built-in (via `include_dir!`) — ships inside the binary
 //!
 //! In every case the manifest's declared version is checked against the
 //! pin; a name collision at the wrong version falls through rather than
@@ -58,10 +56,9 @@ pub enum SchemaSourceError {
     )]
     NotFound {
         schema_ref: String,
-        /// Every filesystem location (mem-local, workspace-level,
-        /// cache) consulted before falling through to the embedded
-        /// builtins. Listed in resolution order so the error message
-        /// matches the precedence the resolver walked.
+        /// Every filesystem location consulted before falling through
+        /// to the embedded builtins. Listed in resolution order so the
+        /// error message matches the precedence the resolver walked.
         candidates: Vec<PathBuf>,
     },
 
@@ -70,21 +67,6 @@ pub enum SchemaSourceError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
-    },
-
-    /// Two distinct on-disk schema directories share the same
-    /// `<name>-<version>` cache key. Indicates a bug in the cache
-    /// extraction pipeline — silent overwrite would mask the issue.
-    #[error(
-        "schema cache collision: '{name}-{version}' has more than one source directory ({} and {})",
-        .first.display(),
-        .second.display()
-    )]
-    CacheCollision {
-        name: String,
-        version: String,
-        first: PathBuf,
-        second: PathBuf,
     },
 
     #[error(
@@ -109,15 +91,20 @@ pub enum SchemaSourceError {
 ///
 /// Resolution order (first match wins):
 /// 1. `<workspace_schemas_dir>/<name>/` (when provided)
-/// 2. `<workspace_root>/.memstead.cache/schemas/<name>-<version>/`
-///    (when `workspace_root` is provided)
-/// 3. Embedded builtins
+/// 2. Embedded builtins
+///
+/// A `<workspace_root>/.memstead.cache/schemas/` layer used to sit
+/// between them, meant to hold schemas extracted from installed
+/// archives. Nothing ever populated it; the install path stages into
+/// the backend's schema source instead. `workspace_root` is kept in
+/// the signature because callers thread it and a storage-rooted layer
+/// belongs here if one returns.
 ///
 /// When every filesystem layer misses, the returned `NotFound` lists
 /// every concrete path that was consulted so callers (and agents) can
 /// inspect the resolution trace without re-walking the filesystem.
 pub fn collect_schema_source(
-    workspace_root: Option<&Path>,
+    _workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     schema_ref: &SchemaRef,
 ) -> Result<Vec<SchemaSourceFile>, SchemaSourceError> {
@@ -138,18 +125,6 @@ pub fn collect_schema_source(
         candidates.push(ws_schema_dir.clone());
         if ws_schema_dir.is_dir()
             && let Some(files) = try_collect_dir(&ws_schema_dir, schema_ref)?
-        {
-            return Ok(files);
-        }
-    }
-
-    if let Some(ws_root) = workspace_root {
-        let cache_dir = ws_root
-            .join(".memstead.cache/schemas")
-            .join(format!("{}-{}", schema_ref.name, schema_ref.version));
-        candidates.push(cache_dir.clone());
-        if cache_dir.is_dir()
-            && let Some(files) = try_collect_dir(&cache_dir, schema_ref)?
         {
             return Ok(files);
         }
@@ -542,16 +517,22 @@ write_rules: []
         assert!(matches!(err, SchemaSourceError::VersionMismatch { .. }));
     }
 
+    /// The retired `.memstead.cache/schemas/` layer contributes
+    /// nothing: nothing ever wrote it, and a package sitting there is
+    /// not a resolvable schema source. Publishing resolves from the
+    /// workspace layer or the built-ins.
     #[test]
-    fn cache_schema_resolves_when_workspace_layer_absent() {
+    fn legacy_cache_directory_is_not_a_source() {
         let tmp = TempDir::new().unwrap();
-        // Cache dir encodes version in the folder name: `<name>-<version>`.
         let dir = tmp.path().join(".memstead.cache/schemas/recipe-1.0.0");
         std::fs::create_dir_all(dir.join("types")).unwrap();
         write_schema(&dir, "recipe", "1.0.0", &["spec"]);
         let schema_ref = SchemaRef::new("recipe", semver::Version::new(1, 0, 0));
-        let files = collect_schema_source(Some(tmp.path()), None, &schema_ref).unwrap();
-        assert!(files.iter().any(|f| f.archive_path == "schema.yaml"));
+        let err = collect_schema_source(Some(tmp.path()), None, &schema_ref).unwrap_err();
+        assert!(
+            matches!(err, SchemaSourceError::NotFound { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -561,18 +542,21 @@ write_rules: []
         assert!(matches!(err, SchemaSourceError::NotFound { .. }));
     }
 
+    /// The versioned install shape (`<name>@<version>/`) is consulted
+    /// before the bare hand-authored `<name>/` form, and both win over
+    /// the built-ins.
     #[test]
-    fn workspace_schema_wins_over_cache() {
+    fn versioned_workspace_shape_wins_over_the_bare_one() {
         let tmp = TempDir::new().unwrap();
-        // Cache layer carries a 2-type variant.
-        let cache_dir = tmp.path().join(".memstead.cache/schemas/software-1.0.0");
-        std::fs::create_dir_all(cache_dir.join("types")).unwrap();
-        write_schema(&cache_dir, "software", "1.0.0", &["spec", "memo"]);
-        // Workspace layer carries a 1-type variant — must win.
         let ws_dir = tmp.path().join("schemas");
-        let ws_schema = ws_dir.join("software");
-        std::fs::create_dir_all(ws_schema.join("types")).unwrap();
-        write_schema(&ws_schema, "software", "1.0.0", &["spec"]);
+        // Bare form carries a 2-type variant.
+        let bare = ws_dir.join("software");
+        std::fs::create_dir_all(bare.join("types")).unwrap();
+        write_schema(&bare, "software", "1.0.0", &["spec", "memo"]);
+        // Versioned form carries a 1-type variant — must win.
+        let versioned = ws_dir.join("software@1.0.0");
+        std::fs::create_dir_all(versioned.join("types")).unwrap();
+        write_schema(&versioned, "software", "1.0.0", &["spec"]);
 
         let schema_ref = SchemaRef::new("software", semver::Version::new(1, 0, 0));
         let files = collect_schema_source(Some(tmp.path()), Some(&ws_dir), &schema_ref).unwrap();
@@ -580,7 +564,7 @@ write_rules: []
             .iter()
             .filter(|f| f.archive_path.starts_with("types/"))
             .count();
-        assert_eq!(type_count, 1, "workspace layer must win over cache");
+        assert_eq!(type_count, 1, "the versioned install shape must win");
     }
 
     #[test]
@@ -597,17 +581,12 @@ write_rules: []
                 candidates,
             } => {
                 assert_eq!(name, "missing@2.3.4");
-                // Every filesystem candidate listed in resolution order:
-                // the versioned install shape first, then the bare
-                // workspace schemas dir, then the workspace cache dir.
-                assert_eq!(candidates.len(), 3);
+                // Every filesystem candidate listed in resolution
+                // order: the versioned install shape first, then the
+                // bare workspace schemas dir.
+                assert_eq!(candidates.len(), 2, "got {candidates:?}");
                 assert!(candidates[0].ends_with("schemas/missing@2.3.4"));
                 assert!(candidates[1].ends_with("schemas/missing"));
-                assert!(
-                    candidates[2]
-                        .to_string_lossy()
-                        .contains(".memstead.cache/schemas/missing-2.3.4")
-                );
             }
             other => panic!("expected NotFound, got {other:?}"),
         }

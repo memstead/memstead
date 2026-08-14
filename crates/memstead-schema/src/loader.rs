@@ -232,6 +232,12 @@ pub enum SchemaLoadError {
     #[error("cross_mem_relationships declares duplicate to_schema '{to_schema}'")]
     DuplicateCrossMemToSchema { to_schema: String },
 
+    /// A sealed package's file list carries no `schema.yaml`. Only
+    /// reachable through [`load_sealed_package`] — the directory
+    /// loader surfaces a missing manifest as [`Self::Io`] instead.
+    #[error("sealed schema package carries no schema.yaml")]
+    SealedPackageMissingManifest,
+
     /// A `to_schema: "*"` wildcard entry in a schema that declares no
     /// `alias_target_rel_type`. The wildcard is BOUND to the
     /// alias-synthesised rel-type — a schema that has not opted into
@@ -602,6 +608,55 @@ pub fn load_schema_from_memory(
         None,
         MetadataPolarityFormat::Legacy,
     )
+}
+
+/// Load a **sealed** schema package from its `(relative-path, bytes)`
+/// file list — the shape every sealed surface carries: a published
+/// `.mem` archive's `.memstead/schema/` tree, the git-branch
+/// `__MEMSTEAD:schemas/<name>@<version>/` tree, a built-in version
+/// directory. Paths are package-relative (`schema.yaml`,
+/// `types/<stem>.yaml`, `schema-format.json`); anything else is
+/// ignored.
+///
+/// One function so the surfaces that *admit* a sealed package (the
+/// archive validator) and the surfaces that later *read it back* (the
+/// local schema source the install stages into) can never disagree —
+/// a package valid to publish stays valid to install. The metadata
+/// polarity comes from the package's own format marker, and keys
+/// retired after the package was sealed read with their written
+/// meaning instead of refusing.
+///
+/// Authoring content takes [`load_schema_from_dir`] instead, which
+/// refuses retired keys loudly so the author can act.
+pub fn load_sealed_package(files: &[(String, Vec<u8>)]) -> Result<Schema, SchemaLoadError> {
+    let mut manifest: Option<String> = None;
+    let mut types: Vec<(String, String)> = Vec::new();
+    let mut marked = false;
+    for (rel, bytes) in files {
+        if rel == "schema.yaml" {
+            manifest = Some(String::from_utf8_lossy(bytes).into_owned());
+        } else if rel == SCHEMA_FORMAT_MARKER_FILE {
+            marked = true;
+        } else if let Some(stem) = rel
+            .strip_prefix("types/")
+            .and_then(|f| f.strip_suffix(".yaml"))
+        {
+            types.push((
+                stem.to_string(),
+                String::from_utf8_lossy(bytes).into_owned(),
+            ));
+        }
+    }
+    let manifest = manifest.ok_or(SchemaLoadError::SealedPackageMissingManifest)?;
+    // Deterministic order regardless of how the caller enumerated the
+    // package — accumulated violations must report the same way twice.
+    types.sort_by(|a, b| a.0.cmp(&b.0));
+    let format = if marked {
+        MetadataPolarityFormat::RequiredOptIn
+    } else {
+        MetadataPolarityFormat::Legacy
+    };
+    load_with_context(&manifest, &types, None, None, format)
 }
 
 /// Load a schema from in-memory YAML strings with an explicit

@@ -47,6 +47,7 @@ memstead-git-branch = { workspace = true, features = ["test-support"] }
 predicates.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+zip.workspace = true
 
 [features]
 # `mem-repo` is the default: it pulls in the git-branch backend

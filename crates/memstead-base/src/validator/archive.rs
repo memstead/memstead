@@ -29,14 +29,35 @@ pub struct MarkdownEntry {
 ///
 /// `archive_path` is relative to the archive root — e.g.
 /// `".memstead/schema/schema.yaml"` or `".memstead/schema/types/spec.yaml"`.
-/// Carried as `String` so the canonical re-pack and the
-/// cache-extraction side effect can write identical bytes back out
-/// (CRLF → LF normalization is applied at extract time so re-validation
-/// over `canonical_bytes` is a fixpoint).
+/// Carried as `String` so the canonical re-pack and the install-time
+/// staging side effect can write identical bytes back out (CRLF → LF
+/// normalization is applied at extract time so re-validation over
+/// `canonical_bytes` is a fixpoint).
 #[derive(Debug)]
 pub struct SchemaFile {
     pub archive_path: String,
     pub content: String,
+}
+
+/// Re-key an archive's schema tree to the package-relative shape every
+/// sealed schema surface speaks (`schema.yaml`, `types/<t>.yaml`,
+/// `schema-format.json`) — the form
+/// [`memstead_schema::load_sealed_package`] reads and the form the
+/// local schema source is written in. Files outside the
+/// `.memstead/schema/` tree cannot appear here (the extractor filters
+/// them), so the strip is total in practice; anything unprefixed is
+/// passed through unchanged rather than silently dropped.
+pub fn to_package_files(schema_files: &[SchemaFile]) -> Vec<(String, Vec<u8>)> {
+    schema_files
+        .iter()
+        .map(|sf| {
+            let rel = sf
+                .archive_path
+                .strip_prefix(memstead_schema::ARCHIVE_SCHEMA_PREFIX)
+                .unwrap_or(sf.archive_path.as_str());
+            (rel.to_string(), sf.content.as_bytes().to_vec())
+        })
+        .collect()
 }
 
 #[derive(Debug)]

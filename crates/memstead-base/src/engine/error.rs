@@ -789,6 +789,23 @@ pub enum EngineError {
         /// was available to probe.
         install_hint: Option<String>,
     },
+    /// A sealed schema package carried inside a mem archive could not
+    /// be loaded — the archive's own `.memstead/schema/` tree is
+    /// broken. Deliberately NOT `SchemaNotFound`: the package is right
+    /// here, so the recovery is never "obtain the schema and install
+    /// it". The message quotes the loader's own diagnosis and the
+    /// refusal leaves nothing mounted and nothing staged; only the
+    /// publisher can fix it.
+    #[error(
+        "mem {mem}: the schema {pin} embedded in the archive could not be loaded: {reason} — \
+         the package is inside the archive, so this is the publisher's to fix; nothing was \
+         staged or mounted"
+    )]
+    EmbeddedSchemaInvalid {
+        mem: String,
+        pin: String,
+        reason: String,
+    },
     /// A schema package handed to `install_schema` failed validation —
     /// the loader's semantic checks or the section-heading round-trip
     /// gate. The engine refuses to seal an invalid schema onto
@@ -1185,6 +1202,7 @@ impl EngineError {
             EngineError::Parse(_) => "PARSE_ERROR",
             EngineError::Backend(_) => "MEM_ERROR",
             EngineError::SchemaNotFound { .. } => "SCHEMA_NOT_FOUND",
+            EngineError::EmbeddedSchemaInvalid { .. } => "EMBEDDED_SCHEMA_INVALID",
             EngineError::SchemaPackageInvalid { .. } => "SCHEMA_VALIDATION_FAILED",
             EngineError::SchemaResolverInit(_) => "SCHEMA_RESOLVER_INIT_FAILED",
             EngineError::Mem(_) => "MEM_ERROR",

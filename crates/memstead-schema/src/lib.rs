@@ -36,7 +36,7 @@ pub use config::{
 pub use loader::{
     HeadingKeyViolation, MetadataPolarityFormat, SchemaLoadError, check_reserved_metadata_keys,
     check_section_formats, check_section_heading_roundtrip, load_schema_from_dir,
-    load_schema_from_memory, load_schema_from_memory_with_format,
+    load_schema_from_memory, load_schema_from_memory_with_format, load_sealed_package,
 };
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
@@ -126,28 +126,12 @@ pub enum WorkspaceSchemaLoadError {
         source: SchemaLoadError,
     },
 
-    /// Filesystem error while iterating a schemas/ or .memstead.cache/schemas/
-    /// directory.
+    /// Filesystem error while iterating a `schemas/` directory.
     #[error("i/o error scanning {}: {source}", .path.display())]
     Io {
         path: PathBuf,
         #[source]
         source: std::io::Error,
-    },
-
-    /// Two distinct schema directories share the same `<name>-<version>`
-    /// cache key. Surfaces as `SCHEMA_CACHE_COLLISION` to MCP callers —
-    /// silent overwrite would mask a bug in the extraction pipeline.
-    #[error(
-        "schema cache collision: '{name}-{version}' has more than one source directory ({} and {})",
-        .first.display(),
-        .second.display()
-    )]
-    CacheCollision {
-        name: String,
-        version: semver::Version,
-        first: PathBuf,
-        second: PathBuf,
     },
 }
 
@@ -173,14 +157,11 @@ impl SchemaRegistry {
     }
 
     /// Build a registry starting from the embedded builtins, then layer
-    /// in the workspace-level shared schemas and the workspace-wide
-    /// schema cache.
+    /// in the workspace-level shared schemas.
     ///
     /// Precedence (highest wins on identical `(name, version)`):
     /// 1. `<workspace_schemas_dir>/<schema>/` — workspace-level shared schemas
     /// 2. Embedded builtins (`default@1.0.0`, ...)
-    /// 3. `<workspace_root>/.memstead.cache/schemas/<schema>-<version>/` —
-    ///    extracted from read-mem archives (workspace-wide cache)
     ///
     /// Different versions of the same schema coexist; a mem picks by exact
     /// pin via `MemConfig.schema`.
@@ -190,51 +171,27 @@ impl SchemaRegistry {
     /// definition.
     ///
     /// Returns the first validation failure it hits so a broken schema can
-    /// never silently shadow a working builtin. Two distinct cache
-    /// directories sharing the same `<name>-<version>` key surface as
-    /// [`WorkspaceSchemaLoadError::CacheCollision`] — the extraction
-    /// pipeline must guarantee uniqueness, and silent overwrite would mask
-    /// the bug.
+    /// never silently shadow a working builtin.
+    ///
+    /// A third pass over `<workspace_root>/.memstead.cache/schemas/` used
+    /// to sit underneath these two, meant to carry schemas extracted from
+    /// installed archives. Nothing ever wrote that directory, so it only
+    /// ever contributed the illusion of a staging mechanism; installs now
+    /// stage into the backend's own schema source, which is the storage
+    /// the pin resolver actually reads. `workspace_root` is retained
+    /// because callers pass it and future storage-rooted passes belong
+    /// here.
     ///
     /// `workspace_root` and `workspace_schemas_dir` are independent
     /// optionals: passing `None` for both yields the builtins-only registry
     /// (the `Engine::init` no-settings variant).
     pub fn load_for_workspace(
-        workspace_root: Option<&Path>,
+        _workspace_root: Option<&Path>,
         workspace_schemas_dir: Option<&Path>,
     ) -> Result<Self, WorkspaceSchemaLoadError> {
         let mut reg = Self::empty();
 
-        // Pass 1 (lowest precedence): cache schemas extracted from archives.
-        if let Some(ws_root) = workspace_root {
-            let cache_dir = ws_root.join(".memstead.cache").join("schemas");
-            // Track seen `(name, version)` against the directory that
-            // contributed the schema — a second hit means the extraction
-            // pipeline produced two cache entries for the same key, which
-            // is a bug we surface rather than mask.
-            let mut seen: HashMap<(String, semver::Version), PathBuf> = HashMap::new();
-            for path in list_schema_subdirs(&cache_dir)? {
-                let schema = loader::load_schema_from_dir(&path).map_err(|source| {
-                    WorkspaceSchemaLoadError::Invalid {
-                        path: path.clone(),
-                        source,
-                    }
-                })?;
-                let key = (schema.manifest.name.clone(), schema.version.clone());
-                if let Some(prev) = seen.get(&key) {
-                    return Err(WorkspaceSchemaLoadError::CacheCollision {
-                        name: key.0,
-                        version: key.1,
-                        first: prev.clone(),
-                        second: path,
-                    });
-                }
-                seen.insert(key.clone(), path);
-                reg.schemas.insert(key, Arc::new(schema));
-            }
-        }
-
-        // Pass 2: embedded builtins override cache at the same key.
+        // Pass 1: embedded builtins.
         for schema in builtins::load_builtin_schemas()
             .expect("built-in schemas must load cleanly — bug in shipped YAML")
         {
@@ -242,8 +199,8 @@ impl SchemaRegistry {
             reg.schemas.insert(key, schema);
         }
 
-        // Pass 3 (highest precedence): workspace-level schemas override
-        // both cache and builtins.
+        // Pass 2 (highest precedence): workspace-level schemas override
+        // builtins.
         if let Some(ws_dir) = workspace_schemas_dir {
             for path in list_schema_subdirs(ws_dir)? {
                 let schema = loader::load_schema_from_dir(&path).map_err(|source| {
@@ -681,67 +638,38 @@ write_rules: []
             );
         }
 
+        /// The `.memstead.cache/schemas/` layer is gone: nothing ever
+        /// wrote it, so it only ever offered the appearance of a
+        /// staging mechanism. A schema package sitting there is not a
+        /// registered schema — installs stage into the backend's own
+        /// schema source instead, which is what the pin resolver reads.
         #[test]
-        fn workspace_cache_path_is_workspace_wide() {
-            // The cache lives at `<workspace_root>/.memstead.cache/schemas/`
-            // — never under any mem directory.
+        fn legacy_cache_directory_is_not_a_schema_source() {
             let tmp = TempDir::new().unwrap();
             let cache_dir = tmp.path().join(".memstead.cache/schemas/recipe-1.0.0");
             write_schema(&cache_dir, "recipe", "1.0.0");
 
             let reg = SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap();
             assert!(
-                reg.get("recipe", &semver::Version::new(1, 0, 0)).is_some(),
-                "workspace-wide cache schema must register"
+                reg.get("recipe", &semver::Version::new(1, 0, 0)).is_none(),
+                "the retired cache directory must contribute nothing"
             );
         }
 
         #[test]
-        fn schema_cache_collision_yields_error() {
-            // Two cache directories sharing the same `(name, version)` key
-            // are a bug — surface the collision instead of silently
-            // overwriting one with the other.
-            let tmp = TempDir::new().unwrap();
-            let first = tmp.path().join(".memstead.cache/schemas/dup-a");
-            let second = tmp.path().join(".memstead.cache/schemas/dup-b");
-            write_schema(&first, "shared", "1.0.0");
-            write_schema(&second, "shared", "1.0.0");
-
-            let err = SchemaRegistry::load_for_workspace(Some(tmp.path()), None).unwrap_err();
-            assert!(
-                matches!(err, WorkspaceSchemaLoadError::CacheCollision { .. }),
-                "expected CacheCollision, got {err:?}"
-            );
-        }
-
-        #[test]
-        fn three_level_chain_resolves_correctly() {
-            // Workspace > builtins > cache. Place a unique schema at
-            // each level and confirm fall-through and override semantics.
+        fn two_level_chain_resolves_correctly() {
+            // Workspace > builtins. A workspace-level package overrides
+            // the builtin at the same key and registers its own names.
             let tmp = TempDir::new().unwrap();
             let workspace_schemas = tmp.path().join("schemas");
 
-            // Cache only — falls through to it when nothing else matches.
-            let cache_only = tmp.path().join(".memstead.cache/schemas/cache-only-1.0.0");
-            write_schema(&cache_only, "cache-only", "1.0.0");
-
-            // Workspace overrides builtin default.
             write_schema(&workspace_schemas.join("default"), "default", "1.0.0");
-
-            // Workspace also overrides the cache at the same key.
-            let cache_overridden = tmp.path().join(".memstead.cache/schemas/overridden-1.0.0");
-            write_schema(&cache_overridden, "overridden", "1.0.0");
             write_schema(&workspace_schemas.join("overridden"), "overridden", "1.0.0");
 
             let reg =
                 SchemaRegistry::load_for_workspace(Some(tmp.path()), Some(&workspace_schemas))
                     .unwrap();
 
-            assert!(
-                reg.get("cache-only", &semver::Version::new(1, 0, 0))
-                    .is_some(),
-                "cache-only schema must register via cache layer"
-            );
             // Builtin had 10 types; workspace override has 1.
             assert_eq!(
                 reg.get("default", &semver::Version::new(1, 0, 0))
@@ -754,7 +682,7 @@ write_rules: []
             assert!(
                 reg.get("overridden", &semver::Version::new(1, 0, 0))
                     .is_some(),
-                "workspace-level schema overrides the cache copy at the same key"
+                "a workspace-level-only schema registers"
             );
         }
 

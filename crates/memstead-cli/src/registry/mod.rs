@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 /// Default registry when no `--registry` / `MEMSTEAD_REGISTRY` is set.
@@ -76,12 +76,24 @@ pub fn registry_host(base: &str) -> String {
 
 /// Shared HTTP client. 30 s timeout is comfortable for the 2 MB cap
 /// times a slow upstream — GitHub API is also cheap to tolerate.
+///
+/// Typed, not `INTERNAL`: the only realistic failure is a TLS backend
+/// the host cannot initialise, which is the same "the registry is
+/// unreachable from here" class every other transport failure on this
+/// path reports.
 pub fn build_http() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("memstead/", env!("CARGO_PKG_VERSION")))
         .build()
-        .context("building HTTP client")
+        .map_err(|e| {
+            crate::CliError::new(
+                crate::output::ExitKind::Generic,
+                "REGISTRY_ERROR",
+                format!("could not build the HTTP client used to reach the registry: {e}"),
+            )
+            .into()
+        })
 }
 
 /// The publisher-terms version the CLI accepts on publish. Running
