@@ -971,15 +971,29 @@ fn every_refusal_on_these_paths_names_a_next_command() {
 // ---------------------------------------------------------------------
 
 /// Every assertion the shape disclosure has to satisfy, in one place:
-/// which shape, one concrete thing it cannot do, and the exact command
-/// for the other shape. Applied to `quickstart` and `init` alike.
+/// which shape, one concrete thing it cannot do, and the way to the
+/// other shape. Applied to `quickstart` and `init` alike.
+///
+/// The "cannot" half is flavour-specific on purpose. The full build
+/// names `memstead install` and the typed code it refuses with, because
+/// that command exists there. The lean build has no `install`
+/// subcommand at all, so it states the limit without borrowing a verb
+/// the reader could not run — see the FILESYSTEM_CANNOT gate in
+/// `setup.rs`. Both must still name `memstead mem-repo init`, which is
+/// a pointer at the other shape, not an invitation to run it here.
 fn assert_filesystem_shape_disclosure(out: &str, ctx: &str) {
-    for needle in [
+    let mut needles = vec![
         "filesystem-mem",
-        "memstead install",
-        "UNSUPPORTED_WORKSPACE_SHAPE",
+        "cannot install mems from the registry",
         "memstead mem-repo init",
-    ] {
+    ];
+    if cfg!(feature = "mem-repo") {
+        needles.push("memstead install");
+        needles.push("UNSUPPORTED_WORKSPACE_SHAPE");
+    } else {
+        needles.push("this lean build does not carry them");
+    }
+    for needle in needles {
         assert!(
             out.contains(needle),
             "{ctx}: shape disclosure must name `{needle}`; got:\n{out}",
@@ -1043,6 +1057,116 @@ fn mem_repo_init_discloses_its_shape_symmetrically() {
         assert!(
             out.contains(needle),
             "mem-repo init receipt must name `{needle}`; got:\n{out}",
+        );
+    }
+}
+
+/// The `--json` receipt carries the whole disclosure, not just the
+/// label. The agent surface is the primary consumer here; a bare
+/// `"workspace_shape": "filesystem-mem"` names the fork without
+/// disclosing it, which is the failure this block exists to end.
+#[test]
+fn json_receipts_carry_the_whole_disclosure_not_just_the_label() {
+    fn assert_disclosure(payload: &serde_json::Value, want_shape: &str, ctx: &str) {
+        let d = &payload["workspace_shape_disclosure"];
+        assert_eq!(d["shape"], want_shape, "{ctx}: shape; got {payload}");
+        for key in ["summary", "cannot", "other_shape", "other_shape_command"] {
+            let v = d[key].as_str().unwrap_or_default();
+            assert!(
+                !v.is_empty(),
+                "{ctx}: `{key}` must be present and non-empty; got {d}",
+            );
+        }
+        assert_ne!(
+            d["other_shape"], want_shape,
+            "{ctx}: the other shape must differ from this one; got {d}",
+        );
+    }
+
+    let tmp = TempDir::new().unwrap();
+
+    let assert = memstead()
+        .args(["quickstart", "--json", "--agent", "claude-code"])
+        .arg(tmp.path().join("json-qs"))
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    assert_disclosure(&payload, "filesystem-mem", "quickstart --json");
+
+    let assert = memstead()
+        .args([
+            "init",
+            "--json",
+            "--name",
+            "json-init",
+            "--schema",
+            "default@1.3.0",
+        ])
+        .arg(tmp.path().join("json-init"))
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    assert_disclosure(&payload, "filesystem-mem", "init --json");
+}
+
+/// Symmetric machine surface: `mem-repo init --json` carries the same
+/// disclosure shape, pointing the other way.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn mem_repo_init_json_carries_the_whole_disclosure() {
+    let tmp = TempDir::new().unwrap();
+    let assert = memstead()
+        .args(["mem-repo", "init", "--json"])
+        .arg(tmp.path())
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    let d = &payload["workspace_shape_disclosure"];
+    assert_eq!(d["shape"], "mem-repo", "got {payload}");
+    assert_eq!(d["other_shape"], "filesystem-mem", "got {d}");
+    assert!(
+        d["other_shape_command"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("memstead quickstart"),
+        "must name the other shape's command; got {d}",
+    );
+}
+
+/// A verb the receipt names must either exist in the binary that
+/// printed it, or be named together with the statement that this build
+/// does not carry it. Anything else sends the reader to
+/// `unrecognized subcommand`.
+///
+/// Both halves are live. The lean build's "cannot" clause no longer
+/// borrows `memstead install` (it has none), while its pointer at the
+/// other shape still names `memstead mem-repo init` — legitimately,
+/// because the same sentence says a different build is needed first.
+#[test]
+fn every_verb_the_receipt_names_is_runnable_or_flagged_as_absent() {
+    let tmp = TempDir::new().unwrap();
+    let out = stdout_of(
+        memstead()
+            .args(["quickstart", "--agent", "claude-code"])
+            .arg(tmp.path().join("named-cmds"))
+            .assert()
+            .success(),
+    );
+
+    let help = stdout_of(memstead().arg("--help").assert().success());
+    let disowned =
+        out.contains("this lean build has no") || out.contains("this lean build does not carry");
+    for verb in ["install", "mem-repo", "quickstart", "overview", "delete"] {
+        if !out.contains(&format!("memstead {verb}")) {
+            continue;
+        }
+        // `--help` lists subcommands one per line, name first.
+        let listed = help.lines().any(|l| l.trim_start().starts_with(verb));
+        assert!(
+            listed || disowned,
+            "the receipt names `memstead {verb}`, this build's help does not list it, and the \
+             receipt never says the build lacks it \u{2014} the reader would hit `unrecognized \
+             subcommand`.\n--- receipt ---\n{out}\n--- help ---\n{help}",
         );
     }
 }

@@ -754,6 +754,12 @@ fn report(
                 .collect::<Vec<_>>(),
             "agents_defaulted": agents_defaulted,
             "workspace_shape": crate::setup::WorkspaceShape::Filesystem.label(),
+            // The agent surface gets the whole disclosure, not just the
+            // label: which shape, what it cannot do, the command for
+            // the other one — the same three parts the markdown block
+            // carries, from the same value.
+            "workspace_shape_disclosure":
+                crate::setup::shape_disclosure(crate::setup::WorkspaceShape::Filesystem).to_json(),
             "next_action": next_action,
             "verify_now": verify_now,
             "warnings": mcp_bin.warning.as_ref().map(|w| vec![w.clone()]).unwrap_or_default(),

@@ -123,6 +123,8 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
     //    doing it here keeps the release commit self-contained).
     crate::generate_docs(crate::GenerateDocsArgs {
         output: root.join("docs-site/src/content/docs/reference"),
+        // The release leg regenerates for real; `--check` is the CI gate.
+        check: false,
     })?;
 
     // 9. The runbook's green gate, locally (CI re-runs the same legs).

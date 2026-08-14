@@ -123,6 +123,21 @@ const MEM_REPO_INIT_HINT: &str = "`memstead mem-repo init` in a fresh folder";
 const MEM_REPO_INIT_HINT: &str = "the full build of memstead (this lean build has no `mem-repo` \
      subcommand), then `memstead mem-repo init` in a fresh folder";
 
+/// What a filesystem-mem workspace cannot do — stated with the same
+/// feature gate as the hint above, and for the same reason. The full
+/// build names `memstead install`, which exists there and refuses by
+/// shape; the lean build has no `install` subcommand at all, so naming
+/// it would send the reader to a verb that does not parse. The lean
+/// wording states the limit without borrowing a command it lacks.
+#[cfg(feature = "mem-repo")]
+const FILESYSTEM_CANNOT: &str = "**It cannot install mems from the registry.** `memstead install \
+     <scope>/<name>` (and the other mem-repo-only subcommands) refuse here with \
+     `UNSUPPORTED_WORKSPACE_SHAPE`.";
+#[cfg(not(feature = "mem-repo"))]
+const FILESYSTEM_CANNOT: &str = "**It cannot install mems from the registry, and holds exactly \
+     one mem.** The subcommands that do either are mem-repo-only, and this lean build does not \
+     carry them at all.";
+
 impl WorkspaceShape {
     /// Resolve the shape of an existing workspace root. Routes through
     /// the engine's shared probe so the CLI, the refusals, and the MCP
@@ -144,50 +159,94 @@ impl WorkspaceShape {
     }
 }
 
-/// Markdown lines disclosing the shape a workspace-creating command
-/// just produced: what the shape is, one concrete thing it cannot do,
-/// and the exact command for the other shape.
+/// The three-part disclosure a workspace-creating command owes its
+/// caller: which shape was just made, one concrete thing that shape
+/// cannot do, and the exact command that produces the other one.
 ///
-/// This block is printed by `quickstart`, `init`, and `mem-repo init`
-/// alike — the disclosure is symmetric, not a warning bolted onto one
-/// branch. It belongs in the creating command's own receipt because
-/// that is the moment the fork is decided and the output the newcomer
-/// is already reading; a sentence elsewhere (the `install --help`
-/// clause) demonstrably arrives after the workspace exists.
-pub fn shape_disclosure_lines(shape: WorkspaceShape) -> Vec<String> {
+/// Held as parts rather than pre-rendered prose because both receipts
+/// carry it: the markdown block a human reads, and the `--json`
+/// envelope an agent reads. A label alone on the machine surface would
+/// name the fork without disclosing it, which is the failure this whole
+/// disclosure exists to end — so both renderings come from one value.
+pub struct ShapeDisclosure {
+    /// The shape just created.
+    pub shape: WorkspaceShape,
+    /// One sentence on what this shape is.
+    pub summary: &'static str,
+    /// One concrete thing this shape cannot do, in markdown.
+    pub cannot: &'static str,
+    /// The shape a caller would get instead.
+    pub other_shape: WorkspaceShape,
+    /// The exact command producing [`Self::other_shape`], in markdown.
+    pub other_shape_command: String,
+}
+
+/// The disclosure for a shape.
+///
+/// `quickstart`, `init`, and `mem-repo init` all print this — the
+/// disclosure is symmetric, not a warning bolted onto one branch. It
+/// belongs in the creating command's own receipt because that is the
+/// moment the fork is decided and the output the newcomer is already
+/// reading; a sentence elsewhere (the `install --help` clause)
+/// demonstrably arrives after the workspace exists.
+pub fn shape_disclosure(shape: WorkspaceShape) -> ShapeDisclosure {
     match shape {
-        WorkspaceShape::Filesystem => vec![
-            "## Workspace shape: filesystem-mem".to_string(),
-            String::new(),
-            "One mem, plain `.md` files in this folder, no git history — nothing else to \
-             set up."
-                .to_string(),
-            String::new(),
-            "- **It cannot install mems from the registry.** `memstead install \
-             <scope>/<name>` (and the other mem-repo-only subcommands) refuse here with \
-             `UNSUPPORTED_WORKSPACE_SHAPE`."
-                .to_string(),
-            format!(
-                "- **The other shape** — mem-repo: many mems, git-backed, registry-capable \
-                 — comes from {MEM_REPO_INIT_HINT}. Switching later means starting a second \
+        WorkspaceShape::Filesystem => ShapeDisclosure {
+            shape,
+            summary: "One mem, plain `.md` files in this folder, no git history — nothing \
+                      else to set up.",
+            cannot: FILESYSTEM_CANNOT,
+            other_shape: WorkspaceShape::MemRepo,
+            other_shape_command: format!(
+                "**The other shape** — mem-repo: many mems, git-backed, registry-capable — \
+                 comes from {MEM_REPO_INIT_HINT}. Switching later means starting a second \
                  workspace, so decide now if you intend to install mems."
             ),
-        ],
-        WorkspaceShape::MemRepo => vec![
-            "## Workspace shape: mem-repo".to_string(),
-            String::new(),
-            "Many mems on git branches, full history — every subcommand works here, \
-             including `memstead install <scope>/<name>`."
+        },
+        WorkspaceShape::MemRepo => ShapeDisclosure {
+            shape,
+            summary: "Many mems on git branches, full history — every subcommand works here, \
+                      including `memstead install <scope>/<name>`.",
+            cannot: "**It costs a git repository.** The mems live in `mem-repo/.git/` and \
+                     every mutation is a commit — not a folder of files you can hand-edit.",
+            other_shape: WorkspaceShape::Filesystem,
+            other_shape_command: "**The other shape** — filesystem-mem: one mem, plain `.md` \
+                                  files, no git — comes from `memstead quickstart` in a fresh \
+                                  folder."
                 .to_string(),
-            String::new(),
-            "- **It costs a git repository.** The mems live in `mem-repo/.git/` and every \
-             mutation is a commit — not a folder of files you can hand-edit."
-                .to_string(),
-            "- **The other shape** — filesystem-mem: one mem, plain `.md` files, no git — \
-             comes from `memstead quickstart` in a fresh folder."
-                .to_string(),
-        ],
+        },
     }
+}
+
+impl ShapeDisclosure {
+    /// The markdown block for a human-facing receipt.
+    pub fn lines(&self) -> Vec<String> {
+        vec![
+            format!("## Workspace shape: {}", self.shape.label()),
+            String::new(),
+            self.summary.to_string(),
+            String::new(),
+            format!("- {}", self.cannot),
+            format!("- {}", self.other_shape_command),
+        ]
+    }
+
+    /// The same three parts for a `--json` receipt. The agent surface
+    /// gets the limit and the recovering command, not just the label.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "shape": self.shape.label(),
+            "summary": self.summary,
+            "cannot": self.cannot,
+            "other_shape": self.other_shape.label(),
+            "other_shape_command": self.other_shape_command,
+        })
+    }
+}
+
+/// Convenience for callers that only render markdown.
+pub fn shape_disclosure_lines(shape: WorkspaceShape) -> Vec<String> {
+    shape_disclosure(shape).lines()
 }
 
 /// Engine instance + the workspace flavour it serves. Subcommands

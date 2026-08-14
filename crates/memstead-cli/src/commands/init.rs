@@ -193,6 +193,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "schema": schema_pin.as_display(),
             "format": FILESYSTEM_WORKSPACE_FORMAT,
             "workspace_shape": crate::setup::WorkspaceShape::Filesystem.label(),
+            "workspace_shape_disclosure":
+                crate::setup::shape_disclosure(crate::setup::WorkspaceShape::Filesystem).to_json(),
         });
         payload["warnings"] = json!(warnings);
         return print_json(&payload);

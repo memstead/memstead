@@ -121,6 +121,8 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "mem_repo_dir": outcome.mem_repo_dir.display().to_string(),
             "workspace_toml": outcome.workspace_toml.display().to_string(),
             "workspace_shape": crate::setup::WorkspaceShape::MemRepo.label(),
+            "workspace_shape_disclosure":
+                crate::setup::shape_disclosure(crate::setup::WorkspaceShape::MemRepo).to_json(),
         }))?;
     } else {
         println!(

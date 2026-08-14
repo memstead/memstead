@@ -204,6 +204,16 @@ struct GenerateDocsArgs {
     /// files are overwritten; missing files are created.
     #[arg(long)]
     output: PathBuf,
+
+    /// Write nothing; instead fail when the committed tree differs from
+    /// what a regeneration would produce. This is the CI gate: the
+    /// reference pages are derived from the binaries (clap help, the
+    /// UDL, the MCP tool table), so an edit to a help string that never
+    /// gets regenerated leaves the published reference asserting
+    /// something the shipped binary no longer does — exactly the class
+    /// of contradiction these pages exist to prevent.
+    #[arg(long)]
+    check: bool,
 }
 
 fn main() -> Result<()> {
@@ -793,9 +803,23 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
     Ok(())
 }
 
+// Set for the duration of a `--check` run: every `write_if_changed`
+// records the path it would have rewritten instead of rewriting it.
+// A thread-local rather than a parameter threaded through nine
+// writers — the writers are the leaves of a fixed tree, and the check
+// is a whole-run mode, not a per-writer choice.
+thread_local! {
+    static CHECK_ONLY: std::cell::RefCell<Option<Vec<PathBuf>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
-    fs::create_dir_all(&args.output)
-        .with_context(|| format!("creating output dir {}", args.output.display()))?;
+    if args.check {
+        CHECK_ONLY.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    } else {
+        fs::create_dir_all(&args.output)
+            .with_context(|| format!("creating output dir {}", args.output.display()))?;
+    }
     write_cli_reference(&args.output)?;
     write_uniffi_reference(&args.output)?;
     write_wasm_reference(&args.output)?;
@@ -803,6 +827,22 @@ fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
     write_parity_matrix(&args.output)?;
     write_error_index(&args.output)?;
     write_binding_reference(&args.output)?;
+
+    if args.check {
+        let stale = CHECK_ONLY.with(|c| c.borrow_mut().take().unwrap_or_default());
+        if !stale.is_empty() {
+            let listed: Vec<String> = stale.iter().map(|p| p.display().to_string()).collect();
+            anyhow::bail!(
+                "generated docs are stale — {} file(s) differ from what the current binaries \
+                 produce:\n  {}\nRegenerate and commit: cargo run -p xtask -- generate-docs \
+                 --output {}",
+                stale.len(),
+                listed.join("\n  "),
+                args.output.display(),
+            );
+        }
+        println!("generate-docs --check: generated reference is current");
+    }
     Ok(())
 }
 
@@ -994,9 +1034,23 @@ fn yaml_double_quote(s: &str) -> String {
 /// the drift-check workflow rely on `git diff --exit-code` to flag real
 /// surface changes.
 fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
-    if let Ok(existing) = fs::read_to_string(path)
-        && existing == contents
-    {
+    let unchanged = matches!(fs::read_to_string(path), Ok(existing) if existing == contents);
+    // `--check` mode: record what would have been rewritten and write
+    // nothing, so the gate can run against a clean tree without
+    // dirtying it.
+    let checking = CHECK_ONLY.with(|c| {
+        let mut slot = c.borrow_mut();
+        match slot.as_mut() {
+            Some(stale) => {
+                if !unchanged {
+                    stale.push(path.to_path_buf());
+                }
+                true
+            }
+            None => false,
+        }
+    });
+    if checking || unchanged {
         return Ok(());
     }
     fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
