@@ -729,12 +729,26 @@ fn report(
     // inside that session. Both checks are real: the first runs the
     // exact binary the config points at, the second reads the graph the
     // server will serve.
+    // `memstead overview` resolves its workspace by walking up from
+    // cwd, so when quickstart was pointed at a path the caller is not
+    // standing in, the bare command refuses `WORKSPACE_NOT_INITIALISED`.
+    // Print the `cd` in that case: a verification step the reader
+    // cannot reproduce is the same defect as an undisclosed shape.
+    let in_cwd = std::env::current_dir()
+        .ok()
+        .zip(target.canonicalize().ok())
+        .is_some_and(|(cwd, t)| cwd == t);
+    let overview = if in_cwd {
+        "`memstead overview`".to_string()
+    } else {
+        format!("`cd {} && memstead overview`", target.display())
+    };
     let verify_now = vec![
         format!(
             "- the wired binary answers: `{} --version`",
             mcp_bin.command
         ),
-        "- the graph is already readable: `memstead overview`".to_string(),
+        format!("- the graph is already readable: {overview}"),
     ];
 
     if ctx.json {

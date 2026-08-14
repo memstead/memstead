@@ -116,6 +116,22 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Testing: memstead-mcp (true lean build)"
+echo "══════════════════════════════════"
+# Same feature-unification trap as the CLI leg above, and it had the same
+# consequence: memstead-mcp's `cfg(not(mem-repo))` tests (boot_lean.rs,
+# wire_shape_lean.rs) were compiled out of every leg, so they existed
+# without ever running. A targeted -p build is the only way to reach the
+# lean MCP binary's own behaviour.
+if (cd "$ROOT" && cargo nextest run -p memstead-mcp --no-default-features); then
+  echo "  ✓ memstead-mcp (true lean) passed"
+else
+  FAILED+=("memstead-mcp-lean")
+  echo "  ✗ memstead-mcp (true lean) FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Gate: plugin must not call git against mem-repo"
 echo "══════════════════════════════════"
 # Plugin code must reach mem-repo via memstead-cli (subprocess) or

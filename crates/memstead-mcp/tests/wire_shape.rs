@@ -876,10 +876,19 @@ fn full_memstead_relate_returns_typed_success_envelope() {
         body.get("type").is_none(),
         "full must not carry `type` (lean field name): {body}"
     );
-    // Full omits `action` — the lean surface carries it.
+    // `action` rides the per-entry result, not the top level — the same
+    // place the lean surface puts it. (This assertion once recorded
+    // "full omits `action`, lean carries it"; that drift closed with the
+    // plural relate envelope, and the twin pin in `wire_shape_lean.rs`
+    // now asserts the matching per-entry shape.)
+    assert_eq!(
+        entry.get("action").and_then(Value::as_str),
+        Some("added"),
+        "full relate `action` drifted: {body}"
+    );
     assert!(
         body.get("action").is_none(),
-        "full unexpectedly carries `action`: {body}"
+        "`action` belongs inside results[], never at the top level: {body}"
     );
 }
 

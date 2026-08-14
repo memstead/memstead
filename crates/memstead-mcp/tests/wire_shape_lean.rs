@@ -757,7 +757,12 @@ fn lean_memstead_relate_returns_typed_success_envelope() {
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
-    // **Drift recorded:** lean names the field `type`; full names it `rel_type`.
+    // **Drift closed:** both surfaces name this `rel_type` and carry it
+    // inside `results[0]`. The pin previously recorded lean naming it
+    // `type` at the top level — true before the plural relate envelope,
+    // and false since. It went on asserting the old shape because no
+    // leg of the canonical gate compiled this file (fixed 2026-08-15 by
+    // the `-p memstead-mcp --no-default-features` leg in run-tests.sh).
     assert_eq!(
         entry.get("rel_type").and_then(Value::as_str),
         Some("USES"),
@@ -765,12 +770,19 @@ fn lean_memstead_relate_returns_typed_success_envelope() {
     );
     assert!(
         body.get("rel_type").is_none(),
-        "lean must not carry `rel_type` (full field name): {body}"
+        "`rel_type` belongs inside results[], never at the top level: {body}"
     );
+    // `action` rides the per-entry result on both surfaces, so a caller
+    // reading a single-relation response finds it in the same place
+    // whichever binary answered.
     assert_eq!(
-        body.get("action").and_then(Value::as_str),
+        entry.get("action").and_then(Value::as_str),
         Some("added"),
         "lean relate `action` drifted: {body}"
+    );
+    assert!(
+        body.get("action").is_none(),
+        "`action` belongs inside results[], never at the top level: {body}"
     );
 }
 
