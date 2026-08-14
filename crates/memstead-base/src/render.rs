@@ -1031,7 +1031,7 @@ fn render_type_catalog_lines(types: Vec<Arc<TypeDefinition>>) -> String {
     let mut lines = vec![
         "# Available types".to_string(),
         String::new(),
-        "Run `memstead type <name>` (or call `memstead_schema` with a type name) to see its metadata fields, sections, relationship types, and writing guidance."
+        "Run `memstead type <name>` to see its metadata fields, sections, relationship types, and writing guidance — over MCP, `memstead_schema` takes the *schema* name and returns every type at once."
             .to_string(),
         String::new(),
     ];

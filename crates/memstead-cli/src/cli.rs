@@ -120,11 +120,16 @@ pub enum Command {
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`
     /// from the memstead.io registry. Registers it as a workspace-level
     /// read-only mount; `memstead uninstall` is the symmetric removal.
+    /// MEM-REPO WORKSPACES ONLY — refuses with
+    /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
+    /// `memstead quickstart` produces; bootstrap with
+    /// `memstead mem-repo init` instead when you intend to install mems.
     #[cfg(feature = "mem-repo")]
     Install(commands::install::Args),
 
     /// Remove an installed read-mem's workspace-level mount. The global
     /// cache copy survives by default; re-`install` re-registers it.
+    /// MEM-REPO WORKSPACES ONLY (see `install`).
     #[cfg(feature = "mem-repo")]
     Uninstall(commands::uninstall::Args),
 
@@ -197,6 +202,10 @@ pub enum Command {
     /// the whole batch is refused and NOTHING is committed — fix the
     /// named entry and resubmit. On success the batch lands as one
     /// commit. Mirrors `memstead update` per entry.
+    /// MEM-REPO WORKSPACES ONLY — refuses with
+    /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
+    /// `memstead quickstart` produces; fall back to one `memstead
+    /// update` per entity there.
     #[cfg(feature = "mem-repo")]
     #[command(name = "batch-update")]
     BatchUpdate(commands::batch_update::Args),
@@ -209,6 +218,11 @@ pub enum Command {
     /// in a single pass with no stubs. All-or-nothing: any invalid
     /// entry refuses the whole batch and names EVERY failing entry.
     /// One commit per touched mem.
+    /// MEM-REPO WORKSPACES ONLY — refuses with
+    /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
+    /// `memstead quickstart` produces; fall back to one `memstead
+    /// create` per entity there (losing atomicity and intra-batch
+    /// reference resolution).
     #[cfg(feature = "mem-repo")]
     #[command(name = "batch-create")]
     BatchCreate(commands::batch_create::Args),
@@ -220,6 +234,10 @@ pub enum Command {
     /// per-entry `note`). All-or-nothing: any invalid entry refuses
     /// the whole batch and names EVERY failing entry. One commit per
     /// touched mem.
+    /// MEM-REPO WORKSPACES ONLY — refuses with
+    /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
+    /// `memstead quickstart` produces; fall back to one `memstead
+    /// relate` per edge there.
     #[cfg(feature = "mem-repo")]
     #[command(name = "batch-relate")]
     BatchRelate(commands::batch_relate::Args),
@@ -228,6 +246,7 @@ pub enum Command {
     /// `PARSED_RELATION_INVALID` warnings, re-renders affected
     /// source entities to drop the stale rows, and reports per-entry
     /// outcomes. Read-only-origin drops surface as skipped.
+    /// MEM-REPO WORKSPACES ONLY (see `install`).
     #[cfg(feature = "mem-repo")]
     Recover(commands::recover::Args),
 

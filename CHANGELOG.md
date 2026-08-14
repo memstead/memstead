@@ -7,6 +7,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **The surfaces a newcomer reads stop withholding what they know.**
+  From the 2026-08-13 cold-start run — an agent with no prior
+  knowledge of Memstead, working from public surfaces alone. Every
+  item here is a sentence that was missing, not a capability:
+  - The installer's closing block names `memstead quickstart` as the
+    next step, and prints the two plugin commands immediately above
+    the `/setup` line that depends on them. It previously ended with
+    "In Claude Code, run `/setup`" — a command that does not exist
+    until a plugin the installer never mentioned is installed.
+  - `batch-create`, `batch-relate`, `batch-update`, `install`,
+    `uninstall`, `recover`, and `create --dry-run` say in `--help`
+    that they are mem-repo-only, and name the fallback. All seven
+    refuse at runtime on the filesystem-mem workspace `quickstart`
+    produces — the workspace every getting-started surface leads to —
+    and none of them said so before the refusal. (`create
+    --relation` already carried the clause; these were the missed
+    instances of an established pattern.)
+  - The `schema new` scaffold shows the relationship keys whose
+    defaults are not the permissive ones — `per_edge_description`
+    above all, whose `forbidden` default refuses every
+    `relate --description` on that type — plus `source_types`,
+    `target_types`, `cardinality_per_source`, and `manual_authoring`,
+    as commented lines. The scaffold teaches by example, so a key it
+    omits is invisible; a field author hit 38 uniform refusals for
+    one absent line.
+  - The scaffold marks `community:` as required rather than "the
+    defaults are fine" (it is required, and the comment read as
+    permission to omit it), and points at the workspace's
+    meta-schema as the exhaustive key reference.
+  - `memstead type`'s footer no longer tells agents to call
+    `memstead_schema` with a **type** name — that tool takes a
+    **schema** name, so the hint sent an agent into a typed error on
+    its first schema lookup.
+
 ## [0.6.0] - 2026-08-10
 
 **The doorway release.** A first-time schema author, modelling a domain the

@@ -449,6 +449,20 @@ relationships:
     - name: RELATES_TO
       description: General association between two entities when no sharper type fits.
       default_weight: 1.0
+      # Every key below is OPTIONAL, but its default is not always the
+      # permissive one — uncomment what you need.
+      #
+      # Per-edge `--description` text. DEFAULT IS `forbidden`: leave this
+      # out and every `memstead relate ... --description` on this type is
+      # REFUSED with DESCRIPTION_NOT_PERMITTED.
+      # per_edge_description: optional   # forbidden | optional | required
+      #
+      # Restrict which types this edge may join. Omit for "any type".
+      # source_types: [note]
+      # target_types: [note]
+      #
+      # cardinality_per_source: 1   # at most one such edge per source
+      # manual_authoring: false     # true = engine-emitted only
     - name: REFERENCES
       description: Soft reference. Auto-emitted from body wiki-links — never author by hand.
       default_weight: 0.5
@@ -462,10 +476,17 @@ relationships:
 # Remove this key to make unbacked wiki-links a validation error instead.
 alias_target_rel_type: REFERENCES
 
-# Community detection (graph clustering) tuning — the defaults are fine.
+# Community detection (graph clustering) tuning. REQUIRED — the block
+# must be present; the values below are the defaults, keep them unless
+# you know why you are changing them.
 community:
   resolution: 1.0
   seed: 42
+
+# The complete key reference for schema packages — every key the loader
+# accepts, with its type and default — is the meta-schema shipped in
+# your workspace at `.memstead/meta-schemas/schema-manifest.schema.json`.
+# This scaffold teaches by example; that file is exhaustive.
 "#
     )
 }

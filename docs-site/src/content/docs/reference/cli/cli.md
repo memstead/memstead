@@ -132,8 +132,8 @@ Exit codes:
 * `export` — Export the write mem as markdown (in place) or as a portable `.mem` archive
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
-* `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal
-* `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it
+* `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
+* `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it. MEM-REPO WORKSPACES ONLY (see `install`)
 * `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Read-only
 * `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
@@ -147,10 +147,10 @@ Exit codes:
 * `relate` — Add or remove a typed relationship between two entities
 * `delete` — Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by design (no post-state to race on); race protection comes from `HAS_INCOMING_REFS` — and `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases
 * `rename` — Rename an entity (changes ID, file path, and every incoming wiki-link)
-* `batch-update` — Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
-* `batch-create` — Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
-* `batch-relate` — Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
-* `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
+* `batch-update` — Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead update` per entity there
+* `batch-create` — Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead create` per entity there (losing atomicity and intra-batch reference resolution)
+* `batch-relate` — Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead relate` per edge there
+* `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped. MEM-REPO WORKSPACES ONLY (see `install`)
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
 * `check` — Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
@@ -469,7 +469,7 @@ One-command cold start: workspace + default-schema mem + seed entity + MCP wirin
 
 ## `memstead install`
 
-Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal
+Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
 
 **Usage:** `memstead install [OPTIONS] <PATH or SCOPE/NAME>`
 
@@ -485,7 +485,7 @@ Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from th
 
 ## `memstead uninstall`
 
-Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it
+Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it. MEM-REPO WORKSPACES ONLY (see `install`)
 
 **Usage:** `memstead uninstall <NAME>`
 
@@ -730,7 +730,7 @@ Slug derivation:
 * `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`. Mem-repo workspaces only — on filesystem mems this refuses; use `memstead relate` after creation there
 * `--anchor <JSON>` — Provenance anchor: repeatable `--anchor '<json>'`, each a JSON object of the anchor shape (`{ "artifact": "...", "grain": "file", "class": "anchored", "hash": "...", "hash_stability": "stable" }`). Written into the mem-branch anchors sidecar in the same commit as the entity. A malformed anchor refuses `INVALID_ANCHOR`. Ignored when `--from` is given (the file's `anchors[]` is authoritative)
 * `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` / `--anchor` flags are ignored (the file is the single source of truth). `--note` still applies (winning over the file's `note`), and `--dry-run` ORs with the file's `dry_run` — same semantics as `update --from`, so one template feeds both commands. The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
-* `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings
+* `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings. MEM-REPO WORKSPACES ONLY — refused with `INVALID_INPUT` on the filesystem-mem workspace `memstead quickstart` produces
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers. When `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` warning to the response (the mutation still commits). When `--from` also carries a `note`, this flag takes precedence
 
 
@@ -855,7 +855,7 @@ Slug derivation:
 
 ## `memstead batch-update`
 
-Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry
+Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead update` per entity there
 
 **Usage:** `memstead batch-update [OPTIONS] --from <FILE>`
 
@@ -868,7 +868,7 @@ Update many entities in one atomic call. Input is a JSON file with a top-level `
 
 ## `memstead batch-create`
 
-Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
+Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead create` per entity there (losing atomicity and intra-batch reference resolution)
 
 **Usage:** `memstead batch-create [OPTIONS] --from <FILE>`
 
@@ -881,7 +881,7 @@ Create many entities in one atomic call. Input is a JSON file with a top-level `
 
 ## `memstead batch-relate`
 
-Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem
+Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead relate` per edge there
 
 **Usage:** `memstead batch-relate [OPTIONS] --from <FILE>`
 
@@ -894,7 +894,7 @@ Apply many edge changes in one atomic call. Input is a JSON file with a top-leve
 
 ## `memstead recover`
 
-Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped
+Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped. MEM-REPO WORKSPACES ONLY (see `install`)
 
 **Usage:** `memstead recover [OPTIONS]`
 

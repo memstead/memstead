@@ -81,6 +81,8 @@ pub struct Args {
     /// Preview only — validate and compute the result without writing to
     /// disk, mutating the store, or producing a commit. Response carries
     /// the prospective id / file_path / content_hash plus any warnings.
+    /// MEM-REPO WORKSPACES ONLY — refused with `INVALID_INPUT` on the
+    /// filesystem-mem workspace `memstead quickstart` produces.
     #[arg(long = "dry-run")]
     pub dry_run: bool,
 
