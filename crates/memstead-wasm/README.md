@@ -52,7 +52,9 @@ const scoped = engine.entityIds("notes"); // one mem; unknown mem -> []
 
 for (const id of ids) {
   const entity = engine.getEntity(id);   // undefined if absent
-  console.log(entity.type, entity.title, Object.keys(entity.sections));
+  // Note the field is `entity_type` here — the MCP surface spells the
+  // same field `type`. The shipped `.d.ts` is authoritative.
+  console.log(entity.entity_type, entity.title, Object.keys(entity.sections));
 }
 
 engine.memNames();  // the mems this snapshot carries
