@@ -704,6 +704,23 @@ fn wire_agent(
     })
 }
 
+/// Render a string as one POSIX shell word. Bare when every character
+/// is safe unquoted; otherwise single-quoted, with embedded `'` closed
+/// and re-opened the POSIX way (`'\''`).
+///
+/// Needed because the receipt prints commands the reader is expected to
+/// run verbatim, and both interpolated values — the target directory
+/// and the resolved `memstead-mcp` path — come from the user's
+/// filesystem. `quickstart "My Graph"` printed `cd My Graph && …`,
+/// which is not the command it looks like.
+fn shell_quote(value: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "._-/@:+,=".contains(c);
+    if !value.is_empty() && value.chars().all(safe) {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
 /// Final report: every artifact by name, then the single next action.
 #[allow(clippy::too_many_arguments)]
 fn report(
@@ -717,44 +734,60 @@ fn report(
     mcp_bin: &McpBinary,
 ) -> anyhow::Result<()> {
     let restart_labels: Vec<&str> = wirings.iter().map(|w| w.target.label()).collect();
+
+    // Every command this receipt prints must run verbatim, from the
+    // directory the caller is actually standing in. Two things break
+    // that if left implicit:
+    //
+    //  * `memstead overview` resolves its workspace by walking up from
+    //    cwd, so after `quickstart <path>` the bare command refuses
+    //    `WORKSPACE_NOT_INITIALISED` — the reader needs the `cd`.
+    //  * paths are user-supplied and may contain spaces, so anything
+    //    interpolated into a shell line is quoted.
+    //
+    // A verification step the reader cannot reproduce is the same
+    // defect as an undisclosed shape, so this is not cosmetic.
+    let absolute = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf());
+    let in_cwd = std::env::current_dir()
+        .ok()
+        .is_some_and(|cwd| cwd == absolute);
+    let overview_cmd = if in_cwd {
+        "memstead overview".to_string()
+    } else {
+        format!(
+            "cd {} && memstead overview",
+            shell_quote(&target.display().to_string())
+        )
+    };
+    let version_cmd = format!("{} --version", shell_quote(&mcp_bin.command));
+
     // The restart is what registers the MCP tools with the agent —
     // it is named for exactly that, and never presented as skippable.
     let next_action = format!(
-        "Restart {} so the `memstead` MCP server registers its tools — then try: memstead \
-         overview",
+        "Restart {} so the `memstead` MCP server registers its tools — then try: {overview_cmd}",
         restart_labels.join(" / "),
     );
     // …but an agent session that just ran onboarding cannot restart
     // itself mid-run, so the wiring it wrote must be checkable from
     // inside that session. Both checks are real: the first runs the
     // exact binary the config points at, the second reads the graph the
-    // server will serve.
-    // `memstead overview` resolves its workspace by walking up from
-    // cwd, so when quickstart was pointed at a path the caller is not
-    // standing in, the bare command refuses `WORKSPACE_NOT_INITIALISED`.
-    // Print the `cd` in that case: a verification step the reader
-    // cannot reproduce is the same defect as an undisclosed shape.
-    let in_cwd = std::env::current_dir()
-        .ok()
-        .zip(target.canonicalize().ok())
-        .is_some_and(|(cwd, t)| cwd == t);
-    let overview = if in_cwd {
-        "`memstead overview`".to_string()
-    } else {
-        format!("`cd {} && memstead overview`", target.display())
-    };
-    let verify_now = vec![
-        format!(
-            "- the wired binary answers: `{} --version`",
-            mcp_bin.command
-        ),
-        format!("- the graph is already readable: {overview}"),
+    // server will serve. Held as `{what, command}` pairs so the JSON
+    // surface ships runnable commands and the markdown surface adds its
+    // own bullet decoration — an agent should never have to strip
+    // backticks off a machine field.
+    let verify_now = [
+        ("the wired binary answers", &version_cmd),
+        ("the graph is already readable", &overview_cmd),
     ];
 
     if ctx.json {
         return print_json(&json!({
-            "workspace_root": target.display().to_string(),
-            "config_path": config_path(target).display().to_string(),
+            // Absolute, so a caller that passed a relative argument can
+            // use these without reconstructing its own cwd.
+            "workspace_root": absolute.display().to_string(),
+            "config_path": config_path(&absolute).display().to_string(),
             "name": name,
             "schema": schema_pin.as_display(),
             "seed_entity": seed_id,
@@ -775,7 +808,10 @@ fn report(
             "workspace_shape_disclosure":
                 crate::setup::shape_disclosure(crate::setup::WorkspaceShape::Filesystem).to_json(),
             "next_action": next_action,
-            "verify_now": verify_now,
+            "verify_now": verify_now
+                .iter()
+                .map(|(what, command)| json!({ "what": what, "command": command }))
+                .collect::<Vec<_>>(),
             "warnings": mcp_bin.warning.as_ref().map(|w| vec![w.clone()]).unwrap_or_default(),
         }));
     }
@@ -813,7 +849,11 @@ fn report(
     lines.push(format!("Next: {next_action}"));
     lines.push(String::new());
     lines.push("Verify from this session, no restart needed:".to_string());
-    lines.extend(verify_now);
+    lines.extend(
+        verify_now
+            .iter()
+            .map(|(what, command)| format!("- {what}: `{command}`")),
+    );
     print_markdown(&lines.join("\n"));
     Ok(())
 }
@@ -895,6 +935,27 @@ mod tests {
             "/custom/memstead-mcp"
         );
         assert_eq!(parsed["mcpServers"]["other"]["command"], "/bin/other");
+    }
+
+    #[test]
+    fn shell_quote_leaves_ordinary_paths_alone_and_quotes_the_rest() {
+        assert_eq!(
+            shell_quote("/usr/local/bin/memstead-mcp"),
+            "/usr/local/bin/memstead-mcp"
+        );
+        assert_eq!(shell_quote("my-graph"), "my-graph");
+        // The case that motivated this: a directory name with a space.
+        assert_eq!(shell_quote("My Graph"), "'My Graph'");
+        assert_eq!(
+            shell_quote("/Users/a b/bin/memstead-mcp"),
+            "'/Users/a b/bin/memstead-mcp'"
+        );
+        // Shell metacharacters are contained, not executed.
+        assert_eq!(shell_quote("a;rm -rf /"), "'a;rm -rf /'");
+        assert_eq!(shell_quote("$(whoami)"), "'$(whoami)'");
+        // An embedded single quote closes, escapes, and reopens.
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_quote(""), "''");
     }
 
     #[test]

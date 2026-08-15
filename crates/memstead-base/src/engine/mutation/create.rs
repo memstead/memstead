@@ -3535,6 +3535,17 @@ write_rules: []
             Box::new(writer) as Box<dyn MemBackend>,
         )])
         .unwrap();
+        // Pin the mutation clock. The auto-stamp is second-resolution,
+        // and the assertions below compare it against a separately
+        // computed "now" — so an unpinned run fails whenever a second
+        // ticks between the create and the comparison. That is a real
+        // flake, not a theoretical one: it fired on a suite run that
+        // straddled midnight. The engine's injectable clock exists for
+        // exactly this, and pinning it here also makes the expected
+        // string a constant rather than a second read of the wall clock.
+        const FROZEN_SECS: u64 = 1_754_000_000;
+        let frozen = std::time::UNIX_EPOCH + std::time::Duration::from_secs(FROZEN_SECS);
+        engine.set_mutation_clock(std::sync::Arc::new(move || frozen));
         let (actor, client) = cli_actor();
 
         // Caller supplies a past value for the init_timestamp field
@@ -3550,9 +3561,9 @@ write_rules: []
             .create_entity(args, actor, Some(&client), None)
             .unwrap();
 
-        // Both timestamps should reflect the engine's `today_iso()`,
-        // not the caller's `2020-01-01`.
-        let today = crate::engine::mutation::today_iso();
+        // Both timestamps should reflect the engine's own clock, not
+        // the caller's `2020-01-01`.
+        let today = crate::engine::mutation::iso_from_system_time(frozen);
         assert_eq!(outcome.created_date, today);
         let entity = engine
             .get_entity(&outcome.id)

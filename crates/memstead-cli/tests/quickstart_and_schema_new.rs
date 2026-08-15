@@ -1230,7 +1230,7 @@ fn quickstart_receipt_names_in_session_verification_and_the_restart() {
         .expect("receipt carries in-session verification steps");
     let rendered = verify
         .iter()
-        .map(|v| v.as_str().unwrap_or_default())
+        .map(|v| v["command"].as_str().unwrap_or_default())
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
@@ -1263,6 +1263,93 @@ fn quickstart_receipt_names_in_session_verification_and_the_restart() {
         out.contains("--version") && out.contains("Restart"),
         "markdown receipt must carry both the in-session check and the restart; got:\n{out}",
     );
+}
+
+/// Every command the receipt prints must run verbatim, from the
+/// directory the reader is standing in — including when the workspace
+/// path contains a space. The earlier version of this test matched
+/// substrings and executed the JSON `mcp_command` field directly, so it
+/// passed while the *printed* lines were unrunnable: `Next:` named a
+/// bare `memstead overview` that refuses outside the new workspace, and
+/// both interpolated paths were unquoted.
+#[test]
+fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
+    let tmp = TempDir::new().unwrap();
+    let outer = tmp.path().join("outer");
+    std::fs::create_dir_all(&outer).unwrap();
+
+    // A directory name with a space — the case unquoted interpolation
+    // silently breaks.
+    let assert = memstead()
+        .current_dir(&outer)
+        .args(["quickstart", "--json", "--agent", "claude-code", "My Graph"])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    // The machine surface ships runnable commands, not markdown.
+    let steps = payload["verify_now"]
+        .as_array()
+        .expect("verify_now is an array of steps");
+    assert!(!steps.is_empty(), "got {payload}");
+    let mut commands: Vec<String> = steps
+        .iter()
+        .map(|s| {
+            let c = s["command"].as_str().unwrap_or_default().to_string();
+            assert!(
+                !c.contains('`') && !c.starts_with("- "),
+                "machine surface must carry a bare command, got: {c}",
+            );
+            c
+        })
+        .collect();
+
+    // `next_action`'s trailing command must be runnable too — it is the
+    // more prominent of the two, and named the same graph read.
+    let next = payload["next_action"].as_str().unwrap_or_default();
+    let (_, tail) = next
+        .rsplit_once("then try: ")
+        .unwrap_or_else(|| panic!("next_action names a follow-up command; got: {next}"));
+    commands.push(tail.to_string());
+
+    // Absolute paths, so a relative argument does not leak into a field
+    // an agent will resolve against its own cwd.
+    for key in ["workspace_root", "config_path"] {
+        let v = payload[key].as_str().unwrap_or_default();
+        assert!(
+            Path::new(v).is_absolute(),
+            "`{key}` must be absolute for a machine consumer, got: {v}",
+        );
+    }
+
+    // Now the real assertion: run each printed command through a shell,
+    // from the directory the caller was standing in.
+    for command in commands {
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&command)
+            .current_dir(&outer)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    Path::new(env!("CARGO_BIN_EXE_memstead"))
+                        .parent()
+                        .unwrap()
+                        .display(),
+                    std::env::var("PATH").unwrap_or_default(),
+                ),
+            )
+            .output()
+            .expect("spawn sh");
+        assert!(
+            out.status.success(),
+            "the receipt printed `{command}`, which fails when run as printed:\n\
+             --- stdout ---\n{}\n--- stderr ---\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
 }
 
 /// F8: `--relation` is no longer refused on a filesystem-mem

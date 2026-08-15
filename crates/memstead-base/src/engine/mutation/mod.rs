@@ -450,14 +450,13 @@ pub(crate) fn stage_anchors_rename(
     Ok(true)
 }
 
-/// System-clock convenience over [`iso_from_system_time`], for tests
-/// that compare against "roughly now". Mutation paths instead go
-/// through `Engine::now_iso`, which reads the engine's injectable
-/// clock — so canonical-bytes tests can pin the stamped value.
-#[cfg(test)]
-pub(super) fn today_iso() -> String {
-    iso_from_system_time(std::time::SystemTime::now())
-}
+// A `today_iso()` wall-clock convenience used to live here, for tests
+// comparing an auto-stamp against "roughly now". It is deliberately
+// gone: the stamp is second-resolution, so every such comparison races
+// the clock between the mutation and the assertion, and one of them
+// duly failed on a suite run that straddled midnight. Tests that need
+// a stamped value pin `Engine::set_mutation_clock` and derive the
+// expected string from the same instant via [`iso_from_system_time`].
 
 /// An instant as a full ISO-8601 datetime string `YYYY-MM-DDTHH:MM:SSZ`
 /// (UTC). Used by mutation paths that auto-stamp metadata fields
