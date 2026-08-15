@@ -107,3 +107,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `update_projection`
 - `workspace_requires_notes`
 
+### Unaligned — WASM
+
+- `entityIds`
+

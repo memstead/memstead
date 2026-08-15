@@ -607,14 +607,23 @@ pub struct PublishedMemConfig {
 /// cleanly.
 pub const PUBLISHED_MEM_FORMAT: u32 = 4;
 
+/// Every archive format a current reader accepts, newest first: the
+/// current integer plus format 3 (the pre-title/subject shape — the two
+/// mems already published on the live registry stay installable without
+/// a re-publish). `format: 1` (V1) and `format: 2` (V2, top-level
+/// `schema/` tree) keep refusing cleanly.
+///
+/// A list rather than a predicate body because the set is a published
+/// fact, not only a runtime check: the docs site derives the
+/// library-compatibility statement from it, so a reader can tell which
+/// library reads what this binary writes *before* installing either.
+pub const PUBLISHED_MEM_FORMATS_ACCEPTED: &[u32] = &[PUBLISHED_MEM_FORMAT, 3];
+
 /// Does a reader updated for the current format accept an archive at
-/// `format`? Accepts the current integer and format 3 (the
-/// pre-title/subject shape — the two mems already published on the
-/// live registry stay installable without a re-publish). The single
-/// predicate every reader gate consults, so acceptance cannot drift
-/// per surface.
+/// `format`? The single predicate every reader gate consults, so
+/// acceptance cannot drift per surface.
 pub fn published_format_accepted(format: u32) -> bool {
-    format == PUBLISHED_MEM_FORMAT || format == 3
+    PUBLISHED_MEM_FORMATS_ACCEPTED.contains(&format)
 }
 
 /// Errors returned by `published_config_from`. Actionable messages —

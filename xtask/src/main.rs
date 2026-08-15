@@ -908,7 +908,7 @@ fn write_wasm_reference(output: &Path) -> Result<()> {
 /// Resolve the `engine` workspace root from the xtask crate
 /// manifest path. Cargo sets `CARGO_MANIFEST_DIR` to
 /// `<workspace>/xtask`; the parent is the workspace root.
-fn workspace_root() -> PathBuf {
+pub(crate) fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("xtask manifest dir has a parent")

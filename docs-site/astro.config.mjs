@@ -1,6 +1,48 @@
+import { execFileSync } from "node:child_process";
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGfm from "remark-gfm";
+
+// The generation stamp every page footer carries. The deploy injects
+// `PUBLIC_GENERATION_SHA` / `PUBLIC_GENERATION_DATE`; a build without
+// them derives the same facts from git rather than printing a
+// placeholder.
+//
+// The placeholder is what this replaces: every published page read
+// `Generated from dev on unbuilt`, because the fallbacks were words
+// that render like data. On a site whose pitch is "generated
+// deterministically from the live source on every push", the one line
+// that says WHICH source was the one line that never did — and a
+// reader trying to tell whether the reference pages describe the
+// release they installed had nothing to go on.
+//
+// When neither the environment nor git can answer, the build fails.
+// An unattributed page is worse than no page: it looks authoritative
+// and cannot be checked.
+function generationStamp() {
+  const fromGit = (args) => {
+    try {
+      return execFileSync("git", args, { encoding: "utf8" }).trim() || null;
+    } catch {
+      return null;
+    }
+  };
+  const sha = process.env.PUBLIC_GENERATION_SHA || fromGit(["rev-parse", "--short", "HEAD"]);
+  const date =
+    process.env.PUBLIC_GENERATION_DATE ||
+    fromGit(["log", "-1", "--format=%cs"]);
+  if (!sha || !date) {
+    throw new Error(
+      "docs-site: cannot determine the generation stamp. Set " +
+        "PUBLIC_GENERATION_SHA and PUBLIC_GENERATION_DATE, or build inside a " +
+        "git checkout. Refusing to publish pages that cannot name the " +
+        "revision they were generated from.",
+    );
+  }
+  return { sha, date };
+}
+
+const generation = generationStamp();
 
 export default defineConfig({
   // The CLI/MCP/etc. reference pages are machine-generated from clap
@@ -74,4 +116,13 @@ export default defineConfig({
       ],
     }),
   ],
+  // The stamp reaches the Footer as compile-time constants rather than
+  // as `import.meta.env`, so an unset variable is a build failure above
+  // (where it can say why) instead of a silent fallback in a component.
+  vite: {
+    define: {
+      __GENERATION_SHA__: JSON.stringify(generation.sha),
+      __GENERATION_DATE__: JSON.stringify(generation.date),
+    },
+  },
 });

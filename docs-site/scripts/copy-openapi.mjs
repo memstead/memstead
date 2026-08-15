@@ -110,14 +110,58 @@ if (JSON.stringify(expected) !== JSON.stringify(actual)) {
   );
 }
 
+// The roster's size, as the word the prose uses. Derived rather than
+// typed, because the count is exactly the kind of fact that rots: the
+// generated page said "six" while the hand-written index said "eight",
+// on a site whose pitch is that generated surfaces cannot drift. A
+// number a human maintains is a number that will eventually be wrong.
+const NUMBER_WORDS = [
+  "zero", "one", "two", "three", "four", "five", "six", "seven",
+  "eight", "nine", "ten", "eleven", "twelve",
+];
+const skillCount = actual.length;
+const skillCountWord = NUMBER_WORDS[skillCount] ?? String(skillCount);
+
+// No hand-written page may state a skill count at all. The index used
+// to, and contradicted the generated page it linked to. Deleting the
+// claim is the fix (the roster page is one click away and always
+// right); this guard is what keeps it deleted.
+const HANDWRITTEN_DOCS = `${here}/../src/content/docs`;
+const skillsDest = `${HANDWRITTEN_DOCS}/skills.md`;
+const COUNT_CLAIM =
+  /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)[- ]skills?\b/i;
+function scanForSkillCounts(dir) {
+  const offenders = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      offenders.push(...scanForSkillCounts(full));
+      continue;
+    }
+    // skills.md is the generated roster page — it states the count
+    // because it derives it, one line below.
+    if (full === skillsDest) continue;
+    if (!/\.mdx?$/.test(entry.name)) continue;
+    const text = readFileSync(full, "utf8");
+    for (const line of text.split("\n")) {
+      const hit = line.match(COUNT_CLAIM);
+      if (!hit) continue;
+      // A claim that happens to be right is still hand-maintained, but
+      // a wrong one is the actual defect — report both, name which.
+      offenders.push({ file: full, line: line.trim(), claim: hit[1] });
+    }
+  }
+  return offenders;
+}
+
 let skillsBody = `---
 title: Skills
-description: "The six-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
+description: "The ${skillCountWord}-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
 ---
 
 > This page is generated from the plugin \`SKILL.md\` frontmatter at build time — the shipped skill descriptions are the source of truth, so the roster here cannot drift from the installed plugin.
 
-The Claude Code plugin ships **six skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. Fidelity measurement is \`/sync --verify\`; the on-demand full stock-take is \`/sync --inventory\`. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
+The Claude Code plugin ships **${skillCountWord} skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. Fidelity measurement is \`/sync --verify\`; the on-demand full stock-take is \`/sync --inventory\`. There is no command for everyday graph work: once a workspace exists, you just talk to Claude and the \`memstead_*\` MCP tools stay live.
 
 `;
 for (const family of families) {
@@ -127,6 +171,19 @@ for (const family of families) {
     skillsBody += `### \`/${s.name}\`\n\n_${s.posture}_\n\n${s.description}\n\n`;
   }
 }
-const skillsDest = `${here}/../src/content/docs/skills.md`;
 writeFileSync(skillsDest, skillsBody);
 console.log(`copy-openapi: ${skillsDir}/*/SKILL.md -> ${skillsDest}`);
+
+const countOffenders = scanForSkillCounts(HANDWRITTEN_DOCS);
+if (countOffenders.length > 0) {
+  const listed = countOffenders
+    .map((o) => `  ${o.file}\n    claims "${o.claim}" skills: ${o.line}`)
+    .join("\n");
+  throw new Error(
+    `hand-written skill count found (the live roster has ${skillCount}). The ` +
+      `roster page derives its count; a page that states one of its own will ` +
+      `eventually contradict it — as the index did, saying "eight" against a ` +
+      `generated "six". Remove the number and link to /skills/ instead.\n${listed}`,
+  );
+}
+console.log(`copy-openapi: no hand-written skill counts (roster has ${skillCount})`);

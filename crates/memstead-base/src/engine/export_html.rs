@@ -212,6 +212,10 @@ impl Engine {
             .ok_or_else(|| crate::engine::EngineError::UnknownMem(mem.to_string()))?;
         let third_party = mounted.mount.capability == MountCapability::ReadOnly;
         let config = self.mem_config_for(mem);
+        // The mem's schema, for the declared section headings below. A
+        // mem whose schema did not resolve still exports — every
+        // section falls back to its key rather than the export failing.
+        let schema = self.schemas.get(mem);
         let schema_ref = self
             .schemas
             .get(mem)
@@ -356,7 +360,28 @@ impl Engine {
                 if body.trim().is_empty() {
                     continue;
                 }
-                let _ = writeln!(out, "<h3>{}</h3>", esc(key));
+                // Show the heading the schema author declared, not the
+                // engine's storage key. This export is the one artifact
+                // handed to somebody with nothing installed, and the
+                // declared heading is the only place an author gets to
+                // control how their model reads to an outsider —
+                // rendering `summary` where they wrote `Summary` was
+                // the export path reaching for the field nearest to
+                // hand, never a decision.
+                //
+                // The key still governs identity elsewhere (anchors are
+                // derived from entity ids, and stay untouched), so
+                // display and stability stay separable.
+                let heading = schema
+                    .and_then(|s| s.get_type(&e.entity_type))
+                    .and_then(|t| {
+                        t.sections
+                            .iter()
+                            .find(|s| &s.key == key)
+                            .map(|s| s.heading.clone())
+                    })
+                    .unwrap_or_else(|| key.clone());
+                let _ = writeln!(out, "<h3>{}</h3>", esc(&heading));
                 let resolved = resolve_wiki_links(body, mem, &exported_ids);
                 out.push_str(&markdown_to_safe_html(&resolved, &exported_ids));
             }
@@ -477,6 +502,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The export shows the heading the schema author declared, not
+    /// the engine's storage key. `current_state` is stored under that
+    /// key and declared as `Current State` — a difference no
+    /// capitalisation rule could reconstruct, which is the point: the
+    /// declared heading is the only place an author controls how their
+    /// model reads to someone who cannot see the markdown.
+    ///
+    /// Anchors are unaffected: they derive from entity ids, and the
+    /// no-dangling-anchor sweep runs here too.
+    #[test]
+    fn html_export_renders_the_declared_heading_not_the_section_key() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        std::fs::write(
+            mem_dir.join("open-question.md"),
+            "---\ntype: inquiry\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n\
+             status: open\nurgency: medium\n---\n# Open Question\n\n## Question\n\nQ?\n\n\
+             ## Significance\n\nS.\n\n## Current State\n\nWhere things stand.\n",
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+
+        let html = engine.render_html_export("specs", "2026-08-15").unwrap();
+
+        assert!(
+            html.contains("<h3>Current State</h3>"),
+            "must render the declared heading; got:\n{html}"
+        );
+        assert!(
+            !html.contains("<h3>current_state</h3>"),
+            "must not render the storage key as a heading; got:\n{html}"
+        );
+        // The capitalised-only cases come along for free.
+        assert!(html.contains("<h3>Question</h3>"), "got:\n{html}");
+        assert!(html.contains("<h3>Significance</h3>"), "got:\n{html}");
+        assert_no_dangling_anchors(&html);
+
+        // Byte-deterministic given store and export date.
+        let again = engine.render_html_export("specs", "2026-08-15").unwrap();
+        assert_eq!(html, again, "export must be byte-deterministic");
     }
 
     /// Criteria 1–4 over one fixture: rendering, sanitisation,

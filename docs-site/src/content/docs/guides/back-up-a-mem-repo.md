@@ -61,7 +61,7 @@ initial branch state with the backed-up one:
 mkdir restored && cd restored
 memstead mem-repo init
 memstead workspace allow-create --schema '*' knowledge
-memstead mem init knowledge --schema default@1.0.0
+memstead mem init knowledge --schema default@1.3.0
 memstead mem-repo remote-add origin git@github.com:you/mem-backup.git
 
 memstead fetch knowledge                                  # refs arrive, nothing moves

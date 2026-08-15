@@ -318,7 +318,78 @@ fn snake_to_camel(name: &str) -> String {
     out
 }
 
+/// The published-artifact compatibility block: which library version
+/// reads what the current binary writes.
+///
+/// Derived, never asserted. crates.io shows an engine version and npm
+/// shows a package version, and neither states which CLI generation it
+/// reads — so the only way to find out was to install both and write a
+/// client against whatever came out. Every number here comes from the
+/// build: the npm version from the package manifest, the engine version
+/// from the workspace, the formats from the engine's own constants.
+///
+/// A hand-maintained version matrix would be the same defect one level
+/// up, which is why this renders from data or not at all.
+fn compatibility_block(npm_version: &str, engine_version: &str) -> String {
+    let reads = memstead_schema::PUBLISHED_MEM_FORMATS_ACCEPTED
+        .iter()
+        .map(|f| format!("`{f}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let writes = memstead_schema::PUBLISHED_MEM_FORMAT;
+    // Built line-by-line rather than as one continued literal: a Rust
+    // string continuation carries its source indentation into the
+    // output, and four leading spaces in markdown is a code block.
+    [
+        "## Compatibility".to_string(),
+        String::new(),
+        "A `.mem` archive carries a `format` integer, and that integer — not the version \
+         numbers on crates.io and npm — decides whether a given library can read a given \
+         archive. This table is generated from the same constants the engine enforces at \
+         read time."
+            .to_string(),
+        String::new(),
+        "| Artifact | Version | Archive format |".to_string(),
+        "|---|---|---|".to_string(),
+        format!("| `memstead` CLI / engine | {engine_version} | writes `{writes}` |"),
+        format!("| `@memstead/wasm` (npm) | {npm_version} | reads {reads} |"),
+        String::new(),
+        "An archive at an unaccepted format refuses cleanly on read rather than loading \
+         partially. If the npm version above lags the engine version, the published \
+         package was built from an earlier engine and may not carry every method listed \
+         on this page — check the version you installed."
+            .to_string(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
 pub fn render(entries: &[WasmEntry]) -> String {
+    render_with_versions(entries, npm_version(), env!("CARGO_PKG_VERSION"))
+}
+
+/// The `@memstead/wasm` version from the package manifest that is
+/// actually published, so the page cannot claim a version npm does not
+/// have. An unreadable manifest degrades to `unknown` rather than
+/// failing the whole docs build over one table cell.
+fn npm_version() -> String {
+    let manifest = crate::workspace_root().join("crates/memstead-wasm/package.json");
+    std::fs::read_to_string(&manifest)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|v| {
+            v.get("version")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+pub fn render_with_versions(
+    entries: &[WasmEntry],
+    npm_version: impl AsRef<str>,
+    engine_version: &str,
+) -> String {
     let mut out = String::new();
     out.push_str("# WASM surface\n\n");
     out.push_str(
@@ -335,6 +406,7 @@ pub fn render(entries: &[WasmEntry]) -> String {
          JS call sites can branch on the stable error code \
          (`SEARCH_UNAVAILABLE_IN_WASM`) instead of cfg-style imports.\n\n",
     );
+    out.push_str(&compatibility_block(npm_version.as_ref(), engine_version));
 
     let functions: Vec<&WasmEntry> = entries
         .iter()

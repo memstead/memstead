@@ -52,14 +52,14 @@ memstead quickstart
 # Quickstart complete — mem `my-graph`
 
 - Workspace:   `/home/you/my-graph`
-- Schema pin:  `default@1.0.0`
+- Schema pin:  `default@1.3.0`
 - Seed entity: `my-graph--welcome-to-memstead` (remove any time: `memstead delete my-graph--welcome-to-memstead`)
 - Claude Code: wrote `.mcp.json` (server `memstead`)
 
 Next: Restart Claude Code so the `memstead` MCP server registers — then try: memstead overview
 ```
 
-Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
+Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
 ## 3. Create your first entities
 

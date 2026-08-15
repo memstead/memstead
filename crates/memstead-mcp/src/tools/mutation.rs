@@ -32,7 +32,9 @@ pub struct CreateParams {
     pub sections: Option<IndexMap<String, String>>,
     #[schemars(description = "Metadata overrides: { \"level\": \"M1\", \"tags\": \"a, b\" }")]
     pub metadata: Option<IndexMap<String, String>>,
-    #[schemars(description = "Initial relationships to create after entity is created")]
+    #[schemars(
+        description = "Initial relationships, wired in the same call that creates the entity. An entry is literally `{ \"to\": \"<mem>--<slug>\", \"type\": \"REL_TYPE\", \"description\": \"…\" }` — `description` optional, and there is no `from`: the entity being created is the source. The sibling surfaces spell the same edge differently — `memstead_relate` entries carry `{from, to, type, remove?, description?}`, and the CLI takes `--relation TYPE:target-id` — so read the shape here rather than carrying one over. An unresolved `to` auto-creates a stub."
+    )]
     pub relations: Option<Vec<RelationInput>>,
     #[schemars(
         description = "Optional provenance anchors to attach to the new entity — durable records tying it to the source artifacts it describes (which artifact, at which grain, under which provenance class). Written into the mem-branch anchors sidecar in the SAME commit as the entity (atomic); omitting it is byte-identical to a create without anchors. Anchor writes MERGE: later `memstead_update` calls carrying `anchors` add to this set (same `(artifact, grain, class)` triple replaces, otherwise appends) and never silently discard it — removal is explicit via `memstead_update`'s `anchors_unset`. A malformed element refuses the whole create with `INVALID_ANCHOR` (`details` carries the offending field + allowed set) and the entity is not written. Anchors do NOT participate in `_hash`."

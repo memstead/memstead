@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-The [MCP tools reference](../../reference/mcp/) is the authoritative surface description — every tool, every parameter, every error code. This page is its on-ramp: five worked sequences an agent actually runs, captured verbatim against a live `memstead-mcp` server over a small workspace (one mem, `my-graph`, pinned to `default@1.0.0`). Requests show the `tools/call` params; responses show the `structured_content` envelope. Long payloads are trimmed where marked (`…`) — nothing is paraphrased.
+The [MCP tools reference](../../reference/mcp/) is the authoritative surface description — every tool, every parameter, every error code. This page is its on-ramp: five worked sequences an agent actually runs, captured verbatim against a live `memstead-mcp` server over a small workspace (one mem, `my-graph`, pinned to `default@1.3.0`). Requests show the `tools/call` params; responses show the `structured_content` envelope. Long payloads are trimmed where marked (`…`) — nothing is paraphrased. The schema pin shown was refreshed from `default@1.0.0` to the version the shipped binary now writes, so a command copied from this page pins nothing stale; the tool shapes and envelopes are otherwise as captured.
 
 ## Recipe 1 — cold start: orient before you touch anything
 
@@ -37,7 +37,7 @@ _total_chunks: 1
 
 _(call `memstead_schema(name=<ref>)` for the full per-type catalogue, sections, fields, and relationship vocabulary)_
 
-### default@1.0.0
+### default@1.3.0
 
 Built-in memstead schema covering ten knowledge-type kinds: spec, memo, assertion,
 concept, inquiry, model, narrative, perspective, principle, process. Spans
@@ -47,7 +47,7 @@ spec-authoring and knowledge-capture in a single relationship vocabulary.
 
 ### my-graph
 
-- **Schema:** default@1.0.0
+- **Schema:** default@1.3.0
 - **Version:** 0.1.0
 - **Entities:** 3
 - **By type:** concept=3
@@ -61,15 +61,15 @@ Idempotency · Retry
 …
 ```
 
-**Call 2: `memstead_schema`** — the mem's pin is `default@1.0.0`, so:
+**Call 2: `memstead_schema`** — the mem's pin is `default@1.3.0`, so:
 
 ```json
-{ "name": "memstead_schema", "arguments": { "name": "default@1.0.0" } }
+{ "name": "memstead_schema", "arguments": { "name": "default@1.3.0" } }
 ```
 
 ```json
 {
-  "ref": "default@1.0.0",
+  "ref": "default@1.3.0",
   "origin": "first-party",
   "relationship_mode": "strict",
   "alias_target_rel_type": "REFERENCES",
@@ -203,7 +203,7 @@ No stemming, no wildcards: expand a concept into keyword variants in `query.any`
   "type": "concept",
   "origin": "first-party",
   "_hash": "f668d8042f4499ee",
-  "_mem_schema": "default@1.0.0",
+  "_mem_schema": "default@1.3.0",
   "_tokens": 117,
   "metadata": {
     "abstraction_level": "concrete",
@@ -285,7 +285,7 @@ The engine validates every write against the schema. A refusal is not a dead end
   "title": "Optimistic locking",
   "file_path": "optimistic-locking.md",
   "_hash": "2027b9e3bed49f5a",
-  "_mem_schema": "default@1.0.0",
+  "_mem_schema": "default@1.3.0",
   "created_date": "2026-07-02T21:15:35Z",
   "commit_sha": "000000000000000018be958d21f850000000000000000000",
   "durable": true,
@@ -343,7 +343,7 @@ Before retrying with `details.current`, re-read the entity when your edit depend
   "id": "my-graph--optimistic-locking",
   "title": "Optimistic locking",
   "_hash": "ea7c45d663f67f89",
-  "_mem_schema": "default@1.0.0",
+  "_mem_schema": "default@1.3.0",
   "modified_date": "2026-07-02T21:16:17Z",
   "modified_sections": { "replaced": ["significance"] },
   "modified_metadata": {},
@@ -427,7 +427,7 @@ In a `strict`-mode schema only declared relationship types are legal. Guess wron
   "commit_sha": "000000000000000018be959d068d4dd80000000000000000",
   "warnings": [],
   "orphan_stubs_removed": [],
-  "_mem_schema": "default@1.0.0",
+  "_mem_schema": "default@1.3.0",
   "durable": true
 }
 ```

@@ -24,6 +24,7 @@ regex.workspace = true
 rmcp.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+memstead-schema = { path = "../crates/memstead-schema" }
 sha2.workspace = true
 tempfile.workspace = true
 toml.workspace = true
