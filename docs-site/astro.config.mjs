@@ -28,9 +28,14 @@ function generationStamp() {
     }
   };
   const sha = process.env.PUBLIC_GENERATION_SHA || fromGit(["rev-parse", "--short", "HEAD"]);
-  const date =
-    process.env.PUBLIC_GENERATION_DATE ||
-    fromGit(["log", "-1", "--format=%cs"]);
+  // Normalised to the calendar date. The deploy passes a full ISO
+  // datetime with offset (`%cI`) and the git fallback a bare date
+  // (`%cs`), so without this the published footer and a local build
+  // would state the same fact in two shapes — and the footer's whole
+  // job is to be a fact a reader can compare.
+  const rawDate =
+    process.env.PUBLIC_GENERATION_DATE || fromGit(["log", "-1", "--format=%cs"]);
+  const date = rawDate ? rawDate.slice(0, 10) : rawDate;
   if (!sha || !date) {
     throw new Error(
       "docs-site: cannot determine the generation stamp. Set " +

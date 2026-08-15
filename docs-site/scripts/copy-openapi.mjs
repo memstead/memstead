@@ -18,7 +18,7 @@
 //    duplicate H1, and points the repo-relative VISION.md links at
 //    GitHub.
 //
-// 3. Skills roster: render the seven-skill plugin roster page at
+// 3. Skills roster: render the plugin roster page at
 //    `/skills/` from the SKILL.md frontmatter — the shipped skill
 //    descriptions ARE the job map (adversarially reviewed as a plugin
 //    gate), so the page is generated from them rather than hand-copied,

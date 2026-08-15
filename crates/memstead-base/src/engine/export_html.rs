@@ -386,7 +386,12 @@ impl Engine {
                 out.push_str(&markdown_to_safe_html(&resolved, &exported_ids));
             }
             if !e.relationships.is_empty() {
-                out.push_str("<h3>relationships</h3>\n<ul class=\"reltable\">\n");
+                // `Relationships` as the engine writes it on disk, not the
+                // lowercase slot name. This block is auto-managed rather
+                // than schema-declared, so it has no `heading` to read —
+                // but it sits beside headings that now carry the author's
+                // words, and was the last storage-flavoured one left.
+                out.push_str("<h3>Relationships</h3>\n<ul class=\"reltable\">\n");
                 let mut rels = e.relationships.clone();
                 rels.sort_by(|a, b| {
                     a.rel_type

@@ -8,16 +8,6 @@ Auto-generated from `crates/memstead-wasm/src/lib.rs`. Every entry point annotat
 
 The WASM surface is the **read-side** of the browser-sync architecture — writes happen server-side and flow back through `applyCommit`. Full-text search is intentionally unavailable in the WASM build; the method exists as a typed-refusal stub so JS call sites can branch on the stable error code (`SEARCH_UNAVAILABLE_IN_WASM`) instead of cfg-style imports.
 
-## Compatibility
-
-A `.mem` archive carries a `format` integer, and that integer — not the version numbers on crates.io and npm — decides whether a given library can read a given archive. This table is generated from the same constants the engine enforces at read time.
-
-| Artifact | Version | Archive format |
-|---|---|---|
-| `memstead` CLI / engine | 0.7.0 | writes `4` |
-| `@memstead/wasm` (npm) | 0.1.2 | reads `4`, `3` |
-
-An archive at an unaccepted format refuses cleanly on read rather than loading partially. If the npm version above lags the engine version, the published package was built from an earlier engine and may not carry every method listed on this page — check the version you installed.
 ## Free functions
 
 ### `setPanicHook` *(feature: `panic-hook`)*
