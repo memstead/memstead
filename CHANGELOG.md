@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-15
+
 ### Added
 - **`@memstead/wasm` joins the release line at 0.7.0.** The package ran
   on its own version track, which is how it came to sit at `0.1.2`
@@ -1951,7 +1953,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/memstead/memstead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/memstead/memstead/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/memstead/memstead/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/memstead/memstead/compare/v0.3.0...v0.4.0
