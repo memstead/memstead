@@ -33,7 +33,7 @@ use serde_json::json;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::CliContext;
+use crate::setup::{CliContext, memstead_program};
 
 use super::init::find_ancestor_workspace;
 
@@ -645,9 +645,19 @@ fn wire_agent(
     mcp_command: &str,
 ) -> anyhow::Result<WiringOutcome> {
     let Some(rel) = agent.config_file() else {
+        // Codex has no project config, so this command IS the wiring —
+        // it must survive an mcp path containing a space exactly as the
+        // verification commands must.
+        let add = ShellCmd::new("codex")
+            .arg("mcp")
+            .arg("add")
+            .arg("memstead")
+            .end_of_options()
+            .arg(mcp_command)
+            .render();
         return Ok(WiringOutcome {
             target: agent,
-            action: format!("run: `codex mcp add memstead -- {mcp_command}`"),
+            action: format!("run: `{add}`"),
         });
     };
     let path = target.join(rel);
@@ -708,17 +718,91 @@ fn wire_agent(
 /// is safe unquoted; otherwise single-quoted, with embedded `'` closed
 /// and re-opened the POSIX way (`'\''`).
 ///
-/// Needed because the receipt prints commands the reader is expected to
-/// run verbatim, and both interpolated values — the target directory
-/// and the resolved `memstead-mcp` path — come from the user's
-/// filesystem. `quickstart "My Graph"` printed `cd My Graph && …`,
-/// which is not the command it looks like.
+/// A leading `-` forces quoting even though `-` is otherwise safe: an
+/// argument that starts with a dash is read as an option by whatever
+/// receives it. Quoting alone does not save `cd` (the shell strips
+/// quotes before `cd` sees the word), which is why [`ShellCmd`] emits
+/// `cd --`; the quoting here keeps the word intact for everything else.
 fn shell_quote(value: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "._-/@:+,=".contains(c);
-    if !value.is_empty() && value.chars().all(safe) {
+    if !value.is_empty() && !value.starts_with('-') && value.chars().all(safe) {
         return value.to_string();
     }
     format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// One command line the receipt prints for the reader to run.
+///
+/// Every printed command goes through this rather than through an ad-hoc
+/// `format!`, because each one needs the same three things and each was
+/// independently getting one of them wrong: the program resolved to
+/// something the reader can actually invoke, every argument shell-quoted,
+/// and a `cd` when the command must run inside the new workspace.
+///
+/// The `cd` uses the `--` terminator so a directory named `-graph`
+/// reaches `cd` as an operand instead of an option.
+/// One word of a command line: a value to be quoted, or shell syntax
+/// to emit as-is.
+enum Word {
+    Value(String),
+    Literal(&'static str),
+}
+
+struct ShellCmd {
+    /// `cd` here first. `None` runs wherever the reader is standing.
+    cd: Option<String>,
+    program: String,
+    args: Vec<Word>,
+}
+
+impl ShellCmd {
+    fn new(program: impl Into<String>) -> Self {
+        ShellCmd {
+            cd: None,
+            program: program.into(),
+            args: Vec::new(),
+        }
+    }
+
+    fn arg(mut self, arg: impl Into<String>) -> Self {
+        self.args.push(Word::Value(arg.into()));
+        self
+    }
+
+    /// The literal `--` end-of-options separator. Distinct from
+    /// [`Self::arg`] because it is syntax, not a value: quoting it
+    /// would be harmless to the shell but noise to the reader, and the
+    /// leading-dash rule that protects values must not fire on it.
+    fn end_of_options(mut self) -> Self {
+        self.args.push(Word::Literal("--"));
+        self
+    }
+
+    /// Prefix a `cd` into `dir` unless the reader is already there.
+    fn in_dir(mut self, dir: &Path, already_there: bool) -> Self {
+        if !already_there {
+            self.cd = Some(dir.display().to_string());
+        }
+        self
+    }
+
+    /// The runnable line. This is what both receipts print — the
+    /// markdown surface only adds its own bullet and backticks.
+    fn render(&self) -> String {
+        let mut out = String::new();
+        if let Some(dir) = &self.cd {
+            out.push_str(&format!("cd -- {} && ", shell_quote(dir)));
+        }
+        out.push_str(&shell_quote(&self.program));
+        for arg in &self.args {
+            out.push(' ');
+            match arg {
+                Word::Value(v) => out.push_str(&shell_quote(v)),
+                Word::Literal(l) => out.push_str(l),
+            }
+        }
+        out
+    }
 }
 
 /// Final report: every artifact by name, then the single next action.
@@ -736,14 +820,11 @@ fn report(
     let restart_labels: Vec<&str> = wirings.iter().map(|w| w.target.label()).collect();
 
     // Every command this receipt prints must run verbatim, from the
-    // directory the caller is actually standing in. Two things break
-    // that if left implicit:
-    //
-    //  * `memstead overview` resolves its workspace by walking up from
-    //    cwd, so after `quickstart <path>` the bare command refuses
-    //    `WORKSPACE_NOT_INITIALISED` — the reader needs the `cd`.
-    //  * paths are user-supplied and may contain spaces, so anything
-    //    interpolated into a shell line is quoted.
+    // directory the caller is actually standing in, with whatever
+    // characters their paths happen to contain. Each printed command is
+    // therefore built as a [`ShellCmd`] rather than formatted inline —
+    // three separate rounds of this receipt shipped a command that did
+    // not run, each time because one `format!` had been missed.
     //
     // A verification step the reader cannot reproduce is the same
     // defect as an undisclosed shape, so this is not cosmetic.
@@ -753,34 +834,52 @@ fn report(
     let in_cwd = std::env::current_dir()
         .ok()
         .is_some_and(|cwd| cwd == absolute);
-    let overview_cmd = if in_cwd {
-        "memstead overview".to_string()
-    } else {
-        format!(
-            "cd {} && memstead overview",
-            shell_quote(&target.display().to_string())
-        )
-    };
-    let version_cmd = format!("{} --version", shell_quote(&mcp_bin.command));
+    let memstead = memstead_program();
+    let overview_cmd = ShellCmd::new(&memstead)
+        .arg("overview")
+        .in_dir(target, in_cwd)
+        .render();
+    let delete_cmd = ShellCmd::new(&memstead)
+        .arg("delete")
+        .arg(seed_id)
+        .in_dir(target, in_cwd)
+        .render();
+    let version_cmd = ShellCmd::new(&mcp_bin.command).arg("--version").render();
 
-    // The restart is what registers the MCP tools with the agent —
-    // it is named for exactly that, and never presented as skippable.
-    let next_action = format!(
-        "Restart {} so the `memstead` MCP server registers its tools — then try: {overview_cmd}",
+    // Codex is wired by a command the reader still has to run, so for
+    // that target the restart registers nothing until they run it. Say
+    // so in order rather than naming a restart that would no-op.
+    let codex_pending = wirings
+        .iter()
+        .any(|w| w.target == AgentTarget::Codex && w.action.starts_with("run:"));
+    let restart_clause = format!(
+        "Restart {} so the `memstead` MCP server registers its tools",
         restart_labels.join(" / "),
     );
+    let next_action = if codex_pending {
+        format!(
+            "Run the `codex mcp add` command above first — it is Codex's wiring, and a restart \
+             registers nothing without it. Then: {restart_clause} — then try: {overview_cmd}"
+        )
+    } else {
+        format!("{restart_clause} — then try: {overview_cmd}")
+    };
     // …but an agent session that just ran onboarding cannot restart
     // itself mid-run, so the wiring it wrote must be checkable from
-    // inside that session. Both checks are real: the first runs the
-    // exact binary the config points at, the second reads the graph the
-    // server will serve. Held as `{what, command}` pairs so the JSON
+    // inside that session. Held as `{what, command}` pairs so the JSON
     // surface ships runnable commands and the markdown surface adds its
     // own bullet decoration — an agent should never have to strip
     // backticks off a machine field.
-    let verify_now = [
-        ("the wired binary answers", &version_cmd),
-        ("the graph is already readable", &overview_cmd),
-    ];
+    let mut verify_now: Vec<(&str, String)> = Vec::new();
+    // Only claim the binary answers when we actually found one. In the
+    // not-found case the warning above already names the install
+    // command, and printing an unrunnable check under the heading "no
+    // restart needed" would be the exact defect this block exists to
+    // remove.
+    if mcp_bin.warning.is_none() {
+        verify_now.push(("the wired binary answers", version_cmd));
+    }
+    verify_now.push(("the graph is already readable", overview_cmd.clone()));
 
     if ctx.json {
         return print_json(&json!({
@@ -788,6 +887,7 @@ fn report(
             // use these without reconstructing its own cwd.
             "workspace_root": absolute.display().to_string(),
             "config_path": config_path(&absolute).display().to_string(),
+            "seed_entity_delete_command": delete_cmd,
             "name": name,
             "schema": schema_pin.as_display(),
             "seed_entity": seed_id,
@@ -821,7 +921,7 @@ fn report(
         String::new(),
         format!("- Workspace:   `{}`", target.display()),
         format!("- Schema pin:  `{}`", schema_pin.as_display()),
-        format!("- Seed entity: `{seed_id}` (remove any time: `memstead delete {seed_id}`)"),
+        format!("- Seed entity: `{seed_id}` (remove any time: `{delete_cmd}`)"),
     ];
     for w in wirings {
         lines.push(format!("- {}: {}", w.target.label(), w.action));

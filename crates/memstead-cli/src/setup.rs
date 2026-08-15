@@ -112,16 +112,48 @@ pub enum WorkspaceShape {
     Filesystem,
 }
 
+/// Resolve the running `memstead` binary to something the reader can
+/// actually type. Bare `memstead` when that name on `PATH` resolves to
+/// this very binary; otherwise the path we were invoked as.
+///
+/// A reader who ran `./target/debug/memstead`, or an unpacked download,
+/// or a binary under a versioned directory, has no `memstead` on
+/// `PATH` — and every printed command naming a bare `memstead` fails
+/// for them with `command not found`. Every message that tells someone
+/// to run this binary goes through here.
+pub fn memstead_program() -> String {
+    let Ok(exe) = std::env::current_exe() else {
+        return "memstead".to_string();
+    };
+    let canonical_exe = exe.canonicalize().unwrap_or_else(|_| exe.clone());
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join("memstead");
+            if candidate.is_file() && candidate.canonicalize().is_ok_and(|c| c == canonical_exe) {
+                return "memstead".to_string();
+            }
+        }
+    }
+    exe.display().to_string()
+}
+
 /// The command that produces the *other* shape than the one a
 /// disclosure is describing. Feature-gated because every command a
 /// message names must exist in the binary that prints it: the lean
 /// build has no `mem-repo` subcommand group, so it points at the full
-/// build rather than at a verb it would reject.
+/// build rather than at a verb it would reject. The program name is
+/// resolved rather than hardcoded, for the same reason the verify
+/// commands resolve it — this is an instruction, not a mention.
 #[cfg(feature = "mem-repo")]
-const MEM_REPO_INIT_HINT: &str = "`memstead mem-repo init` in a fresh folder";
+fn mem_repo_init_hint() -> String {
+    format!("`{} mem-repo init` in a fresh folder", memstead_program())
+}
 #[cfg(not(feature = "mem-repo"))]
-const MEM_REPO_INIT_HINT: &str = "the full build of memstead (this lean build has no `mem-repo` \
-     subcommand), then `memstead mem-repo init` in a fresh folder";
+fn mem_repo_init_hint() -> String {
+    "the full build of memstead (this lean build has no `mem-repo` subcommand), then \
+     `memstead mem-repo init` in a fresh folder"
+        .to_string()
+}
 
 /// What a filesystem-mem workspace cannot do — stated with the same
 /// feature gate as the hint above, and for the same reason. The full
@@ -199,8 +231,9 @@ pub fn shape_disclosure(shape: WorkspaceShape) -> ShapeDisclosure {
             other_shape: WorkspaceShape::MemRepo,
             other_shape_command: format!(
                 "**The other shape** — mem-repo: many mems, git-backed, registry-capable — \
-                 comes from {MEM_REPO_INIT_HINT}. Switching later means starting a second \
-                 workspace, so decide now if you intend to install mems."
+                 comes from {hint}. Switching later means starting a second \
+                 workspace, so decide now if you intend to install mems.",
+                hint = mem_repo_init_hint(),
             ),
         },
         WorkspaceShape::MemRepo => ShapeDisclosure {
@@ -210,10 +243,11 @@ pub fn shape_disclosure(shape: WorkspaceShape) -> ShapeDisclosure {
             cannot: "**It costs a git repository.** The mems live in `mem-repo/.git/` and \
                      every mutation is a commit — not a folder of files you can hand-edit.",
             other_shape: WorkspaceShape::Filesystem,
-            other_shape_command: "**The other shape** — filesystem-mem: one mem, plain `.md` \
-                                  files, no git — comes from `memstead quickstart` in a fresh \
-                                  folder."
-                .to_string(),
+            other_shape_command: format!(
+                "**The other shape** — filesystem-mem: one mem, plain `.md` files, no git — \
+                 comes from `{} quickstart` in a fresh folder.",
+                memstead_program(),
+            ),
         },
     }
 }

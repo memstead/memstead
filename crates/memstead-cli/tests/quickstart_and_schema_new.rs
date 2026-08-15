@@ -1266,51 +1266,206 @@ fn quickstart_receipt_names_in_session_verification_and_the_restart() {
 }
 
 /// Every command the receipt prints must run verbatim, from the
-/// directory the reader is standing in — including when the workspace
-/// path contains a space. The earlier version of this test matched
-/// substrings and executed the JSON `mcp_command` field directly, so it
-/// passed while the *printed* lines were unrunnable: `Next:` named a
-/// bare `memstead overview` that refuses outside the new workspace, and
-/// both interpolated paths were unquoted.
+/// directory the reader is standing in — across the awkward cases, on
+/// both output surfaces, for every agent target.
+///
+/// Three earlier versions of this guard passed while printed commands
+/// were unrunnable, each time because the test sampled a subset: it
+/// checked `verify_now` but not the markdown lines, one agent target
+/// but not Codex, a space in the path but not a leading dash, and a
+/// `PATH` that always happened to contain `memstead`. So this one
+/// *extracts* every backticked command from the markdown receipt and
+/// every command-bearing JSON field, and runs the lot.
 #[test]
 fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
+    // Pull every `backticked` span out of the markdown receipt, keeping
+    // the ones that look like commands (they name a binary we ship, or
+    // start with `cd `). Extraction rather than enumeration is the
+    // point: a new printed command is covered the day it is added.
+    fn commands_in_markdown(out: &str) -> Vec<String> {
+        out.split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::trim)
+            .filter(|s| {
+                if s.starts_with("cd ") || s.starts_with("codex ") {
+                    return true;
+                }
+                // A lone binary name is prose ("the `memstead` MCP
+                // server"), not an instruction — a printed command
+                // always carries at least a subcommand or flag.
+                if !s.contains(' ') {
+                    return false;
+                }
+                // The first word must BE one of our binaries — bare or
+                // as a path. `ends_with("memstead")` would also match
+                // the seed entity id `<mem>--welcome-to-memstead`,
+                // which is a backticked identifier, not a command.
+                s.split_whitespace().next().is_some_and(|w| {
+                    matches!(w, "memstead" | "memstead-mcp")
+                        || w.ends_with("/memstead")
+                        || w.ends_with("/memstead-mcp")
+                })
+            })
+            // `memstead quickstart` in recovery hints is a real command
+            // but would create a second workspace; the disclosure block's
+            // `memstead install <scope>/<name>` is a placeholder, not a
+            // literal. Both are covered by their own tests.
+            .filter(|s| !s.contains("quickstart") && !s.contains('<'))
+            .map(str::to_string)
+            .collect()
+    }
+
+    // The `PATH` a case runs under. It is applied to BOTH the
+    // `quickstart` invocation and the commands its receipt prints —
+    // a reader runs both in the same shell, so generating the receipt
+    // under one environment and testing it under another would prove
+    // nothing about what they see.
+    fn path_for(has_memstead: bool) -> String {
+        if has_memstead {
+            format!(
+                "{}:{}",
+                Path::new(env!("CARGO_BIN_EXE_memstead"))
+                    .parent()
+                    .unwrap()
+                    .display(),
+                std::env::var("PATH").unwrap_or_default(),
+            )
+        } else {
+            "/usr/bin:/bin".to_string()
+        }
+    }
+
+    fn run(command: &str, cwd: &Path, path_has_memstead: bool) {
+        let path = path_for(path_has_memstead);
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .current_dir(cwd)
+            .env("PATH", path)
+            .output()
+            .expect("spawn sh");
+        assert!(
+            out.status.success(),
+            "the receipt printed `{command}`, which fails when run as printed \
+             (PATH carries memstead: {path_has_memstead}):\n--- stdout ---\n{}\n\
+             --- stderr ---\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
+
+    // Each case is (directory name, whether `memstead` is on PATH).
+    // The dash-prefixed name is why the `cd` carries `--`; the
+    // PATH-less case is why the receipt names the binary it was
+    // actually invoked as.
+    let cases = [
+        ("My Graph", true),
+        ("-dashed-graph", true),
+        ("bob's graph", true),
+        ("offpath-graph", false),
+    ];
+
+    for (dir, on_path) in cases {
+        let tmp = TempDir::new().unwrap();
+        let outer = tmp.path().join("outer");
+        std::fs::create_dir_all(&outer).unwrap();
+
+        // `--` so clap does not read `-dashed-graph` as a flag.
+        let assert = memstead()
+            .current_dir(&outer)
+            .env("PATH", path_for(on_path))
+            .args(["quickstart", "--agent", "claude-code", "--"])
+            .arg(dir)
+            .assert()
+            .success();
+        let out = stdout_of(assert);
+        // The lean receipt names `mem-repo init` while stating that this
+        // build does not carry it — a pointer at another build, not an
+        // instruction for here. `every_verb_the_receipt_names_is_runnable_
+        // or_flagged_as_absent` is what holds that case honest.
+        let disowned = out.contains("this lean build has no")
+            || out.contains("this lean build does not carry");
+        for command in commands_in_markdown(&out) {
+            if disowned && command.contains("mem-repo") {
+                continue;
+            }
+            run(&command, &outer, on_path);
+        }
+    }
+
+    // The JSON surface, including the Codex target — whose wiring IS a
+    // command the reader runs, so it has to survive the same paths.
     let tmp = TempDir::new().unwrap();
     let outer = tmp.path().join("outer");
     std::fs::create_dir_all(&outer).unwrap();
-
-    // A directory name with a space — the case unquoted interpolation
-    // silently breaks.
     let assert = memstead()
         .current_dir(&outer)
-        .args(["quickstart", "--json", "--agent", "claude-code", "My Graph"])
+        .args([
+            "quickstart",
+            "--json",
+            "--agent",
+            "claude-code",
+            "--agent",
+            "codex",
+            "--",
+            "My Graph",
+        ])
         .assert()
         .success();
     let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
 
-    // The machine surface ships runnable commands, not markdown.
     let steps = payload["verify_now"]
         .as_array()
         .expect("verify_now is an array of steps");
     assert!(!steps.is_empty(), "got {payload}");
-    let mut commands: Vec<String> = steps
-        .iter()
-        .map(|s| {
-            let c = s["command"].as_str().unwrap_or_default().to_string();
-            assert!(
-                !c.contains('`') && !c.starts_with("- "),
-                "machine surface must carry a bare command, got: {c}",
-            );
-            c
-        })
-        .collect();
+    for s in steps {
+        let c = s["command"].as_str().unwrap_or_default();
+        assert!(
+            !c.contains('`') && !c.starts_with("- "),
+            "machine surface must carry a bare command, got: {c}",
+        );
+        run(c, &outer, true);
+    }
+    run(
+        payload["seed_entity_delete_command"]
+            .as_str()
+            .expect("seed delete command"),
+        &outer,
+        true,
+    );
 
     // `next_action`'s trailing command must be runnable too — it is the
-    // more prominent of the two, and named the same graph read.
+    // most prominent line in the receipt.
     let next = payload["next_action"].as_str().unwrap_or_default();
     let (_, tail) = next
         .rsplit_once("then try: ")
         .unwrap_or_else(|| panic!("next_action names a follow-up command; got: {next}"));
-    commands.push(tail.to_string());
+    run(tail, &outer, true);
+
+    // Codex's wiring line is a command too. It is not run (that would
+    // need Codex installed), but it must parse into the argv we intend
+    // — the bug this catches is an unquoted path splitting into extra
+    // words, which `set --` reproduces exactly.
+    let codex_action = payload["agents"]
+        .as_array()
+        .and_then(|a| a.iter().find(|w| w["target"] == "codex"))
+        .map(|w| w["action"].as_str().unwrap_or_default().to_string())
+        .expect("codex wiring action");
+    let codex_cmd = codex_action.split('`').nth(1).unwrap_or_else(|| {
+        panic!("codex action carries a backticked command; got: {codex_action}")
+    });
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("set -- {codex_cmd}; echo $#"))
+        .output()
+        .expect("spawn sh");
+    let argc: usize = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    assert_eq!(
+        argc, 6,
+        "`{codex_cmd}` must parse as exactly `codex mcp add memstead -- <path>` (6 words); \
+         an unquoted path with a space would split into more",
+    );
 
     // Absolute paths, so a relative argument does not leak into a field
     // an agent will resolve against its own cwd.
@@ -1319,35 +1474,6 @@ fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
         assert!(
             Path::new(v).is_absolute(),
             "`{key}` must be absolute for a machine consumer, got: {v}",
-        );
-    }
-
-    // Now the real assertion: run each printed command through a shell,
-    // from the directory the caller was standing in.
-    for command in commands {
-        let out = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .current_dir(&outer)
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    Path::new(env!("CARGO_BIN_EXE_memstead"))
-                        .parent()
-                        .unwrap()
-                        .display(),
-                    std::env::var("PATH").unwrap_or_default(),
-                ),
-            )
-            .output()
-            .expect("spawn sh");
-        assert!(
-            out.status.success(),
-            "the receipt printed `{command}`, which fails when run as printed:\n\
-             --- stdout ---\n{}\n--- stderr ---\n{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr),
         );
     }
 }
