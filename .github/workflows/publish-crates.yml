@@ -1,0 +1,53 @@
+# cargo-dist custom publish job: crates.io.
+#
+# Runs after the binary release lands, on tag push, via
+# `publish-jobs = ["./publish-crates"]` in dist-workspace.toml. It calls
+# the same `scripts/publish-crates.sh` that was run by hand until
+# 2026-08-15 — the script is the contract, this file only supplies a
+# runner and the token.
+#
+# WHY: cutting 0.6.0 and 0.7.0 by hand each cost an afternoon, and each
+# time the registries drifted behind the binaries because publishing was
+# a separate act somebody had to remember. The tag already triggered
+# binaries and Homebrew; this closes crates.io into the same trigger.
+#
+# Requires the `CARGO_REGISTRY_TOKEN` repository secret (scope
+# `publish-update`, crate pattern `memstead-*`). Without it the job fails
+# loudly rather than skipping — a silent skip is exactly the failure mode
+# that let the registries fall two minor versions behind.
+name: publish-crates
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-crates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Fail fast when the token is absent
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository." >&2
+            echo "Add it under Settings → Secrets and variables → Actions." >&2
+            exit 1
+          fi
+
+      # The script publishes in strict path-dependency order, blocks
+      # until each crate is index-visible, and SKIPS any version already
+      # live — so a re-run after a partial failure resumes rather than
+      # erroring.
+      - name: Publish the six public crates
+        run: bash scripts/publish-crates.sh

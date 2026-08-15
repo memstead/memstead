@@ -1,0 +1,77 @@
+# cargo-dist custom publish job: npm (@memstead/wasm).
+#
+# Runs after the binary release lands, on tag push, via
+# `publish-jobs = ["./publish-npm"]` in dist-workspace.toml. It calls the
+# same `scripts/publish-npm.sh` that was run by hand — the script owns
+# assembly (wasm-pack, the checked-in package.json) and this file only
+# supplies a runner, the wasm toolchain, and the token.
+#
+# WHY: the package sat at 0.1.2 while the CLI shipped 0.7.0, could not
+# read a single archive that CLI wrote, and the 2026-08-14 cold-start run
+# called it the biggest wall it hit. It drifted because publishing was a
+# separate act nobody was prompted to perform. Now the tag prompts it.
+#
+# The package version is hand-set in crates/memstead-wasm/package.json and
+# rides the engine's version line (engineering decision, 2026-08-15). This
+# job publishes whatever that file says; the guard below refuses when it
+# disagrees with the tag, because publishing a stale number automatically
+# is worse than publishing it by hand.
+#
+# Requires the `NPM_TOKEN` repository secret (automation token, publish
+# rights on the `memstead` org).
+name: publish-npm
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Fail fast when the token is absent
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN is not set on this repository." >&2
+            echo "Add it under Settings → Secrets and variables → Actions." >&2
+            exit 1
+          fi
+
+      # The package's version is hand-set; the tag is the truth. Publishing
+      # a version that does not match the release being cut is how the
+      # package drifted in the first place, so refuse rather than ship it.
+      - name: The package version must match the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./crates/memstead-wasm/package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag is $tag but crates/memstead-wasm/package.json says $pkg." >&2
+            echo "Bump the package version with the release commit — it rides the engine's version line." >&2
+            exit 1
+          fi
+          echo "package version $pkg matches the tag"
+
+      - name: Install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Publish @memstead/wasm
+        run: bash scripts/publish-npm.sh

@@ -92,6 +92,35 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
     fs::write(&cargo_toml_path, bumped)?;
     println!("release: Cargo.toml — {replaced} version strings bumped");
 
+    // 4b. The JSON manifests that carry a hand-set version string.
+    //
+    //     These are not Cargo manifests, so step 4 never saw them, and
+    //     every release so far has relied on somebody remembering to edit
+    //     them: 0.6.0 shipped with the plugin a version behind and needed
+    //     a second commit on top of the tagged one, and `@memstead/wasm`
+    //     drifted six minor versions because nothing prompted the bump.
+    //     The npm publish job now refuses a package version that does not
+    //     match the tag, so forgetting this would fail the release rather
+    //     than ship a stale package — bump it here instead.
+    for rel in [
+        "plugins/claude-code/.claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        "crates/memstead-wasm/package.json",
+    ] {
+        let path = root.join(rel);
+        let text = fs::read_to_string(&path).with_context(|| format!("reading {rel}"))?;
+        let needle = format!("\"version\": \"{old}\"");
+        let count = text.matches(&needle).count();
+        ensure!(
+            count > 0,
+            "{rel} carries no `\"version\": \"{old}\"` to bump — it has drifted from the \
+             workspace version and must be reconciled by hand before a release"
+        );
+        let bumped = text.replace(&needle, &format!("\"version\": \"{}\"", args.version));
+        fs::write(&path, bumped).with_context(|| format!("writing {rel}"))?;
+        println!("release: {rel} — {count} version string(s) bumped");
+    }
+
     // 5. Cargo.lock follows the manifests.
     run_streamed(&root, "cargo", &["update", "--workspace"])?;
 
@@ -167,21 +196,23 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
     println!(
         "\nrelease: mechanical leg done. Outward steps (in order, each gated \
          on the one before):\n\
-         \n  1. Review the diff, then commit with a narrative message:\n\
-         \x20        git add Cargo.toml Cargo.lock CHANGELOG.md docs-site\n\
-         \x20        git commit   # release: {v} — <why this release exists>\n\
+         \n  1. Review the diff, then commit with a narrative message \
+         (the JSON manifests were bumped for you — plugin, marketplace, \
+         and the wasm package):\n\
+         \x20        git add -u && git commit   # release: {v} — <why this release exists>\n\
          \n  2. Push and wait for ALL public CI green (the bundle rule — \
          never tag on red or pending):\n\
          \x20        git push origin main\n\
-         \n  3. Tag — the tag push is the entire binary-release trigger \
-         (build → attest → GitHub Release → Homebrew tap):\n\
+         \n  3. Tag — the tag push is the ENTIRE outward release: binaries, \
+         attestation, GitHub Release, Homebrew tap, crates.io and npm all \
+         run from it:\n\
          \x20        git tag -a v{v} -m \"v{v}\" && git push origin v{v}\n\
-         \n  4. Bump the public gitlink in the private repo (bundle rule (a)).\n\
-         \n  5. Registries when launching: scripts/publish-crates.sh / \
-         publish-npm.sh — always --dry-run first.\n\
-         \n  6. Verify from the real channel: install.sh into a scratch \
-         CARGO_HOME, `memstead --version` = {v}, one documented command \
-         end-to-end, `gh attestation verify` on a downloaded artifact.\n"
+         \n  4. In the private repo, adopt it (gitlink + the private \
+         crates' locks + the .ai deploy):\n\
+         \x20        scripts/adopt-release.sh v{v}\n\
+         \n  5. Verify from the real channel: scripts/release-verify.sh, \
+         then install.sh into a scratch CARGO_HOME, `memstead --version` = \
+         {v}, one documented command end-to-end.\n"
     );
     Ok(())
 }

@@ -28,8 +28,16 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-da
 # Where to host releases
 hosting = "github"
 # Publish jobs that run after the binary release lands. `homebrew`
-# opens a PR to the tap repo above with the rendered formula.
-publish-jobs = ["homebrew"]
+# opens a PR to the tap repo above with the rendered formula; the two
+# `./`-prefixed entries are our own workflow files in
+# `.github/workflows/`, each wrapping the publish script that was run by
+# hand until 2026-08-15. The tag is now the single trigger for every
+# channel — binaries, Homebrew, crates.io and npm — which is what makes a
+# release three commands instead of an afternoon.
+#
+# Both need repository secrets (`CARGO_REGISTRY_TOKEN`, `NPM_TOKEN`) and
+# fail loudly when they are absent rather than skipping.
+publish-jobs = ["homebrew", "./publish-crates", "./publish-npm"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
