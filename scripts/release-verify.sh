@@ -105,7 +105,17 @@ crates=$(curl -sS -H "User-Agent: memstead-release-verify (ci@memstead.com)" \
 npmv=$(curl -sS "https://registry.npmjs.org/@memstead/wasm" \
   | sed -n 's/.*"latest": *"\([^"]*\)".*/\1/p' | head -1)
 say "crates.io (deliberate skip)" "${crates:-unreadable}"
-say "npm @memstead/wasm (own track)" "${npmv:-unreadable}"
+# npm joined the release line: the package is version-matched to the engine
+# now, so it is compared like any other channel rather than reported as a
+# bare number on a track of its own. Its own line is exactly how it came to
+# sit at 0.1.2 against a 0.7.0 CLI with nothing anywhere saying so.
+if [ "$npmv" = "$WANT" ]; then
+  ok   "npm @memstead/wasm" "$npmv"
+elif [ -z "$npmv" ]; then
+  fail "npm @memstead/wasm" "unreadable"
+else
+  fail "npm @memstead/wasm" "$npmv (want $WANT)"
+fi
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo ""

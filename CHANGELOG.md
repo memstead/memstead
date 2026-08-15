@@ -8,6 +8,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **`@memstead/wasm` joins the release line at 0.7.0.** The package ran
+  on its own version track, which is how it came to sit at `0.1.2`
+  against a `0.7.0` CLI — unable to read any archive that CLI writes —
+  with nothing on either registry page saying so. It is version-matched
+  to the engine now, its README states that plainly, and
+  `release-verify.sh` compares it like every other channel instead of
+  printing a bare number on a track of its own.
 - **`@memstead/wasm` can enumerate a snapshot's entity ids** —
   `entityIds(mem?)` returns the sorted ids in a hydrated archive.
   Without it the package could not meet its own stated purpose: a

@@ -23,6 +23,17 @@ cd crates/memstead-wasm
 wasm-pack build --target web --release   # output in pkg/
 ```
 
+## Compatibility
+
+**This package is version-matched to the engine.** `@memstead/wasm@0.7.0`
+is built from Memstead engine 0.7.0 and reads the archives that version's
+CLI writes — check yours with `memstead --version`. If the two numbers
+match, the archive and the reader agree.
+
+The package previously ran on its own version line, which is how it came
+to sit at 0.1.2 against a 0.7.0 CLI with nothing on either page saying so.
+One number now answers the question.
+
 ## Use
 
 ```js
@@ -33,7 +44,25 @@ setPanicHook(); // readable stack traces instead of "unreachable executed"
 
 const bytes = new Uint8Array(await (await fetch("/my-graph.mem")).arrayBuffer());
 const engine = Engine.fromSnapshot(bytes);
+
+// What is in this snapshot? `entityIds()` is how you find out — the
+// archive is self-describing, so you never need a separate id list.
+const ids = engine.entityIds();          // sorted, every mem
+const scoped = engine.entityIds("notes"); // one mem; unknown mem -> []
+
+for (const id of ids) {
+  const entity = engine.getEntity(id);   // undefined if absent
+  console.log(entity.type, entity.title, Object.keys(entity.sections));
+}
+
+engine.memNames();  // the mems this snapshot carries
+engine.health();    // entity/edge counts, per-mem breakdown
 ```
+
+Full-text search is deliberately unavailable in the browser build:
+`engine.search(...)` throws `{ code: "SEARCH_UNAVAILABLE_IN_WASM" }` so a
+call site can catch the code and route the query elsewhere rather than
+branching at the import layer.
 
 Type definitions (`.d.ts`) ship in the package.
 
