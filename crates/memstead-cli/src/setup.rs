@@ -112,6 +112,54 @@ pub enum WorkspaceShape {
     Filesystem,
 }
 
+/// Render a string as one POSIX shell word. Bare when every character
+/// is safe unquoted; otherwise single-quoted, with embedded `'` closed
+/// and re-opened the POSIX way (`'\''`).
+///
+/// A leading `-` forces quoting even though `-` is otherwise safe: an
+/// argument that starts with a dash is read as an option by whatever
+/// receives it. (Quoting alone does not save `cd`, which parses its
+/// argument after the shell strips quotes — callers printing a `cd`
+/// emit `cd --`.)
+///
+/// Lives here rather than beside its first caller because every message
+/// that interpolates a filesystem path into a command the reader is
+/// expected to run needs it, and the one that did not — the shape
+/// disclosure's other-shape command — was unrunnable for anyone whose
+/// binary path contained a space.
+pub fn shell_quote(value: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "._-/@:+,=".contains(c);
+    if !value.is_empty() && !value.starts_with('-') && value.chars().all(safe) {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// The running binary, resolved and shell-quoted — the form to
+/// interpolate into any command a message tells the reader to run.
+fn memstead_word() -> String {
+    shell_quote(&memstead_program())
+}
+
+/// The `UNSUPPORTED_WORKSPACE_SHAPE` refusal, in one place because both
+/// mem-repo-only gates mint it and they must not drift. Names the
+/// recovering command and the verbs that do work here, both resolved to
+/// this binary — the refusal is read by someone who is about to type
+/// what it says.
+///
+/// Both gates that mint it are mem-repo-only, so the lean build never
+/// reaches this refusal (it has no mem-repo-only subcommand to refuse).
+#[cfg(feature = "mem-repo")]
+fn unsupported_workspace_shape_message() -> String {
+    let m = memstead_word();
+    format!(
+        "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — \
+         bootstrap one with `{m} mem-repo init` in a fresh folder, or use `{m} status` / \
+         `{m} list` / `{m} search` / `{m} entity` / `{m} health` / \
+         `{m} create|update|delete|relate|rename` here instead."
+    )
+}
+
 /// Resolve the running `memstead` binary to something the reader can
 /// actually type. Bare `memstead` when that name on `PATH` resolves to
 /// this very binary; otherwise the path we were invoked as.
@@ -146,7 +194,7 @@ pub fn memstead_program() -> String {
 /// commands resolve it — this is an instruction, not a mention.
 #[cfg(feature = "mem-repo")]
 fn mem_repo_init_hint() -> String {
-    format!("`{} mem-repo init` in a fresh folder", memstead_program())
+    format!("`{} mem-repo init` in a fresh folder", memstead_word())
 }
 #[cfg(not(feature = "mem-repo"))]
 fn mem_repo_init_hint() -> String {
@@ -246,7 +294,7 @@ pub fn shape_disclosure(shape: WorkspaceShape) -> ShapeDisclosure {
             other_shape_command: format!(
                 "**The other shape** — filesystem-mem: one mem, plain `.md` files, no git — \
                  comes from `{} quickstart` in a fresh folder.",
-                memstead_program(),
+                memstead_word(),
             ),
         },
     }
@@ -454,9 +502,7 @@ impl CliContext {
             return Err(CliError {
                 kind: ExitKind::Generic,
                 code: "UNSUPPORTED_WORKSPACE_SHAPE",
-                message:
-                    "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — bootstrap one with `memstead mem-repo init` in a fresh folder, or use `memstead status` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` here instead."
-                        .to_string(),
+                message: unsupported_workspace_shape_message(),
                 details: None,
             }
             .into());
@@ -593,9 +639,7 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
         return Err(CliError {
             code: "UNSUPPORTED_WORKSPACE_SHAPE",
             kind: ExitKind::Generic,
-            message:
-                "this subcommand is mem-repo-only and not yet supported on filesystem-mem workspaces — bootstrap one with `memstead mem-repo init` in a fresh folder, or use `memstead status` / `memstead list` / `memstead search` / `memstead entity` / `memstead health` / `memstead create|update|delete|relate|rename` here instead."
-                    .to_string(),
+            message: unsupported_workspace_shape_message(),
             details: None,
         }
         .into());

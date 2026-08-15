@@ -1288,24 +1288,15 @@ fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
             .step_by(2)
             .map(str::trim)
             .filter(|s| {
-                if s.starts_with("cd ") || s.starts_with("codex ") {
-                    return true;
-                }
-                // A lone binary name is prose ("the `memstead` MCP
-                // server"), not an instruction — a printed command
-                // always carries at least a subcommand or flag.
-                if !s.contains(' ') {
-                    return false;
-                }
-                // The first word must BE one of our binaries — bare or
-                // as a path. `ends_with("memstead")` would also match
-                // the seed entity id `<mem>--welcome-to-memstead`,
-                // which is a backticked identifier, not a command.
-                s.split_whitespace().next().is_some_and(|w| {
-                    matches!(w, "memstead" | "memstead-mcp")
-                        || w.ends_with("/memstead")
-                        || w.ends_with("/memstead-mcp")
-                })
+                // A printed command always carries at least a
+                // subcommand or flag. Requiring a space is what keeps
+                // prose mentions (the backticked `memstead` in "the
+                // `memstead` MCP server") and the seed entity id
+                // (`<mem>--welcome-to-memstead`) out — and, unlike a
+                // first-word match, it still recognises a command whose
+                // program is quoted because its path holds a space.
+                s.contains(' ')
+                    && (s.starts_with("cd ") || s.starts_with("codex ") || s.contains("memstead"))
             })
             // `memstead quickstart` in recovery hints is a real command
             // but would create a second workspace; the disclosure block's
@@ -1355,24 +1346,48 @@ fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
         );
     }
 
-    // Each case is (directory name, whether `memstead` is on PATH).
+    // Each case is (directory name, whether `memstead` is on PATH,
+    // whether the binary itself sits under a path with a space).
     // The dash-prefixed name is why the `cd` carries `--`; the
     // PATH-less case is why the receipt names the binary it was
-    // actually invoked as.
+    // actually invoked as; the awkward-binary-path case is why that
+    // name is quoted wherever it is printed — including in the shape
+    // disclosure, which lives in a different module and was the last
+    // printed command still interpolating it raw.
     let cases = [
-        ("My Graph", true),
-        ("-dashed-graph", true),
-        ("bob's graph", true),
-        ("offpath-graph", false),
+        ("My Graph", true, false),
+        ("-dashed-graph", true, false),
+        ("bob's graph", true, false),
+        ("offpath-graph", false, false),
+        ("awkward-binary-graph", false, true),
     ];
 
-    for (dir, on_path) in cases {
+    for (dir, on_path, awkward_binary) in cases {
         let tmp = TempDir::new().unwrap();
         let outer = tmp.path().join("outer");
         std::fs::create_dir_all(&outer).unwrap();
 
+        // Copy the pair into a directory whose name would break any
+        // unquoted interpolation, and invoke through that copy.
+        let bin = if awkward_binary {
+            let dir = tmp.path().join("bob's bin dir");
+            std::fs::create_dir_all(&dir).unwrap();
+            for name in ["memstead", "memstead-mcp"] {
+                let src = Path::new(env!("CARGO_BIN_EXE_memstead"))
+                    .parent()
+                    .unwrap()
+                    .join(name);
+                if src.is_file() {
+                    std::fs::copy(&src, dir.join(name)).unwrap();
+                }
+            }
+            dir.join("memstead")
+        } else {
+            Path::new(env!("CARGO_BIN_EXE_memstead")).to_path_buf()
+        };
+
         // `--` so clap does not read `-dashed-graph` as a flag.
-        let assert = memstead()
+        let assert = Command::new(&bin)
             .current_dir(&outer)
             .env("PATH", path_for(on_path))
             .args(["quickstart", "--agent", "claude-code", "--"])

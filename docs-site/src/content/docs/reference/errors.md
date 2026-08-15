@@ -59,7 +59,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `IGNORED_READONLY_FIELD` | engine | `crates/memstead-base/src/ops/mod.rs:1737` |
 | `INLINE_WIKI_LINK_AUTO_STUBBED` | engine | `crates/memstead-base/src/ops/mod.rs:1685` |
 | `INTERNAL` | CLI, MCP | `crates/memstead-cli/src/lib.rs:28`<br>`crates/memstead-mcp/src/filesystem_server.rs:1755`<br>`crates/memstead-mcp/src/filesystem_server.rs:1814` |
-| `INTERNAL_IO_ERROR` | CLI | `crates/memstead-cli/src/commands/install.rs:81`<br>`crates/memstead-cli/src/setup.rs:580` |
+| `INTERNAL_IO_ERROR` | CLI | `crates/memstead-cli/src/commands/install.rs:81`<br>`crates/memstead-cli/src/setup.rs:626` |
 | `INVALID_ANCHOR` | engine | `crates/memstead-base/src/anchor.rs:67` |
 | `INVALID_CURSOR` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1212`<br>`crates/memstead-mcp/src/server.rs:1672` |
 | `INVALID_DOMAIN` | CLI | `crates/memstead-cli/src/commands/domain.rs:148` |

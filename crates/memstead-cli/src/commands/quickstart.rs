@@ -33,7 +33,7 @@ use serde_json::json;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
-use crate::setup::{CliContext, memstead_program};
+use crate::setup::{CliContext, memstead_program, shell_quote};
 
 use super::init::find_ancestor_workspace;
 
@@ -712,23 +712,6 @@ fn wire_agent(
         target: agent,
         action: format!("wrote `{rel}` (server `memstead`)"),
     })
-}
-
-/// Render a string as one POSIX shell word. Bare when every character
-/// is safe unquoted; otherwise single-quoted, with embedded `'` closed
-/// and re-opened the POSIX way (`'\''`).
-///
-/// A leading `-` forces quoting even though `-` is otherwise safe: an
-/// argument that starts with a dash is read as an option by whatever
-/// receives it. Quoting alone does not save `cd` (the shell strips
-/// quotes before `cd` sees the word), which is why [`ShellCmd`] emits
-/// `cd --`; the quoting here keeps the word intact for everything else.
-fn shell_quote(value: &str) -> String {
-    let safe = |c: char| c.is_ascii_alphanumeric() || "._-/@:+,=".contains(c);
-    if !value.is_empty() && !value.starts_with('-') && value.chars().all(safe) {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 /// One command line the receipt prints for the reader to run.
