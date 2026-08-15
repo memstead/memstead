@@ -96,15 +96,27 @@ for pair in "plugins/claude-code/.claude-plugin/plugin.json:plugin" \
   fi
 done
 
-# ── 5. registries — stated skips, not failures ───────────────────────────────
-# Pre-launch posture: binaries are the primary channel and may run ahead.
-# Reported so the skew stays a decision someone can see, not a surprise.
+# ── 5. registries — compared, since the tag now publishes them ───────────────
+# Until 2026-08-15 these were stated skips: binaries were the primary channel
+# and the registries followed by hand when someone remembered. They stopped
+# being remembered, which is how crates.io sat two minor versions back and npm
+# six. The tag publishes both now, so both are held to the release like every
+# other channel.
 crates=$(curl -sS -H "User-Agent: memstead-release-verify (ci@memstead.com)" \
   "https://crates.io/api/v1/crates/memstead-cli" \
   | sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' | head -1)
 npmv=$(curl -sS "https://registry.npmjs.org/@memstead/wasm" \
   | sed -n 's/.*"latest": *"\([^"]*\)".*/\1/p' | head -1)
-say "crates.io (deliberate skip)" "${crates:-unreadable}"
+# crates.io stopped being a deliberate skip on 2026-08-15: the tag publishes
+# it, so it is compared like every other channel. A label saying "skip" for a
+# channel that no longer skips is the same drift this script exists to catch.
+if [ "$crates" = "$WANT" ]; then
+  ok   "crates.io" "$crates"
+elif [ -z "$crates" ]; then
+  fail "crates.io" "unreadable"
+else
+  fail "crates.io" "$crates (want $WANT)"
+fi
 # npm joined the release line: the package is version-matched to the engine
 # now, so it is compared like any other channel rather than reported as a
 # bare number on a track of its own. Its own line is exactly how it came to
@@ -115,6 +127,30 @@ elif [ -z "$npmv" ]; then
   fail "npm @memstead/wasm" "unreadable"
 else
   fail "npm @memstead/wasm" "$npmv (want $WANT)"
+fi
+
+# ── 6. this machine — informational, never a failure ─────────────────────────
+# Not a channel a user receives, so it cannot make the release wrong. But a
+# maintainer's own install is the version they EXPERIENCE as the product, and
+# nothing keeps it in step: neither a release nor CI touches ~/.cargo/bin, and
+# updating it is a separate act nobody is prompted to perform. On 2026-08-15
+# that had left this machine on 0.4.0 for six days across two releases, so the
+# operator's dogfooding — including a run measuring whether a newcomer copes —
+# ran against pre-0.6.0 behaviour without anyone noticing. Reported here
+# because this script's whole job is answering "what does someone actually
+# get", and the maintainer is a someone.
+echo ""
+local_bin="$(command -v memstead 2>/dev/null || true)"
+if [ -z "$local_bin" ]; then
+  say "this machine (not a channel)" "no memstead on PATH"
+else
+  local_v="$("$local_bin" --version 2>/dev/null | awk '{print $2}' | cut -d'+' -f1)"
+  if [ "$local_v" = "$WANT" ]; then
+    say "this machine (not a channel)" "$local_v — in step"
+  else
+    say "this machine (not a channel)" "${local_v:-unreadable} — BEHIND $WANT"
+    say "" "→ curl -sSf https://memstead.io/install.sh | sh"
+  fi
 fi
 
 # ── verdict ──────────────────────────────────────────────────────────────────
