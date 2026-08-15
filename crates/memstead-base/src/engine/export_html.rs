@@ -510,11 +510,16 @@ mod tests {
     }
 
     /// The export shows the heading the schema author declared, not
-    /// the engine's storage key. `current_state` is stored under that
-    /// key and declared as `Current State` — a difference no
-    /// capitalisation rule could reconstruct, which is the point: the
-    /// declared heading is the only place an author controls how their
-    /// model reads to someone who cannot see the markdown.
+    /// the engine's storage key.
+    ///
+    /// The load-bearing fixture is `out_of_scope` → `Out of Scope`: the
+    /// interior word stays lowercase, so no capitalisation rule
+    /// reconstructs it from the key. (`current_state` → `Current State`
+    /// is also asserted, but title-casing the key would produce it, so
+    /// on its own it would not have caught a renderer that guessed.)
+    /// That is the point of the finding: the declared heading is the
+    /// only place an author controls how their model reads to someone
+    /// who cannot see the markdown, and guessing is not reading.
     ///
     /// Anchors are unaffected: they derive from entity ids, and the
     /// no-dangling-anchor sweep runs here too.
@@ -550,6 +555,51 @@ mod tests {
         assert!(html.contains("<h3>Question</h3>"), "got:\n{html}");
         assert!(html.contains("<h3>Significance</h3>"), "got:\n{html}");
         assert_no_dangling_anchors(&html);
+
+        // The case a capitalisation rule cannot fake: `out_of_scope` is
+        // declared `Out of Scope`, interior word lowercase. A renderer
+        // that title-cased the key would emit "Out Of Scope" and fail
+        // here — which is what makes this the load-bearing assertion.
+        let tmp2 = TempDir::new().unwrap();
+        let goal_dir = tmp2.path().to_path_buf();
+        std::fs::write(
+            goal_dir.join("second-goal.md"),
+            "---\ntype: goal\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n\
+             priority: high\nstatus: active\n---\n# Second Goal\n\n## Statement\n\nS.\n\n\
+             ## Rationale\n\nR.\n\n## Success Criteria\n\nC.\n\n## Out of Scope\n\n\
+             Everything else.\n",
+        )
+        .unwrap();
+        let goal_writer = FilesystemMemWriter::new(goal_dir.clone());
+        let goal_mount = Mount {
+            mem: "plans".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "planning",
+                semver::Version::new(0, 4, 0),
+            )),
+            storage: MountStorage::Folder { path: goal_dir },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let goal_engine = Engine::from_mounts(vec![(
+            goal_mount,
+            Box::new(goal_writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let goal_html = goal_engine
+            .render_html_export("plans", "2026-08-15")
+            .unwrap();
+        assert!(
+            goal_html.contains("<h3>Out of Scope</h3>"),
+            "the interior word must stay lowercase, as declared; got:\n{goal_html}"
+        );
+        assert!(
+            !goal_html.contains("<h3>Out Of Scope</h3>")
+                && !goal_html.contains("<h3>out_of_scope</h3>"),
+            "neither a title-cased guess nor the storage key; got:\n{goal_html}"
+        );
 
         // Byte-deterministic given store and export date.
         let again = engine.render_html_export("specs", "2026-08-15").unwrap();

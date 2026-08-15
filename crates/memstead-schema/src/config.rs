@@ -613,15 +613,24 @@ pub const PUBLISHED_MEM_FORMAT: u32 = 4;
 /// a re-publish). `format: 1` (V1) and `format: 2` (V2, top-level
 /// `schema/` tree) keep refusing cleanly.
 ///
-/// A list rather than a predicate body because the set is a published
-/// fact, not only a runtime check: the docs site derives the
-/// library-compatibility statement from it, so a reader can tell which
-/// library reads what this binary writes *before* installing either.
+/// A list rather than a predicate body because the accepted set is a
+/// fact worth reading directly, not only a branch to evaluate.
+///
+/// It is NOT currently the whole story about what a reader accepts.
+/// [`published_format_accepted`] has exactly one caller
+/// (`validator::config::parse_config_bytes`), and the archive-hydration
+/// path — `Engine::from_archive_bytes` — never reaches it: an archive
+/// at `format: 99` hydrates without complaint. Deciding whether that
+/// path should gate is tracked in the backlog; until it does, treat
+/// this list as the set the VALIDATOR accepts rather than as a
+/// guarantee every reader enforces.
 pub const PUBLISHED_MEM_FORMATS_ACCEPTED: &[u32] = &[PUBLISHED_MEM_FORMAT, 3];
 
 /// Does a reader updated for the current format accept an archive at
-/// `format`? The single predicate every reader gate consults, so
-/// acceptance cannot drift per surface.
+/// `format`? The single predicate every reader gate that checks at all
+/// consults, so acceptance cannot drift between them — but see
+/// [`PUBLISHED_MEM_FORMATS_ACCEPTED`]: the archive-hydration path does
+/// not check, so "every reader" overstates today's reach.
 pub fn published_format_accepted(format: u32) -> bool {
     PUBLISHED_MEM_FORMATS_ACCEPTED.contains(&format)
 }
