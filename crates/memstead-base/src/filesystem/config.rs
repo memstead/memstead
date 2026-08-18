@@ -394,7 +394,7 @@ pub fn write_workspace_config(
 /// [`crate::Engine::from_workspace_root`]. The mem root *is* the workspace
 /// root (collapsed single-mem form).
 ///
-/// This is the engine entry external embedders (the macOS app's bootstrap)
+/// This is the engine entry external embedders
 /// route through instead of hand-writing `.memstead/config.json` from their
 /// own code — the engine owns the seed structure. Creates `root` (and the
 /// `.memstead/` tree) if absent; the caller is responsible for refusing a

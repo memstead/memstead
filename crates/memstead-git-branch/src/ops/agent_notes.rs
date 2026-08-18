@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn parser_round_trips_app_actor_with_client_identity() {
         // The `app` category (human-driven application embedders — the
-        // macOS app, the node app's HTTP surface) must round-trip the
+        // node app's HTTP surface) must round-trip the
         // commit-message path like agent/cli do, with the client
         // identity naming which software spoke and an author identity
         // derived from it — never the committer fallback.

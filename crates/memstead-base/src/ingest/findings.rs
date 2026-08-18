@@ -2757,7 +2757,7 @@ mod tests {
     /// decomposition of `key.source_head`), and [`record_verified_baseline`]
     /// records them as `<binding>/<facet>#verified` through the engine's
     /// sync-state writer — durable on disk, visible to the same config read
-    /// `report`/`status` (and the macOS app) consume. A failed pass returns
+    /// `report`/`status` consume. A failed pass returns
     /// `Err` before any caller reaches the writer, so the token never
     /// advances on an aborted run.
     /// A vanished source directory must refuse verify with the typed

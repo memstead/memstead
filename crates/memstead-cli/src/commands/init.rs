@@ -159,8 +159,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
 
     // Write the seed structure (config + `.memstead/` subdirs + adapter
     // marker + one-folder-mount roster) through the engine's shared
-    // initialiser, so the CLI and the in-process embedders (the macOS app's
-    // bootstrap) produce a byte-identical filesystem mem from one place.
+    // initialiser, so the CLI and any in-process embedder produce a
+    // byte-identical filesystem mem from one place.
     init_filesystem_mem(&target, &args.name, &schema_pin).map_err(|e| CliError {
         code: crate::INTERNAL_CODE,
         message: format!("initialise filesystem mem: {e}"),

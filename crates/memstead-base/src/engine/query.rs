@@ -184,8 +184,8 @@ impl Engine {
     /// The pipeline configs — the v2 single-record binding store — loaded
     /// from the workspace at boot: the read-only queryable surface the
     /// loader exposes. Empty for engines not booted from a workspace root,
-    /// or for a workspace that declares no pipelines. The ingest skill,
-    /// future MCP tools, and the macOS app consume this structured form
+    /// or for a workspace that declares no pipelines. The ingest skill
+    /// and future MCP tools consume this structured form
     /// rather than re-reading the JSON folders.
     pub fn pipeline_configs(&self) -> &crate::pipeline_store::BindingConfigs {
         &self.pipeline_configs

@@ -11,8 +11,8 @@
 //! This module ships the data shapes only. The persistence adapter
 //! that materialises a `Workspace` from `.memstead/workspace.toml` +
 //! `.memstead/state/mounts.json` lands separately as the file-adapter
-//! sessions move forward; tests and the macOS app's in-memory builder
-//! construct `Workspace` directly without going through any adapter.
+//! sessions move forward; tests and in-memory builders construct
+//! `Workspace` directly without going through any adapter.
 //!
 //! Distinct from [`crate::mem::MemRouterSnapshot`], which is the
 //! engine's *runtime* snapshot of writable / visible mems. The
@@ -210,7 +210,7 @@ pub enum MountLifecycle {
 /// The two-layer file adapter produces a `Workspace` by reading
 /// `.memstead/workspace.toml` (operator-edited rules) and
 /// `.memstead/state/mounts.json` (engine-managed mount list). Tests and
-/// the macOS app's in-memory builder construct `Workspace` directly.
+/// in-memory builders construct `Workspace` directly.
 ///
 /// V1 carries the mount list and operator policy. Plugin hooks and
 /// pipeline-config handles attach as additive fields — no breaking
@@ -220,7 +220,7 @@ pub struct Workspace {
     pub mounts: Vec<Mount>,
     /// Workspace-level operator policy (mem create/delete rules,
     /// cross-mem link permissions). Defaults to empty for tests
-    /// and the macOS app's in-memory builder; the file adapter
+    /// and in-memory builders; the file adapter
     /// populates from `.memstead/workspace.toml`'s `[mem_management]`
     /// and `[cross_mem_links]` sections. The unified engine reads
     /// this via [`crate::Engine::settings`] after

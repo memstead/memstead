@@ -27,7 +27,7 @@ pub enum Actor {
     Agent,
     Cli,
     /// A human-driven application embedding or fronting the engine —
-    /// the macOS app, the node app's HTTP surface, any future UI
+    /// the node app's HTTP surface, any future UI
     /// consumer. Distinct from `Agent` (an LLM speaking MCP) and `Cli`
     /// (the memstead binary): ambient provenance needs "a human did
     /// this through app software" as its own category, with the

@@ -175,9 +175,9 @@ pub(crate) fn load_workspace_description(
 ) -> Result<memstead_base::Workspace, BootError> {
     match detect_layout(workspace_root) {
         // Standalone collapse: a bare folder mem (`.memstead/config.json`,
-        // no `workspace.toml`) roots as a one-mount workspace. The macOS app
-        // boots through this full entry, so the unified lone-mem experience
-        // must hold here too, not only in the lean boot path.
+        // no `workspace.toml`) roots as a one-mount workspace. Full-flavour
+        // embedders boot through this entry, so the unified lone-mem
+        // experience must hold here too, not only in the lean boot path.
         memstead_base::Layout::Empty => match memstead_base::standalone_workspace(workspace_root) {
             Some(ws) => Ok(ws),
             None => Err(BootError::NotInitialised(workspace_root.to_path_buf())),

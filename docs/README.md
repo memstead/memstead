@@ -41,7 +41,7 @@ You know what you want; these get you there.
 Complete, generated, and kept honest by CI (regenerated from source; a drift
 check fails the build if the committed copy lags).
 
-- **[CLI / MCP / UniFFI / WASM reference + parity matrix](../docs-site/src/content/docs/reference/)**
+- **[CLI / MCP / WASM reference + parity matrix](../docs-site/src/content/docs/reference/)**
   — every command, tool, and binding, plus the cross-surface parity matrix and
   the error-code index.
 - **[Workspace config example](workspace.toml.example)** — annotated

@@ -622,8 +622,8 @@ pub enum WarningHint {
     ///   acyclic-declared subgraph (emitted by the post-load
     ///   second-pass cycle check; not yet implemented).
     ///
-    /// Hand-edits, external tooling, and the macOS app's editor
-    /// surface can inject relations that bypass `memstead_relate`; the
+    /// Hand-edits, external tooling, and embedder editor
+    /// surfaces can inject relations that bypass `memstead_relate`; the
     /// parse-path validation catches those. Mutation-path writes
     /// pre-validated by the engine never trip this warning.
     ///

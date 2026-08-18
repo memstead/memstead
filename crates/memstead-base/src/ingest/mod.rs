@@ -3,8 +3,8 @@
 //! Ingest today has two implementations that have drifted apart: a full
 //! orchestration (selection, backoff, change-detection, brief assembly,
 //! process-state lifecycle) living in the Claude-Code plugin's Node.js, and
-//! a hard-coded natural-language charge in the macOS app that uses none of
-//! it. This module is the engine-side home the deterministic half is being
+//! (historically) a hard-coded natural-language charge in the retired macOS
+//! app that used none of it. This module is the engine-side home the deterministic half is being
 //! ported into, so that every client reduces to a thin consumer pulling
 //! the *same* rendered run-brief from the engine — honouring the
 //! engine-surface parity rule and "the engine owns mem-repo state".

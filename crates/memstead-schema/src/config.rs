@@ -960,8 +960,7 @@ fn commit_config(
 // Config CRUD operations
 // ---------------------------------------------------------------------------
 
-/// Allowed top-level fields for `update_config_field`. Mirrored by the
-/// macOS app's `WorkspaceService.allowedUpdateFields`. The
+/// Allowed top-level fields for `update_config_field`. The
 /// workspace rewrite dropped `mediums` and
 /// `projections` here: the engine no longer recognises those blocks so
 /// they are not writable through the update surface either.

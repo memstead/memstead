@@ -29,8 +29,7 @@
 //! `memstead_mem_set_version`) creates/removes/reconfigures a whole
 //! mem at runtime; workspace-policy mutation (allowlists and
 //! cross-mem link policy in `.memstead/workspace.toml`) is the
-//! `memstead_workspace_*` family. The macOS app edits the same policy
-//! in-process via its `WorkspaceService`. Every MCP tool must carry the
+//! `memstead_workspace_*` family. Every MCP tool must carry the
 //! `memstead_` prefix — an un-namespaced `workspace_*` tool (or any
 //! other non-`memstead_` tool) must fail this test.
 //!
@@ -251,7 +250,7 @@ fn mcp_does_not_expose_list_or_phantom_entities() {
 /// the original removal rationale ("contradicts the never-edit-.md-files-
 /// directly project policy") was stale — the real pressure is from
 /// regelkonforme MCP-mediated mutations from a sibling engine instance
-/// (forked Claude-Code subagents, macOS app + chat subprocess, parallel
+/// (forked Claude-Code subagents, parallel
 /// terminals on the same workspace). The engine also closes the
 /// silent-overwrite gap on the write path via the same drift-check
 /// primitive that backs `memstead_reload`. Do not re-remove with the

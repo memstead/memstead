@@ -804,7 +804,7 @@ mod tests {
             preparation: None,
         };
         let projection = Projection {
-            intent: Some("Swift macOS app source.".to_string()),
+            intent: Some("Swift desktop app source.".to_string()),
             source_facets: vec!["source-files".to_string()],
             reference_mems: vec!["engine".to_string()],
             destination_mem: "macos".to_string(),
