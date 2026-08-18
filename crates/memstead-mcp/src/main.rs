@@ -1,6 +1,6 @@
 //! Memstead MCP Server — binary entry point producing the `memstead-mcp`
 //! binary that every external integration invokes (Claude Code plugin,
-//! macOS spawn path, install scripts, `MEMSTEAD_MCP_BIN` env var).
+//! install scripts, `MEMSTEAD_MCP_BIN` env var).
 //!
 //! One crate, two build configs. The default build (`mem-repo` feature
 //! on) serves the multi-mem, git-backed engine; `--no-default-features`
