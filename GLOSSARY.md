@@ -493,3 +493,16 @@ The source `preparation` slot is reserved for non-text mediums (PDF, DOCX, audio
 Why the pipeline lives at workspace level even though its declarations are per-mem: cross-mem references inside bindings benefit from a central store; mem content (entities) lives in the storage backend, mem configuration lives in the workspace store. Same mem, two persistence layers.
 
 Why one record: fidelity accounting needs one object to key on. `hash(D)` invalidates cleanly when the declaration changes, the `#synced` / `#verified` baselines attach to the very object they measure, and there is no half-configured state left to be in — no detached run-config to drift, no declared-but-never-runnable dead end, no dangling cross-record reference to police. The medium/facet split survives as the two halves of a source *description* because the distinction is real (where it lives vs. which part of it); it stopped being a record boundary because nothing ever shared the records across bindings — the store's per-mem namespacing structurally capped the reuse the normalization existed to enable.
+
+## The two `.well-known` manifests
+
+### Definition
+
+Memstead publishes two different `.well-known/` files whose names invite confusion — cite the right one for the job:
+
+- **`.well-known/memstead-publishing.json`** — the **registry publisher proof** for domain-authority publishing. You generate a signing key for a domain you control (`memstead domain`), host this manifest on that domain, and `memstead publish --scope <domain>:<handle>` signs each publish against it; the registry fetches the manifest fresh and verifies the signature. It lives on *your* domain.
+- **`.well-known/memstead-authority.json`** — the **agent-discovery manifest** served by a Memstead deployment itself (memstead.ai serves one): it tells an arriving agent where the deployment's MCP and read surfaces are. It lives on the *serving* site.
+
+### Rationale
+
+The names are one word apart and both sit under `.well-known/`, so briefs and docs have mis-cited one for the other. The rule of thumb: **publishing** proves *who you are* to the registry (publisher-side); **authority** tells agents *what is served here* (deployment-side). If you are writing installation or publishing instructions, you almost always mean `memstead-publishing.json`.
