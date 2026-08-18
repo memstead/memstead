@@ -5,7 +5,7 @@ dual-licensed **MIT OR Apache-2.0** (the Rust-ecosystem standard, at the user's
 option); the commercial layer carries different terms.
 
 The open-core cut line is **engine + plugin + `.mem` format/client public;
-registry server + macOS app private** — *not* a capability split inside the
+registry server private** — *not* a capability split inside the
 engine (the `memstead-git-branch` git-backed backend is open too).
 
 ## Per-folder license map
@@ -19,7 +19,6 @@ The proprietary commercial layer is **not part of this repository**:
 
 - The registry **server** — the network moat and seed of the commercial layer. Lives in a private repository (its own cargo workspace) and depends on the open engine crates by path. The `.mem` format, authority protocol, and publish/install client stay open; the server code does not.
 - The **hosted-deployment server layer** — the serve/bridge crates behind our hosted web surfaces (read-only HTTP/MCP deployment server, HTTP+SSE sync bridge, and its JS sync client). Product surface, not public libraries; lives in the same private repository, wired like the registry (own workspace roots, path-dependencies on the open engine). The public JS story is `@memstead/wasm` snapshot reads.
-- The **macOS application** — commercial product. All rights reserved; not open.
 
 ## Rationale
 
@@ -27,7 +26,7 @@ The project follows an **open-core model**, and the cut runs by *trust*, not by 
 
 - The **full engine** — the `memstead-git-branch` backend, multi-mem, collaboration, and history — plus the **CLI**, **MCP server**, **schema definitions**, and the **`.mem` format/protocol + publish/install client** are open source under **dual MIT OR Apache-2.0** (the Rust-ecosystem standard; users pick either). There is **no crippled core** — the collaboration story *is* the differentiator, so it must be free to experience. Anyone may embed Memstead into their own products, including commercial ones, keeping copyright notices intact.
 - **Plugins** for third-party tools (Claude Code today, others later) are MIT — lighter weight than Apache for the plugin-ecosystem case.
-- The **registry server** and the **macOS app** are the commercial layer and stay private. The registry server is the network moat (open-sourcing it would invite a fork that fragments the network); the app is a human oversight surface. Launch posture is **adoption-first** — the open engine drives adoption; revenue layers (a private/enterprise registry, team features) come later, once the graph is embedded in real workflows.
+- The **registry server** is the commercial layer and stays private — it is the network moat (open-sourcing it would invite a fork that fragments the network). Launch posture is **adoption-first** — the open engine drives adoption; revenue layers (a private/enterprise registry, team features) come later, once the graph is embedded in real workflows.
 
 ## Why open the whole engine (and not AGPL or BSL)
 
@@ -43,4 +42,4 @@ This project accepts external contributions, with a few guardrails — see [CONT
 
 ## Questions
 
-For licensing questions, including commercial licensing of the macOS application or the registry server, or alternative-license requests for the engine, contact hello@memstead.com.
+For licensing questions, including commercial licensing of the registry server, or alternative-license requests for the engine, contact hello@memstead.com.

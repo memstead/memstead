@@ -77,8 +77,8 @@ pub enum ProjectionCommand {
     /// loop-declared build / sync / verify pair). An operation participates
     /// only where its binding block declares `trigger: loop`. Reads the v2
     /// binding store and the destination mem's schema / writing guidance; the
-    /// assembly is shared with the UniFFI surface, so CLI and app briefs are
-    /// byte-identical by construction.
+    /// assembly lives in the engine, so every consuming surface renders
+    /// byte-identical briefs by construction.
     ///
     /// `--verify` renders the **verify brief** (group C) for the named binding:
     /// measurement + capped-adjudication instructions only, with no

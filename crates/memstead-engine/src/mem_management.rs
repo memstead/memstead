@@ -867,9 +867,9 @@ pub struct MemCreateParams {
     pub storage: Option<StorageKind>,
     /// Caller category for the seed commit's provenance trailer.
     /// Transports pass their own: MCP `Actor::Agent`, the CLI
-    /// `Actor::Cli`, application embedders (UniFFI, HTTP) `Actor::App`.
+    /// `Actor::Cli`, application embedders (HTTP) `Actor::App`.
     /// Pre-parameter behaviour hardcoded `Agent` for every transport —
-    /// the macOS app's mem creations were misattributed as agent
+    /// app-embedder mem creations were misattributed as agent
     /// writes.
     pub actor: memstead_base::vcs::Actor,
     /// Client identity paired with `actor` — renders `name@version`
@@ -1743,7 +1743,7 @@ pub fn create_mem(
     // `.memstead/config.json`) lives on disk but the next CLI / MCP
     // process boots with an empty mount manifest — `unknown mem`
     // on every follow-up call. Engine-side rather than orchestrator-
-    // side so every caller (MCP, UniFFI, in-process embedding)
+    // side so every caller (MCP, CLI, in-process embedding)
     // inherits persistence by construction.
     engine.persist_state()?;
 

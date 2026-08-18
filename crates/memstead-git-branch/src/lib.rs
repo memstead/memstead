@@ -87,9 +87,9 @@ pub use store::{Edge, EdgeSource, InEdge, Store};
 pub use vcs::{Actor, ClientId, CommitContext, Vcs, VcsError};
 
 /// Description of a mem discovered on a git-branch backend. Produced
-/// by [`mem_repo_config::mem_init_from_branch`] for the macOS
-/// `discover_mems` UniFFI helper, which seeds the UI's mem list
-/// before the engine itself is constructed.
+/// by [`mem_repo_config::mem_init_from_branch`] for pre-engine mem
+/// discovery — an embedder can seed a UI's mem list before the
+/// engine itself is constructed.
 #[derive(Debug, Clone)]
 pub struct MemInit {
     pub name: String,

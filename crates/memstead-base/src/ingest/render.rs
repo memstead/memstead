@@ -1,7 +1,7 @@
-//! Top-level run-brief rendering — the one engine entry point that both the
-//! CLI (`memstead ingest brief`) and UniFFI (macOS app) call, so the brief a
-//! client emits is byte-identical to the CLI's **by construction** (a single
-//! code path), not by parallel re-implementation.
+//! Top-level run-brief rendering — the one engine entry point every
+//! consuming surface calls (the CLI via `memstead ingest brief`), so the
+//! brief a client emits is byte-identical to the CLI's **by construction**
+//! (a single code path), not by parallel re-implementation.
 //!
 //! Given a loaded [`Engine`], the workspace root, and an ingest name, it
 //! loads the four-primitive config, resolves the ingest, and — for discovery
@@ -83,7 +83,7 @@ pub fn mode_name(mode: BuildMode) -> &'static str {
     }
 }
 
-/// Locate a binding by the CLI/UniFFI argument. The canonical form is the
+/// Locate a binding by the CLI argument. The canonical form is the
 /// binding id `<mem>/<stem>` (D3) — the shape `projection brief` / `--all`
 /// selection use. As a transition bridge, a slash-free legacy argument (the
 /// old flat ingest stem, e.g. `engine-graph`) is also matched against each
@@ -122,7 +122,7 @@ fn find_binding<'a>(
 }
 
 /// Render the run-brief for a binding — the Markdown prompt an agent consumes.
-/// The single engine entry point shared by the CLI and UniFFI. `ingest_name` is
+/// The single engine entry point behind every consuming surface. `ingest_name` is
 /// the canonical binding id (or a legacy flat-ingest stem — see [`find_binding`]).
 pub fn render_ingest_brief(
     engine: &Engine,
@@ -165,8 +165,8 @@ pub fn render_ingest_brief(
 }
 
 /// Render the **verify brief** (C1) for a binding — the measurement +
-/// capped-adjudication prompt an agent consumes. The one engine entry point the
-/// CLI (`projection brief --verify`) and UniFFI share, mirroring
+/// capped-adjudication prompt an agent consumes. The one engine entry point
+/// behind the CLI (`projection brief --verify`), mirroring
 /// [`render_ingest_brief`]. Read-only on the destination mem: it borrows
 /// `&Engine` (shared), reads the durable findings store for the backlog count,
 /// and renders. It emits **no** destination-mutation instruction (C1) — the
@@ -197,7 +197,7 @@ pub fn render_verify_brief_for(
 
 /// Render the **sync brief** (C2/C3) for a binding — the *single* channel
 /// through which maintenance-writing work reaches an agent. The one engine entry
-/// point the CLI (`projection brief --sync`) and UniFFI share. It assembles both
+/// point behind the CLI (`projection brief --sync`). It assembles both
 /// inputs in one render: the live cursor slice ([`compute_source_cursor`]) and
 /// the open findings the verify pass recorded (`current(key)`), plus the adopt
 /// framing when the mem predates its binding (E1). Read-only on the destination

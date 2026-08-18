@@ -7,7 +7,7 @@
 //! as a child process and drove the matching MCP tool over JSON-RPC
 //! — wire-format parity with the agent path was the intent,
 //! but the CLI-as-MCP-consumer relationship cut against the layering
-//! posture that CLI, MCP, and UniFFI are sibling surfaces over the
+//! posture that CLI and MCP are sibling surfaces over the
 //! engine (AGENTS.md's parity rule). In-process
 //! collapses CLI and MCP onto the same Rust call, with `operator_mode:
 //! true` hardcoded at the call site so the engine bypasses the

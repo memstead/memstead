@@ -1,6 +1,6 @@
 //! `xtask` — internal command runner for build-tooling tasks against the
 //! engine workspace: `generate-docs` regenerates the deterministic
-//! API-docs Markdown tree from the live MCP / CLI / UniFFI / WASM source
+//! API-docs Markdown tree from the live MCP / CLI / WASM source
 //! and the v1 binding schema + medium-capability matrix (the Registry
 //! HTTP reference is generated separately by the private
 //! `memstead-registry` crate); `release` runs the mechanical leg of
@@ -16,7 +16,6 @@ mod mcp;
 mod parity;
 mod release;
 mod sizing;
-mod udl;
 mod wasm;
 
 use std::fs;
@@ -821,7 +820,6 @@ fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
             .with_context(|| format!("creating output dir {}", args.output.display()))?;
     }
     write_cli_reference(&args.output)?;
-    write_uniffi_reference(&args.output)?;
     write_wasm_reference(&args.output)?;
     write_mcp_reference(&args.output)?;
     write_parity_matrix(&args.output)?;
@@ -872,26 +870,14 @@ fn write_mcp_reference(output: &Path) -> Result<()> {
 
 fn write_parity_matrix(output: &Path) -> Result<()> {
     let workspace_root = workspace_root();
-    let udl_text =
-        std::fs::read_to_string(workspace_root.join("crates/memstead-swift/src/memstead.udl"))?;
     let wasm_path = workspace_root.join("crates/memstead-wasm/src/lib.rs");
     let wasm_methods = wasm::method_names_from_file(&wasm_path)?;
     let operations_toml = include_str!("../operations.toml");
-    let inputs = parity::collect_inputs(&udl_text, wasm_methods);
+    let inputs = parity::collect_inputs(wasm_methods);
     let rendered = parity::render(operations_toml, &inputs)?;
     write_if_changed(
         &output.join("parity.md"),
         &with_frontmatter("Surface Parity Matrix", &rendered),
-    )
-}
-
-fn write_uniffi_reference(output: &Path) -> Result<()> {
-    let workspace_root = workspace_root();
-    let udl_path = workspace_root.join("crates/memstead-swift/src/memstead.udl");
-    let rendered = udl::render_from_file(&udl_path)?;
-    write_if_changed(
-        &output.join("uniffi.md"),
-        &with_frontmatter("UniFFI surface", &rendered),
     )
 }
 

@@ -1,10 +1,10 @@
 //! Render the Surface Parity Matrix. Each row of the matrix is a logical
 //! engine operation declared in `xtask/operations.toml`; columns line up
-//! the matching MCP tool name, top-level CLI subcommand, UniFFI `Engine`
-//! method, and WASM JS-visible entry point. Names emitted by the live
-//! extractors that the registry doesn't pin land in a dedicated
-//! "unaligned" sub-table so the matrix never silently drops a row when
-//! a new tool / command / method appears.
+//! the matching MCP tool name, top-level CLI subcommand, and WASM
+//! JS-visible entry point. Names emitted by the live extractors that the
+//! registry doesn't pin land in a dedicated "unaligned" sub-table so the
+//! matrix never silently drops a row when a new tool / command / method
+//! appears.
 
 use std::collections::BTreeSet;
 
@@ -13,7 +13,6 @@ use clap::CommandFactory;
 use serde::Deserialize;
 
 use crate::mcp;
-use crate::udl;
 
 #[derive(Debug, Deserialize)]
 struct Operations {
@@ -29,8 +28,6 @@ struct Operation {
     #[serde(default)]
     cli: Option<String>,
     #[serde(default)]
-    uniffi: Option<String>,
-    #[serde(default)]
     wasm: Option<String>,
 }
 
@@ -39,7 +36,6 @@ pub struct Inputs {
     pub mcp_pro: Vec<String>,
     pub cli_lean: Vec<String>,
     pub cli_pro: Vec<String>,
-    pub uniffi_methods: Vec<String>,
     pub wasm_methods: Vec<String>,
 }
 
@@ -62,7 +58,7 @@ const CLI_MEM_REPO_ONLY: &[&str] = &[
     "branch-reset",
 ];
 
-pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {
+pub fn collect_inputs(wasm_methods: Vec<String>) -> Inputs {
     let (mcp_lean, mcp_pro) = mcp::tool_names();
     // One CLI crate now. `xtask` links it with `mem-repo` on, so
     // `Cli::command()` is the full surface; the lean surface drops the
@@ -73,16 +69,11 @@ pub fn collect_inputs(udl_source: &str, wasm_methods: Vec<String>) -> Inputs {
         .filter(|n| !CLI_MEM_REPO_ONLY.contains(&n.as_str()))
         .cloned()
         .collect();
-    let uniffi_methods = udl::engine_methods(udl_source)
-        .into_iter()
-        .filter(|m| m != "constructor")
-        .collect();
     Inputs {
         mcp_lean,
         mcp_pro,
         cli_lean,
         cli_pro,
-        uniffi_methods,
         wasm_methods,
     }
 }
@@ -97,8 +88,8 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     let mut out = String::new();
     out.push_str("# Surface Parity Matrix\n\n");
     out.push_str(
-        "Every public engine operation across the four programmatic \
-         surfaces (MCP, CLI, UniFFI, WASM). Rows are aligned by the \
+        "Every public engine operation across the three programmatic \
+         surfaces (MCP, CLI, WASM). Rows are aligned by the \
          hand-maintained `xtask/operations.toml` registry; cells render \
          the surface-specific name when present and `—` when the surface \
          doesn't expose the operation. The Registry HTTP surface is its \
@@ -109,12 +100,11 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     let mcp_pro_set: BTreeSet<&str> = inputs.mcp_pro.iter().map(String::as_str).collect();
     let cli_lean_set: BTreeSet<&str> = inputs.cli_lean.iter().map(String::as_str).collect();
     let cli_pro_set: BTreeSet<&str> = inputs.cli_pro.iter().map(String::as_str).collect();
-    let uniffi_set: BTreeSet<&str> = inputs.uniffi_methods.iter().map(String::as_str).collect();
     let wasm_set: BTreeSet<&str> = inputs.wasm_methods.iter().map(String::as_str).collect();
 
     out.push_str("## Matrix\n\n");
-    out.push_str("| Operation | MCP | CLI | UniFFI | WASM |\n");
-    out.push_str("|-----------|-----|-----|--------|------|\n");
+    out.push_str("| Operation | MCP | CLI | WASM |\n");
+    out.push_str("|-----------|-----|-----|------|\n");
     for op in &ops.operation {
         let mcp_cell = match &op.mcp {
             Some(name) => format!(
@@ -138,17 +128,13 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
             ),
             None => "—".to_string(),
         };
-        let uniffi_cell = match &op.uniffi {
-            Some(name) => format!("`{}`", name),
-            None => "—".to_string(),
-        };
         let wasm_cell = match &op.wasm {
             Some(name) => format!("`{}`", name),
             None => "—".to_string(),
         };
         out.push_str(&format!(
-            "| `{}` | {} | {} | {} | {} |\n",
-            op.name, mcp_cell, cli_cell, uniffi_cell, wasm_cell,
+            "| `{}` | {} | {} | {} |\n",
+            op.name, mcp_cell, cli_cell, wasm_cell,
         ));
     }
     out.push('\n');
@@ -162,11 +148,6 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         .operation
         .iter()
         .filter_map(|o| o.cli.as_deref())
-        .collect();
-    let claimed_uniffi: BTreeSet<&str> = ops
-        .operation
-        .iter()
-        .filter_map(|o| o.uniffi.as_deref())
         .collect();
     let claimed_wasm: BTreeSet<&str> = ops
         .operation
@@ -190,22 +171,13 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         .collect::<BTreeSet<&str>>()
         .into_iter()
         .collect();
-    let unaligned_uniffi: Vec<&str> = uniffi_set
-        .iter()
-        .copied()
-        .filter(|name| !claimed_uniffi.contains(name))
-        .collect();
     let unaligned_wasm: Vec<&str> = wasm_set
         .iter()
         .copied()
         .filter(|name| !claimed_wasm.contains(name))
         .collect();
 
-    if unaligned_mcp.is_empty()
-        && unaligned_cli.is_empty()
-        && unaligned_uniffi.is_empty()
-        && unaligned_wasm.is_empty()
-    {
+    if unaligned_mcp.is_empty() && unaligned_cli.is_empty() && unaligned_wasm.is_empty() {
         out.push_str("## Unaligned\n\n");
         out.push_str("_(all surface entries reference an operation in the matrix above)_\n");
     } else {
@@ -219,7 +191,6 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         );
         emit_unaligned_table(&mut out, "MCP", &unaligned_mcp);
         emit_unaligned_table(&mut out, "CLI", &unaligned_cli);
-        emit_unaligned_table(&mut out, "UniFFI", &unaligned_uniffi);
         emit_unaligned_table(&mut out, "WASM", &unaligned_wasm);
     }
 

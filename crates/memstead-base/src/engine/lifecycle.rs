@@ -1042,7 +1042,7 @@ impl Engine {
     /// consumers that build the engine directly from a mount list).
     /// Production boot paths (`Engine::from_workspace_root` and the
     /// full counterpart) always set the root, so the engine-side
-    /// fix covers every caller — including the future UniFFI binding
+    /// fix covers every caller — in-process embedders included
     /// — by construction.
     ///
     /// Hardcoded against [`crate::FileWorkspaceStore`] because that

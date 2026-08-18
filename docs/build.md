@@ -29,7 +29,6 @@ The engine workspace is root-hoisted: `Cargo.toml` + `crates/` + `xtask/` live a
 | `crates/memstead-mcp/` | MCP server binary | Cargo | `target/<profile>/memstead-mcp` |
 | `crates/memstead-git-branch/` | Engine library (no binary, used by CLI/MCP) | Cargo | `target/<profile>/libmemstead_git_branch.rlib` |
 | `crates/memstead-schema/` | Schema layer (library, no binary) | Cargo | linked into others |
-| `crates/memstead-swift/` | UniFFI bindings for in-process embedders | Cargo + UniFFI | static lib + Swift bindings |
 | `crates/memstead-wasm/` | WASM bindings | Cargo (wasm target) | wasm module + JS glue |
 | `plugins/claude-code/` | Claude Code plugin | none — plain `.mjs`/`.json` | runs as-is |
 

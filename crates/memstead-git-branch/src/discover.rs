@@ -1,9 +1,9 @@
 //! Branch enumeration for the workspace's `mem-repo/.git/`.
 //!
 //! Post-rebuild the canonical mem list lives in
-//! `.memstead/state/mounts.json`. This helper is retained for the macOS
-//! UniFFI `discover_mems` entry point, which the app calls before the
-//! engine is constructed to seed its UI. It reads the per-mem branch
+//! `.memstead/state/mounts.json`. This helper is retained for
+//! pre-engine mem discovery — an embedder can call it before the
+//! engine is constructed to seed a UI. It reads the per-mem branch
 //! list off the workspace's single `mem-repo/.git/` and filters out
 //! `main` and any `__*` registry-class refs.
 
@@ -24,7 +24,7 @@ use std::path::Path;
 /// `__MEMSTEAD` but no per-mem branches yet.
 ///
 /// Returns `None` when the gitdir is missing, cannot be opened, or
-/// lacks `__MEMSTEAD`. Callers (notably `memstead-swift`) treat `None` as
+/// lacks `__MEMSTEAD`. Callers treat `None` as
 /// "this workspace is not mem-repo-backed".
 pub fn enumerate_mem_repo_branches(workspace_root: &Path) -> Option<Vec<String>> {
     let gitdir = workspace_root.join("mem-repo").join(".git");

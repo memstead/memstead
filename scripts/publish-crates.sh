@@ -16,7 +16,7 @@
 #
 # Exactly these six crates are the public Rust surface. Deliberately NOT
 # published (see the `publish = false` comments in their manifests):
-# memstead-swift (xcframework bindings artifact), memstead-wasm
+# memstead-wasm
 # (distribution channel is npm — scripts/publish-npm.sh), xtask (internal
 # tooling).
 #

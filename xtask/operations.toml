@@ -1,8 +1,8 @@
 # Hand-maintained operation registry powering the Surface Parity Matrix.
 #
 # Each entry is a logical engine operation; the per-surface name slots
-# resolve to the matching MCP tool, top-level CLI subcommand, UniFFI
-# `Engine` method, and WASM JS-visible entry. A blank slot means the
+# resolve to the matching MCP tool, top-level CLI subcommand, and WASM
+# JS-visible entry. A blank slot means the
 # operation is not exposed on that surface. Surface entries the registry
 # doesn't reference land in the matrix's "unaligned" sub-table — the
 # matrix never silently drops a row when an extractor emits a name this
@@ -12,25 +12,21 @@
 name = "entity-read"
 mcp = "memstead_entity"
 cli = "entity"
-uniffi = "get_entity"
 wasm = "getEntity"
 
 [[operation]]
 name = "search"
 mcp = "memstead_search"
 cli = "search"
-uniffi = "search"
 wasm = "search"
 
 [[operation]]
 name = "list"
 cli = "list"
-uniffi = "list_entities"
 
 [[operation]]
 name = "relations-read"
 cli = "relations"
-uniffi = "get_relations"
 
 [[operation]]
 name = "context"
@@ -40,14 +36,10 @@ cli = "context"
 name = "overview"
 mcp = "memstead_overview"
 cli = "overview"
-uniffi = "get_overview"
 
 [[operation]]
 name = "status"
 cli = "status"
-# UniFFI keeps the `get_stats` method name this cycle — the UDL-surface
-# rename lands with the macOS floor in a later session.
-uniffi = "get_stats"
 
 [[operation]]
 name = "schema-describe"
@@ -55,26 +47,22 @@ mcp = "memstead_schema"
 cli = "type"
 # The app's schema browser reads the same wire shape the MCP tool
 # serves (single-sourced through render::build_schema_payload).
-uniffi = "schema_json"
 
 [[operation]]
 name = "health"
 mcp = "memstead_health"
 cli = "health"
-uniffi = "get_health"
 wasm = "health"
 
 [[operation]]
 name = "changes-since"
 mcp = "memstead_changes_since"
 cli = "changes"
-uniffi = "changes_since"
 
 [[operation]]
 name = "reload"
 mcp = "memstead_reload"
 cli = "reload"
-uniffi = "reload"
 
 # Transport: deliberately CLI-only. Agents get no push/fetch primitive
 # (security posture — moving a mem-repo off-machine is an owner
@@ -95,11 +83,9 @@ cli = "push"
 [[operation]]
 name = "branch-reset"
 cli = "branch-reset"
-# Human-surface rewind parity (macos-cockpit plan 04): the app exposes the
-# guarded reset over UniFFI; deliberately absent from MCP (history
-# rewriting stays off the agent wire). branch_reset_stranded_refs is the
-# read-side confirmation companion.
-uniffi = "branch_reset"
+# Deliberately absent from MCP (history rewriting stays off the agent
+# wire). branch_reset_stranded_refs is the read-side confirmation
+# companion.
 
 [[operation]]
 name = "create"
@@ -173,16 +159,13 @@ cli = "workspace"
 
 # Binding (projection-promotion) surface — the `memstead projection` tree.
 # The projection is the unit: one versioned binding per source→mem
-# obligation. `brief` has a UniFFI counterpart (`ingest_brief` this cycle —
-# the UDL rename to `projection_brief` lands with the macOS floor in a later
-# session); the scaffold / migrate / advance / enable leaves are CLI-only
+# obligation. The scaffold / migrate / advance / enable leaves are CLI-only
 # (like the mem / workspace lifecycle rows, several operations share one
 # top-level `projection` subcommand).
 
 [[operation]]
 name = "projection-brief"
 cli = "projection"
-uniffi = "ingest_brief"
 
 [[operation]]
 name = "projection-init"
@@ -200,21 +183,17 @@ cli = "projection"
 name = "projection-enable"
 cli = "projection"
 
-# Parse-time-drift recovery. Reaches both the CLI (`memstead recover`)
-# and UniFFI (`Engine.apply_parse_recovery`, the first disk-mutating
-# UniFFI method); no MCP tool (operator-initiated maintenance sweep).
+# Parse-time-drift recovery. Reaches the CLI (`memstead recover`);
+# no MCP tool (operator-initiated maintenance sweep).
 [[operation]]
 name = "parse-recovery"
 cli = "recover"
-uniffi = "apply_parse_recovery"
 
 [[operation]]
 name = "agent-notes"
-uniffi = "agent_notes"
 
 [[operation]]
 name = "mem-head-sha"
-uniffi = "mem_head_sha"
 
 # WASM-specific operations. Browser thin-clients hydrate from a `.mem`
 # snapshot, then receive incremental updates as `applyCommit` envelopes

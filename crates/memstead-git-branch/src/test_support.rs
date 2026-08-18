@@ -13,7 +13,7 @@
 //! The module is compiled in for the crate's own `cfg(test)` builds and
 //! for downstream consumers that opt into the `test-support` Cargo
 //! feature in their `[dev-dependencies]` — that is how `memstead-cli`,
-//! `memstead-mcp`, and `memstead-swift` reach in.
+//! and `memstead-mcp` reach in.
 //!
 //! # Negative-case coverage
 //!

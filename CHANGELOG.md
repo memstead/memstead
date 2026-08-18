@@ -7,6 +7,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Removed
+- **The `memstead-swift` UniFFI crate left the workspace.** Its sole
+  consumer — the native macOS app — was retired on 2026-08-18, so the
+  in-process embedding surface goes with it: the crate, the xtask UDL
+  reference generator, the generated UniFFI docs page, and the parity
+  matrix's UniFFI column are all removed. Every remaining engine
+  consumer is subprocess (MCP/CLI), HTTP, or wasm; `git log` preserves
+  the in-process embedding implementation for any future embedder.
+
 ## [0.8.1] - 2026-08-18
 
 ### Added

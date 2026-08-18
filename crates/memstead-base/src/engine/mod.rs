@@ -3,8 +3,8 @@
 //! **One [`Engine`] type, three storage backends**: the engine sits
 //! above [`MemBackend`] and routes reads / writes to the backend
 //! named by each mount's mem. The MCP filesystem-mem server
-//! (`memstead_mcp::filesystem_server::FilesystemMcpServer`), every CLI
-//! lean subcommand, and the macOS UniFFI consumer all reach the
+//! (`memstead_mcp::filesystem_server::FilesystemMcpServer`) and every CLI
+//! lean subcommand reach the
 //! engine through [`Engine::from_workspace_root`] (lean: folder +
 //! archive backends) or `memstead_git_branch::engine_from_workspace_root`
 //! (full: adds git-branch).

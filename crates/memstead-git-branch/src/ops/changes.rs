@@ -30,8 +30,8 @@ use crate::vcs::VcsError;
 
 // `ChangeEnvelope`, `EMPTY_TREE_SHA`, and `RENAME_SIMILARITY_*` are
 // re-exports of the lifted-to-`memstead-base` originals. Existing
-// downstream consumers (MCP server, CLI, tests, the macOS UniFFI
-// path) keep their `memstead_git_branch::ChangeEnvelope` import untouched
+// downstream consumers (MCP server, CLI, tests) keep their
+// `memstead_git_branch::ChangeEnvelope` import untouched
 // — the type is the same one `memstead-base` defines, just reachable
 // from both crates.
 pub use memstead_base::ops::{

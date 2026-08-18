@@ -106,7 +106,7 @@ Three things this entry keeps clear:
 
 - **Recursion is a feature, not a problem.** A union of typed sub-graphs with cross-edges is itself a graph — that is the mathematical definition, not a fudge. *"Graph"* therefore works at the mem-level and the workspace-level without needing different words. The same recursion is why *graph* cannot be the unit's name: the workspace-level composite is also a graph, so "graph" as a proper noun would be ambiguous exactly where the unit noun must be countable.
 - **Graph is descriptive; mem is the noun.** *"My project graph"* is fine prose — it describes the structure the project's mems compose. The moment the sentence counts, mounts, seals, publishes, or installs the thing, the word is *mem*.
-- **"Sub-graph", "area", or "part" disambiguate when needed.** *"My project graph has three sub-graphs: engine, macOS, plugin"* works in technical writing; *"three areas"* often reads more naturally in casual speech. Both refer to mem-graphs from the user's prose perspective.
+- **"Sub-graph", "area", or "part" disambiguate when needed.** *"My project graph has three sub-graphs: engine, plugin, registry"* works in technical writing; *"three areas"* often reads more naturally in casual speech. Both refer to mem-graphs from the user's prose perspective.
 
 ---
 
@@ -128,7 +128,7 @@ One mount = one mem. If five mems live in the same mem-repo gitdir, that is five
 
 **Interfaces that issue mounts.**
 
-- **Rust API** — the most primitive form. The caller passes a list of mount records to the engine constructor directly. The macOS app uses this via UniFFI bindings.
+- **Rust API** — the most primitive form. The caller passes a list of mount records to the engine constructor directly; in-process embedders use this.
 - **CLI** (`memstead`) — reads a [workspace store](#workspace-store) on startup, recovers the mount list, and issues the mount calls against the engine.
 - **MCP server** (`memstead-mcp`) — same pattern as the CLI; reads a workspace store, issues mounts, then exposes the running engine over the MCP protocol.
 
@@ -162,7 +162,7 @@ The workspace store is logical, not physical. Its content is fixed; the form on 
 **Role.**
 
 - **Required** by the CLI (`memstead`) and MCP server (`memstead-mcp`) — they consult the workspace store through their configured persistence adapter on every invocation to recover the workspace configuration before issuing mount calls against the engine.
-- **Not required** by direct engine API consumers (e.g. the macOS app via UniFFI) — they construct workspace configuration in memory and pass it to the engine constructor without persisting anything. No adapter involved.
+- **Not required** by direct engine API consumers (in-process embedders of the Rust crates) — they construct workspace configuration in memory and pass it to the engine constructor without persisting anything. No adapter involved.
 
 **Persistence adapters.**
 
@@ -247,7 +247,7 @@ Default convention: one git-repo per workspace, multi-repo only when the operato
 
 The folder backend is intentionally simple: it carries entity files and per-mem config, nothing more. Two capabilities that the git-branch backend offers and the folder backend deliberately does not:
 
-- **Drift detection.** Git-branch tracks each mem's HEAD SHA; when a sibling writer advances it, the engine emits `MEM_RELOADED` and auto-reloads. Folder has no equivalent signal — `MemBackend::current_head` returns `None`. Multi-process workflows (two CLIs on the same workspace, macOS app + Claude Code plugin, iCloud/Dropbox sync) need git-branch.
+- **Drift detection.** Git-branch tracks each mem's HEAD SHA; when a sibling writer advances it, the engine emits `MEM_RELOADED` and auto-reloads. Folder has no equivalent signal — `MemBackend::current_head` returns `None`. Multi-process workflows (two CLIs on the same workspace, several agents in parallel, iCloud/Dropbox sync) need git-branch.
 - **Change history.** Git-branch carries the full git log per mem; the folder backend keeps only an append-only sidecar log — see [Provenance](#provenance--mutation-log) for the per-backend shapes and the trade-off.
 
 The product position: **folder = simple, single-context notes. Git-branch = multi-actor, history-bearing knowledge.** Anyone who needs drift detection, audit trails, or multi-process safety chooses git-branch. The folder backend is not "git-branch lite" — it is a distinct affordance for users who want their mem to be a plain directory of markdown.
@@ -365,7 +365,7 @@ Two distinctions worth preserving:
 
 A mem has exactly one subject. The subject is editorial — not enforced by code. The mem's name and entity content together imply it; convention keeps the entities on-subject.
 
-**Examples.** The Memstead project's own full mem-repo carries four mems with the `software@0.1.0` schema; each has a different subject — *the engine codebase*, *the macOS app*, *the Claude Code plugin*, *the registry server* — while *the project as a whole* is a fifth mem on its own `project@0.1.0` schema. Same software schema, four distinct mems, because four distinct subjects.
+**Examples.** The Memstead project's own full mem-repo carries three mems with the `software@0.1.0` schema; each has a different subject — *the engine codebase*, *the Claude Code plugin*, *the registry server* — while *the project as a whole* is a fourth mem on its own `project@0.1.0` schema. Same software schema, three distinct mems, because three distinct subjects.
 
 **Boundary.**
 

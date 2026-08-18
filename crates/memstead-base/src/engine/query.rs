@@ -153,8 +153,8 @@ impl Engine {
     /// MCP, never derived from mem content — the operator running the
     /// process is the only authority that can set it, so a served mem the
     /// deployment does *not* vouch for keeps reporting third-party on
-    /// every surface. (Deliberately absent from UniFFI/CLI: those surfaces
-    /// operate a workspace, not a deployment; the CLI counterpart would be
+    /// every surface. (Deliberately absent from the CLI: that surface
+    /// operates a workspace, not a deployment; the CLI counterpart would be
     /// a workspace-config knob no use case demands yet.)
     pub fn declare_mem_origin(
         &mut self,
@@ -193,7 +193,7 @@ impl Engine {
 
     /// The pipeline configs serialized as a JSON string — the read
     /// counterpart of the `add_projection_json` edit entry point.
-    /// Serialization-boundary callers (UniFFI, where serde does not live)
+    /// Serialization-boundary callers (where serde does not live)
     /// get the store in one call and deserialize on their side.
     ///
     /// Shape: `{ "bindings": [{ mem, name, config }] }` — the v2

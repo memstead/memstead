@@ -300,7 +300,7 @@ pub fn read_config_at_gitdir(
 /// fallback so disk-shaped and mem-repo-backed paths produce the same
 /// MemInit shape.
 ///
-/// Used by `memstead-swift`'s `discover_mems` to build the macOS app's
+/// Used by embedding consumers' mem discovery to build a
 /// mem list from `enumerate_mem_repo_branches` output without
 /// re-implementing the schema-pin → SchemaRef plumbing.
 ///

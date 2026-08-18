@@ -143,8 +143,8 @@ fn tool_count_matches_expected_set() {
 }
 
 /// Layering pin. The MCP server (`memstead-mcp`) must not depend on the
-/// CLI crate (`memstead-cli`). The layering rule: CLI, MCP, and
-/// UniFFI are sibling surfaces over the engine — so MCP tools that need
+/// CLI crate (`memstead-cli`). The layering rule: CLI and MCP are
+/// sibling surfaces over the engine — so MCP tools that need
 /// shared logic (e.g. the `workspace_config_edit` writers) reach it
 /// through `memstead-engine`, never back through the CLI. Inspecting the
 /// Cargo.toml is the canonical source of truth.
@@ -201,7 +201,7 @@ fn mcp_does_not_expose_batch_update_or_export() {
 /// `memstead_overview.schemas[]`. They must stay gone even if someone
 /// re-adds one by copy-paste.
 ///
-/// `memstead_status` is banned here too (D11): the CLI/UniFFI `stats`→`status`
+/// `memstead_status` is banned here too (D11): the CLI `stats`→`status`
 /// rename mints **no** new MCP tool — health remains the single agent
 /// dashboard (a second status tool is the response-shape sprawl the
 /// tool-surface policy exists to prevent; the asymmetry is recorded in

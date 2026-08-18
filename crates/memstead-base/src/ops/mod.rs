@@ -638,9 +638,9 @@ pub enum WarningHint {
     /// reverse the drop without consulting another response. `Some`
     /// when `origin == "writable"` — the engine can rewrite the
     /// source markdown via the mutation surface, so a consumer (an
-    /// agent walking `memstead_health`, a bulk-fix orchestrator, the
-    /// macOS app's drift panel) maps `kind` to the concrete call on
-    /// whichever MCP / CLI / UniFFI surface it uses. `None` when
+    /// agent walking `memstead_health`, a bulk-fix orchestrator, a
+    /// UI drift panel) maps `kind` to the concrete call on
+    /// whichever MCP / CLI surface it uses. `None` when
     /// `origin == "readonly"` — the source markdown is not reachable
     /// via the engine, so no abstract action exists; the warning's
     /// message names the operator-level path (uninstall the archive
@@ -935,7 +935,7 @@ fn severity_is_warn(s: &memstead_schema::ConstraintSeverity) -> bool {
 /// warning when the source mem is writable. The shape is tool-
 /// agnostic: it names *what* to do, not *which tool* to call. A
 /// consumer (agent, bulk-fix orchestrator, app surface) maps `kind`
-/// to the concrete call on whichever MCP / CLI / UniFFI path it
+/// to the concrete call on whichever MCP / CLI path it
 /// uses; the warning's payload itself does not drift when the
 /// mutation surface evolves.
 ///
@@ -990,7 +990,7 @@ impl ParsedRelationRecovery {
 /// `PARSED_RELATION_INVALID` warning the engine observed at the call
 /// site: the bulk-fix dispatches the writable-origin recoveries and
 /// reports the read-only-origin warnings as skipped. Wire-equivalent
-/// across MCP, CLI, and UniFFI surfaces; the renderer chooses the
+/// across the MCP and CLI surfaces; the renderer chooses the
 /// shape it prefers.
 ///
 /// `outcome` is the stable discriminator. Current values:

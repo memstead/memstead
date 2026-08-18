@@ -4,7 +4,7 @@
 //! with `unrecognized subcommand` while the same op stays reachable through
 //! MCP. AGENTS.md's parity rule
 //! ("every operation reachable through the engine SHOULD be
-//! reachable via both UniFFI and CLI") makes this the correct
+//! reachable via MCP and CLI alike") makes this the correct
 //! direction to close.
 
 use clap::Parser;

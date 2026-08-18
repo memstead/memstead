@@ -121,7 +121,7 @@ memstead install scope/name    # pull a published mem into your workspace
 
 ## Reference
 
-Auto-generated API reference for every callable surface — MCP tools, CLI, UniFFI engine surface, WASM (browser) surface, Registry HTTP, plus a cross-surface parity matrix and error-code index:
+Auto-generated API reference for every callable surface — MCP tools, CLI, WASM (browser) surface, Registry HTTP, plus a cross-surface parity matrix and error-code index:
 
 **[memstead.com/dev](https://memstead.com/dev)**
 
@@ -149,7 +149,7 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
 | [`docs/`](docs/), [`examples/`](examples/) | [Documentation](docs/) (organized by Diátaxis: tutorial / how-to / reference / explanation) and [example schemas](examples/) (`agent-program`, and the paired `reimpl-source`/`reimpl-target`) |
 
-Memstead also has a native macOS app and a hosted registry; those are separate, closed-source parts of the project and are not part of this open repository.
+Memstead also has a hosted registry; that is a separate, closed-source part of the project and not part of this open repository.
 
 ## What Memstead does not do (yet)
 

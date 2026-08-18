@@ -34,9 +34,7 @@ pub const ALLOWED_OVERVIEW_INCLUDE_KEYS: &[&str] = &[
 
 /// Which surface is rendering. The composer branches on this only for
 /// inline command-name hints — never for content or shape. Adding a new
-/// surface (e.g. UniFFI) is an additive variant; today the macOS app
-/// consumes structured engine data, not rendered markdown, so two
-/// variants suffice.
+/// surface is an additive variant; two variants suffice today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Cli,

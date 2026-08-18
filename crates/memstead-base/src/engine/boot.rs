@@ -1,7 +1,7 @@
 //! Engine construction — `from_mounts*` and `from_workspace_root`.
 //!
-//! `from_mounts` is the in-process constructor every test, the macOS
-//! UniFFI consumer, and the MCP filesystem server reach through.
+//! `from_mounts` is the in-process constructor every test, in-process
+//! embedder, and the MCP filesystem server reach through.
 //! `from_workspace_root` is the lean boot helper that produces the
 //! same engine from a workspace root; the full counterpart lives in
 //! `memstead_git_branch::engine_from_workspace_root` and follows the same
@@ -461,10 +461,9 @@ impl Engine {
     }
 
     /// Boot an engine from a workspace root using only lean-flavour
-    /// backends (folder + archive). The MCP filesystem server, the
-    /// CLI's lean dispatcher, and the macOS UniFFI consumer all reach
-    /// the new engine through this entry point — replacing per-flavour
-    /// init code with one call.
+    /// backends (folder + archive). The MCP filesystem server and the
+    /// CLI's lean dispatcher reach the new engine through this entry
+    /// point — replacing per-flavour init code with one call.
     ///
     /// Loads the workspace through [`crate::FileWorkspaceStore`],
     /// instantiates each mount's backend via

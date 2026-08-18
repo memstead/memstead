@@ -5,10 +5,9 @@
 //! process-state lifecycle) living in the Claude-Code plugin's Node.js, and
 //! a hard-coded natural-language charge in the macOS app that uses none of
 //! it. This module is the engine-side home the deterministic half is being
-//! ported into, so that the plugin skill and the macOS app both reduce to
-//! thin clients pulling the *same* rendered run-brief from the engine —
-//! honouring "every engine-reachable operation is reachable over UniFFI
-//! *and* CLI" and "the engine owns mem-repo state".
+//! ported into, so that every client reduces to a thin consumer pulling
+//! the *same* rendered run-brief from the engine — honouring the
+//! engine-surface parity rule and "the engine owns mem-repo state".
 //!
 //! The boundary is load-bearing: **deterministic → engine** (selection,
 //! backoff, change-detection, brief assembly, cursor/process-state);
@@ -20,9 +19,8 @@
 //! layer (joins an ingest config to its projection, facets, and mediums), the
 //! [`change_detection`] primitives, the [`cursor`] driver that assembles a
 //! per-source changed slice across the git / graph / mtime strategies, and
-//! [`brief`] assembly — all reachable through `memstead ingest brief` (CLI)
-//! and the UniFFI surface, which the plugin skill and macOS app consume as
-//! thin clients.
+//! [`brief`] assembly — all reachable through `memstead ingest brief` (CLI),
+//! which the plugin skill consumes as a thin client.
 
 pub mod advance;
 pub mod brief;

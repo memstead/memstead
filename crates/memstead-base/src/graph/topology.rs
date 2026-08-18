@@ -3,7 +3,7 @@
 //!
 //! "Projection" here is a render view of the live store, not the
 //! pipeline's projection-binding; the two nouns are unrelated. The
-//! shape exists for UI consumers (HTTP surfaces, UniFFI, CLI) that
+//! shape exists for UI consumers (HTTP surfaces, CLI) that
 //! would otherwise assemble topology from paged list reads plus
 //! per-entity relation calls — the measured N+1 path — or re-derive it
 //! per surface (the `serve/` precedent this module hoists).

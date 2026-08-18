@@ -7,7 +7,6 @@ members = [
     "crates/memstead-git-branch",
     "crates/memstead-mcp",
     "crates/memstead-cli",
-    "crates/memstead-swift",
     "crates/memstead-wasm",
     "xtask",
 ]

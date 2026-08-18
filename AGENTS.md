@@ -11,7 +11,7 @@ This file is the public mirror of the private workspace constitution: where they
 
 ## The binding rule — the engine owns mem-repo state
 
-*(Mirrors the workspace constitution; this repo ships publicly, so it must state the rule self-contained.)* Nothing outside the engine crates — plugin code, scripts, in-process embedders, you at a shell — may mutate a mem-repo directly: no `git` against the mem-repo, no raw `.md` entity writes, no `mem-repo/.git/` introspection. Direct mutation skips schema validation, write rules, link-graph integrity, search-index updates, optimistic locking, and commit provenance — the graph corrupts silently. All mutations route through one engine surface: **MCP** (`memstead-mcp`, the agent contract), **UniFFI** (in-process embedders), or the **CLI** (`memstead`). Reads may use any surface.
+*(Mirrors the workspace constitution; this repo ships publicly, so it must state the rule self-contained.)* Nothing outside the engine crates — plugin code, scripts, in-process embedders, you at a shell — may mutate a mem-repo directly: no `git` against the mem-repo, no raw `.md` entity writes, no `mem-repo/.git/` introspection. Direct mutation skips schema validation, write rules, link-graph integrity, search-index updates, optimistic locking, and commit provenance — the graph corrupts silently. All mutations route through one engine surface: **MCP** (`memstead-mcp`, the agent contract) or the **CLI** (`memstead`). Reads may use any surface.
 
 ## Conventions
 

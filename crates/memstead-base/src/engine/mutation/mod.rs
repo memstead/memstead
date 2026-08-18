@@ -1095,7 +1095,7 @@ pub(super) fn synthesise_alias_relations(
 /// dropped — the agent reads the error, fixes the link, retries, and
 /// surfaces the next one on the follow-up call. Keeps the envelope
 /// shape stable (single typed payload rather than a list) so MCP /
-/// CLI / UniFFI clients don't need a fan-out renderer.
+/// CLI clients don't need a fan-out renderer.
 pub(super) fn map_wiki_link_errors(
     section_key: &str,
     errors: Vec<crate::entity::id::WikiLinkError>,

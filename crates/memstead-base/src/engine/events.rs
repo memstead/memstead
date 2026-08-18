@@ -9,7 +9,7 @@
 //! The Core (this module + the `Engine` wiring) is **std-only**: no
 //! tokio, no notify, no async runtime dependency. Tokio-broadcast and
 //! filesystem-watcher conveniences live behind opt-in feature flags
-//! (`tokio`, `file-watcher`) so UniFFI / WASM / sync consumers are not
+//! (`tokio`, `file-watcher`) so WASM / sync consumers are not
 //! forced to drag async runtimes into their dependency graph.
 //!
 //! Consumer-side contract: transport / routing / filtering are *not*

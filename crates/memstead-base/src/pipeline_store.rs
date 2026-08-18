@@ -178,7 +178,7 @@ fn primitive_dir(workspace_root: &Path, primitive: &str) -> PathBuf {
 /// and empty values would let a caller-supplied name write or delete
 /// outside the workspace's own metadata directory. Validated here — the
 /// one place every mutation's path is built — so no surface above
-/// (CLI, UniFFI, engine) can bypass it.
+/// (CLI, MCP, engine embedders) can bypass it.
 fn validate_component(kind: &str, value: &str) -> Result<(), StoreError> {
     let invalid = value.is_empty()
         || value == "."

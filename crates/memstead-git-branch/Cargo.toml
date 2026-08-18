@@ -58,7 +58,7 @@ git-object-storage = []
 # `test-support` re-exports `crate::test_support::init_mem_repo_stub`
 # (and any future helpers) for downstream test crates. The module is
 # always compiled under the crate's own `cfg(test)`; this feature
-# unlocks it for `memstead-cli`, `memstead-mcp`, `memstead-swift` integration tests
+# unlocks it for `memstead-cli` and `memstead-mcp` integration tests
 # that need to satisfy the `mem-repo/.git/` fail-fast.
 test-support = []
 

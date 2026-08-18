@@ -1142,7 +1142,7 @@ impl fmt::Display for MissingWikiLink {
 impl EngineError {
     /// Stable, surface-independent error code token.
     ///
-    /// Each surface (MCP envelope, CLI envelope, UniFFI binding) maps
+    /// Each surface (MCP envelope, CLI envelope) maps
     /// the variant to its wire shape; the code returned here is the
     /// canonical name agents key on. Add a new code here when a new
     /// variant lands; do not invent ad-hoc strings inside the

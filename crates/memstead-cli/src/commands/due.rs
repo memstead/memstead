@@ -2,10 +2,10 @@
 //! schema-declared due date falls inside the window, overdue first,
 //! across every mem whose schema declares the axis (read-only mounts
 //! labelled as third-party quoted data). The renderer is the shared
-//! engine entry point `Engine::render_due_brief`, so the CLI and
-//! UniFFI serve byte-identical content — the projection-brief
+//! engine entry point `Engine::render_due_brief`, so every consuming
+//! surface serves byte-identical content — the projection-brief
 //! precedent. There is deliberately no MCP tool (briefs are the
-//! CLI/app family); the MCP server instructions name this verb as the
+//! CLI family); the MCP server instructions name this verb as the
 //! CLI companion.
 
 use clap::Args as ClapArgs;

@@ -105,7 +105,6 @@ How Memstead differs: this is the approach Memstead's own VISION names as its or
 ## Rust ecosystem patterns
 
 - **Open-core projects in Rust** — **[swc](https://swc.rs)**, **[Polars](https://www.pola.rs)**, **[Pydantic-core](https://github.com/pydantic/pydantic-core)**, **[Lightning CSS](https://lightningcss.dev)**, **[Tantivy](https://github.com/quickwit-oss/tantivy)**, **[Tauri](https://tauri.app)**. All apply the "Rust engine + language-specific FFI wrappers" architecture Memstead uses. None invented the pattern; they each refined it for their domain.
-- **[UniFFI](https://mozilla.github.io/uniffi-rs/)** (Mozilla) — generates language bindings (Swift, Kotlin, Python, Ruby, Go) from a Rust UDL contract. memstead-swift uses this verbatim.
 - **[axum](https://github.com/tokio-rs/axum)** + **[tower](https://github.com/tower-rs/tower)** — the standard Rust web-server pattern. memstead-registry follows it conventionally.
 - **[gix](https://github.com/Byron/gitoxide)** — pure-Rust git implementation. Replaces libgit2/cgo dependency chains. Memstead's mem-repo backend uses it.
 - **[clap](https://github.com/clap-rs/clap)** + **[clap-markdown](https://github.com/ConnorGray/clap-markdown)** — the standard derive-based CLI parser plus its Markdown docs renderer. memstead-cli is conventional usage; the docs site's CLI reference is mechanically generated.

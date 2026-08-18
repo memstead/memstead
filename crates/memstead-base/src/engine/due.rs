@@ -6,9 +6,10 @@
 //! filter, sort, render. The only environmental input is the current
 //! date, taken once per invocation and passed in (injectable in
 //! tests). Ordering: overdue first, then ascending by date, ties
-//! broken by entity id. The renderer lives here so the CLI and UniFFI
-//! serve byte-identical content (the projection-brief precedent);
-//! there is deliberately no MCP tool — briefs are the CLI/app family.
+//! broken by entity id. The renderer lives here so every consuming
+//! surface serves byte-identical content (the projection-brief
+//! precedent); there is deliberately no MCP tool — briefs are the
+//! CLI family.
 //!
 //! Read-only mounts participate: a due date in an installed
 //! compliance mem is precisely the multi-stakeholder case, and a
@@ -97,8 +98,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Public epoch-days → civil-date conversion for callers that derive
-/// "today" from `SystemTime` (the UniFFI surface). Same algorithm the
-/// window math uses.
+/// "today" from `SystemTime`. Same algorithm the window math uses.
 pub fn civil_from_days_pub(days_since_epoch: i64) -> (i64, u32, u32) {
     civil_from_days(days_since_epoch)
 }
