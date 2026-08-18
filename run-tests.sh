@@ -20,7 +20,7 @@
 #
 # The engine workspace lives at the repo root (Cargo.toml + crates/ + xtask/),
 # so tests run from $ROOT directly — there is no engine/ subdir. The private
-# registry, the macOS app, and the internal CI guards are not part of the
+# registry and the internal CI guards are not part of the
 # open repo; they live in the sibling private repo and run there.
 
 ROOT=$(cd "$(dirname "$0")" && pwd)

@@ -14,9 +14,8 @@
 # folder-only build — a CI / dependency-hygiene config, not installed
 # here.
 #
-# Skips the registry (a separate deploy binary) and the macOS app (needs
-# Xcode + xcodegen). Run those separately when you actually need them —
-# see docs/build.md.
+# Skips the registry (a separate deploy binary). Run it separately when
+# you actually need it — see docs/build.md.
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 FAILED=()

@@ -12,7 +12,7 @@ Memstead is currently in **pre-1.0** development. Until a stable 1.0 release is 
 
 ## Reporting a vulnerability
 
-If you believe you have found a security issue in Memstead — the engine, the CLI, the MCP server, the registry service, or the Memstead macOS application — please **do not open a public GitHub issue**.
+If you believe you have found a security issue in Memstead — the engine, the CLI, the MCP server, or the registry service — please **do not open a public GitHub issue**.
 
 Instead, send the report by email to:
 

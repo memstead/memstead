@@ -85,7 +85,7 @@ This is the foundation the memstead.io registry is being built toward — domain
 
 ### LLM-first engine, human-first app
 
-The engine, the schema system, the relationship vocabulary, and the MCP interface are designed for LLM agents as the primary author and consumer. The macOS app and human-facing projections (specs to documentation, mem summaries to overviews) are designed for humans. Two layers, two consumer profiles, one shared substrate.
+The engine, the schema system, the relationship vocabulary, and the MCP interface are designed for LLM agents as the primary author and consumer. The human app and human-facing projections (specs to documentation, mem summaries to overviews) are designed for humans. Two layers, two consumer profiles, one shared substrate.
 
 ### Two modes of truth
 
@@ -154,7 +154,7 @@ Differentiators: schema-driven structure, typed and validated relationships, MCP
 
 The whole engine — Rust crates, the MCP server, the `.mem` format/protocol and publish/install client — is open-source under dual MIT OR Apache-2.0. The launch posture is **adoption-first**: like npm, the win is being free developer infrastructure that gets adopted; revenue is a later layer, not a launch gate. A commercial layer — a human oversight surface and an org/IP-retention tier — sits on top:
 
-- The **macOS app** — a human control-and-oversight surface over the engine, a *free showcase* at launch rather than a monetised flagship.
+- A **human app** — a control-and-oversight surface over the engine (web-based), free rather than a monetised flagship.
 - A **private/enterprise registry** — companies managing their own mems on a hosted or self-hosted server (the npm-Enterprise model, sellable because the registry server stays private).
 - **Team features** — collaboration, shared mems with edit safeguards, organisation-level authority.
 

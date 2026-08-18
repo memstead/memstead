@@ -127,7 +127,7 @@ pub fn build_args(arm: &ArmConfig) -> Vec<String> {
 
 /// Parse `claude --output-format stream-json --verbose` NDJSON into an answer.
 ///
-/// Port of the reference parser in `AgentRuntime.swift`: `assistant` events carry
+/// Ported from the retired macOS app's `AgentRuntime.swift` parser: `assistant` events carry
 /// a `message.content[]` array of `text` / `tool_use` items; the final `result`
 /// event carries the answer text as a fallback. Unparseable lines are skipped
 /// (the stream interleaves `system` and rate-limit events).
