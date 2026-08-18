@@ -283,7 +283,7 @@ pub struct WorkspaceSettings {
     /// mutation calls that omit a `note`. Default-zeroed when absent.
     pub mutations: MutationsSection,
     /// `[plugin.*]` namespace — opaque pass-through map keyed by
-    /// plugin identifier (`claude_code`, `macos`, …). Values are raw
+    /// plugin identifier (`claude_code`, …). Values are raw
     /// TOML tables the engine never inspects; named plugins read
     /// their own sub-table via `memstead_health { include_config: true }`.
     pub plugin: HashMap<String, toml::Table>,

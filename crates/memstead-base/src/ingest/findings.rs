@@ -595,7 +595,7 @@ pub struct VerifyOutcome {
 /// mem mutation): the caller invokes this **only after** a verify pass
 /// returned `Ok`, so an aborted or failed run never advances the token. The
 /// selection loop reads the token to decide when a verify is due again; the
-/// CLI `status`/report paths and the macOS panel render it.
+/// CLI `status`/report paths render it.
 ///
 /// Returns the written sync-state keys. A binding whose run observed no facet
 /// head (nothing recorded, nothing moved) writes nothing.

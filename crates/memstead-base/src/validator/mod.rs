@@ -257,7 +257,7 @@ pub enum ValidationError {
 }
 
 /// The single ingress entry point. Callers (registry publish, CLI
-/// install, MCP read-mem attach, macOS drop-to-install) hand in
+/// install, MCP read-mem attach) hand in
 /// bytes and receive either a `ValidatedMem` with canonical bytes
 /// to install, or a typed `ValidationError`.
 ///
