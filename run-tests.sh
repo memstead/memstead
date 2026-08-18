@@ -60,7 +60,7 @@ echo ""
 echo "══════════════════════════════════"
 echo "  Gate: the generated reference matches the binaries"
 echo "══════════════════════════════════"
-# docs-site/reference is DERIVED — clap help, the UDL, the MCP tool table,
+# docs-site/reference is DERIVED — clap help, the MCP tool table,
 # the error index. Editing a help string without regenerating leaves the
 # published reference asserting something the shipped binary no longer
 # does, and that page is more discoverable than `--help`. This gate is

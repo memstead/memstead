@@ -207,7 +207,7 @@ struct GenerateDocsArgs {
     /// Write nothing; instead fail when the committed tree differs from
     /// what a regeneration would produce. This is the CI gate: the
     /// reference pages are derived from the binaries (clap help, the
-    /// UDL, the MCP tool table), so an edit to a help string that never
+    /// MCP tool table), so an edit to a help string that never
     /// gets regenerated leaves the published reference asserting
     /// something the shipped binary no longer does — exactly the class
     /// of contradiction these pages exist to prevent.
