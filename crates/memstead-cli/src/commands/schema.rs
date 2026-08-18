@@ -497,16 +497,22 @@ community:
 fn scaffold_example_type() -> String {
     r#"# One entity type = one file. `name` must match the filename stem
 # and appear in the manifest's `types:` list.
+#
+# Keys marked REQUIRED must be present in every type file — deleting
+# one fails `memstead schema validate`. Everything else is optional.
 
+# REQUIRED.
 name: note
+# REQUIRED.
 description: |
   A general-purpose note — replace this with your first real type.
+# REQUIRED.
 when_to_use: |
   Use while sketching the schema; rename or split into sharper types
   as the domain vocabulary firms up.
 
-# Sections are the entity's markdown body. `required: true` sections
-# must be present on every create.
+# REQUIRED. Sections are the entity's markdown body. `required: true`
+# sections must be present on every create.
 sections:
   - key: summary
     heading: Summary
@@ -523,7 +529,8 @@ sections:
     write_rules:
       - "Everything beyond the summary. Bullets over prose."
 
-# Typed, filterable frontmatter fields — beyond the built-in
+# REQUIRED (the key; it may be an empty list). Typed, filterable
+# frontmatter fields — beyond the built-in
 # type / created_date / last_modified / tags.
 # One rule for fields and sections alike: absence of `required` means
 # optional. `required: true` refuses a create that leaves the field
@@ -546,11 +553,11 @@ metadata_fields:
     description: Where the note's content came from.
     field_type: string
 
-# Search ranking: how much a title match weighs.
+# REQUIRED. Search ranking: how much a title match weighs.
 title_weight: 100.0
-# Sections included in full-text search.
+# REQUIRED. Sections included in full-text search.
 text_fields: [summary, details]
-# Which declared relationship expresses hierarchy for this type.
+# REQUIRED. Which declared relationship expresses hierarchy for this type.
 hierarchy_relationship: PART_OF
 # One effect only: relate refuses a self-loop (from == to) on the rel-types
 # listed here. Nothing propagates; for impact propagation declare a

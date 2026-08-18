@@ -1572,7 +1572,110 @@ pub fn create_mem(
         })?;
         let config_path = memstead_dir.join("config.json");
         if config_path.exists() {
-            return Err(FullEngineError::ConfigAlreadyExists { path: config_path });
+            // Folder-mem residue routing — the folder analogue of the
+            // git-branch residue match above, honouring the same
+            // `recovery` contract. Before this arm existed, a folder
+            // mem whose mount was lost (or deliberately unregistered)
+            // could never be re-attached: create refused with
+            // `ConfigAlreadyExists` regardless of `recovery`, breaking
+            // `mem unregister`'s documented re-init promise for
+            // folder-backed mems.
+            let existing_config = std::fs::read(&config_path).ok().and_then(|b| {
+                serde_json::from_slice::<memstead_schema::config::MemConfig>(&b).ok()
+            });
+            let tombstone = existing_config
+                .as_ref()
+                .and_then(|c| c.unregistered_at.clone());
+            let effective_action = params
+                .recovery
+                .or_else(|| tombstone.as_ref().map(|_| crate::RecoveryAction::Reattach));
+            match effective_action {
+                Some(crate::RecoveryAction::Reattach) => {
+                    // Adopt the existing folder as-is: its config
+                    // (version, description, syncState) and entity
+                    // files stay untouched; only the mount is
+                    // registered. No seed commit, no config write.
+                    let mount = memstead_base::workspace::Mount {
+                        migration_target: None,
+                        mem: params.name.clone(),
+                        schema: Some(canonical_schema_ref.clone()),
+                        storage,
+                        capability: memstead_base::workspace::MountCapability::Write,
+                        lifecycle: memstead_base::workspace::MountLifecycle::Eager,
+                        cross_linkable: true,
+                    };
+                    let factory = engine.backend_factory();
+                    let backend = factory(&mount).map_err(|e| {
+                        memstead_base::EngineError::Mem(format!(
+                            "reattach backend instantiate: {e}"
+                        ))
+                    })?;
+                    // Clear the tombstone if one was present, so a
+                    // future probe doesn't re-trigger this branch.
+                    if let Some(cfg) = existing_config.as_ref()
+                        && cfg.unregistered_at.is_some()
+                    {
+                        let mut updated = cfg.clone();
+                        updated.unregistered_at = None;
+                        if let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) {
+                            bytes.push(b'\n');
+                            if let Err(e) = backend.write_mem_config(&bytes) {
+                                tracing::warn!(
+                                    mem = %params.name,
+                                    error = %e,
+                                    "reattach: tombstone clear failed — \
+                                     the marker survives; a re-unregister will \
+                                     overwrite it",
+                                );
+                            }
+                        }
+                    }
+                    let origin = memstead_base::MemOrigin::RuntimeCreated {
+                        at: std::time::SystemTime::now(),
+                        by_tool: "memstead_mem_create (reattach)",
+                    };
+                    engine.register_writable_mem(mount, backend, origin)?;
+                    engine.persist_state()?;
+                    // Same rationale as the git-branch reattach: re-derive
+                    // every writable mem's incoming-edge slice so
+                    // cross-mem edges pointing at the reattached mem land
+                    // in the in-memory edge index.
+                    let _ = engine.reload_each_writable_mem_reports()?;
+                    let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+                    if let Some(ts) = tombstone {
+                        warnings.push(
+                            memstead_base::ops::WarningHint::MemReattachedAfterUnregister {
+                                mem: params.name.clone(),
+                                unregistered_at: ts,
+                            },
+                        );
+                    }
+                    return Ok(MemCreateResponse {
+                        name: params.name,
+                        location: canonical,
+                        schema_ref: canonical_schema_ref,
+                        seed_commit_sha: String::new(),
+                        warnings,
+                    });
+                }
+                Some(crate::RecoveryAction::ForceOverwrite) => {
+                    // A folder mem's files sit visibly in the outer
+                    // tree — often a directory the operator also owns
+                    // for other purposes. Create never destroys such
+                    // content; deletion stays a separate, named act.
+                    return Err(memstead_base::EngineError::InvalidInput(
+                        "force_overwrite is not supported for folder residue — \
+                         a folder mem's files live in the outer tree and are \
+                         never destroyed by create. Remove the folder contents \
+                         yourself, or re-attach them with recovery `reattach`"
+                            .to_string(),
+                    )
+                    .into());
+                }
+                Some(crate::RecoveryAction::HardCleanupFirst) | None => {
+                    return Err(FullEngineError::ConfigAlreadyExists { path: config_path });
+                }
+            }
         }
         std::fs::write(&config_path, &config_bytes).map_err(|e| {
             memstead_base::EngineError::Mem(format!("write {}: {e}", config_path.display()))

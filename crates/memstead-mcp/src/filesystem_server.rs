@@ -1020,7 +1020,7 @@ fn validation_envelope(err: memstead_base::runtime_validator::ValidationError) -
 impl FilesystemMcpServer {
     #[tool(
         name = "memstead_entity",
-        description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity`. Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations. Pass `sections` to narrow the rendered body; `include_relations` appends the entity's outgoing and incoming edges; `include_context` appends its community cluster.",
+        description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity` — envelope carries `origin` (trust class) and direction-labelled `relationships[]` (`direction: \"out\"` with `target`; with `include_relations`, additionally `direction: \"in\"` with `from`). Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations. Pass `sections` to narrow the rendered body; `include_relations` appends the entity's outgoing and incoming edges to both channels; `include_context` appends its community cluster.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1091,13 +1091,23 @@ impl FilesystemMcpServer {
         } else {
             None
         };
+        // Origin + optional incoming edges ride in the shared envelope
+        // builder — identical semantics to the mem-repo flavour
+        // (cold-start 0-8-0, F9/F13/F15).
+        let incoming_for_envelope = if p.include_relations.unwrap_or(false) {
+            Some(engine.store().incoming(&entity.id).to_vec())
+        } else {
+            None
+        };
         let mut structured = memstead_base::render::build_entity_envelope(
             &entity,
             rendered_body_tokens,
             full_tokens,
             sections_filter,
             None,
+            engine.mem_origin_class(id.mem()),
             engine.store().outgoing(&entity.id),
+            incoming_for_envelope.as_deref(),
         );
         // Mutation provenance (agent-trust plan 13), opt-in — same
         // block and key the full flavour serves; default responses

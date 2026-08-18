@@ -1087,6 +1087,13 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "origin",
             "first-party",
             "third-party",
+            // Direction-labelled relationship entries (cold-start 0-8-0,
+            // F15): every entry carries `direction`; outgoing entries
+            // hold the endpoint under `target`, incoming (opt-in via
+            // include_relations) under `from`.
+            "direction",
+            "target",
+            "from",
         ],
         "memstead_search" => &[
             // Expansion metadata: the traversal direction rides beside the

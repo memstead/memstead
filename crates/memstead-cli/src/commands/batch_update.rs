@@ -168,7 +168,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             crate::commands::merge_mem_changed_json(&mut body, &mem_changed);
             print_json(&body)?;
         } else {
-            let mut md = super::batch::render_batch_markdown("update", &result);
+            let mut md = super::batch::render_batch_markdown("update", &result, args.dry_run);
             md.push_str(&crate::commands::render_mem_changed_block(&mem_changed));
             print_markdown(&md);
         }
@@ -186,7 +186,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // rides stderr. In `--json` mode the single error envelope is the
     // only thing on stdout, so it stays exactly one JSON document.
     if !ctx.json {
-        print_markdown(&super::batch::render_batch_markdown("update", &result));
+        print_markdown(&super::batch::render_batch_markdown(
+            "update",
+            &result,
+            args.dry_run,
+        ));
     }
     Err(super::batch::batch_refused_error("update", &result).into())
 }

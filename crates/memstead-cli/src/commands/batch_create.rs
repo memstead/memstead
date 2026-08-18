@@ -144,7 +144,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             crate::commands::merge_mem_changed_json(&mut body, &mem_changed);
             print_json(&body)?;
         } else {
-            let mut md = super::batch::render_batch_markdown("create", &result);
+            let mut md = super::batch::render_batch_markdown("create", &result, args.dry_run);
             md.push_str(&crate::commands::render_mem_changed_block(&mem_changed));
             print_markdown(&md);
         }
@@ -154,7 +154,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // Refused batch: standard error envelope with the full result on
     // `details` — same contract as `batch-update` (CLI F12).
     if !ctx.json {
-        print_markdown(&super::batch::render_batch_markdown("create", &result));
+        print_markdown(&super::batch::render_batch_markdown(
+            "create",
+            &result,
+            args.dry_run,
+        ));
     }
     Err(super::batch::batch_refused_error("create", &result).into())
 }

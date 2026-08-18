@@ -79,29 +79,38 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Err(e) => serde_json::json!({ "unavailable": e.to_string() }),
         })
     };
-    let (entity, output, outgoing_snapshot, provenance) = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(engine) => {
-            let entity = engine
-                .get_entity(&id)
-                .cloned()
-                .ok_or_else(|| miss(&engine))?;
-            let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
-            let outgoing = engine.store().outgoing(&id).to_vec();
-            let prov = provenance_block(&engine);
-            (entity, md, outgoing, prov)
-        }
-        CliEngine::Filesystem(engine) => {
-            let entity = engine
-                .get_entity(&id)
-                .cloned()
-                .ok_or_else(|| miss(&engine))?;
-            let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
-            let outgoing = engine.store().outgoing(&id).to_vec();
-            let prov = provenance_block(&engine);
-            (entity, md, outgoing, prov)
-        }
-    };
+    let (entity, output, outgoing_snapshot, incoming_snapshot, origin, provenance) =
+        match ctx.cli_engine()? {
+            #[cfg(feature = "mem-repo")]
+            CliEngine::MemRepo(engine) => {
+                let entity = engine
+                    .get_entity(&id)
+                    .cloned()
+                    .ok_or_else(|| miss(&engine))?;
+                let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
+                let outgoing = engine.store().outgoing(&id).to_vec();
+                let incoming = args
+                    .include_relations
+                    .then(|| engine.store().incoming(&id).to_vec());
+                let origin = engine.mem_origin_class(id.mem());
+                let prov = provenance_block(&engine);
+                (entity, md, outgoing, incoming, origin, prov)
+            }
+            CliEngine::Filesystem(engine) => {
+                let entity = engine
+                    .get_entity(&id)
+                    .cloned()
+                    .ok_or_else(|| miss(&engine))?;
+                let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
+                let outgoing = engine.store().outgoing(&id).to_vec();
+                let incoming = args
+                    .include_relations
+                    .then(|| engine.store().incoming(&id).to_vec());
+                let origin = engine.mem_origin_class(id.mem());
+                let prov = provenance_block(&engine);
+                (entity, md, outgoing, incoming, origin, prov)
+            }
+        };
 
     let chunked = match args.token_budget {
         Some(budget) => apply_chunking(
@@ -140,7 +149,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             full_tokens,
             sections_filter,
             None,
+            origin,
             &outgoing_snapshot,
+            incoming_snapshot.as_deref(),
         );
         if let (Some(prov), Some(obj)) = (&provenance, envelope.as_object_mut()) {
             obj.insert("mutation_provenance".into(), prov.clone());

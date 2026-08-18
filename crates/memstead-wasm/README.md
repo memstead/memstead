@@ -25,10 +25,11 @@ wasm-pack build --target web --release   # output in pkg/
 
 ## Compatibility
 
-**This package is version-matched to the engine.** `@memstead/wasm@0.7.0`
-is built from Memstead engine 0.7.0 and reads the archives that version's
-CLI writes — check yours with `memstead --version`. If the two numbers
-match, the archive and the reader agree.
+**This package is version-matched to the engine.** Each release of
+`@memstead/wasm` is built from the Memstead engine of the same version
+and reads the archives that version's CLI writes — check yours with
+`memstead --version`. If the two numbers match, the archive and the
+reader agree.
 
 The package previously ran on its own version line, which is how it came
 to sit at 0.1.2 against a 0.7.0 CLI with nothing on either page saying so.

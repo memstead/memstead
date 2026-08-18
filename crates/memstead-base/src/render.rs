@@ -695,18 +695,31 @@ pub struct ListResultEnvelope<'a> {
 /// The structured envelope is the contract for `memstead_entity`:
 /// agents read `_hash`, sections, and relations from typed fields
 /// rather than string-scraping the markdown frontmatter.
+#[allow(clippy::too_many_arguments)] // a pure builder: every arg is used, a params struct would churn 4 call sites for no clarity
 pub fn build_entity_envelope(
     entity: &Entity,
     rendered_body_tokens: usize,
     full_tokens: Option<usize>,
     sections_filter: Option<&[String]>,
     schema_anchor: Option<&str>,
+    origin: OriginClass,
     outgoing_edges: &[crate::store::Edge],
+    incoming_edges: Option<&[crate::store::InEdge]>,
 ) -> serde_json::Value {
     let mut envelope = serde_json::Map::new();
     envelope.insert(
         "_hash".to_string(),
         serde_json::Value::String(entity.content_hash.clone()),
+    );
+    // Data-origin trust class, rendered at the shared envelope layer so
+    // no read surface can compose an entity read without it. It was
+    // previously inserted post-hoc by the MCP handler alone, which left
+    // the CLI's `--json` envelope silently unlabelled — a script
+    // branching on trust class treated third-party content as
+    // first-party there (cold-start 0-8-0, F9/F13).
+    envelope.insert(
+        "origin".to_string(),
+        serde_json::Value::String(origin.as_wire().to_string()),
     );
     envelope.insert(
         "id".to_string(),
@@ -820,7 +833,14 @@ pub fn build_entity_envelope(
             })
             .unwrap_or("explicit")
     };
-    let relationships = entity
+    // Every entry declares its direction explicitly. The authored
+    // entries (the entity's own `## Relationships` section) are
+    // outgoing; incoming edges — when the caller opted in — are
+    // appended with `direction: "in"` and the other endpoint under
+    // `from`. Before the marker existed the array was silently
+    // one-directional: a consumer had no signal that "what depends on
+    // this?" was unanswerable from the block (cold-start 0-8-0, F15).
+    let mut relationships: Vec<serde_json::Value> = entity
         .relationships
         .iter()
         .map(|rel| {
@@ -832,6 +852,10 @@ pub fn build_entity_envelope(
             obj.insert(
                 "target".to_string(),
                 serde_json::Value::String(rel.target.to_string()),
+            );
+            obj.insert(
+                "direction".to_string(),
+                serde_json::Value::String("out".to_string()),
             );
             obj.insert(
                 "source".to_string(),
@@ -851,6 +875,35 @@ pub fn build_entity_envelope(
             serde_json::Value::Object(obj)
         })
         .collect();
+    if let Some(incoming) = incoming_edges {
+        for e in incoming {
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "rel_type".to_string(),
+                serde_json::Value::String(e.rel_type.clone()),
+            );
+            obj.insert(
+                "from".to_string(),
+                serde_json::Value::String(e.from.to_string()),
+            );
+            obj.insert(
+                "direction".to_string(),
+                serde_json::Value::String("in".to_string()),
+            );
+            obj.insert(
+                "source".to_string(),
+                serde_json::Value::String(
+                    match e.source {
+                        crate::store::EdgeSource::BodyLink => "body_link",
+                        crate::store::EdgeSource::Hierarchy => "hierarchy",
+                        crate::store::EdgeSource::Explicit => "explicit",
+                    }
+                    .to_string(),
+                ),
+            );
+            relationships.push(serde_json::Value::Object(obj));
+        }
+    }
     envelope.insert(
         "relationships".to_string(),
         serde_json::Value::Array(relationships),
@@ -2935,7 +2988,16 @@ mod tests {
             },
         ];
 
-        let env = build_entity_envelope(&entity, 0, None, None, None, &edges);
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &edges,
+            None,
+        );
         let relationships = env["relationships"].as_array().expect("array");
         let refs = relationships
             .iter()
@@ -2955,6 +3017,74 @@ mod tests {
         );
     }
 
+    /// The envelope's read contract is structural (cold-start 0-8-0,
+    /// F9/F13/F15): `origin` is present on every envelope, every
+    /// relationship entry declares its `direction`, and incoming edges
+    /// — when the caller passes them — appear as `direction: "in"`
+    /// entries carrying the other endpoint under `from`. A consumer
+    /// can therefore always tell whether the block is one-directional.
+    #[test]
+    fn build_entity_envelope_carries_origin_direction_and_incoming() {
+        let mut entity = test_entity();
+        let out_target = EntityId("specs--downstream".to_string());
+        entity.relationships = vec![crate::entity::Relationship::new(
+            "USES".to_string(),
+            out_target.clone(),
+        )];
+        let edges = vec![crate::store::Edge {
+            rel_type: "USES".to_string(),
+            target: out_target,
+            source: crate::store::EdgeSource::Explicit,
+        }];
+        let incoming = vec![crate::store::InEdge {
+            rel_type: "MANAGES".to_string(),
+            from: EntityId("specs--upstream".to_string()),
+            source: crate::store::EdgeSource::Explicit,
+        }];
+
+        // Without incoming: outgoing entries are direction-labelled.
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::ThirdParty,
+            &edges,
+            None,
+        );
+        assert_eq!(env["origin"], "third-party", "origin is envelope-level");
+        let rels = env["relationships"].as_array().expect("array");
+        assert_eq!(rels.len(), 1);
+        assert_eq!(rels[0]["direction"], "out");
+
+        // With incoming: the other half of the neighbourhood appears,
+        // direction-labelled, endpoint under `from`.
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &edges,
+            Some(&incoming),
+        );
+        assert_eq!(env["origin"], "first-party");
+        let rels = env["relationships"].as_array().expect("array");
+        assert_eq!(rels.len(), 2);
+        let inc = rels
+            .iter()
+            .find(|r| r["direction"] == "in")
+            .expect("incoming entry present");
+        assert_eq!(inc["rel_type"], "MANAGES");
+        assert_eq!(inc["from"], "specs--upstream");
+        assert!(
+            inc.get("target").is_none(),
+            "incoming carries from, not target"
+        );
+    }
+
     /// A relationship whose store edge is missing
     /// (transitional drift, store-rebuild lag) falls back to
     /// `"explicit"` so the envelope doesn't crash. The fallback is
@@ -2965,7 +3095,16 @@ mod tests {
         let target = EntityId("specs--unmapped".to_string());
         entity.relationships = vec![crate::entity::Relationship::new("USES".to_string(), target)];
         let edges: Vec<crate::store::Edge> = Vec::new();
-        let env = build_entity_envelope(&entity, 0, None, None, None, &edges);
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &edges,
+            None,
+        );
         let relationships = env["relationships"].as_array().expect("array");
         assert_eq!(relationships[0]["source"], "explicit");
     }
@@ -3009,7 +3148,16 @@ mod tests {
             ),
         ]);
 
-        let env = build_entity_envelope(&entity, 0, None, None, None, &[]);
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &[],
+            None,
+        );
 
         // Metadata scalars are NOT hoisted to the top level — the
         // nested map is their single home.
@@ -3065,7 +3213,16 @@ mod tests {
         entity.stub = true;
         entity.stub_kind = Some(crate::entity::StubKind::ForwardReference);
         entity.metadata = IndexMap::new();
-        let env = build_entity_envelope(&entity, 0, None, None, None, &[]);
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &[],
+            None,
+        );
         let metadata = env["metadata"]
             .as_object()
             .expect("metadata key present even on stubs");
@@ -3092,7 +3249,16 @@ mod tests {
                 MetadataValue::String("also-shadowed".to_string()),
             ),
         ]);
-        let env = build_entity_envelope(&entity, 0, None, None, None, &[]);
+        let env = build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &[],
+            None,
+        );
         // Top-level structured slots stay structured.
         assert!(
             env["sections"].is_object(),
@@ -3115,14 +3281,32 @@ mod tests {
     fn build_entity_envelope_unfiltered_body_token_field_name() {
         let entity = test_entity();
         // Filter-active path — field present under new name.
-        let env_filtered = build_entity_envelope(&entity, 10, Some(42), None, None, &[]);
+        let env_filtered = build_entity_envelope(
+            &entity,
+            10,
+            Some(42),
+            None,
+            None,
+            OriginClass::FirstParty,
+            &[],
+            None,
+        );
         assert_eq!(env_filtered["_tokens_unfiltered_body"], 42);
         assert!(
             env_filtered.get("_tokens_full").is_none(),
             "_tokens_full must not survive — rename is one-way"
         );
         // No-filter path — field absent under both names.
-        let env_unfiltered = build_entity_envelope(&entity, 10, None, None, None, &[]);
+        let env_unfiltered = build_entity_envelope(
+            &entity,
+            10,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &[],
+            None,
+        );
         assert!(env_unfiltered.get("_tokens_unfiltered_body").is_none());
         assert!(env_unfiltered.get("_tokens_full").is_none());
     }

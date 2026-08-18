@@ -15,11 +15,26 @@ use crate::output::ExitKind;
 pub(crate) fn render_batch_markdown(
     command: &str,
     result: &memstead_base::ops::BatchResult,
+    dry_run: bool,
 ) -> String {
-    let header = if result.applied {
+    // A rehearsal must never read as an applied batch: `--dry-run`
+    // validates everything and writes nothing, and the human-facing
+    // markdown has to say so as plainly as the JSON envelope's empty
+    // `commit_sha` does (cold-start 0-8-0, F5).
+    let header = if result.applied && dry_run {
+        format!(
+            "# Batch {command} rehearsed — {} item(s) valid, nothing written",
+            result.succeeded
+        )
+    } else if result.applied {
         format!(
             "# Batch {command} applied — {} item(s) in one commit",
             result.succeeded
+        )
+    } else if dry_run {
+        format!(
+            "# Batch {command} rehearsal REFUSED — {} item(s) failed (nothing would have been written anyway)",
+            result.failed
         )
     } else {
         format!(
@@ -36,15 +51,25 @@ pub(crate) fn render_batch_markdown(
         } else {
             "✓"
         };
+        // On a rehearsal, engine actions arrive in the same past tense
+        // as a real run ("created"); render them as conditionals so no
+        // line claims a write that did not happen.
+        let action: std::borrow::Cow<'_, str> = if dry_run {
+            match entry.action.as_str() {
+                "created" => "would create".into(),
+                "updated" => "would update".into(),
+                "related" => "would relate".into(),
+                other => other.into(),
+            }
+        } else {
+            entry.action.as_str().into()
+        };
         let detail = entry
             .error
             .as_ref()
             .map(|e| format!(" — [{}] {}", e.code, e.message))
             .unwrap_or_default();
-        lines.push(format!(
-            "- {marker} `{}` ({}){}",
-            entry.id, entry.action, detail
-        ));
+        lines.push(format!("- {marker} `{}` ({}){}", entry.id, action, detail));
     }
     if result.errors_suppressed > 0 {
         lines.push(String::new());

@@ -97,8 +97,14 @@ pub enum FullEngineError {
 
     /// `create_mem` rejected because the target `.memstead/config.json`
     /// already exists at the requested location — the engine never
-    /// silently overwrites a prior attempt.
-    #[error("config already exists at {path}")]
+    /// silently overwrites a prior attempt. The message names the
+    /// working remedy: an existing folder mem is adopted, not
+    /// recreated.
+    #[error(
+        "config already exists at {path} — an existing folder mem lives there; \
+         re-attach it instead of creating: pass recovery `reattach` \
+         (CLI: `memstead mem init <name> --storage folder --location <dir> --reattach`)"
+    )]
     ConfigAlreadyExists { path: PathBuf },
 
     /// `create_mem` detected on-disk storage residue for the

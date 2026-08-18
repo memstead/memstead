@@ -827,15 +827,24 @@ impl MountWire {
 /// Errors surfaced by [`instantiate_lean_backend`].
 #[derive(Debug, thiserror::Error)]
 pub enum InstantiateError {
-    /// Mount declares a `MountStorage::GitBranch` storage variant
-    /// but the lean flavour cannot construct a git-branch backend
-    /// (the implementation lives in `memstead-git-branch` behind the
-    /// `mem-repo` Cargo feature). Full consumers expose a
-    /// feature-gated `instantiate_full_backend` that handles all
-    /// three variants.
+    /// Mount declares a `MountStorage::GitBranch` storage variant but
+    /// `memstead-base` alone cannot construct a git-branch backend —
+    /// the implementation lives in the `memstead-git-branch` crate.
+    ///
+    /// The remedy text names the two real, published entry points and
+    /// nothing else: an earlier revision pointed at a `mem-repo` Cargo
+    /// feature that does not exist on the published crates and named
+    /// `instantiate_full_backend` without saying how to wire it —
+    /// a cold-start run burned its longest wall on exactly that
+    /// (protocol 0-8-0, F6). Keep this message in lockstep with the
+    /// actual `memstead-git-branch` public API.
     #[error(
-        "mem {mem}: git-branch backend requires the `mem-repo` feature; \
-         use `instantiate_full_backend` from memstead-git-branch, or rebuild with --features mem-repo"
+        "mem {mem}: git-branch storage needs the memstead-git-branch crate \
+         (`cargo add memstead-git-branch`). Simplest: open the workspace with \
+         `memstead_git_branch::workspace_store::engine_from_workspace_root(root)` \
+         instead of the memstead-base constructor. Alternative, if you build the \
+         Engine yourself: `engine.set_backend_factory(\
+         memstead_git_branch::storage::instantiate_full_backend)` before mounting"
     )]
     GitBranchRequiresMemRepoFeature { mem: String },
 }

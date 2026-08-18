@@ -179,7 +179,14 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 let tokens = memstead_base::chunking::estimate_tokens(&body);
                 let outgoing = engine.store().outgoing(&entity.id);
                 memstead_base::render::build_entity_envelope(
-                    entity, tokens, None, None, None, outgoing,
+                    entity,
+                    tokens,
+                    None,
+                    None,
+                    None,
+                    engine.mem_origin_class(entity.id.mem()),
+                    outgoing,
+                    None,
                 )
             })
             .collect();

@@ -7,6 +7,51 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **The entity envelope answers "what depends on this?".** Every
+  `relationships[]` entry now declares its `direction`; a default read
+  carries the entity's own outgoing edges (`direction: "out"`, endpoint
+  under `target`), and `include_relations: true` adds the incoming
+  edges (`direction: "in"`, endpoint under `from`) to the structured
+  channel — previously the array was silently one-directional, and an
+  agent branching on the envelope saw half the neighbourhood with no
+  signal that half was missing (cold-start 0-8-0, F15).
+- **`origin` is rendered at the shared envelope layer**, so every
+  surface that composes an entity read carries the trust class — the
+  CLI's `--json` read included, which previously omitted it while the
+  guides promised it on "every read surface"; a script branching on
+  trust silently treated third-party content as first-party there
+  (cold-start 0-8-0, F9/F13).
+- **Folder mems can be re-attached.** `mem init --storage folder
+  --location <dir> --reattach` (recovery `reattach` over MCP) adopts an
+  existing folder mem — config, entities, and sync state untouched —
+  instead of refusing with `CONFIG_ERROR`, closing the gap where
+  `mem unregister`'s documented re-init promise held for git-branch
+  mems only. The `CONFIG_ERROR` message now names that remedy.
+
+### Changed
+- **A batch rehearsal reports itself as one.** `batch-* --dry-run`
+  renders "rehearsed — N item(s) valid, nothing written" with
+  per-line "would create" markers, where it previously printed the
+  same "applied — N item(s) in one commit" as a real run and left the
+  reader to discover the empty graph themselves (cold-start 0-8-0, F5).
+- **The `UNSUPPORTED_WORKSPACE_SHAPE` remedy names published API.**
+  The lean-boot error pointed at a `mem-repo` Cargo feature that does
+  not exist on the published crates and named a factory without saying
+  how to wire it; it now names
+  `memstead_git_branch::workspace_store::engine_from_workspace_root`
+  and the `set_backend_factory` alternative (cold-start 0-8-0, F6).
+- **The schema scaffold marks its required keys.** Every key a type
+  file must carry (`name`, `description`, `when_to_use`, `sections`,
+  `metadata_fields`, `title_weight`, `text_fields`,
+  `hierarchy_relationship`) now carries the same `REQUIRED` prefix the
+  manifest's `community:` block already used, so deleting one is an
+  informed act rather than a validate-time surprise (cold-start
+  0-8-0, F4).
+- **`@memstead/wasm`'s compatibility note is version-agnostic** — the
+  rule ("same number as the engine") no longer hardcodes an example
+  version that goes stale one release later (cold-start 0-8-0, F8).
+
 ## [0.8.0] - 2026-08-15
 
 ### Added
