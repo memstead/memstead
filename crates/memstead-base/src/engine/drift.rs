@@ -1435,7 +1435,7 @@ mod tests {
 
     #[test]
     fn mem_drifted_tracks_sibling_advance_until_reload() {
-        // The read-only drift probe used by the macOS roster: it reports
+        // The read-only drift probe (built for the retired macOS app's roster): it reports
         // `true` once a sibling writer advances the backend past the
         // engine's cached head, *without* itself reloading, and clears
         // after the engine re-reads.

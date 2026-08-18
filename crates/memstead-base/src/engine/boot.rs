@@ -385,8 +385,8 @@ impl Engine {
 
         // Parse-time relation validation runs after every mount's
         // entities are loaded so cross-mem target types are
-        // resolvable. Hand-edits, external tooling, and the macOS
-        // app's editor surface can inject relations that bypass
+        // resolvable. Hand-edits, external tooling, and embedder
+        // editor surfaces can inject relations that bypass
         // `memstead_relate`; this is the only place those get caught.
         // Mutation paths pre-validate before writing, so they
         // never trip the warning post-load.

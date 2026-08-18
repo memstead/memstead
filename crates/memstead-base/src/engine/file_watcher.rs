@@ -5,7 +5,7 @@
 //! against `<gitdir>/refs/heads/` and surfaces a
 //! [`std::sync::mpsc::Receiver`] of [`MemChangedEvent`]s. Consumers
 //! that do not share the writer's [`crate::Engine`] instance (the
-//! bridge HEAD-watcher, the macOS live-update path, audit-log workers,
+//! bridge HEAD-watcher, a UI live-update path, audit-log workers,
 //! webhook notifiers) consume events through this surface; the wire
 //! shape matches the in-process callback API exactly so the same
 //! downstream code paths work for both sources.
