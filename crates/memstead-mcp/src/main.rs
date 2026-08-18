@@ -43,8 +43,8 @@ struct Args {
     /// process-scoped — children spawned without it are not in
     /// operator-mode, and there is no env-var equivalent. `memstead`
     /// sets this flag when it spawns `memstead-mcp` for `memstead mem init`
-    /// / `memstead mem delete`. Agent-spawned servers (Claude Code
-    /// plugin, macOS chat subprocess) do not.
+    /// / `memstead mem delete`. Agent-spawned servers (e.g. the Claude
+    /// Code plugin) do not.
     #[cfg(feature = "mem-repo")]
     #[arg(long = "operator-mode", default_value_t = false)]
     operator_mode: bool,

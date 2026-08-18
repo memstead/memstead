@@ -79,7 +79,7 @@ pub struct McpServer {
     /// `[[mem_management.delete]]` allowlists and the
     /// `MEM_REFERENCED_BY_POLICY` safeguard. Set only by the
     /// `memstead-mcp --operator-mode` boot path; agent-spawned servers
-    /// (Claude Code plugin, macOS chat subprocess) always boot with
+    /// (e.g. the Claude Code plugin) always boot with
     /// this `false` and have no in-band channel to flip it. Surfaced
     /// in `memstead_overview`'s `## Lifecycle Namespaces` section so the
     /// posture is observable to anyone reading the engine's outputs.
@@ -14444,9 +14444,9 @@ write_rules: []
 
         #[test]
         fn chat_agent_scenario_hides_mem_lifecycle_pair() {
-            // Mirrors the macOS chat-agent's intended config: the app's
-            // `WorkspaceService` owns mem lifecycle, so the in-process
-            // chat agent never sees `memstead_mem_create` /
+            // Mirrors an embedder chat-agent config (the retired macOS
+            // app's pattern): the host owns mem lifecycle, so the
+            // embedded chat agent never sees `memstead_mem_create` /
             // `memstead_mem_delete` on its MCP surface.
             use rmcp::ServerHandler;
             let (server, _tmp) =
