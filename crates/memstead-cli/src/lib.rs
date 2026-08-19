@@ -487,6 +487,7 @@ impl CliError {
                 missing_count,
                 sections,
                 type_guidance,
+                pre_announced_missing_fields,
             } => {
                 let sections_json: Vec<_> = sections
                     .iter()
@@ -499,15 +500,33 @@ impl CliError {
                         })
                     })
                     .collect();
-                (
-                    ExitKind::Validation,
-                    Some(serde_json::json!({
-                        "entity_type": entity_type,
-                        "missing_count": missing_count,
-                        "sections": sections_json,
-                        "type_guidance": type_guidance,
-                    })),
-                )
+                let mut details = serde_json::json!({
+                    "entity_type": entity_type,
+                    "missing_count": missing_count,
+                    "sections": sections_json,
+                    "type_guidance": type_guidance,
+                });
+                // Cross-gate pre-announcement — additive, only when
+                // non-empty; element shape mirrors REQUIRED_FIELD_UNSET's
+                // details.missing[] so one decoder reads both.
+                if !pre_announced_missing_fields.is_empty() {
+                    let type_rules = type_guidance.get(entity_type).cloned().unwrap_or_default();
+                    let missing_json: Vec<_> = pre_announced_missing_fields
+                        .iter()
+                        .map(|m| {
+                            serde_json::json!({
+                                "field": m.key,
+                                "description": m.description,
+                                "enum_values": m.enum_values,
+                                "write_rules": type_rules,
+                            })
+                        })
+                        .collect();
+                    details["pre_announced"] = serde_json::json!({
+                        "required_field_unset": { "missing": missing_json }
+                    });
+                }
+                (ExitKind::Validation, Some(details))
             }
             PatchSectionEmpty { section } => (
                 ExitKind::Validation,

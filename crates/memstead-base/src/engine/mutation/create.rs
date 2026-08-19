@@ -323,6 +323,18 @@ impl Engine {
                 missing_count: missing_sections.len(),
                 sections: missing_sections,
                 type_guidance,
+                // Cross-gate pre-announcement: step 6a's demand set
+                // depends only on the type definition and the supplied
+                // metadata keys — both fully knowable here — so the
+                // refusal announces it now and the fixed-everything
+                // retry clears both gates in one round-trip. The same
+                // computation runs again at 6a when the sections pass,
+                // which is what keeps the announcement true rather
+                // than merely plausible.
+                pre_announced_missing_fields: missing_required_fields(
+                    type_def.as_ref(),
+                    &args.metadata,
+                ),
             });
         }
 
@@ -3321,6 +3333,7 @@ write_rules: []
                 missing_count,
                 sections,
                 type_guidance,
+                pre_announced_missing_fields: _,
             } => {
                 assert_eq!(entity_type, "spec");
                 assert_eq!(missing_count, sections.len());
@@ -3350,6 +3363,148 @@ write_rules: []
         assert!(
             engine.store().get(&id).is_none(),
             "refused create must not persist any entity"
+        );
+    }
+
+    /// Cross-gate pre-announcement (backlog-sweep/09): a first write
+    /// failing BOTH the section gate and the metadata gate learns both
+    /// demands in the one `MISSING_REQUIRED_SECTION` refusal — the
+    /// pre-announced set names exactly what `REQUIRED_FIELD_UNSET`
+    /// would demand next — and a second submission fixing everything
+    /// announced succeeds. The cold write that took three round-trips
+    /// takes two.
+    #[test]
+    fn create_refusing_sections_pre_announces_metadata_gate_and_fixed_retry_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_planning_schema(&tmp);
+        let (actor, client) = cli_actor();
+
+        // Round-trip 1: neither gate satisfied — no sections, no
+        // metadata. `planning.decision` requires sections decision/
+        // context/consequences and no-default fields decided_on +
+        // deciders.
+        let bare = CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "planning".to_string(),
+            title: "Cold Write".to_string(),
+            entity_type: "decision".to_string(),
+            sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        let err = engine
+            .create_entity(bare, actor, Some(&client), None)
+            .unwrap_err();
+        let (sections, announced) = match err {
+            EngineError::MissingRequiredSection {
+                sections,
+                pre_announced_missing_fields,
+                ..
+            } => (sections, pre_announced_missing_fields),
+            other => panic!("expected MissingRequiredSection, got {other:?}"),
+        };
+        let section_keys: Vec<&str> = sections.iter().map(|s| s.key.as_str()).collect();
+        for key in ["decision", "context", "consequences"] {
+            assert!(section_keys.contains(&key), "sections: {section_keys:?}");
+        }
+        // The announcement is exactly the metadata gate's demand set —
+        // nothing speculative, nothing withheld that is knowable.
+        let announced_keys: Vec<&str> = announced.iter().map(|m| m.key.as_str()).collect();
+        assert_eq!(
+            announced_keys,
+            vec!["decided_on", "deciders"],
+            "pre-announced set must equal the metadata gate's demand in declaration order"
+        );
+        // The wire payload carries the block under `pre_announced`, in
+        // REQUIRED_FIELD_UNSET's established `missing[]` element shape.
+        let rebuilt = EngineError::MissingRequiredSection {
+            entity_type: "decision".to_string(),
+            missing_count: sections.len(),
+            sections,
+            type_guidance: Default::default(),
+            pre_announced_missing_fields: announced,
+        };
+        let details = rebuilt.details();
+        let wire_missing = details["pre_announced"]["required_field_unset"]["missing"]
+            .as_array()
+            .expect("pre_announced.required_field_unset.missing[] present");
+        assert_eq!(wire_missing[0]["field"], "decided_on");
+        assert!(wire_missing[0].get("description").is_some());
+        assert!(wire_missing[0].get("enum_values").is_some());
+
+        // Round-trip 2: fix everything the one refusal announced —
+        // and nothing else. Succeeds: no third round-trip exists.
+        let mut metadata = IndexMap::new();
+        metadata.insert("decided_on".to_string(), "2026-08-19".to_string());
+        metadata.insert("deciders".to_string(), "alice".to_string());
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "planning".to_string(),
+                    title: "Cold Write".to_string(),
+                    entity_type: "decision".to_string(),
+                    sections: IndexMap::from_iter([
+                        ("decision".to_string(), "x".to_string()),
+                        ("context".to_string(), "y".to_string()),
+                        ("consequences".to_string(), "z".to_string()),
+                    ]),
+                    metadata,
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("fixing everything announced must succeed in the second round-trip");
+    }
+
+    /// Complement (backlog-sweep/09 criterion 3): a body failing ONLY
+    /// the section gate — metadata complete — refuses with an empty
+    /// pre-announcement, and its `details` payload carries no
+    /// `pre_announced` key at all: byte-compatible with the
+    /// pre-announcement-free shape.
+    #[test]
+    fn section_only_refusal_omits_the_pre_announced_block() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_planning_schema(&tmp);
+        let (actor, client) = cli_actor();
+
+        let mut metadata = IndexMap::new();
+        metadata.insert("decided_on".to_string(), "2026-08-19".to_string());
+        metadata.insert("deciders".to_string(), "alice".to_string());
+        let err = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "planning".to_string(),
+                    title: "Sections Only".to_string(),
+                    entity_type: "decision".to_string(),
+                    sections: IndexMap::new(),
+                    metadata,
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        match &err {
+            EngineError::MissingRequiredSection {
+                pre_announced_missing_fields,
+                ..
+            } => assert!(
+                pre_announced_missing_fields.is_empty(),
+                "metadata gate is satisfied — nothing to pre-announce"
+            ),
+            other => panic!("expected MissingRequiredSection, got {other:?}"),
+        }
+        assert!(
+            err.details().get("pre_announced").is_none(),
+            "single-gate refusal must stay byte-compatible: no pre_announced key"
         );
     }
 

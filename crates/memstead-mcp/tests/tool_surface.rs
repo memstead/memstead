@@ -1335,6 +1335,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.enum_values",
             "details.type_write_rules",
             "details.stubs",
+            // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION
+            // (backlog-sweep/09): still-unset required metadata rides the
+            // section refusal so one retry clears both gates.
+            "details.pre_announced",
+            "details.pre_announced.required_field_unset.missing[]",
             "suggestion",
             // Title-slug refusal (create slug-refusal docs): INVALID_TITLE
             // names the refusal, proposed_slug its recovery field.
@@ -1379,6 +1384,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.enum_values",
             "details.type_write_rules",
             "details.stubs",
+            // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION
+            // (backlog-sweep/09): still-unset required metadata rides the
+            // section refusal so one retry clears both gates.
+            "details.pre_announced",
+            "details.pre_announced.required_field_unset.missing[]",
             "suggestion",
             // Bug 4 (engine-bugs-from-planning-session.md): inline-wiki-link
             // auto-stub warning surfaces alongside the existing typed warnings.

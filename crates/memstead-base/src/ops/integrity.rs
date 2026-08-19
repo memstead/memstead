@@ -208,6 +208,10 @@ fn lint_entity(
                 missing_count: missing_sections.len(),
                 sections: missing_sections,
                 type_guidance,
+                // The linter reports every gate as its own finding
+                // (the RequiredFieldUnset finding below), so a
+                // pre-announcement here would duplicate it.
+                pre_announced_missing_fields: Vec::new(),
             },
         ));
     }

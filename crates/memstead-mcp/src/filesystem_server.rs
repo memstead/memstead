@@ -782,6 +782,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             missing_count,
             sections,
             type_guidance,
+            pre_announced_missing_fields,
         } => {
             let message =
                 format!("missing {missing_count} required section(s) for type '{entity_type}'");
@@ -796,16 +797,33 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     })
                 })
                 .collect();
-            tool_error_with_details(
-                "MISSING_REQUIRED_SECTION",
-                &message,
-                Some(serde_json::json!({
-                    "entity_type": entity_type,
-                    "missing_count": missing_count,
-                    "sections": sections_json,
-                    "type_guidance": type_guidance,
-                })),
-            )
+            let mut details = serde_json::json!({
+                "entity_type": entity_type,
+                "missing_count": missing_count,
+                "sections": sections_json,
+                "type_guidance": type_guidance,
+            });
+            // Cross-gate pre-announcement — additive, only when
+            // non-empty; element shape mirrors REQUIRED_FIELD_UNSET's
+            // details.missing[] so one decoder reads both.
+            if !pre_announced_missing_fields.is_empty() {
+                let type_rules = type_guidance.get(&entity_type).cloned().unwrap_or_default();
+                let missing_json: Vec<_> = pre_announced_missing_fields
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "field": m.key,
+                            "description": m.description,
+                            "enum_values": m.enum_values,
+                            "write_rules": type_rules,
+                        })
+                    })
+                    .collect();
+                details["pre_announced"] = serde_json::json!({
+                    "required_field_unset": { "missing": missing_json }
+                });
+            }
+            tool_error_with_details("MISSING_REQUIRED_SECTION", &message, Some(details))
         }
         EngineError::PatchSectionEmpty { section } => tool_error(
             "PATCH_SECTION_EMPTY",
@@ -1128,7 +1146,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_create",
-        description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` refusals remain for control characters, empty-deriving titles, and over-long ids). Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
+        description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` refusals remain for control characters, empty-deriving titles, and over-long ids). Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. A `MISSING_REQUIRED_SECTION` refusal that finds required-no-default metadata fields also unset pre-announces them under `details.pre_announced.required_field_unset.missing[]` (element shape identical to `REQUIRED_FIELD_UNSET`'s `details.missing[]`) so one retry clears both gates — the block is absent when the metadata gate is satisfied. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

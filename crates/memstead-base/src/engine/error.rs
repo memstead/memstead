@@ -724,6 +724,19 @@ pub enum EngineError {
         /// the warning-surface ships so a single decoder reads
         /// guidance from either path.
         type_guidance: std::collections::BTreeMap<String, Vec<String>>,
+        /// Cross-gate pre-announcement: what the metadata gate
+        /// (`REQUIRED_FIELD_UNSET`) will also demand once the sections
+        /// are fixed — computed in the same validation pass so a first
+        /// write learns both gates' demands in one refusal. Element
+        /// shape matches `RequiredFieldUnset::missing[]` so the same
+        /// decoder reads both. Rides `details.pre_announced` on the
+        /// wire, and only when non-empty — a refusal from a body
+        /// failing only the section gate is byte-identical to the
+        /// pre-announcement-free shape. Best-effort by contract: what
+        /// is announced is true; gates that cannot run against the
+        /// broken body are not forced. Empty on surfaces that report
+        /// each gate separately anyway (the integrity linter).
+        pre_announced_missing_fields: Vec<MissingRequiredField>,
     },
     /// `patch_sections` targeted a key whose section body is
     /// absent from the entity (or has never been authored).
@@ -1471,6 +1484,7 @@ impl EngineError {
                 missing_count,
                 sections,
                 type_guidance,
+                pre_announced_missing_fields,
             } => {
                 let sections_json: Vec<_> = sections
                     .iter()
@@ -1483,12 +1497,36 @@ impl EngineError {
                         })
                     })
                     .collect();
-                serde_json::json!({
+                let mut details = serde_json::json!({
                     "entity_type": entity_type,
                     "missing_count": missing_count,
                     "sections": sections_json,
                     "type_guidance": type_guidance,
-                })
+                });
+                // Cross-gate pre-announcement rides additionally and
+                // only when non-empty: the established payload above
+                // keeps its exact shape, and a single-gate refusal
+                // stays byte-identical to the pre-announcement-free
+                // form. Element shape mirrors `REQUIRED_FIELD_UNSET`'s
+                // `details.missing[]` so one decoder reads both.
+                if !pre_announced_missing_fields.is_empty() {
+                    let type_rules = type_guidance.get(entity_type).cloned().unwrap_or_default();
+                    let missing_json: Vec<_> = pre_announced_missing_fields
+                        .iter()
+                        .map(|m| {
+                            serde_json::json!({
+                                "field": m.key,
+                                "description": m.description,
+                                "enum_values": m.enum_values,
+                                "write_rules": type_rules,
+                            })
+                        })
+                        .collect();
+                    details["pre_announced"] = serde_json::json!({
+                        "required_field_unset": { "missing": missing_json }
+                    });
+                }
+                details
             }
             EngineError::PatchSectionEmpty { section } => serde_json::json!({ "section": section }),
             EngineError::PatchOldNotFound {
@@ -1787,6 +1825,7 @@ impl EngineError {
                 missing_count,
                 sections,
                 type_guidance,
+                pre_announced_missing_fields,
             } => {
                 let mut out = format!(
                     "missing {missing_count} required section(s) for type '{entity_type}':"
@@ -1806,6 +1845,22 @@ impl EngineError {
                             continue;
                         }
                         out.push_str(&format!("\n  - {etype}: {}", rules.join("; ")));
+                    }
+                }
+                // Cross-gate pre-announcement on the text channel so a
+                // consumer reading only prose still fixes both gates in
+                // one retry.
+                if !pre_announced_missing_fields.is_empty() {
+                    out.push_str(
+                        "\nPre-announced — the metadata gate will also require (supply in the same retry):",
+                    );
+                    for m in pre_announced_missing_fields {
+                        let enums = if m.enum_values.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (one of: {})", m.enum_values.join(", "))
+                        };
+                        out.push_str(&format!("\n  - '{}'{enums} — {}", m.key, m.description));
                     }
                 }
                 out
@@ -2716,6 +2771,7 @@ mod inline_list_tests {
             missing_count: 2,
             sections,
             type_guidance,
+            pre_announced_missing_fields: Vec::new(),
         };
         let prose = err.prose_render();
         assert!(prose.contains("purpose"), "got: {prose}");
