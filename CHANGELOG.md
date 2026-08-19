@@ -7,6 +7,45 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **Anchor artifact paths speak the source dialect.** An anchor's
+  artifact path now resolves source-relative first — joined onto the
+  pointer its `source` name declares in the mem's bindings, out-of-root
+  pointers included — with the workspace-relative form as the fallback
+  when the join does not resolve; a path resolving under both joins goes
+  to the source-join, deterministically. Anchors without a `source` name
+  observe workspace-relative exactly as before. This makes the dialect
+  every other binding surface speaks (scope globs, the brief's path
+  list, disposition artifact ids) the correct one for anchors too, with
+  zero migration of existing sidecars.
+- **Write time resolves or refuses.** A path-grain anchor whose artifact
+  resolves under no candidate join refuses `INVALID_ANCHOR`
+  (`ArtifactUnresolvable`) with every candidate tried in the payload —
+  a mutation never stores a silently dead (orphaned-at-birth) anchor.
+  The gate skips only when it cannot know: no workspace root, or an
+  unreadable binding store.
+- **Rendering a rotation brief is a pure read.** `projection brief
+  --all` no longer advances the round-robin cursor or per-pair backoff;
+  taking the rotation slot is the new explicit `--consume` flag
+  (requires `--all`), which the sync skill's loop driver and the ingest
+  router pass. The JSON envelope gains `not_rotated`, naming every
+  (binding, operation) pair the filter admits but the binding does not
+  loop-declare, with the enable remedy; the markdown form prints the
+  same as stderr notes.
+- **A foreign or garbage-collected sync baseline reseeds instead of
+  degrading.** A git-shaped `#synced` baseline the source's repo does
+  not contain now reseeds at HEAD (one honest full re-roam, then normal
+  change detection) instead of reporting "git signal unavailable"
+  forever; the reseed message states the foreign-baseline case
+  honestly. `projection brief <id> --sync` on a sync-disabled binding
+  refuses `PROJECTION_SYNC_NOT_ENABLED` with the enable remedy in
+  `details`.
+- **The brief names sources by their declared name** (`**main-app**
+  (codebase, primary)`) in the Operative-data section, matching the
+  provenance section's instruction; the zero-artifact `projection
+  advance` says "No artifacts were presented this pass" instead of
+  claiming disposal of nothing.
+
 ### Removed
 - **The `memstead-swift` UniFFI crate left the workspace.** Its sole
   consumer — the native macOS app — was retired on 2026-08-18, so the

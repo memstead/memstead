@@ -2243,6 +2243,69 @@ fn source_dialect_anchors_join_fallback_collide_and_refuse() {
         err.contains("srcdir/missing.txt"),
         "payload names the source-join candidate tried: {err}"
     );
+
+    // An UNKNOWN source name (typo, renamed binding) earns no join
+    // candidate — the workspace-relative form must resolve or the write
+    // refuses. Dead path + typo'd name: refused (resolution would make
+    // the same roster lookup and orphan it at birth)...
+    let typo =
+        r#"{"artifact":"missing2.txt","source":"main-apppp","grain":"file","class":"anchored"}"#;
+    let out = memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "--json",
+            "create",
+            "--mem",
+            "hold",
+            "--title",
+            "Typo Source",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Should refuse.",
+            "--section",
+            "purpose=Typo'd source.",
+            "--anchor",
+            typo,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let err = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(err.contains("INVALID_ANCHOR"), "typed refusal: {err}");
+    assert!(err.contains("missing2.txt"), "names the artifact: {err}");
+
+    // ...while an unknown name over a RESOLVING workspace-relative path is
+    // accepted — a legacy anchor whose binding was since renamed keeps
+    // writing, because its reference is alive under the fallback.
+    let legacy =
+        r#"{"artifact":"srcdir/a.txt","source":"legacy-name","grain":"file","class":"anchored"}"#;
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "create",
+            "--mem",
+            "hold",
+            "--title",
+            "Legacy Source",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Accepted.",
+            "--section",
+            "purpose=Legacy source name over a live path.",
+            "--anchor",
+            legacy,
+        ])
+        .assert()
+        .success();
 }
 
 /// Criterion 1: all four states on a hand-authored mem with no binding,

@@ -182,12 +182,16 @@ impl super::Engine {
         // still has the binding context to say what the right dialect is.
         // Candidates in decision-29 priority: the source-join (the anchor's
         // `source` name resolved to its declared pointer) first, then the
-        // workspace-relative form. The check runs only when the candidate
-        // set is COMPLETE: with no workspace root, or a named source whose
-        // pointer this workspace cannot resolve (unloadable store, renamed
-        // binding), it degrades to accept — validation never requires the
-        // binding to resolve.
-        if let Some(root) = self.workspace_root() {
+        // workspace-relative form. An anchor naming a source the LOADED
+        // roster does not declare (a typo, a renamed binding) gets no join
+        // candidate — its workspace-relative form must resolve or the write
+        // refuses, because resolution will make the same roster lookup and
+        // orphan it at birth. The gate skips entirely only when it cannot
+        // know: no workspace root, or a pipeline store that fails to load —
+        // validation never requires the binding store to be readable.
+        if let Some(root) = self.workspace_root()
+            && crate::pipeline_store::load_pipeline_configs(root).is_ok()
+        {
             let source_roots = self.anchor_source_roots(mem);
             for a in &anchors {
                 match a.grain {
@@ -200,17 +204,13 @@ impl super::Engine {
                 }
                 let base = crate::engine::query::anchor_base_path(&a.artifact);
                 let mut candidates: Vec<String> = Vec::new();
-                let mut complete = true;
-                if let Some(source) = &a.source {
-                    match source_roots.get(source) {
-                        Some(pointer) => {
-                            candidates.push(crate::engine::query::join_pointer(pointer, base));
-                        }
-                        None => complete = false,
-                    }
+                if let Some(source) = &a.source
+                    && let Some(pointer) = source_roots.get(source)
+                {
+                    candidates.push(crate::engine::query::join_pointer(pointer, base));
                 }
                 candidates.push(base.to_string());
-                if complete && !candidates.iter().any(|c| root.join(c).exists()) {
+                if !candidates.iter().any(|c| root.join(c).exists()) {
                     return Err(EngineError::from(
                         crate::anchor::AnchorValidationError::ArtifactUnresolvable {
                             artifact: a.artifact.clone(),
