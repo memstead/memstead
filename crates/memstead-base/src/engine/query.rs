@@ -326,10 +326,11 @@ impl Engine {
     /// deferred (E3b's remaining leg).
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
+        let source_roots = self.anchor_source_roots(id.mem());
         anchors
             .into_iter()
             .map(|anchor| {
-                let observed = self.observe_anchor(&anchor);
+                let observed = self.observe_anchor(&anchor, &source_roots);
                 let (state, observed_hash) = match observed {
                     Some((state, hash)) => (Some(state), hash),
                     None => (None, None),
@@ -347,24 +348,61 @@ impl Engine {
     /// binding-backed verify (`mem_anchors_resolved`, which the ingest
     /// render/report/prune/findings paths consume), the per-entity read
     /// (`entity_anchors_resolved`), and the standalone
-    /// `verify_mem_anchors` operation. Each anchor resolves against its
-    /// own declared reference: path-shaped grains (`span`/`file`/`tree`)
-    /// observe against the **workspace root** — anchor artifact ids are
-    /// workspace-relative (pointer-prefixed), so no binding roster is
-    /// consulted and a hand-authored mem's anchors resolve identically
-    /// to a binding-backed mem's. `url`/`entity` grains have no
-    /// filesystem observation and return `None` (the report vocabulary's
-    /// `unresolvable`), as does a workspace-root-less engine. This
-    /// replaces the retired `single_path_medium_root` gate, whose
-    /// single-source assumption nulled every anchor of a mem with zero
-    /// or several bindings — the honest per-anchor answer supersedes the
-    /// all-or-nothing mem-level one.
+    /// `verify_mem_anchors` operation. Path-shaped grains
+    /// (`span`/`file`/`tree`) observe under the **decision-29 candidate
+    /// priority** (backlog-sweep plan 03a): the anchor's artifact path is
+    /// SOURCE-relative first — when its `source` name resolves through
+    /// `source_roots` to a declared pointer, the pointer-joined path is
+    /// authoritative — and workspace-relative only as the fallback, tried
+    /// when the source-join does not resolve. A path resolving under both
+    /// joins is decided by that priority, deterministically. An anchor
+    /// without a `source` (a hand-authored mem, a binding-less write)
+    /// observes workspace-relative exactly as before. `url`/`entity`
+    /// grains have no filesystem observation and return `None` (the
+    /// report vocabulary's `unresolvable`), as does a workspace-root-less
+    /// engine. This replaces the retired `single_path_medium_root` gate,
+    /// whose single-source assumption nulled every anchor of a mem with
+    /// zero or several bindings — the honest per-anchor answer supersedes
+    /// the all-or-nothing mem-level one.
     fn observe_anchor(
         &self,
         anchor: &crate::anchor::Anchor,
+        source_roots: &std::collections::BTreeMap<String, String>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
         let root = self.workspace_root.as_deref()?;
-        observe_path_anchor(root, anchor)
+        let source_pointer = anchor
+            .source
+            .as_deref()
+            .and_then(|name| source_roots.get(name))
+            .map(String::as_str);
+        observe_path_anchor(root, anchor, source_pointer)
+    }
+
+    /// The `source name → pointer` map for `mem`'s bindings — the filesystem
+    /// roots that anchors written in the source dialect join onto (decision
+    /// 26: anchor artifact paths are source-relative first). Empty when the
+    /// workspace has no root, the pipeline store does not load, or `mem` has
+    /// no bindings — resolution then degrades to the workspace-relative
+    /// dialect alone, which is exactly the hand-authored-mem posture.
+    pub(crate) fn anchor_source_roots(
+        &self,
+        mem: &str,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut roots = std::collections::BTreeMap::new();
+        let Some(root) = self.workspace_root.as_deref() else {
+            return roots;
+        };
+        let Ok(configs) = crate::pipeline_store::load_pipeline_configs(root) else {
+            return roots;
+        };
+        for record in configs.bindings.iter().filter(|r| r.mem == mem) {
+            for source in &record.config.sources {
+                roots
+                    .entry(source.name.clone())
+                    .or_insert_with(|| source.pointer.clone());
+            }
+        }
+        roots
     }
 
     /// Reverse anchor lookup: every `(entity_id, anchor)` across all mems
@@ -387,9 +425,25 @@ impl Engine {
             let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
                 continue;
             };
+            // Source-dialect anchors (decision 26) reference the same
+            // artifact under its pointer-joined workspace form — match both.
+            let source_roots = self.anchor_source_roots(&mount.mount.mem);
             for (eid, anchors) in &sc.entities {
                 for a in anchors {
-                    if anchor_references_path(a, artifact_path) {
+                    let joined = a
+                        .source
+                        .as_deref()
+                        .and_then(|name| source_roots.get(name))
+                        .map(|pointer| join_pointer(pointer, anchor_base_path(&a.artifact)));
+                    if anchor_references_path(a, artifact_path)
+                        || joined.is_some_and(|j| {
+                            path_references(
+                                &j,
+                                a.grain == crate::anchor::AnchorGrain::Tree,
+                                artifact_path,
+                            )
+                        })
+                    {
                         out.push((EntityId(eid.clone()), a.clone()));
                     }
                 }
@@ -420,9 +474,10 @@ impl Engine {
             return Vec::new();
         };
         let mut out = Vec::new();
+        let source_roots = self.anchor_source_roots(mem);
         for (eid, anchors) in &sc.entities {
             for anchor in anchors {
-                let observed = self.observe_anchor(anchor);
+                let observed = self.observe_anchor(anchor, &source_roots);
                 let (state, observed_hash) = match observed {
                     Some((state, hash)) => (Some(state), hash),
                     None => (None, None),
@@ -1653,7 +1708,7 @@ impl Engine {
 /// The base path of an anchor artifact ref — the locator suffixes a
 /// medium may append (`@<commit>`, `#<span>`) stripped so the reverse
 /// lookup compares paths, not versioned/located refs.
-fn anchor_base_path(artifact: &str) -> &str {
+pub(crate) fn anchor_base_path(artifact: &str) -> &str {
     let cut = artifact.find(['@', '#']).unwrap_or(artifact.len());
     &artifact[..cut]
 }
@@ -1734,6 +1789,7 @@ pub struct ResolvedAnchor {
 fn observe_path_anchor(
     root: &Path,
     anchor: &crate::anchor::Anchor,
+    source_pointer: Option<&str>,
 ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
     use crate::anchor::AnchorGrain;
     match anchor.grain {
@@ -1741,7 +1797,16 @@ fn observe_path_anchor(
         AnchorGrain::Url | AnchorGrain::Entity => return None,
     }
     let base = anchor_base_path(&anchor.artifact);
-    let path = root.join(base);
+    // Decision 29: the source-join is authoritative — an artifact path is
+    // source-relative first (joined onto the declaring source's pointer,
+    // which may deliberately leave the workspace root for out-of-root
+    // pointers); the workspace-relative form is tried only when the
+    // source-join does not resolve. A path resolving under both joins is
+    // decided by this priority, deterministically.
+    let path = source_pointer
+        .map(|pointer| root.join(join_pointer(pointer, base)))
+        .filter(|joined| joined.exists())
+        .unwrap_or_else(|| root.join(base));
     if !path.exists() {
         return Some((
             crate::anchor::resolve_anchor(anchor, &crate::anchor::ArtifactObservation::Absent),
@@ -1790,14 +1855,34 @@ fn schema_parsed_fingerprint(schema: &memstead_schema::Schema) -> String {
 
 fn anchor_references_path(anchor: &crate::anchor::Anchor, path: &str) -> bool {
     let base = anchor_base_path(&anchor.artifact);
+    path_references(base, anchor.grain == crate::anchor::AnchorGrain::Tree, path)
+}
+
+/// Whether `base` (a file path, or a tree root when `is_tree`) references
+/// `path` — exact match, or containment for a tree.
+fn path_references(base: &str, is_tree: bool, path: &str) -> bool {
     if base == path {
         return true;
     }
-    if anchor.grain == crate::anchor::AnchorGrain::Tree {
+    if is_tree {
         let prefix = base.strip_suffix('/').unwrap_or(base);
         return path.starts_with(&format!("{prefix}/"));
     }
     false
+}
+
+/// Join a source pointer and a source-relative artifact path into the
+/// pointer-joined (workspace-relative) form — the decision-26 dialect
+/// bridge. Plain string concatenation with a separator: the pointer is
+/// workspace-relative (and may climb out via `..`), the artifact is
+/// source-relative; no canonicalization here, the filesystem resolves it.
+pub(crate) fn join_pointer(pointer: &str, base: &str) -> String {
+    let pointer = pointer.trim_end_matches('/');
+    if pointer.is_empty() || pointer == "." {
+        base.to_string()
+    } else {
+        format!("{pointer}/{base}")
+    }
 }
 
 #[cfg(test)]

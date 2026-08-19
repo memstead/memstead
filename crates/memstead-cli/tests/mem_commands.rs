@@ -1241,6 +1241,9 @@ fn make_rename_workspace(root: &Path) {
     m(&["mem", "init", "alpha", "--no-gitignore"]);
     m(&["mem", "init", "beta", "--no-gitignore"]);
     m(&["workspace", "grant-cross-link", "beta", "alpha"]);
+    // The anchored artifact must resolve — the write gate refuses dead refs.
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/lib.rs"), "// lib").unwrap();
     let corpus = serde_json::json!({ "creates": [
         {"title": "One", "entity_type": "spec", "mem": "alpha",
          "sections": {"identity": "First entity.", "purpose": "Rename fixture."}},
@@ -2086,6 +2089,160 @@ fn make_anchor_workspace(root: &Path) {
     fs::write(root.join("src-b.txt"), "beta CHANGED").unwrap();
     fs::write(root.join("src-c.txt"), "gamma CHANGED").unwrap();
     fs::remove_file(root.join("src-d.txt")).unwrap();
+}
+
+/// Anchor dialect (backlog-sweep plan 03a, decisions 26+29): an anchor
+/// written SOURCE-relative — the dialect every other binding surface
+/// speaks — resolves via the pointer-join; the workspace-relative form
+/// keeps resolving as the fallback; a path existing under BOTH joins
+/// resolves to the source-join target, deterministically; and a path
+/// resolving under NEITHER refuses typed at write time with the
+/// candidates tried — no write stores a silently dead anchor.
+#[test]
+fn source_dialect_anchors_join_fallback_collide_and_refuse() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let m = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .args(args)
+            .assert()
+            .success();
+    };
+    m(&["mem-repo", "init", ".", "--no-gitignore"]);
+    m(&["mem", "init", "hold", "--no-gitignore"]);
+
+    // Source tree + a workspace-root collision twin with different content.
+    fs::create_dir_all(root.join("srcdir")).unwrap();
+    fs::write(root.join("srcdir/a.txt"), "alpha").unwrap();
+    fs::write(root.join("srcdir/x.txt"), "source copy").unwrap();
+    fs::write(root.join("x.txt"), "workspace copy").unwrap();
+    m(&[
+        "projection",
+        "init",
+        "--mem",
+        "hold",
+        "--source",
+        "./srcdir",
+        "--medium-type",
+        "codebase",
+        "--name",
+        "main-app",
+    ]);
+
+    let h = |content: &str| memstead_base::anchor::prepared_content_hash(content.as_bytes());
+    let src_a = format!(
+        r#"{{"artifact":"a.txt","source":"main-app","grain":"file","class":"anchored","hash":"{}","hash_stability":"stable"}}"#,
+        h("alpha")
+    );
+    // Collision probe: the recorded hash is the SOURCE copy's — only the
+    // source-join target can resolve it clean.
+    let src_x = format!(
+        r#"{{"artifact":"x.txt","source":"main-app","grain":"file","class":"anchored","hash":"{}","hash_stability":"stable"}}"#,
+        h("source copy")
+    );
+    // Workspace-relative fallback (no source name) — the pre-existing dialect.
+    let ws_a = format!(
+        r#"{{"artifact":"srcdir/a.txt","grain":"file","class":"anchored","hash":"{}","hash_stability":"stable"}}"#,
+        h("alpha")
+    );
+    m(&[
+        "create",
+        "--mem",
+        "hold",
+        "--title",
+        "Dialects",
+        "--type",
+        "spec",
+        "--section",
+        "identity=Anchor dialect fixture.",
+        "--section",
+        "purpose=Join, fallback, collision.",
+        "--anchor",
+        &src_a,
+        "--anchor",
+        &src_x,
+        "--anchor",
+        &ws_a,
+    ]);
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "verify-anchors", "--mem", "hold"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let state_of = |artifact: &str| -> String {
+        v["anchors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["artifact"] == artifact)
+            .map(|a| a["state"].as_str().unwrap().to_string())
+            .unwrap_or_else(|| panic!("anchor for {artifact} missing: {v}"))
+    };
+    assert_eq!(
+        state_of("a.txt"),
+        "resolved",
+        "source-relative resolves via the pointer-join: {v}"
+    );
+    assert_eq!(
+        state_of("x.txt"),
+        "resolved",
+        "collision resolves to the SOURCE-join target (its hash matches the \
+         source copy; the workspace twin would read drifted): {v}"
+    );
+    assert_eq!(
+        state_of("srcdir/a.txt"),
+        "resolved",
+        "workspace-relative fallback unbroken: {v}"
+    );
+
+    // Refusal: a path resolving under neither join refuses typed with the
+    // candidates tried — never a silent orphaned-at-birth write.
+    let dead =
+        r#"{"artifact":"missing.txt","source":"main-app","grain":"file","class":"anchored"}"#;
+    let out = memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "--json",
+            "create",
+            "--mem",
+            "hold",
+            "--title",
+            "Dead Ref",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Should refuse.",
+            "--section",
+            "purpose=Dead anchor.",
+            "--anchor",
+            dead,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let err = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(err.contains("INVALID_ANCHOR"), "typed refusal: {err}");
+    assert!(
+        err.contains("missing.txt"),
+        "payload names the artifact: {err}"
+    );
+    assert!(
+        err.contains("srcdir/missing.txt"),
+        "payload names the source-join candidate tried: {err}"
+    );
 }
 
 /// Criterion 1: all four states on a hand-authored mem with no binding,

@@ -468,6 +468,10 @@ fn update_from_refuses_content_flags() {
 fn update_anchor_batches_merge_and_unset_is_explicit() {
     let tmp = TempDir::new().unwrap();
     let _mem = make_mem(tmp.path());
+    // Anchored artifacts must resolve — the write gate refuses dead refs.
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(tmp.path().join("src/a.rs"), "a").unwrap();
+    std::fs::write(tmp.path().join("src/b.rs"), "b").unwrap();
 
     // Batch A rides the create.
     memstead()

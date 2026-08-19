@@ -1253,6 +1253,132 @@ mod tests {
         assert_eq!(map["b.rs"].rationale(), Some("generated"));
     }
 
+    /// Criterion 4 (backlog-sweep plan 03a): the auto-`worked` matching
+    /// understands the SOURCE dialect — an anchor written source-relative
+    /// (`f.rs` + `source` name, decision 26) marks the pointer-joined slice
+    /// artifact (`srcdir/f.rs`) worked, exactly as a workspace-relative
+    /// anchor would. Requires a workspace root + pipeline store so the
+    /// source name resolves to its pointer.
+    #[test]
+    fn advance_auto_worked_matches_source_dialect_anchors() {
+        use crate::binding::{BINDING_VERSION, Binding, Operations};
+        use crate::vcs::Actor;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        git(root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join("srcdir")).unwrap();
+        std::fs::write(root.join(".keep"), "x").unwrap();
+        git(root, &["add", ".keep"]);
+        git(root, &["commit", "-qm", "base"]);
+        let baseline = head_sha(root);
+
+        // The pipeline store carries the binding that maps source name
+        // `source-tree` → pointer `srcdir` for mem `engine`.
+        let binding = Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![crate::pipeline::Source {
+                name: "source-tree".to_string(),
+                medium_type: crate::pipeline::MediumType::Codebase,
+                pointer: "srcdir".to_string(),
+                change_detection: Some("git".to_string()),
+                scope: vec![PatternEntry {
+                    path: "**/*.rs".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: None,
+            }],
+            reference_mems: Vec::new(),
+            destination_mem: "engine".to_string(),
+            deny_paths: Vec::new(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: None,
+                sync: None,
+                verify: None,
+            },
+        };
+        let dir = root.join(".memstead").join("projections").join("engine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("graph.json"),
+            serde_json::to_string_pretty(&binding).unwrap(),
+        )
+        .unwrap();
+
+        // The resolved ingest's source points at `srcdir`, so slice
+        // artifact ids come out pointer-joined (`srcdir/f.rs`).
+        let mut resolved = resolved_engine_graph();
+        if let [ResolvedSource::Primary(p)] = resolved.sources.as_mut_slice() {
+            p.pointer = "srcdir".to_string();
+        } else {
+            panic!("fixture shape");
+        }
+
+        {
+            let mut engine = engine_at(root);
+            engine
+                .set_mem_sync_state("engine", synced_key(), &baseline, None)
+                .unwrap();
+        }
+
+        std::fs::write(root.join("srcdir").join("f.rs"), "fn f() {}").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "head1"]);
+
+        // Anchored write in the SOURCE dialect: artifact `f.rs`, source
+        // `source-tree` — no pointer prefix.
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Covers f.".to_string());
+        sections.insert("purpose".to_string(), "Track f.rs.".to_string());
+        {
+            let mut engine = engine_at(root);
+            engine.set_workspace_root(root.to_path_buf());
+            engine
+                .create_entity(
+                    crate::CreateEntityArgs {
+                        mem: "engine".to_string(),
+                        title: "Covers F".to_string(),
+                        entity_type: "spec".to_string(),
+                        sections,
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        anchors: vec![crate::anchor::AnchorInput {
+                            artifact: Some("f.rs".to_string()),
+                            grain: Some("file".to_string()),
+                            class: Some("anchored".to_string()),
+                            hash: Some("h".to_string()),
+                            hash_stability: Some("stable".to_string()),
+                            source: Some("source-tree".to_string()),
+                            ..Default::default()
+                        }],
+                        dry_run: false,
+                    },
+                    Actor::Agent,
+                    None,
+                    Some("source-dialect anchored write"),
+                )
+                .unwrap();
+        }
+
+        // Advance with NO explicit dispositions: `srcdir/f.rs` (the slice
+        // form) auto-works from the source-dialect anchor.
+        let mut engine = engine_at(root);
+        engine.set_workspace_root(root.to_path_buf());
+        let out = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
+        assert!(
+            out.completed,
+            "the source-dialect anchor auto-worked the joined slice artifact: {out:?}"
+        );
+        assert_eq!(out.disposed, 1);
+    }
+
     /// AC9a — an anchored write auto-marks its referenced frozen-slice
     /// artifacts `worked`, so `advance` needs an explicit disposition only for
     /// the residue, held across a HEAD move. Refusals: an artifact with no

@@ -1890,6 +1890,9 @@ community:
         .unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
         std::fs::write(tmp.path().join("src").join("present.rs"), "fn main() {}").unwrap();
+        // Exists at write time (the write gate refuses dead references);
+        // deleted after the write to produce the orphaned READ state.
+        std::fs::write(tmp.path().join("src").join("gone.rs"), "fn gone() {}").unwrap();
 
         let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
 
@@ -1932,6 +1935,7 @@ community:
             )
             .unwrap();
 
+        std::fs::remove_file(tmp.path().join("src").join("gone.rs")).unwrap();
         let resolved = engine.entity_anchors_resolved(&created.id);
         assert_eq!(resolved.len(), 4);
         let state_of = |artifact: &str, class: crate::anchor::AnchorProvenanceClass| {

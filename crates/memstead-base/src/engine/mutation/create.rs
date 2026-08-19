@@ -2753,6 +2753,12 @@ write_rules: []
         engine.set_workspace_root(ws.path().to_path_buf());
         let binding_hash = hash_binding(&binding);
 
+        // The artifact must resolve (workspace-relative fallback) — the
+        // write gate refuses dead references; this test's subject is the
+        // source-NAME validation, not the path join.
+        std::fs::create_dir_all(ws.path().join("src")).unwrap();
+        std::fs::write(ws.path().join("src").join("x.rs"), "fn x() {}").unwrap();
+
         let anchor = |source: &str, binding: &str| crate::anchor::AnchorInput {
             artifact: Some("src/x.rs".into()),
             grain: Some("file".into()),

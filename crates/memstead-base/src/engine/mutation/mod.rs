@@ -176,6 +176,51 @@ impl super::Engine {
             }
         }
 
+        // Write time resolves or refuses (decision 26, plan 03a): a
+        // path-grain anchor whose artifact resolves under NO candidate join
+        // is a silently dead reference — refuse now, while the write moment
+        // still has the binding context to say what the right dialect is.
+        // Candidates in decision-29 priority: the source-join (the anchor's
+        // `source` name resolved to its declared pointer) first, then the
+        // workspace-relative form. The check runs only when the candidate
+        // set is COMPLETE: with no workspace root, or a named source whose
+        // pointer this workspace cannot resolve (unloadable store, renamed
+        // binding), it degrades to accept — validation never requires the
+        // binding to resolve.
+        if let Some(root) = self.workspace_root() {
+            let source_roots = self.anchor_source_roots(mem);
+            for a in &anchors {
+                match a.grain {
+                    crate::anchor::AnchorGrain::Span
+                    | crate::anchor::AnchorGrain::File
+                    | crate::anchor::AnchorGrain::Tree => {}
+                    crate::anchor::AnchorGrain::Url | crate::anchor::AnchorGrain::Entity => {
+                        continue;
+                    }
+                }
+                let base = crate::engine::query::anchor_base_path(&a.artifact);
+                let mut candidates: Vec<String> = Vec::new();
+                let mut complete = true;
+                if let Some(source) = &a.source {
+                    match source_roots.get(source) {
+                        Some(pointer) => {
+                            candidates.push(crate::engine::query::join_pointer(pointer, base));
+                        }
+                        None => complete = false,
+                    }
+                }
+                candidates.push(base.to_string());
+                if complete && !candidates.iter().any(|c| root.join(c).exists()) {
+                    return Err(EngineError::from(
+                        crate::anchor::AnchorValidationError::ArtifactUnresolvable {
+                            artifact: a.artifact.clone(),
+                            candidates,
+                        },
+                    ));
+                }
+            }
+        }
+
         Ok(anchors)
     }
 

@@ -112,7 +112,10 @@ fn anchor_only_update_commits_with_distinct_anchor_verb() {
     let c1 = created.commit_sha.clone();
 
     // Anchor-only update. Anchors are excluded from `_hash`, so the
-    // content hash is unchanged even though a real commit lands.
+    // content hash is unchanged even though a real commit lands. The
+    // anchored artifact must resolve — the write gate refuses dead refs.
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(tmp.path().join("src/lib.rs"), "// lib").unwrap();
     let anchor_json = r#"{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}"#;
     let a = e
         .update_entity(

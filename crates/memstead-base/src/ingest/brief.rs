@@ -207,8 +207,14 @@ pub fn render_operative_data(
         for source in &resolved.sources {
             match source {
                 ResolvedSource::Primary(p) => {
+                    // Name first, medium type demoted to annotation — the
+                    // provenance section instructs `source` = the declared
+                    // NAME, so this section must teach the same token
+                    // (plan 03a: an agent copying this bullet verbatim
+                    // must not earn an INVALID_ANCHOR).
                     lines.push(format!(
-                        "- **{}** (primary)",
+                        "- **{}** ({}, primary)",
+                        p.name,
                         medium_type_label(p.medium_type)
                     ));
                     let allows: Vec<&str> = p
@@ -1417,7 +1423,7 @@ mod tests {
 
 ### Sources
 
-- **codebase** (primary)
+- **f** (codebase, primary)
   - Paths: src/**/*.swift
   - Ignore: src/gen/**
 - **graph** (reference) — mem: engine
@@ -1450,7 +1456,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             mem_label: "ingest/g".to_string(),
         };
         let out = render_operative_data(&r, &skipped, None);
-        assert!(out.contains("- **filesystem** (primary)\n"));
+        assert!(out.contains("- **f** (filesystem, primary)\n"));
         assert!(!out.contains("Cross-mem references"), "no reference note");
         assert!(out.contains("### Destination\n\n- **g**\n"));
         assert!(

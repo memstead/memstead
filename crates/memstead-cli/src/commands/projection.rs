@@ -1671,7 +1671,15 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
             outcome.binding, outcome.disposed, outcome.pending
         );
         if outcome.completed {
-            out.push_str("\nEvery presented artifact is disposed — the sync baseline advanced.\n");
+            if outcome.disposed == 0 && outcome.pending == 0 {
+                out.push_str(
+                    "\nNo artifacts were presented this pass — the sync baseline advanced.\n",
+                );
+            } else {
+                out.push_str(
+                    "\nEvery presented artifact is disposed — the sync baseline advanced.\n",
+                );
+            }
             if !outcome.tokens_written.is_empty() {
                 out.push_str("\nBaseline tokens written:\n");
                 for key in &outcome.tokens_written {

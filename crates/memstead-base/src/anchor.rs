@@ -470,6 +470,22 @@ pub enum AnchorValidationError {
         declared.join(", ")
     )]
     SourceNotDeclared { got: String, declared: Vec<String> },
+    /// A path-grain artifact reference that resolves under NO candidate
+    /// join — neither source-relative (joined onto the declaring source's
+    /// pointer, decision 26) nor workspace-relative. Refused at write time
+    /// so the mutation never stores a silently dead (orphaned-at-birth)
+    /// reference; the payload names every candidate tried so the agent can
+    /// fix the dialect.
+    #[error(
+        "anchor artifact {artifact:?} resolves under no candidate path (tried: {}); artifact \
+         paths are source-relative (joined onto the source's pointer) or workspace-relative — \
+         write the path exactly as the brief lists it",
+        candidates.join(", ")
+    )]
+    ArtifactUnresolvable {
+        artifact: String,
+        candidates: Vec<String>,
+    },
     /// The grain cannot be expressed in the medium's anchor namespace
     /// (per the E2 capability matrix), e.g. `span` on a non-path medium.
     #[error(
@@ -523,6 +539,21 @@ impl AnchorValidationError {
             AnchorValidationError::HashOnNonHashClass { class } => {
                 d.insert("field".into(), "hash".into());
                 d.insert("class".into(), serde_json::json!(class));
+            }
+            AnchorValidationError::ArtifactUnresolvable {
+                artifact,
+                candidates,
+            } => {
+                d.insert("field".into(), "artifact".into());
+                d.insert("got".into(), serde_json::json!(artifact));
+                d.insert("candidates_tried".into(), serde_json::json!(candidates));
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!(
+                        "a source-relative path (joined onto the source's pointer) or a \
+                         workspace-relative path that resolves to an existing artifact"
+                    ),
+                );
             }
             AnchorValidationError::GrainNamespaceUnsupported {
                 grain,
