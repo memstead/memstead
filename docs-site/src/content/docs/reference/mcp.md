@@ -1256,7 +1256,7 @@ Rename an entity by changing its title. Updates the entity id and its file path 
 
 **Flavour:** lean + full
 
-Read one schema. Default `verbosity` is "lite": a structural skeleton — entity-type names with their section keys (`required` flags kept) and metadata-field shapes (`enum` values + `default`), `required_outgoing`, relationship names with endpoint constraints, plus `relationship_mode` (strict|open), `community.{resolution, seed}`, `used_by[]`, top-level `origin` (`first-party` for an engine built-in or workspace-authored schema; `third-party` otherwise), and top-level `alias_target_rel_type` (names the rel-type body wiki-links auto-emit; absent means unbacked wiki-links refuse with `WIKILINK_WITHOUT_RELATION`). The skeleton carries every legality flag needed to author a valid write. Pass `verbosity: "full"` for the prose layer — per-section `write_rules`, type-level `writing_guidance`, `system_context`, relationship `description`/`when_to_use`/`default_weight`, top-level `default_writing_guidance` and schema-level `system_context` — fetch it before substantial authoring against an unfamiliar schema. Full and lite ship the heavy arrays under distinct keys (`types`/`relationships` vs `types_summary`/`relationships_summary`) — decode by key presence. A `third-party` schema is served structural-only regardless of `verbosity` — its prose-instruction fields are omitted so a stranger's free-text never reaches the agent as instructions. Pass exactly one of: `name` — bare ("default") or canonical pin ("default@1.0.0"); `mem` — a mem name whose pinned `mem.schema_ref` the engine resolves. Both or neither returns `INVALID_INPUT`. Workflow: call once per writable mem per session before create/update/relate (schema-discovery contract — see server instructions); cache — schema is workspace-stable. Conformance errors carry recovery payloads as a fallback; fix from `details` rather than re-fetching. Returns `ENTITY_NOT_FOUND` for an unknown `name` (`details.id` echoes it; `details.suggestions` stays empty for schemas) or `UNKNOWN_MEM` for an unmounted `mem` (`details.known_mems` lists the writable roster).
+Read one schema. Default `verbosity` is "lite": a structural skeleton — entity-type names with their section keys (`required` flags kept) and metadata-field shapes (`enum` values + `default`), `required_outgoing`, relationship names with endpoint constraints, plus `relationship_mode` (strict|open), `community.{resolution, seed}`, `used_by[]`, top-level `origin` (`first-party` for an engine built-in or workspace-authored schema; `third-party` otherwise), and top-level `alias_target_rel_type` (names the rel-type body wiki-links auto-emit; absent means unbacked wiki-links refuse with `WIKILINK_WITHOUT_RELATION`). The skeleton carries every legality flag needed to author a valid write. Pass `verbosity: "full"` for the prose layer — per-section `write_rules`, type-level `writing_guidance`, `system_context`, relationship prose, `default_writing_guidance` — before substantial authoring; scope it with `types: ["<name>", …]` to get the complete prose for exactly the types you will write (unserved types listed in `types_omitted`; an unknown name refuses `UNKNOWN_ENTITY_TYPE` naming the valid set). An unscoped full reply exceeding `token_budget` degrades visibly — per-type prose drops to the skeleton, `_schema_mode: "reduced"` + `_hint` steer to `types` — never silent truncation. Full and lite ship the heavy arrays under distinct keys (`types`/`relationships` vs `types_summary`/`relationships_summary`) — decode by key presence. A `third-party` schema is served structural-only regardless of `verbosity` — its prose-instruction fields never reach the agent as instructions. Pass exactly one of `name` — bare ("default") or canonical pin — or `mem`; both or neither returns `INVALID_INPUT`. Call once per writable mem per session before create/update/relate (schema-discovery contract); cache — schema is workspace-stable. Returns `ENTITY_NOT_FOUND` for an unknown `name`, `UNKNOWN_MEM` for an unmounted `mem` (`details.known_mems` lists the roster).
 
 **Hints:** `read_only` = true, `destructive` = false, `idempotent` = true, `open_world` = false
 
@@ -1278,6 +1278,25 @@ Read one schema. Default `verbosity` is "lite": a structural skeleton — entity
       "description": "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`.",
       "type": [
         "string",
+        "null"
+      ]
+    },
+    "token_budget": {
+      "description": "Token budget for an UNSCOPED `verbosity: \"full\"` reply. When the whole-package full payload would exceed it, the reply degrades visibly instead of overflowing the response cap: per-type prose drops to the lite skeleton, `_schema_mode: \"reduced\"` is stamped, and `_hint` steers to per-type retrieval via `types`. Scoped (`types`) requests are never degraded. Omit to use the server's default budget.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "types": {
+      "description": "Scope the per-type payload to these entity-type names (as listed in the lite skeleton). With `verbosity: \"full\"` this is the way to drill before substantial authoring: the reply carries the full package-level context plus the complete prose for exactly the named types, with every unserved type listed in `types_omitted` — one under-budget reply instead of a whole-package spill. A name not in the schema refuses `UNKNOWN_ENTITY_TYPE` naming the valid types. Omit for the whole roster.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
         "null"
       ]
     },

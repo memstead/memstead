@@ -1236,6 +1236,13 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "community",
             "ref",
             "types",
+            // Type-scoped serving (backlog-sweep plan 06a): the
+            // unserved-types roster, the visible-degrade stamp/steer,
+            // and the unknown-selection refusal code.
+            "types_omitted",
+            "_schema_mode",
+            "_hint",
+            "UNKNOWN_ENTITY_TYPE",
             "types_summary",
             "relationships_summary",
             "description",

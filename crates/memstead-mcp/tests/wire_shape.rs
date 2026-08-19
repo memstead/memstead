@@ -441,6 +441,144 @@ fn full_memstead_schema_unknown_name_emits_entity_not_found() {
     );
 }
 
+/// Plan 06a criterion 1: a full-verbosity request scoped to a small
+/// type selection on the measured large schema (`software@0.4.0` — the
+/// 60.2 KB field spill, 2026-08-18 WOENENN ingest) returns the named
+/// types' complete prose in one under-budget reply, with every
+/// unserved type named in `types_omitted`. Complement: an unknown type
+/// name in the selection refuses `UNKNOWN_ENTITY_TYPE` naming the
+/// valid types — never a silent empty section.
+#[test]
+fn full_schema_type_selection_serves_named_prose_under_budget() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    let result = harness.call_tool(
+        "memstead_schema",
+        json!({
+            "name": "software@0.4.0",
+            "verbosity": "full",
+            "types": ["actor", "incident"],
+        }),
+    );
+    assert_success_envelope(&result);
+    let body = result
+        .get("structuredContent")
+        .expect("structuredContent missing");
+    let types = body["types"].as_array().expect("scoped full carries types");
+    let names: Vec<&str> = types.iter().filter_map(|t| t["name"].as_str()).collect();
+    assert_eq!(names, vec!["actor", "incident"], "exactly the selection");
+    for t in types {
+        assert!(
+            t.get("writing_guidance").is_some() && t.get("system_context").is_some(),
+            "selected types carry the complete prose: {t}"
+        );
+    }
+    let omitted = body["types_omitted"]
+        .as_array()
+        .expect("unserved types are named, never silently dropped");
+    assert_eq!(omitted.len(), 9 - 2, "the other seven types are listed");
+    assert!(
+        body.get("_schema_mode").is_none(),
+        "a scoped reply is the steered-to shape — never re-degraded"
+    );
+    // The whole point: the scoped reply fits the pipe.
+    let estimated = serde_json::to_string(body).unwrap().len() / 4;
+    assert!(
+        estimated < 15_000,
+        "scoped reply must sit under the schema budget, got ~{estimated} tokens"
+    );
+
+    // Complement: unknown type name refuses typed with the roster.
+    let result = harness.call_tool(
+        "memstead_schema",
+        json!({
+            "name": "software@0.4.0",
+            "verbosity": "full",
+            "types": ["galaxy-brain"],
+        }),
+    );
+    assert!(
+        result["isError"].as_bool().unwrap_or(false),
+        "unknown type must refuse: {result}"
+    );
+    let structured = &result["structuredContent"];
+    assert_eq!(structured["code"], "UNKNOWN_ENTITY_TYPE");
+    assert_eq!(structured["details"]["unknown"], json!(["galaxy-brain"]));
+    assert!(
+        structured["details"]["known_types"]
+            .as_array()
+            .is_some_and(|k| k.iter().any(|v| v == "actor")),
+        "refusal names the valid types: {structured}"
+    );
+}
+
+/// Plan 06a criterion 2: the unscoped full reply on the measured large
+/// schema degrades VISIBLY per the budget pattern — reduced mode
+/// stamped, hint steering to per-type retrieval, full roster in
+/// `types_omitted` — no silent truncation and no reliance on harness
+/// file-spill. Complements: an unscoped full on a schema that fits
+/// (`default@1.0.0`, ~52 KB — today's working size) still serves the
+/// whole prose untouched, and the default lite reply carries none of
+/// the new keys (byte-compatible for existing consumers).
+#[test]
+fn full_schema_unscoped_over_budget_degrades_visibly() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    let result = harness.call_tool(
+        "memstead_schema",
+        json!({ "name": "software@0.4.0", "verbosity": "full" }),
+    );
+    assert_success_envelope(&result);
+    let body = result
+        .get("structuredContent")
+        .expect("structuredContent missing");
+    assert_eq!(body["_schema_mode"], "reduced", "degrade is stamped");
+    assert!(
+        body["_hint"].as_str().is_some_and(|h| h.contains("types")),
+        "hint steers to per-type retrieval: {}",
+        body["_hint"]
+    );
+    assert!(body.get("types").is_none(), "over-budget prose not shipped");
+    assert!(
+        body["types_summary"]
+            .as_array()
+            .is_some_and(|t| t.len() == 9),
+        "the lite skeleton still covers the whole roster"
+    );
+    assert_eq!(
+        body["types_omitted"].as_array().map(|v| v.len()),
+        Some(9),
+        "everything unserved is named"
+    );
+
+    // Complement 1: a fitting schema's unscoped full is untouched.
+    let result = harness.call_tool(
+        "memstead_schema",
+        json!({ "name": "default@1.0.0", "verbosity": "full" }),
+    );
+    assert_success_envelope(&result);
+    let body = &result["structuredContent"];
+    assert!(body["types"].is_array(), "fitting full stays full");
+    assert!(body.get("_schema_mode").is_none());
+    assert!(body.get("types_omitted").is_none());
+
+    // Complement 2: the default lite reply carries none of the new keys.
+    let result = harness.call_tool("memstead_schema", json!({ "name": "default@1.0.0" }));
+    assert_success_envelope(&result);
+    let body = &result["structuredContent"];
+    assert!(body["types_summary"].is_array());
+    for k in ["types", "types_omitted", "_schema_mode", "_hint"] {
+        assert!(
+            body.get(k).is_none(),
+            "lite reply must stay byte-compatible — unexpected key {k:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Mutation pins — `memstead_create` success + UNKNOWN_ENTITY_TYPE error
 // ---------------------------------------------------------------------------

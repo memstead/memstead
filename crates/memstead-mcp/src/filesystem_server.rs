@@ -1815,7 +1815,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_schema",
-        description = "Read the workspace's pinned schema as a JSON document — `ref` (canonical `name@version`), `relationship_mode`, the relationship vocabulary, `community`, `used_by[]`, top-level `origin` (`first-party` / `third-party`; a third-party schema is served structural-only with its prose-instruction fields omitted), top-level `alias_target_rel_type` (when authored — the rel-type body wiki-links `[[target]]` auto-emit), and per-type section/field detail. Accepts either `name` (bare name or canonical pin) or `mem` (the workspace's single mem). Passing both is `INVALID_INPUT`. v1 surface returns the engine's pinned schema regardless of which form is used (filesystem-mem is single-mem, single-schema). Default `verbosity` is `\"lite\"` — a cheap cold-start skeleton: entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer, prose dropped (heavy arrays ship as `types_summary`/`relationships_summary`). Pass `verbosity: \"full\"` for the complete prose payload. An unrecognized `verbosity` returns `INVALID_INPUT`. Returns `ENTITY_NOT_FOUND` when `name` explicitly mismatches the pinned schema; `UNKNOWN_MEM` when `mem` is not the workspace's mem.",
+        description = "Read the workspace's pinned schema as a JSON document — `ref` (canonical `name@version`), `relationship_mode`, the relationship vocabulary, `community`, `used_by[]`, top-level `origin` (`first-party` / `third-party`; a third-party schema is served structural-only with its prose-instruction fields omitted), top-level `alias_target_rel_type` (when authored — the rel-type body wiki-links `[[target]]` auto-emit), and per-type section/field detail. Accepts either `name` (bare name or canonical pin) or `mem` (the workspace's single mem). Passing both is `INVALID_INPUT`. v1 surface returns the engine's pinned schema regardless of which form is used (filesystem-mem is single-mem, single-schema). Default `verbosity` is `\"lite\"` — a cheap cold-start skeleton: entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer, prose dropped (heavy arrays ship as `types_summary`/`relationships_summary`). Pass `verbosity: \"full\"` for the complete prose payload. An unrecognized `verbosity` returns `INVALID_INPUT`. Scope full with `types: [\"<name>\", …]` for the complete prose of exactly the types you will write (unserved types listed in `types_omitted`; an unknown name refuses `UNKNOWN_ENTITY_TYPE` naming the valid set); an unscoped full exceeding `token_budget` degrades visibly — prose drops to the skeleton, `_schema_mode: \"reduced\"` + `_hint` steer to `types` — never silent truncation. Returns `ENTITY_NOT_FOUND` when `name` explicitly mismatches the pinned schema; `UNKNOWN_MEM` when `mem` is not the workspace's mem.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1904,12 +1904,37 @@ impl FilesystemMcpServer {
         // Trust origin governs de-framing: a third-party schema is served
         // structural-only regardless of the requested `verbosity`.
         let origin = engine.schema_origin(schema);
-        let payload = memstead_base::render::build_schema_payload(
+        // Serving-shape controls (backlog-sweep plan 06a) — same
+        // semantics as the mem-repo flavour: `types` scopes the
+        // per-type prose, the token budget guards the unscoped full
+        // reply with a visible degrade.
+        let payload = match memstead_base::render::build_schema_payload_scoped(
             schema,
             vec![mem_name.to_string()],
             verbosity,
             origin,
-        );
+            p.types.as_deref(),
+            Some(
+                p.token_budget
+                    .unwrap_or(memstead_base::render::DEFAULT_SCHEMA_FULL_BUDGET),
+            ),
+        ) {
+            Ok(v) => v,
+            Err(unknown) => {
+                return tool_error_with_details(
+                    "UNKNOWN_ENTITY_TYPE",
+                    &format!(
+                        "unknown entity type(s) in `types`: [{}] — valid types: [{}]",
+                        unknown.unknown.join(", "),
+                        unknown.known.join(", ")
+                    ),
+                    Some(serde_json::json!({
+                        "unknown": unknown.unknown,
+                        "known_types": unknown.known,
+                    })),
+                );
+            }
+        };
         json_response(&payload)
     }
 
@@ -3728,6 +3753,8 @@ mod tests {
                 verbosity: None,
                 name: Some(name.into()),
                 mem: None,
+                types: None,
+                token_budget: None,
             }));
             assert!(!result.is_error.unwrap_or(false), "name={name:?}");
             let body = result.structured_content.unwrap();
@@ -3746,6 +3773,8 @@ mod tests {
             verbosity: Some("full".into()),
             name: Some("default".into()),
             mem: None,
+            types: None,
+            token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3756,6 +3785,8 @@ mod tests {
             verbosity: None,
             name: None,
             mem: Some("demo".into()),
+            types: None,
+            token_budget: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3776,6 +3807,8 @@ mod tests {
             verbosity: Some("lite".into()),
             name: None,
             mem: Some("demo".into()),
+            types: None,
+            token_budget: None,
         }));
         assert!(!lite.is_error.unwrap_or(false));
         let lite_body = lite.structured_content.unwrap();
@@ -3791,6 +3824,8 @@ mod tests {
             verbosity: Some("brief".into()),
             name: None,
             mem: Some("demo".into()),
+            types: None,
+            token_budget: None,
         }));
         assert!(
             unknown.is_error.unwrap_or(false),
@@ -3810,6 +3845,8 @@ mod tests {
             verbosity: None,
             name: Some("default".into()),
             mem: Some("demo".into()),
+            types: None,
+            token_budget: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.content[0]
@@ -3829,6 +3866,8 @@ mod tests {
             verbosity: None,
             name: None,
             mem: Some("nope".into()),
+            types: None,
+            token_budget: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.content[0]
@@ -3848,6 +3887,8 @@ mod tests {
             verbosity: None,
             name: Some("totally-not-a-schema".into()),
             mem: None,
+            types: None,
+            token_budget: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();

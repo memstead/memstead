@@ -132,4 +132,12 @@ pub struct SchemaParams {
         description = "Verbosity of the schema body. `\"lite\"` (default, absent) returns a cheap cold-start skeleton: entity-type names with their section keys (and `required` markers) and metadata-field shapes (name, `required`, `enum`, `default`), relationship-type names with their `allowed_sources`/`allowed_targets`, `manual_authoring`, `acyclic`, and `per_edge_description` — plus the top-level `alias_target_rel_type` pointer — with the long-form prose dropped. The lite skeleton carries every flag needed to author a legal write. `\"full\"` returns the complete payload — every description, `when_to_use`, write-rule, and writing-guidance string; escalate to full for the human-readable guidance before substantial authoring. Heavy arrays ship under distinct keys per mode (`types`/`relationships` vs. `types_summary`/`relationships_summary`). Any value other than `\"full\"`/`\"lite\"` returns `INVALID_INPUT` naming the bad value."
     )]
     pub verbosity: Option<String>,
+    #[schemars(
+        description = "Scope the per-type payload to these entity-type names (as listed in the lite skeleton). With `verbosity: \"full\"` this is the way to drill before substantial authoring: the reply carries the full package-level context plus the complete prose for exactly the named types, with every unserved type listed in `types_omitted` — one under-budget reply instead of a whole-package spill. A name not in the schema refuses `UNKNOWN_ENTITY_TYPE` naming the valid types. Omit for the whole roster."
+    )]
+    pub types: Option<Vec<String>>,
+    #[schemars(
+        description = "Token budget for an UNSCOPED `verbosity: \"full\"` reply. When the whole-package full payload would exceed it, the reply degrades visibly instead of overflowing the response cap: per-type prose drops to the lite skeleton, `_schema_mode: \"reduced\"` is stamped, and `_hint` steers to per-type retrieval via `types`. Scoped (`types`) requests are never degraded. Omit to use the server's default budget."
+    )]
+    pub token_budget: Option<usize>,
 }

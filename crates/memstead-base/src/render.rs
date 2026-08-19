@@ -1389,13 +1389,89 @@ fn append_section_format(
     }
 }
 
+/// Unknown type names in a `types` selection passed to
+/// [`build_schema_payload_scoped`] — the caller raises a typed refusal
+/// naming the valid types (recovery-payload posture, never a silent
+/// empty section).
+#[derive(Debug, Clone)]
+pub struct UnknownSchemaTypes {
+    pub unknown: Vec<String>,
+    pub known: Vec<String>,
+}
+
+/// Token estimate for a serialized JSON payload — routed through the
+/// house heuristic ([`crate::chunking::estimate_tokens`]) so "fits the
+/// pipe" is judged by the same yardstick every budgeted surface uses.
+fn estimate_payload_tokens(value: &serde_json::Value) -> usize {
+    serde_json::to_string(value)
+        .map(|s| estimate_tokens(&s))
+        .unwrap_or(0)
+}
+
+/// Default budget for the UNSCOPED full-verbosity schema reply, in
+/// estimated (bytes/4) tokens — ~60 KB of JSON. Calibrated against the
+/// primary client's ~25k real-token response cap: dense JSON tokenizes
+/// well above bytes/4, so 15k estimated sits at the cap's edge. The
+/// two measured packages land on the intended sides: `default@1.3.0`
+/// (~52 KB) keeps serving in full — today's behaviour on today's reply
+/// sizes — while `software@0.4.0` (60.2 KB, the observed harness spill,
+/// 2026-08-18 WOENENN ingest) degrades visibly to the per-type steer
+/// instead of overflowing the pipe.
+pub const DEFAULT_SCHEMA_FULL_BUDGET: usize = 15_000;
+
 pub fn build_schema_payload(
     schema: &Arc<Schema>,
     used_by: Vec<String>,
     verbosity: SchemaVerbosity,
     origin: OriginClass,
 ) -> serde_json::Value {
+    // Unscoped, unbudgeted — the classic shape every existing consumer
+    // gets. Infallible by construction (no selection to refuse).
+    build_schema_payload_scoped(schema, used_by, verbosity, origin, None, None)
+        .expect("no type selection, no refusal")
+}
+
+/// [`build_schema_payload`] with the serving-shape controls
+/// (backlog-sweep plan 06a): `type_selection` scopes the heavy per-type
+/// prose to the named types — the reply carries the full package-level
+/// context, the selected types in full, and a `types_omitted` roster
+/// naming what was not served (visible scope, never silent truncation).
+/// An unknown name refuses with [`UnknownSchemaTypes`]. Under
+/// [`SchemaVerbosity::Lite`] the selection filters the skeleton the
+/// same way (coherent, though the full tier is the use case).
+///
+/// `token_budget` guards the UNSCOPED full reply: when the complete
+/// payload's estimated tokens exceed the budget, the reply degrades
+/// visibly — per-type prose drops to the lite `types_summary` skeleton,
+/// `_schema_mode: "reduced"` is stamped, and `_hint` steers the caller
+/// to per-type retrieval via `types`. A scoped request is what the
+/// budget steers TOWARD, so the selection path is never re-degraded.
+pub fn build_schema_payload_scoped(
+    schema: &Arc<Schema>,
+    used_by: Vec<String>,
+    verbosity: SchemaVerbosity,
+    origin: OriginClass,
+    type_selection: Option<&[String]>,
+    token_budget: Option<usize>,
+) -> Result<serde_json::Value, UnknownSchemaTypes> {
     let manifest = &schema.manifest;
+
+    // Validate the selection against the manifest roster before any
+    // rendering — refuse-with-the-known-names beats a silent empty
+    // `types` array.
+    if let Some(sel) = type_selection {
+        let unknown: Vec<String> = sel
+            .iter()
+            .filter(|t| !manifest.types.iter().any(|m| m == *t))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            return Err(UnknownSchemaTypes {
+                unknown,
+                known: manifest.types.clone(),
+            });
+        }
+    }
     // De-frame third-party schemas: their prose-instruction fields only
     // guide authoring (which never targets a foreign mem), so omitting
     // them is lossless — and serving them would place a stranger's
@@ -1816,6 +1892,22 @@ pub fn build_schema_payload(
         }
     }
 
+    // The selection partitions the manifest-ordered type roster into
+    // served and omitted halves. `types_omitted` is emitted whenever
+    // any type was NOT served in the requested tier — the visible-scope
+    // guarantee (a reader always sees what a reply does not carry).
+    let selected = |name: &serde_json::Value| -> bool {
+        match type_selection {
+            None => true,
+            Some(sel) => name.as_str().is_some_and(|n| sel.iter().any(|s| s == n)),
+        }
+    };
+    let omitted_names: Vec<serde_json::Value> = types_full
+        .iter()
+        .filter(|t| !selected(&t["name"]))
+        .map(|t| t["name"].clone())
+        .collect();
+
     if full {
         obj.insert(
             "relationships".into(),
@@ -1830,7 +1922,63 @@ pub fn build_schema_payload(
                 serde_json::Value::Array(cross_mem_relationships),
             );
         }
-        obj.insert("types".into(), serde_json::Value::Array(types_full));
+        match type_selection {
+            Some(_) => {
+                let served: Vec<serde_json::Value> = types_full
+                    .iter()
+                    .filter(|t| selected(&t["name"]))
+                    .cloned()
+                    .collect();
+                obj.insert("types".into(), serde_json::Value::Array(served));
+                if !omitted_names.is_empty() {
+                    obj.insert(
+                        "types_omitted".into(),
+                        serde_json::Value::Array(omitted_names),
+                    );
+                }
+            }
+            None => {
+                obj.insert("types".into(), serde_json::Value::Array(types_full.clone()));
+                // Budget guard on the UNSCOPED full reply: when the
+                // assembled payload exceeds the budget, degrade
+                // visibly — the per-type prose drops to the lite
+                // skeleton, the mode is stamped, and the hint steers
+                // to per-type retrieval. Never silent truncation: the
+                // caller sees `_schema_mode: "reduced"` plus the full
+                // roster in `types_omitted`.
+                if let Some(budget) = token_budget {
+                    let estimated = estimate_payload_tokens(&payload);
+                    if estimated > budget {
+                        let obj = payload.as_object_mut().unwrap();
+                        obj.remove("types");
+                        let all_names: Vec<serde_json::Value> =
+                            types_full.iter().map(|t| t["name"].clone()).collect();
+                        obj.insert(
+                            "types_summary".into(),
+                            serde_json::Value::Array(lite_types_projection(&types_full)),
+                        );
+                        obj.insert("types_omitted".into(), serde_json::Value::Array(all_names));
+                        obj.insert(
+                            "_schema_mode".into(),
+                            serde_json::Value::String("reduced".into()),
+                        );
+                        obj.insert("_estimated_tokens".into(), serde_json::json!(estimated));
+                        obj.insert("_token_budget".into(), serde_json::json!(budget));
+                        obj.insert(
+                            "_hint".into(),
+                            serde_json::Value::String(format!(
+                                "the full prose for all {} types (~{estimated} tokens) exceeds \
+                                 the response budget ({budget}); per-type prose is served as the \
+                                 lite skeleton here — request the full prose for exactly the \
+                                 types you will write via `types: [\"<name>\", …]` (valid names \
+                                 in `types_omitted`)",
+                                types_full.len(),
+                            )),
+                        );
+                    }
+                }
+            }
+        }
     } else {
         // Lite relationship form: name + endpoint constraints
         // (`allowed_sources`/`allowed_targets`) + manual-authoring
@@ -1896,91 +2044,110 @@ pub fn build_schema_payload(
             );
         }
 
-        // Lite entity-type form: name + section keys (each with its
-        // `required` marker) + metadata-field shapes (name, required,
-        // `enum`, `default`) + `no_self_loop_relationships` +
-        // `required_outgoing` — the structural minimum to author a
-        // legal write — with the type/section prose (descriptions,
-        // write_rules, writing_guidance, system_context) dropped.
-        // `no_self_loop_relationships` rides along because it governs
-        // the self-loop relate refusal (relate R X→X when type T lists
-        // R), one of the refusals the lite view must let an
-        // agent avoid. `required_outgoing` rides along because it is
-        // the only declared legality condition on outgoing edges —
-        // dropping it would make "enough to plan a legal write" false.
-        // Projected from the rich array.
-        let types_summary: Vec<serde_json::Value> = types_full
+        // Lite entity-type form — see [`lite_types_projection`]. The
+        // selection filters the skeleton the same way it filters the
+        // full tier, with the same visible `types_omitted` roster.
+        let served: Vec<serde_json::Value> = types_full
             .iter()
-            .map(|t| {
-                let sections: Vec<serde_json::Value> = t["sections"]
-                    .as_array()
-                    .map(|secs| {
-                        secs.iter()
-                            .map(|s| {
-                                let mut o = serde_json::Map::new();
-                                o.insert("key".into(), s["key"].clone());
-                                o.insert("required".into(), s["required"].clone());
-                                // The format declaration is a
-                                // legality condition — the lite
-                                // skeleton carries it in full.
-                                for k in [
-                                    "content",
-                                    "item_pattern",
-                                    "table",
-                                    "example",
-                                    "format_severity",
-                                ] {
-                                    if let Some(v) = s.get(k) {
-                                        o.insert(k.into(), v.clone());
-                                    }
-                                }
-                                serde_json::Value::Object(o)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let fields: Vec<serde_json::Value> = t["fields"]
-                    .as_array()
-                    .map(|fs| {
-                        fs.iter()
-                            .map(|f| {
-                                let mut o = serde_json::Map::new();
-                                o.insert("name".into(), f["name"].clone());
-                                o.insert("required".into(), f["required"].clone());
-                                if let Some(e) = f.get("enum") {
-                                    o.insert("enum".into(), e.clone());
-                                }
-                                if let Some(d) = f.get("default") {
-                                    o.insert("default".into(), d.clone());
-                                }
-                                serde_json::Value::Object(o)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let mut o = serde_json::json!({
-                    "name": t["name"],
-                    "sections": sections,
-                    "fields": fields,
-                    "no_self_loop_relationships": t["no_self_loop_relationships"],
-                    "required_outgoing": t["required_outgoing"],
-                    "constraints": t["constraints"],
-                });
-                // Leaf declaration rides the lite skeleton too — it is
-                // a legality-relevant per-type fact.
-                if t.get("leaf") == Some(&serde_json::json!(true)) {
-                    o["leaf"] = serde_json::json!(true);
-                }
-                o
-            })
+            .filter(|t| selected(&t["name"]))
+            .cloned()
             .collect();
         obj.insert(
             "types_summary".into(),
-            serde_json::Value::Array(types_summary),
+            serde_json::Value::Array(lite_types_projection(&served)),
         );
+        if !omitted_names.is_empty() {
+            obj.insert(
+                "types_omitted".into(),
+                serde_json::Value::Array(omitted_names),
+            );
+        }
     }
 
-    payload
+    Ok(payload)
+}
+
+/// Lite entity-type form: name + section keys (each with its
+/// `required` marker) + metadata-field shapes (name, required,
+/// `enum`, `default`) + `no_self_loop_relationships` +
+/// `required_outgoing` — the structural minimum to author a
+/// legal write — with the type/section prose (descriptions,
+/// write_rules, writing_guidance, system_context) dropped.
+/// `no_self_loop_relationships` rides along because it governs
+/// the self-loop relate refusal (relate R X→X when type T lists
+/// R), one of the refusals the lite view must let an
+/// agent avoid. `required_outgoing` rides along because it is
+/// the only declared legality condition on outgoing edges —
+/// dropping it would make "enough to plan a legal write" false.
+/// Projected from the rich array so each field value has one
+/// source; also the degrade target for an over-budget unscoped
+/// full reply.
+fn lite_types_projection(types_full: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    types_full
+        .iter()
+        .map(|t| {
+            let sections: Vec<serde_json::Value> = t["sections"]
+                .as_array()
+                .map(|secs| {
+                    secs.iter()
+                        .map(|s| {
+                            let mut o = serde_json::Map::new();
+                            o.insert("key".into(), s["key"].clone());
+                            o.insert("required".into(), s["required"].clone());
+                            // The format declaration is a
+                            // legality condition — the lite
+                            // skeleton carries it in full.
+                            for k in [
+                                "content",
+                                "item_pattern",
+                                "table",
+                                "example",
+                                "format_severity",
+                            ] {
+                                if let Some(v) = s.get(k) {
+                                    o.insert(k.into(), v.clone());
+                                }
+                            }
+                            serde_json::Value::Object(o)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let fields: Vec<serde_json::Value> = t["fields"]
+                .as_array()
+                .map(|fs| {
+                    fs.iter()
+                        .map(|f| {
+                            let mut o = serde_json::Map::new();
+                            o.insert("name".into(), f["name"].clone());
+                            o.insert("required".into(), f["required"].clone());
+                            if let Some(e) = f.get("enum") {
+                                o.insert("enum".into(), e.clone());
+                            }
+                            if let Some(d) = f.get("default") {
+                                o.insert("default".into(), d.clone());
+                            }
+                            serde_json::Value::Object(o)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut o = serde_json::json!({
+                "name": t["name"],
+                "sections": sections,
+                "fields": fields,
+                "no_self_loop_relationships": t["no_self_loop_relationships"],
+                "required_outgoing": t["required_outgoing"],
+                "constraints": t["constraints"],
+            });
+            // Leaf declaration rides the lite skeleton too — it is
+            // a legality-relevant per-type fact.
+            if t.get("leaf") == Some(&serde_json::json!(true)) {
+                o["leaf"] = serde_json::json!(true);
+            }
+            o
+        })
+        .collect()
 }
 
 /// Format a metadata field definition as a single bullet line.
