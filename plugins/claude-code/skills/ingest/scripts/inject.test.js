@@ -83,7 +83,7 @@ describe('ingest router — brief routing', () => {
   it('renders a due binding brief verbatim', () => {
     const { stdout, calls } = runRouter(['--all'], 'brief-ok');
     assert.equal(stdout, '# Build brief\nDo the thing.\n');
-    assert.deepEqual(calls[0], ['--json', 'projection', 'brief', '--all']);
+    assert.deepEqual(calls[0], ['--json', 'projection', 'brief', '--all', '--consume']);
   });
 
   it('routes a named binding to `projection brief <binding>`', () => {
@@ -144,7 +144,7 @@ describe('ingest router — no-source setup ramp', () => {
     // Only the `brief --all` probe ran; no init is spawned by the router — the
     // agent runs init after the conversation.
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], ['--json', 'projection', 'brief', '--all']);
+    assert.deepEqual(calls[0], ['--json', 'projection', 'brief', '--all', '--consume']);
   });
 });
 

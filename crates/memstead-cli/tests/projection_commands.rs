@@ -2218,6 +2218,107 @@ fn brief_operation_flag_requires_all_and_conflicts_with_group_c() {
     }
 }
 
+/// A plain `--all` render is a pure read: it mints no scheduler state and
+/// repeats byte-identically; `--consume` is the act that takes the rotation
+/// slot. The JSON envelope also discloses the (binding, op) pairs the filter
+/// admits but the bindings never loop-declare (`not_rotated`).
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_all_is_pure_without_consume_and_advances_with_it() {
+    let (tmp, ws) = operation_workspace();
+    // A second build-loop binding so the rotation has two pairs to move
+    // between: `ws/code#build` < `ws/code2#build`.
+    let src2 = tmp.path().join("src2");
+    std::fs::create_dir_all(&src2).unwrap();
+    std::fs::write(src2.join("b.rs"), "y").unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src2",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code2",
+        ])
+        .assert()
+        .success();
+
+    let cursor_path = ws.join(".memstead.cache/ingest/ingest-cursor.json");
+    let render = |consume: bool| -> Value {
+        let mut args = vec![
+            "--json",
+            "projection",
+            "brief",
+            "--all",
+            "--operation",
+            "any",
+        ];
+        if consume {
+            args.push("--consume");
+        }
+        let out = memstead()
+            .current_dir(&ws)
+            .args(&args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice(&out).unwrap()
+    };
+
+    // Two peeks: a brief renders, but no scheduler state appears.
+    for _ in 0..2 {
+        let env = render(false);
+        assert_eq!(env["operation"], "build", "peek renders a brief: {env}");
+        assert!(
+            !cursor_path.exists(),
+            "a plain --all render must not mint the rotation cursor"
+        );
+        // Sync and verify stay manual on both bindings — the filter admits
+        // them, the declarations don't, and the envelope says so.
+        let not_rotated = env["not_rotated"].as_array().expect("not_rotated array");
+        assert_eq!(not_rotated.len(), 4, "2 bindings x (sync, verify): {env}");
+    }
+
+    // Consume: the slot is taken, the cursor lands on the first pair.
+    render(true);
+    let cursor: Value = serde_json::from_slice(&std::fs::read(&cursor_path).unwrap()).unwrap();
+    assert_eq!(cursor["last"], "ws/code#build");
+
+    // A peek between consumes leaves the cursor untouched...
+    let bytes_before = std::fs::read(&cursor_path).unwrap();
+    render(false);
+    assert_eq!(
+        std::fs::read(&cursor_path).unwrap(),
+        bytes_before,
+        "peek left the cursor byte-identical"
+    );
+
+    // ...and the next consume advances to the pair the peek would have shown.
+    render(true);
+    let cursor: Value = serde_json::from_slice(&std::fs::read(&cursor_path).unwrap()).unwrap();
+    assert_eq!(cursor["last"], "ws/code2#build");
+}
+
+/// `--consume` binds to the `--all` rotation: on a named-binding render it is
+/// a usage error (a single-binding brief has no rotation slot to take).
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_consume_requires_all() {
+    let (_tmp, ws) = operation_workspace();
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/code", "--consume"])
+        .assert()
+        .failure();
+}
+
 // ── verify: prepared-hash backfill + deterministic drift ─────────────────────
 
 /// `advance_workspace` plus a verify operation on the binding and an anchors

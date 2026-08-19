@@ -78,8 +78,11 @@ if (clearMode) {
 }
 
 // ── brief: named binding, or --all round-robin selection ─────────────────────
+// The router pipes the brief as the agent's prompt — the slot WILL be acted
+// on, so `--consume` takes it. (A plain `--all` render without the flag is a
+// pure read that leaves the rotation untouched.)
 const briefArgs = allMode
-  ? ['--json', 'projection', 'brief', '--all']
+  ? ['--json', 'projection', 'brief', '--all', '--consume']
   : ['--json', 'projection', 'brief', target];
 const r = memstead(briefArgs);
 

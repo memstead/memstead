@@ -30,8 +30,10 @@ write-only on the mem; engine refusals are surfaced verbatim, never worked aroun
    `--all` → run
 
    ```sh
-   memstead --json --workspace "$WS" projection brief --all --operation any
+   memstead --json --workspace "$WS" projection brief --all --operation any --consume
    ```
+
+   (`--consume` takes the slot you act on; without it a render is a pure read.)
 
    No bindings configured → say so and stop. Nothing due → say so and stop —
    and under a recurring loop (a scheduler re-prompting this conversation), a

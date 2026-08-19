@@ -45,8 +45,8 @@ use memstead_base::ingest::report::{
 };
 use memstead_base::ingest::resolve::{ResolveError, ResolvedSource, resolve_binding_run};
 use memstead_base::ingest::{
-    OperationFilter, OperationKind, RenderBriefError, render_ingest_brief, render_sync_brief_for,
-    render_verify_brief_for, select_next_due_operation,
+    OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
+    render_sync_brief_for, render_verify_brief_for, select_next_due_operation,
 };
 use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode, Source};
 use memstead_base::pipeline_store::{
@@ -216,6 +216,14 @@ pub struct BriefArgs {
     /// brief (the `--json` output names the picked operation).
     #[arg(long, value_enum, default_value_t = BriefOperationArg::Build, requires = "all", conflicts_with_all = ["verify", "sync"])]
     pub operation: BriefOperationArg,
+    /// Take the rotation slot this `--all` render selects — advancing the
+    /// round-robin cursor and the per-pair backoff state. WITHOUT this flag a
+    /// `--all` render is a pure read: repeat it as often as you like and the
+    /// rotation stays exactly where it was (a diagnostic re-render must never
+    /// silently skip the next binding). The loop driver that will act on the
+    /// brief passes `--consume`; nothing else should.
+    #[arg(long, requires = "all")]
+    pub consume: bool,
     /// Render the **verify brief** (group C) for the named binding instead of
     /// the build brief: measurement + capped-adjudication instructions only.
     /// It carries no destination-mutation instruction — repairs route through
@@ -526,8 +534,8 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
     // `--all` rotation (which advances the cursor + backoff state). The
     // rotation's operation set is `--operation` (default: build only — the
     // classic rotation, byte-stable for existing callers).
-    let selected = match args.binding {
-        Some(binding) if !args.all => Some((binding, OperationKind::Build)),
+    let (selected, never_rotated) = match args.binding {
+        Some(binding) if !args.all => (Some((binding, OperationKind::Build)), Vec::new()),
         _ => {
             let configs = load_pipeline_configs(&root).map_err(|e| {
                 CliError::new(
@@ -552,15 +560,44 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 }
                 return Ok(());
             }
-            select_next_due_operation(engine, &root, &configs, args.operation.to_filter())
+            // Criterion 4's --all half (backlog-sweep plan 03): the rotation
+            // drops pairs the binding never loop-declared — by design
+            // (consent lives in the declaration), but never silently. Say
+            // which (binding, op) pairs the requested filter can never
+            // rotate: JSON carries them structurally; markdown puts the note
+            // on stderr so the brief on stdout stays a verbatim prompt.
+            let never_rotated = not_loop_declared(&configs, args.operation.to_filter());
+            if !ctx.json {
+                for (binding, op) in &never_rotated {
+                    eprintln!(
+                        "[projection] skipped from rotation: `{binding}` declares no \
+                         loop-triggered {} operation (enable with `memstead projection \
+                         enable {} {binding}`)",
+                        op.as_wire(),
+                        op.as_wire(),
+                    );
+                }
+            }
+            let picked = select_next_due_operation(
+                engine,
+                &root,
+                &configs,
+                args.operation.to_filter(),
+                args.consume,
+            );
+            (picked, never_rotated)
         }
     };
+    let not_rotated_json = never_rotated
+        .iter()
+        .map(|(b, o)| json!({ "binding": b, "operation": o.as_wire() }))
+        .collect::<Vec<_>>();
 
     let Some((binding_id, operation)) = selected else {
         // Every eligible pair is backing off (or not due) this pass — a valid
         // outcome, the loop's quiet yield.
         if ctx.json {
-            print_json(&json!({ "skipped": true }))?;
+            print_json(&json!({ "skipped": true, "not_rotated": not_rotated_json }))?;
         } else {
             println!(
                 "> **[projection] Skipped — every eligible binding is backing off this pass.**"
@@ -579,7 +616,11 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
     .map_err(|e| map_brief_err(&binding_id, e))?;
 
     if ctx.json {
-        print_json(&json!({ "brief": rendered, "operation": operation.as_wire() }))?;
+        print_json(&json!({
+            "brief": rendered,
+            "operation": operation.as_wire(),
+            "not_rotated": not_rotated_json,
+        }))?;
     } else {
         // The brief *is* the stdout content (the skill pipes it as the agent
         // prompt) — write it verbatim, no added trailing newline.

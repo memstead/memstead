@@ -89,8 +89,8 @@ pub use resolve::{
     resolve_binding_run, resolve_change_strategy,
 };
 pub use selection::{
-    BackoffEntry, MAX_SKIP_LEVEL, OperationFilter, OperationKind, apply_backoff, select_next_due,
-    select_next_due_operation, should_skip,
+    BackoffEntry, MAX_SKIP_LEVEL, OperationFilter, OperationKind, apply_backoff, not_loop_declared,
+    select_next_due, select_next_due_operation, should_skip,
 };
 pub use slice::{
     Slice, SliceOutcome, graph_changes_to_slice, graph_slice_outcome, is_git_token,

@@ -163,6 +163,30 @@ pub fn apply_backoff(entry: &mut BackoffEntry, current: &str) -> bool {
     false
 }
 
+/// Non-mutating twin of [`apply_backoff`]: the same skip decision without
+/// touching the entry. A destination that moved since the stored snapshot
+/// always runs; otherwise a positive `skip_remaining` skips. Peek selection
+/// uses this so a render predicts exactly what a consuming selection would
+/// pick, while mutating nothing.
+fn would_skip_backoff(entry: &BackoffEntry, current: &str) -> bool {
+    if !entry.snapshot.is_empty() && current != entry.snapshot {
+        return false;
+    }
+    entry.skip_remaining > 0
+}
+
+/// Non-mutating twin of [`should_skip`], for peek selection.
+fn would_skip(mode: BuildMode, source_moved: bool, entry: &BackoffEntry, current: &str) -> bool {
+    match mode {
+        BuildMode::OneShot => return false,
+        BuildMode::Discovery => {}
+    }
+    if source_moved {
+        return false;
+    }
+    would_skip_backoff(entry, current)
+}
+
 /// Whether a binding should be skipped this rotation. A one-shot build never
 /// skips (one-shots are excluded from the eligible set once run). Discovery: a
 /// moved source overrides backoff; otherwise the destination-snapshot
@@ -221,8 +245,31 @@ pub fn select_next_due(
         workspace_root,
         configs,
         OperationFilter::Only(OperationKind::Build),
+        true,
     )
     .map(|(name, _)| name)
+}
+
+/// The (binding, operation) pairs a `--all` rotation with `filter` will NEVER
+/// rotate because the binding does not declare the operation with
+/// `trigger: loop` — consent lives in the declaration. Exposed so the CLI can
+/// say so explicitly instead of the rotation dropping them silently (a loop
+/// operator deserves to see WHY a binding never comes up).
+pub fn not_loop_declared(
+    configs: &BindingConfigs,
+    filter: OperationFilter,
+) -> Vec<(String, OperationKind)> {
+    let mut out = Vec::new();
+    for record in &configs.bindings {
+        let binding_id = format!("{}/{}", record.mem, record.name);
+        for op in OperationKind::ALL {
+            if filter.admits(op) && !declared_for_loop(&record.config, op) {
+                out.push((binding_id.clone(), op));
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// One eligible rotation pair: a resolved binding run plus the operation.
@@ -289,11 +336,17 @@ fn operation_due(engine: &Engine, workspace_root: &Path, pair: &Pair<'_>) -> boo
 /// advancing the round-robin cursor and the per-pair backoff state. Returns
 /// the selected binding id and operation, or `None` when nothing eligible is
 /// due (or everything due is backing off) this pass.
+/// `consume: false` is the PEEK form — decision 12 (backlog-sweep plan 03):
+/// rendering a brief is a read, so a plain `--all` render must leave cursor
+/// and backoff byte-identical, however often it runs. `consume: true` is the
+/// loop driver taking the rotation slot it is about to act on — the one
+/// place scheduler state advances.
 pub fn select_next_due_operation(
     engine: &Engine,
     workspace_root: &Path,
     configs: &BindingConfigs,
     filter: OperationFilter,
+    consume: bool,
 ) -> Option<(String, OperationKind)> {
     let cache_root = workspace_root.join(".memstead.cache").join("ingest");
 
@@ -339,8 +392,10 @@ pub fn select_next_due_operation(
         .as_ref()
         .and_then(|last| eligible.iter().position(|p| &p.key == last))
         .map_or(0, |i| (i + 1) % n);
-    cursor.last = Some(eligible[start].key.clone());
-    write_json(&cache_root, "ingest-cursor.json", &cursor);
+    if consume {
+        cursor.last = Some(eligible[start].key.clone());
+        write_json(&cache_root, "ingest-cursor.json", &cursor);
+    }
 
     // From the start, take the first pair that is due and not backing off.
     // Pre-pair single-key backoff entries (no `#<op>` suffix) are discarded on
@@ -370,13 +425,23 @@ pub fn select_next_due_operation(
             ),
             OperationKind::Sync | OperationKind::Verify => (BuildMode::Discovery, false),
         };
-        let entry = backoff.entry(pair.key.clone()).or_default();
-        if !should_skip(mode, moved, entry, &current) {
-            selected = Some((pair.ingest.name.clone(), pair.op));
-            break;
+        if consume {
+            let entry = backoff.entry(pair.key.clone()).or_default();
+            if !should_skip(mode, moved, entry, &current) {
+                selected = Some((pair.ingest.name.clone(), pair.op));
+                break;
+            }
+        } else {
+            let entry = backoff.get(&pair.key).cloned().unwrap_or_default();
+            if !would_skip(mode, moved, &entry, &current) {
+                selected = Some((pair.ingest.name.clone(), pair.op));
+                break;
+            }
         }
     }
-    write_json(&cache_root, "ingest-backoff.json", &backoff);
+    if consume {
+        write_json(&cache_root, "ingest-backoff.json", &backoff);
+    }
     selected
 }
 
@@ -555,12 +620,13 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Build)
+                OperationFilter::Only(OperationKind::Build),
+                true
             ),
             Some(("m/a".to_string(), OperationKind::Build))
         );
         assert_eq!(
-            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any),
+            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any, true),
             Some(("m/a".to_string(), OperationKind::Build))
         );
         // Sync / verify filters: the declared blocks are manual → no pair.
@@ -569,7 +635,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Sync)
+                OperationFilter::Only(OperationKind::Sync),
+                true
             ),
             None
         );
@@ -578,7 +645,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Verify)
+                OperationFilter::Only(OperationKind::Verify),
+                true
             ),
             None
         );
@@ -607,7 +675,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Sync)
+                OperationFilter::Only(OperationKind::Sync),
+                true
             ),
             None
         );
@@ -630,7 +699,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Sync)
+                OperationFilter::Only(OperationKind::Sync),
+                true
             ),
             None
         );
@@ -656,7 +726,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Sync)
+                OperationFilter::Only(OperationKind::Sync),
+                true
             ),
             Some(("m/s".to_string(), OperationKind::Sync))
         );
@@ -690,7 +761,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Sync)
+                OperationFilter::Only(OperationKind::Sync),
+                true
             ),
             None,
             "superseded findings must not pull a sync into rotation"
@@ -744,7 +816,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Verify)
+                OperationFilter::Only(OperationKind::Verify),
+                true
             ),
             Some(("m/v".to_string(), OperationKind::Verify))
         );
@@ -757,7 +830,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &no_signal,
-                OperationFilter::Only(OperationKind::Verify)
+                OperationFilter::Only(OperationKind::Verify),
+                true
             ),
             None
         );
@@ -793,7 +867,8 @@ mod tests {
         ));
 
         let next = || {
-            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any).unwrap()
+            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any, true)
+                .unwrap()
         };
         assert_eq!(next(), ("m/a".to_string(), OperationKind::Build));
         assert_eq!(next(), ("m/v".to_string(), OperationKind::Verify));
@@ -837,7 +912,8 @@ mod tests {
                 &engine,
                 ws.path(),
                 &configs,
-                OperationFilter::Only(OperationKind::Build)
+                OperationFilter::Only(OperationKind::Build),
+                true
             ),
             Some(("m/a".to_string(), OperationKind::Build)),
             "a legacy entry's pending skips are discarded, not honoured"
@@ -848,5 +924,132 @@ mod tests {
                 .unwrap();
         assert!(!rewritten.contains_key("m/a"), "legacy key pruned");
         assert!(rewritten.contains_key("m/a#build"), "pair key written");
+    }
+
+    /// A peek (`consume: false`) before any scheduler state exists selects
+    /// without creating the cache files: a diagnostic render on a fresh
+    /// workspace leaves no trace.
+    #[test]
+    fn peek_on_fresh_workspace_writes_nothing() {
+        let ws = tempfile::tempdir().unwrap();
+        let engine = empty_engine();
+        let configs = configs_of(vec![record(
+            "a",
+            binding_with(Operations {
+                build: Some(build_op(IngestTrigger::Loop)),
+                sync: None,
+                verify: None,
+            }),
+        )]);
+        assert_eq!(
+            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any, false),
+            Some(("m/a".to_string(), OperationKind::Build))
+        );
+        let cache_root = ws.path().join(".memstead.cache").join("ingest");
+        assert!(
+            !cache_root.join("ingest-cursor.json").exists()
+                && !cache_root.join("ingest-backoff.json").exists(),
+            "a pure render must not mint scheduler state"
+        );
+    }
+
+    /// Render idempotence + prediction: repeated peeks return the same pair
+    /// the next consuming selection takes, and leave the cursor and backoff
+    /// files byte-identical — the criterion-3 contract (a re-rendered brief
+    /// never silently advances the rotation past a binding).
+    #[test]
+    fn peek_is_idempotent_and_predicts_consumption() {
+        let ws = tempfile::tempdir().unwrap();
+        let engine = empty_engine();
+        let loop_build = Operations {
+            build: Some(build_op(IngestTrigger::Loop)),
+            sync: None,
+            verify: None,
+        };
+        let configs = configs_of(vec![
+            record("a", binding_with(loop_build.clone())),
+            record("b", binding_with(loop_build)),
+        ]);
+        let cache_root = ws.path().join(".memstead.cache").join("ingest");
+
+        // One consuming pass seeds real cursor + backoff state.
+        assert_eq!(
+            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any, true),
+            Some(("m/a".to_string(), OperationKind::Build))
+        );
+        let cursor_bytes = std::fs::read(cache_root.join("ingest-cursor.json")).unwrap();
+        let backoff_bytes = std::fs::read(cache_root.join("ingest-backoff.json")).unwrap();
+
+        // Three peeks: same answer every time, zero state movement.
+        for _ in 0..3 {
+            assert_eq!(
+                select_next_due_operation(
+                    &engine,
+                    ws.path(),
+                    &configs,
+                    OperationFilter::Any,
+                    false
+                ),
+                Some(("m/b".to_string(), OperationKind::Build))
+            );
+        }
+        assert_eq!(
+            std::fs::read(cache_root.join("ingest-cursor.json")).unwrap(),
+            cursor_bytes,
+            "peeks left the cursor byte-identical"
+        );
+        assert_eq!(
+            std::fs::read(cache_root.join("ingest-backoff.json")).unwrap(),
+            backoff_bytes,
+            "peeks left the backoff byte-identical"
+        );
+
+        // The consuming pass takes exactly the pair the peeks promised.
+        assert_eq!(
+            select_next_due_operation(&engine, ws.path(), &configs, OperationFilter::Any, true),
+            Some(("m/b".to_string(), OperationKind::Build))
+        );
+    }
+
+    /// `not_loop_declared` names every (binding, op) pair the filter admits
+    /// but the binding does not loop-declare — the criterion-4 disclosure
+    /// list for `--all` rendering.
+    #[test]
+    fn not_loop_declared_lists_undeclared_pairs() {
+        let configs = configs_of(vec![
+            // Loop build, no sync/verify blocks.
+            record(
+                "a",
+                binding_with(Operations {
+                    build: Some(build_op(IngestTrigger::Loop)),
+                    sync: None,
+                    verify: None,
+                }),
+            ),
+            // Manual build only.
+            record(
+                "b",
+                binding_with(Operations {
+                    build: Some(build_op(IngestTrigger::Manual)),
+                    sync: None,
+                    verify: None,
+                }),
+            ),
+        ]);
+        assert_eq!(
+            not_loop_declared(&configs, OperationFilter::Only(OperationKind::Build)),
+            vec![("m/b".to_string(), OperationKind::Build)]
+        );
+        let any = not_loop_declared(&configs, OperationFilter::Any);
+        assert_eq!(
+            any,
+            vec![
+                ("m/a".to_string(), OperationKind::Sync),
+                ("m/a".to_string(), OperationKind::Verify),
+                ("m/b".to_string(), OperationKind::Build),
+                ("m/b".to_string(), OperationKind::Sync),
+                ("m/b".to_string(), OperationKind::Verify),
+            ]
+        );
     }
 }

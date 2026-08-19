@@ -447,8 +447,10 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
             "them"
         };
         lines.push(format!(
-            "No prior sync baseline exists for {keys} — treating the current source state as the \
-             baseline (first sync). No priority slice from {it} this pass; proceed as usual.\n"
+            "No usable sync baseline exists for {keys} — none was recorded, or the recorded one \
+             is not a commit of the source's repo (foreign or garbage-collected). Treating the \
+             current source state as the baseline. No priority slice from {it} this pass; \
+             proceed as usual.\n"
         ));
     }
 
@@ -1609,7 +1611,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let out = render_changed_slice(&cursor);
         assert!(out.starts_with("## Source changes since the last sync\n\n"));
         assert!(out.contains(
-            "No prior sync baseline exists for `ing/f` — treating the current source state as the baseline (first sync). No priority slice from it this pass; proceed as usual."
+            "No usable sync baseline exists for `ing/f` — none was recorded, or the recorded one is not a commit of the source's repo (foreign or garbage-collected). Treating the current source state as the baseline. No priority slice from it this pass; proceed as usual."
         ));
         assert!(out.contains(
             r#"memstead projection advance d/p --dispositions '{"<artifact>": "<disposition>", ...}'"#
@@ -1963,8 +1965,8 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let mut cursor = empty_cursor();
         cursor.reseed = vec![cmd("engine/graph/src#synced", "TOK")];
         let out = render_sync_brief(&r, &cursor, &[], &[], false);
-        assert!(out.contains("No prior sync baseline exists for"));
-        assert!(out.contains("(first sync)"));
+        assert!(out.contains("No usable sync baseline exists for"));
+        assert!(out.contains("Treating the current source state as the baseline"));
     }
 
     /// A no-work sync pass (nothing moved, no findings, not adopt) renders a

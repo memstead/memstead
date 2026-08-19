@@ -1617,6 +1617,7 @@ Render a binding's run-brief — the Markdown prompt an agent consumes — on st
   - `any`:
     Rotate over every loop-declared build / sync / verify pair
 
+* `--consume` — Take the rotation slot this `--all` render selects — advancing the round-robin cursor and the per-pair backoff state. WITHOUT this flag a `--all` render is a pure read: repeat it as often as you like and the rotation stays exactly where it was (a diagnostic re-render must never silently skip the next binding). The loop driver that will act on the brief passes `--consume`; nothing else should
 * `--verify` — Render the **verify brief** (group C) for the named binding instead of the build brief: measurement + capped-adjudication instructions only. It carries no destination-mutation instruction — repairs route through the sync brief. Read-only on the mem. Mutually exclusive with `--sync`
 * `--sync` — Render the **sync brief** (group C) for the named binding instead of the build brief: the sole maintenance-writer prompt, carrying both the cursor slice and the open verify findings in one brief, with the absorbed reconcile conservatism. Read-only on the mem (the agent's writes route through MCP). Mutually exclusive with `--verify`
 
