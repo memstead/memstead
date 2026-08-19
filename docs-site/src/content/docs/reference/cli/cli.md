@@ -435,7 +435,7 @@ Initialise a filesystem mem in the current (or named) folder. Strict: errors out
 ###### **Options:**
 
 * `--name <NAME>` — Mem name. Slug-shaped: `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`
-* `--schema <SCHEMA>` — Schema pin in exact `<name>@<version>` form (e.g. `default@1.0.0`). Bare-name pins are rejected. filesystem-mem v1 resolves against the engine's builtin schema set; registry-resolved schemas land in a follow-up
+* `--schema <SCHEMA>` — Schema pin in exact `<name>@<version>` form (e.g. `default@1.3.0`). Bare-name pins are rejected. filesystem-mem v1 resolves against the engine's builtin schema set; registry-resolved schemas land in a follow-up
 
 
 
