@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **A pilot-grade GitHub-issues mirror** (`scripts/mirror-issues.mjs`):
+  mirrors any repository's issues (body, comments, labels, state, dates)
+  one-file-per-issue into a dedicated git repo a normal `filesystem`
+  binding consumes — deterministic re-runs, updatedAt-incremental,
+  `--full` refetch-and-prune. Deliberately NOT a stable `memstead` CLI
+  surface: the tool marks itself pilot-grade, names the open
+  forge-medium design questions, and states the freshness gap (the
+  mirror is as fresh as its last run; nothing measures it against
+  GitHub) at every point of use.
+
 ### Changed
 - **Anchor artifact paths speak the source dialect.** An anchor's
   artifact path now resolves source-relative first — joined onto the
