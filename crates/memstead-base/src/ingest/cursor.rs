@@ -193,6 +193,17 @@ fn engine_state_denies(workspace_root: &Path) -> Vec<String> {
     denies
 }
 
+/// Whether `sha` names a commit that exists in the repo at `git_root`.
+/// `git cat-file -e <sha>^{commit}` — exit 0 iff present and a commit.
+fn commit_exists(git_root: &Path, sha: &str) -> bool {
+    Command::new("git")
+        .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
+        .current_dir(git_root)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// `git rev-parse HEAD` in `git_root`, or `None` on any failure.
 fn git_head(git_root: &Path) -> Option<String> {
     let out = Command::new("git")
@@ -412,6 +423,17 @@ fn compute_git_slice(
     };
     if baseline == head {
         return SliceOutcome::Unchanged { token: head };
+    }
+    // A git-shaped baseline that THIS repo does not contain is not a usable
+    // baseline either — it is foreign (seeded when the pointer resolved to a
+    // different repo, e.g. before a source tree moved into a submodule) or
+    // gone (gc'd / rewritten away). Diffing against it fatals, which used to
+    // degrade every pass into `GitUnavailable` — a baseline that never seats
+    // and a binding that never backs off. Reseed at HEAD instead: one honest
+    // full re-roam, then normal change detection. `GitUnavailable` below is
+    // reserved for transient git failures on a baseline that does exist.
+    if !commit_exists(&git_root, baseline) {
+        return SliceOutcome::Reseed { token: head };
     }
 
     // Pathspecs from the facet scope + the ingest's deny_paths.
@@ -1187,6 +1209,47 @@ mod tests {
             in_repo_pathspec("../public/target/**", git_root, ws, true),
             Some(":(glob,exclude)target/**".to_string())
         );
+    }
+
+    /// A git-shaped baseline the repo does NOT contain reseeds at HEAD
+    /// instead of degrading to `GitUnavailable` forever. Regression for the
+    /// dogfood plugin/graph binding, whose stored baseline was a commit of a
+    /// *different* repo (seeded before the source moved into the submodule):
+    /// every pass diffed against a foreign sha, fataled, and the baseline
+    /// never seated.
+    #[test]
+    fn foreign_baseline_reseeds_instead_of_degrading() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        std::fs::write(root.join("keep.rs"), "one").unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "seed"]);
+
+        let source = primary(vec![PatternEntry {
+            path: "**/*.rs".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        // Git-token-shaped, but no such commit exists in this repo.
+        let foreign = "46ce8add0fe87250527b6fa21fcfdc2d943d51f0";
+        match compute_git_slice(&source, &[], root, Some(foreign)) {
+            SliceOutcome::Reseed { token } => {
+                // Reseeds at the repo's actual HEAD — the baseline seats.
+                let head = String::from_utf8(
+                    std::process::Command::new("git")
+                        .args(["rev-parse", "HEAD"])
+                        .current_dir(root)
+                        .output()
+                        .unwrap()
+                        .stdout,
+                )
+                .unwrap()
+                .trim()
+                .to_string();
+                assert_eq!(token, head);
+            }
+            other => panic!("foreign baseline must reseed, got {other:?}"),
+        }
     }
 
     /// A real git diff with a cross-repo deny present must still succeed (the

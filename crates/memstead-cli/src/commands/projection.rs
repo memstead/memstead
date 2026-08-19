@@ -465,6 +465,41 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 ),
             )
         })?;
+        // D6/AC4 (backlog-sweep plan 03, decision 13): the sync brief is the
+        // maintenance-writer prompt — rendering it for a binding whose sync
+        // operation is not enabled spends a loop's work slot on work the
+        // engine will refuse to apply. Gate render exactly like `projection
+        // advance` does, with the one-command remedy in `details`.
+        if args.sync {
+            let configs = load_pipeline_configs(&root).map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    "PROJECTION_LOAD_FAILED",
+                    format!("could not load binding store: {e}"),
+                )
+                .with_details(json!({ "error": e.to_string() }))
+            })?;
+            if let Some(record) = configs
+                .bindings
+                .iter()
+                .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
+                && record.config.operations.sync.is_none()
+            {
+                return Err(CliError::new(
+                    ExitKind::Validation,
+                    "PROJECTION_SYNC_NOT_ENABLED",
+                    format!(
+                        "binding `{binding_id}` has no sync operation — enable it with \
+                         `memstead projection enable sync {binding_id}`"
+                    ),
+                )
+                .with_details(json!({
+                    "binding": binding_id,
+                    "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
+                }))
+                .into());
+            }
+        }
         let (rendered, operation) = if args.verify {
             (
                 render_verify_brief_for(engine, &root, &binding_id),
@@ -1561,7 +1596,10 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
                  `memstead projection enable sync {binding_id}`"
             ),
         )
-        .with_details(json!({ "binding": binding_id }))
+        .with_details(json!({
+            "binding": binding_id,
+            "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
+        }))
         .into());
     }
 

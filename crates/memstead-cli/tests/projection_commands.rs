@@ -1441,6 +1441,77 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
     assert!(brief.contains("`[commit <hash>]` log-style entries"));
 }
 
+/// `projection brief <binding> --sync` against a binding whose sync operation
+/// is not enabled refuses typed with the enable remedy in details — a loop
+/// must not spend a work slot rendering a brief the engine will refuse to
+/// apply (backlog-sweep plan 03, decision 13). Complement: `projection
+/// enable sync` makes the identical call succeed.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_sync_refuses_sync_disabled_binding_with_remedy() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+
+    // Strip the scaffolded sync block — the store is operator-editable JSON;
+    // direct edits take effect on the next load (documented store contract).
+    let record_path = ws.join(".memstead/projections/ws/code.json");
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+    record["operations"].as_object_mut().unwrap().remove("sync");
+    std::fs::write(&record_path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "brief", "ws/code", "--sync"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&out).expect("JSON envelope on stdout");
+    assert_eq!(
+        envelope["code"], "PROJECTION_SYNC_NOT_ENABLED",
+        "got: {envelope}"
+    );
+    assert_eq!(
+        envelope["details"]["remedy"]["cli"], "memstead projection enable sync ws/code",
+        "the one-command remedy rides details: {envelope}"
+    );
+
+    // Complement: running the named remedy makes the same call succeed.
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "enable", "sync", "ws/code"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/code", "--sync"])
+        .assert()
+        .success();
+}
+
 /// `projection brief --verify` / `--sync` without a binding id refuses with a
 /// typed `PROJECTION_BRIEF_BINDING_REQUIRED` — they render one binding, never an
 /// `--all` rotation.
