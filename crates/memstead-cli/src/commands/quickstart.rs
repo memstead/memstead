@@ -109,6 +109,16 @@ struct WiringOutcome {
     target: AgentTarget,
     /// What happened, as a report line fragment.
     action: String,
+    /// `Some(_)` when a pre-existing `memstead` server entry was left
+    /// untouched: the entry's `command` value as found in the file
+    /// (`None` inside the option is impossible — a non-string command
+    /// yields `Some(None)`-like absence via the outer `None`). The
+    /// receipt uses this so its verify line checks what the file
+    /// actually wires, never what quickstart would have written.
+    existing_command: Option<String>,
+    /// True when the wiring was skipped because an entry already
+    /// existed — regardless of whether its command could be read.
+    preexisting: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -130,15 +140,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .into());
     }
     if !target.exists() {
+        // Typed, not INTERNAL: an unwritable or missing parent is an
+        // environment condition the caller can act on (fix permissions,
+        // pick another target). The path rides `details` so an agent
+        // recovers without parsing prose.
         std::fs::create_dir_all(&target).map_err(|e| {
             CliError::new(
                 ExitKind::Generic,
-                crate::INTERNAL_CODE,
+                "INTERNAL_IO_ERROR",
                 format!(
                     "failed to create target directory {}: {e}",
                     target.display()
                 ),
             )
+            .with_details(serde_json::json!({ "path": target.display().to_string() }))
         })?;
     }
 
@@ -228,7 +243,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     init_filesystem_mem(&target, &name, &schema_pin).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            crate::INTERNAL_CODE,
+            "INTERNAL_IO_ERROR",
             format!("initialise filesystem mem: {e}"),
         )
     })?;
@@ -303,7 +318,7 @@ fn blocking_entries(target: &Path) -> anyhow::Result<Vec<String>> {
     let read_err = |e: std::io::Error| {
         CliError::new(
             ExitKind::Generic,
-            crate::INTERNAL_CODE,
+            "INTERNAL_IO_ERROR",
             format!("read target {}: {e}", target.display()),
         )
     };
@@ -466,7 +481,7 @@ fn prompt_line(msg: &str) -> anyhow::Result<String> {
     std::io::stdin().read_line(&mut line).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            crate::INTERNAL_CODE,
+            "INTERNAL_IO_ERROR",
             format!("read answer from stdin: {e}"),
         )
     })?;
@@ -595,7 +610,7 @@ fn read_agent_config(path: &Path) -> anyhow::Result<serde_json::Value> {
     let bytes = std::fs::read(path).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            crate::INTERNAL_CODE,
+            "INTERNAL_IO_ERROR",
             format!("read {}: {e}", path.display()),
         )
     })?;
@@ -658,6 +673,8 @@ fn wire_agent(
         return Ok(WiringOutcome {
             target: agent,
             action: format!("run: `{add}`"),
+            existing_command: None,
+            preexisting: false,
         });
     };
     let path = target.join(rel);
@@ -680,10 +697,18 @@ fn wire_agent(
         )
     })?;
 
-    if servers.contains_key("memstead") {
+    if let Some(existing) = servers.get("memstead") {
+        // Capture what the file actually wires so the receipt can
+        // verify it (or state honestly that it could not).
+        let existing_command = existing
+            .get("command")
+            .and_then(|c| c.as_str())
+            .map(str::to_string);
         return Ok(WiringOutcome {
             target: agent,
             action: format!("`{rel}` already has a `memstead` server entry — left untouched"),
+            existing_command,
+            preexisting: true,
         });
     }
     servers.insert("memstead".to_string(), json!({ "command": mcp_command }));
@@ -692,7 +717,7 @@ fn wire_agent(
         std::fs::create_dir_all(parent).map_err(|e| {
             CliError::new(
                 ExitKind::Generic,
-                crate::INTERNAL_CODE,
+                "INTERNAL_IO_ERROR",
                 format!("create {}: {e}", parent.display()),
             )
         })?;
@@ -704,13 +729,15 @@ fn wire_agent(
     std::fs::write(&path, rendered).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
-            crate::INTERNAL_CODE,
+            "INTERNAL_IO_ERROR",
             format!("write {}: {e}", path.display()),
         )
     })?;
     Ok(WiringOutcome {
         target: agent,
         action: format!("wrote `{rel}` (server `memstead`)"),
+        existing_command: None,
+        preexisting: false,
     })
 }
 
@@ -859,8 +886,29 @@ fn report(
     // command, and printing an unrunnable check under the heading "no
     // restart needed" would be the exact defect this block exists to
     // remove.
-    if mcp_bin.warning.is_none() {
+    // Verify only what is actually in the wiring files. A pre-existing
+    // `memstead` entry was left untouched, so checking the binary
+    // quickstart *would* have wired asserts nothing about that file —
+    // seeded with a broken entry, the old check passed while the wiring
+    // was broken. Fresh wirings (and the codex instruction) still
+    // verify the resolved binary; preserved entries verify their own
+    // command, or are stated as left-as-is when no plain command exists.
+    let fresh_wiring = wirings.iter().any(|w| !w.preexisting);
+    if fresh_wiring && mcp_bin.warning.is_none() {
         verify_now.push(("the wired binary answers", version_cmd));
+    }
+    let mut seen_existing: Vec<String> = Vec::new();
+    for w in wirings.iter().filter(|w| w.preexisting) {
+        match &w.existing_command {
+            Some(cmd) if !seen_existing.contains(cmd) => {
+                seen_existing.push(cmd.clone());
+                verify_now.push((
+                    "the pre-existing `memstead` entry's binary answers",
+                    ShellCmd::new(cmd).arg("--version").render(),
+                ));
+            }
+            _ => {}
+        }
     }
     verify_now.push(("the graph is already readable", overview_cmd.clone()));
 

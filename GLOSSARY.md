@@ -283,7 +283,7 @@ A schema is the contract that makes a mem a *typed* model rather than a raw mark
    - **Git-branch backend** — `__MEMSTEAD:schemas/<name>@<version>/` on the `__MEMSTEAD` ref in the same gitdir.
    - **Folder backend** — `<workspace>/.memstead/schemas/<name>@<version>/` (or `<mem>/.memstead/schemas/<name>@<version>/` for the collapsed single-mem form).
    - **Archive backend** — `schemas/<name>@<version>/` inside the `.mem` zip.
-2. **Built-in** — schemas compiled into the engine binary, available on every install (today: `default@1.0.0` plus the bundled schema packages `software`, `planning`, `project`, `ingest`). Used when no local match. Works offline by definition.
+2. **Built-in** — schemas compiled into the engine binary, available on every install (today: `default@1.3.0` plus the bundled schema packages `software`, `planning`, `project`, `ingest`). Used when no local match. Works offline by definition.
 3. **Registry** — schemas served by memstead.io, fetched on demand and cached locally. Reserved slot; not implemented yet — the third source is diagnostic-only today, with no download path.
 
 **Authoring.**
@@ -298,7 +298,7 @@ Three confusions this entry resolves:
 
 - **"Schema" without qualifier is ambiguous.** Code, docs, and conversation use the bare word for whichever role is contextually relevant — often without distinguishing definition (the YAML), pin (the reference), and registry (the resolver). Naming the roles separately fixes that.
 - **Schemas live with their storage.** A mem's schema travels with the storage backend that holds the mem. A cloned mem-repo carries its schemas in the same gitdir; a folder workspace copied to a USB stick carries them under its own `.memstead/`; an archive embeds them in the zip. The workspace store does not host schemas — the workspace is the layer that mounts storage backends, not the layer that owns schema definitions.
-- **Resolution-order is fixed and not arbitrary.** Local storage wins so a mem is self-resolvable from its own backend. Built-in is the fallback for shipping defaults (`default@1.0.0` works without network or local authoring). Registry is the third-source fallback for pins neither local nor built-in carries. The order is hard-coded; workspaces do not customise it.
+- **Resolution-order is fixed and not arbitrary.** Local storage wins so a mem is self-resolvable from its own backend. Built-in is the fallback for shipping defaults (`default@1.3.0` works without network or local authoring). Registry is the third-source fallback for pins neither local nor built-in carries. The order is hard-coded; workspaces do not customise it.
 
 ---
 
@@ -397,7 +397,7 @@ The five flavours are **not** hard-coded in the engine. They emerge from each sc
 
 **Boundary.**
 
-- A flavour is a *read-back* of the schema choice, not an independent axis. `default@1.0.0` is hybrid because of the types it declares; `planning@0.1.0` is the planning flavour for the same reason.
+- A flavour is a *read-back* of the schema choice, not an independent axis. `default@1.3.0` is hybrid because of the types it declares; `planning@0.1.0` is the planning flavour for the same reason.
 - The flavours appear in user-facing prose ("create a knowledge graph", "create a spec graph"); the technical glossary uses [Mem](#mem) as the umbrella with [Schema](#schema) as the determining attribute.
 
 ### Rationale

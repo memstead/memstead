@@ -878,10 +878,10 @@ fn seed_workspace_with_create_allowlist(tmp: &Path) -> PathBuf {
             "{existing}\n\
              [[mem_management.create]]\n\
              pattern = \"test\"\n\
-             schemas = [\"default@1.0.0\"]\n\n\
+             schemas = [\"default@1.3.0\"]\n\n\
              [[mem_management.create]]\n\
              pattern = \"other\"\n\
-             schemas = [\"default@1.0.0\"]\n",
+             schemas = [\"default@1.3.0\"]\n",
         ),
     )
     .unwrap();
@@ -987,7 +987,7 @@ fn mem_delete_preserves_allowlist_rules_so_recreate_succeeds() {
              other = [\"keep\"]\n\n\
              [[mem_management.create]]\n\
              pattern = \"other\"\n\
-             schemas = [\"default@1.0.0\"]\n\n\
+             schemas = [\"default@1.3.0\"]\n\n\
              [[mem_management.delete]]\n\
              pattern = \"other\"\n",
         ),

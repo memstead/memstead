@@ -726,17 +726,22 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         quiet: false,
         role: Default::default(),
     };
-    // Engine init can fail for several reasons; `WORKSPACE_NOT_INITIALISED`
-    // is the dominant one for cold-start usage and the only one the test
-    // contract pins. Pre-fix the boot error was wrapped under a generic
-    // INTERNAL string — wire envelope drifted from the typed code.
-    let engine = crate::setup::full_engine(&setup_ctx).map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "WORKSPACE_NOT_INITIALISED",
-            format!("workspace dump: could not initialize engine: {e}"),
-        )
-    })?;
+    // `full_engine` already refuses with the right typed code per
+    // situation — `WORKSPACE_NOT_INITIALISED` when no workspace marker
+    // exists, `UNSUPPORTED_WORKSPACE_SHAPE` on a filesystem-mem
+    // workspace, and typed boot errors otherwise. Keep the code and
+    // details, prefix only the failing command's name: an earlier
+    // blanket re-wrap here collapsed the shape refusal into the
+    // not-initialised code, giving an agent branching on `code` a
+    // wrong cause.
+    let engine =
+        crate::setup::full_engine(&setup_ctx).map_err(|e| match e.downcast::<CliError>() {
+            Ok(mut cli) => {
+                cli.message = format!("workspace dump: {}", cli.message);
+                anyhow::Error::from(cli)
+            }
+            Err(other) => other,
+        })?;
 
     let mut mems: Vec<DumpMem> = Vec::new();
     let mut schemas: Map<String, Value> = Map::new();

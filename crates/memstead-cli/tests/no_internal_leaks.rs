@@ -510,3 +510,40 @@ fn install_refusals_are_all_typed() {
     let env = parse_envelope(&output);
     assert_typed_code(&env, "install into a folder workspace");
 }
+
+/// `quickstart` into a target whose parent is unwritable must refuse
+/// with the typed IO code (path in details), never the generic
+/// sentinel — the cold-start command is exactly where an agent
+/// branches on `code` first.
+#[test]
+fn quickstart_unwritable_parent_is_typed_not_internal() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let parent = tmp.path().join("locked");
+    std::fs::create_dir(&parent).unwrap();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let out = memstead()
+        .args(["--json", "quickstart"])
+        .arg(parent.join("ws"))
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    // Restore permissions so TempDir cleanup works.
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let envelope = parse_envelope(&out);
+    assert_typed_code(&envelope, "quickstart unwritable parent");
+    assert_eq!(
+        envelope["code"], "INTERNAL_IO_ERROR",
+        "unwritable parent is a caller-actionable environment condition: {envelope}",
+    );
+    assert!(
+        envelope["details"]["path"]
+            .as_str()
+            .is_some_and(|p| p.contains("ws")),
+        "the refused path must ride details: {envelope}",
+    );
+}

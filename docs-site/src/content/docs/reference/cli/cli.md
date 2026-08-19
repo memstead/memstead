@@ -1143,9 +1143,9 @@ Register a new mem via the engine's mem-management orchestrator
 
 ###### **Options:**
 
-* `--schema <SCHEMA>` — Schema pin (`name@x.y.z`) for the new mem. Defaults to `default@1.0.0` so the common case stays one argument
+* `--schema <SCHEMA>` — Schema pin (`name@x.y.z`) for the new mem. Defaults to `default@1.3.0` — the same pin `memstead init` and `memstead quickstart` write, so every bootstrap verb produces one schema
 
-  Default value: `default@1.0.0`
+  Default value: `default@1.3.0`
 * `--vcs-shared` — Pass a shared-gitdir `vcs` block to `memstead_mem_create`: `{ "gitdir": "../.git", "worktree": ".." }`. Without this flag the engine uses the default isolated layout
 * `--no-gitignore` — Skip outer-repo `.gitignore` auto-append. Useful when the user intends to track the workspace as a git submodule, or when the detection heuristic would pick the wrong outer repo
 * `--note <NOTE>` — Optional provenance note recorded in the seed commit's body (≤280 chars). Forwarded as the MCP tool's `note` parameter

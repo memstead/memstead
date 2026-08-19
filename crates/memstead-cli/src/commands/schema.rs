@@ -577,6 +577,30 @@ write_rules:
 }
 
 fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
+    // A directory carrying `schema-format.json` is a SEALED package —
+    // installer output, not authoring input. Reporting conformance
+    // errors against it sends the author fixing a file the seal wrote;
+    // name what it is instead. (The validate-vs-loader tolerance
+    // asymmetry itself is by design and documented; this is only the
+    // recognition hint.)
+    if args.path.join("schema-format.json").is_file() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "SCHEMA_VALIDATION_FAILED",
+            format!(
+                "{} is a sealed schema package (it carries `schema-format.json`, the seal \
+                 marker), not authoring input — `schema validate` checks the directories you \
+                 author, before sealing. Validate the package's source directory instead, or \
+                 install this package directly with `memstead schema install`.",
+                args.path.display(),
+            ),
+        )
+        .with_details(json!({
+            "path": args.path,
+            "reason": "sealed_package",
+        }))
+        .into());
+    }
     match memstead_schema::loader::load_schema_from_dir(&args.path)
         .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
         .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
@@ -1005,20 +1029,61 @@ mod tests {
         }
     }
 
-    /// A shipped built-in package validates cleanly — the loader the
-    /// command runs is the same one the engine boots with.
+    /// The current built-in's CONTENT validates cleanly — the loader
+    /// the command runs is the same one the engine boots with. The
+    /// shipped package itself carries the seal marker, so the parity
+    /// check runs on an unsealed copy; the sealed original is pinned
+    /// by `validate_names_sealed_package` below.
     #[test]
     fn validate_accepts_builtin_default_schema() {
-        // The CURRENT generation — older sealed generations use the
-        // retired `optional:` key and legitimately refuse under the
-        // authoring gate this command runs.
+        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../memstead-schema/builtins/schemas/default-1.3");
+        assert!(src.join("schema.yaml").is_file(), "fixture moved: {src:?}");
+        let dir = tempfile::tempdir().unwrap();
+        let dst = dir.path().join("authoring");
+        copy_dir_without_marker(&src, &dst);
+        validate(&ctx(), ValidateArgs { path: dst })
+            .expect("default builtin content must validate");
+    }
+
+    fn copy_dir_without_marker(src: &Path, dst: &Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for entry in std::fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            if name == "schema-format.json" {
+                continue;
+            }
+            let target = dst.join(&name);
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir_without_marker(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A directory carrying `schema-format.json` — a sealed package —
+    /// is named as such instead of being conformance-checked as
+    /// authoring input. The shipped builtin is exactly that shape.
+    #[test]
+    fn validate_names_sealed_package() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../memstead-schema/builtins/schemas/default-1.3");
+        let err = validate(&ctx(), ValidateArgs { path }).expect_err("sealed package must refuse");
+        let cli = err
+            .downcast_ref::<CliError>()
+            .expect("error is a typed CliError");
+        assert_eq!(cli.code, "SCHEMA_VALIDATION_FAILED");
         assert!(
-            path.join("schema.yaml").is_file(),
-            "fixture moved: {path:?}"
+            cli.message.contains("sealed schema package"),
+            "message names the sealed package: {}",
+            cli.message,
         );
-        validate(&ctx(), ValidateArgs { path }).expect("default builtin must validate");
+        assert_eq!(
+            cli.details.as_ref().unwrap()["reason"],
+            json!("sealed_package"),
+        );
     }
 
     /// A malformed `schema.yaml` refuses with the typed

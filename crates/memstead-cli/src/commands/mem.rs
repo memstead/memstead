@@ -220,8 +220,9 @@ pub struct InitArgs {
     pub path: PathBuf,
 
     /// Schema pin (`name@x.y.z`) for the new mem. Defaults to
-    /// `default@1.0.0` so the common case stays one argument.
-    #[arg(long, default_value = "default@1.0.0")]
+    /// `default@1.3.0` — the same pin `memstead init` and `memstead
+    /// quickstart` write, so every bootstrap verb produces one schema.
+    #[arg(long, default_value = "default@1.3.0")]
     pub schema: String,
 
     /// Pass a shared-gitdir `vcs` block to `memstead_mem_create`:
@@ -497,10 +498,21 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     let mut engine = match ctx.cli_engine()? {
         CliEngine::MemRepo(e) => e,
         CliEngine::Filesystem(_) => {
-            return Err(validation_error(format!(
-                "`memstead mem init` requires a mem-repo workspace; the workspace at {} is filesystem-shaped. Use `memstead mem-repo init` first to migrate.",
-                workspace_root.display(),
-            )));
+            // Same situation, same code: every mem-repo-only verb
+            // refuses a filesystem-mem workspace with
+            // `UNSUPPORTED_WORKSPACE_SHAPE` (the code the cold-start
+            // disclosure teaches by name). The message text is
+            // unchanged; only the typed code routes differently.
+            return Err(CliError {
+                kind: ExitKind::Generic,
+                code: "UNSUPPORTED_WORKSPACE_SHAPE",
+                message: format!(
+                    "`memstead mem init` requires a mem-repo workspace; the workspace at {} is filesystem-shaped. Use `memstead mem-repo init` first to migrate.",
+                    workspace_root.display(),
+                ),
+                details: None,
+            }
+            .into());
         }
     };
     let response =
