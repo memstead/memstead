@@ -3356,5 +3356,93 @@ write_rules: []
         );
     }
 
+    /// A search `mem` filter naming no visible mem refuses typed
+    /// `UNKNOWN_MEM` — matching every other mem-naming surface — while a
+    /// quarantined mem keeps its established typed refusal and a VALID
+    /// mem with no matches still returns success with 0 hits. Absence of
+    /// mem and absence of matches are never the same answer
+    /// (backlog-sweep plan 05, decision 4).
+    #[test]
+    fn search_mem_filter_gates_against_visible_roster() {
+        use crate::vcs::Actor;
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let memstead = tmp.path().join(".memstead");
+        std::fs::create_dir_all(&memstead).unwrap();
+        std::fs::write(
+            memstead.join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                tmp.path(),
+                &crate::workspace::Workspace {
+                    mounts: vec![folder_mount("specs", mem_dir.clone())],
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
+        let mut sections = IndexMap::new();
+        sections.insert(
+            "identity".to_string(),
+            "Zebra searching fixture.".to_string(),
+        );
+        sections.insert("purpose".to_string(), "Search gate test.".to_string());
+        engine
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: "Zebra".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    anchors: Vec::new(),
+                    dry_run: false,
+                },
+                Actor::Agent,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let scope = |mem: Option<&str>, term: &str| crate::ops::SearchScope {
+            query: Some(crate::ops::Query {
+                any: vec![term.to_string()],
+                ..Default::default()
+            }),
+            mem: mem.map(str::to_string),
+            ..Default::default()
+        };
+
+        // Nonexistent mem → typed UNKNOWN_MEM, never success-with-0-hits.
+        let err = engine
+            .search(&scope(Some("no-such-mem"), "zebra"))
+            .expect_err("a nonexistent mem filter must refuse");
+        assert_eq!(err.code(), "UNKNOWN_MEM", "got {err:?}");
+
+        // Valid mem, matching query → hits.
+        let hit = engine.search(&scope(Some("specs"), "zebra")).unwrap();
+        assert!(hit.total >= 1, "the fixture entity matches: {hit:?}");
+
+        // Valid mem, no matches → success with 0 hits (the gate
+        // distinguishes absence of mem from absence of matches).
+        let none = engine
+            .search(&scope(Some("specs"), "quixotic-nonword"))
+            .unwrap();
+        assert_eq!(none.total, 0, "{none:?}");
+    }
+
     // ---- Engine::reload_one_mem -----------------------------------
 }

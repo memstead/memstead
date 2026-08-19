@@ -1238,11 +1238,27 @@ impl Engine {
                 .collect();
             let count = entity_ids.len();
             let subject = format!("memstead: batch-create ({count} entities)");
+            // Per-entry notes ride the ONE batch commit's note record as
+            // `<id>: <note>` lines (decision 3, backlog-sweep plan 05):
+            // `append_provenance` below is a documented no-op on the
+            // git-branch backend, so without this the notes survived
+            // nowhere exactly where most writes happen. A batch with no
+            // notes carries no note record at all.
+            let note_lines: Vec<String> = prepared
+                .iter()
+                .zip(notes.iter())
+                .filter(|(p, _)| p.mount_idx == m)
+                .filter_map(|(p, n)| n.as_ref().map(|n| format!("{}: {n}", p.id)))
+                .collect();
             let ctx = CommitContext {
                 actor,
                 client: client.cloned(),
                 tool: Some("batch_create"),
-                note: None,
+                note: if note_lines.is_empty() {
+                    None
+                } else {
+                    Some(note_lines.join("\n"))
+                },
                 role: self.current_role,
                 logical_operation_id: None,
                 entity_ids: Some(entity_ids),

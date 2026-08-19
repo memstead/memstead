@@ -162,11 +162,14 @@ impl Engine {
         let ops = self.git_branch_ops.as_ref().ok_or_else(|| {
             EngineError::Mem("git-branch ops are not wired on this engine".to_string())
         })?;
-        // Seal the format marker with the package: readers of the
-        // sealed copy decide the metadata-polarity generation by its
-        // presence (absent marker = legacy semantics).
-        let files = memstead_schema::loader::with_format_marker(files.to_vec());
-        (ops.write_schema)(&gitdir, name, version, &files).map_err(EngineError::Backend)
+        // Seal the package AS-GIVEN: the format marker is a generation
+        // claim only the resolver can make (an authored directory source
+        // arrives already stamped; a legacy builtin or sealed source
+        // arrives unmarked, and absence IS its legacy claim). Stamping
+        // here mis-labelled legacy content as current and flipped every
+        // bare field's meaning in the sealed copy — the manufacturing
+        // defect backlog-sweep plan 05 removed.
+        (ops.write_schema)(&gitdir, name, version, files).map_err(EngineError::Backend)
     }
 
     /// Make a **sealed third-party** schema package resolvable in this

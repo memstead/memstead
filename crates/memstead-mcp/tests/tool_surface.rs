@@ -1125,6 +1125,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Warning codes referenced literally in the description for
             // the search filter family.
             "STUB_FILTER_EXCLUDES_ALL",
+            // The mem-filter refusal (backlog-sweep plan 05): a filter
+            // naming no visible mem refuses typed.
+            "UNKNOWN_MEM",
             "UNKNOWN_FILTER_KEY",
             "FIELD_NOT_FILTERABLE",
             // #52 enum-value filter warning + #54 neighbourhood cap.

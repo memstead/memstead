@@ -1339,11 +1339,25 @@ impl Engine {
                 .collect();
             let count = entity_ids.len();
             let subject = format!("memstead: batch-update ({count} entities)");
+            // Per-entry notes ride the batch commit's note record as
+            // `<id>: <note>` lines (decision 3) — `append_provenance` is a
+            // no-op on the git-branch backend, so this record is where
+            // they survive. No notes → no note record.
+            let note_lines: Vec<String> = prepared
+                .iter()
+                .zip(notes.iter())
+                .filter(|(p, _)| p.mount_idx == m)
+                .filter_map(|(p, n)| n.as_ref().map(|n| format!("{}: {n}", p.id)))
+                .collect();
             let ctx = CommitContext {
                 actor,
                 client: client.cloned(),
                 tool: Some("batch_update"),
-                note: None,
+                note: if note_lines.is_empty() {
+                    None
+                } else {
+                    Some(note_lines.join("\n"))
+                },
                 role: self.current_role,
                 logical_operation_id: None,
                 // F13: name every entity this batch commit touched so an

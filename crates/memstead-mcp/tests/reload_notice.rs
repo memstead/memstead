@@ -624,3 +624,168 @@ fn advance_store_is_reload_independent() {
         .expect("rewritten store present");
     assert_eq!(read3, state2, "per-call fresh read reflects the rewrite");
 }
+
+/// Batch per-entry notes survive on the git-branch backend
+/// (backlog-sweep plan 05, decision 3): each batch family's ONE commit
+/// carries the notes as `<id>: <note>` lines in its note record,
+/// retrievable via `changes_since(...).notes` — where they previously
+/// survived nowhere (the per-entry `append_provenance` route is a
+/// documented no-op on git-branch). Complement: a batch with no notes
+/// produces no note artifact at all.
+#[test]
+fn batch_per_entry_notes_survive_on_git_branch() {
+    use indexmap::IndexMap;
+    use memstead_base::RelateEntityArgs;
+    use memstead_base::UpdateEntityArgs;
+
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut e = engine_from_workspace_root(tmp.path()).expect("engine boots");
+    let baseline = e
+        .create_entity(
+            create_args("specs", "Anchor Point"),
+            Actor::Cli,
+            Some(&client()),
+            None,
+        )
+        .expect("baseline create")
+        .commit_sha;
+
+    // --- batch_create: one noted entry, one un-noted.
+    let r = e
+        .batch_create(
+            vec![
+                (
+                    create_args("specs", "Alpha Noted"),
+                    Some("why alpha".to_string()),
+                ),
+                (create_args("specs", "Beta Silent"), None),
+            ],
+            Actor::Cli,
+            Some(&client()),
+            false,
+        )
+        .expect("batch create succeeds");
+    assert_eq!(r.succeeded, 2);
+    let report = e.changes_since("specs", &baseline, None).expect("changes");
+    let notes = report.notes.expect("git-branch mem surfaces notes");
+    let create_note = notes
+        .iter()
+        .find(|n| {
+            n.tool_verb.as_deref() == Some("batch_create") || n.subject.contains("batch-create")
+        })
+        .expect("the batch-create commit appears in the note stream");
+    let text = create_note
+        .note
+        .as_deref()
+        .expect("noted batch carries a note record");
+    assert!(
+        text.contains("specs--alpha-noted: why alpha"),
+        "per-entry note attributed to its entry: {text:?}"
+    );
+    assert!(
+        !text.contains("beta-silent"),
+        "un-noted entry contributes no line: {text:?}"
+    );
+
+    // --- batch_update with a note; batch_relate with a note.
+    let alpha_hash = e
+        .get_entity(&EntityId("specs--alpha-noted".into()))
+        .unwrap()
+        .content_hash
+        .clone();
+    let upd = UpdateEntityArgs {
+        anchors: Vec::new(),
+        id: EntityId("specs--alpha-noted".into()),
+        expected_hash: Some(alpha_hash),
+        sections: IndexMap::from_iter([("identity".to_string(), "revised".to_string())]),
+        append_sections: IndexMap::new(),
+        patch_sections: IndexMap::new(),
+        metadata: IndexMap::new(),
+        metadata_unset: Vec::new(),
+        declare_relations: Vec::new(),
+        dry_run: false,
+        relations_unset: Vec::new(),
+        anchors_unset: Vec::new(),
+    };
+    let before_update = e.changes_since("specs", &baseline, None).unwrap().head;
+    e.batch_update(
+        vec![(upd, Some("revision rationale".to_string()))],
+        Actor::Cli,
+        Some(&client()),
+        false,
+    )
+    .expect("batch update succeeds");
+    let unotes = e
+        .changes_since("specs", &before_update, None)
+        .unwrap()
+        .notes
+        .expect("notes");
+    let utext = unotes
+        .iter()
+        .filter_map(|n| n.note.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        utext.contains("specs--alpha-noted: revision rationale"),
+        "batch_update note survives: {utext:?}"
+    );
+
+    let before_relate = e.changes_since("specs", &baseline, None).unwrap().head;
+    e.batch_relate(
+        vec![(
+            RelateEntityArgs {
+                source: EntityId("specs--alpha-noted".into()),
+                expected_hash: None,
+                rel_type: "USES".to_string(),
+                target: EntityId("specs--beta-silent".into()),
+                remove: false,
+                description: None,
+                dry_run: false,
+            },
+            Some("edge rationale".to_string()),
+        )],
+        Actor::Cli,
+        Some(&client()),
+        false,
+    )
+    .expect("batch relate succeeds");
+    let rnotes = e
+        .changes_since("specs", &before_relate, None)
+        .unwrap()
+        .notes
+        .expect("notes");
+    let rtext = rnotes
+        .iter()
+        .filter_map(|n| n.note.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rtext.contains("specs--alpha-noted: edge rationale"),
+        "batch_relate note survives, keyed by the edge's source: {rtext:?}"
+    );
+
+    // --- Complement: a batch with NO notes produces no note record.
+    let before_silent = e.changes_since("specs", &baseline, None).unwrap().head;
+    e.batch_create(
+        vec![(create_args("specs", "Gamma Quiet"), None)],
+        Actor::Cli,
+        Some(&client()),
+        false,
+    )
+    .expect("silent batch succeeds");
+    let snotes = e
+        .changes_since("specs", &before_silent, None)
+        .unwrap()
+        .notes
+        .expect("notes stream exists");
+    let silent_commit = snotes
+        .iter()
+        .find(|n| n.subject.contains("batch-create"))
+        .expect("the silent batch commit is in range");
+    assert!(
+        silent_commit.note.is_none(),
+        "a batch with no notes produces no note artifact: {:?}",
+        silent_commit.note
+    );
+}

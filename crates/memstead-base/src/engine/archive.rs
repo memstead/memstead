@@ -54,6 +54,20 @@ pub enum FromArchiveBytesError {
     /// archive-level whitelist but the JSON shape failed.
     #[error("invalid published config: {0}")]
     InvalidConfig(String),
+    /// The archive declares a `format` this engine does not accept
+    /// (`published_format_accepted` refused it). A reader that proceeds
+    /// past an unknown format would reinterpret bytes written under a
+    /// contract it does not know — refuse, never guess.
+    #[error(
+        "unsupported archive format {declared} — this engine accepts formats {accepted:?}; \
+         re-export the mem with a current engine or upgrade this one"
+    )]
+    UnsupportedFormat {
+        /// The `format` the archive's config declares.
+        declared: u32,
+        /// The formats this engine accepts.
+        accepted: &'static [u32],
+    },
     /// The embedded `.memstead/schema/` package failed to load via
     /// `load_schema_from_memory`.
     #[error("embedded schema failed to load: {0}")]
@@ -100,6 +114,17 @@ impl Engine {
         let published: memstead_schema::PublishedMemConfig =
             serde_json::from_slice(config_bytes)
                 .map_err(|e| FromArchiveBytesError::InvalidConfig(e.to_string()))?;
+
+        // The format gate: every reader path consults the one predicate
+        // (`published_format_accepted`) — this byte-hydration path used to
+        // skip it, so an archive rewritten to `format: 99` hydrated and
+        // served entities through the wasm package. Refuse typed instead.
+        if !memstead_schema::published_format_accepted(published.format) {
+            return Err(FromArchiveBytesError::UnsupportedFormat {
+                declared: published.format,
+                accepted: memstead_schema::PUBLISHED_MEM_FORMATS_ACCEPTED,
+            });
+        }
 
         let extra_schemas = load_embedded_schemas(schema_files)?;
 
@@ -558,6 +583,73 @@ mod tests {
             w.finish().unwrap();
         }
         out
+    }
+
+    /// Replace one member's bytes in a zip archive, returning fresh
+    /// bytes — the tamper helper for negative format tests.
+    fn rewrite_zip_member(archive: &[u8], name: &str, content: &[u8]) -> Vec<u8> {
+        use std::io::{Read, Write};
+        let mut src = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
+        let mut out = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut out));
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            for i in 0..src.len() {
+                let mut f = src.by_index(i).unwrap();
+                let fname = f.name().to_string();
+                let mut buf = Vec::new();
+                f.read_to_end(&mut buf).unwrap();
+                w.start_file(fname.clone(), opts).unwrap();
+                if fname == name {
+                    w.write_all(content).unwrap();
+                } else {
+                    w.write_all(&buf).unwrap();
+                }
+            }
+            w.finish().unwrap();
+        }
+        out
+    }
+
+    /// The format gate has no reader path that bypasses it (backlog-sweep
+    /// plan 05, decision 2): an archive rewritten to `format: 99` used to
+    /// hydrate through the byte path (and hence the wasm package) and
+    /// serve every entity. It now refuses typed; the untampered archive
+    /// keeps hydrating.
+    #[test]
+    fn byte_hydration_refuses_unknown_archive_format() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, _dir) = folder_mem_with_entities(&tmp, &["Alpha"]);
+        let _ = &mut engine;
+        let exported = engine.export_mem_to_bytes("specs").unwrap();
+
+        // Complement first: the untampered archive hydrates.
+        let ok = Engine::from_archive_bytes(exported.clone()).expect("valid archive hydrates");
+        assert!(
+            ok.get_entity(&crate::EntityId("specs--alpha".into()))
+                .is_some()
+        );
+
+        // Tamper: rewrite the declared format to an unknown value.
+        let entries = extract_entries(&exported, &ValidatorLimits::DEFAULT).unwrap();
+        let mut cfg: serde_json::Value = serde_json::from_slice(&entries.config_bytes).unwrap();
+        cfg["format"] = serde_json::json!(99);
+        let tampered = rewrite_zip_member(
+            &exported,
+            ".memstead/config.json",
+            serde_json::to_string(&cfg).unwrap().as_bytes(),
+        );
+
+        let err =
+            Engine::from_archive_bytes(tampered).expect_err("format 99 must refuse, never hydrate");
+        match err {
+            FromArchiveBytesError::UnsupportedFormat { declared, accepted } => {
+                assert_eq!(declared, 99);
+                assert!(!accepted.is_empty());
+            }
+            other => panic!("expected UnsupportedFormat, got {other:?}"),
+        }
     }
 
     /// Registry-leg survival: an anchors sidecar member threads verbatim

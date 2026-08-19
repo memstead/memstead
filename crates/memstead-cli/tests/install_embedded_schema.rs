@@ -674,3 +674,111 @@ fn reinstall_is_a_noop_and_a_shared_schema_installs_in_either_order() {
     assert_eq!(payload["mount"], "already_registered", "got: {payload}");
     assert_eq!(payload["copied_to_cache"], false, "got: {payload}");
 }
+
+/// The seal carries the SOURCE package's generation and never invents
+/// one (backlog-sweep plan 05, decision 1). `schema install` of a
+/// legacy builtin used to stamp the sealed copy with the
+/// current-language marker, silently flipping every bare field from
+/// required to optional the moment the sealed copy was read. Now: a
+/// legacy builtin seals UNMARKED (absence IS its legacy claim, meaning
+/// conserved — verified through a booted engine reading the sealed
+/// copy); a current-generation builtin seals with its marker as-found;
+/// and an authored directory package still receives the marker (the
+/// resolver just verified it under the current language).
+#[test]
+fn seal_carries_source_generation_never_invents_the_marker() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let cache = root.join("cache");
+    run_ok(root, &cache, &["mem-repo", "init", ".", "--no-gitignore"]);
+
+    let ref_has = |pkg: &str| -> bool {
+        std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(root.join("mem-repo").join(".git"))
+            .args([
+                "cat-file",
+                "-e",
+                &format!("__MEMSTEAD:schemas/{pkg}/schema-format.json"),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    };
+
+    // Legacy builtin: sealed UNMARKED. (`engineering@0.1.0` is the
+    // bare-field legacy class — no retired `optional:` keys, so it
+    // passes the install validation gate; its bare fields carry the
+    // pre-flip absent-key-means-required meaning.)
+    run_ok(root, &cache, &["schema", "install", "engineering@0.1.0"]);
+    assert!(
+        !ref_has("engineering@0.1.0"),
+        "a legacy builtin must seal without the current-language marker"
+    );
+
+    // Current-generation builtin: marker travels as-found.
+    run_ok(root, &cache, &["schema", "install", "default@1.3.0"]);
+    assert!(
+        ref_has("default@1.3.0"),
+        "a current-generation builtin's marker travels with the seal"
+    );
+
+    // Authored directory package: the resolver mints the marker
+    // (complement — the fix does not unstamp genuine current content).
+    let pkg = root.join("fieldnotes-pkg");
+    write_package(&pkg, NOTE_TYPE);
+    run_ok(root, &cache, &["schema", "install", pkg.to_str().unwrap()]);
+    assert!(
+        ref_has("fieldnotes@0.1.0"),
+        "an authored (current-language) package seals marked"
+    );
+
+    // Round-trip meaning: a mem pinned to the sealed legacy package
+    // reads it under LEGACY semantics — `decision.decided_on` is a
+    // bare field (no required key), which meant REQUIRED pre-flip and
+    // must still read as required from the sealed copy. A mis-stamped
+    // (current-marked) seal would flip it to optional.
+    run_ok(
+        root,
+        &cache,
+        &[
+            "workspace",
+            "allow-create",
+            "hold",
+            "--schema",
+            "engineering@0.1.0",
+        ],
+    );
+    run_ok(
+        root,
+        &cache,
+        &[
+            "mem",
+            "init",
+            "hold",
+            "--schema",
+            "engineering@0.1.0",
+            "--no-gitignore",
+        ],
+    );
+    let out = run_ok(
+        root,
+        &cache,
+        &["--json", "type", "decision", "--mem", "hold"],
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        v["schema"], "engineering@0.1.0",
+        "the sealed pin resolved: {v}"
+    );
+    let md = v["markdown"].as_str().expect("type description markdown");
+    assert!(
+        md.contains("**decided_on**: Date (required)"),
+        "bare legacy field keeps its pre-flip REQUIRED meaning through the seal \
+         (a mis-stamped current-marked seal would read it optional): {md}"
+    );
+    assert!(
+        md.contains("**deciders**: String (required"),
+        "second bare field likewise: {md}"
+    );
+}

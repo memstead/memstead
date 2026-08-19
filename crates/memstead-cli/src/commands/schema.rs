@@ -665,10 +665,10 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
     match shape {
         WorkspaceShape::Filesystem => {
             // Folder backend: write the package under `.memstead/schemas/`.
-            // Marked: the install gate validates the current language, so
-            // the installed copy carries its generation for every later
-            // seal (export/publish collects it as-found).
-            let files = marked_package(files);
+            // AS-GIVEN: the resolver decided the generation — an authored
+            // directory source arrives stamped; a legacy builtin arrives
+            // unmarked, and stamping it here would flip every bare
+            // field's meaning in later seals (the plan-05 defect).
             let pkg_dir = root
                 .join(".memstead")
                 .join("schemas")
@@ -820,6 +820,13 @@ fn resolve_source(
             }))
             .expect("provenance stamp serialises"),
         });
+        // A directory source is the AUTHORING tier and just validated
+        // under the current language (the retired `optional:` key would
+        // have refused above) — the one place a current-generation stamp
+        // is verified, so it is minted here and only here. Builtin and
+        // sealed sources below carry their marker (or its absence — the
+        // legacy claim) as-found.
+        let files = marked_package(files);
         Ok((SchemaRef::new(name, version), files))
     } else {
         // Name source — resolve against the built-in catalogue.
@@ -932,9 +939,10 @@ fn collect_dir_package(dir: &Path) -> anyhow::Result<Vec<memstead_schema::Schema
 }
 
 /// Append the sealed format marker to a resolved package's file list
-/// if absent — the install gate validates the current language, so the
-/// installed copy carries its metadata-polarity generation for every
-/// later seal (export/publish collect it as-found).
+/// if absent. For the authoring (directory-source) resolver branch
+/// ONLY — the one place current-language content is verified; sealed
+/// and builtin sources travel as-found (see `with_format_marker`'s
+/// contract in the schema crate).
 fn marked_package(
     mut files: Vec<memstead_schema::SchemaSourceFile>,
 ) -> Vec<memstead_schema::SchemaSourceFile> {

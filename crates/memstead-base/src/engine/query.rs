@@ -1520,11 +1520,13 @@ impl Engine {
     /// engine never builds a tantivy index in WASM. Native targets get
     /// the same shape as before, wrapped in `Ok`.
     pub fn search(&self, scope: &SearchScope) -> Result<SearchResult, EngineError> {
-        // A mem filter naming a quarantined mem refuses typed — an
-        // empty result with a missing-index warning would misstate the
-        // reason (the mem is quarantined, not index-less).
+        // A mem filter naming a quarantined OR nonexistent mem refuses
+        // typed `UNKNOWN_MEM`, matching every other mem-naming surface. A
+        // success with 0 hits (the old nonexistent-mem behaviour, with a
+        // missing-index warning) is indistinguishable from a true empty
+        // result — the one thing a typed surface must never be.
         if let Some(mem) = scope.mem.as_deref()
-            && self.quarantine_reason(mem).is_some()
+            && (self.quarantine_reason(mem).is_some() || !self.mem_router.is_visible(mem))
         {
             return Err(self.unknown_mem_error(mem));
         }

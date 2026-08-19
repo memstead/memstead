@@ -574,9 +574,18 @@ pub const SCHEMA_FORMAT_MARKER_FILE: &str = "schema-format.json";
 /// The marker file's canonical content.
 pub const SCHEMA_FORMAT_MARKER_CONTENT: &str = "{\"metadata_polarity\":\"required-opt-in\"}\n";
 
-/// Append the format marker to a package's file list if absent —
-/// the seal-path helper every installer runs so sealed copies carry
-/// their generation.
+/// Append the format marker to a package's file list if absent.
+///
+/// **For content verified current-language only.** The marker is a
+/// generation claim, and this helper cannot verify one — a legacy
+/// package stamped here would flip every bare field from required to
+/// optional the moment the sealed copy is read. The one place that
+/// KNOWS a package is current is the authoring/install resolver (a
+/// directory source just validated under the current language, where
+/// the retired `optional:` key refuses loudly); sealed and builtin
+/// sources carry their generation as-found and are never stamped —
+/// absence IS the legacy claim, and inventing a marker over it is the
+/// silent-flip defect this contract exists to prevent.
 pub fn with_format_marker(mut files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
     if !files
         .iter()

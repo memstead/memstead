@@ -233,6 +233,7 @@ fn from_archive_bytes_err(e: FromArchiveBytesError) -> JsValue {
         FromArchiveBytesError::Validation(_) => "ARCHIVE_VALIDATION_FAILED",
         FromArchiveBytesError::InvalidConfig(_) => "INVALID_MEM_CONFIG",
         FromArchiveBytesError::EmbeddedSchemaInvalid(_) => "EMBEDDED_SCHEMA_INVALID",
+        FromArchiveBytesError::UnsupportedFormat { .. } => "UNSUPPORTED_ARCHIVE_FORMAT",
         FromArchiveBytesError::Engine(inner) => inner.code(),
     };
     err_object(code, &e.to_string())

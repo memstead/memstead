@@ -57,6 +57,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   advance` says "No artifacts were presented this pass" instead of
   claiming disposal of nothing.
 
+### Fixed
+- **A sealed schema package carries the generation its content was
+  written in.** `schema install` used to stamp every unmarked package
+  with the current-language format marker — a legacy builtin sealed
+  onto `__MEMSTEAD` (or exported into an archive) read back with every
+  bare metadata field flipped from required to optional, the exact
+  silent flip the 0.6.0 marker contract promises cannot happen. The
+  seal paths now carry the source's generation as-found: a legacy
+  package seals unmarked (absence IS its legacy claim), a
+  current-generation builtin's marker travels with it, and only the
+  authoring resolver — which just validated the package under the
+  current language — mints a new marker.
+- **Hydrating an archive with an unknown `format` refuses typed.** The
+  byte-hydration path (`Engine::from_archive_bytes`, the wasm
+  package's `fromSnapshot` included) never consulted the format
+  predicate — an archive rewritten to `format: 99` hydrated and served
+  every entity. It now refuses with the accepted formats named; every
+  reader gate consults the one predicate.
+- **`memstead_search` with a mem filter naming no visible mem refuses
+  `UNKNOWN_MEM`** instead of succeeding with 0 hits and a
+  missing-index warning — an empty result now always means a valid mem
+  with no matches, matching every other mem-naming surface.
+- **Per-entry batch notes survive on the git-branch backend.** All
+  three batch operations (create, update, relate) routed per-entry
+  notes through a documented no-op; they now ride the one batch
+  commit's note record as `<id>: <note>` lines, retrievable via the
+  notes surface. A batch with no notes carries no note record.
+
 ### Removed
 - **The `memstead-swift` UniFFI crate left the workspace.** Its sole
   consumer — the native macOS app — was retired on 2026-08-18, so the

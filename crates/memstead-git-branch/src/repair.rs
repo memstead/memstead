@@ -187,9 +187,10 @@ pub fn install_schema_below_boot(
             gitdir.display()
         ))));
     }
-    let files = memstead_schema::loader::with_format_marker(files.to_vec());
+    // Seal AS-GIVEN — the resolver decides the generation (see
+    // `with_format_marker`'s contract); this seam never invents one.
     let outcome =
-        crate::storage_memstead::write_schema_to_memstead_ref(&gitdir, name, version, &files)
+        crate::storage_memstead::write_schema_to_memstead_ref(&gitdir, name, version, files)
             .map_err(|e| {
                 BootError::Engine(EngineError::Mem(format!(
                     "schema install onto `__MEMSTEAD:schemas/{name}@{version}` failed: {e}"
