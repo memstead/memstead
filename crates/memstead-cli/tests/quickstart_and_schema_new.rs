@@ -2078,6 +2078,9 @@ fn quickstart_repo_workspace_inside_the_repo_keeps_the_mem_out_of_its_own_scope(
         .iter()
         .find(|l| l.starts_with("Scope:"))
         .expect("the brief states the scope");
+    // The machine brief speaks workspace-relative, which is what an agent
+    // resolves against `workspace_root`. The markdown brief's frame is
+    // covered by `quickstart_repo_printed_mem_folder_resolves_from_the_readers_cwd`.
     assert!(
         scope.contains("the mem's own folder `memgraph/`"),
         "the scope claim must name the excluded folder: {scope}",
@@ -2412,6 +2415,106 @@ fn quickstart_repo_non_git_directory_claims_no_history() {
     assert!(
         not_yet.contains("Its files are"),
         "a non-git directory has files, not history: {not_yet}",
+    );
+}
+
+/// The wiring line names a file the reader is told to restart an agent
+/// for. It resolves from their cwd, like every other path the receipt
+/// prints — for every target that writes a file.
+#[test]
+fn quickstart_repo_printed_wiring_paths_resolve_from_the_readers_cwd() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "wiring-app");
+
+    let out = stdout_of(
+        memstead()
+            .current_dir(&repo)
+            .args([
+                "quickstart",
+                "sub-ws",
+                "--repo",
+                ".",
+                "--agent",
+                "claude-code",
+                "--agent",
+                "cursor",
+                "--agent",
+                "gemini",
+            ])
+            .assert()
+            .success(),
+    );
+
+    let mut checked = 0;
+    for line in out.lines().filter(|l| l.contains("(server `memstead`)")) {
+        let printed = line
+            .split('`')
+            .nth(1)
+            .expect("the config file is backticked");
+        assert!(
+            repo.join(printed).is_file(),
+            "the printed wiring path must resolve from the reader's cwd: {printed}\n{out}",
+        );
+        checked += 1;
+    }
+    assert_eq!(
+        checked, 3,
+        "all three file-writing targets are named:\n{out}"
+    );
+}
+
+/// The `--json` payload is the agent's surface: its paths resolve against
+/// `workspace_root`, not against whatever directory the human ran from.
+/// One rendering serving both frames is how a payload ends up carrying a
+/// path that resolves in neither.
+#[test]
+fn quickstart_repo_json_paths_resolve_against_the_workspace_root() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "frames-app");
+
+    let assert = memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "sub-ws", "--repo", "."])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    let root = std::path::PathBuf::from(payload["workspace_root"].as_str().unwrap());
+
+    assert!(
+        root.join(payload["binding"]["record"].as_str().unwrap())
+            .is_file(),
+        "binding.record resolves against workspace_root",
+    );
+    assert!(
+        root.join(payload["mem_folder"].as_str().unwrap()).is_dir(),
+        "mem_folder resolves against workspace_root",
+    );
+    assert!(
+        root.join(
+            payload["agents"][0]["action"]
+                .as_str()
+                .unwrap()
+                .split('`')
+                .nth(1)
+                .unwrap()
+        )
+        .is_file(),
+        "the agent action's path resolves against workspace_root",
+    );
+
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let edit = brief
+        .iter()
+        .find(|l| l.contains("yours to edit"))
+        .expect("the brief names the record");
+    let path = edit
+        .rsplit_once("yours to edit: `")
+        .unwrap()
+        .1
+        .trim_end_matches('`');
+    assert!(
+        root.join(path).is_file(),
+        "the JSON brief's paths resolve against workspace_root too: {path}",
     );
 }
 

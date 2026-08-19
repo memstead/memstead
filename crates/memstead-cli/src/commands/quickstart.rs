@@ -123,11 +123,45 @@ impl AgentTarget {
     ];
 }
 
+/// What happened to one agent's wiring. Held as data rather than as a
+/// rendered sentence because the sentence names a FILE, and a file has to
+/// be named in the frame of whoever is reading — the human receipt speaks
+/// from the reader's directory, the JSON speaks workspace-relative.
+enum WiringAction {
+    /// The config file was written (or the entry added to it).
+    Wrote,
+    /// A `memstead` entry was already there and was left alone.
+    LeftUntouched,
+    /// No project config exists for this target; this command IS the
+    /// wiring. Carries no path, so it renders the same in either frame.
+    RunCommand(String),
+}
+
+impl WiringAction {
+    /// The report line fragment, with any path rendered by `path`.
+    fn render(&self, target: AgentTarget, path: &dyn Fn(&str) -> String) -> String {
+        match self {
+            WiringAction::Wrote => match target.config_file() {
+                Some(rel) => format!("wrote `{}` (server `memstead`)", path(rel)),
+                None => "wrote its config".to_string(),
+            },
+            WiringAction::LeftUntouched => match target.config_file() {
+                Some(rel) => format!(
+                    "`{}` already has a `memstead` server entry — left untouched",
+                    path(rel)
+                ),
+                None => "already wired — left untouched".to_string(),
+            },
+            WiringAction::RunCommand(cmd) => format!("run: `{cmd}`"),
+        }
+    }
+}
+
 /// One wiring outcome per selected target, for the report.
 struct WiringOutcome {
     target: AgentTarget,
-    /// What happened, as a report line fragment.
-    action: String,
+    /// What happened. Rendered per surface — see [`WiringAction`].
+    action: WiringAction,
     /// `Some(_)` when a pre-existing `memstead` server entry was left
     /// untouched: the entry's `command` value as found in the file
     /// (`None` inside the option is impossible — a non-string command
@@ -1011,7 +1045,7 @@ fn wire_agent(
             .render();
         return Ok(WiringOutcome {
             target: agent,
-            action: format!("run: `{add}`"),
+            action: WiringAction::RunCommand(add),
             existing_command: None,
             preexisting: false,
             file_existed: false,
@@ -1047,7 +1081,7 @@ fn wire_agent(
             .map(str::to_string);
         return Ok(WiringOutcome {
             target: agent,
-            action: format!("`{rel}` already has a `memstead` server entry — left untouched"),
+            action: WiringAction::LeftUntouched,
             existing_command,
             preexisting: true,
             file_existed,
@@ -1077,7 +1111,7 @@ fn wire_agent(
     })?;
     Ok(WiringOutcome {
         target: agent,
-        action: format!("wrote `{rel}` (server `memstead`)"),
+        action: WiringAction::Wrote,
         existing_command: None,
         preexisting: false,
         file_existed,
@@ -1257,7 +1291,7 @@ fn report(
     // so in order rather than naming a restart that would no-op.
     let codex_pending = wirings
         .iter()
-        .any(|w| w.target == AgentTarget::Codex && w.action.starts_with("run:"));
+        .any(|w| w.target == AgentTarget::Codex && matches!(w.action, WiringAction::RunCommand(_)));
     let restart_clause = format!(
         "Restart {} so the `memstead` MCP server registers its tools",
         restart_labels.join(" / "),
@@ -1316,114 +1350,131 @@ fn report(
     // what was just written — the deny list comes off the record, the
     // commands off the builder — because a brief that is composed rather
     // than derived is exactly how printed claims drift from behaviour.
-    let brief_lines: Vec<String> = match (guided, &brief_cmd) {
-        (Some(g), Some(brief)) => {
-            let mut b = vec![
-                "## What this mem holds".to_string(),
-                String::new(),
-                format!(
-                    "- Now: one seed entity (`{seed_id}`). Nothing else — scaffolding a \
+    // Built once per FRAME, not once: the brief names paths, and the
+    // human receipt speaks from the reader's directory while the JSON
+    // speaks workspace-relative. One rendering serving both is how a
+    // payload ends up carrying a path that resolves in neither.
+    let build_brief = |path: &dyn Fn(&str) -> String| -> Vec<String> {
+        match (guided, &brief_cmd) {
+            (Some(g), Some(brief)) => {
+                let mut b = vec![
+                    "## What this mem holds".to_string(),
+                    String::new(),
+                    format!(
+                        "- Now: one seed entity (`{seed_id}`). Nothing else — scaffolding a \
                      binding reads no source file and creates no entity from one."
-                ),
-                format!(
-                    "- Not yet: anything from `{}`. Its {} are the binding's subject, \
+                    ),
+                    format!(
+                        "- Not yet: anything from `{}`. Its {} are the binding's subject, \
                      not its content.",
-                    g.repo_display,
-                    if g.is_git_repo {
-                        "code, docs and history"
-                    } else {
-                        "files"
-                    },
-                ),
-                format!(
-                    "- Growth: the ingest loop against binding `{}` — one batch at a \
+                        g.repo_display,
+                        if g.is_git_repo {
+                            "code, docs and history"
+                        } else {
+                            "files"
+                        },
+                    ),
+                    format!(
+                        "- Growth: the ingest loop against binding `{}` — one batch at a \
                      time, each entity written through the same validated path as the \
                      seed. Start with: `{brief}`",
-                    g.binding_id,
-                ),
-                format!(
-                    "- Scope: everything under `{}`, minus what the record denies ({}) \
+                        g.binding_id,
+                    ),
+                    format!(
+                        "- Scope: everything under `{}`, minus what the record denies ({}) \
                      and minus {}, which the engine excludes unconditionally. The deny \
                      list is yours to edit: `{}`",
-                    g.pointer,
-                    g.deny_paths
-                        .iter()
-                        .map(|d| format!("`{d}`"))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    // Say what this layout actually excludes. The mem's
-                    // folder is only inside the scope — and only excluded
-                    // by the mount rule — when it is a folder of its own;
-                    // in the collapsed layout the workspace sits outside
-                    // the source tree, so naming it here would claim an
-                    // exclusion that never had to fire.
-                    match &mem_folder_rel {
-                        Some(rel) => format!("engine state and the mem's own folder `{rel}/`"),
-                        None => "engine state (`.memstead/`)".to_string(),
-                    },
-                    from_here(&g.record),
-                ),
-                format!(
-                    "- Operations the binding declares: {}",
-                    g.operations.join(", ")
-                ),
-            ];
-            // What appeared in the reader's repository — the one claim
-            // they can check with `git status` in ten seconds, so it is
-            // stated in THEIR frame, not the workspace's. Every artifact
-            // path quickstart holds is workspace-relative; the two frames
-            // coincide only when the workspace is the repository, so the
-            // paths are re-expressed against the repo root and the line
-            // is omitted entirely when the workspace is somewhere else.
-            if let Some(ws_rel) = &g.workspace_in_repo {
-                let in_repo = |p: &str| {
-                    if ws_rel.is_empty() {
-                        format!("`{p}`")
-                    } else {
-                        format!("`{ws_rel}/{p}`")
-                    }
-                };
-                let mut written = Vec::new();
-                if target_created && !ws_rel.is_empty() {
-                    // The whole workspace directory is what `git status`
-                    // will show — one untracked path, not three inside it.
-                    written.push(format!(
-                        "`{ws_rel}/` (the workspace: its state, the binding record, \
+                        g.pointer,
+                        g.deny_paths
+                            .iter()
+                            .map(|d| format!("`{d}`"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        // Say what this layout actually excludes. The mem's
+                        // folder is only inside the scope — and only excluded
+                        // by the mount rule — when it is a folder of its own;
+                        // in the collapsed layout the workspace sits outside
+                        // the source tree, so naming it here would claim an
+                        // exclusion that never had to fire.
+                        match &mem_folder_rel {
+                            Some(rel) => {
+                                format!("engine state and the mem's own folder `{}/`", path(rel))
+                            }
+                            None => "engine state (`.memstead/`)".to_string(),
+                        },
+                        path(&g.record),
+                    ),
+                    format!(
+                        "- Operations the binding declares: {}",
+                        g.operations.join(", ")
+                    ),
+                ];
+                // What appeared in the reader's repository — the one claim
+                // they can check with `git status` in ten seconds, so it is
+                // stated in THEIR frame, not the workspace's. Every artifact
+                // path quickstart holds is workspace-relative; the two frames
+                // coincide only when the workspace is the repository, so the
+                // paths are re-expressed against the repo root and the line
+                // is omitted entirely when the workspace is somewhere else.
+                if let Some(ws_rel) = &g.workspace_in_repo {
+                    let in_repo = |p: &str| {
+                        if ws_rel.is_empty() {
+                            format!("`{p}`")
+                        } else {
+                            format!("`{ws_rel}/{p}`")
+                        }
+                    };
+                    let mut written = Vec::new();
+                    if target_created && !ws_rel.is_empty() {
+                        // The whole workspace directory is what `git status`
+                        // will show — one untracked path, not three inside it.
+                        written.push(format!(
+                            "`{ws_rel}/` (the workspace: its state, the binding record, \
                          the mem, and the agent wiring — plus the engine's cache, \
                          which appears inside it once the binding is first measured)"
-                    ));
-                } else {
-                    written.push(format!(
-                        "{} (workspace state and the binding record; a sibling \
+                        ));
+                    } else {
+                        written.push(format!(
+                            "{} (workspace state and the binding record; a sibling \
                          `.memstead.cache/` appears once the binding is first measured)",
-                        in_repo(".memstead/")
-                    ));
-                    if let Some(rel) = &mem_folder_rel {
-                        written.push(format!("{} (the mem)", in_repo(&format!("{rel}/"))));
-                    }
-                    // A config file that already existed was MODIFIED, not
-                    // added — `preexisting` tracks the `memstead` server
-                    // entry, which is a different fact from the file.
-                    for w in wirings.iter().filter(|w| !w.preexisting) {
-                        if let Some(f) = w.target.config_file() {
-                            let verb = if w.file_existed {
-                                "agent wiring added to it"
-                            } else {
-                                "agent wiring"
-                            };
-                            written.push(format!("{} ({verb})", in_repo(f)));
+                            in_repo(".memstead/")
+                        ));
+                        if let Some(rel) = &mem_folder_rel {
+                            written.push(format!("{} (the mem)", in_repo(&format!("{rel}/"))));
+                        }
+                        // A config file that already existed was MODIFIED, not
+                        // added — `preexisting` tracks the `memstead` server
+                        // entry, which is a different fact from the file.
+                        for w in wirings.iter().filter(|w| !w.preexisting) {
+                            if let Some(f) = w.target.config_file() {
+                                let verb = if w.file_existed {
+                                    "agent wiring added to it"
+                                } else {
+                                    "agent wiring"
+                                };
+                                written.push(format!("{} ({verb})", in_repo(f)));
+                            }
                         }
                     }
+                    b.push(format!(
+                        "- Written into your {}: {}. Nothing else in the tree was touched.",
+                        if g.is_git_repo {
+                            "repository"
+                        } else {
+                            "source directory"
+                        },
+                        written.join(", "),
+                    ));
                 }
-                b.push(format!(
-                    "- Written into your repository: {}. Nothing else in the tree was touched.",
-                    written.join(", "),
-                ));
+                b
             }
-            b
+            _ => Vec::new(),
         }
-        _ => Vec::new(),
     };
+    // The reader's frame for the printed receipt; the workspace frame for
+    // the machine surface, where `workspace_root` is the resolution base.
+    let brief_lines = build_brief(&from_here);
+    let brief_lines_machine = build_brief(&|rel: &str| rel.to_string());
 
     if ctx.json {
         let mut payload = json!({
@@ -1444,7 +1495,7 @@ fn report(
                 .iter()
                 .map(|w| json!({
                     "target": w.target.to_possible_value().map(|v| v.get_name().to_string()),
-                    "action": w.action,
+                    "action": w.action.render(w.target, &|rel: &str| rel.to_string()),
                 }))
                 .collect::<Vec<_>>(),
             "agents_defaulted": agents_defaulted,
@@ -1479,7 +1530,7 @@ fn report(
                 "operations": g.operations,
             });
             payload["brief"] = json!(
-                brief_lines
+                brief_lines_machine
                     .iter()
                     .filter(|l| l.starts_with("- "))
                     .map(|l| l.trim_start_matches("- ").to_string())
@@ -1535,7 +1586,11 @@ fn report(
         ));
     }
     for w in wirings {
-        lines.push(format!("- {}: {}", w.target.label(), w.action));
+        lines.push(format!(
+            "- {}: {}",
+            w.target.label(),
+            w.action.render(w.target, &from_here),
+        ));
     }
     if agents_defaulted {
         lines.push(
@@ -1621,7 +1676,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         // Fresh write.
         let outcome = wire_agent(tmp.path(), AgentTarget::ClaudeCode, "/bin/memstead-mcp").unwrap();
-        assert!(outcome.action.contains("wrote"), "got: {}", outcome.action);
+        let rendered = outcome
+            .action
+            .render(outcome.target, &|rel: &str| rel.to_string());
+        assert!(rendered.contains("wrote"), "got: {rendered}");
         let parsed: serde_json::Value =
             serde_json::from_slice(&std::fs::read(tmp.path().join(".mcp.json")).unwrap()).unwrap();
         assert_eq!(
@@ -1643,11 +1701,10 @@ mod tests {
         )
         .unwrap();
         let outcome = wire_agent(tmp.path(), AgentTarget::ClaudeCode, "/bin/memstead-mcp").unwrap();
-        assert!(
-            outcome.action.contains("left untouched"),
-            "got: {}",
-            outcome.action
-        );
+        let rendered = outcome
+            .action
+            .render(outcome.target, &|rel: &str| rel.to_string());
+        assert!(rendered.contains("left untouched"), "got: {rendered}");
         let parsed: serde_json::Value =
             serde_json::from_slice(&std::fs::read(tmp.path().join(".mcp.json")).unwrap()).unwrap();
         assert_eq!(
@@ -1682,12 +1739,12 @@ mod tests {
     fn wire_agent_codex_prints_command_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let outcome = wire_agent(tmp.path(), AgentTarget::Codex, "/bin/memstead-mcp").unwrap();
+        let rendered = outcome
+            .action
+            .render(outcome.target, &|rel: &str| rel.to_string());
         assert!(
-            outcome
-                .action
-                .contains("codex mcp add memstead -- /bin/memstead-mcp"),
-            "got: {}",
-            outcome.action,
+            rendered.contains("codex mcp add memstead -- /bin/memstead-mcp"),
+            "got: {rendered}",
         );
         assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
     }
