@@ -149,6 +149,12 @@ else
   echo "  ✗ memstead-mcp (true lean) FAILED"
 fi
 
+# Decision 9: the Rust gate must not hard-depend on node. Every node leg
+# below shares this check; a node-less environment skips each one LOUDLY
+# (a degraded green that names what was not checked), never silently.
+HAS_NODE=0
+if command -v node >/dev/null 2>&1; then HAS_NODE=1; fi
+
 echo ""
 echo "══════════════════════════════════"
 echo "  Gate: docs-site guard prebuild"
@@ -159,7 +165,7 @@ echo "════════════════════════�
 # leg it ran only in the post-merge deploy workflow — a guard that can
 # only fail AFTER the tree merged. Node-free environments skip loudly
 # (decision 9): a skip is a degraded mode, not a silent pass.
-if command -v node >/dev/null 2>&1; then
+if [ "$HAS_NODE" = 1 ]; then
   if (cd "$ROOT" && node docs-site/scripts/copy-openapi.mjs); then
     echo "  ✓ docs-site guard prebuild passed"
   else
@@ -194,22 +200,30 @@ echo "════════════════════════�
 # Its own named leg (not a glob inside the node-test leg): router line
 # caps, no mechanism-term narration, no retired vocabulary, medium-neutral
 # descriptions. See the checker header for the full rule/scope map.
-if (cd "$ROOT" && node scripts/check-skill-prose.mjs); then
-  echo "  ✓ plugin roster prose lint passed"
+if [ "$HAS_NODE" = 1 ]; then
+  if (cd "$ROOT" && node scripts/check-skill-prose.mjs); then
+    echo "  ✓ plugin roster prose lint passed"
+  else
+    FAILED+=("plugin-skill-prose")
+    echo "  ✗ plugin roster prose lint FAILED"
+  fi
 else
-  FAILED+=("plugin-skill-prose")
-  echo "  ✗ plugin roster prose lint FAILED"
+  echo "  ⚠⚠⚠ SKIPPED — node is not installed. The roster prose lint did NOT run."
 fi
 
 echo ""
 echo "══════════════════════════════════"
 echo "  Testing: plugin (node --test)"
 echo "══════════════════════════════════"
-if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js plugins/claude-code/scripts/*.test.mjs scripts/*.test.mjs); then
-  echo "  ✓ plugin tests passed"
+if [ "$HAS_NODE" = 1 ]; then
+  if (cd "$ROOT" && node --test plugins/claude-code/hooks/*.test.js plugins/claude-code/skills/ingest/scripts/*.test.js plugins/claude-code/scripts/*.test.mjs scripts/*.test.mjs); then
+    echo "  ✓ plugin tests passed"
+  else
+    FAILED+=("plugin-tests")
+    echo "  ✗ plugin tests FAILED"
+  fi
 else
-  FAILED+=("plugin-tests")
-  echo "  ✗ plugin tests FAILED"
+  echo "  ⚠⚠⚠ SKIPPED — node is not installed. The plugin hook/router/script tests did NOT run."
 fi
 
 echo ""
@@ -222,11 +236,15 @@ echo "════════════════════════�
 # v1/binding.schema.json) is split: the JS half lives in the v1 validator
 # test; the Rust half (init still emits that golden) is in memstead-cli's
 # suite.
-if (cd "$ROOT" && node --test docs/schemas/memstead-plugin/v1/validator.test.mjs); then
-  echo "  ✓ workspace format schemas passed"
+if [ "$HAS_NODE" = 1 ]; then
+  if (cd "$ROOT" && node --test docs/schemas/memstead-plugin/v1/validator.test.mjs); then
+    echo "  ✓ workspace format schemas passed"
+  else
+    FAILED+=("format-schemas")
+    echo "  ✗ workspace format schemas FAILED"
+  fi
 else
-  FAILED+=("format-schemas")
-  echo "  ✗ workspace format schemas FAILED"
+  echo "  ⚠⚠⚠ SKIPPED — node is not installed. The workspace format-schema validators did NOT run."
 fi
 
 echo ""
@@ -249,7 +267,11 @@ fi
 
 echo ""
 if [ ${#FAILED[@]} -eq 0 ]; then
-  echo "All passed."
+  if [ "$HAS_NODE" = 1 ]; then
+    echo "All passed."
+  else
+    echo "All passed — DEGRADED: node legs (docs-site guards, prose lint, plugin tests, format schemas) were SKIPPED."
+  fi
   exit 0
 else
   echo "Failed: ${FAILED[*]}"
