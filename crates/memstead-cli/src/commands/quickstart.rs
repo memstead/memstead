@@ -258,7 +258,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // Mem name: flag > derivation from the directory > TTY prompt >
     // refusal carrying the exact command. Resolved before gate 3 because
     // the guided layout names the mem's folder after it.
-    let name = resolve_mem_name(&target, args.name.as_deref())?;
+    let name = resolve_mem_name(&target, args.name.as_deref(), args.repo.as_deref())?;
 
     // The mem's folder — the workspace root itself in the collapsed
     // shape, a subdirectory named after the mem in the guided in-repo one.
@@ -465,6 +465,8 @@ struct GuidedPlan {
     /// it at all (`Some("")` when they are the same directory). `None`
     /// means this run wrote nothing into the repository.
     workspace_in_repo: Option<String>,
+    /// Whether the source tree is actually a git repository.
+    is_git_repo: bool,
     mem: String,
 }
 
@@ -486,6 +488,10 @@ struct GuidedOutcome {
     /// The workspace root relative to the repository — see
     /// [`GuidedPlan::workspace_in_repo`].
     workspace_in_repo: Option<String>,
+    /// Whether the source tree is actually a git repository. `--repo`
+    /// accepts any directory and the binding works either way, but the
+    /// brief must not describe history a plain folder does not have.
+    is_git_repo: bool,
 }
 
 impl GuidedPlan {
@@ -524,6 +530,7 @@ impl GuidedPlan {
             repo_display: repo_abs.display().to_string(),
             layout_warning,
             workspace_in_repo: workspace_within_repo(workspace_root, repo),
+            is_git_repo: repo_abs.join(".git").exists(),
             mem: mem.to_string(),
         })
     }
@@ -535,6 +542,7 @@ impl GuidedPlan {
             repo_display,
             layout_warning,
             workspace_in_repo,
+            is_git_repo,
             mem,
         } = self;
         let scaffolded = memstead_base::binding::scaffold_binding(ScaffoldParams {
@@ -571,6 +579,7 @@ impl GuidedPlan {
                 .collect(),
             warnings,
             workspace_in_repo,
+            is_git_repo,
         })
     }
 }
@@ -655,16 +664,35 @@ fn blocking_entries(target: &Path) -> anyhow::Result<Vec<String>> {
 /// Resolve the mem name: `--name` wins, then slug derivation from the
 /// directory basename, then (TTY only) one prompt, else a refusal
 /// carrying the exact retry command.
-fn resolve_mem_name(target: &Path, flag: Option<&str>) -> anyhow::Result<String> {
+fn resolve_mem_name(
+    target: &Path,
+    flag: Option<&str>,
+    repo: Option<&Path>,
+) -> anyhow::Result<String> {
+    // A refusal's retry command must reproduce the invocation that hit it:
+    // a guided run retried without `--repo` lands on the tolerant-emptiness
+    // gate instead of succeeding. The guided form is built, never formatted
+    // — a repository path can contain anything a shell would eat. The plain
+    // form stays the literal it has always been: it takes no path argument,
+    // and its wording is pinned by test as part of the unchanged plain path.
+    let retry = |name: &str| match repo {
+        Some(repo) => ShellCmd::new(memstead_program())
+            .arg("quickstart")
+            .arg("--repo")
+            .arg(repo.display().to_string())
+            .arg("--name")
+            .arg(name)
+            .render(),
+        None => format!("memstead quickstart --name {name}"),
+    };
     if let Some(name) = flag {
         validate_mem_name(name).map_err(|e| {
             CliError::new(
                 ExitKind::Validation,
                 "INVALID_INPUT",
                 format!(
-                    "invalid --name: {e}. Retry with a slug, e.g.: memstead quickstart \
-                     --name {}",
-                    derive_mem_name(name).unwrap_or_else(|| "my-graph".to_string()),
+                    "invalid --name: {e}. Retry with a slug, e.g.: {}",
+                    retry(&derive_mem_name(name).unwrap_or_else(|| "my-graph".to_string())),
                 ),
             )
         })?;
@@ -686,7 +714,7 @@ fn resolve_mem_name(target: &Path, flag: Option<&str>) -> anyhow::Result<String>
             CliError::new(
                 ExitKind::Validation,
                 "INVALID_INPUT",
-                format!("invalid mem name: {e}. Retry with: memstead quickstart --name my-graph"),
+                format!("invalid mem name: {e}. Retry with: {}", retry("my-graph")),
             )
         })?;
         return Ok(answer.to_string());
@@ -696,7 +724,8 @@ fn resolve_mem_name(target: &Path, flag: Option<&str>) -> anyhow::Result<String>
         "INVALID_INPUT",
         format!(
             "could not derive a mem name from directory `{basename}` — \
-             pass one explicitly: memstead quickstart --name my-graph",
+             pass one explicitly: {}",
+            retry("my-graph"),
         ),
     )
     .with_details(json!({ "directory": basename }))
@@ -1205,6 +1234,17 @@ fn report(
             format!("{}/{}", target.display(), workspace_relative)
         }
     };
+    // The mem's own folder in the reader's frame, for the prose that
+    // tells them where their entities are. `mem_folder_rel` below stays
+    // workspace-relative: it is the machine field, and an agent reading
+    // `--json` already has `workspace_root` to resolve it against.
+    // Everything a human is told to open goes through `from_here`.
+    let mem_folder_here: Option<String> = mem_dir
+        .strip_prefix(target)
+        .ok()
+        .map(|r| r.to_string_lossy().to_string())
+        .filter(|r| !r.is_empty())
+        .map(|r| from_here(&r));
     // The mem's own folder, workspace-relative, when it is not the root.
     let mem_folder_rel: Option<String> = mem_dir
         .strip_prefix(target)
@@ -1286,9 +1326,14 @@ fn report(
                      binding reads no source file and creates no entity from one."
                 ),
                 format!(
-                    "- Not yet: anything from `{}`. Its code, docs and history are the \
-                     binding's subject, not its content.",
+                    "- Not yet: anything from `{}`. Its {} are the binding's subject, \
+                     not its content.",
                     g.repo_display,
+                    if g.is_git_repo {
+                        "code, docs and history"
+                    } else {
+                        "files"
+                    },
                 ),
                 format!(
                     "- Growth: the ingest loop against binding `{}` — one batch at a \
@@ -1345,12 +1390,12 @@ fn report(
                     written.push(format!(
                         "`{ws_rel}/` (the workspace: its state, the binding record, \
                          the mem, and the agent wiring — plus the engine's cache, \
-                         which appears inside it on the first read)"
+                         which appears inside it once the binding is first measured)"
                     ));
                 } else {
                     written.push(format!(
                         "{} (workspace state and the binding record; a sibling \
-                         `.memstead.cache/` appears the first time the engine reads)",
+                         `.memstead.cache/` appears once the binding is first measured)",
                         in_repo(".memstead/")
                     ));
                     if let Some(rel) = &mem_folder_rel {
@@ -1473,7 +1518,8 @@ fn report(
     ];
     if let Some(rel) = &mem_folder_rel {
         lines.push(format!(
-            "- Mem folder:  `{rel}/` (the graph owns this folder and nothing else)"
+            "- Mem folder:  `{}/` (the graph owns this folder and nothing else)",
+            from_here(rel),
         ));
     }
     lines.push(format!("- Schema pin:  `{}`", schema_pin.as_display()));
@@ -1517,7 +1563,7 @@ fn report(
     lines.push(String::new());
     lines.extend(crate::setup::shape_disclosure_lines_in(
         crate::setup::WorkspaceShape::Filesystem,
-        mem_folder_rel.as_deref(),
+        mem_folder_here.as_deref(),
     ));
     lines.push(String::new());
     lines.push(format!("Next: {next_action}"));

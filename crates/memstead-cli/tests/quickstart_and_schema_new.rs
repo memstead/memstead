@@ -2301,6 +2301,120 @@ fn quickstart_repo_record_path_resolves_from_the_readers_cwd() {
     );
 }
 
+/// The mem-folder path the receipt prints is a path the reader is told
+/// their entities are in — so it resolves from where the receipt leaves
+/// them, like every other path it prints. The nested layout is where the
+/// workspace frame and the reader's frame diverge.
+#[test]
+fn quickstart_repo_printed_mem_folder_resolves_from_the_readers_cwd() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "framed-app");
+
+    let out = stdout_of(
+        memstead()
+            .current_dir(&repo)
+            .args([
+                "quickstart",
+                "--agent",
+                "claude-code",
+                "sub-ws",
+                "--repo",
+                ".",
+                "--name",
+                "kb",
+            ])
+            .assert()
+            .success(),
+    );
+
+    // The artifact line and the shape disclosure name the same folder;
+    // both must open from the directory the reader is standing in.
+    let folder_line = out
+        .lines()
+        .find(|l| l.starts_with("- Mem folder:"))
+        .expect("the receipt names the mem folder");
+    let printed = folder_line
+        .split('`')
+        .nth(1)
+        .expect("the folder is backticked")
+        .trim_end_matches('/');
+    assert!(
+        repo.join(printed).is_dir(),
+        "the printed mem folder must resolve from the reader's cwd: {printed}",
+    );
+    assert!(
+        repo.join(printed).join("welcome-to-memstead.md").is_file(),
+        "…and be the folder that actually holds the entities: {printed}",
+    );
+    assert!(
+        out.contains(&format!("plain `.md` files in `{printed}/`")),
+        "the disclosure must name the same resolvable folder; got:\n{out}",
+    );
+}
+
+/// A refusal's retry command reproduces the invocation that hit it. A
+/// guided run retried without `--repo` lands on the tolerant-emptiness
+/// gate instead of succeeding.
+#[test]
+fn quickstart_repo_name_refusal_retry_keeps_the_repo_flag() {
+    let tmp = TempDir::new().unwrap();
+    // A directory name nothing valid survives slugging from.
+    let repo = fixture_repo(tmp.path(), "日本語");
+
+    let err = stderr_of(
+        memstead()
+            .current_dir(&repo)
+            .args(["quickstart", "--repo", "."])
+            .assert()
+            .failure(),
+    );
+    let retry = err
+        .split("pass one explicitly: ")
+        .nth(1)
+        .expect("the refusal carries a retry command")
+        .trim();
+    assert!(
+        retry.contains("--repo"),
+        "the retry must reproduce the guided invocation: {retry}",
+    );
+    let out = replay(&repo, retry);
+    assert!(
+        out.status.success(),
+        "the printed retry must run verbatim: {retry}\n{}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+/// `--repo` takes any directory. A plain folder has files, not history —
+/// the brief must not describe a git repository that is not there.
+#[test]
+fn quickstart_repo_non_git_directory_claims_no_history() {
+    let tmp = TempDir::new().unwrap();
+    let plain = tmp.path().join("plain-dir");
+    std::fs::create_dir_all(plain.join("src")).unwrap();
+    std::fs::write(plain.join("src/a.rs"), b"fn a() {}\n").unwrap();
+    let ws = tmp.path().join("ws");
+
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["quickstart", "--json"])
+        .arg(&ws)
+        .arg("--repo")
+        .arg(&plain)
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let not_yet = brief
+        .iter()
+        .find(|l| l.starts_with("Not yet:"))
+        .expect("the brief states what the mem does not hold");
+    assert!(
+        not_yet.contains("Its files are"),
+        "a non-git directory has files, not history: {not_yet}",
+    );
+}
+
 /// The collapsed layout — workspace outside the repository — claims only
 /// engine state, because the mem folder is not in the source tree at all
 /// and no exclusion has to fire for it.
