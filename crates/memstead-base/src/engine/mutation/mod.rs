@@ -187,8 +187,11 @@ impl super::Engine {
         // candidate — its workspace-relative form must resolve or the write
         // refuses, because resolution will make the same roster lookup and
         // orphan it at birth. The gate skips entirely only when it cannot
-        // know: no workspace root, or a pipeline store that fails to load —
-        // validation never requires the binding store to be readable.
+        // know: no workspace root, or a pipeline store whose LOAD fails as a
+        // whole — validation never requires the binding store to be
+        // readable. (A corrupted individual binding file does not fail the
+        // load; it yields a reduced roster, and the gate then fail-closes on
+        // paths that resolve under no surviving candidate.)
         if let Some(root) = self.workspace_root()
             && crate::pipeline_store::load_pipeline_configs(root).is_ok()
         {
