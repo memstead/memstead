@@ -51,6 +51,32 @@ fn conflicts_list_and_resolve_roundtrip() {
     assert_eq!(listed["conflicts"][0]["id"], "ws--torn");
     assert_eq!(listed["conflicts"][0]["file_path"], "torn.md");
 
+    // Criterion 3, agent-facing: the failure mode names the remedy on
+    // a surface an agent actually reads — the CLI health report
+    // carries the per-file load error whose message names the resolve
+    // operation.
+    let out = stdout_of(
+        memstead()
+            .current_dir(&root)
+            .args(["--json", "health"])
+            .assert()
+            .success(),
+    );
+    let health: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let load_errors = health["load_errors"]
+        .as_array()
+        .expect("health carries load_errors for the conflicted file");
+    assert!(
+        load_errors.iter().any(|e| {
+            e["file"].as_str().unwrap_or("").ends_with("torn.md")
+                && e["error"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("memstead conflicts resolve")
+        }),
+        "the load failure names the remedy: {load_errors:?}"
+    );
+
     // Resolve to theirs, with a note.
     let out = stdout_of(
         memstead()

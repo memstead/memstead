@@ -365,6 +365,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             serde_json::to_value(&health.quarantined).unwrap_or_default(),
         );
     }
+    // Per-file load failures — the same boot-honesty class: each
+    // entry's message names the remedy (the merge-conflict refusal
+    // names `memstead conflicts resolve`), and this hand-built
+    // envelope must carry them like the MCP surfaces do or a
+    // CLI-driven agent never finds the door (backlog-sweep plan 07).
+    if !health.load_errors.is_empty() {
+        obj.insert(
+            "load_errors".into(),
+            serde_json::to_value(&health.load_errors).unwrap_or_default(),
+        );
+    }
     if let Some(diag) = &health.boot_diagnosis {
         obj.insert("boot_diagnosis".into(), diag.clone());
     }
@@ -715,6 +726,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 q.get("reason_message")
                     .and_then(|x| x.as_str())
                     .unwrap_or(""),
+            ));
+        }
+        lines.push(String::new());
+    }
+
+    // Per-file load failures — ungated like the quarantine roster;
+    // each message names its remedy, so the markdown must show it.
+    if let Some(arr) = obj.get("load_errors").and_then(|v| v.as_array()) {
+        lines.push(format!("## Load errors ({})", arr.len()));
+        for e in arr {
+            lines.push(format!(
+                "- `{}` — {}",
+                e.get("file").and_then(|x| x.as_str()).unwrap_or(""),
+                e.get("error").and_then(|x| x.as_str()).unwrap_or(""),
             ));
         }
         lines.push(String::new());
