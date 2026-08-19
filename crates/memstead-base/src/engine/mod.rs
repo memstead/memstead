@@ -36,6 +36,7 @@ pub mod apply_commit;
 pub mod archive;
 pub mod boot;
 pub mod check_ops;
+pub mod conflicts;
 pub mod drift;
 pub mod due;
 pub mod error;

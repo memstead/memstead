@@ -911,6 +911,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         | e @ EngineError::CheckNotRecorded { .. }
         | e @ EngineError::Mem(_)
         | e @ EngineError::MemNameCollision { .. }
+        | e @ EngineError::MergeConflictUnsupportedBackend { .. }
+        | e @ EngineError::NotConflicted { .. }
         | e @ EngineError::InvalidInput(_) => tool_error(e.code(), &e.to_string()),
         EngineError::RenameSimilarityOutOfRange {
             requested,

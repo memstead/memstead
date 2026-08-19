@@ -903,3 +903,34 @@ write_rules: []
         warnings2.iter().map(|w| w.code()).collect::<Vec<_>>()
     );
 }
+
+/// Plan 07 complement: the git-branch backend's mem-repo is
+/// engine-managed and cannot acquire merge conflicts through supported
+/// use — `conflicts` operations refuse typed there instead of
+/// pretending applicability.
+#[test]
+fn conflict_operations_refuse_on_git_branch_backend() {
+    use memstead_base::engine::conflicts::ConflictSide;
+
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let mut engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+
+    let err = engine.list_merge_conflicts(Some("specs")).unwrap_err();
+    assert_eq!(err.code(), "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND");
+
+    let err = engine
+        .resolve_merge_conflict(
+            &EntityId("specs--anything".into()),
+            ConflictSide::Ours,
+            Actor::Cli,
+            Some(&client()),
+            None,
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND");
+
+    // The unscoped sweep simply reports nothing conflicted — the
+    // git-branch mount is not applicable, not an error.
+    assert!(engine.list_merge_conflicts(None).unwrap().is_empty());
+}

@@ -2202,10 +2202,29 @@ impl Engine {
         );
         // Surface load errors back through the engine's accumulator
         // so subsequent `load_errors()` calls reflect the latest read.
-        // We don't clear pre-existing errors from other mems — only
-        // append; an external operator that wants a clean slate runs
-        // a full re-init.
-        self.load_errors.extend(load_result.errors);
+        // THIS mem's stale entries are replaced, not accumulated — a
+        // repaired file (e.g. a resolved merge conflict) must stop
+        // reporting its old refusal, and a re-read of a still-broken
+        // file must not duplicate its entry. Other mems' entries are
+        // untouched (their reloads own them). Folder mounts key their
+        // entries by absolute source path under the mem root; other
+        // backends have no path-attributable entries to replace.
+        if let crate::workspace::MountStorage::Folder { path } =
+            &self.mounts[mount_idx].mount.storage
+        {
+            let root = path.clone();
+            self.load_errors.retain(|(p, _)| !p.starts_with(&root));
+            // The backend walk yields mem-relative paths while the boot
+            // loader yields absolute ones — normalize to absolute so the
+            // replace-on-reload key stays uniform across both origins.
+            self.load_errors
+                .extend(load_result.errors.into_iter().map(|(p, m)| {
+                    let abs = if p.is_relative() { root.join(&p) } else { p };
+                    (abs, m)
+                }));
+        } else {
+            self.load_errors.extend(load_result.errors);
+        }
 
         // Refresh the mem's config from the backend too (D13). `sync_state`
         // (the projection baselines) and the schema pin / write guidance are

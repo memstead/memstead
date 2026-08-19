@@ -436,6 +436,36 @@ pub fn mask_code_blocks(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Merge-conflict detection
+// ---------------------------------------------------------------------------
+
+/// True when `text` carries a complete git merge-conflict block: an
+/// ordered `<<<<<<< …` / `=======` / `>>>>>>> …` triple at line starts,
+/// evaluated over [`mask_code_blocks`] output so a fenced code example
+/// documenting conflict markers never trips the check. The masking is
+/// a legibility trade-off, not a soundness one: a real conflict whose
+/// markers all fall inside one fenced block goes undetected (the file
+/// then loads/degrades exactly as it did before this check existed) —
+/// git writes markers without regard for fences, so that shape is
+/// rare, while marker examples in documentation entities are not.
+pub fn has_merge_conflict_markers(text: &str) -> bool {
+    let masked = mask_code_blocks(text);
+    let mut seen_start = false;
+    let mut seen_separator = false;
+    for line in masked.lines() {
+        if line.starts_with("<<<<<<< ") {
+            seen_start = true;
+            seen_separator = false;
+        } else if seen_start && line.trim_end() == "=======" {
+            seen_separator = true;
+        } else if seen_separator && line.starts_with(">>>>>>> ") {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
 // Section splitting
 // ---------------------------------------------------------------------------
 

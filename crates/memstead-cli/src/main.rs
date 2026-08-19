@@ -167,6 +167,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         #[cfg(feature = "mem-repo")]
         Command::Recover(args) => commands::recover::run(&ctx, args),
         Command::Anchors(args) => commands::anchors::run(&ctx, args),
+        Command::Conflicts(args) => commands::conflicts::run(&ctx, args),
         Command::Changes(args) => commands::changes::run(&ctx, args),
         Command::Check(args) => commands::check::run(&ctx, args),
         Command::ReviewMark(args) => commands::review_mark::run(&ctx, args),

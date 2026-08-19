@@ -843,6 +843,27 @@ pub enum EngineError {
     /// length, malformed path, etc.) is the message text.
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// Merge-conflict listing/resolution targeted a mem whose backend
+    /// cannot acquire git merge conflicts through supported use — the
+    /// git-branch mem-repo is engine-managed, archives and in-memory
+    /// sketches have no user-git seam at all. Only folder mems live in
+    /// the user's own repository where an ordinary merge can write
+    /// conflict markers into entity files. Typed code
+    /// `CONFLICT_RESOLVE_UNSUPPORTED_BACKEND`.
+    #[error(
+        "mem `{mem}` is not folder-backed — its storage cannot acquire git merge \
+         conflicts through supported use; `conflicts` operations apply to folder mems only"
+    )]
+    MergeConflictUnsupportedBackend { mem: String },
+    /// Conflict resolution targeted an entity whose file carries no git
+    /// merge-conflict markers — nothing to resolve. Distinct from
+    /// `NotFound` so an agent can tell "already clean" from "no such
+    /// entity". Typed code `NOT_CONFLICTED`.
+    #[error(
+        "entity `{id}` is not conflicted — its file carries no git merge-conflict \
+         markers; nothing to resolve"
+    )]
+    NotConflicted { id: String },
     /// `memstead_fetch` / `memstead_pull` / `memstead_push` named a remote that is
     /// not configured on the workspace's mem-repo. Typed code
     /// `UNKNOWN_REMOTE`. Recovery: configure the remote via
@@ -1208,6 +1229,10 @@ impl EngineError {
             EngineError::Mem(_) => "MEM_ERROR",
             EngineError::MemNameCollision { .. } => "MEM_NAME_COLLISION",
             EngineError::InvalidInput(_) => "INVALID_INPUT",
+            EngineError::MergeConflictUnsupportedBackend { .. } => {
+                "CONFLICT_RESOLVE_UNSUPPORTED_BACKEND"
+            }
+            EngineError::NotConflicted { .. } => "NOT_CONFLICTED",
             EngineError::RenameSimilarityOutOfRange { .. } => "INVALID_INPUT",
             EngineError::InvalidChangesCursor { .. } => "INVALID_CURSOR",
             EngineError::ReviewMarkNotSet { .. } => "REVIEW_MARK_NOT_SET",

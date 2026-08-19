@@ -367,7 +367,19 @@ impl Engine {
                     mem_names: &mem_names,
                 }),
             );
-            load_errors.extend(load_result.errors);
+            // Normalize folder-mount error paths to absolute (the
+            // backend walk yields mem-relative ones) so the per-mem
+            // reload can later replace exactly this mem's entries —
+            // a repaired file must stop reporting its old refusal.
+            if let crate::workspace::MountStorage::Folder { path } = &m.mount.storage {
+                let root = path.clone();
+                load_errors.extend(load_result.errors.into_iter().map(|(p, msg)| {
+                    let abs = if p.is_relative() { root.join(&p) } else { p };
+                    (abs, msg)
+                }));
+            } else {
+                load_errors.extend(load_result.errors);
+            }
         }
 
         // Drop quarantined mounts from the serving roster: a

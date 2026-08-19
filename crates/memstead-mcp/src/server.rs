@@ -1431,6 +1431,16 @@ fn engine_err_unified(
                 serde_json::json!({ "message": msg }),
             ),
         ),
+        E::MergeConflictUnsupportedBackend { mem } => tool_error_with_payload(
+            e.code(),
+            &message,
+            envelope(e.code(), message.clone(), serde_json::json!({ "mem": mem })),
+        ),
+        E::NotConflicted { id } => tool_error_with_payload(
+            e.code(),
+            &message,
+            envelope(e.code(), message.clone(), serde_json::json!({ "id": id })),
+        ),
         E::RenameSimilarityOutOfRange {
             requested,
             allowed_min,

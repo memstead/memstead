@@ -139,6 +139,11 @@ impl CliError {
         let code = e.code();
         let (kind, details) = match &e {
             NotFound { id } => (ExitKind::NotFound, Some(serde_json::json!({ "id": id }))),
+            MergeConflictUnsupportedBackend { mem } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({ "mem": mem })),
+            ),
+            NotConflicted { id } => (ExitKind::Validation, Some(serde_json::json!({ "id": id }))),
             HashMismatch {
                 id,
                 current,

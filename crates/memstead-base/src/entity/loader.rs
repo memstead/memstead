@@ -32,7 +32,7 @@ use super::source::EntitySource;
 ///
 /// The function never panics — the final default-schema `spec` lookup is
 /// guaranteed to exist by the schema crate's invariants.
-fn resolve_type_for_entry(mem_schema: &Schema, content: &str) -> Arc<TypeDefinition> {
+pub(crate) fn resolve_type_for_entry(mem_schema: &Schema, content: &str) -> Arc<TypeDefinition> {
     if let Some(name) = parser::peek_type_from_frontmatter(content) {
         if let Some(t) = mem_schema.get_type(&name) {
             return t;
@@ -183,6 +183,27 @@ pub fn parse_entries(
     for entry in source_entries {
         // Skip empty files
         if entry.content.trim().is_empty() {
+            continue;
+        }
+
+        // Git merge-conflict markers: refuse the file with the remedy
+        // named, before the parser can either fail confusingly or —
+        // worse — "succeed" and load BOTH sides' content as one body.
+        // The failure mode must name the door (backlog-sweep plan 07):
+        // the guards correctly block git verbs and raw edits against
+        // mem content, so the engine-side resolve operation is the one
+        // sanctioned repair, and this message is where an agent finds
+        // it at the exact moment it is needed.
+        if parser::has_merge_conflict_markers(&entry.content) {
+            errors.push((
+                entry.source_path,
+                "git merge-conflict markers detected — resolve through the engine: \
+                 `memstead conflicts list` shows the conflicted entities, `memstead \
+                 conflicts resolve <entity-id> --side ours|theirs` picks a side \
+                 (validated and provenance-tracked). Never repair via git verbs or \
+                 raw file edits — the engine owns mem content."
+                    .to_string(),
+            ));
             continue;
         }
 

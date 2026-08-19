@@ -46,6 +46,9 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead batch-relate`↴](#memstead-batch-relate)
 * [`memstead recover`↴](#memstead-recover)
 * [`memstead anchors`↴](#memstead-anchors)
+* [`memstead conflicts`↴](#memstead-conflicts)
+* [`memstead conflicts list`↴](#memstead-conflicts-list)
+* [`memstead conflicts resolve`↴](#memstead-conflicts-resolve)
 * [`memstead changes`↴](#memstead-changes)
 * [`memstead check`↴](#memstead-check)
 * [`memstead review-mark`↴](#memstead-review-mark)
@@ -152,6 +155,7 @@ Exit codes:
 * `batch-relate` — Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead relate` per edge there
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped. MEM-REPO WORKSPACES ONLY (see `install`)
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
+* `conflicts` — List and resolve git merge conflicts in folder-backed mems — the one sanctioned repair when a merge in the user's repo writes conflict markers into entity files. `conflicts list` shows conflicted entities; `conflicts resolve <id> --side ours|theirs` keeps one side, validated before it lands and committed as an attributed mutation
 * `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
 * `check` — Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
 * `review-mark` — Read and move the per-mem review mark — the engine's one pointer per mem to the last human-approved state. `list` shows every mem's mark and head; `set`/`clear` move it (explicit target only); `diff` reports the unreviewed delta. Marks never gate writes
@@ -917,6 +921,48 @@ Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors
 ###### **Options:**
 
 * `--artifact <PATH>` — Reverse lookup: list every entity whose anchor references this artifact path. Mutually exclusive with a positional entity id
+
+
+
+## `memstead conflicts`
+
+List and resolve git merge conflicts in folder-backed mems — the one sanctioned repair when a merge in the user's repo writes conflict markers into entity files. `conflicts list` shows conflicted entities; `conflicts resolve <id> --side ours|theirs` keeps one side, validated before it lands and committed as an attributed mutation
+
+**Usage:** `memstead conflicts <COMMAND>`
+
+###### **Subcommands:**
+
+* `list` — List every entity file carrying git merge-conflict markers. Scope with `--mem`; unscoped sweeps every writable folder mem. Naming a non-folder mem refuses `CONFLICT_RESOLVE_UNSUPPORTED_BACKEND` — only folder mems live in a user git repo where merges can conflict entity files
+* `resolve` — Resolve one conflicted entity to the chosen side. The chosen side is validated as an entity BEFORE anything is written — an invalid side refuses with the validation error. Sides are the standard two; there is no merged-content resolution: to merge, resolve to the better base side, then edit the entity through the normal mutation surface (`memstead update`), and say so in the note (e.g. "base for a manual merge; discarded side: theirs"). A non-conflicted target refuses `NOT_CONFLICTED`
+
+
+
+## `memstead conflicts list`
+
+List every entity file carrying git merge-conflict markers. Scope with `--mem`; unscoped sweeps every writable folder mem. Naming a non-folder mem refuses `CONFLICT_RESOLVE_UNSUPPORTED_BACKEND` — only folder mems live in a user git repo where merges can conflict entity files
+
+**Usage:** `memstead conflicts list [OPTIONS]`
+
+###### **Options:**
+
+* `--mem <MEM>` — Restrict the sweep to one folder mem
+
+
+
+## `memstead conflicts resolve`
+
+Resolve one conflicted entity to the chosen side. The chosen side is validated as an entity BEFORE anything is written — an invalid side refuses with the validation error. Sides are the standard two; there is no merged-content resolution: to merge, resolve to the better base side, then edit the entity through the normal mutation surface (`memstead update`), and say so in the note (e.g. "base for a manual merge; discarded side: theirs"). A non-conflicted target refuses `NOT_CONFLICTED`
+
+**Usage:** `memstead conflicts resolve [OPTIONS] --side <ours|theirs> <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Entity id (e.g. `specs--torn-entity`), as listed by `conflicts list`
+
+###### **Options:**
+
+* `--side <ours|theirs>` — Which side to keep: `ours` or `theirs`
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars) — lands in the resolution's commit and provenance record
 
 
 

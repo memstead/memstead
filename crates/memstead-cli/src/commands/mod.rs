@@ -1,6 +1,7 @@
 pub mod anchors;
 pub mod changes;
 pub mod check;
+pub mod conflicts;
 pub mod context;
 pub mod create;
 

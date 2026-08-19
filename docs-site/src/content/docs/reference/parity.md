@@ -71,6 +71,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `batch-relate`
 - `batch-update`
 - `check`
+- `conflicts`
 - `domain`
 - `due`
 - `export`

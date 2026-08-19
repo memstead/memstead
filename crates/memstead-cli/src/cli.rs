@@ -256,6 +256,14 @@ pub enum Command {
     /// (the query the check-realization hook consumes).
     Anchors(commands::anchors::Args),
 
+    /// List and resolve git merge conflicts in folder-backed mems —
+    /// the one sanctioned repair when a merge in the user's repo
+    /// writes conflict markers into entity files. `conflicts list`
+    /// shows conflicted entities; `conflicts resolve <id> --side
+    /// ours|theirs` keeps one side, validated before it lands and
+    /// committed as an attributed mutation.
+    Conflicts(commands::conflicts::Args),
+
     /// Diff a mem's HEAD against a commit SHA. Pass `--since` = a
     /// prior `commit_sha` from a mutation, or the canonical empty-tree
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
@@ -401,6 +409,7 @@ impl Command {
             #[cfg(feature = "mem-repo")]
             Command::Recover(_) => "recover",
             Command::Anchors(_) => "anchors",
+            Command::Conflicts(_) => "conflicts",
             Command::Changes(_) => "changes",
             Command::Check(_) => "check",
             Command::ReviewMark(_) => "review-mark",
