@@ -1627,6 +1627,213 @@ fn mem_rename_read_only_mount_refuses() {
 }
 
 // ---------------------------------------------------------------------------
+// Rename pins for grader-verified-but-untested behaviours
+// (backlog-sweep plan 08; agent-toolbox/03 grader advisory 2026-08-06)
+// ---------------------------------------------------------------------------
+
+/// Pin 1 — KEY-side `[cross_mem_links]` grant rewrite: renaming the
+/// mem that OWNS a grant (the table key) rewrites the key, not just
+/// values. The full-surface test above covers the value side only
+/// (renaming `alpha`, the grant's target).
+#[test]
+fn mem_rename_rewrites_grant_table_keys() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    // `beta` is the KEY in `beta = ["alpha"]`. Rename beta → zeta.
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "rename", "beta", "zeta"])
+        .assert()
+        .success();
+
+    let toml = fs::read_to_string(root.join(".memstead/workspace.toml")).unwrap();
+    assert!(
+        toml.contains(r#"zeta = ["alpha"]"#),
+        "the grant key must carry the new mem name; got:\n{toml}"
+    );
+    assert!(
+        !toml.contains("beta"),
+        "no grant may still key on the old mem name:\n{toml}"
+    );
+}
+
+/// Pin 2 — OUTGOING cross-mem edges from the renamed mem survive: the
+/// renamed mem's own entity keeps its cross-mem wiki-link and typed
+/// edge into the peer, under the entity's new id, with health clean.
+/// (The full-surface test covers the inbound direction only.)
+#[test]
+fn mem_rename_preserves_outgoing_cross_mem_edges() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    // `beta--watcher` carries [[alpha--one]] and DEPENDS_ON alpha--two.
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "rename", "beta", "zeta"])
+        .assert()
+        .success();
+
+    memstead()
+        .current_dir(root)
+        .args(["entity", "zeta--watcher"])
+        .assert()
+        .success()
+        .stdout(contains("[[alpha--one]]"))
+        .stdout(contains("alpha--two"));
+    memstead()
+        .current_dir(root)
+        .args(["entity", "beta--watcher"])
+        .assert()
+        .failure()
+        .stderr(contains("ENTITY_NOT_FOUND"));
+    // The typed edge is live graph structure, not just text: the
+    // target's referrer view names the renamed source.
+    memstead()
+        .current_dir(root)
+        .args(["--json", "relations", "alpha--two"])
+        .assert()
+        .success()
+        .stdout(contains("zeta--watcher"));
+    memstead()
+        .current_dir(root)
+        .args(["health", "--strict"])
+        .assert()
+        .success();
+}
+
+/// Pin 3 — the create-side allowlist gates the NEW name in agent
+/// posture: a rename whose target matches no `[[mem_management.create]]`
+/// rule refuses `MEM_PATH_NOT_ALLOWED` naming the create table, and
+/// nothing moves. Complement: a target matching the allowlist passes
+/// the same gate.
+#[test]
+fn mem_rename_create_allowlist_gates_the_new_name() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    // Agent-posture gates: the OLD name must match the delete
+    // allowlist, the NEW name the create allowlist.
+    let m = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .env("MEMSTEAD_OPERATOR_MODE", "1")
+            .args(args)
+            .assert()
+            .success();
+    };
+    m(&["workspace", "allow-delete", "alpha"]);
+    m(&["workspace", "allow-create", "exec-*", "--schema", "*"]);
+
+    // Target outside the create allowlist: typed refusal, create table
+    // named, workspace untouched.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "mem", "rename", "alpha", "gamma"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let err = String::from_utf8(out).unwrap();
+    assert!(
+        err.contains("MEM_PATH_NOT_ALLOWED"),
+        "typed refusal expected; got: {err}"
+    );
+    assert!(
+        err.contains("mem_management.create"),
+        "the refusal names the create policy table; got: {err}"
+    );
+    memstead()
+        .current_dir(root)
+        .args(["entity", "alpha--one"])
+        .assert()
+        .success();
+
+    // Complement: an allowlisted target passes the same gate.
+    memstead()
+        .current_dir(root)
+        .args(["mem", "rename", "alpha", "exec-alpha"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args(["entity", "exec-alpha--one"])
+        .assert()
+        .success();
+}
+
+/// Pin 4 — binding + findings-store relocation: `projections/<mem>/`
+/// and `state/findings/<mem>/` move to the new name and the binding's
+/// `destination_mem` is rewritten; the old directories are gone.
+#[test]
+fn mem_rename_relocates_bindings_and_findings() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_rename_workspace(root);
+
+    // A real binding via the product surface…
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "alpha",
+            "--source",
+            "src",
+            "--medium-type",
+            "codebase",
+            "--intent",
+            "rename fixture",
+            "--name",
+            "graph",
+        ])
+        .assert()
+        .success();
+    // …and a findings-store file (engine-owned workspace state, seeded
+    // directly: verify runs are not needed to pin the relocation).
+    let findings_dir = root.join(".memstead/state/findings/alpha");
+    fs::create_dir_all(&findings_dir).unwrap();
+    fs::write(findings_dir.join("graph.json"), "{\"findings\":[]}").unwrap();
+
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args(["mem", "rename", "alpha", "gamma"])
+        .assert()
+        .success();
+
+    let binding_new = root.join(".memstead/projections/gamma/graph.json");
+    assert!(binding_new.is_file(), "binding must move with the mem");
+    assert!(
+        !root.join(".memstead/projections/alpha").exists(),
+        "old projections dir must be gone"
+    );
+    let binding: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&binding_new).unwrap()).unwrap();
+    assert_eq!(
+        binding["destination_mem"], "gamma",
+        "destination_mem must be rewritten; got: {binding}"
+    );
+    assert!(
+        root.join(".memstead/state/findings/gamma/graph.json")
+            .is_file(),
+        "findings store must move with the mem"
+    );
+    assert!(
+        !root.join(".memstead/state/findings/alpha").exists(),
+        "old findings dir must be gone"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Read-mems as workspace-level mounts: install / uninstall / migration
 // ---------------------------------------------------------------------------
 
