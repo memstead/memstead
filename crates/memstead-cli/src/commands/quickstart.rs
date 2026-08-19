@@ -1184,6 +1184,27 @@ fn report(
             .in_dir(target, in_cwd)
             .render()
     });
+    // Where the mem's own files actually are, resolved for the JSON
+    // surface the same way `absolute` resolves the workspace root.
+    let mem_absolute = mem_dir.canonicalize().unwrap_or_else(|_| {
+        if mem_dir == target {
+            absolute.clone()
+        } else {
+            mem_dir.to_path_buf()
+        }
+    });
+    // A path the reader is told to open, rendered from where the receipt
+    // leaves them standing. Every command beside it carries a `cd` when
+    // the workspace is not the cwd; a bare workspace-relative path in that
+    // company is the same defect in prose form — it does not resolve from
+    // the directory the reader is actually in.
+    let from_here = |workspace_relative: &str| {
+        if in_cwd {
+            workspace_relative.to_string()
+        } else {
+            format!("{}/{}", target.display(), workspace_relative)
+        }
+    };
     // The mem's own folder, workspace-relative, when it is not the root.
     let mem_folder_rel: Option<String> = mem_dir
         .strip_prefix(target)
@@ -1295,7 +1316,7 @@ fn report(
                         Some(rel) => format!("engine state and the mem's own folder `{rel}/`"),
                         None => "engine state (`.memstead/`)".to_string(),
                     },
-                    g.record,
+                    from_here(&g.record),
                 ),
                 format!(
                     "- Operations the binding declares: {}",
@@ -1364,7 +1385,11 @@ fn report(
             // Absolute, so a caller that passed a relative argument can
             // use these without reconstructing its own cwd.
             "workspace_root": absolute.display().to_string(),
-            "config_path": config_path(&absolute).display().to_string(),
+            // The MEM's config, which lives under the MEM's folder — the
+            // same directory as its entities. Only in the collapsed shape
+            // is that also the workspace root, so this is derived from the
+            // mem folder, never from the root.
+            "config_path": config_path(&mem_absolute).display().to_string(),
             "seed_entity_delete_command": delete_cmd,
             "name": name,
             "schema": schema_pin.as_display(),
@@ -1458,7 +1483,9 @@ fn report(
     if let Some(g) = guided {
         lines.push(format!(
             "- Binding:     `{}` over `{}` (record: `{}`)",
-            g.binding_id, g.pointer, g.record,
+            g.binding_id,
+            g.pointer,
+            from_here(&g.record),
         ));
     }
     for w in wirings {

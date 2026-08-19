@@ -802,10 +802,14 @@ fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<V
 ///
 /// The scaffold's own default hygiene entries
 /// ([`crate::binding::DEFAULT_SCAFFOLD_DENY_PATHS`]) are exempt: `projection
-/// init` writes them into every codebase/filesystem binding, and on a
-/// git-enumerated source they can never match (ignored/untracked trees are
-/// not enumerated at all). The engine never calls its own output a typo; a
-/// user-authored entry that matches nothing keeps the loud warning.
+/// init` writes them into every codebase/filesystem binding, and most trees
+/// carry none of the debris they name. The exemption is a membership check
+/// against that constant, not a prediction about what the enumerator walks —
+/// enumeration is a filesystem walk even on a git-signalled source, so these
+/// entries CAN match (deleting `**/node_modules/**` from a scaffolded record
+/// over a repo that gitignores `node_modules/` raises the denominator). The
+/// engine never calls its own output a typo; a user-authored entry that
+/// matches nothing keeps the loud warning.
 fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<String> {
     if resolved.deny_paths.is_empty() {
         return Vec::new();

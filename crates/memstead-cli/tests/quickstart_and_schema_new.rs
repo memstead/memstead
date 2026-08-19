@@ -2231,6 +2231,76 @@ fn quickstart_repo_at_the_common_parent_is_reachable() {
     );
 }
 
+/// The JSON receipt's `config_path` names the MEM's config, and the mem's
+/// config lives with the mem's entities — which, in every guided layout
+/// that gives the mem a folder, is not the workspace root.
+#[test]
+fn quickstart_repo_json_config_path_names_a_file_that_exists() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "config-app");
+
+    for args in [
+        vec!["quickstart", "--json", "--repo", "."],
+        vec!["quickstart", "--json", "sub-ws", "--repo", "."],
+    ] {
+        let fresh = fixture_repo(tmp.path(), &format!("c{}", args.len()));
+        let assert = memstead()
+            .current_dir(&fresh)
+            .args(&args)
+            .assert()
+            .success();
+        let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+        let config = std::path::PathBuf::from(payload["config_path"].as_str().unwrap());
+        assert!(
+            config.is_file(),
+            "config_path must name a file that exists ({args:?}): {config:?}",
+        );
+        // …and it is the mem's, not some other workspace's.
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+        assert_eq!(parsed["schema"], payload["schema"]);
+    }
+    drop(repo);
+}
+
+/// A path the receipt tells the reader to open resolves from where the
+/// receipt's own commands leave them standing — the commands carry a
+/// `cd` when the workspace is not the cwd, and a bare workspace-relative
+/// path beside them would not resolve.
+#[test]
+fn quickstart_repo_record_path_resolves_from_the_readers_cwd() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "record-app");
+
+    let out = stdout_of(
+        memstead()
+            .current_dir(&repo)
+            .args([
+                "quickstart",
+                "--agent",
+                "claude-code",
+                "sub-ws",
+                "--repo",
+                ".",
+            ])
+            .assert()
+            .success(),
+    );
+    let edit_line = out
+        .lines()
+        .find(|l| l.contains("yours to edit"))
+        .expect("the brief names the record to edit");
+    let path = edit_line
+        .rsplit_once("yours to edit: `")
+        .expect("the line ends in a backticked path")
+        .1
+        .trim_end_matches('`');
+    assert!(
+        repo.join(path).is_file(),
+        "the record path must resolve from the reader's cwd: {path}",
+    );
+}
+
 /// The collapsed layout — workspace outside the repository — claims only
 /// engine state, because the mem folder is not in the source tree at all
 /// and no exclusion has to fire for it.
