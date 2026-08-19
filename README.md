@@ -32,14 +32,25 @@ brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
 
 Or build from source: with the [Rust toolchain](https://rustup.rs) installed, run `./build-engine.sh` from a clone of this repo — it compiles the workspace and installs both binaries to `~/.cargo/bin`. Whichever path you took, `memstead --version` should now work.
 
-**2. Bootstrap a workspace.** In a fresh directory:
+**2. Bootstrap a workspace.** Either in a fresh directory:
 
 ```bash
 mkdir my-graph && cd my-graph
 memstead quickstart
 ```
 
-One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI — pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action. Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.0.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
+…or in the repository you already have:
+
+```bash
+cd my-existing-repo
+memstead quickstart --repo .
+```
+
+One run leaves a working graph: a workspace, a mem pinned to the built-in `default` schema, a seed entity, and the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI — pass `--agent <target>` to skip the prompt). It prints each artifact it created plus the single next action.
+
+`--repo .` adds one thing: a **source binding** over that repository, so the mem has a subject to grow into. The mem takes a folder of its own inside the repo (your files are never adopted as entities), and the receipt states exactly what the starter mem holds, what it does not, and the command that starts the ingest loop. Nothing is ingested during quickstart itself — see [Growing a mem from a source](#growing-a-mem-from-a-source).
+
+Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
 **3. Add knowledge, find it back:**
 
@@ -101,6 +112,23 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
   ```
 
   `memstead-mcp` walks up from its working directory looking for `.memstead/workspace.toml`, so spawn it from anywhere inside (or under) the workspace — no extra arguments needed. Restart the agent so it picks up the new server.
+
+## Growing a mem from a source
+
+A **binding** is a standing obligation: *this source belongs in that mem.* `memstead quickstart --repo .` scaffolds one over the repository you pointed at; `memstead projection init` creates one for any other source, in any workspace:
+
+```bash
+memstead projection init --mem my-graph --source ../some-repo --medium-type codebase
+```
+
+Creating a binding reads nothing. What fills the mem is the **ingest loop**: an agent session that asks the engine what to work on, works one batch, and records what it did.
+
+```bash
+memstead projection brief my-graph/some-repo    # the batch instruction an agent executes
+memstead projection verify my-graph/some-repo   # what is covered, what has drifted
+```
+
+The brief is written for the agent, not for you — hand it to a session (the Claude Code plugin's ingest skill does exactly this on a loop) and repeat until `verify` says the coverage is where you want it. Every entity still lands through the same validated write path as a hand-authored one.
 
 ## How a Memstead system runs
 

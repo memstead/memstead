@@ -61,6 +61,37 @@ Next: Restart Claude Code so the `memstead` MCP server registers — then try: m
 
 Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
+### …or start from the repository you already have
+
+An empty directory is one starting point; the other is the project you already work in. `--repo` points quickstart at an existing repository:
+
+```bash
+cd my-existing-repo
+memstead quickstart --repo .
+```
+
+The repository becomes the workspace root — `.memstead/` and the agent wiring land where an agent working in the repo will find them — and the mem takes a folder of its own inside it. That folder is the whole graph: your repository's own `.md` files are *not* adopted as entities, and because a mount's storage location is excluded from every binding's input set unconditionally, the mem's own entities never come back round as source artifacts either. (This is why the mem gets a folder of its own whenever the workspace lands inside the repository: the exclusion is skipped for a mem that *is* the workspace root, since excluding it there would empty every denominator.)
+
+The extra artifact is a **source binding**: the standing "this repository belongs in that mem" obligation, scaffolded with the same defaults `memstead projection init` writes. The receipt adds a brief that states what you actually have:
+
+```text
+- Binding:     `my-app/my-app` over `.` (record: `.memstead/projections/my-app/my-app.json`)
+
+## What this mem holds
+
+- Now: one seed entity (`my-app--welcome-to-memstead`). Nothing else — scaffolding a
+  binding reads no source file and creates no entity from one.
+- Not yet: anything from `/home/you/my-existing-repo`. Its code, docs and history are
+  the binding's subject, not its content.
+- Growth: the ingest loop against binding `my-app/my-app` — one batch at a time, each
+  entity written through the same validated path as the seed. Start with:
+  `memstead projection brief my-app/my-app`
+```
+
+Quickstart itself ingests nothing: it is a scaffold, not a batch job. What fills the mem is the ingest loop — see [Bind a source and grow the mem](#5-bind-a-source-and-grow-the-mem) below.
+
+Pass a target path as well (`memstead quickstart ./graph --repo ./my-existing-repo`) to keep the workspace *outside* the repository instead. That shape is fully supported; the receipt names its one cost, which is the same one the next paragraph describes.
+
 **Choosing where to root the workspace.** If you plan to bind source repositories into the graph later (`memstead projection init`), pick the workspace root with them in mind: a source *inside* the workspace root gets clean relative artifact ids; a source *outside* it is fully supported — enumeration, change detection, and anchor resolution all work — but its artifact ids render as `../…` chains, and the workspace-to-source relative layout must stay fixed. To model several sibling repositories, root the workspace at their **common parent directory** (e.g. `~/projects/graph/` next to `~/projects/app/` and `~/projects/lib/` works, but `~/projects/` containing all three is cleaner). Inside a git repository, `mem-repo init` prints this same hint and adds `mem-repo/` to the repo's `.gitignore` — `.memstead/` itself is intentionally trackable.
 
 ## 3. Create your first entities
@@ -120,7 +151,26 @@ memstead entity my-graph--idempotency  # read one entity as markdown
 
 Everything you just created is plain markdown on disk — open `idempotency.md` in the workspace and you'll see exactly what the engine sees. Human-readable, diffable, no database.
 
-## 5. Connect your AI agent
+## 5. Bind a source and grow the mem
+
+Typing entities by hand is one way to fill a mem. The other is a **binding**: a standing "this source belongs in that mem" obligation the engine tracks, measures, and renders work instructions from. `memstead quickstart --repo .` scaffolds one over the repository you started in; `memstead projection init` creates one for any other source:
+
+```bash
+memstead projection init --mem my-graph --source ../some-repo --medium-type codebase
+```
+
+Creating a binding reads nothing — it records the obligation. What fills the mem is the **ingest loop**: an agent session that asks the engine what to work on, works one batch, and stops.
+
+```bash
+memstead projection brief my-graph/some-repo    # the batch instruction an agent executes
+memstead projection verify my-graph/some-repo   # coverage, drift, freshness
+```
+
+The brief is written for the agent, not for you: it names the source slice, the destination mem, and the anchoring rules that let `verify` measure the result. Hand it to an agent session and repeat until `verify` reports the coverage you want. The Claude Code plugin's ingest skill runs exactly this loop for you.
+
+Entities created this way go through the same validated write path as the ones you typed — a binding changes who does the writing, not what the engine accepts.
+
+## 6. Connect your AI agent
 
 `quickstart` already wrote the MCP config for the agent targets you selected — for Claude Code that's a project `.mcp.json` pointing at `memstead-mcp`. Restart the agent inside the workspace and it's connected: the same graph is now readable and writable through the `memstead_*` MCP tools, with the same schema validation on every write.
 

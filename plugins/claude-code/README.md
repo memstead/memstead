@@ -28,8 +28,11 @@ Run **`/setup`** once per workspace. It resolves the `memstead` and
 `memstead-mcp` binaries — installing them for you if they aren't on `PATH`
 (release installer, Homebrew, or source build, in that order) — then runs
 `memstead quickstart`, which creates the workspace, registers a mem named
-after the folder, pins it to the built-in `default@1.0.0` schema, seeds one
-entity, and writes `.mcp.json`. Finally it tells you to restart Claude Code
+after the folder, pins it to the built-in `default` schema, seeds one
+entity, and writes `.mcp.json`. Started in a repository you already have?
+The skill runs `memstead quickstart --repo .` instead, which additionally
+scaffolds a source binding over that repository — the mem takes a folder
+of its own inside it, and none of your files are adopted as entities. Finally it tells you to restart Claude Code
 so the MCP server registers. After the restart, the `memstead_*` tools and
 the commands below are available. (Want a different schema? Pins can be
 changed after setup — the skill points the way.)

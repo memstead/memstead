@@ -26,7 +26,9 @@ use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 
 use clap::{Args as ClapArgs, ValueEnum};
-use memstead_base::filesystem::config::{config_path, init_filesystem_mem, validate_mem_name};
+use memstead_base::binding::ScaffoldParams;
+use memstead_base::filesystem::config::{config_path, init_filesystem_mem_at, validate_mem_name};
+use memstead_base::pipeline_store::write_binding;
 use memstead_base::vcs::Actor;
 use memstead_base::{CreateEntityArgs, Engine as BaseEngine};
 use serde_json::json;
@@ -55,6 +57,23 @@ pub struct Args {
     /// flag, quickstart defaults to `claude-code`.
     #[arg(long = "agent", value_enum)]
     pub agents: Vec<AgentTarget>,
+
+    /// Point at an existing repository: bootstrap the workspace *and*
+    /// scaffold a codebase binding over that tree, then print what the
+    /// starter mem does and does not contain. `--repo .` in the repo
+    /// you already have is the whole guided path.
+    ///
+    /// Without a `PATH` argument the repository *is* the workspace:
+    /// `.memstead/` and the mem's own folder land inside it, so the
+    /// binding points at `.` and every artifact id is repo-relative.
+    /// With a `PATH` argument the workspace is bootstrapped there as
+    /// usual and the binding points back at the repository — a
+    /// supported layout whose one caveat quickstart prints.
+    ///
+    /// Nothing is ingested: the binding is the standing obligation,
+    /// the ingest loop is what fills the mem.
+    #[arg(long = "repo", value_name = "PATH")]
+    pub repo: Option<PathBuf>,
 }
 
 /// The supported agent targets and the wiring each one gets. The three
@@ -119,12 +138,38 @@ struct WiringOutcome {
     /// True when the wiring was skipped because an entry already
     /// existed — regardless of whether its command could be read.
     preexisting: bool,
+    /// True when the config FILE was already on disk before this run.
+    /// Distinct from [`Self::preexisting`], which is about the `memstead`
+    /// server ENTRY: a file that existed and gained an entry was modified,
+    /// not created, and a receipt that calls it new is wrong about the
+    /// reader's tree.
+    file_existed: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    // The repository must already exist — quickstart creates workspaces,
+    // never repositories, and a typo'd `--repo` that silently produced an
+    // empty tree would scaffold a binding over nothing.
+    if let Some(repo) = &args.repo
+        && !repo.is_dir()
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "--repo {} is not an existing directory — point it at the repository \
+                 you already have: memstead quickstart --repo .",
+                repo.display(),
+            ),
+        )
+        .with_details(json!({ "repo": repo.display().to_string() }))
+        .into());
+    }
+
     let target = args
         .path
         .clone()
+        .or_else(|| args.repo.clone())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     if target.exists() && !target.is_dir() {
@@ -139,7 +184,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         )
         .into());
     }
-    if !target.exists() {
+    let target_created = !target.exists();
+    if target_created {
         // Typed, not INTERNAL: an unwritable or missing parent is an
         // environment condition the caller can act on (fix permissions,
         // pick another target). The path rides `details` so an agent
@@ -156,6 +202,31 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .with_details(serde_json::json!({ "path": target.display().to_string() }))
         })?;
     }
+
+    // Layout. Without `--repo` the workspace root is the target and the
+    // mem folder collapses onto it — today's shape exactly. With `--repo`,
+    // the mem takes a folder of its own whenever the workspace and the
+    // repository OVERLAP: `--repo .` with no target path (the flagship
+    // case), a workspace nested in the repo (`quickstart ./graph --repo .`),
+    // and a workspace at the common parent of several repos alike.
+    //
+    // The overlap test is the rule, not a convenience, and it earns its
+    // keep at both ends. Workspace inside the source tree: the mem's own
+    // entity files would be inside the binding's scope, and the one
+    // mechanism that keeps them out — the engine's unconditional
+    // exclusion of every mount's storage location — is skipped for a
+    // mount that IS the workspace root (excluding `**` there would empty
+    // every denominator); a folder of its own puts the mem back under
+    // that exclusion. Repository inside the workspace — the common-parent
+    // layout the out-of-root warning itself recommends: the
+    // tolerant-emptiness gate would refuse that parent for containing the
+    // repo, and a folder of its own moves the gate onto the mem's folder,
+    // so the recipe the engine prints is reachable from the front door
+    // that prints it.
+    let mem_in_subfolder = args
+        .repo
+        .as_deref()
+        .is_some_and(|repo| workspace_overlaps_repo(&target, repo));
 
     // Conflict gate 1: the target itself already carries `.memstead/`.
     check_no_local_memstead(&target)?;
@@ -184,13 +255,28 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .into());
     }
 
-    // Conflict gate 3: tolerant emptiness. Dotfiles and non-`.md`
-    // README-grade files are fine — the folder backend only reads `.md`
-    // files, so they can never leak into the graph. Anything else is a
-    // genuine conflict named in full; `.md` files especially, because a
-    // filesystem mem owns every `.md` file in its folder and quickstart
-    // must never silently adopt user content into the graph.
-    let blocking = blocking_entries(&target)?;
+    // Mem name: flag > derivation from the directory > TTY prompt >
+    // refusal carrying the exact command. Resolved before gate 3 because
+    // the guided layout names the mem's folder after it.
+    let name = resolve_mem_name(&target, args.name.as_deref())?;
+
+    // The mem's folder — the workspace root itself in the collapsed
+    // shape, a subdirectory named after the mem in the guided in-repo one.
+    let mem_dir = if mem_in_subfolder {
+        target.join(&name)
+    } else {
+        target.clone()
+    };
+
+    // Conflict gate 3: tolerant emptiness — of the folder the mem will
+    // own, which is the only folder whose `.md` files the graph would
+    // adopt. In the guided in-repo layout that is the fresh subdirectory,
+    // so the repository's own files never reach this gate; they are not
+    // the mem's folder, and nothing adopts them.
+    if mem_in_subfolder {
+        guard_guided_mem_folder(&target, &mem_dir, &name)?;
+    }
+    let blocking = blocking_entries(&mem_dir)?;
     if !blocking.is_empty() {
         let md_note = if blocking.iter().any(|f| f.ends_with(".md`")) {
             " (a filesystem mem owns every `.md` file in its folder, so quickstart \
@@ -205,20 +291,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 "target {} has content quickstart won't touch: {}{md_note} — move it \
                  out, or start in a fresh folder: mkdir my-graph && cd my-graph && \
                  memstead quickstart",
-                target.display(),
+                mem_dir.display(),
                 blocking.join(", "),
             ),
         )
         .with_details(json!({
-            "path": target.display().to_string(),
+            "path": mem_dir.display().to_string(),
             "found": blocking,
         }))
         .into());
     }
-
-    // Mem name: flag > derivation from the directory > TTY prompt >
-    // refusal carrying the exact command.
-    let name = resolve_mem_name(&target, args.name.as_deref())?;
 
     // Agent targets: flag > TTY prompt > default (Claude Code, stated).
     let (agents, agents_defaulted) = resolve_agents(&args.agents)?;
@@ -238,9 +320,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // printed pin tracks the catalogue instead of a hardcoded version.
     let schema_pin = default_schema_pin()?;
 
+    // Everything the guided mode needs to say and write is derived
+    // BEFORE the first write: a pointer or stem that cannot be formed
+    // must refuse while "re-run memstead quickstart" is still true.
+    let guided_plan = match &args.repo {
+        Some(repo) => Some(GuidedPlan::derive(&target, repo, &name)?),
+        None => None,
+    };
+
     // Workspace + config through the same shared initialiser `memstead
     // init` uses — one code path, byte-identical output.
-    init_filesystem_mem(&target, &name, &schema_pin).map_err(|e| {
+    init_filesystem_mem_at(&target, &mem_dir, &name, &schema_pin).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
             "INTERNAL_IO_ERROR",
@@ -250,6 +340,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     // Seed entity, through the engine's validated create path.
     let seed_id = seed_entity(&target, &name)?;
+
+    // The binding: the standing source→mem obligation the ingest loop
+    // runs against. Scaffolded through the engine's own scaffold, so a
+    // guided binding is the same record `memstead projection init`
+    // writes — no quickstart-private shape.
+    let guided = match guided_plan {
+        Some(plan) => Some(plan.write(&target)?),
+        None => None,
+    };
 
     // MCP wiring per selected target.
     let mcp_bin = resolve_mcp_binary();
@@ -261,13 +360,219 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     report(
         ctx,
         &target,
+        &mem_dir,
         &name,
         &schema_pin,
         &seed_id,
         &wirings,
         agents_defaulted,
         &mcp_bin,
+        guided.as_ref(),
+        target_created,
     )
+}
+
+/// Whether the workspace root and the repository overlap — either one
+/// containing the other, the equal case included. Both sides are
+/// canonicalized where possible so a symlinked parent (`/tmp` on macOS)
+/// does not read as disjoint; a path that cannot be canonicalized falls
+/// back to its own form, which claims no overlap.
+fn workspace_overlaps_repo(target: &Path, repo: &Path) -> bool {
+    let t = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf());
+    let r = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    t.starts_with(&r) || r.starts_with(&t)
+}
+
+/// The workspace root expressed relative to the repository, or `None`
+/// when the workspace is not inside it (`Some("")` for the equal case).
+///
+/// This is the frame the receipt owes a reader asking "what appeared in
+/// my repository?": every artifact path quickstart knows is relative to
+/// the WORKSPACE, and the two frames coincide only when the two roots do.
+fn workspace_within_repo(target: &Path, repo: &Path) -> Option<String> {
+    let t = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf());
+    let r = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    let rel = t.strip_prefix(&r).ok()?;
+    Some(rel.to_string_lossy().replace('\\', "/"))
+}
+
+/// Refuse a guided in-repo layout whose mem folder would collide with
+/// something already in the repository. The mem folder is a directory
+/// quickstart creates and the graph then owns; adopting a folder the
+/// repository already uses is the same defect as adopting its `.md`
+/// files, so this refuses and names the flag that resolves it.
+fn guard_guided_mem_folder(repo: &Path, mem_dir: &Path, name: &str) -> anyhow::Result<()> {
+    if !mem_dir.exists() {
+        return Ok(());
+    }
+    let retry = ShellCmd::new(memstead_program())
+        .arg("quickstart")
+        .arg("--repo")
+        .arg(repo.display().to_string())
+        .arg("--name")
+        .arg(format!("{name}-mem"))
+        .render();
+    if !mem_dir.is_dir() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            crate::TARGET_NOT_EMPTY_CODE,
+            format!(
+                "the mem would take the folder {}, and that path already exists as a file \
+                 — name the mem something else: {retry}",
+                mem_dir.display(),
+            ),
+        )
+        .with_details(json!({ "path": mem_dir.display().to_string() }))
+        .into());
+    }
+    let occupied = std::fs::read_dir(mem_dir)
+        .map(|entries| entries.count() > 0)
+        .unwrap_or(true);
+    if occupied {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            crate::TARGET_NOT_EMPTY_CODE,
+            format!(
+                "the mem would take the folder {}, and that folder already exists and is \
+                 not empty — quickstart won't adopt a folder the repository already uses. \
+                 Name the mem something else: {retry}",
+                mem_dir.display(),
+            ),
+        )
+        .with_details(json!({ "path": mem_dir.display().to_string() }))
+        .into());
+    }
+    Ok(())
+}
+
+/// The guided mode's binding, resolved before any write and written
+/// after the workspace exists. Split in two so a pointer or stem that
+/// cannot be formed refuses while the retry command is still true.
+struct GuidedPlan {
+    /// The medium pointer, workspace-relative (`.` for the in-repo layout).
+    pointer: String,
+    /// The `<stem>` half of the binding id.
+    stem: String,
+    /// The repository as the reader sees it, for the receipt.
+    repo_display: String,
+    /// The layout caveat, when the repository sits outside the workspace.
+    layout_warning: Option<String>,
+    /// The workspace root relative to the repository, when it is inside
+    /// it at all (`Some("")` when they are the same directory). `None`
+    /// means this run wrote nothing into the repository.
+    workspace_in_repo: Option<String>,
+    mem: String,
+}
+
+/// What the receipt reports about the scaffolded binding.
+struct GuidedOutcome {
+    binding_id: String,
+    pointer: String,
+    repo_display: String,
+    /// Workspace-relative path of the written record.
+    record: String,
+    /// The deny globs the record actually carries — printed from the
+    /// record, never from the constant, so the brief cannot drift from
+    /// what was written.
+    deny_paths: Vec<String>,
+    /// Which operations the record declares.
+    operations: Vec<String>,
+    /// Scaffold + layout warnings, in that order.
+    warnings: Vec<String>,
+    /// The workspace root relative to the repository — see
+    /// [`GuidedPlan::workspace_in_repo`].
+    workspace_in_repo: Option<String>,
+}
+
+impl GuidedPlan {
+    fn derive(workspace_root: &Path, repo: &Path, mem: &str) -> anyhow::Result<Self> {
+        let workspace_abs = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+        let repo_abs = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+        let pointer = if repo_abs == workspace_abs {
+            ".".to_string()
+        } else {
+            let rel = memstead_base::ingest::cursor::relative_to(&workspace_abs, &repo_abs);
+            if rel.as_os_str().is_empty() {
+                ".".to_string()
+            } else {
+                rel.to_string_lossy().replace('\\', "/")
+            }
+        };
+        // The stem is a file-path component and half the binding id, so
+        // it gets the same slug treatment as the mem name; a repository
+        // basename that slugs to nothing falls back to the mem name,
+        // which already passed the slug rule.
+        let stem = repo_abs
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .and_then(|n| derive_mem_name(&n))
+            .unwrap_or_else(|| mem.to_string());
+        let layout_warning = memstead_base::ingest::cursor::out_of_root_layout_warning(
+            &pointer,
+            &workspace_abs,
+            memstead_base::MediumType::Codebase,
+        );
+        Ok(GuidedPlan {
+            pointer,
+            stem,
+            repo_display: repo_abs.display().to_string(),
+            layout_warning,
+            workspace_in_repo: workspace_within_repo(workspace_root, repo),
+            mem: mem.to_string(),
+        })
+    }
+
+    fn write(self, workspace_root: &Path) -> anyhow::Result<GuidedOutcome> {
+        let GuidedPlan {
+            pointer,
+            stem,
+            repo_display,
+            layout_warning,
+            workspace_in_repo,
+            mem,
+        } = self;
+        let scaffolded = memstead_base::binding::scaffold_binding(ScaffoldParams {
+            destination_mem: &mem,
+            source_name: &stem,
+            pointer: &pointer,
+            medium_type: memstead_base::MediumType::Codebase,
+            intent: Some(format!(
+                "Model the `{stem}` codebase in the `{mem}` mem: what each part is for, \
+                 how the parts fit together, and the decisions behind them."
+            )),
+            additional_deny_paths: Vec::new(),
+        });
+        write_binding(workspace_root, &mem, &stem, &scaffolded.binding).map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                "PROJECTION_INIT_FAILED",
+                format!("could not scaffold binding `{mem}/{stem}`: {e}"),
+            )
+            .with_details(json!({ "binding": format!("{mem}/{stem}"), "error": e.to_string() }))
+        })?;
+        let mut warnings: Vec<String> = scaffolded.warnings;
+        warnings.extend(layout_warning);
+        Ok(GuidedOutcome {
+            binding_id: format!("{mem}/{stem}"),
+            pointer,
+            repo_display,
+            record: format!(".memstead/projections/{mem}/{stem}.json"),
+            deny_paths: scaffolded.binding.deny_paths.clone(),
+            operations: scaffolded
+                .operations
+                .iter()
+                .map(|o| (*o).to_string())
+                .collect(),
+            warnings,
+            workspace_in_repo,
+        })
+    }
 }
 
 /// Refuse when the target already carries `.memstead/` — either a
@@ -315,6 +620,11 @@ fn check_no_local_memstead(target: &Path) -> anyhow::Result<()> {
 /// content into the graph is the one thing quickstart must never do.
 /// `.memstead` is handled earlier by [`check_no_local_memstead`].
 fn blocking_entries(target: &Path) -> anyhow::Result<Vec<String>> {
+    // A folder that does not exist yet blocks nothing — the guided
+    // layout's mem folder is created by the initialiser.
+    if !target.exists() {
+        return Ok(Vec::new());
+    }
     let read_err = |e: std::io::Error| {
         CliError::new(
             ExitKind::Generic,
@@ -675,9 +985,11 @@ fn wire_agent(
             action: format!("run: `{add}`"),
             existing_command: None,
             preexisting: false,
+            file_existed: false,
         });
     };
     let path = target.join(rel);
+    let file_existed = path.exists();
     let mut root = read_agent_config(&path)?;
 
     let servers = root
@@ -709,6 +1021,7 @@ fn wire_agent(
             action: format!("`{rel}` already has a `memstead` server entry — left untouched"),
             existing_command,
             preexisting: true,
+            file_existed,
         });
     }
     servers.insert("memstead".to_string(), json!({ "command": mcp_command }));
@@ -738,6 +1051,7 @@ fn wire_agent(
         action: format!("wrote `{rel}` (server `memstead`)"),
         existing_command: None,
         preexisting: false,
+        file_existed,
     })
 }
 
@@ -820,12 +1134,18 @@ impl ShellCmd {
 fn report(
     ctx: &CliContext,
     target: &Path,
+    mem_dir: &Path,
     name: &str,
     schema_pin: &memstead_schema::SchemaRef,
     seed_id: &str,
     wirings: &[WiringOutcome],
     agents_defaulted: bool,
     mcp_bin: &McpBinary,
+    guided: Option<&GuidedOutcome>,
+    // Whether this run created the workspace directory itself — the
+    // difference between "one new directory appeared" and "files appeared
+    // inside a directory you already had".
+    target_created: bool,
 ) -> anyhow::Result<()> {
     let restart_labels: Vec<&str> = wirings.iter().map(|w| w.target.label()).collect();
 
@@ -855,6 +1175,21 @@ fn report(
         .in_dir(target, in_cwd)
         .render();
     let version_cmd = ShellCmd::new(&mcp_bin.command).arg("--version").render();
+    // The one command that starts the ingest loop the brief points at.
+    let brief_cmd = guided.map(|g| {
+        ShellCmd::new(&memstead)
+            .arg("projection")
+            .arg("brief")
+            .arg(&g.binding_id)
+            .in_dir(target, in_cwd)
+            .render()
+    });
+    // The mem's own folder, workspace-relative, when it is not the root.
+    let mem_folder_rel: Option<String> = mem_dir
+        .strip_prefix(target)
+        .ok()
+        .map(|r| r.to_string_lossy().to_string())
+        .filter(|r| !r.is_empty());
 
     // Codex is wired by a command the reader still has to run, so for
     // that target the restart registers nothing until they run it. Say
@@ -911,9 +1246,121 @@ fn report(
         }
     }
     verify_now.push(("the graph is already readable", overview_cmd.clone()));
+    if let Some(cmd) = &brief_cmd {
+        verify_now.push(("the binding renders its ingest brief", cmd.clone()));
+    }
+
+    // The honest brief: what the starter mem holds now, what it does not,
+    // and what turns the second into the first. Every line is derived from
+    // what was just written — the deny list comes off the record, the
+    // commands off the builder — because a brief that is composed rather
+    // than derived is exactly how printed claims drift from behaviour.
+    let brief_lines: Vec<String> = match (guided, &brief_cmd) {
+        (Some(g), Some(brief)) => {
+            let mut b = vec![
+                "## What this mem holds".to_string(),
+                String::new(),
+                format!(
+                    "- Now: one seed entity (`{seed_id}`). Nothing else — scaffolding a \
+                     binding reads no source file and creates no entity from one."
+                ),
+                format!(
+                    "- Not yet: anything from `{}`. Its code, docs and history are the \
+                     binding's subject, not its content.",
+                    g.repo_display,
+                ),
+                format!(
+                    "- Growth: the ingest loop against binding `{}` — one batch at a \
+                     time, each entity written through the same validated path as the \
+                     seed. Start with: `{brief}`",
+                    g.binding_id,
+                ),
+                format!(
+                    "- Scope: everything under `{}`, minus what the record denies ({}) \
+                     and minus {}, which the engine excludes unconditionally. The deny \
+                     list is yours to edit: `{}`",
+                    g.pointer,
+                    g.deny_paths
+                        .iter()
+                        .map(|d| format!("`{d}`"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    // Say what this layout actually excludes. The mem's
+                    // folder is only inside the scope — and only excluded
+                    // by the mount rule — when it is a folder of its own;
+                    // in the collapsed layout the workspace sits outside
+                    // the source tree, so naming it here would claim an
+                    // exclusion that never had to fire.
+                    match &mem_folder_rel {
+                        Some(rel) => format!("engine state and the mem's own folder `{rel}/`"),
+                        None => "engine state (`.memstead/`)".to_string(),
+                    },
+                    g.record,
+                ),
+                format!(
+                    "- Operations the binding declares: {}",
+                    g.operations.join(", ")
+                ),
+            ];
+            // What appeared in the reader's repository — the one claim
+            // they can check with `git status` in ten seconds, so it is
+            // stated in THEIR frame, not the workspace's. Every artifact
+            // path quickstart holds is workspace-relative; the two frames
+            // coincide only when the workspace is the repository, so the
+            // paths are re-expressed against the repo root and the line
+            // is omitted entirely when the workspace is somewhere else.
+            if let Some(ws_rel) = &g.workspace_in_repo {
+                let in_repo = |p: &str| {
+                    if ws_rel.is_empty() {
+                        format!("`{p}`")
+                    } else {
+                        format!("`{ws_rel}/{p}`")
+                    }
+                };
+                let mut written = Vec::new();
+                if target_created && !ws_rel.is_empty() {
+                    // The whole workspace directory is what `git status`
+                    // will show — one untracked path, not three inside it.
+                    written.push(format!(
+                        "`{ws_rel}/` (the workspace: its state, the binding record, \
+                         the mem, and the agent wiring — plus the engine's cache, \
+                         which appears inside it on the first read)"
+                    ));
+                } else {
+                    written.push(format!(
+                        "{} (workspace state and the binding record; a sibling \
+                         `.memstead.cache/` appears the first time the engine reads)",
+                        in_repo(".memstead/")
+                    ));
+                    if let Some(rel) = &mem_folder_rel {
+                        written.push(format!("{} (the mem)", in_repo(&format!("{rel}/"))));
+                    }
+                    // A config file that already existed was MODIFIED, not
+                    // added — `preexisting` tracks the `memstead` server
+                    // entry, which is a different fact from the file.
+                    for w in wirings.iter().filter(|w| !w.preexisting) {
+                        if let Some(f) = w.target.config_file() {
+                            let verb = if w.file_existed {
+                                "agent wiring added to it"
+                            } else {
+                                "agent wiring"
+                            };
+                            written.push(format!("{} ({verb})", in_repo(f)));
+                        }
+                    }
+                }
+                b.push(format!(
+                    "- Written into your repository: {}. Nothing else in the tree was touched.",
+                    written.join(", "),
+                ));
+            }
+            b
+        }
+        _ => Vec::new(),
+    };
 
     if ctx.json {
-        return print_json(&json!({
+        let mut payload = json!({
             // Absolute, so a caller that passed a relative argument can
             // use these without reconstructing its own cwd.
             "workspace_root": absolute.display().to_string(),
@@ -937,23 +1384,83 @@ fn report(
             // the other one — the same three parts the markdown block
             // carries, from the same value.
             "workspace_shape_disclosure":
-                crate::setup::shape_disclosure(crate::setup::WorkspaceShape::Filesystem).to_json(),
+                crate::setup::shape_disclosure_in(
+                    crate::setup::WorkspaceShape::Filesystem,
+                    mem_folder_rel.as_deref(),
+                ).to_json(),
             "next_action": next_action,
             "verify_now": verify_now
                 .iter()
                 .map(|(what, command)| json!({ "what": what, "command": command }))
                 .collect::<Vec<_>>(),
             "warnings": mcp_bin.warning.as_ref().map(|w| vec![w.clone()]).unwrap_or_default(),
-        }));
+        });
+        // Guided-mode fields are additive and present only in guided mode:
+        // a plain quickstart's JSON is the same document it has always been.
+        if let Some(g) = guided {
+            payload["mem_folder"] =
+                json!(mem_folder_rel.clone().unwrap_or_else(|| ".".to_string()));
+            payload["repo"] = json!(g.repo_display);
+            payload["binding"] = json!({
+                "id": g.binding_id,
+                "pointer": g.pointer,
+                "record": g.record,
+                "deny_paths": g.deny_paths,
+                "operations": g.operations,
+            });
+            payload["brief"] = json!(
+                brief_lines
+                    .iter()
+                    .filter(|l| l.starts_with("- "))
+                    .map(|l| l.trim_start_matches("- ").to_string())
+                    .collect::<Vec<_>>()
+            );
+            if !g.warnings.is_empty() {
+                let mut w: Vec<String> = payload["warnings"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                w.extend(g.warnings.iter().cloned());
+                payload["warnings"] = json!(w);
+            }
+        }
+        return print_json(&payload);
     }
 
     let mut lines = vec![
         format!("# Quickstart complete — mem `{name}`"),
         String::new(),
-        format!("- Workspace:   `{}`", target.display()),
-        format!("- Schema pin:  `{}`", schema_pin.as_display()),
-        format!("- Seed entity: `{seed_id}` (remove any time: `{delete_cmd}`)"),
+        // The guided path is normally invoked as `--repo .`, and a
+        // receipt that answers "where is it?" with "." tells the reader
+        // nothing they did not type; resolve it for that case only.
+        format!(
+            "- Workspace:   `{}`",
+            if guided.is_some() {
+                absolute.display().to_string()
+            } else {
+                target.display().to_string()
+            }
+        ),
     ];
+    if let Some(rel) = &mem_folder_rel {
+        lines.push(format!(
+            "- Mem folder:  `{rel}/` (the graph owns this folder and nothing else)"
+        ));
+    }
+    lines.push(format!("- Schema pin:  `{}`", schema_pin.as_display()));
+    lines.push(format!(
+        "- Seed entity: `{seed_id}` (remove any time: `{delete_cmd}`)"
+    ));
+    if let Some(g) = guided {
+        lines.push(format!(
+            "- Binding:     `{}` over `{}` (record: `{}`)",
+            g.binding_id, g.pointer, g.record,
+        ));
+    }
     for w in wirings {
         lines.push(format!("- {}: {}", w.target.label(), w.action));
     }
@@ -964,17 +1471,26 @@ fn report(
                 .to_string(),
         );
     }
-    if let Some(warning) = &mcp_bin.warning {
+    let mut warnings: Vec<String> = mcp_bin.warning.iter().cloned().collect();
+    warnings.extend(guided.iter().flat_map(|g| g.warnings.iter().cloned()));
+    if !warnings.is_empty() {
         lines.push(String::new());
-        lines.push(format!("> warning: {warning}"));
+        for warning in &warnings {
+            lines.push(format!("> warning: {warning}"));
+        }
+    }
+    if !brief_lines.is_empty() {
+        lines.push(String::new());
+        lines.extend(brief_lines.iter().cloned());
     }
     // The shape disclosure sits between the artifact list and the next
     // action: quickstart picked one of two workspace shapes just now,
     // and this receipt is the only output the newcomer is guaranteed
     // to read before they hit the first mem-repo-only refusal.
     lines.push(String::new());
-    lines.extend(crate::setup::shape_disclosure_lines(
+    lines.extend(crate::setup::shape_disclosure_lines_in(
         crate::setup::WorkspaceShape::Filesystem,
+        mem_folder_rel.as_deref(),
     ));
     lines.push(String::new());
     lines.push(format!("Next: {next_action}"));

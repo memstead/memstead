@@ -796,6 +796,230 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
     }
 }
 
+/// What a caller wants scaffolded: one binding over one source. Everything
+/// else — deny defaults, the capability-matrix filter, the prune block — is
+/// the engine's to decide, so that every front door that scaffolds a binding
+/// scaffolds the same one.
+#[derive(Debug, Clone)]
+pub struct ScaffoldParams<'a> {
+    /// The mem the binding writes into — the `<mem>` half of the binding id.
+    pub destination_mem: &'a str,
+    /// The single source's `name` (unique within the record; keys per-source
+    /// state). Conventionally the binding stem.
+    pub source_name: &'a str,
+    /// The medium pointer — workspace-relative path, mem id, or URL.
+    pub pointer: &'a str,
+    /// The medium type, which decides the capability matrix.
+    pub medium_type: MediumType,
+    /// Intent prose for the agent, or `None`.
+    pub intent: Option<String>,
+    /// Deny globs to add beyond [`DEFAULT_SCAFFOLD_DENY_PATHS`], for a caller
+    /// that knows something about the tree the engine cannot infer. Materialised
+    /// into the record exactly like the defaults — visible, editable, deletable.
+    /// Engine state and mount storage locations never belong here: their
+    /// exclusion is unconditional in the strategy layer.
+    pub additional_deny_paths: Vec<String>,
+}
+
+/// A scaffolded binding, ready to write: the record, the operations it ended
+/// up declaring, and the warnings the caller must surface.
+#[derive(Debug, Clone)]
+pub struct ScaffoldedBinding {
+    /// The record to write.
+    pub binding: Binding,
+    /// The operation names the record declares, in `build, sync, verify` order
+    /// — the matrix may have stripped some.
+    pub operations: Vec<&'static str>,
+    /// Capability refusals the scaffold resolved by stripping an operation,
+    /// rendered for the caller's output. Never a failure: a scaffold that
+    /// declares less than asked says so rather than refusing.
+    pub warnings: Vec<String>,
+}
+
+/// Scaffold the default binding record for one source — the single
+/// definition of "a fresh binding", shared by every front door that creates
+/// one (`memstead projection init`, the guided `memstead quickstart` path,
+/// any embedder).
+///
+/// The record: one inline [`Source`] scoped `**/*` (a scoped default — an
+/// unscoped source refuses at run time), the enumerable-medium deny defaults
+/// materialised into the record (see [`DEFAULT_SCAFFOLD_DENY_PATHS`] for why
+/// they are recorded rather than injected), unstated `coverage_semantics`
+/// (the scaffold asserts nothing), and `build` + `sync` + `verify` filtered
+/// through the capability matrix — a `web` source loses sync/verify and the
+/// deferral rides `warnings`. Prune is scaffolded wherever sync survived,
+/// with the strongest guarantee the medium supports.
+pub fn scaffold_binding(params: ScaffoldParams<'_>) -> ScaffoldedBinding {
+    let ScaffoldParams {
+        destination_mem,
+        source_name,
+        pointer,
+        medium_type,
+        intent,
+        additional_deny_paths,
+    } = params;
+
+    let source = Source {
+        name: source_name.to_string(),
+        medium_type,
+        pointer: pointer.to_string(),
+        change_detection: None,
+        scope: vec![PatternEntry {
+            path: "**/*".to_string(),
+            mode: crate::pipeline::PatternMode::Allow,
+        }],
+        engagement: None,
+        preparation: None,
+    };
+
+    let mut deny_paths: Vec<String> =
+        if matches!(medium_type, MediumType::Codebase | MediumType::Filesystem) {
+            DEFAULT_SCAFFOLD_DENY_PATHS
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            Vec::new()
+        };
+    for extra in additional_deny_paths {
+        if !deny_paths.contains(&extra) {
+            deny_paths.push(extra);
+        }
+    }
+
+    let mut binding = Binding {
+        version: BINDING_VERSION,
+        intent,
+        sources: vec![source],
+        reference_mems: Vec::new(),
+        destination_mem: destination_mem.to_string(),
+        deny_paths,
+        coverage_semantics: None,
+        rules: None,
+        prune: None,
+        operations: Operations {
+            build: Some(BuildOperation {
+                mode: BuildMode::Discovery,
+                trigger: IngestTrigger::Loop,
+                batch_size: 20,
+                post_actions: None,
+            }),
+            sync: Some(SyncOperation {
+                trigger: IngestTrigger::Manual,
+                batch_size: 20,
+            }),
+            verify: Some(VerifyOperation {
+                trigger: IngestTrigger::Manual,
+                batch_size: 20,
+                adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+            }),
+        },
+    };
+
+    let mut warnings: Vec<String> = Vec::new();
+    if let Err(refusals) = validate_binding(&binding) {
+        for r in &refusals {
+            if let CapabilityError::OperationOutOfScope { operation, .. } = r {
+                match *operation {
+                    "sync" => binding.operations.sync = None,
+                    "verify" => binding.operations.verify = None,
+                    _ => {}
+                }
+            }
+            warnings.push(r.to_string());
+        }
+    }
+
+    if binding.operations.sync.is_some() {
+        binding.prune = Some(PruneConfig {
+            guarantee: prune_guarantee_for_medium(medium_type),
+        });
+    }
+
+    let mut operations: Vec<&'static str> = vec!["build"];
+    if binding.operations.sync.is_some() {
+        operations.push("sync");
+    }
+    if binding.operations.verify.is_some() {
+        operations.push("verify");
+    }
+
+    ScaffoldedBinding {
+        binding,
+        operations,
+        warnings,
+    }
+}
+
+#[cfg(test)]
+mod scaffold_tests {
+    use super::*;
+
+    /// The scaffold is one definition, so every front door writes the same
+    /// record: scoped source, materialised deny defaults, full operations.
+    #[test]
+    fn codebase_scaffold_carries_the_deny_defaults_and_every_operation() {
+        let s = scaffold_binding(ScaffoldParams {
+            destination_mem: "app",
+            source_name: "app",
+            pointer: ".",
+            medium_type: MediumType::Codebase,
+            intent: Some("model it".to_string()),
+            additional_deny_paths: Vec::new(),
+        });
+        assert_eq!(s.operations, vec!["build", "sync", "verify"]);
+        assert_eq!(s.warnings, Vec::<String>::new());
+        assert_eq!(s.binding.deny_paths, DEFAULT_SCAFFOLD_DENY_PATHS);
+        assert_eq!(s.binding.sources[0].scope[0].path, "**/*");
+        assert_eq!(s.binding.sources[0].pointer, ".");
+        assert!(s.binding.coverage_semantics.is_none(), "asserts nothing");
+        assert!(
+            s.binding.prune.is_some(),
+            "sync survived, so prune rides it"
+        );
+    }
+
+    /// A caller's extra deny entries are materialised alongside the
+    /// defaults — visible, editable, and never silently deduplicated away
+    /// into a different list.
+    #[test]
+    fn additional_deny_paths_are_appended_once() {
+        let s = scaffold_binding(ScaffoldParams {
+            destination_mem: "app",
+            source_name: "app",
+            pointer: ".",
+            medium_type: MediumType::Codebase,
+            intent: None,
+            additional_deny_paths: vec!["build/**".to_string(), "**/.git/**".to_string()],
+        });
+        let expected: Vec<String> = DEFAULT_SCAFFOLD_DENY_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .chain(std::iter::once("build/**".to_string()))
+            .collect();
+        assert_eq!(s.binding.deny_paths, expected);
+    }
+
+    /// A medium the matrix cannot serve loses the operation and says so,
+    /// rather than scaffolding a record that refuses at run time.
+    #[test]
+    fn web_scaffold_loses_sync_and_verify_with_a_warning() {
+        let s = scaffold_binding(ScaffoldParams {
+            destination_mem: "app",
+            source_name: "manual",
+            pointer: "https://example.com/manual",
+            medium_type: MediumType::Web,
+            intent: None,
+            additional_deny_paths: Vec::new(),
+        });
+        assert_eq!(s.operations, vec!["build"]);
+        assert!(!s.warnings.is_empty(), "the deferral is named");
+        assert!(s.binding.deny_paths.is_empty(), "no path denies over web");
+        assert!(s.binding.prune.is_none(), "no sync, no prune");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

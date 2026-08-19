@@ -65,11 +65,21 @@ memstead quickstart --agent claude-code
 
 One command does everything: workspace store, a default-schema mem named after the folder, a seed entity, and the Claude Code MCP wiring (`.mcp.json` pointing at `memstead-mcp`). It tolerates dotfiles and README-grade files in the target folder.
 
+**In an existing repository, add `--repo .`:**
+
+```bash
+memstead quickstart --agent claude-code --repo .
+```
+
+Same artifacts, plus a scaffolded `codebase` binding over the repository — the standing "this repo belongs in that mem" obligation the `/ingest` loop then works. The mem takes a folder of its own inside the repo, so the repository's own `.md` files are never adopted as entities, and the receipt's brief states what the starter mem holds, what it does not, and the command that starts the loop. Nothing is ingested by quickstart itself.
+
+Decide which form to run **before** invoking: if the current directory is inside a git repository with content of its own (`git rev-parse --show-toplevel` succeeds and the folder is not empty), use `--repo .`; otherwise use the plain form. Say which you picked and why in one line.
+
 Handle its outcomes:
 
-- **Success** — the summary names the workspace, mem, schema pin (`default@1.0.0`), and seed entity. Go to step 3.
+- **Success** — the summary names the workspace, mem, schema pin (the current built-in `default` generation), and seed entity; with `--repo` it also names the binding and prints the "What this mem holds" brief. Relay the brief to the user verbatim — it is the honest statement of what they now have. Go to step 3.
 - **Unknown / unrecognized subcommand** (`quickstart` not found) — the installed binary predates `quickstart` (the v0.1.0 release binaries only have `memstead init`). Don't parse versions; just fall back to the manual path, which does the same two things quickstart automates:
-  1. `memstead init --name <slug> --schema default@1.0.0` — `<slug>` is the folder name, slugified to `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$` (ask the user if the derivation is ambiguous). Surface any error verbatim (same outcomes as below: non-empty folder, existing workspace).
+  1. `memstead init --name <slug> --schema default@1.3.0` — `<slug>` is the folder name, slugified to `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$` (ask the user if the derivation is ambiguous). Surface any error verbatim (same outcomes as below: non-empty folder, existing workspace).
   2. Write the MCP wiring by hand — this is the one case where the skill writes `.mcp.json` itself, because the old binary can't. If `.mcp.json` doesn't exist, write exactly:
 
      ```json
@@ -84,11 +94,11 @@ Handle its outcomes:
 
   No seed entity in this path — that's fine, the graph just starts empty. Then go to step 3. (Mention to the user that a newer `memstead` release adds `memstead quickstart`, which automates this.)
 - **`WORKSPACE_ALREADY_INITIALISED`** — the folder is already a Memstead workspace; nothing to bootstrap. Tell the user, suggest `memstead overview` to inspect it, and go to step 3 (a restart may still be needed if `.mcp.json` is new to this Claude Code project).
-- **`TARGET_NOT_EMPTY`** — the folder has content quickstart won't touch. Surface the error verbatim (it names the offending files) and ask the user whether to move the content out or start in a fresh folder (`mkdir my-graph && cd my-graph`). Do not delete or move anything without confirmation.
+- **`TARGET_NOT_EMPTY`** — the folder has content quickstart won't touch. If this is a repository the user works in, that is the case `--repo .` exists for: re-run as `memstead quickstart --agent claude-code --repo .`, which puts the mem in a folder of its own and binds the repository instead of refusing it. Otherwise surface the error verbatim (it names the offending files) and ask the user whether to move the content out or start in a fresh folder (`mkdir my-graph && cd my-graph`). If the refusal names the *mem folder* (a `--repo` run whose mem folder collides with an existing one), re-run with the `--name` the message suggests. Do not delete or move anything without confirmation.
 - **Mem-name derivation failure** (folder name is not slug-shaped `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`) — re-run with an explicit name: `memstead quickstart --agent claude-code --name <slug>`. Ask the user for the name; suggest a slugified form of the folder name.
 - **Any other error** — surface the message verbatim and stop.
 
-If the user wants a schema other than the default, point them at `memstead link <scope/name>` (registry-published schemas) after setup — quickstart always pins `default@1.0.0`, the built-in 10-type schema.
+If the user wants a schema other than the default, point them at `memstead link <scope/name>` (registry-published schemas) after setup — quickstart always pins the current built-in `default` generation (`default@1.3.0` in this release), the 10-type schema.
 
 For scripted / CI use the strict variant is `memstead init` — this skill only reaches for it in the pre-`quickstart` fallback above; quickstart is the interactive path.
 

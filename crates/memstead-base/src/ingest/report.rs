@@ -335,7 +335,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
              artifacts are the backfill worklist, not defects.\n\n",
         );
         md.push_str(&format!(
-            "**Backfill path:** run `memstead projection sync {}` to work through the in-scope \
+            "**Backfill path:** run `memstead projection brief {} --sync` to work through the in-scope \
              source artifacts that carry no entity yet, covering the clearly-new concepts among \
              them through the normal mutation surface. Backfilling is incremental — a partial \
              pass is fine, and the next sync continues where you left off.\n\n",
@@ -1387,7 +1387,9 @@ mod tests {
         assert!(md.contains("## Adopting — first verify"));
         assert!(md.contains("0% anchored is expected — this is onboarding, not a failure."));
         // … and the concrete backfill path.
-        assert!(md.contains("**Backfill path:** run `memstead projection sync engine/graph`"));
+        assert!(
+            md.contains("**Backfill path:** run `memstead projection brief engine/graph --sync`")
+        );
         // REFUSAL: the exhaustive branch never frames uncovered as red defect
         // "findings" under adopt — it is the onboarding backfill worklist.
         assert!(

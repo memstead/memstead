@@ -144,6 +144,56 @@ pub fn medium_base(pointer: &str, workspace_root: &Path) -> PathBuf {
     }
 }
 
+/// The relative path from `from` to `to`, lexically normalized — public so a
+/// caller holding two absolute paths (a workspace root and a source tree, say)
+/// can express one as a medium pointer against the other, the exact inverse of
+/// [`medium_base`].
+pub fn relative_to(from: &Path, to: &Path) -> PathBuf {
+    relative_path(from, to)
+}
+
+/// The honest caveat for a medium base that resolves outside the workspace
+/// root, or `None` when it does not — the single wording every front door
+/// that scaffolds a binding prints, so the layout split is named once, at the
+/// layout decision, in the same terms everywhere.
+///
+/// The shape is supported: enumeration, change detection, sync, and anchor
+/// resolution all work on it (measured on the dogfood's own out-of-root
+/// bindings, where zero anchors orphan). What degrades rides the message —
+/// `../…` artifact ids and a layout that must stay fixed — together with the
+/// recipe that avoids it. Only path-namespace mediums can be out-of-root;
+/// every other medium type yields `None`.
+pub fn out_of_root_layout_warning(
+    pointer: &str,
+    workspace_root: &Path,
+    medium_type: crate::pipeline::MediumType,
+) -> Option<String> {
+    use crate::pipeline::MediumType;
+    if !matches!(medium_type, MediumType::Codebase | MediumType::Filesystem) {
+        return None;
+    }
+    let base = medium_base(pointer, workspace_root);
+    // Canonicalize both sides when possible so symlinked roots (macOS /tmp)
+    // don't false-positive; fall back to the lexical forms for not-yet-existing
+    // paths.
+    let canon_base = std::fs::canonicalize(&base).unwrap_or(base);
+    let canon_root =
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+    if canon_base.starts_with(&canon_root) {
+        return None;
+    }
+    Some(format!(
+        "medium base '{}' resolves outside the workspace root '{}': supported — \
+         enumeration, change detection, and anchor resolution all work on this shape — \
+         but artifact ids render as workspace-relative '../…' chains and the \
+         workspace-to-source relative layout must stay fixed (moving either side \
+         breaks the pointer). To avoid the '../…' ids, root the workspace at the \
+         common parent directory containing every source tree.",
+        canon_base.display(),
+        canon_root.display()
+    ))
+}
+
 /// Workspace-relative deny globs excluding the engine's own state from
 /// every strategy's input set. Unconditional and non-configurable: a
 /// binding can never legitimately model `.memstead/`,

@@ -468,6 +468,11 @@ One-command cold start: workspace + default-schema mem + seed entity + MCP wirin
   - `gemini`:
     Gemini CLI — project `.gemini/settings.json`
 
+* `--repo <PATH>` — Point at an existing repository: bootstrap the workspace *and* scaffold a codebase binding over that tree, then print what the starter mem does and does not contain. `--repo .` in the repo you already have is the whole guided path.
+
+   Without a `PATH` argument the repository *is* the workspace: `.memstead/` and the mem's own folder land inside it, so the binding points at `.` and every artifact id is repo-relative. With a `PATH` argument the workspace is bootstrapped there as usual and the binding points back at the repository — a supported layout whose one caveat quickstart prints.
+
+   Nothing is ingested: the binding is the standing obligation, the ingest loop is what fills the mem.
 
 
 

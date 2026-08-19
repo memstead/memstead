@@ -26,9 +26,8 @@ use clap::{Args as ClapArgs, Subcommand, ValueEnum};
 use serde_json::json;
 
 use memstead_base::binding::{
-    BINDING_VERSION, Binding, BuildMode, BuildOperation, CapabilityError, DEFAULT_ADJUDICATION_CAP,
-    DEFAULT_FULL_RESYNC_EVERY, Operations, PruneConfig, SyncOperation, VerifyOperation,
-    prune_guarantee_for_medium, validate_binding,
+    BuildMode, BuildOperation, CapabilityError, DEFAULT_ADJUDICATION_CAP,
+    DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams, SyncOperation, VerifyOperation, validate_binding,
 };
 use memstead_base::binding_migrate::{
     BindingMigrateError, check_all_consumed, fold_v1_binding, migrate_gen2_bindings,
@@ -48,7 +47,7 @@ use memstead_base::ingest::{
     OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
     render_sync_brief_for, render_verify_brief_for, select_next_due_operation,
 };
-use memstead_base::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode, Source};
+use memstead_base::pipeline::{IngestTrigger, MediumType};
 use memstead_base::pipeline_store::{
     ProjectionGeneration, delete_ingest, load_legacy_pipeline_configs, load_pipeline_configs,
     load_projection_generations, read_binding, remove_mediums_and_facets_trees, write_binding,
@@ -721,141 +720,28 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         .into());
     }
 
-    // The scaffolded record: ONE v2 binding with one inline source under the
-    // binding stem. The source is scoped `**/*` (a scoped default: an
-    // unscoped source — no allow patterns — would refuse at run time).
-    let source = Source {
-        name: stem.clone(),
+    // The scaffolded record comes from the engine — one definition of "a
+    // fresh binding" (source scoped `**/*`, materialised deny defaults,
+    // matrix-filtered operations, prune where sync survived), shared with
+    // every other front door that creates one.
+    let scaffolded = memstead_base::binding::scaffold_binding(ScaffoldParams {
+        destination_mem: &mem,
+        source_name: &stem,
+        pointer: &args.source,
         medium_type,
-        pointer: args.source.clone(),
-        change_detection: None,
-        scope: vec![PatternEntry {
-            path: "**/*".to_string(),
-            mode: PatternMode::Allow,
-        }],
-        engagement: None,
-        preparation: None,
-    };
-
-    // Matrix-filtered defaults: declare build+sync+verify, then let the
-    // capability matrix strip any operation the medium cannot support. A `web`
-    // source has no change signal this cycle, so sync/verify are stripped and
-    // the deferral is named in `warnings[]` (operator decision 7). Every other
-    // medium keeps build+sync+verify.
-    // Default deny paths — materialised into the record at scaffold
-    // time (not injected at load) so the author sees, edits, and can
-    // delete them, and bindings created before the default existed
-    // keep behaving as recorded. Engine self-exclusion is separate:
-    // unconditional in the strategy layer, never a record entry.
-    let deny_paths: Vec<String> = if matches!(
-        medium_type,
-        memstead_base::MediumType::Codebase | memstead_base::MediumType::Filesystem
-    ) {
-        memstead_base::binding::DEFAULT_SCAFFOLD_DENY_PATHS
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    let mut binding = Binding {
-        version: BINDING_VERSION,
         intent: args.intent.clone(),
-        sources: vec![source],
-        reference_mems: Vec::new(),
-        destination_mem: mem.clone(),
-        deny_paths,
-        // Unstated: the scaffold asserts nothing — the effective value
-        // resolves per medium (enumerable → exhaustive, web → curated).
-        coverage_semantics: None,
-        rules: None,
-        prune: None,
-        operations: Operations {
-            build: Some(BuildOperation {
-                mode: BuildMode::Discovery,
-                trigger: IngestTrigger::Loop,
-                batch_size: 20,
-                post_actions: None,
-            }),
-            sync: Some(SyncOperation {
-                trigger: IngestTrigger::Manual,
-                batch_size: 20,
-            }),
-            verify: Some(VerifyOperation {
-                trigger: IngestTrigger::Manual,
-                batch_size: 20,
-                adjudication_cap: DEFAULT_ADJUDICATION_CAP,
-                full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
-            }),
-        },
-    };
-
-    let mut warnings: Vec<String> = Vec::new();
+        additional_deny_paths: Vec::new(),
+    });
+    let binding = scaffolded.binding;
+    let operations = scaffolded.operations;
+    let mut warnings = scaffolded.warnings;
 
     // Out-of-workspace medium base — a supported shape with one honest
-    // caveat. Everything works: enumeration, change detection, sync,
-    // and anchor resolution (anchors speak the source dialect and join
-    // on the pointer — verified on the dogfood's own out-of-root
-    // bindings, where zero anchors orphan). What degrades: artifact ids
-    // render as workspace-relative `../…` chains, and the binding
-    // depends on the workspace-to-source relative layout staying fixed.
-    // Name the split NOW, at the layout decision; the operation still
-    // succeeds.
-    if matches!(
-        medium_type,
-        memstead_base::MediumType::Codebase | memstead_base::MediumType::Filesystem
-    ) {
-        let base = memstead_base::ingest::cursor::medium_base(&args.source, &root);
-        // Canonicalize both sides when possible so symlinked roots
-        // (macOS /tmp) don't false-positive; fall back to the lexical
-        // forms for not-yet-existing paths.
-        let canon_base = std::fs::canonicalize(&base).unwrap_or(base);
-        let canon_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-        if !canon_base.starts_with(&canon_root) {
-            warnings.push(format!(
-                "medium base '{}' resolves outside the workspace root '{}': supported — \
-                 enumeration, change detection, and anchor resolution all work on this shape — \
-                 but artifact ids render as workspace-relative '../…' chains and the \
-                 workspace-to-source relative layout must stay fixed (moving either side \
-                 breaks the pointer). To avoid the '../…' ids, root the workspace at the \
-                 common parent directory containing every source tree.",
-                canon_base.display(),
-                canon_root.display()
-            ));
-        }
-    }
-
-    if let Err(refusals) = validate_binding(&binding) {
-        for r in &refusals {
-            if let CapabilityError::OperationOutOfScope { operation, .. } = r {
-                match *operation {
-                    "sync" => binding.operations.sync = None,
-                    "verify" => binding.operations.verify = None,
-                    _ => {}
-                }
-            }
-            warnings.push(r.to_string());
-        }
-    }
-
-    // Prune (F1) rides the sync path — scaffold it wherever sync survived the
-    // matrix filter, with the strongest guarantee the medium supports (a
-    // base-retrievable / git-backed medium gets never-clobber; every
-    // sync-capable medium is also base-retrievable, so this never refuses). A
-    // `web` binding (sync stripped) gets no prune block.
-    if binding.operations.sync.is_some() {
-        binding.prune = Some(PruneConfig {
-            guarantee: prune_guarantee_for_medium(medium_type),
-        });
-    }
-
-    let mut operations: Vec<&str> = vec!["build"];
-    if binding.operations.sync.is_some() {
-        operations.push("sync");
-    }
-    if binding.operations.verify.is_some() {
-        operations.push("verify");
+    // caveat, named NOW, at the layout decision. The operation still succeeds.
+    if let Some(w) =
+        memstead_base::ingest::cursor::out_of_root_layout_warning(&args.source, &root, medium_type)
+    {
+        warnings.push(w);
     }
 
     // Write the one record. The id-collision refusal above already

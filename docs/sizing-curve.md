@@ -38,7 +38,8 @@ diff) — medians per operation per size are the contract.
 ## Method
 
 Synthetic corpora, self-contained: `spec` entities under the builtin
-`default@1.0.0` schema, three prose sections each, rotating `level`
+`default` schema — the harness pins no version, so a run takes whatever
+the binary's default is (`default@1.3.0` today) — three prose sections each, rotating `level`
 metadata, two explicit edges (USES / DEPENDS_ON) to earlier entities plus
 one body wiki-link (alias-emitting REFERENCES) — edge density ~3/entity,
 following the flavour of the largest real deployment without depending on

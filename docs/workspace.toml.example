@@ -51,7 +51,7 @@ name = "file-two-layer"
 
 [[mem_management.create]]
 pattern = "memstead/*"                # top-level mems under memstead/
-schemas = ["default@1.0.0"]           # exact pins only, or ["*"]
+schemas = ["default@1.3.0"]           # exact pins only, or ["*"]
 # default_cross_links = "*"           # optional: cross-link permission
                                       # synthesised for every mem this
                                       # rule creates — "*" or a list of

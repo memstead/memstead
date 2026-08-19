@@ -1651,3 +1651,634 @@ fn walk(dir: &Path) -> Vec<String> {
     }
     out
 }
+
+// ---------------------------------------------------------------------
+// quickstart --repo — the guided point-at-your-repo path
+// ---------------------------------------------------------------------
+
+/// A repository the way a stranger's actually looks: source files, `.md`
+/// docs at the root and below, and a git history. Returns its path.
+fn fixture_repo(parent: &Path, name: &str) -> std::path::PathBuf {
+    let repo = parent.join(name);
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::create_dir_all(repo.join("docs")).unwrap();
+    std::fs::write(repo.join("src/main.rs"), b"fn main() {}\n").unwrap();
+    std::fs::write(repo.join("README.md"), b"# The App\n\nWhat it does.\n").unwrap();
+    std::fs::write(repo.join("docs/design.md"), b"# Design\n\nHow it works.\n").unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["add", "-A"],
+        vec![
+            "-c",
+            "user.email=fixture@example.com",
+            "-c",
+            "user.name=Fixture",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .status()
+            .expect("git must be available");
+        assert!(status.success(), "git {args:?} failed");
+    }
+    repo
+}
+
+/// Run one printed command line verbatim through a shell, from `dir`.
+fn replay(dir: &Path, command: &str) -> std::process::Output {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(dir)
+        .output()
+        .expect("shell must run")
+}
+
+/// The headline AC: from an existing repository, one invocation leaves a
+/// workspace, a mem, and a codebase binding carrying the scaffold deny
+/// defaults — and adopts none of the repository's own files.
+#[test]
+fn quickstart_repo_mode_binds_the_repo_without_adopting_its_files() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "the-app");
+
+    let assert = memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "--repo", "."])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    // The repository IS the workspace; the mem takes a folder of its own.
+    assert_eq!(
+        std::fs::canonicalize(payload["workspace_root"].as_str().unwrap()).unwrap(),
+        std::fs::canonicalize(&repo).unwrap(),
+    );
+    assert_eq!(payload["name"], "the-app");
+    assert_eq!(payload["mem_folder"], "the-app");
+    assert!(repo.join(".memstead").join("workspace.toml").is_file());
+    assert!(
+        repo.join("the-app")
+            .join(".memstead")
+            .join("config.json")
+            .is_file()
+    );
+
+    // The binding: codebase over the repo, scaffold deny defaults, and the
+    // record where `projection init` would have put it.
+    assert_eq!(payload["binding"]["id"], "the-app/the-app");
+    assert_eq!(payload["binding"]["pointer"], ".");
+    let record = repo.join(payload["binding"]["record"].as_str().unwrap());
+    assert!(record.is_file(), "binding record must exist at {record:?}");
+    let binding: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    assert_eq!(binding["version"], 2);
+    assert_eq!(binding["destination_mem"], "the-app");
+    assert_eq!(binding["sources"][0]["type"], "codebase");
+    let deny: Vec<String> = serde_json::from_value(binding["deny_paths"].clone()).unwrap();
+    assert_eq!(
+        deny,
+        vec![
+            "**/.DS_Store",
+            "**/.git/**",
+            "**/node_modules/**",
+            "**/Thumbs.db"
+        ],
+        "the record materialises the scaffold deny defaults as deletable entries",
+    );
+
+    // Complement: none of the repository's files became entities. The mem
+    // folder holds exactly the seed, and the graph counts exactly one.
+    let mem_files: Vec<String> = std::fs::read_dir(repo.join("the-app"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".md"))
+        .collect();
+    assert_eq!(mem_files, vec!["welcome-to-memstead.md"]);
+    let overview = stdout_of(
+        memstead()
+            .current_dir(&repo)
+            .arg("overview")
+            .assert()
+            .success(),
+    );
+    assert!(
+        overview.contains("_entity_count: 1"),
+        "the repo's files must not be adopted; overview:\n{overview}",
+    );
+
+    // Complement: the repository's tracked tree is untouched — the only
+    // additions are the ones the receipt names.
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let mut added: Vec<String> = String::from_utf8(status.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| l.trim().to_string())
+        .collect();
+    added.sort();
+    assert_eq!(
+        added,
+        vec!["?? .mcp.json", "?? .memstead/", "?? the-app/"],
+        "nothing beyond the receipt's own artifacts may appear in the tree",
+    );
+    let receipt_names: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let written = receipt_names
+        .iter()
+        .find(|l| l.starts_with("Written into your repository"))
+        .expect("the brief names what it wrote into the repo");
+    for named in [".memstead/", "the-app/", ".mcp.json"] {
+        assert!(
+            written.contains(named),
+            "brief must name `{named}`: {written}"
+        );
+    }
+}
+
+/// Complement to the guided path: without `--repo`, the same fixture is
+/// still refused by the tolerant-emptiness gate, with the same code and
+/// the same reason. The guided mode adds a door; it opens none.
+#[test]
+fn quickstart_without_repo_flag_still_refuses_a_populated_repo() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "untouched-app");
+
+    let err = stderr_of(
+        memstead()
+            .args(["quickstart"])
+            .arg(&repo)
+            .assert()
+            .failure(),
+    );
+    assert!(
+        err.contains("TARGET_NOT_EMPTY") && err.contains("README.md"),
+        "the plain path must still refuse the populated repo; got:\n{err}",
+    );
+    assert!(
+        err.contains("silently adopt them into the graph"),
+        "the refusal must still name the adoption risk; got:\n{err}",
+    );
+    assert!(
+        !repo.join(".memstead").exists(),
+        "a refused quickstart writes nothing",
+    );
+}
+
+/// Every command the guided receipt prints runs verbatim from the
+/// directory the receipt states, with no placeholder to edit first.
+#[test]
+fn quickstart_repo_receipt_commands_replay_verbatim() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "replay-app");
+
+    let assert = memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "--repo", "."])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    let mut replayed = 0;
+    for check in payload["verify_now"].as_array().unwrap() {
+        let command = check["command"].as_str().unwrap();
+        // The `memstead-mcp --version` check names a binary that only a
+        // full install carries; every other check is this binary's own.
+        if command.contains("memstead-mcp") {
+            continue;
+        }
+        let out = replay(&repo, command);
+        assert!(
+            out.status.success(),
+            "printed command must run verbatim: {command}\n{}",
+            String::from_utf8_lossy(&out.stderr),
+        );
+        replayed += 1;
+    }
+    assert!(replayed >= 2, "the receipt must print runnable checks");
+
+    // The brief's own command — the one that starts the ingest loop —
+    // is a printed command too, and carries no placeholder.
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let growth = brief
+        .iter()
+        .find(|l| l.starts_with("Growth:"))
+        .expect("the brief states how the mem grows");
+    let command = growth
+        .rsplit_once("Start with: `")
+        .expect("the growth line ends in a runnable command")
+        .1
+        .trim_end_matches('`');
+    assert!(
+        !command.contains('<') && !command.contains("..."),
+        "no printed command may carry a placeholder: {command}",
+    );
+    let out = replay(&repo, command);
+    assert!(
+        out.status.success(),
+        "the ingest brief must render: {command}\n{}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+/// The layout guidance fires at the layout decision: a workspace beside
+/// the repository is supported, and the receipt says what it costs and
+/// how to avoid it.
+#[test]
+fn quickstart_repo_outside_the_workspace_warns_with_the_relocation_recipe() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "beside-app");
+
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["quickstart", "--json", "graph", "--repo"])
+        .arg(&repo)
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    assert_eq!(payload["binding"]["pointer"], "../beside-app");
+    // The mem still collapses onto the workspace root in this layout.
+    assert!(payload["mem_folder"].as_str().unwrap() == ".");
+    let warnings: Vec<String> = serde_json::from_value(payload["warnings"].clone()).unwrap();
+    let layout = warnings
+        .iter()
+        .find(|w| w.contains("resolves outside the workspace root"))
+        .expect("the out-of-root layout must be named");
+    assert!(
+        layout.contains("root the workspace at the common parent"),
+        "the warning must carry the relocation recipe: {layout}",
+    );
+    assert!(
+        layout.contains("supported"),
+        "the shape is supported, not refused: {layout}",
+    );
+    // Complement: the repository itself stays clean in this layout.
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8(status.stdout).unwrap().trim().is_empty(),
+        "a workspace beside the repo writes nothing into it",
+    );
+}
+
+/// The mem folder is a folder the graph then owns, so a collision with
+/// something the repository already uses refuses — it is never adopted —
+/// and the refusal carries the flag that resolves it.
+#[test]
+fn quickstart_repo_mem_folder_collision_refuses_with_the_name_remedy() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "collide-app");
+    std::fs::create_dir_all(repo.join("collide-app")).unwrap();
+    std::fs::write(repo.join("collide-app").join("notes.md"), b"# mine\n").unwrap();
+
+    let err = stderr_of(
+        memstead()
+            .current_dir(&repo)
+            .args(["quickstart", "--repo", "."])
+            .assert()
+            .failure(),
+    );
+    assert!(
+        err.contains("TARGET_NOT_EMPTY") && err.contains("--name"),
+        "the collision must refuse with the --name remedy; got:\n{err}",
+    );
+    assert!(
+        !repo.join(".memstead").exists(),
+        "a refused guided quickstart writes nothing",
+    );
+    assert_eq!(
+        std::fs::read(repo.join("collide-app").join("notes.md")).unwrap(),
+        b"# mine\n",
+        "the folder it refused to take is untouched",
+    );
+}
+
+/// A `--repo` that names nothing refuses before any write: quickstart
+/// creates workspaces, never repositories.
+#[test]
+fn quickstart_repo_must_already_exist() {
+    let tmp = TempDir::new().unwrap();
+    let err = stderr_of(
+        memstead()
+            .current_dir(tmp.path())
+            .args(["quickstart", "graph", "--repo", "./typo"])
+            .assert()
+            .failure(),
+    );
+    assert!(
+        err.contains("INVALID_INPUT") && err.contains("--repo"),
+        "a missing repo must refuse naming the flag; got:\n{err}",
+    );
+    assert!(!tmp.path().join("graph").exists(), "nothing is created");
+}
+
+/// The guided scaffold does not widen the silent dead-deny exemption:
+/// its own defaults stay quiet, a user-authored entry that matches
+/// nothing still gets the loud lint.
+#[test]
+fn quickstart_repo_scaffold_does_not_widen_the_dead_deny_exemption() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "lint-app");
+
+    memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "--repo", "."])
+        .assert()
+        .success();
+
+    let record = repo.join(".memstead/projections/lint-app/lint-app.json");
+    let mut binding: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    binding["deny_paths"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!("nowhere-near/**"));
+    std::fs::write(&record, serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
+
+    let brief = stdout_of(
+        memstead()
+            .current_dir(&repo)
+            .args(["projection", "brief", "lint-app/lint-app"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        brief.contains("nowhere-near/**"),
+        "a user-authored dead deny entry must still be reported; got:\n{brief}",
+    );
+    for scaffolded in ["**/node_modules/**", "**/Thumbs.db"] {
+        assert!(
+            !brief.contains(&format!("`{scaffolded}`")),
+            "the scaffold's own default must stay silent: {scaffolded}\n{brief}",
+        );
+    }
+}
+
+/// A workspace INSIDE the repository is still a mem-in-its-own-folder
+/// layout, and that is what makes the receipt's scope claim true: the
+/// mem's own entity file must not come back round as a source artifact
+/// of the binding that points at the tree containing it.
+#[test]
+fn quickstart_repo_workspace_inside_the_repo_keeps_the_mem_out_of_its_own_scope() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "inside-app");
+
+    let assert = memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "memgraph", "--repo", "."])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    // The workspace is a subdirectory of the repo, so the mem still takes
+    // a folder of its own — the containment test, not path-argument
+    // absence, decides the layout.
+    assert_eq!(payload["mem_folder"], "memgraph");
+    assert_eq!(payload["binding"]["pointer"], "..");
+
+    let workspace = repo.join("memgraph");
+    let measured = memstead()
+        .current_dir(&workspace)
+        .args([
+            "projection",
+            "verify",
+            payload["binding"]["id"].as_str().unwrap(),
+            "--full",
+            "--include",
+            "uncovered_artifacts",
+        ])
+        .assert()
+        .success();
+    let report = stdout_of(measured);
+    assert!(
+        !report.contains("welcome-to-memstead.md"),
+        "the mem's own entity must not enumerate as a source artifact; report:\n{report}",
+    );
+    for repo_file in ["../README.md", "../src/main.rs"] {
+        assert!(
+            report.contains(repo_file),
+            "the repository's files are the denominator; missing {repo_file}:\n{report}",
+        );
+    }
+
+    // …and the printed claim says exactly that, naming the folder that
+    // carries the exclusion in this layout.
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let scope = brief
+        .iter()
+        .find(|l| l.starts_with("Scope:"))
+        .expect("the brief states the scope");
+    assert!(
+        scope.contains("the mem's own folder `memgraph/`"),
+        "the scope claim must name the excluded folder: {scope}",
+    );
+}
+
+/// The "what appeared in your repository" claim is stated in the
+/// READER's frame. With the workspace nested inside the repo, one new
+/// directory appears — not the three paths inside it, which are
+/// workspace-relative and would not resolve from the repo root.
+#[test]
+fn quickstart_repo_nested_workspace_names_what_the_repo_actually_gained() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "nested-app");
+
+    let assert = memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "wsdir", "--repo", "."])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let written = brief
+        .iter()
+        .find(|l| l.starts_with("Written into your repository"))
+        .expect("the brief states what the repository gained");
+    assert!(
+        written.contains("`wsdir/`"),
+        "the one new path must be named: {written}",
+    );
+    for workspace_relative in ["`.memstead/`", "`.mcp.json`"] {
+        assert!(
+            !written.contains(workspace_relative),
+            "a workspace-relative path must not be presented as repo-relative: {written}",
+        );
+    }
+
+    // …and that is exactly what git sees.
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(status.stdout).unwrap().trim(),
+        "?? wsdir/",
+        "the receipt's claim and the tracked tree must agree",
+    );
+}
+
+/// A wiring file that already existed was MODIFIED, not added — and the
+/// receipt says so, because `git status` will.
+#[test]
+fn quickstart_repo_names_a_modified_wiring_file_as_modified() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "wired-app");
+    std::fs::write(
+        repo.join(".mcp.json"),
+        b"{\n  \"mcpServers\": {\n    \"other\": { \"command\": \"/bin/other\" }\n  }\n}\n",
+    )
+    .unwrap();
+    for args in [
+        vec!["add", "-A"],
+        vec![
+            "-c",
+            "user.email=fixture@example.com",
+            "-c",
+            "user.name=Fixture",
+            "commit",
+            "-qm",
+            "wiring",
+        ],
+    ] {
+        std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+    }
+
+    let assert = memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--json", "--repo", "."])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let written = brief
+        .iter()
+        .find(|l| l.starts_with("Written into your repository"))
+        .expect("the brief states what the repository gained");
+    assert!(
+        written.contains("`.mcp.json` (agent wiring added to it)"),
+        "a pre-existing file is modified, not added: {written}",
+    );
+
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let out = String::from_utf8(status.stdout).unwrap();
+    assert!(
+        out.contains("M .mcp.json"),
+        "git must agree the file was modified: {out}",
+    );
+}
+
+/// The out-of-root warning recommends rooting the workspace at the common
+/// parent of the source trees. That recipe must be reachable from the
+/// front door that prints it.
+#[test]
+fn quickstart_repo_at_the_common_parent_is_reachable() {
+    let tmp = TempDir::new().unwrap();
+    let parent = tmp.path().join("parent");
+    std::fs::create_dir_all(&parent).unwrap();
+    fixture_repo(&parent, "repo-one");
+
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "quickstart",
+            "--json",
+            "parent",
+            "--repo",
+            "parent/repo-one",
+            "--name",
+            "parent-ws",
+        ])
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+
+    // The whole point of the recipe: an in-root pointer, so no `../…`
+    // artifact ids and no out-of-root caveat.
+    assert_eq!(payload["binding"]["pointer"], "repo-one");
+    let warnings: Vec<String> = serde_json::from_value(payload["warnings"].clone()).unwrap();
+    assert!(
+        !warnings.iter().any(|w| w.contains("resolves outside")),
+        "the recommended layout must not warn about itself: {warnings:?}",
+    );
+    // The workspace is not inside the repository, so nothing was written
+    // into it and the receipt claims nothing about its tree.
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    assert!(
+        !brief
+            .iter()
+            .any(|l| l.starts_with("Written into your repository")),
+        "no repository claim belongs here: {brief:?}",
+    );
+}
+
+/// The collapsed layout — workspace outside the repository — claims only
+/// engine state, because the mem folder is not in the source tree at all
+/// and no exclusion has to fire for it.
+#[test]
+fn quickstart_repo_outside_layout_claims_only_engine_state() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "outside-app");
+
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["quickstart", "--json", "graph", "--repo"])
+        .arg(&repo)
+        .assert()
+        .success();
+    let payload: serde_json::Value = serde_json::from_str(&stdout_of(assert)).unwrap();
+    assert_eq!(payload["mem_folder"], ".");
+
+    let brief: Vec<String> = serde_json::from_value(payload["brief"].clone()).unwrap();
+    let scope = brief
+        .iter()
+        .find(|l| l.starts_with("Scope:"))
+        .expect("the brief states the scope");
+    assert!(
+        scope.contains("engine state (`.memstead/`)") && !scope.contains("mem's own folder"),
+        "the collapsed layout claims only what it excludes: {scope}",
+    );
+}
+
+/// The guided receipt's shape disclosure holds — and tells the truth
+/// about where the entities actually are.
+#[test]
+fn quickstart_repo_receipt_discloses_the_shape_and_the_mem_folder() {
+    let tmp = TempDir::new().unwrap();
+    let repo = fixture_repo(tmp.path(), "disclose-app");
+    let out = stdout_of(
+        memstead()
+            .current_dir(&repo)
+            .args(["quickstart", "--agent", "claude-code", "--repo", "."])
+            .assert()
+            .success(),
+    );
+    assert_filesystem_shape_disclosure(&out, "guided quickstart receipt");
+    assert!(
+        out.contains("plain `.md` files in `disclose-app/`"),
+        "the disclosure must point at the mem's actual folder; got:\n{out}",
+    );
+    assert!(
+        !out.contains("plain `.md` files in this folder"),
+        "the collapsed-shape wording would be untrue here; got:\n{out}",
+    );
+}

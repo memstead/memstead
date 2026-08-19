@@ -7,6 +7,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **`memstead quickstart --repo <PATH>` — the guided point-at-your-repo
+  first session.** One invocation from an existing repository leaves a
+  workspace, a mem, a scaffolded `codebase` binding over that tree, agent
+  wiring, and a printed brief stating what the starter mem holds (one seed
+  entity), what it does not (anything from the repository), and the exact
+  command that starts the ingest loop. Nothing is ingested and no
+  repository file becomes an entity: the mem takes a folder of its own
+  inside the repo, and the engine already excludes every mount's storage
+  location from binding enumeration. Without a target path the repository
+  *is* the workspace root (clean repo-relative artifact ids, `.memstead/`
+  and the agent config where an agent working in the repo finds them);
+  with one, the workspace lands there and the out-of-root layout caveat is
+  printed with its relocation recipe. The plain path is untouched — its
+  arguments, gates, refusals, receipt, and JSON are unchanged, and the
+  tolerant-emptiness gate still refuses a populated folder.
+- **`memstead_base::binding::scaffold_binding`** — the engine-side
+  definition of "a fresh binding" (scoped source, materialised deny
+  defaults, capability-matrix-filtered operations, prune where sync
+  survives), now shared by `projection init` and the guided quickstart
+  path instead of living in one command. `init_filesystem_mem_at` is its
+  workspace counterpart: a folder mem in a subdirectory of the workspace
+  root, the uncollapsed form of `init_filesystem_mem`.
+
+### Fixed
+- **The backfill path named a subcommand that does not exist.** The
+  fidelity report and three health findings told the reader to run
+  `memstead projection sync <binding>`; the CLI has no `projection sync`
+  verb — the sync brief is `memstead projection brief <binding> --sync`.
+  Four printed sites corrected, the pinning test with them.
+- **Superseded `default@1.0.0` citations** in the repo README, the CLI
+  crate README, `docs/build.md`, `docs/workspace.toml.example`, and
+  `docs/sizing-curve.md` — every one taught a schema pin the shipped
+  binary no longer writes.
+
 ## [0.9.0] - 2026-08-19
 
 ### Added

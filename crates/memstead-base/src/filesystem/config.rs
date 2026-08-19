@@ -400,20 +400,53 @@ pub fn write_workspace_config(
 /// `.memstead/` tree) if absent; the caller is responsible for refusing a
 /// non-empty target if that matters.
 pub fn init_filesystem_mem(root: &Path, name: &str, schema: &SchemaRef) -> std::io::Result<()> {
+    init_filesystem_mem_at(root, root, name, schema)
+}
+
+/// Initialise a filesystem (folder-backed) mem whose folder is `mem_dir`
+/// inside the workspace rooted at `workspace_root` — the uncollapsed form
+/// of [`init_filesystem_mem`], which is exactly this call with
+/// `mem_dir == workspace_root`.
+///
+/// The split exists because a folder mount's path is independent of the
+/// workspace root everywhere else in the engine (`mem create` has always
+/// placed folder mems in subdirectories), and a workspace root that
+/// already holds unrelated content — a source repository, say — can only
+/// carry a mem if the mem owns a folder of its own rather than the root.
+/// Both facts of that shape follow from the mount roster and need no
+/// special-casing downstream: the mem folder is a mount storage location,
+/// so [`crate::ingest::cursor`] already excludes it from every binding's
+/// input set unconditionally.
+///
+/// Writes `<mem_dir>/.memstead/config.json` (the mem's own config, the
+/// same file the collapsed form writes at the root) and the workspace
+/// tier — `cache/`, `memstead-io/`, `workspace.toml`, `state/mounts.json`
+/// — under `<workspace_root>/.memstead/`. Creates both directories if
+/// absent; the caller is responsible for refusing a non-empty target if
+/// that matters.
+pub fn init_filesystem_mem_at(
+    workspace_root: &Path,
+    mem_dir: &Path,
+    name: &str,
+    schema: &SchemaRef,
+) -> std::io::Result<()> {
     use crate::workspace::{
         Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
     };
     use crate::workspace_store::{FileWorkspaceStore, WorkspaceStoreAdapter};
 
+    let root = workspace_root;
+    std::fs::create_dir_all(mem_dir)?;
     let config = WorkspaceConfig::new(name, schema.clone());
-    write_workspace_config(root, &config).map_err(std::io::Error::other)?;
+    write_workspace_config(mem_dir, &config).map_err(std::io::Error::other)?;
 
     let memstead_dir = root.join(crate::WORKSPACE_STORE_DIR);
     std::fs::create_dir_all(memstead_dir.join("cache"))?;
     std::fs::create_dir_all(memstead_dir.join("memstead-io"))?;
     // Two-layer file adapter marker — `from_workspace_root` recognises a
-    // workspace by `.memstead/workspace.toml`. The filesystem mem collapses
-    // workspace = mem root: one folder mount carries every entity.
+    // workspace by `.memstead/workspace.toml`. One folder mount carries
+    // every entity, whether its folder is the workspace root (collapsed
+    // form) or a subdirectory of it.
     std::fs::write(
         memstead_dir.join("workspace.toml"),
         "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
@@ -424,7 +457,7 @@ pub fn init_filesystem_mem(root: &Path, name: &str, schema: &SchemaRef) -> std::
             mem: name.to_string(),
             schema: Some(schema.clone()),
             storage: MountStorage::Folder {
-                path: root.to_path_buf(),
+                path: mem_dir.to_path_buf(),
             },
             capability: MountCapability::Write,
             lifecycle: MountLifecycle::Eager,
@@ -485,6 +518,55 @@ mod tests {
                 .iter()
                 .any(|v| v == "notes"),
             "init'd mem must be writable in the rooted engine"
+        );
+    }
+
+    /// The uncollapsed form: the mem takes a folder inside a workspace
+    /// root that holds unrelated content. The workspace tier lands at the
+    /// root, the mem's own config inside its folder, and the mount points
+    /// at the folder — which is what makes the root's own files belong to
+    /// no mem at all.
+    #[test]
+    fn init_filesystem_mem_at_puts_the_mem_in_its_own_folder() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("README.md"), b"# not an entity\n").unwrap();
+        let mem_dir = root.join("notes");
+
+        init_filesystem_mem_at(&root, &mem_dir, "notes", &versioned("default", "1.0.0")).unwrap();
+
+        // Workspace tier at the root, mem config in the mem's folder.
+        assert!(root.join(".memstead").join("workspace.toml").is_file());
+        assert!(config_path(&mem_dir).is_file());
+        assert!(
+            !root.join(".memstead").join("config.json").is_file(),
+            "the root is not the mem, so it carries no mem config"
+        );
+
+        let engine = crate::Engine::from_workspace_root(&root).unwrap();
+        assert!(
+            engine
+                .mem_router()
+                .writable_mems()
+                .iter()
+                .any(|v| v == "notes"),
+        );
+
+        // The mount is the folder, stored relative to the root — so the
+        // root's own `README.md` is not in any mem's folder.
+        let mounts: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.join(".memstead").join("state").join("mounts.json")).unwrap(),
+        )
+        .unwrap();
+        let on_disk = serde_json::to_string(&mounts).unwrap();
+        assert!(
+            on_disk.contains("\"notes\""),
+            "mount path stays relative to the workspace root: {on_disk}"
+        );
+        assert!(
+            !on_disk.contains(&tmp.path().display().to_string()),
+            "no absolute prefix is baked into the roster: {on_disk}"
         );
     }
 

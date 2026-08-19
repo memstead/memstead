@@ -394,7 +394,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
                 severity: 1,
                 text: format!(
                     "`{binding_id}` predates its binding — 0% anchored is expected; run \
-                     `memstead projection sync {binding_id}` for a first-sync backfill"
+                     `memstead projection brief {binding_id} --sync` for a first-sync backfill"
                 ),
             });
             continue;
@@ -422,7 +422,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
                 severity: 6,
                 text: format!(
                     "{unresolvable} entit{} in `{binding_id}` describe source that no longer \
-                     exists — run `memstead projection sync {binding_id}`",
+                     exists — run `memstead projection brief {binding_id} --sync`",
                     if unresolvable == 1 { "y" } else { "ies" }
                 ),
             });
@@ -432,7 +432,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
                 severity: 5,
                 text: format!(
                     "{drifted} anchor(s) in `{binding_id}` drifted from their source — run \
-                     `memstead projection sync {binding_id}`"
+                     `memstead projection brief {binding_id} --sync`"
                 ),
             });
         }

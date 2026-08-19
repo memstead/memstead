@@ -252,7 +252,7 @@ pub struct ShapeDisclosure {
     /// The shape just created.
     pub shape: WorkspaceShape,
     /// One sentence on what this shape is.
-    pub summary: &'static str,
+    pub summary: String,
     /// One concrete thing this shape cannot do, in markdown.
     pub cannot: &'static str,
     /// The shape a caller would get instead.
@@ -270,11 +270,32 @@ pub struct ShapeDisclosure {
 /// reading; a sentence elsewhere (the `install --help` clause)
 /// demonstrably arrives after the workspace exists.
 pub fn shape_disclosure(shape: WorkspaceShape) -> ShapeDisclosure {
+    shape_disclosure_in(shape, None)
+}
+
+/// The disclosure for a shape whose mem folder is `mem_folder` — a
+/// workspace-relative folder name when the mem does not own the
+/// workspace root (the guided `quickstart --repo` layout), `None` for
+/// the collapsed shape every other front door creates.
+///
+/// The parameter exists because the filesystem shape's summary makes a
+/// claim about *where the files are*, and that claim is the reader's
+/// first check: pointing them at "this folder" when their entities live
+/// one folder down would be untrue in exactly the receipt that has to
+/// be trusted.
+pub fn shape_disclosure_in(shape: WorkspaceShape, mem_folder: Option<&str>) -> ShapeDisclosure {
     match shape {
         WorkspaceShape::Filesystem => ShapeDisclosure {
             shape,
-            summary: "One mem, plain `.md` files in this folder, no git history — nothing \
-                      else to set up.",
+            summary: match mem_folder {
+                None => "One mem, plain `.md` files in this folder, no git history — nothing \
+                         else to set up."
+                    .to_string(),
+                Some(folder) => format!(
+                    "One mem, plain `.md` files in `{folder}/` — that folder is the whole \
+                     graph, and Memstead keeps no history of its own for it."
+                ),
+            },
             cannot: FILESYSTEM_CANNOT,
             other_shape: WorkspaceShape::MemRepo,
             other_shape_command: format!(
@@ -287,7 +308,8 @@ pub fn shape_disclosure(shape: WorkspaceShape) -> ShapeDisclosure {
         WorkspaceShape::MemRepo => ShapeDisclosure {
             shape,
             summary: "Many mems on git branches, full history — every subcommand works here, \
-                      including `memstead install <scope>/<name>`.",
+                      including `memstead install <scope>/<name>`."
+                .to_string(),
             cannot: "**It costs a git repository.** The mems live in `mem-repo/.git/` and \
                      every mutation is a commit — not a folder of files you can hand-edit.",
             other_shape: WorkspaceShape::Filesystem,
@@ -306,7 +328,7 @@ impl ShapeDisclosure {
         vec![
             format!("## Workspace shape: {}", self.shape.label()),
             String::new(),
-            self.summary.to_string(),
+            self.summary.clone(),
             String::new(),
             format!("- {}", self.cannot),
             format!("- {}", self.other_shape_command),
@@ -318,7 +340,7 @@ impl ShapeDisclosure {
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "shape": self.shape.label(),
-            "summary": self.summary,
+            "summary": self.summary.clone(),
             "cannot": self.cannot,
             "other_shape": self.other_shape.label(),
             "other_shape_command": self.other_shape_command,
@@ -329,6 +351,11 @@ impl ShapeDisclosure {
 /// Convenience for callers that only render markdown.
 pub fn shape_disclosure_lines(shape: WorkspaceShape) -> Vec<String> {
     shape_disclosure(shape).lines()
+}
+
+/// [`shape_disclosure_lines`] for a mem that lives in its own folder.
+pub fn shape_disclosure_lines_in(shape: WorkspaceShape, mem_folder: Option<&str>) -> Vec<String> {
+    shape_disclosure_in(shape, mem_folder).lines()
 }
 
 /// Engine instance + the workspace flavour it serves. Subcommands

@@ -143,7 +143,7 @@ The `target/` directory grows large (~5 GB+ after several builds across profiles
 You haven't installed the CLI. Easiest fix: `./build-engine.sh`. Or just step 2 of it: `cargo install --path crates/memstead-cli --locked`.
 
 **`CONFIG_ERROR: no \`.memstead/workspace.toml\` workspace found in cwd or any ancestor. Run \`memstead mem-repo init\` to bootstrap a new workspace.`**
-The binary discovers its workspace by walking up from the current directory looking for `.memstead/workspace.toml`. Run the command from inside (or under) a workspace, or `cd` into one first. To create a new workspace, do what the message says: `memstead mem-repo init` bootstraps a git-backed workspace (for a strict folder mem instead, `memstead init --name <slug> --schema default@1.0.0` in an empty directory).
+The binary discovers its workspace by walking up from the current directory looking for `.memstead/workspace.toml`. Run the command from inside (or under) a workspace, or `cd` into one first. To create a new workspace, do what the message says: `memstead mem-repo init` bootstraps a git-backed workspace (for a strict folder mem instead, `memstead init --name <slug> --schema default@1.3.0` in an empty directory).
 
 **MCP server "Failed" in the client**
 The binary at `target/release/memstead-mcp` is missing or stale. Run `./build-engine.sh` (or just step 4: `cargo build --release -p memstead-mcp`) and reconnect the MCP server. If the binary runs but exits during engine init, check that the spawn directory (or one of its ancestors) carries a `.memstead/workspace.toml`; the same `CONFIG_ERROR` shape applies as for the CLI.
