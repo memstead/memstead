@@ -1,0 +1,226 @@
+#!/usr/bin/env node
+// mirror-issues — PILOT-GRADE tool: mirror a GitHub repository's issues into
+// a git-repo mirror a normal `filesystem` binding can consume.
+//
+// PILOT STATUS: this is deliberately not a stable `memstead` CLI surface.
+// Whether issues become a first-class forge medium is decided from the
+// evidence mirrors like this produce; until then, five design questions stay
+// deliberately open (dev backlog, "Issue trackers as a source medium"):
+// anchor namespace, change signal (updatedAt polling vs webhook),
+// enumeration cost under rate limits, artifact granularity, and which
+// fields carry weight for intent scoping.
+//
+// FRESHNESS: the mirror is exactly as fresh as its last run. The engine can
+// measure a mem against this mirror; nothing measures the mirror against
+// GitHub. Do not read mirror content as live GitHub state.
+//
+// Determinism contract: for an unchanged tracker, a re-run produces a
+// byte-identical working tree (stable file names, field order, comment
+// ordering, LF endings, one trailing newline) — git is the change signal,
+// so a noisy mirror would poison it. An upstream change touches exactly the
+// affected issue files.
+//
+// Usage:  node scripts/mirror-issues.mjs <owner>/<repo> <mirror-dir> [--full]
+//   <mirror-dir>  created and `git init`ed if needed; issue files land under
+//                 issues/<number>.md; a README.md and .mirror-state.json are
+//                 generated at the root. The tool commits when (and only
+//                 when) the tree changed.
+//   --full        ignore the incremental state: refetch every issue and
+//                 prune files for issues no longer present upstream.
+//                 Incremental runs (the default) use the recorded updatedAt
+//                 watermark (`since`) and never prune.
+//
+// GitHub access goes through the `gh` CLI (auth included); override the
+// binary with MIRROR_GH_BIN for testing.
+
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+const GH = process.env.MIRROR_GH_BIN || 'gh';
+
+function usage() {
+  process.stderr.write(
+    'Usage: node scripts/mirror-issues.mjs <owner>/<repo> <mirror-dir> [--full]\n' +
+      'Pilot-grade GitHub-issues mirror; see the header of this script.\n' +
+      'Freshness: the mirror is as fresh as its last run — nothing here is live GitHub state.\n',
+  );
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+const full = args.includes('--full');
+const positional = args.filter((a) => a !== '--full');
+if (positional.length !== 2 || !/^[\w.-]+\/[\w.-]+$/.test(positional[0])) usage();
+const [repo, dir] = positional;
+
+function gh(apiArgs) {
+  const out = execFileSync(GH, apiArgs, { encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 });
+  return out.trim() ? JSON.parse(out) : [];
+}
+
+function git(gitArgs, opts = {}) {
+  return execFileSync('git', ['-C', dir, ...gitArgs], { encoding: 'utf-8', ...opts });
+}
+
+// `--paginate --slurp` wraps the pages into one JSON array of page arrays —
+// the only splice-free way to consume multi-page results.
+function ghPaginated(path) {
+  const raw = execFileSync(GH, ['api', '--paginate', '--slurp', path], {
+    encoding: 'utf-8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const pages = JSON.parse(trimmed);
+  // A stub or single page may return a bare array of items.
+  return Array.isArray(pages[0]) ? pages.flat() : pages;
+}
+
+// One issue → one deterministic markdown document. Field order is fixed;
+// comments arrive pre-sorted; every document ends in exactly one LF.
+function renderIssue(issue, comments) {
+  const lines = [];
+  lines.push(`# ${issue.title}`);
+  lines.push('');
+  lines.push(`- **Issue:** #${issue.number}`);
+  const state = issue.state_reason ? `${issue.state} (${issue.state_reason})` : issue.state;
+  lines.push(`- **State:** ${state}`);
+  const labels = (issue.labels || [])
+    .map((l) => (typeof l === 'string' ? l : l.name))
+    .filter(Boolean)
+    .sort();
+  lines.push(`- **Labels:** ${labels.length ? labels.join(', ') : '(none)'}`);
+  lines.push(`- **Author:** ${issue.user?.login || '(unknown)'}`);
+  lines.push(`- **Created:** ${issue.created_at}`);
+  lines.push(`- **Updated:** ${issue.updated_at}`);
+  if (issue.closed_at) lines.push(`- **Closed:** ${issue.closed_at}`);
+  lines.push('');
+  lines.push('## Body');
+  lines.push('');
+  lines.push((issue.body || '(no body)').replace(/\r\n/g, '\n').trimEnd());
+  if (comments.length) {
+    lines.push('');
+    lines.push('## Comments');
+    for (const c of comments) {
+      lines.push('');
+      lines.push(`### ${c.user?.login || '(unknown)'} — ${c.created_at}`);
+      lines.push('');
+      lines.push((c.body || '(no body)').replace(/\r\n/g, '\n').trimEnd());
+    }
+  }
+  return lines.join('\n') + '\n';
+}
+
+function renderReadme() {
+  return `# Issue mirror — ${repo}
+
+Generated by memstead's PILOT-GRADE \`scripts/mirror-issues.mjs\`. One file
+per issue under \`issues/\`, carrying body, comments, labels, state, and
+dates. Point a normal \`filesystem\` binding at this repository to get
+enumeration, git change detection, anchors, sync, and prune over the issue
+archive.
+
+**Freshness:** this mirror is exactly as fresh as its last \`mirror-issues\`
+run. A memstead binding measures its mem against THIS MIRROR — nothing
+measures the mirror against GitHub. Do not read these files as live GitHub
+state.
+
+**Pilot status:** the mirror tool is deliberately not a stable memstead
+product surface. Whether issue trackers become a first-class source medium
+is decided from the evidence mirrors like this produce; the open design
+questions (anchor namespace, change signal, enumeration cost under rate
+limits, artifact granularity, intent-scoping fields) stay deliberately
+unanswered until then.
+`;
+}
+
+function loadState() {
+  const p = join(dir, '.mirror-state.json');
+  if (!existsSync(p)) return { repo, issues: {} };
+  try {
+    return JSON.parse(readFileSync(p, 'utf-8'));
+  } catch {
+    return { repo, issues: {} };
+  }
+}
+
+function saveState(state) {
+  const sorted = { repo: state.repo, issues: {} };
+  for (const k of Object.keys(state.issues).sort((a, b) => Number(a) - Number(b))) {
+    sorted.issues[k] = state.issues[k];
+  }
+  writeFileSync(join(dir, '.mirror-state.json'), JSON.stringify(sorted, null, 2) + '\n');
+}
+
+// ── mirror ───────────────────────────────────────────────────────────────────
+
+mkdirSync(join(dir, 'issues'), { recursive: true });
+if (!existsSync(join(dir, '.git'))) git(['init', '-q']);
+
+const state = loadState();
+if (state.repo && state.repo !== repo) {
+  process.stderr.write(`mirror-issues: this mirror tracks ${state.repo}, not ${repo}\n`);
+  process.exit(2);
+}
+state.repo = repo;
+
+// Watermark: the newest updatedAt we have mirrored. Incremental runs ask
+// GitHub only for issues updated since then; --full refetches everything.
+const watermark = full ? null : Object.values(state.issues).sort().at(-1) || null;
+let path = `repos/${repo}/issues?state=all&per_page=100&sort=updated&direction=asc`;
+if (watermark) path += `&since=${encodeURIComponent(watermark)}`;
+const fetched = ghPaginated(path).filter((i) => !i.pull_request);
+
+let changed = 0;
+for (const issue of fetched) {
+  // The `since` window re-includes the watermark issue itself; skip issues
+  // whose recorded updatedAt is unchanged so their comments are not
+  // refetched (rate-limit friendliness; correctness is unaffected because
+  // an unchanged updatedAt means an unchanged issue+comment thread).
+  if (!full && state.issues[String(issue.number)] === issue.updated_at) continue;
+  const comments = issue.comments
+    ? ghPaginated(`repos/${repo}/issues/${issue.number}/comments?per_page=100`).sort(
+        (a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id,
+      )
+    : [];
+  writeFileSync(join(dir, 'issues', `${issue.number}.md`), renderIssue(issue, comments));
+  state.issues[String(issue.number)] = issue.updated_at;
+  changed += 1;
+}
+
+// Prune (full runs only): an issue file with no upstream counterpart —
+// transferred or admin-deleted — leaves the mirror. Incremental runs never
+// prune; their fetch window cannot distinguish "gone" from "unchanged".
+if (full) {
+  const upstream = new Set(fetched.map((i) => String(i.number)));
+  for (const f of readdirSync(join(dir, 'issues'))) {
+    const m = /^(\d+)\.md$/.exec(f);
+    if (m && !upstream.has(m[1])) {
+      rmSync(join(dir, 'issues', f));
+      delete state.issues[m[1]];
+      changed += 1;
+    }
+  }
+}
+
+writeFileSync(join(dir, 'README.md'), renderReadme());
+saveState(state);
+
+// Commit only when the tree moved — the git history IS the change signal.
+git(['add', '-A']);
+const dirty = git(['status', '--porcelain']).trim();
+if (dirty) {
+  git(['commit', '-q', '-m', `mirror: sync ${repo} (${changed} issue file(s) touched)`], {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'mirror-issues',
+      GIT_AUTHOR_EMAIL: 'mirror-issues@memstead.local',
+      GIT_COMMITTER_NAME: 'mirror-issues',
+      GIT_COMMITTER_EMAIL: 'mirror-issues@memstead.local',
+    },
+  });
+  process.stdout.write(`mirrored ${repo}: ${changed} issue file(s) touched, committed\n`);
+} else {
+  process.stdout.write(`mirrored ${repo}: unchanged (mirror is as fresh as this run — not live GitHub state)\n`);
+}
