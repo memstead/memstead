@@ -87,11 +87,30 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Testing: doctests (cargo test --doc)"
+echo "══════════════════════════════════"
+# nextest skips doctests by design, so without this leg every doc example
+# in the crates was a stated API contract that never executed anywhere —
+# not locally, not in CI.
+if (cd "$ROOT" && cargo test --doc --workspace --features mem-repo); then
+  echo "  ✓ doctests passed"
+else
+  FAILED+=("doctests")
+  echo "  ✗ doctests FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Testing: engine (Rust, lean flavour)"
 echo "══════════════════════════════════"
 # lean is the --no-default-features, folder-backend-only build (no gix). Both
 # flavours must stay green — public CI runs lean-smoke and full-smoke.
-if (cd "$ROOT" && cargo nextest run --workspace --no-default-features); then
+# Lean legs build into their own target dir (target/lean): sharing the
+# default dir left a degraded --no-default-features binary at
+# target/debug/memstead after every full run — a binary that is not what
+# its path says it is (cost two sessions a false-negative probe round
+# each). Isolation also keeps lean artifacts cached across runs.
+if (cd "$ROOT" && cargo nextest run --workspace --no-default-features --target-dir target/lean); then
   echo "  ✓ engine (lean) passed"
 else
   FAILED+=("engine-lean")
@@ -107,7 +126,7 @@ echo "════════════════════════�
 # features across one build graph. Only a targeted -p build exercises
 # the cli's real lean flavour (its cfg(not(mem-repo)) branches — e.g.
 # the schema-new follow-up that routes through a fresh init).
-if (cd "$ROOT" && cargo nextest run -p memstead-cli --no-default-features); then
+if (cd "$ROOT" && cargo nextest run -p memstead-cli --no-default-features --target-dir target/lean); then
   echo "  ✓ memstead-cli (true lean) passed"
 else
   FAILED+=("memstead-cli-lean")
@@ -123,11 +142,35 @@ echo "════════════════════════�
 # wire_shape_lean.rs) were compiled out of every leg, so they existed
 # without ever running. A targeted -p build is the only way to reach the
 # lean MCP binary's own behaviour.
-if (cd "$ROOT" && cargo nextest run -p memstead-mcp --no-default-features); then
+if (cd "$ROOT" && cargo nextest run -p memstead-mcp --no-default-features --target-dir target/lean); then
   echo "  ✓ memstead-mcp (true lean) passed"
 else
   FAILED+=("memstead-mcp-lean")
   echo "  ✗ memstead-mcp (true lean) FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
+echo "  Gate: docs-site guard prebuild"
+echo "══════════════════════════════════"
+# The prebuild (docs-site/scripts/copy-openapi.mjs) carries the skills
+# roster guard: it reads the live SKILL.md directories, asserts the
+# roster is exactly the expected set, and throws on drift. Before this
+# leg it ran only in the post-merge deploy workflow — a guard that can
+# only fail AFTER the tree merged. Node-free environments skip loudly
+# (decision 9): a skip is a degraded mode, not a silent pass.
+if command -v node >/dev/null 2>&1; then
+  if (cd "$ROOT" && node docs-site/scripts/copy-openapi.mjs); then
+    echo "  ✓ docs-site guard prebuild passed"
+  else
+    FAILED+=("docs-site-guards")
+    echo "  ✗ docs-site guard prebuild FAILED"
+  fi
+else
+  echo "  ⚠⚠⚠ SKIPPED — node is not installed. The docs-site guards did NOT run:"
+  echo "  ⚠⚠⚠   - skills roster guard (roster set, frontmatter, invocation posture)"
+  echo "  ⚠⚠⚠   - glossary/openapi prebuild sync"
+  echo "  ⚠⚠⚠ A green run WITHOUT node is a degraded green. Install node to close it."
 fi
 
 echo ""
@@ -184,6 +227,24 @@ if (cd "$ROOT" && node --test docs/schemas/memstead-plugin/v1/validator.test.mjs
 else
   FAILED+=("format-schemas")
   echo "  ✗ workspace format schemas FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
+echo "  Gate: target/debug/memstead is the full-feature binary"
+echo "══════════════════════════════════"
+# The behavioural invariant behind the lean target-dir isolation above: a
+# green run leaves behind a binary that is what its path says it is. Only
+# checked when the binary exists (a docs-only tree may never build it).
+if [ -x "$ROOT/target/debug/memstead" ]; then
+  if "$ROOT/target/debug/memstead" mem --help >/dev/null 2>&1; then
+    echo "  ✓ full-feature binary intact (mem subcommand answers)"
+  else
+    FAILED+=("binary-integrity")
+    echo "  ✗ target/debug/memstead lost its full-feature surface (lean leg leaked?)"
+  fi
+else
+  echo "  (no target/debug/memstead built — nothing to check)"
 fi
 
 echo ""
