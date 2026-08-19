@@ -1261,11 +1261,36 @@ fn report(
     // the workspace is not the cwd; a bare workspace-relative path in that
     // company is the same defect in prose form — it does not resolve from
     // the directory the reader is actually in.
-    let from_here = |workspace_relative: &str| {
-        if in_cwd {
-            workspace_relative.to_string()
+    //
+    // Resolve, then re-express: joining the workspace-relative form onto
+    // the root and canonicalizing collapses `..` instead of printing
+    // `./ws/..`, which is the only way an upward pointer comes out as
+    // something the reader can act on. Falls back to the absolute path
+    // when the target is not under the cwd — still resolvable, never a
+    // form that resolves somewhere else.
+    let cwd_canon = std::env::current_dir()
+        .ok()
+        .map(|c| c.canonicalize().unwrap_or(c));
+    let from_here = |workspace_relative: &str| -> String {
+        let joined = absolute.join(workspace_relative);
+        let resolved = joined.canonicalize().unwrap_or(joined);
+        let absolute_form = resolved.display().to_string();
+        let Some(cwd) = &cwd_canon else {
+            return absolute_form;
+        };
+        let rel = memstead_base::ingest::cursor::relative_to(cwd, &resolved)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.is_empty() {
+            return ".".to_string();
+        }
+        // An upward chain is fine — the `cd` beside it uses the same
+        // shape — but past the point where it is longer than the plain
+        // absolute path it stops helping anyone read it.
+        if rel.len() <= absolute_form.len() {
+            rel
         } else {
-            format!("{}/{}", target.display(), workspace_relative)
+            absolute_form
         }
     };
     // The mem's own folder in the reader's frame, for the prose that
@@ -1273,12 +1298,21 @@ fn report(
     // workspace-relative: it is the machine field, and an agent reading
     // `--json` already has `workspace_root` to resolve it against.
     // Everything a human is told to open goes through `from_here`.
-    let mem_folder_here: Option<String> = mem_dir
+    let mem_folder_here: Option<String> = match mem_dir
         .strip_prefix(target)
         .ok()
         .map(|r| r.to_string_lossy().to_string())
         .filter(|r| !r.is_empty())
-        .map(|r| from_here(&r));
+    {
+        Some(rel) => Some(from_here(&rel)),
+        // The mem collapsed onto the workspace root. "In this folder" is
+        // true only if the reader is standing in it — in the guided
+        // disjoint layout they are not, so name the folder instead. The
+        // plain path keeps the inherited wording: its receipt is pinned
+        // observably equivalent, and this branch never fires there.
+        None if guided.is_some() && !in_cwd => Some(from_here(".")),
+        None => None,
+    };
     // The mem's own folder, workspace-relative, when it is not the root.
     let mem_folder_rel: Option<String> = mem_dir
         .strip_prefix(target)
@@ -1384,7 +1418,7 @@ fn report(
                         "- Scope: everything under `{}`, minus what the record denies ({}) \
                      and minus {}, which the engine excludes unconditionally. The deny \
                      list is yours to edit: `{}`",
-                        g.pointer,
+                        path(&g.pointer),
                         g.deny_paths
                             .iter()
                             .map(|d| format!("`{d}`"))
@@ -1581,7 +1615,7 @@ fn report(
         lines.push(format!(
             "- Binding:     `{}` over `{}` (record: `{}`)",
             g.binding_id,
-            g.pointer,
+            from_here(&g.pointer),
             from_here(&g.record),
         ));
     }

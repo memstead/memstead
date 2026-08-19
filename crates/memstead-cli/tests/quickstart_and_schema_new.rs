@@ -2518,6 +2518,93 @@ fn quickstart_repo_json_paths_resolve_against_the_workspace_root() {
     );
 }
 
+/// Every path the markdown receipt prints resolves from the directory the
+/// reader is standing in, and is the thing the receipt calls it. Invoked
+/// from a third directory — neither the workspace nor the repository —
+/// because that is the only vantage point where all three frames differ.
+/// Layout A cannot expose this: there they coincide.
+#[test]
+fn quickstart_repo_every_printed_path_resolves_from_a_third_directory() {
+    let tmp = TempDir::new().unwrap();
+    let parent = tmp.path().join("parent");
+    std::fs::create_dir_all(&parent).unwrap();
+    let repo = fixture_repo(&parent, "third-app");
+    let elsewhere = tmp.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+
+    let out = stdout_of(
+        memstead()
+            .current_dir(&elsewhere)
+            .args(["quickstart", "--agent", "claude-code"])
+            // Nested inside the repo, so the mem takes a folder of its
+            // own — and the reader is in neither.
+            .arg("../parent/third-app/ws")
+            .arg("--repo")
+            .arg("../parent/third-app")
+            .arg("--name")
+            .arg("kb")
+            .assert()
+            .success(),
+    );
+
+    let printed = |prefix: &str| -> String {
+        let line = out
+            .lines()
+            .find(|l| l.starts_with(prefix))
+            .unwrap_or_else(|| panic!("receipt has no `{prefix}` line:\n{out}"));
+        line.split('`')
+            .nth(if prefix.starts_with("- Binding") {
+                3
+            } else {
+                1
+            })
+            .unwrap_or_else(|| panic!("no backticked path in: {line}"))
+            .trim_end_matches('/')
+            .to_string()
+    };
+
+    // The mem folder: exists, and holds the entities.
+    let mem = elsewhere.join(printed("- Mem folder:"));
+    assert!(
+        mem.join("welcome-to-memstead.md").is_file(),
+        "mem folder must resolve and hold the seed: {mem:?}",
+    );
+
+    // The binding pointer: exists, and is the source — not some other
+    // directory that merely happens to exist at that relative path.
+    let pointer = elsewhere.join(printed("- Binding:"));
+    assert!(
+        pointer.join("README.md").is_file() && pointer.join(".git").exists(),
+        "the pointer must resolve to the repository: {pointer:?}",
+    );
+    assert_eq!(
+        pointer.canonicalize().unwrap(),
+        repo.canonicalize().unwrap(),
+        "…and to THAT repository, not another directory at the same path",
+    );
+
+    // The wiring file the reader is told to restart an agent for.
+    let wiring = out
+        .lines()
+        .find(|l| l.contains("(server `memstead`)"))
+        .expect("the receipt names the wiring file");
+    let wiring = elsewhere.join(wiring.split('`').nth(1).unwrap());
+    assert!(wiring.is_file(), "wiring path must resolve: {wiring:?}");
+
+    // The record the reader is told to edit.
+    let edit = out
+        .lines()
+        .find(|l| l.contains("yours to edit"))
+        .expect("the brief names the record");
+    let record = elsewhere.join(
+        edit.rsplit_once("yours to edit: `")
+            .unwrap()
+            .1
+            .trim_end_matches('`'),
+    );
+    assert!(record.is_file(), "record path must resolve: {record:?}");
+}
+
 /// The collapsed layout — workspace outside the repository — claims only
 /// engine state, because the mem folder is not in the source tree at all
 /// and no exclusion has to fire for it.
