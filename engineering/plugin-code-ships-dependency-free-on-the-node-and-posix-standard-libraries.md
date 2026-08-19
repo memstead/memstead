@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:05Z
-last_modified: 2026-07-13T16:44:04Z
+last_modified: 2026-08-18T21:26:12Z
 authority: established
 universality: domain-wide
 tags: plugin, dependencies, packaging, portability
@@ -13,7 +13,7 @@ tags: plugin, dependencies, packaging, portability
 Every executable file shipped in `plugins/claude-code/` MUST run on the Node and POSIX standard libraries alone — no npm dependencies, no `package.json`, no `node_modules`, no bare-package imports. A plugin `.mjs` script may import only `node:`-prefixed builtins and relative-path modules; shell wrappers use POSIX utilities only.
 
 ## Scope
-All plugin-owned scripts under `plugins/claude-code/`: the `hooks/*.mjs` lifecycle hooks, the skill scripts (`skills/ingest/scripts/inject.mjs`, `workspace-loader.mjs`, `change-detection.mjs`, `skills/lib/writing-guidance.mjs`), the schema validator and workspace-walker under `schemas/`, and their `.sh` wrappers. It does NOT extend to the Rust engine crates or the macOS app's Swift packages — those carry their own dependency policies — those carry their own dependency policies.
+All plugin-owned scripts under `plugins/claude-code/`: the `hooks/*.mjs` lifecycle hooks, the skill scripts (`skills/ingest/scripts/inject.mjs`, `workspace-loader.mjs`, `change-detection.mjs`, `skills/lib/writing-guidance.mjs`), the schema validator and workspace-walker under `schemas/`, and their `.sh` wrappers. It does NOT extend to the Rust engine crates — those carry their own dependency policies.
 
 ## Relationships
 - **REFERENCES**: [[plugin:memstead-plugin-v0-schema-validator-runtime]]

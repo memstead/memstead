@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-07-13T16:44:05Z
+last_modified: 2026-08-18T20:43:51Z
 authority: accepted
 universality: domain-wide
 tags: security, serve, defaults, defense-in-depth, engine
@@ -13,7 +13,7 @@ tags: security, serve, defaults, defense-in-depth, engine
 Every externally-reachable Memstead surface defaults to the narrowest exposure and least authority it can, and widens only on explicit configuration. A new public route or binary must default closed — broadening reach or write scope is always a deliberate, reviewable config act, never the fallback behaviour.
 
 ## Scope
-The network-reachable HTTP + MCP surfaces the `memstead-serve` binaries expose: the read-only serve surface, the writable per-session sketch surface, and the unified `memstead-serve-full`. Does NOT govern the local stdio MCP server or in-process UniFFI — those are not network-reachable and carry their own trust model (a local operator with filesystem access).
+The network-reachable HTTP + MCP surfaces the `memstead-serve` binaries expose: the read-only serve surface, the writable per-session sketch surface, and the unified `memstead-serve-full`. Does NOT govern the local stdio MCP server or in-process embedding of the Rust crates — those are not network-reachable and carry their own trust model (a local operator with filesystem access).
 
 ## Relationships
 - **GOVERNS**: [[engine:serve-read-only-http-wire-surface]]

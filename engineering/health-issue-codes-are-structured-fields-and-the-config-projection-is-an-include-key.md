@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-06T08:31:01Z
-last_modified: 2026-08-06T08:31:01Z
+last_modified: 2026-08-18T20:17:56Z
 status: accepted
 decided_on: 2026-08-06
 deciders: operator (stability-sweep plan 04), implementing agent
@@ -29,4 +29,4 @@ A typed field survives every projection that carries issues at all — the same 
 
 ## Notes
 
-
+**2026-08-18:** the UniFFI `HealthIssue` consumer named in the consequences retired with the native macOS app (the UniFFI surface left the workspace); the typed-code posture itself is unchanged and every remaining surface still branches on the code field.

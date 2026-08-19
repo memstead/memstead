@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-07-13T16:44:02Z
+last_modified: 2026-08-18T19:34:42Z
 status: accepted
 decided_on: 2026-07-04
 deciders: memstead-core
@@ -19,14 +19,13 @@ The git-branch backend is Memstead's affordance for multi-actor, multi-process w
 
 ## Consequences
 - Replay/recovery workflows operate only over un-pushed commit segments; a reset that would cross a pushed commit refuses and surfaces the offending SHAs for the operator to reconcile rather than proceeding.
-- `expected_head` is optional: the CLI path passes `None` and relies on the git-standard ref-update CAS alone, while the macOS guarded-undo surface passes the observed head for the stronger sibling-safety guarantee — the stricter guard is offered, not imposed.
+- `expected_head` is optional: the CLI path passes `None` and relies on the git-standard ref-update CAS alone, while a guarded-undo UI can pass the observed head for the stronger sibling-safety guarantee — the stricter guard is offered, not imposed.
 - "Pushed" is defined purely by local `refs/remotes/*` reachability; the probe never contacts the network, so an operator who hand-edits remote-tracking refs can fool it. The trade accepted is git-standard local semantics over a network round-trip on every reset.
 - Each reset adds a reachability walk over remote-tracking refs — negligible against the history rewrite itself.
 
 ## Relationships
 - **REFERENCES**: [[use-optimistic-content-hash-locking-for-all-mutations]]
 - **REFERENCES**: [[engine:git-transport-and-history-surface]]
-- **REFERENCES**: [[engine:memstead-swift-uniffi-foreign-function-contract]]
 - **MOTIVATED_BY**: [[use-optimistic-content-hash-locking-for-all-mutations]]
 
 ## Options
@@ -37,4 +36,4 @@ The git-branch backend is Memstead's affordance for multi-actor, multi-process w
 
 ## Notes
 
-Extends the optimistic-locking discipline of [[engineering--use-optimistic-content-hash-locking-for-all-mutations]] from entity-hash to branch-head granularity — one uniform "never overwrite what you did not observe" posture across entity mutations and history rewrite. Realized in `crates/memstead-git-branch/src/ops/branch_reset.rs`; surfaced through [[engine--git-transport-and-history-surface]] and exposed over the [[engine--memstead-swift-uniffi-foreign-function-contract]] for the app's guarded-undo affordance (`branch_reset_stranded_refs` gives that surface a cross-mem strand preview before confirming).
+Extends the optimistic-locking discipline of [[engineering--use-optimistic-content-hash-locking-for-all-mutations]] from entity-hash to branch-head granularity — one uniform "never overwrite what you did not observe" posture across entity mutations and history rewrite. Realized in `crates/memstead-git-branch/src/ops/branch_reset.rs`; surfaced through [[engine--git-transport-and-history-surface]]; it was additionally exposed over the memstead-swift UniFFI contract for the retired macOS app's guarded-undo affordance until that surface left with the app on 2026-08-18 (`branch_reset_stranded_refs` remains as the cross-mem strand preview).

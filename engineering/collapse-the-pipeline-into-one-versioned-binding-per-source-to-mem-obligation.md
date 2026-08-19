@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-07-18T11:37:52Z
+last_modified: 2026-08-18T21:41:04Z
 status: superseded
 decided_on: 2026-07-10
 deciders: memstead-core
@@ -45,3 +45,5 @@ The four-primitive model ([[engineering--model-the-pipeline-as-four-primitives-m
 ## Notes
 
 Format and machinery live in `crates/memstead-base/src/binding.rs` (`BindingV1`, `hash_binding`, capability matrix), `binding_migrate.rs` (gen-2→v1), `ingest/advance.rs` (the durable advance store), and the `projection` CLI leaves in `memstead-cli`. **E2 is complete** (all 22 acceptance criteria confirmed by an independent grading gate, 2026-07-10). The v1 binding format has no `Ingest` record and no `refinement` mode; the CLI (`ingest`/`pipeline` retired) and UniFFI surfaces are switched over; and the engine machinery is **deleted** — `Ingest`/`IngestMode`/`Refinement` and the refinement renderers are gone from `pipeline.rs`/`render.rs` (only a migrate-local `LegacyIngest` parse struct survives so `projection migrate` can read and refuse the old shape). The five edge-behaviors the grading gate demanded all landed: absent-operation-block refusal with a `projection enable {build,sync}` remedy (`operations.build` is optional), cursor consumption + `reconcile-cursors.json` deletion + `workspace.toml` proposal in migrate, reload-independence doc/test pins, and `signal: none` for detection-less web sources. The binding **format is frozen** — E3a (anchors) and S1a (first plugin release) build on it. Superseded decision retained at `status: superseded` for the historical record. Minor residuals (non-blocking): the legacy-load CLI token is `PROJECTION_LOAD_FAILED` (the message names `projection migrate` correctly) rather than the originally-specified spelling `PROJECTION_STORE_LEGACY`.
+
+**2026-08-18:** the macOS app and its UniFFI surface named throughout this record (the compile-green floor, the deferred editor release) retired entirely with the app; every deferred macOS obligation this decision carried is dissolved. Superseded record kept verbatim otherwise.

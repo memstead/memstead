@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:05Z
-last_modified: 2026-07-13T16:44:04Z
+last_modified: 2026-08-18T21:26:16Z
 authority: established
 universality: domain-wide
 tags: licensing, open-core, strategy, plugin
@@ -10,10 +10,10 @@ tags: licensing, open-core, strategy, plugin
 # Open-core licensing tiers the terms by folder
 
 ## Statement
-The project's license terms follow an open-core model, resolved per-folder by the repo-root licensing map: the open core (engine, CLI, MCP server, schemas, docs, the `.mem` format + publish/install client) ships permissively as dual **MIT OR Apache-2.0** at the user's option; the monetized commercial layer (registry server, the hosted-deployment serve/bridge crates, macOS app) is proprietary; and a plugin that extends a third-party host ships under the single most permissive license that maximizes reuse, forking, and re-embedding — because a host plugin's value is breadth of adoption, not defensibility.
+The project's license terms follow an open-core model, resolved per-folder by the repo-root licensing map: the open core (engine, CLI, MCP server, schemas, docs, the `.mem` format + publish/install client) ships permissively as dual **MIT OR Apache-2.0** at the user's option; the monetized commercial layer (registry server, the hosted-deployment serve/bridge crates; until 2026-08-18 also the macOS app) is proprietary; and a plugin that extends a third-party host ships under the single most permissive license that maximizes reuse, forking, and re-embedding — because a host plugin's value is breadth of adoption, not defensibility.
 
 ## Scope
-Governs the license terms of every shippable folder in the repository — engine, CLI, MCP server, schemas, docs, the registry server, the hosted-deployment serve/bridge crates, the macOS app, and every third-party-host plugin. A file's folder location, resolved through the repo-root licensing map, determines its terms; moving a file across a folder boundary changes its license.
+Governs the license terms of every shippable folder in the repository — engine, CLI, MCP server, schemas, docs, the registry server, the hosted-deployment serve/bridge crates, and every third-party-host plugin (the macOS app's folder was in scope until the app's 2026-08-18 retirement; its attic'd source keeps its proprietary LICENSE). A file's folder location, resolved through the repo-root licensing map, determines its terms; moving a file across a folder boundary changes its license.
 
 ## Relationships
 - **GOVERNS**: [[plugin-ships-under-mit-distinct-from-the-engine]]

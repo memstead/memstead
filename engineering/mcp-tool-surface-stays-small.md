@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-07-13T16:44:03Z
+last_modified: 2026-08-18T20:17:48Z
 authority: established
 universality: domain-wide
 tags: invariant, mcp, tools, agent-ergonomics, engine
@@ -29,4 +29,4 @@ Two consolidation anti-patterns are themselves forbidden, so 'extend an existing
 
 ## Consequences
 
-Parameter-shape changes to MCP tools propagate in the same session through the plugin, the macOS app, `memstead-cli`, and spec entities — a breaking tool change is a cross-repo change, which is itself a reason to prefer additive extension.
+Parameter-shape changes to MCP tools propagate in the same session through the plugin, `memstead-cli`, and spec entities — a breaking tool change is a cross-repo change, which is itself a reason to prefer additive extension.

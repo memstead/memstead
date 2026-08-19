@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-18T11:37:35Z
-last_modified: 2026-07-18T11:37:35Z
+last_modified: 2026-08-18T20:17:53Z
 status: accepted
 decided_on: 2026-07-18
 deciders: operator
@@ -32,4 +32,4 @@ Keep the three-record model and hide it in UI only — rejected: every consumer 
 
 ## Notes
 
-
+**2026-08-18:** the macOS three-tier pipeline editor named in the consequences (honest unavailable state pending a redesigned editor) retired with the native macOS app; that deferred-editor obligation is dissolved, not still pending.

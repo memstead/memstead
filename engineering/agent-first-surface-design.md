@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:02Z
-last_modified: 2026-07-13T16:43:59Z
+last_modified: 2026-08-18T20:17:46Z
 authority: established
 universality: domain-wide
 tags: agent-first, mcp, surface-design, ergonomics, primary-consumer, wire-surface, engine
@@ -10,10 +10,10 @@ tags: agent-first, mcp, surface-design, ergonomics, primary-consumer, wire-surfa
 # Agent-first surface design
 
 ## Statement
-The engine's machine-facing surfaces are designed from the primary consumer's perspective first, and that primary consumer is the LLM agent. Formats, tool shapes, parameter names, defaults, and error payloads are evaluated for how an agent reads them, queries with them, and recovers from them — before any human-readability consideration. Human-facing projections (the macOS app, rendered documentation, mem summaries) are a deliberately separate layer, designed separately for human ergonomics over the same substrate.
+The engine's machine-facing surfaces are designed from the primary consumer's perspective first, and that primary consumer is the LLM agent. Formats, tool shapes, parameter names, defaults, and error payloads are evaluated for how an agent reads them, queries with them, and recovers from them — before any human-readability consideration. Human-facing projections (the web app, rendered documentation, mem summaries) are a deliberately separate layer, designed separately for human ergonomics over the same substrate.
 
 ## Scope
-Governs every surface an agent consumes directly: the [[engine--mcp-tool-surface]] (full and lean), the [[engine--schema-describe-projection-surface]] and the relationship vocabulary, the [[engine--typed-error-and-warning-envelope]], and the read/search/entity projections — plus the CLI text and the UniFFI reads the macOS app's in-app agent drives. It does NOT govern the human projection layer (the macOS app's own UI chrome, the docs-site rendering, prose summaries), which optimises for human reading on the same files. Two consumer profiles, one shared markdown-in-git substrate.
+Governs every surface an agent consumes directly: the [[engine--mcp-tool-surface]] (full and lean), the [[engine--schema-describe-projection-surface]] and the relationship vocabulary, the [[engine--typed-error-and-warning-envelope]], and the read/search/entity projections — plus the CLI text. It does NOT govern the human projection layer (the web app's UI, the docs-site rendering, prose summaries), which optimises for human reading on the same files. Two consumer profiles, one shared markdown-in-git substrate.
 
 ## Relationships
 - **REFERENCES**: [[engine:mcp-tool-surface]]
@@ -31,7 +31,7 @@ Stated as the project's foundational design stance (`AGENTS.md`: "built for LLM 
 
 ## Exceptions
 
-The human projection layer is the deliberate exception: the macOS app UI, the docs-site, and prose mem summaries are designed for human ergonomics and may trade agent-optimality for readability. The split is intentional — this principle only claims the machine-facing surfaces, and cedes the human-facing ones to a separately-designed layer.
+The human projection layer is the deliberate exception: the web app UI, the docs-site, and prose mem summaries are designed for human ergonomics and may trade agent-optimality for readability. The split is intentional — this principle only claims the machine-facing surfaces, and cedes the human-facing ones to a separately-designed layer.
 
 ## Consequences
 

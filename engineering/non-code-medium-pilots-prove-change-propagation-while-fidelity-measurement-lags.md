@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-07-13T16:43:05Z
-last_modified: 2026-07-13T16:43:05Z
+last_modified: 2026-08-18T20:18:02Z
 status: active
 tags: projection, verify, sync, pilot, evidence, s1b, engine
 ---
@@ -23,7 +23,7 @@ The S1b milestone required two non-code bindings exercised build→sync→verify
 
 **Gap resolved (2026-07-11):** Filesystem conflict-flag now surfaces — base-retrievability is keyed on the resolved strategy, not the static medium type, so a filesystem+mtime binding renders `base_version_retrievable: false` and the `base-version-unretrievable → prune degrades to conflict-flagging` degradation (was `Degradations: (none)`).
 
-**Gap still open (backlogged):** Graph-medium verify fidelity is inert — `entity`-namespace anchors are never resolved against the live source graph (always "unobserved"), source enumeration is unwired despite `enumerable: true` ("No S(D) denominator"), so coverage/anchor-resolution/**drift** are all `0/0` — a deliberately stale anchor over a changed source went unflagged. Also: engine writes untracked `.memstead/state/{findings,advance}/` into a tracked workspace; mtime baselines aren't machine-portable; no CLI medium-edit command exists (UniFFI/CLI parity gap).
+**Gap still open (backlogged):** Graph-medium verify fidelity is inert — `entity`-namespace anchors are never resolved against the live source graph (always "unobserved"), source enumeration is unwired despite `enumerable: true` ("No S(D) denominator"), so coverage/anchor-resolution/**drift** are all `0/0` — a deliberately stale anchor over a changed source went unflagged. Also: engine writes untracked `.memstead/state/{findings,advance}/` into a tracked workspace; mtime baselines aren't machine-portable; no CLI medium-edit command exists (CLI command-surface gap; the former UniFFI half of that parity retired with the macOS app 2026-08-18).
 
 ## Alternatives
 
