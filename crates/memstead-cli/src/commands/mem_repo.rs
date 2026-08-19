@@ -154,24 +154,47 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         OuterRepoOutcome::Appended { outer_root, rel } => {
             if !ctx.quiet {
                 eprintln!(
-                    "  outer:    {} — added `{}` to .gitignore",
+                    "  outer:    {} — added `{}` to .gitignore \
+                     (`.memstead/` is intentionally trackable — don't ignore it)",
                     outer_root.display(),
                     rel,
                 );
+                eprint_source_layout_hint();
             }
         }
         OuterRepoOutcome::AlreadyIgnored { outer_root, rel } => {
             if !ctx.quiet {
                 eprintln!(
-                    "  outer:    {} — `{}` already in .gitignore, no change",
+                    "  outer:    {} — `{}` already in .gitignore, no change \
+                     (`.memstead/` is intentionally trackable — don't ignore it)",
                     outer_root.display(),
                     rel,
                 );
+                eprint_source_layout_hint();
             }
         }
         OuterRepoOutcome::NoOuter | OuterRepoOutcome::Skipped => {}
     }
     Ok(())
+}
+
+/// The source-layout hint, emitted when `mem-repo init` runs inside (or
+/// at the root of) a git repository — the moment the layout decision is
+/// made, and the layout where the classic multi-repo mistake happens:
+/// workspace inside one source repo, bindings pointing at siblings.
+/// Out-of-root sources are a supported shape — enumeration, change
+/// detection, and anchor resolution all work — but artifact ids render
+/// as workspace-relative `../…` chains and the workspace-to-source
+/// relative layout must stay fixed. Context, not a warning: nothing is
+/// wrong yet, so it rides stderr with the other provenance lines.
+fn eprint_source_layout_hint() {
+    eprintln!(
+        "  layout:   sources you later bind (`projection init`) resolve against this \
+         workspace root. A source outside it is supported — enumeration, change \
+         detection, and anchor resolution all work — but its artifact ids render as \
+         `../…` chains and the workspace-to-source layout must stay fixed. To model \
+         several sibling repos, root the workspace at their common parent directory."
+    );
 }
 
 /// Library-form entry point for `memstead mem-repo init`. Creates
@@ -267,18 +290,18 @@ pub(crate) fn run_init(
     materialise_main_worktree(&mem_repo_root)?;
     write_default_workspace_toml(&workspace)?;
 
-    // Outer-repo gitignore append: walk up from the workspace's parent
-    // (so we don't rediscover the new mem-repo/.git/ as our own outer)
-    // looking for an enclosing `.git/`, append `mem-repo/` to its
-    // `.gitignore`. Idempotent on re-run.
+    // Outer-repo gitignore append: walk up from the workspace root
+    // itself looking for an enclosing `.git/`, append `mem-repo/` to
+    // its `.gitignore`. Starting AT the workspace (not its parent)
+    // covers the workspace-IS-the-repo-root layout — the case where the
+    // append matters most, since a nested `mem-repo/.git` can never be
+    // tracked normally. The new mem-repo's own gitdir sits a level
+    // below (`<workspace>/mem-repo/.git`), never on the walk path, so
+    // it cannot be rediscovered as the outer. Idempotent on re-run.
     let gitignore = if skip_outer_gitignore {
         OuterRepoOutcome::Skipped
     } else {
-        let walk_start = workspace
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| workspace.clone());
-        apply_outer_gitignore(&walk_start, &mem_repo_root)?
+        apply_outer_gitignore(&workspace, &mem_repo_root)?
     };
 
     Ok(InitOutcome {
@@ -503,6 +526,61 @@ schemas = [\"default@1.0.0\"]\n";
             "outer .gitignore must carry exactly one `ws/mem-repo/` line, got {count}\n{gitignore2}",
         );
         let _ = workspace2;
+    }
+
+    /// Workspace AT the git-repo root — the layout the source-layout
+    /// recipe recommends — appends `mem-repo/` to that repo's own
+    /// `.gitignore`. The old parent-first walk skipped exactly this
+    /// case, the one where the append matters most (a nested
+    /// `mem-repo/.git` can never be tracked normally).
+    #[test]
+    fn memstead_mem_repo_init_workspace_at_repo_root_appends() {
+        let tmp = TempDir::new().unwrap();
+        let workspace = tmp.path().join("repo");
+        fs::create_dir_all(&workspace).unwrap();
+        gix::init(&workspace).unwrap();
+
+        let outcome = run_init(&workspace, false).unwrap();
+        match outcome.gitignore {
+            OuterRepoOutcome::Appended {
+                ref outer_root,
+                ref rel,
+            } => {
+                assert_eq!(
+                    outer_root.canonicalize().unwrap(),
+                    workspace.canonicalize().unwrap(),
+                    "the workspace itself is the outer repo"
+                );
+                assert_eq!(rel, "mem-repo/");
+            }
+            other => panic!("expected Appended, got {other:?}"),
+        }
+        let gitignore = fs::read_to_string(workspace.join(".gitignore")).unwrap();
+        assert!(
+            gitignore.contains("mem-repo/"),
+            "expected mem-repo/ in the repo's own .gitignore, got:\n{gitignore}",
+        );
+    }
+
+    /// Complement: a workspace under no git repo at all appends nowhere
+    /// and reports `NoOuter` — no `.gitignore` is invented.
+    #[test]
+    fn memstead_mem_repo_init_without_any_outer_repo_appends_nowhere() {
+        let tmp = TempDir::new().unwrap();
+        let workspace = tmp.path().join("free").join("ws");
+
+        let outcome = run_init(&workspace, false).unwrap();
+        assert!(
+            matches!(outcome.gitignore, OuterRepoOutcome::NoOuter),
+            "expected NoOuter, got {:?}",
+            outcome.gitignore
+        );
+        assert!(
+            !tmp.path().join(".gitignore").exists()
+                && !workspace.join(".gitignore").exists()
+                && !tmp.path().join("free").join(".gitignore").exists(),
+            "no .gitignore may be invented anywhere on the walk path"
+        );
     }
 
     #[test]

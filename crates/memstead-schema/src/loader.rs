@@ -668,6 +668,33 @@ pub fn load_sealed_package(files: &[(String, Vec<u8>)]) -> Result<Schema, Schema
     load_with_context(&manifest, &types, None, None, format)
 }
 
+/// Would this package content pass the AUTHORING tier under the
+/// current language? Same strictness as [`load_schema_from_dir`] —
+/// retired keys (`propagating_relationships`, `examples:`, `optional:`)
+/// refuse loudly — but over in-memory content, so a caller holding a
+/// sealed package's files (git-branch `__MEMSTEAD:schemas/` tree,
+/// folder seal, archive) can ask whether the content is still
+/// re-authorable/installable without materialising a directory. The
+/// tolerant sealed read ([`load_sealed_package`]) is unaffected; this
+/// is a pure diagnosis — the health rot axis is the consumer.
+pub fn check_package_reauthorable(
+    manifest_yaml: &str,
+    types_yamls: &[(String, String)],
+) -> Result<(), SchemaLoadError> {
+    // The `types_dir: Some(..)` context is what selects the authoring-
+    // strict legacy-key gates; the path itself only labels error
+    // messages.
+    let strict_context = Path::new("<sealed package>");
+    load_with_context(
+        manifest_yaml,
+        types_yamls,
+        Some(strict_context),
+        Some(strict_context),
+        MetadataPolarityFormat::RequiredOptIn,
+    )
+    .map(|_| ())
+}
+
 /// Load a schema from in-memory YAML strings with an explicit
 /// metadata-polarity format generation (from the sealed package's
 /// format marker).

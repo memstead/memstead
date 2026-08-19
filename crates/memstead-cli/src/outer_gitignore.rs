@@ -39,10 +39,12 @@ pub enum OuterRepoOutcome {
     Skipped,
 }
 
-/// Walk upward from `start` looking for an outer `.git/` directory; on
-/// success append `ignore_path` (rendered relative to the outer root)
-/// to that repo's `.gitignore`. The starting directory is the parent of
-/// the new gitdir / mem-repo so we don't rediscover our own git.
+/// Walk upward from `start` (inclusive) looking for an outer `.git/`
+/// directory; on success append `ignore_path` (rendered relative to the
+/// outer root) to that repo's `.gitignore`. Callers start at the
+/// workspace root itself — the target's own gitdir lives below it
+/// (`mem-repo/.git`), never on the walk path — so a workspace that IS
+/// a git-repo root still gets its append.
 ///
 /// `ignore_path` must lie inside the discovered outer repo for the
 /// relative-path rendering to succeed; if `strip_prefix` fails the

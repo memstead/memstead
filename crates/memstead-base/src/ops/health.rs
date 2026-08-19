@@ -461,18 +461,27 @@ pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value 
 /// is missing from this map fall back to the builtin `default` schema
 /// relationship vocabulary (keeps legacy fixtures green; real production
 /// paths always register a mem schema).
+///
+/// `mem_filter` scopes the per-entity scans and the structural counts
+/// (orphans, stubs, leaf population) to one mem; `None` is the classic
+/// engine-wide sweep. Validating that the name exists is the caller's
+/// job ([`crate::Engine::health_scoped`] refuses `UNKNOWN_MEM` before
+/// reaching here) — an unknown name at this level just scans nothing.
 pub fn compute_health(
     store: &Store,
     default_schema: &TypeDefinition,
     mem_schemas: &HashMap<String, Arc<Schema>>,
+    mem_filter: Option<&str>,
 ) -> HealthSummary {
     let mut missing_fields = Vec::new();
     let mut stale_entities = Vec::new();
 
     let today_days = days_since_epoch();
 
+    let in_scope = |mem: &str| mem_filter.is_none_or(|v| mem == v);
+
     for entity in store.all_entities() {
-        if entity.stub {
+        if entity.stub || !in_scope(&entity.mem) {
             continue;
         }
 
@@ -674,10 +683,27 @@ pub fn compute_health(
     // Sort stale entities by days_since_modified descending
     stale_entities.sort_by_key(|e| std::cmp::Reverse(e.days_since_modified));
 
-    // Structural counts
-    let orphan_count = query::find_orphans_with_schemas(store, mem_schemas).len();
-    let leaf_entities_by_type = query::leaf_population(store, mem_schemas);
-    let stub_count = query::find_stubs(store).len();
+    // Structural counts — scoped by the same filter as the entity scans
+    // above so a `mem`-scoped summary is internally consistent.
+    let orphan_count = query::find_orphans_with_schemas(store, mem_schemas)
+        .into_iter()
+        .filter(|id| store.get(id).is_some_and(|e| in_scope(&e.mem)))
+        .count();
+    let leaf_entities_by_type = match mem_filter {
+        None => query::leaf_population(store, mem_schemas),
+        Some(v) => {
+            let scoped: HashMap<String, Arc<Schema>> = mem_schemas
+                .iter()
+                .filter(|(mem, _)| mem.as_str() == v)
+                .map(|(mem, s)| (mem.clone(), s.clone()))
+                .collect();
+            query::leaf_population(store, &scoped)
+        }
+    };
+    let stub_count = query::find_stubs(store)
+        .iter()
+        .filter(|(id, _)| store.get(id).is_some_and(|e| in_scope(&e.mem)))
+        .count();
 
     HealthSummary {
         stale_entities,
@@ -892,6 +918,13 @@ pub fn collect_dangling_links(store: &Store, mem_filter: Option<&str>) -> Vec<Da
             });
         }
     }
+    // Deterministic output — the store iterates a HashMap, so without a
+    // sort two identical runs can serve the same findings in different
+    // orders. Sort by (from, target, section) so successive sweeps diff
+    // cleanly.
+    out.sort_by(|a, b| {
+        (&a.from.0, &a.target_id.0, &a.section).cmp(&(&b.from.0, &b.target_id.0, &b.section))
+    });
     out
 }
 
@@ -2113,7 +2146,7 @@ write_rules: []
         store.upsert(e2.id.clone(), e2);
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &HashMap::new());
+        let summary = compute_health(&store, schema, &HashMap::new(), None);
         assert_eq!(summary.orphan_count, 2); // No edges between them
         assert_eq!(summary.stub_count, 0);
     }
@@ -2156,7 +2189,7 @@ write_rules: []
         mem_schemas.insert("specs".to_string(), software);
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &mem_schemas);
+        let summary = compute_health(&store, schema, &mem_schemas, None);
         let report = summary
             .missing_fields
             .iter()
@@ -2227,7 +2260,7 @@ write_rules: []
         mem_schemas.insert("specs".to_string(), software);
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &mem_schemas);
+        let summary = compute_health(&store, schema, &mem_schemas, None);
         let shape_issue = summary
             .missing_fields
             .iter()
@@ -2262,7 +2295,7 @@ write_rules: []
         mem_schemas.insert("specs".to_string(), Schema::builtin_default());
 
         let schema = &type_by_name("spec").unwrap();
-        let summary = compute_health(&store, schema, &mem_schemas);
+        let summary = compute_health(&store, schema, &mem_schemas, None);
         let report = summary
             .missing_fields
             .iter()
@@ -2317,6 +2350,68 @@ write_rules: []
         assert_eq!(d.target_id, b_id);
         assert_eq!(d.target_path, "b");
         assert_eq!(d.section.as_deref(), Some("purpose"));
+    }
+
+    /// Decision 18 (backlog-sweep plan 06): dangling-links and stubs
+    /// output is deterministic — the store iterates a HashMap, so the
+    /// collectors sort before serving. Two independently built
+    /// identical stores must produce byte-identical lists, in the
+    /// documented (from, target, section) / id order.
+    #[test]
+    fn dangling_links_and_stubs_serve_in_deterministic_order() {
+        use crate::entity::store_builder::make_stub;
+
+        let build = || {
+            let mut store = Store::new();
+            // Insert in an order unrelated to the expected output order.
+            for name in ["zeta", "alpha", "mid"] {
+                let e = make_entity_with_body(
+                    name,
+                    "purpose",
+                    &format!("See [[gone-{name}]] and [[lost-{name}]]."),
+                );
+                store.upsert(e.id.clone(), e);
+            }
+            for name in ["zeta", "alpha", "mid"] {
+                for pre in ["gone", "lost"] {
+                    let id = EntityId::new("specs", &format!("{pre}-{name}"));
+                    store.upsert(id.clone(), make_stub(id));
+                }
+            }
+            store
+        };
+
+        let store_a = build();
+        let store_b = build();
+
+        let key =
+            |d: &super::DanglingLink| (d.from.0.clone(), d.target_id.0.clone(), d.section.clone());
+        let dangling_a: Vec<_> = super::collect_dangling_links(&store_a, None)
+            .iter()
+            .map(key)
+            .collect();
+        let dangling_b: Vec<_> = super::collect_dangling_links(&store_b, None)
+            .iter()
+            .map(key)
+            .collect();
+        assert_eq!(dangling_a, dangling_b, "identical stores, identical order");
+        let mut sorted = dangling_a.clone();
+        sorted.sort();
+        assert_eq!(dangling_a, sorted, "served pre-sorted by (from, target)");
+        assert_eq!(dangling_a.len(), 6);
+
+        let stub_ids = |s: &Store| -> Vec<String> {
+            crate::graph::query::find_stubs(s)
+                .into_iter()
+                .map(|(id, _)| id.0)
+                .collect()
+        };
+        let stubs_a = stub_ids(&store_a);
+        assert_eq!(stubs_a, stub_ids(&store_b), "stub order is deterministic");
+        let mut sorted = stubs_a.clone();
+        sorted.sort();
+        assert_eq!(stubs_a, sorted, "stubs served pre-sorted by id");
+        assert_eq!(stubs_a.len(), 6);
     }
 
     #[test]

@@ -1647,6 +1647,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Warning codes referenced literally in the description.
             "UNKNOWN_INCLUDE_KEY",
             "LIMIT_CLAMPED",
+            // The mem-scope refusal (backlog-sweep plan 06): the lean
+            // flavour's description names the typed refusal for a `mem`
+            // filter matching no visible mem.
+            "UNKNOWN_MEM",
             "details",
             // Config projection: the `config` include key (catalogue
             // form of `include_config: true`) and the per-issue

@@ -748,6 +748,13 @@ fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<V
 /// with the identical dialect. Best-effort: if the tree can't be enumerated
 /// (walk cap hit, no readable base) nothing is reported — a warning is only
 /// ever raised on a confirmed zero-match.
+///
+/// The scaffold's own default hygiene entries
+/// ([`crate::binding::DEFAULT_SCAFFOLD_DENY_PATHS`]) are exempt: `projection
+/// init` writes them into every codebase/filesystem binding, and on a
+/// git-enumerated source they can never match (ignored/untracked trees are
+/// not enumerated at all). The engine never calls its own output a typo; a
+/// user-authored entry that matches nothing keeps the loud warning.
 fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<String> {
     if resolved.deny_paths.is_empty() {
         return Vec::new();
@@ -758,6 +765,9 @@ fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<St
     };
     let mut dead: Vec<String> = Vec::new();
     for entry in &resolved.deny_paths {
+        if crate::binding::DEFAULT_SCAFFOLD_DENY_PATHS.contains(&entry.as_str()) {
+            continue;
+        }
         let Some(set) = build_glob_set(&[entry.as_str()]) else {
             // A malformed glob can't be resolved either way — not a confirmed
             // zero-match, so it is not reported here.
@@ -1948,5 +1958,56 @@ mod tests {
             }
             other => panic!("expected Changed, got {other:?}"),
         }
+    }
+
+    /// The dead-deny lint never flags the scaffold's own default hygiene
+    /// entries (they can never match on a git-enumerated source — the
+    /// engine must not call its own output a typo), while a user-authored
+    /// entry that matches nothing keeps the loud warning and one that
+    /// matches stays silent.
+    #[test]
+    fn dead_deny_lint_exempts_scaffold_defaults_but_not_user_typos() {
+        use crate::binding::{BuildMode, DEFAULT_SCAFFOLD_DENY_PATHS};
+        use crate::pipeline::IngestTrigger;
+
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        git(root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "code").unwrap();
+
+        let mut deny_paths: Vec<String> = DEFAULT_SCAFFOLD_DENY_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        deny_paths.push("typo/**".to_string()); // user typo — matches nothing
+        deny_paths.push("src/**".to_string()); // user entry that matches
+
+        let resolved = ResolvedIngest {
+            name: "ing".to_string(),
+            mode: BuildMode::Discovery,
+            trigger: IngestTrigger::Loop,
+            batch_size: 20,
+            deny_paths,
+            projection_ref: "m/p".to_string(),
+            projection_mem: "m".to_string(),
+            projection_name: "p".to_string(),
+            intent: None,
+            sources: vec![ResolvedSource::Primary(primary(vec![PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            }]))],
+            destination_mem: "m".to_string(),
+            rules: None,
+            post_actions: None,
+        };
+
+        let dead = dead_deny_entries(&resolved, root);
+        assert_eq!(
+            dead,
+            vec!["typo/**".to_string()],
+            "only the user typo is flagged — scaffold defaults and matching \
+             entries stay silent"
+        );
     }
 }

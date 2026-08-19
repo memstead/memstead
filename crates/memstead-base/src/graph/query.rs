@@ -291,19 +291,24 @@ pub fn leaf_population(
 
 /// Find stub entities — entities created from unresolved references.
 /// Returns each stub with the list of entities that reference it.
+/// Deterministic: stubs sorted by id, referrers sorted within each —
+/// the store iterates a HashMap, so without the sorts two identical
+/// runs can serve the same list in different orders.
 pub fn find_stubs(store: &Store) -> Vec<(EntityId, Vec<EntityId>)> {
     let mut results = Vec::new();
     for entity in store.all_entities() {
         if !entity.stub {
             continue;
         }
-        let referenced_by: Vec<EntityId> = store
+        let mut referenced_by: Vec<EntityId> = store
             .incoming(&entity.id)
             .iter()
             .map(|e| e.from.clone())
             .collect();
+        referenced_by.sort_by(|a, b| a.0.cmp(&b.0));
         results.push((entity.id.clone(), referenced_by));
     }
+    results.sort_by(|a, b| a.0.0.cmp(&b.0.0));
     results
 }
 

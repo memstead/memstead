@@ -789,3 +789,117 @@ fn batch_per_entry_notes_survive_on_git_branch() {
         silent_commit.note
     );
 }
+
+/// Rot axis for UNSTAMPED seals (backlog-sweep plan 06, decision 19):
+/// a schema sealed under an older engine — retired
+/// `propagating_relationships` key, no install-provenance stamp —
+/// keeps its mem running on the tolerant seal, and health surfaces a
+/// low-tier `SCHEMA_UNSTAMPED_SOURCE_ROT` hint naming the condition
+/// and the re-install remedy. Complement: an unstamped seal that still
+/// passes current-language authoring validation produces no hint, and
+/// the stamped-divergence axis stays silent throughout (its
+/// no-false-positive contract is untouched — these pins carry no
+/// stamp).
+#[test]
+fn unstamped_sealed_schema_rot_surfaces_as_low_tier_hint() {
+    const MANIFEST: &str = r#"name: rotted
+version: 0.1.0
+description: sealed under an older engine
+when_to_use: tests
+types:
+  - doc
+relationships:
+  mode: strict
+  definitions:
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+    const DOC_TYPE_CLEAN: &str = r#"name: doc
+description: t
+when_to_use: Here
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: _default
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+
+    let seal = |root: &std::path::Path, doc_yaml: &str| {
+        init_real_mem_repo(root, &[("hold", "rotted@0.1.0")]);
+        let gitdir = root.join("mem-repo").join(".git");
+        // Simulate an old-engine seal: write the package onto the
+        // `__MEMSTEAD:schemas/` ref as-given (no format marker, no
+        // install-provenance stamp) — the state a pre-stamping install
+        // left behind. The current install path refuses this content,
+        // which is exactly why only health can surface it.
+        memstead_git_branch::storage_memstead::write_schema_to_memstead_ref(
+            &gitdir,
+            "rotted",
+            "0.1.0",
+            &[
+                ("schema.yaml".to_string(), MANIFEST.as_bytes().to_vec()),
+                ("types/doc.yaml".to_string(), doc_yaml.as_bytes().to_vec()),
+            ],
+        )
+        .expect("seal writes");
+        engine_from_workspace_root(root).expect("tolerant boot keeps the mem running")
+    };
+
+    // Rotted content: the retired key refuses under the authoring tier.
+    let rotted_doc = format!("{DOC_TYPE_CLEAN}propagating_relationships: []\n");
+    let tmp = TempDir::new().unwrap();
+    let engine = seal(tmp.path(), &rotted_doc);
+    assert_eq!(engine.mem_names(), vec!["hold"], "the holding runs fine");
+    let warnings = engine.health().warnings;
+    let rot = warnings
+        .iter()
+        .find(|w| w.code() == "SCHEMA_UNSTAMPED_SOURCE_ROT")
+        .expect("rotted unstamped seal must surface the low-tier hint");
+    let payload = serde_json::to_value(rot).unwrap();
+    assert_eq!(payload["details"]["schema_ref"], "rotted@0.1.0");
+    assert_eq!(payload["details"]["mems"], serde_json::json!(["hold"]));
+    assert!(
+        rot.message().contains("schema install"),
+        "the hint names the stamping remedy: {}",
+        rot.message()
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.code().starts_with("SCHEMA_AUTHORING_SOURCE_")),
+        "the stamped-divergence axis must stay silent for unstamped pins"
+    );
+
+    // Complement: a clean unstamped seal parses under the authoring
+    // tier — no hint of any kind.
+    let tmp2 = TempDir::new().unwrap();
+    let engine2 = seal(tmp2.path(), DOC_TYPE_CLEAN);
+    let warnings2 = engine2.health().warnings;
+    assert!(
+        !warnings2
+            .iter()
+            .any(|w| w.code() == "SCHEMA_UNSTAMPED_SOURCE_ROT"
+                || w.code().starts_with("SCHEMA_AUTHORING_SOURCE_")),
+        "a parsing unstamped seal produces no rot or drift finding: {:?}",
+        warnings2.iter().map(|w| w.code()).collect::<Vec<_>>()
+    );
+}

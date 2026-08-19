@@ -61,6 +61,8 @@ Next: Restart Claude Code so the `memstead` MCP server registers — then try: m
 
 Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
+**Choosing where to root the workspace.** If you plan to bind source repositories into the graph later (`memstead projection init`), pick the workspace root with them in mind: a source *inside* the workspace root gets clean relative artifact ids; a source *outside* it is fully supported — enumeration, change detection, and anchor resolution all work — but its artifact ids render as `../…` chains, and the workspace-to-source relative layout must stay fixed. To model several sibling repositories, root the workspace at their **common parent directory** (e.g. `~/projects/graph/` next to `~/projects/app/` and `~/projects/lib/` works, but `~/projects/` containing all three is cleaner). Inside a git repository, `mem-repo init` prints this same hint and adds `mem-repo/` to the repo's `.gitignore` — `.memstead/` itself is intentionally trackable.
+
 ## 3. Create your first entities
 
 The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …) — run `memstead type` to list them. Each type declares which sections an entity must carry; the engine refuses writes that don't conform. Create a `concept` (it requires a definition and an explanation):

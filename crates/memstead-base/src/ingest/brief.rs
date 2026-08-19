@@ -342,7 +342,10 @@ pub struct SourceCursor {
     /// can reach (the project tree). A zero-selecting deny is surfaced as a
     /// rendered warning rather than silently no-op'ing — it catches typos and
     /// un-migrated legacy bare names (which, as globs, match nothing). Never a
-    /// hard error: the ingest still runs, the entry just does nothing.
+    /// hard error: the ingest still runs, the entry just does nothing. The
+    /// scaffold's own default hygiene entries are exempt at collection
+    /// (`cursor::dead_deny_entries`) — the engine never calls its own output
+    /// a typo.
     pub dead_denies: Vec<String>,
     /// The destination mem whose `sync_state` the baseline tokens live on.
     pub dest_mem: String,

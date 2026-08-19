@@ -788,6 +788,24 @@ pub enum WarningHint {
         mems: Vec<String>,
         detail: String,
     },
+    /// Low-tier rot axis for UNSTAMPED pins — distinct from the two
+    /// stamped variants above, whose no-false-positive contract stays
+    /// untouched. The pinned schema's sealed package still loads
+    /// tolerantly (the mem runs fine), but its content no longer passes
+    /// current-language AUTHORING validation — so the package is, as of
+    /// the seal, no longer installable, and the (unstamped, therefore
+    /// unlocatable) authoring source it was sealed from has rotted the
+    /// same way unless someone has since fixed it. `detail` carries the
+    /// authoring-tier load error. Remedy: re-author the package under
+    /// the current language and `memstead schema install` it — which
+    /// re-seals AND stamps, handing the check over to the divergence
+    /// axis. An unstamped package that still parses under the authoring
+    /// tier produces no hint.
+    SchemaUnstampedSourceRot {
+        schema_ref: String,
+        mems: Vec<String>,
+        detail: String,
+    },
     /// A `## Relationships` row was followed by trailing content that
     /// did not match the canonical em-dash delimiter (` — `, U+2014
     /// framed by spaces) — ASCII `--`, ASCII `-`, en-dash U+2013, or
@@ -1634,6 +1652,21 @@ impl fmt::Display for WarningHint {
                  install` it.",
                 mems.join(", ")
             ),
+            WarningHint::SchemaUnstampedSourceRot {
+                schema_ref,
+                mems,
+                detail,
+            } => write!(
+                f,
+                "schema '{schema_ref}' (pinned by {}) has no install-provenance \
+                 stamp, and its sealed package no longer passes current-language \
+                 authoring validation: {detail}. The mem keeps running on the \
+                 tolerantly-loaded seal — nothing is broken — but the package is \
+                 no longer installable as authored. Re-author it under the \
+                 current language and `memstead schema install` it (which also \
+                 stamps it, so future drift is checked).",
+                mems.join(", ")
+            ),
             WarningHint::MemFilesNotDeleted {
                 mem,
                 reason,
@@ -1756,6 +1789,7 @@ impl WarningHint {
             Self::FolderMemProvenance { .. } => "FOLDER_MEM_PROVENANCE",
             Self::SchemaAuthoringSourceMissing { .. } => "SCHEMA_AUTHORING_SOURCE_MISSING",
             Self::SchemaAuthoringSourceDiverged { .. } => "SCHEMA_AUTHORING_SOURCE_DIVERGED",
+            Self::SchemaUnstampedSourceRot { .. } => "SCHEMA_UNSTAMPED_SOURCE_ROT",
             Self::AmbiguousDescriptionDelimiter { .. } => "AMBIGUOUS_DESCRIPTION_DELIMITER",
             Self::ParseMissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",
             Self::ParseDescriptionNotPermitted { .. } => "DESCRIPTION_NOT_PERMITTED",
@@ -2030,6 +2064,11 @@ impl WarningHint {
                 stamped_path: "/workspace/authored".into(),
                 mems: vec!["specs".into()],
                 detail: "the parsed authoring package differs from the sealed copy".into(),
+            },
+            WarningHint::SchemaUnstampedSourceRot {
+                schema_ref: "authored@0.1.0".into(),
+                mems: vec!["specs".into()],
+                detail: "type 'decision': `propagating_relationships` was renamed".into(),
             },
             WarningHint::AmbiguousDescriptionDelimiter {
                 from: EntityId("specs--example-source".into()),
@@ -2330,6 +2369,15 @@ impl WarningHint {
             } => serde_json::json!({
                 "schema_ref": schema_ref,
                 "stamped_path": stamped_path,
+                "mems": mems,
+                "detail": detail,
+            }),
+            Self::SchemaUnstampedSourceRot {
+                schema_ref,
+                mems,
+                detail,
+            } => serde_json::json!({
+                "schema_ref": schema_ref,
                 "mems": mems,
                 "detail": detail,
             }),

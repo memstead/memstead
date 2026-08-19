@@ -793,11 +793,15 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
 
     let mut warnings: Vec<String> = Vec::new();
 
-    // Out-of-workspace medium base — legitimate but fragile: artifact
-    // ids are rendered workspace-relative (`../../…` chains), and
-    // anchors hand-written against source-relative paths resolve as
-    // orphaned. Name the consequence NOW, before any work is wasted;
-    // the operation still succeeds.
+    // Out-of-workspace medium base — a supported shape with one honest
+    // caveat. Everything works: enumeration, change detection, sync,
+    // and anchor resolution (anchors speak the source dialect and join
+    // on the pointer — verified on the dogfood's own out-of-root
+    // bindings, where zero anchors orphan). What degrades: artifact ids
+    // render as workspace-relative `../…` chains, and the binding
+    // depends on the workspace-to-source relative layout staying fixed.
+    // Name the split NOW, at the layout decision; the operation still
+    // succeeds.
     if matches!(
         medium_type,
         memstead_base::MediumType::Codebase | memstead_base::MediumType::Filesystem
@@ -810,10 +814,12 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         let canon_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         if !canon_base.starts_with(&canon_root) {
             warnings.push(format!(
-                "medium base '{}' resolves outside the workspace root '{}': artifact ids will be \
-                 workspace-relative ('../…' chains), and anchors written against source-relative \
-                 paths will fail to resolve (orphaned). Consider rooting the workspace at the \
-                 source tree.",
+                "medium base '{}' resolves outside the workspace root '{}': supported — \
+                 enumeration, change detection, and anchor resolution all work on this shape — \
+                 but artifact ids render as workspace-relative '../…' chains and the \
+                 workspace-to-source relative layout must stay fixed (moving either side \
+                 breaks the pointer). To avoid the '../…' ids, root the workspace at the \
+                 common parent directory containing every source tree.",
                 canon_base.display(),
                 canon_root.display()
             ));

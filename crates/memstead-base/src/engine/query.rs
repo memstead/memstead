@@ -1257,9 +1257,33 @@ impl Engine {
 
     /// Engine-wide health summary across every mount.
     pub fn health(&self) -> crate::ops::HealthSummary {
+        self.health_inner(None)
+    }
+
+    /// Health summary scoped to one visible mem. The scans and
+    /// structural counts narrow to that mem; workspace-level facts
+    /// (quarantine roster, boot diagnosis, workspace-scoped warnings)
+    /// stay global — an agent scoping to one mem must still see them.
+    /// A name that is quarantined or not on the visible roster refuses
+    /// `UNKNOWN_MEM` — the same gate `search` applies to its `mem`
+    /// filter, so "no such mem" and "healthy mem, nothing to report"
+    /// can never be confused. `None` is the engine-wide sweep.
+    pub fn health_scoped(
+        &self,
+        mem: Option<&str>,
+    ) -> Result<crate::ops::HealthSummary, crate::EngineError> {
+        if let Some(name) = mem
+            && (self.quarantine_reason(name).is_some() || !self.mem_router.is_visible(name))
+        {
+            return Err(self.unknown_mem_error(name));
+        }
+        Ok(self.health_inner(mem))
+    }
+
+    fn health_inner(&self, mem: Option<&str>) -> crate::ops::HealthSummary {
         let fallback = engine_fallback_type();
         let mut summary =
-            crate::ops::health::compute_health(&self.store, fallback.as_ref(), &self.schemas);
+            crate::ops::health::compute_health(&self.store, fallback.as_ref(), &self.schemas, mem);
         // Merge in load-time drift warnings so every caller of
         // Engine::health — MCP handler, Swift FFI, direct CLI —
         // sees the SuspiciousNestedPrefix / DuplicateSectionHeading
@@ -1310,6 +1334,24 @@ impl Engine {
         // Unstamped schemas — sealed pre-stamp, built-ins, archive
         // installs — produce no finding. Read-only on both copies.
         summary.warnings.extend(self.authoring_drift_findings());
+        // Rot axis for the pins the drift axis skips: an UNSTAMPED
+        // sealed package whose content no longer passes current-
+        // language authoring validation gets its own low-tier hint —
+        // the holding runs fine on the tolerant seal, but the package
+        // (and the unlocatable authoring source it came from) is no
+        // longer installable, and nothing else would say so before the
+        // next install attempt. A parsing unstamped package stays
+        // silent; stamped pins are the drift axis's business.
+        summary.warnings.extend(self.unstamped_rot_findings());
+        // Under a mem scope, mem-attributable warnings narrow to the
+        // scoped mem; workspace- and request-scoped warnings return
+        // `None` from `source_mem()` and stay visible regardless.
+        // Mirrors the full flavour's compose filter.
+        if let Some(v) = mem {
+            summary
+                .warnings
+                .retain(|w| w.source_mem().is_none_or(|wv| wv == v));
+        }
         summary
     }
 
@@ -1374,6 +1416,111 @@ impl Engine {
             }
         }
         out
+    }
+
+    /// Compute the rot findings for every UNSTAMPED pinned schema: read
+    /// the sealed package's content back (folder seal directory, or the
+    /// `__MEMSTEAD:schemas/` ref via the ops bundle) and run the
+    /// authoring-tier check over it. A pin with a stamp is skipped (the
+    /// divergence axis owns it); a pin with no readable sealed package
+    /// — built-ins resolving from the embedded catalogue — is skipped
+    /// too (nothing on disk can rot). See the call site in
+    /// [`Self::health`] for the axis contract.
+    fn unstamped_rot_findings(&self) -> Vec<WarningHint> {
+        let Some(root) = self.workspace_root.as_deref() else {
+            return Vec::new();
+        };
+        let mut pins: std::collections::BTreeMap<(String, String), Vec<String>> =
+            std::collections::BTreeMap::new();
+        for (mem, schema) in &self.schemas {
+            let (name, version) = schema.id();
+            pins.entry((name.to_string(), version.to_string()))
+                .or_default()
+                .push(mem.clone());
+        }
+        let mut out = Vec::new();
+        for ((name, version), mut mems) in pins {
+            mems.sort();
+            if self
+                .read_install_provenance(root, &name, &version)
+                .is_some()
+            {
+                continue; // stamped — the divergence axis checks it
+            }
+            let schema_ref = format!("{name}@{version}");
+            // Folder seal: the sealed package is a real directory the
+            // authoring loader can probe directly.
+            let sealed_dir = root.join(".memstead").join("schemas").join(&schema_ref);
+            let detail: Option<String> = if sealed_dir.join("schema.yaml").is_file() {
+                memstead_schema::load_schema_from_dir(&sealed_dir)
+                    .err()
+                    .map(|e| e.to_string())
+            } else if let Some((manifest, types)) = self.read_sealed_package_yamls(&name, &version)
+            {
+                memstead_schema::loader::check_package_reauthorable(&manifest, &types)
+                    .err()
+                    .map(|e| e.to_string())
+            } else {
+                None // no sealed copy anywhere — embedded builtin
+            };
+            if let Some(detail) = detail {
+                out.push(WarningHint::SchemaUnstampedSourceRot {
+                    schema_ref,
+                    mems,
+                    detail,
+                });
+            }
+        }
+        out
+    }
+
+    /// Read a sealed package's `schema.yaml` + `types/*.yaml` back from
+    /// the `__MEMSTEAD:schemas/` ref, reconstructing the type-file names
+    /// from the pinned parsed schema's type roster (seal-time authoring
+    /// enforces stem == declared type name). `None` when the ops bundle
+    /// or the package is absent — the embedded-builtin state.
+    fn read_sealed_package_yamls(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Option<(String, Vec<(String, String)>)> {
+        let ops = self.git_branch_ops()?;
+        let root = self.workspace_root.as_deref()?;
+        let gitdir = self
+            .mounts
+            .iter()
+            .find_map(|m| match &m.mount.storage {
+                crate::workspace::MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                let g = root.join("mem-repo").join(".git");
+                g.is_dir().then_some(g)
+            })?;
+        let read = |rel: &str| -> Option<String> {
+            (ops.read_schema_file)(&gitdir, name, version, rel)
+                .ok()
+                .flatten()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+        };
+        let manifest = read("schema.yaml")?;
+        let schema = self
+            .schemas
+            .values()
+            .find(|s| {
+                let (n, v) = s.id();
+                n == name && v.to_string() == version
+            })?
+            .clone();
+        let mut type_names: Vec<String> = schema.types.keys().cloned().collect();
+        type_names.sort();
+        let mut types = Vec::new();
+        for t in type_names {
+            if let Some(body) = read(&format!("types/{t}.yaml")) {
+                types.push((t, body));
+            }
+        }
+        Some((manifest, types))
     }
 
     /// Read the install-provenance stamp for a sealed schema package,

@@ -351,16 +351,24 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
         serde_json::json!(["build", "sync", "verify"])
     );
     // `--source ../public` resolves outside this workspace root — init
-    // names the consequence (workspace-relative ids, orphaned anchors)
-    // as a warning and still succeeds.
+    // warns with the works/degrades split and the common-parent recipe
+    // (never the retired "anchors orphan" claim — post pointer-join,
+    // out-of-root anchors resolve) and still succeeds.
     let warnings = env["warnings"].as_array().expect("warnings array");
     assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    let w = warnings[0].as_str().unwrap();
+    assert!(w.contains("outside the workspace root"), "got: {w}");
     assert!(
-        warnings[0]
-            .as_str()
-            .unwrap()
-            .contains("outside the workspace root"),
-        "got: {warnings:?}"
+        w.contains("anchor resolution all work"),
+        "warning must state what works: {w}"
+    );
+    assert!(
+        w.contains("common parent directory"),
+        "warning must carry the relocation recipe: {w}"
+    );
+    assert!(
+        !w.contains("orphan"),
+        "the retired anchors-orphan claim must not reappear: {w}"
     );
     // Exactly the four contract keys — no extras leaked.
     let keys: Vec<&str> = env
@@ -402,6 +410,45 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
     let round = serde_json::to_string(&b).unwrap();
     let back: Binding = serde_json::from_str(&round).unwrap();
     assert_eq!(back, b);
+}
+
+/// Complement to the out-of-root warning: an IN-root source scaffolds with
+/// no warnings at all — the layout hint fires only where the shape is
+/// affected, never as ambient noise.
+#[test]
+fn init_in_root_codebase_source_warns_nothing() {
+    let tmp = bare_workspace();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+
+    let output = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "engine",
+            "--source",
+            "src",
+            "--medium-type",
+            "codebase",
+            "--intent",
+            "model the engine",
+            "--name",
+            "inroot",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).expect("--json init must emit JSON");
+    assert_eq!(
+        env["warnings"],
+        serde_json::json!([]),
+        "in-root pointer must produce zero hint noise"
+    );
 }
 
 /// Round-trip pin (Rust half): `projection init` still emits **exactly** the

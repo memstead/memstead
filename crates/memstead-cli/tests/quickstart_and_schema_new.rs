@@ -1133,6 +1133,61 @@ fn mem_repo_init_json_carries_the_whole_disclosure() {
     );
 }
 
+/// `mem-repo init` inside (or at the root of) a git repository emits
+/// the source-layout hint — the out-of-root trade-off and the
+/// common-parent recipe — at the moment the layout decision is made,
+/// and names `.memstead/` as intentionally trackable next to the
+/// `.gitignore` append (backlog-sweep plan 06, decisions 14/15).
+/// Complement: under no git repo at all, neither line appears.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn mem_repo_init_inside_git_repo_hints_layout_and_trackability() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    // Workspace AT the repo root — the recipe's own recommended layout.
+    let assert = memstead()
+        .args(["mem-repo", "init"])
+        .arg(&repo)
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("common parent directory"),
+        "layout hint with the recipe expected on stderr, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(".memstead/` is intentionally trackable"),
+        "trackability note expected next to the gitignore line, got:\n{stderr}"
+    );
+    // The append itself reached the repo's own .gitignore (workspace ==
+    // repo root — the case the old parent-first walk skipped).
+    let gitignore = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
+    assert!(gitignore.contains("mem-repo/"), "got:\n{gitignore}");
+
+    // Complement: no git repo anywhere above → no hint, no note.
+    let free = tmp.path().join("free-standing");
+    let assert = memstead()
+        .args(["mem-repo", "init"])
+        .arg(&free)
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        !stderr.contains("common parent directory") && !stderr.contains("intentionally trackable"),
+        "no hint noise where the shape is unaffected, got:\n{stderr}"
+    );
+}
+
 /// A verb the receipt names must either exist in the binary that
 /// printed it, or be named together with the statement that this build
 /// does not carry it. Anything else sends the reader to

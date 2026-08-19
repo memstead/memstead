@@ -1655,7 +1655,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return the filesystem-mem workspace's health summary: orphans, stubs, missing required fields, stale entities. Same JSON shape as the mem-repo `memstead_health` (single-mem, so `writable_mems` carries one entry). `include` accepts the shared health key set — today the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list; `anchors` adds per-mem counts of the four standalone anchor-verification states (resolved/drifted/recheck/unresolvable). `constraints` lists standing declared-constraint violations with `severity`. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
+        description = "Return the workspace's health summary: orphans, stubs, missing required fields, stale entities. Same JSON shape as the mem-repo `memstead_health`, across every mounted mem. Pass `mem` to scope counts, scans, and include sections to one visible mem; a name matching no visible mem refuses `UNKNOWN_MEM` (never a clean full report); omitted serves the engine-wide sweep. `include` accepts the shared health key set — the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list; `anchors` adds per-mem counts of the four standalone anchor-verification states (resolved/drifted/recheck/unresolvable). `constraints` lists standing declared-constraint violations with `severity`. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1665,7 +1665,15 @@ impl FilesystemMcpServer {
     )]
     fn memstead_health(&self, Parameters(p): Parameters<HealthParams>) -> CallToolResult {
         let engine = crate::lock_engine!(self.engine);
-        let mut health = engine.health();
+        // `mem` scopes with full-flavour semantics: counts, scans, and
+        // the include sections narrow to the named visible mem; a name
+        // matching no visible mem refuses `UNKNOWN_MEM` (never a clean
+        // full report). Omitted → the engine-wide sweep, unchanged.
+        let mem_scope = p.mem.as_deref();
+        let mut health = match engine.health_scoped(mem_scope) {
+            Ok(h) => h,
+            Err(e) => return tool_error(e.code(), &e.to_string()),
+        };
         let include = p.include.unwrap_or_default();
 
         // Validate include keys against the shared catalogue. Unknown
@@ -1691,7 +1699,8 @@ impl FilesystemMcpServer {
         // it from the lean surface gives agents the documented
         // include-key without forcing them through the full engine.
         if include.iter().any(|s| s == "dangling_links") {
-            let dangling = memstead_base::ops::health::collect_dangling_links(engine.store(), None);
+            let dangling =
+                memstead_base::ops::health::collect_dangling_links(engine.store(), mem_scope);
             health.dangling_links = Some(dangling);
         }
 
@@ -1719,7 +1728,12 @@ impl FilesystemMcpServer {
                     }
                 },
             };
-            let mut mem_names: Vec<String> = engine.schemas().keys().cloned().collect();
+            let mut mem_names: Vec<String> = engine
+                .schemas()
+                .keys()
+                .filter(|m| mem_scope.is_none_or(|v| m.as_str() == v))
+                .cloned()
+                .collect();
             mem_names.sort();
             let mut findings = Vec::new();
             for v in &mem_names {
@@ -1768,7 +1782,7 @@ impl FilesystemMcpServer {
                 value["anchors"] = memstead_base::ops::health::health_anchors_axis(&engine);
             }
             if wants_constraints {
-                value["constraints"] = serde_json::to_value(engine.constraint_findings(None))
+                value["constraints"] = serde_json::to_value(engine.constraint_findings(mem_scope))
                     .unwrap_or(serde_json::Value::Null);
                 let defects = engine.schema_format_defects();
                 if !defects.is_empty() {
@@ -1783,14 +1797,15 @@ impl FilesystemMcpServer {
             }
             if wants_open_questions {
                 value["open_questions"] =
-                    memstead_base::ops::health::health_open_questions_axis(&engine, None);
+                    memstead_base::ops::health::health_open_questions_axis(&engine, mem_scope);
             }
             if wants_stale_derivations {
                 value["stale_derivations"] =
-                    memstead_base::ops::health::health_stale_derivations_axis(&engine, None);
+                    memstead_base::ops::health::health_stale_derivations_axis(&engine, mem_scope);
             }
             if wants_checks {
-                value["checks"] = memstead_base::ops::health::health_checks_axis(&engine, None);
+                value["checks"] =
+                    memstead_base::ops::health::health_checks_axis(&engine, mem_scope);
             }
             return json_response(&value);
         }
@@ -3534,6 +3549,50 @@ mod tests {
         // just assert the response is a non-empty JSON object.
         assert!(body.is_object());
         assert!(!body.as_object().unwrap().is_empty());
+    }
+
+    /// The lean flavour honours the `mem` scope with full-flavour
+    /// semantics (backlog-sweep plan 06): naming the visible mem scopes
+    /// (and succeeds), naming no visible mem refuses `UNKNOWN_MEM`
+    /// instead of silently serving the full report, and omitting `mem`
+    /// serves the engine-wide sweep unchanged.
+    #[test]
+    fn health_mem_scope_gates_against_visible_roster() {
+        let tmp = TempDir::new().unwrap();
+        write_workspace(&tmp, "demo");
+        let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
+        seed_via_mcp(&server, "Healthy");
+
+        let params = |mem: Option<&str>| HealthParams {
+            include: None,
+            limit: None,
+            mem: mem.map(String::from),
+            include_config: false,
+            target_schema: None,
+            token_budget: None,
+            chunk: None,
+        };
+
+        // Scoped to the visible mem: success, non-empty summary.
+        let scoped = server.memstead_health(Parameters(params(Some("demo"))));
+        assert!(!scoped.is_error.unwrap_or(false), "{scoped:?}");
+        assert!(scoped.structured_content.unwrap().is_object());
+
+        // Unknown mem: typed refusal, never a clean full report.
+        let refused = server.memstead_health(Parameters(params(Some("no-such-mem"))));
+        assert!(refused.is_error.unwrap_or(false), "{refused:?}");
+        let text = refused
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("UNKNOWN_MEM"), "got: {text}");
+
+        // Complement: no `mem` serves the full report unchanged.
+        let full = server.memstead_health(Parameters(params(None)));
+        assert!(!full.is_error.unwrap_or(false), "{full:?}");
+        assert!(full.structured_content.unwrap().is_object());
     }
 
     /// Plan 08 duplicate check (MCP leg): an identifier-shaped value

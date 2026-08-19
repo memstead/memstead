@@ -544,10 +544,10 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // and `mem-repo/` is unrelated to it.
     if !args.no_gitignore && args.storage != Some(StorageArg::Folder) {
         let mem_repo_path = workspace_root.join("mem-repo");
-        let walk_start = workspace_root
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| workspace_root.clone());
+        // Walk from the workspace root itself so the workspace-IS-the-
+        // repo-root layout appends too; `mem-repo/.git` sits a level
+        // below and is never rediscovered as the outer.
+        let walk_start = workspace_root.clone();
         // Outer-repo provenance is human-facing context, not part of the
         // structured result. It goes to stderr — never stdout — so a `--json`
         // caller's stdout stays exactly one JSON document (the contract
