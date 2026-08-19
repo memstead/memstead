@@ -93,6 +93,21 @@ fn conflicts_list_and_resolve_roundtrip() {
         "ledger records the resolution: {ledger}"
     );
 
+    // After resolution the health report is clean — the stale load
+    // error is replaced, not accumulated.
+    let out = stdout_of(
+        memstead()
+            .current_dir(&root)
+            .args(["--json", "health"])
+            .assert()
+            .success(),
+    );
+    let health: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        health.get("load_errors").is_none(),
+        "clean workspace omits load_errors: {health}"
+    );
+
     // Nothing conflicted remains.
     let out = stdout_of(
         memstead()

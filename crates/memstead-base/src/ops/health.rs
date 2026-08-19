@@ -712,6 +712,7 @@ pub fn compute_health(
         stub_count,
         warnings: Vec::new(),
         quarantined: Vec::new(),
+        load_errors: Vec::new(),
         boot_diagnosis: None,
         leaf_entities_by_type,
         dangling_links: None,

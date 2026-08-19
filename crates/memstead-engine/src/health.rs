@@ -385,6 +385,16 @@ pub fn compose_health(
             serde_json::to_value(&health.quarantined).unwrap_or_default(),
         );
     }
+    // Per-file load failures — same boot-honesty class: each entry's
+    // message names the remedy (the merge-conflict refusal names
+    // `memstead conflicts resolve`), so the composed report must carry
+    // them for the failure mode to name its door (backlog-sweep 07).
+    if !health.load_errors.is_empty() {
+        obj.insert(
+            "load_errors".into(),
+            serde_json::to_value(&health.load_errors).unwrap_or_default(),
+        );
+    }
     if let Some(diag) = &health.boot_diagnosis {
         obj.insert("boot_diagnosis".into(), diag.clone());
     }

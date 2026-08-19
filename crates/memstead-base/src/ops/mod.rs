@@ -3060,6 +3060,17 @@ pub struct QuarantinedMemReport {
     pub reason_message: String,
 }
 
+/// One per-file load failure surfaced on the health report. `file` is
+/// the path the loader reported (absolute for folder mounts after the
+/// reload-normalization pass); `error` is the loader's message, which
+/// names the remedy where one exists (the merge-conflict refusal names
+/// `memstead conflicts resolve`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LoadErrorReport {
+    pub file: String,
+    pub error: String,
+}
+
 /// Aggregated health report for the whole graph.
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthSummary {
@@ -3083,6 +3094,16 @@ pub struct HealthSummary {
     /// on a healthy workspace, keeping default output byte-unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub quarantined: Vec<QuarantinedMemReport>,
+    /// Per-file load failures: entity files the loader refused (git
+    /// merge-conflict markers, unreadable bytes, parser failures). The
+    /// same boot-honesty class as `quarantined` — always present when
+    /// non-empty, never behind an include gate — because each entry's
+    /// message names the remedy (e.g. the conflict refusal names
+    /// `memstead conflicts resolve`), and a remedy no surface renders
+    /// is a capability nobody finds at the moment it is needed. Empty
+    /// (and omitted from the wire) on a clean workspace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub load_errors: Vec<LoadErrorReport>,
     /// Workspace-level boot diagnosis from a diagnostic-shell engine
     /// (`{code, message}`): why the real workspace could not boot at
     /// all. Absent on every ordinarily booted engine.

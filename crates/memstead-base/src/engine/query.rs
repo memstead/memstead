@@ -1307,6 +1307,19 @@ impl Engine {
                 reason_message: q.reason_message.clone(),
             })
             .collect();
+        // Per-file load failures ride the report unconditionally, like
+        // the quarantine roster — each entry's message names the remedy
+        // (the merge-conflict refusal names `memstead conflicts
+        // resolve`), and a remedy only a library accessor carries is a
+        // capability nobody finds at the moment it is needed.
+        summary.load_errors = self
+            .load_errors
+            .iter()
+            .map(|(path, msg)| crate::ops::LoadErrorReport {
+                file: path.display().to_string(),
+                error: msg.clone(),
+            })
+            .collect();
         summary.boot_diagnosis = self
             .boot_diagnosis
             .as_ref()
