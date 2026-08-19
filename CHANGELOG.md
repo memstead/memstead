@@ -68,7 +68,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   package seals unmarked (absence IS its legacy claim), a
   current-generation builtin's marker travels with it, and only the
   authoring resolver — which just validated the package under the
-  current language — mints a new marker.
+  current language — mints a new marker. Workspaces that installed a
+  legacy package on an affected engine may hold a mis-stamped seal:
+  the affected window, the detection one-liner, and the reinstall
+  repair are documented in the docs-site schema-authoring guide
+  ("Repair: mis-stamped legacy seals"); `schema install --help`
+  points there.
 - **Hydrating an archive with an unknown `format` refuses typed.** The
   byte-hydration path (`Engine::from_archive_bytes`, the wasm
   package's `fromSnapshot` included) never consulted the format

@@ -67,6 +67,29 @@ memstead schema install cookbook
 
 Installing copies the validated package into the workspace's schema store so mems can pin it. The command validates before copying and is idempotent.
 
+### Repair: mis-stamped legacy seals (engines 0.6.0 – 0.8.1)
+
+In that engine window, `schema install` stamped every unmarked package as
+current-language at seal time. A **legacy** package (one authored before the
+metadata-polarity flip, with bare `optional:`-style fields) installed by an
+affected engine therefore carries a wrong generation marker: its bare
+metadata fields silently read as *optional* instead of *required*.
+
+**Detect** — the marker's presence inside a legacy package's sealed copy IS
+the mis-stamp. On a git-branch workspace:
+
+```bash
+git --git-dir mem-repo/.git cat-file -e '__MEMSTEAD:schemas/<legacy-pkg>/schema-format.json' \
+  && echo "mis-stamped"
+```
+
+Current-language packages legitimately carry the marker — only a package you
+know to be legacy-authored is implicated.
+
+**Repair** — re-run `memstead schema install` for the affected schema with a
+fixed engine (0.8.2+). The seal then carries the source's generation
+as-found, and the package's fields read with their written meaning again.
+
 ## 4. Pin the mem
 
 A mem switches schema atomically only when every entity it holds conforms to the target. A quickstart workspace carries one seed entity of the default schema's `concept` type, which the scaffold doesn't declare — remove it first (the scaffold's printed follow-up includes this step):

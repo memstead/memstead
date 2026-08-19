@@ -1606,7 +1606,9 @@ Validate a schema package directory (`schema.yaml` plus an optional `types/*.yam
 
 ## `memstead schema install`
 
-Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a mem can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
+Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a mem can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent.
+
+Repair note — engines 0.6.0 through 0.8.1 mis-stamped LEGACY packages as current-language at install, flipping their bare metadata fields from required to optional. If you installed a legacy package in that window, re-run the install with a fixed engine; the detection command and details are in the docs-site schema-authoring guide.
 
 **Usage:** `memstead schema install <SOURCE>`
 

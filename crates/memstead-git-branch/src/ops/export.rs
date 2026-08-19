@@ -205,6 +205,21 @@ fn schema_files_from_memstead_ref(
 ) -> Option<Vec<memstead_schema::SchemaSourceFile>> {
     let blobs = read_branch_blobs(mem_repo_gitdir, "refs/heads/__MEMSTEAD").ok()?;
     let prefix = format!("schemas/{}@{}/", schema_ref.name, schema_ref.version);
+    // The sealed schema an archive carries is the LANGUAGE, not the
+    // install-time package: only the manifest, the sealed format
+    // marker, and the type definitions ride. Everything else the
+    // install staged — `mem-template.json`, `README.md`, the
+    // workspace-local install-provenance stamp — is setup scaffolding
+    // the strict archive whitelist rightly refuses, so collecting it
+    // here would make the export unreadable. Allowlist, not denylist:
+    // future scaffolding additions cannot re-break the export.
+    let is_language_member = |rel: &str| {
+        rel == "schema.yaml"
+            || rel == memstead_schema::loader::SCHEMA_FORMAT_MARKER_FILE
+            || (rel.starts_with("types/")
+                && rel.ends_with(".yaml")
+                && !rel["types/".len()..].contains('/'))
+    };
     let mut files: Vec<memstead_schema::SchemaSourceFile> = blobs
         .into_iter()
         .filter_map(|b| {
@@ -215,9 +230,7 @@ fn schema_files_from_memstead_ref(
                     bytes: b.bytes,
                 })
         })
-        // The install-provenance stamp is workspace-local (it names a
-        // path on THIS machine); a published archive must not carry it.
-        .filter(|f| f.archive_path != memstead_schema::INSTALL_PROVENANCE_FILE)
+        .filter(|f| is_language_member(&f.archive_path))
         .collect();
     if !files.iter().any(|f| f.archive_path == "schema.yaml") {
         return None;

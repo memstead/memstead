@@ -10,7 +10,7 @@
 //!
 //! ## JS API
 //!
-//! ```ignore
+//! ```js
 //! import init, { Engine, setPanicHook } from "@memstead/wasm";
 //!
 //! await init();

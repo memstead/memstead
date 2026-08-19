@@ -1334,6 +1334,111 @@ fn brief_renders_for_scaffolded_binding() {
     );
 }
 
+/// Backlog-sweep plan 09a criterion 2: the deny-paths hook cache derives
+/// only from CONSUMING renders. A peek-only brief (any named render — the
+/// `--consume` flag requires `--all`, so named briefs are peeks by
+/// construction) leaves every cache byte-identical and never points the
+/// hook at the peeked binding; a consuming `--all --consume` render
+/// publishes the picked binding's list.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn deny_cache_derives_only_from_consuming_renders() {
+    fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push((p.display().to_string(), std::fs::read(&p).unwrap()));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    for name in ["alpha", "beta"] {
+        memstead()
+            .current_dir(&ws)
+            .args([
+                "projection",
+                "init",
+                "--mem",
+                "ws",
+                "--source",
+                "../src",
+                "--medium-type",
+                "codebase",
+                "--name",
+                name,
+            ])
+            .assert()
+            .success();
+    }
+    let cache_file = ws
+        .join(".memstead.cache")
+        .join("projection")
+        .join("active-deny-paths.json");
+
+    // Peek binding beta: a pure read — the deny cache is not created.
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/beta"])
+        .assert()
+        .success();
+    assert!(
+        !cache_file.exists(),
+        "a peek-only render must not create the deny cache"
+    );
+
+    // Repeated peeks are byte-idempotent on ALL caches.
+    let before = snapshot(&ws.join(".memstead.cache"));
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "brief", "ws/beta"])
+        .assert()
+        .success();
+    assert_eq!(
+        before,
+        snapshot(&ws.join(".memstead.cache")),
+        "repeated peeks must leave every cache byte-identical"
+    );
+
+    // A consuming rotation render publishes the PICKED binding's list.
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "projection", "brief", "--all", "--consume"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let payload: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let brief = payload["brief"].as_str().expect("rotation renders a brief");
+    let cache: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&cache_file).expect("a consuming render must publish the deny cache"),
+    )
+    .unwrap();
+    let guarded = cache["ingest"].as_str().unwrap();
+    assert!(
+        brief.contains(guarded),
+        "the hook must guard the binding whose brief was consumed: cache names \
+         `{guarded}`, brief:\n{brief}"
+    );
+}
+
 /// `projection brief --all` on a workspace with NO bindings configured reports
 /// a distinct `no_bindings` outcome (exit 0) — not the all-backing-off
 /// `skipped` outcome, which would otherwise collapse into the same `None`. A

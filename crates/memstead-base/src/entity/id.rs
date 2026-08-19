@@ -175,6 +175,21 @@ pub fn title_to_slug(title: &str) -> Result<String, SlugError> {
 /// conformance test in this module asserts
 /// [`validate_and_derive_slug`]'s behaviour matches the sentence's
 /// claim — so neither the prose nor the validator can drift alone.
+///
+/// The sentence's two claims, executable:
+///
+/// ```
+/// use memstead_base::entity::id::validate_and_derive_slug;
+///
+/// // "control characters such as tab/newline are rejected"
+/// assert!(validate_and_derive_slug("two\nlines").is_err());
+///
+/// // "characters outside Unicode alphanumerics, whitespace, and
+/// // hyphen are dropped from the derived slug" — and reported.
+/// let d = validate_and_derive_slug("The Gate's Rule — v2").unwrap();
+/// assert_eq!(d.slug, "the-gates-rule-v2");
+/// assert_eq!(d.dropped_chars, vec!['\'', '—']);
+/// ```
 pub const TITLE_GRAMMAR_RULE: &str = "Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them";
 
 /// A strict-gate derivation result: the slug plus the distinct title
@@ -209,6 +224,27 @@ pub struct SlugDerivation {
 /// Loader paths continue to call [`title_to_slug`] so pre-gate
 /// entities created with the old permissive pipeline remain
 /// readable — only mutation entry runs this strict gate.
+///
+/// ```
+/// use memstead_base::entity::id::{SlugError, validate_and_derive_slug};
+///
+/// // The happy path: Unicode-aware kebab-case, divergence reported.
+/// let d = validate_and_derive_slug("Knowledge Graph!").unwrap();
+/// assert_eq!(d.slug, "knowledge-graph");
+/// assert_eq!(d.dropped_chars, vec!['!']);
+///
+/// // Refusal 1: control characters.
+/// assert!(matches!(
+///     validate_and_derive_slug("tab\there"),
+///     Err(SlugError::TitleHasControlChars { .. })
+/// ));
+///
+/// // Refusal 2: a title whose slug collapses to empty.
+/// assert!(matches!(
+///     validate_and_derive_slug("!!!"),
+///     Err(SlugError::TitleEmpty { .. })
+/// ));
+/// ```
 pub fn validate_and_derive_slug(title: &str) -> Result<SlugDerivation, SlugError> {
     let normalized: String = title.nfc().collect();
     let case_folded: String = normalized.chars().flat_map(|c| c.to_lowercase()).collect();

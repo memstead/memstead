@@ -253,6 +253,133 @@ fn repack(src: &Path, dest: &Path, member: &str, new_bytes: &[u8], drop: &[&str]
     assert!(replaced, "archive must carry the member {member}");
 }
 
+/// Copy an archive through, appending one extra member — how a
+/// smuggling archive is built for whitelist complements.
+fn append_member(src: &Path, dest: &Path, member: &str, bytes: &[u8]) {
+    use std::io::{Read as _, Write as _};
+    let mut archive = zip::ZipArchive::new(fs::File::open(src).unwrap()).unwrap();
+    let mut writer = zip::ZipWriter::new(fs::File::create(dest).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).unwrap();
+        let name = entry.name().to_string();
+        let mut body = Vec::new();
+        entry.read_to_end(&mut body).unwrap();
+        writer.start_file(&name, opts).unwrap();
+        writer.write_all(&body).unwrap();
+    }
+    writer.start_file(member, opts).unwrap();
+    writer.write_all(bytes).unwrap();
+    writer.finish().unwrap();
+}
+
+/// Backlog-sweep plan 09a criterion 1: a git-branch mem pinned to a
+/// builtin whose install staged `mem-template.json` exports as `.mem`
+/// (one representative per template-shipping family), the archive
+/// re-reads cleanly in a fresh receiver, and the scaffolding did not
+/// travel — the sealed schema an archive carries is the language, not
+/// the install-time package. Complement: smuggling the template back
+/// into the archive refuses at install — the whitelist did not widen.
+#[test]
+fn builtin_installs_with_scaffolding_still_export_and_reread() {
+    let _guard = cache_guard();
+    for schema_ref in [
+        "engineering@0.1.0",
+        "planning@0.4.0",
+        "project@0.4.0",
+        "software@0.4.0",
+    ] {
+        let sender = TempDir::new().unwrap();
+        let receiver = TempDir::new().unwrap();
+        let cache = TempDir::new().unwrap();
+        let root = sender.path();
+        let name = schema_ref.split('@').next().unwrap();
+
+        run_ok(root, cache.path(), &["mem-repo", "init", "."]);
+        // The install stages the FULL builtin package — mem-template.json
+        // included — onto the __MEMSTEAD ref; the export collector must
+        // keep that scaffolding out of the archive.
+        run_ok(root, cache.path(), &["schema", "install", schema_ref]);
+        let mem = format!("{name}-mem");
+        run_ok(
+            root,
+            cache.path(),
+            &[
+                "mem",
+                "init",
+                &mem,
+                "--schema",
+                schema_ref,
+                "--no-gitignore",
+            ],
+        );
+        let archive = root.join("out.mem");
+        run_ok(
+            root,
+            cache.path(),
+            &[
+                "export",
+                "--format",
+                "mem",
+                "--mem",
+                &mem,
+                "-o",
+                archive.to_str().unwrap(),
+            ],
+        );
+
+        // The sealed language travelled; the scaffolding did not.
+        let mut zip = zip::ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
+        let names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == ".memstead/schema/schema.yaml"),
+            "{schema_ref}: sealed manifest must travel: {names:?}"
+        );
+        assert!(
+            names.iter().all(|n| !n.contains("mem-template.json")),
+            "{schema_ref}: install scaffolding must not travel: {names:?}"
+        );
+
+        // Re-read: a fresh receiver installs the archive cleanly and the
+        // workspace still loads healthy with the new mount. (Builtins
+        // resolve from the embedded catalogue, so no staging assertion —
+        // the clean install + healthy load IS the re-read.)
+        fresh_receiver(receiver.path(), cache.path());
+        run_ok(
+            receiver.path(),
+            cache.path(),
+            &["install", archive.to_str().unwrap()],
+        );
+        run_ok(receiver.path(), cache.path(), &["--json", "health"]);
+
+        // Complement: the whitelist did not widen — an archive with the
+        // template smuggled back refuses in a fresh receiver.
+        let smuggled = root.join("smuggled.mem");
+        append_member(
+            &archive,
+            &smuggled,
+            ".memstead/schema/mem-template.json",
+            b"{}",
+        );
+        let strict = TempDir::new().unwrap();
+        fresh_receiver(strict.path(), cache.path());
+        let out = memstead()
+            .current_dir(strict.path())
+            .env("MEMSTEAD_MEM_CACHE", cache.path())
+            .args(["install", smuggled.to_str().unwrap()])
+            .assert()
+            .failure();
+        let text = String::from_utf8_lossy(&out.get_output().stderr).to_string()
+            + &String::from_utf8_lossy(&out.get_output().stdout);
+        assert!(
+            text.contains("unknown file"),
+            "{schema_ref}: smuggled scaffolding must refuse as unknown file, got: {text}"
+        );
+    }
+}
+
 /// Read the schemas the receiver workspace now resolves from its own
 /// local storage (the mem-repo's `__MEMSTEAD:schemas/` ref) — the
 /// source the pin resolver consults, so what is readable here is what

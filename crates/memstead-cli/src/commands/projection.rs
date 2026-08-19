@@ -609,7 +609,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
     // Dispatch to the selected operation's renderer: the rotation hands back
     // build / sync / verify pairs, each with its own brief.
     let rendered = match operation {
-        OperationKind::Build => render_ingest_brief(engine, &root, &binding_id),
+        OperationKind::Build => render_ingest_brief(engine, &root, &binding_id, args.consume),
         OperationKind::Sync => render_sync_brief_for(engine, &root, &binding_id),
         OperationKind::Verify => render_verify_brief_for(engine, &root, &binding_id),
     }

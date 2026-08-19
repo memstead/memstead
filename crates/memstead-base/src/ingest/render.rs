@@ -124,10 +124,19 @@ fn find_binding<'a>(
 /// Render the run-brief for a binding — the Markdown prompt an agent consumes.
 /// The single engine entry point behind every consuming surface. `ingest_name` is
 /// the canonical binding id (or a legacy flat-ingest stem — see [`find_binding`]).
+///
+/// `consume` mirrors the scheduler's peek/consume split (decision 12,
+/// backlog-sweep plan 03) onto derived caches: a peek (`false`) is a
+/// pure read that leaves every cache byte-identical, while a consuming
+/// render (`true`) additionally publishes the binding's deny list for
+/// the plugin hook. Without this, a peek of binding A rewrote the
+/// deny cache so a later consuming run of binding B was briefly
+/// guarded by A's list.
 pub fn render_ingest_brief(
     engine: &Engine,
     workspace_root: &Path,
     ingest_name: &str,
+    consume: bool,
 ) -> Result<String, RenderBriefError> {
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
@@ -146,9 +155,13 @@ pub fn render_ingest_brief(
 
     // Publish this ingest's deny list for the plugin's PreToolUse deny hook —
     // stale-safe (remove-then-write), overwrite-always, before any mode branch
-    // so the channel is live for every rendered brief and never pins a
-    // previous ingest's list. Best-effort engine cache, not a tracked mutation.
-    write_active_deny_file(workspace_root, &resolved.name, &resolved.deny_paths);
+    // so the channel is live for every consumed brief and never pins a
+    // previous ingest's list. Best-effort engine cache, not a tracked
+    // mutation. Consuming renders only: a peek changes no state a later
+    // actor depends on — derived caches included.
+    if consume {
+        write_active_deny_file(workspace_root, &resolved.name, &resolved.deny_paths);
+    }
 
     // Refuse an ingest whose source facet declares a deterministic preparation
     // step (e.g. `pdf-to-markdown`) — no preparation implementation exists, so

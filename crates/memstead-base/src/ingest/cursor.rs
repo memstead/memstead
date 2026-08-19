@@ -638,9 +638,10 @@ fn write_cursor_memo(cache_root: &Path, ingest: &str, facet: &str, aggregate: &s
 // The plugin's PreToolUse deny hook (`deny-meta-files.mjs`) blocks the ingest
 // agent from Read/Glob/Grep against the *active* ingest's `deny_paths`. It
 // reads the list from an engine-written cache file; the engine writes that file
-// during brief rendering (below), so the hook always enforces the list of the
-// ingest whose brief was last rendered — never a stale one. Same
-// workspace-relative glob dialect the engine resolves here.
+// during CONSUMING brief renders only (below), so the hook always enforces the
+// list of the ingest whose brief was last consumed — never a stale one, and
+// never one a peek-only render merely looked at. Same workspace-relative glob
+// dialect the engine resolves here.
 
 /// The hook's active-deny cache path:
 /// `<workspace>/.memstead.cache/projection/active-deny-paths.json`.

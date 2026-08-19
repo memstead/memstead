@@ -43,6 +43,18 @@ pub const HEADER_TIMESTAMP: &str = "x-memstead-domain-timestamp";
 /// <timestamp>             (unix seconds, decimal)
 /// ```
 ///
+/// The same layout, executable:
+///
+/// ```
+/// use memstead_base::domain_authority_wire::signing_payload;
+///
+/// let bytes = signing_payload("aa11", "acme.com:payments", "billing", "1.2.0", 1755600000);
+/// assert_eq!(
+///     String::from_utf8(bytes).unwrap(),
+///     "memstead-domain-publish-v1\naa11\nacme.com:payments\nbilling\n1.2.0\n1755600000",
+/// );
+/// ```
+///
 /// Every field is mandatory and both the signer and the verifier MUST produce
 /// these bytes identically. None of the fields can contain a newline (hex,
 /// scope, name, version, and a decimal integer are all newline-free), so the
