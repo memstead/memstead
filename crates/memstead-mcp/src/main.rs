@@ -29,9 +29,10 @@ struct Args {
     /// Attach a sealed `.mem` mem as a read-only reference. Repeatable —
     /// `--read-mem a.mem --read-mem b.mem` attaches both. Each path
     /// is installed into the global mem cache (if the cached file is
-    /// missing) and registered in the first writable mem's `readMems`
-    /// with `source: { type: "local" }` so the next run picks it up from
-    /// the config alone.
+    /// missing) and registered as a workspace-level read-only mount —
+    /// the same model `memstead install` produces; no writable mem's
+    /// config is touched. The mount persists in the engine's mount
+    /// state, so the next run picks it up without the flag.
     #[cfg(feature = "mem-repo")]
     #[arg(long = "read-mem", value_name = "PATH", action = ArgAction::Append)]
     read_mems: Vec<PathBuf>,

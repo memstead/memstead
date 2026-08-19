@@ -1985,7 +1985,7 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_changes_since",
-        description = "Read the per-mutation changelog at `.memstead/changes.jsonl` since a given RFC 3339 timestamp. **Diverges from the mem-repo flavour** — filesystem-mem has no commit history, so `since` is a timestamp string (e.g. `\"2026-05-08T15:30:00.000Z\"`) and the response yields the JSONL entries with `ts > since` as a structured array. Pass an empty string or the UNIX epoch (`\"1970-01-01T00:00:00.000Z\"`) for a full dump. The `mem` field is accepted for shape compatibility with the mem-repo flavour but ignored — single-mem. `rename_similarity` and `include_notes` are also accepted but ignored.",
+        description = "Read the per-mutation changelog at `.memstead/changes.jsonl` since a given RFC 3339 timestamp. **Diverges from the mem-repo flavour** — filesystem-mem has no commit history, so `since` is a timestamp string (e.g. `\"2026-05-08T15:30:00.000Z\"`) and the response yields the JSONL entries with `ts > since` as a structured array. Pass an empty string or the UNIX epoch (`\"1970-01-01T00:00:00.000Z\"`) for a full dump. `mem` is honoured: it must name a visible mem, whose per-mem ledger is served; an unknown name refuses `UNKNOWN_MEM` naming the visible set (a ledger-less backend, e.g. an in-memory sketch, serves an empty list). `include_notes: true` is honoured with lean semantics: the response additionally carries `notes[]` — one entry per ledger line bearing a note, with `timestamp`, `kind`, `entity_id`, `note`, `actor`, `client` (no `sha`/`subject` — there are no commits on this substrate). `rename_similarity` is NOT implemented here (no commit history to run rename detection over): passing it is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names it), never silently ignored — omit it, or use the unified engine (mem-repo MCP / CLI) which honours it.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1997,17 +1997,40 @@ impl FilesystemMcpServer {
         &self,
         Parameters(p): Parameters<ChangesSinceParams>,
     ) -> CallToolResult {
-        // The unified engine doesn't expose a workspace_root accessor
-        // (mounts can be heterogeneous); use the captured field.
-        let log_path = self
-            .workspace_root
-            .join(memstead_base::MEM_META_DIR)
-            .join("changes.jsonl");
-        let raw = match std::fs::read_to_string(&log_path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => {
-                return tool_error("CHANGELOG_ERROR", &e.to_string());
+        // Decision-17 posture (plan 09b): honour a parameter with
+        // full-flavour semantics where the lean substrate carries the
+        // data, refuse typed where it cannot, never accept-and-ignore.
+        // Rename detection needs commit history this substrate does
+        // not have — refuse up front, before any read.
+        if let Some(resp) =
+            reject_unsupported_params(&[("rename_similarity", p.rename_similarity.is_some())])
+        {
+            return resp;
+        }
+
+        // `mem` is honoured: resolve it to the named mount's folder
+        // root and serve THAT ledger — unknown/quarantined names
+        // refuse UNKNOWN_MEM exactly as the lean `memstead_health`
+        // does. A visible ledger-less backend (in-memory sketch)
+        // serves an empty list: nothing was durably recorded.
+        let ledger_root = {
+            let engine = crate::lock_engine!(self.engine);
+            match engine.folder_mem_root(&p.mem) {
+                Ok(root) => root,
+                Err(e) => return engine_op_error(e),
+            }
+        };
+        let raw = match ledger_root {
+            None => String::new(),
+            Some(root) => {
+                let log_path = root.join(memstead_base::MEM_META_DIR).join("changes.jsonl");
+                match std::fs::read_to_string(&log_path) {
+                    Ok(s) => s,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                    Err(e) => {
+                        return tool_error("CHANGELOG_ERROR", &e.to_string());
+                    }
+                }
             }
         };
 
@@ -2032,11 +2055,39 @@ impl FilesystemMcpServer {
             }
             entries.push(value);
         }
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "since": since,
             "count": entries.len(),
             "entries": entries,
         });
+        // `include_notes` honoured with lean semantics: fold the
+        // note-bearing ledger lines into a `notes[]` array (the
+        // full flavour's contract, minus the commit-only fields this
+        // substrate cannot have). Default false keeps the response
+        // byte-identical to the pre-honour shape.
+        if p.include_notes {
+            let notes: Vec<serde_json::Value> = payload["entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|e| {
+                    e.get("note")
+                        .and_then(|n| n.as_str())
+                        .is_some_and(|n| !n.trim().is_empty())
+                })
+                .map(|e| {
+                    serde_json::json!({
+                        "timestamp": e.get("ts").cloned().unwrap_or(serde_json::Value::Null),
+                        "kind": e.get("kind").cloned().unwrap_or(serde_json::Value::Null),
+                        "entity_id": e.get("entity").cloned().unwrap_or(serde_json::Value::Null),
+                        "note": e.get("note").cloned().unwrap_or(serde_json::Value::Null),
+                        "actor": e.get("actor").cloned().unwrap_or(serde_json::Value::Null),
+                        "client": e.get("client").cloned().unwrap_or(serde_json::Value::Null),
+                    })
+                })
+                .collect();
+            payload["notes"] = serde_json::Value::Array(notes);
+        }
         json_response(&payload)
     }
 
@@ -3951,6 +4002,98 @@ mod tests {
         }));
         let body = result.structured_content.unwrap();
         assert_eq!(body["count"], 0);
+    }
+
+    /// Decision-17 posture on the lean `memstead_changes_since`
+    /// (backlog-sweep 09b): every parameter is honoured or refused
+    /// typed — never accepted-and-ignored. `mem` is honoured (an
+    /// unknown name refuses UNKNOWN_MEM, never a clean dump);
+    /// `rename_similarity` refuses UNSUPPORTED_PARAM up front (no
+    /// commit history to detect renames over); `include_notes: true`
+    /// folds the note-bearing ledger lines into `notes[]`, and its
+    /// default leaves the response byte-identical to the plain shape.
+    #[test]
+    fn changes_since_honours_or_refuses_every_param() {
+        let tmp = TempDir::new().unwrap();
+        write_workspace(&tmp, "demo");
+        let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
+        // One noted create, one bare.
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "i".to_string());
+        sections.insert("purpose".to_string(), "p".to_string());
+        let result = server.memstead_create(Parameters(CreateParams {
+            anchors: None,
+            title: "Noted".into(),
+            entity_type: "spec".into(),
+            mem: None,
+            sections: Some(sections),
+            metadata: None,
+            relations: None,
+            dry_run: None,
+            note: Some("seeded with a provenance note".into()),
+            role: None,
+        }));
+        assert!(!result.is_error.unwrap_or(false));
+        seed_via_mcp(&server, "Bare");
+
+        // Unknown mem refuses UNKNOWN_MEM — never a clean full dump.
+        let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
+            mem: "nope".into(),
+            since: "".into(),
+            rename_similarity: None,
+            include_notes: false,
+        }));
+        assert_eq!(result.is_error, Some(true));
+        let body = result.structured_content.unwrap();
+        assert_eq!(body["code"], "UNKNOWN_MEM", "got: {body}");
+
+        // rename_similarity refuses up front, naming the param.
+        let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
+            mem: "demo".into(),
+            since: "".into(),
+            rename_similarity: Some(0.6),
+            include_notes: false,
+        }));
+        assert_eq!(result.is_error, Some(true));
+        let body = result.structured_content.unwrap();
+        assert_eq!(body["code"], "UNSUPPORTED_PARAM", "got: {body}");
+        assert!(
+            body["details"]["params"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p == "rename_similarity"),
+            "details.params names the refused param: {body}"
+        );
+
+        // include_notes: true → notes[] carries exactly the noted line.
+        let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
+            mem: "demo".into(),
+            since: "".into(),
+            rename_similarity: None,
+            include_notes: true,
+        }));
+        assert!(!result.is_error.unwrap_or(false));
+        let body = result.structured_content.unwrap();
+        assert_eq!(body["count"], 2);
+        let notes = body["notes"].as_array().expect("notes[] present");
+        assert_eq!(notes.len(), 1, "one noted mutation: {notes:?}");
+        assert_eq!(notes[0]["note"], "seeded with a provenance note");
+        assert_eq!(notes[0]["kind"], "create");
+        assert!(notes[0].get("timestamp").is_some() && notes[0].get("entity_id").is_some());
+
+        // Default include_notes stays byte-identical: no notes key.
+        let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
+            mem: "demo".into(),
+            since: "".into(),
+            rename_similarity: None,
+            include_notes: false,
+        }));
+        let body = result.structured_content.unwrap();
+        assert!(
+            body.get("notes").is_none(),
+            "plain call must not grow a notes key: {body}"
+        );
     }
 
     #[test]

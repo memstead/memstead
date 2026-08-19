@@ -171,6 +171,31 @@ impl Engine {
         &self.load_errors
     }
 
+    /// Resolve a VISIBLE mem to its folder-storage root on disk.
+    ///
+    /// Unknown or quarantined names refuse `UNKNOWN_MEM` (the same
+    /// visibility gate `search` and the conflicts door apply); a
+    /// visible mount whose storage is not folder-backed returns
+    /// `Ok(None)` so callers branch on backend applicability without
+    /// inventing a typed error. Read-only mounts resolve too — this is
+    /// a read accessor, not a write gate. Generic by design: any
+    /// consumer that needs a folder mem's disk root (per-mem changelog
+    /// readers, export tooling, future doors) gets the same answer.
+    pub fn folder_mem_root(&self, mem: &str) -> Result<Option<PathBuf>, EngineError> {
+        let mount = self
+            .mounts
+            .iter()
+            .find(|m| m.mount.mem == mem)
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
+        if self.quarantine_reason(mem).is_some() {
+            return Err(self.unknown_mem_error(mem));
+        }
+        match &mount.mount.storage {
+            crate::workspace::MountStorage::Folder { path } => Ok(Some(path.clone())),
+            _ => Ok(None),
+        }
+    }
+
     /// Workspace-level operator policy (mem create/delete rules,
     /// cross-mem links). Defaults to empty; populated via
     /// [`Engine::set_settings`] after construction. Surfaced for MCP

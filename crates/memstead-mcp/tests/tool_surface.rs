@@ -1833,6 +1833,21 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // configs).
             "memstead_ref",
             "__MEMSTEAD",
+            // Lean-surface honour-or-refuse posture (backlog-sweep 09b):
+            // the refusal code for an unknown mem, the lean notes[]
+            // element fields, and the up-front rename_similarity refusal.
+            "UNKNOWN_MEM",
+            "notes[]",
+            "timestamp",
+            "kind",
+            "entity_id",
+            "note",
+            "actor",
+            "client",
+            "sha",
+            "subject",
+            "UNSUPPORTED_PARAM",
+            "details.params",
         ],
         "memstead_reload" => &[
             // Response-shape fields surfaced by the per-mem `ReloadReport`.
