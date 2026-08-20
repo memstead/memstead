@@ -1870,11 +1870,16 @@ fn quickstart_repo_receipt_commands_replay_verbatim() {
         .iter()
         .find(|l| l.starts_with("Growth:"))
         .expect("the brief states how the mem grows");
+    // Take what is BETWEEN the backticks, not everything after the opening
+    // one: the line may carry prose after the command, and a trailing-trim
+    // would hand the shell that prose too.
     let command = growth
-        .rsplit_once("Start with: `")
-        .expect("the growth line ends in a runnable command")
+        .split_once("Start with: `")
+        .expect("the growth line names a runnable command")
         .1
-        .trim_end_matches('`');
+        .split('`')
+        .next()
+        .expect("the command is backtick-delimited");
     assert!(
         !command.contains('<') && !command.contains("..."),
         "no printed command may carry a placeholder: {command}",

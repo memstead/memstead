@@ -32,33 +32,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   root, the uncollapsed form of `init_filesystem_mem`.
 
 ### Changed
-- **An anchor's `source` name is validated against the binding's declared
-  names even when the anchor carries no producing binding** — which is
-  every anchor an agent following a brief writes, since the brief asks
-  for `source` and never for `binding`. Until now an undeclared name was
-  accepted, resolved and counted toward coverage while the brief promised
-  it would refuse. Checked against the union of declared names over the
-  bindings writing into that mem; a mem with no bindings, or an
-  unloadable store, still accepts any non-empty name.
 - **The build brief tells the truth about its destination, its source and
-  its anchor names.** The absent-destination remedy is now chosen by
-  workspace shape: `memstead mem init` is mem-repo-only and refuses in
-  the filesystem-mem workspace `memstead quickstart` produces, so that
-  shape is told to repoint the binding instead. A source pointer that
-  resolves to nothing on disk is named as such, and the Sources block
-  prints the pointer it is talking about.
-- **The build brief tells the truth about its destination and its anchor
-  names.** A binding scaffolded before its mem exists (an order
-  `projection init` deliberately allows) rendered a brief whose whole
-  mandate is "mutate the destination", with nothing saying the mem was
-  not there — the agent found out on its first write. The Destination
-  block now names the absence and carries `memstead mem init <mem>`. And
-  the provenance block promised that an undeclared `source` name "refuses
-  `INVALID_ANCHOR` with the declared names in the recovery payload";
-  that check only fires when the anchor also carries its producing
-  binding, which the brief never asks for. It now states what actually
-  happens: the name decides attribution and the path join, so a wrong one
-  usually refuses on the path.
+  its anchor names.** A binding scaffolded before its mem exists (an
+  order `projection init` deliberately allows) rendered a brief whose
+  whole mandate is "mutate the destination", with nothing saying the mem
+  was not there — the agent found out on its first write. The Destination
+  block now names the absence and the remedy that works in the reader's
+  own workspace shape. A source pointer resolving to nothing on disk is
+  named as such, and the Sources block prints the pointer it is talking
+  about. And the provenance block promised that an undeclared anchor
+  `source` name always refuses; that check fires only for anchors
+  carrying a producing binding, and an unknown name over a path that
+  resolves workspace-relative is accepted on purpose — so a legacy anchor
+  whose binding was renamed keeps writing. The brief now states both
+  halves of that contract.
+- **`memstead projection init` warns when the declared source does not
+  exist.** Declaring a not-yet-present tree stays legal; the silence was
+  how a mistyped answer produced a binding that could never yield
+  anything.
 
 ### Fixed
 - **The backfill path named a subcommand that does not exist.** The

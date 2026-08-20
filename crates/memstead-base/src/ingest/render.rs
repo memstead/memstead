@@ -334,7 +334,12 @@ fn absent_source_names(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<
 /// it unconditionally hands a filesystem-mem reader (the shape `memstead
 /// quickstart` produces) a command that refuses; there, the binding is
 /// simply pointed at the wrong mem and repointing it is the whole fix.
-fn absent_destination_note(engine: &Engine, dest: &str, workspace_root: &Path) -> Option<String> {
+fn absent_destination_note(
+    engine: &Engine,
+    dest: &str,
+    binding_id: &str,
+    workspace_root: &Path,
+) -> Option<String> {
     if engine.schema_pin(dest).is_some() {
         return None;
     }
@@ -346,18 +351,38 @@ fn absent_destination_note(engine: &Engine, dest: &str, workspace_root: &Path) -
         .collect();
     writable.sort_unstable();
     let remedy = if crate::workspace_store::is_mem_repo_shaped(workspace_root) {
-        format!("Create it before writing: `memstead mem init {dest}`.")
+        // `mem init` is refused by default: a mem-repo workspace creates
+        // nothing until a `[[mem_management.create]]` rule admits the name.
+        // Naming the second step only would hand the reader a command that
+        // refuses `MEM_PATH_NOT_ALLOWED` on a workspace fresh from
+        // `mem-repo init` — which is the workspace this brief most often
+        // renders against.
+        let admitted =
+            crate::mem_management::CreateRuleSet::new(engine.settings().mem_create_rules.clone())
+                .ok()
+                .is_some_and(|set| set.matches(std::path::Path::new(dest)));
+        if admitted {
+            format!("Create it before writing: `memstead mem init {dest}`.")
+        } else {
+            format!(
+                "Creating it takes two steps — this workspace admits no mem name yet, \
+                 so `memstead mem init` alone refuses: `memstead workspace allow-create \
+                 '{dest}' --schema <name@version>`, then `memstead mem init {dest}`."
+            )
+        }
     } else if writable.is_empty() {
         "This workspace has no writable mem to point it at.".to_string()
     } else {
         format!(
             "This is a filesystem-mem workspace, which holds one mem and cannot \
-             add another — point the binding's `destination_mem` at {} instead.",
+             add another — set `destination_mem` to {} in the binding record \
+             `.memstead/projections/{}.json`.",
             writable
                 .iter()
                 .map(|m| format!("`{m}`"))
                 .collect::<Vec<_>>()
-                .join(" or ")
+                .join(" or "),
+            binding_id,
         )
     };
     Some(format!(
@@ -380,7 +405,7 @@ fn render_discovery(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
     let cursor = compute_source_cursor(engine, resolved, workspace_root);
     let preface = render_changed_slice(&cursor);
 
-    let dest_note = absent_destination_note(engine, dest, workspace_root);
+    let dest_note = absent_destination_note(engine, dest, &resolved.name, workspace_root);
     let absent = absent_source_names(resolved, workspace_root);
     assemble_discovery_brief(
         resolved,

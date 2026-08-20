@@ -1411,7 +1411,8 @@ fn report(
                     format!(
                         "- Growth: the ingest loop against binding `{}` — one batch at a \
                      time, each entity written through the same validated path as the \
-                     seed. Start with: `{brief}`",
+                     seed. Start with: `{brief}`, or follow the walkthrough at \
+                     https://memstead.com/guides/grow-a-mem-from-a-source/",
                         g.binding_id,
                     ),
                     format!(

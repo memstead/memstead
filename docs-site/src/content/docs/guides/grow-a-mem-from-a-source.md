@@ -11,19 +11,29 @@ Every command below was executed against the workspace this guide builds.
 
 ## 1. Have a binding
 
-`memstead quickstart --repo .` ([Getting started](../getting-started/#or-start-from-the-repository-you-already-have)) scaffolds one over the repository you ran it in, and its receipt names the binding id — `<mem>/<stem>`. If you already have a workspace, declare one directly:
+`memstead quickstart --repo .` ([Getting started](../getting-started/#or-start-from-the-repository-you-already-have)) scaffolds one over the repository you ran it in, and its receipt names the binding id — `<mem>/<stem>`, both halves derived from your folder names.
+
+The rest of this guide uses a workspace called `my-graph` beside a source repository called `some-repo`, so the binding id is `my-graph/some-repo`. To follow it literally:
 
 ```bash
+mkdir my-graph && cd my-graph
+memstead quickstart --name my-graph
 memstead projection init --mem my-graph --source ../some-repo --medium-type codebase
 ```
 
-Either way, confirm what you have:
+Substitute your own names throughout if you came from `quickstart --repo .`.
+
+Confirm what you have:
 
 ```bash
 memstead projection verify my-graph/some-repo --full
 ```
 
 On a fresh binding this reports **0% anchored** and says so plainly — that is onboarding, not drift. The number it gives you is the denominator: how many source artifacts are in scope after the binding's deny list.
+
+:::caution
+Run this only once the destination mem exists — `quickstart` and the commands above create it. Against a binding whose mem is not there yet, `verify` records its findings and then fails writing the baseline (`PROJECTION_VERIFY_BASELINE_FAILED: unknown mem`). Create the mem first; the brief in step 2 tells you how if you are unsure.
+:::
 
 :::note
 Working in Claude Code with the [plugin](../../skills/) installed? `/ingest` is this whole loop in one command — it asks the engine for the next due binding, hands you the brief, and you work it. If nothing is set up yet it asks three plain questions and declares the binding for you. The rest of this guide is what `/ingest` does, spelled out for any agent.

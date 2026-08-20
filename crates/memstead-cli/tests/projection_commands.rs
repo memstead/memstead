@@ -2021,9 +2021,26 @@ fn brief_absent_destination_remedy_suits_the_workspace_shape() {
         "`mem init` refuses in a filesystem-mem workspace — the brief must not \
          name it here:\n{out}",
     );
+    // The remedy names the field AND the file it lives in — a bare field
+    // name is not actionable — and that file exists.
     assert!(
-        out.contains("point the binding's `destination_mem` at `app`"),
+        out.contains("set `destination_mem` to `app`"),
         "…and must name the fix that works here:\n{out}",
+    );
+    let record_claim = out
+        .lines()
+        .find(|l| l.contains("binding record"))
+        .expect("the remedy names the record file");
+    let path = record_claim
+        .rsplit_once("binding record `")
+        .expect("backticked path")
+        .1
+        .split('`')
+        .next()
+        .unwrap();
+    assert!(
+        repo.join(path).is_file(),
+        "the record path the remedy names must exist: {path}",
     );
 }
 
