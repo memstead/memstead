@@ -15,6 +15,18 @@ use crate::commands;
 /// taxonomy is intentionally coarse — success vs failure — because
 /// agents read JSON, not exit codes, and shell scripts can lift the
 /// granular `code` from `--json | jq .code`.
+///
+/// Code 6 breaks that success/failure symmetry on purpose: it means the
+/// command succeeded and the caller asked to be gated on what it found.
+/// A CI job needs three outcomes, not two, and it cannot get the third
+/// from a code that also means "the engine failed to boot". Keep it
+/// exclusive to explicit opt-in gate modes — the moment an operational
+/// path returns 6, the distinction stops being worth anything.
+///
+/// This string is the source the published reference renders from
+/// (`docs-site/.../reference/cli/cli.md`, xtask-generated and
+/// drift-gated). Editing the table here and not regenerating leaves the
+/// published page asserting an exit-code space the binary no longer has.
 pub const EXIT_CODES_HELP: &str = "\
 Exit codes:
   0  success
@@ -23,6 +35,10 @@ Exit codes:
   3  not found (entity / mem / resource missing)
   4  hash mismatch (optimistic-locking failure on a mutation)
   5  validation / schema / policy refusal
+  6  findings present — the command SUCCEEDED and found something
+     you asked to be gated on (`projection verify --fail-on-findings`).
+     Never returned for an operational error, so a CI job can tell
+     \"the mem drifted\" from \"the engine could not run\".
 
   For programmatic branching, prefer `--json` over the exit code:
     memstead <subcommand> ... --json | jq -r .code

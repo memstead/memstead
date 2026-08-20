@@ -267,6 +267,217 @@ pub struct FidelityReport {
 }
 
 // ---------------------------------------------------------------------------
+// Rollup verdict
+// ---------------------------------------------------------------------------
+
+/// The one-word answer a CI gate and a human reader branch on, derived from
+/// an assembled [`FidelityReport`] — never measured separately, so it cannot
+/// disagree with the figures under it.
+///
+/// Three values, because there are three honest answers and the third is the
+/// one that matters: a measurement can complete without being able to support
+/// a green claim. A medium with no change signal cannot observe drift; an
+/// empty enumerated scope makes coverage vacuous; a pass that adjudicated no
+/// anchor observed nothing. Summarizing any of those as "clean" would be the
+/// report asserting more than it measured, so they resolve to
+/// [`RollupVerdict::Inconclusive`] with the blindness named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RollupVerdict {
+    /// The pass was substantive on every axis and recorded no findings.
+    Clean,
+    /// Findings were recorded over the current key.
+    Drifted,
+    /// The pass completed but cannot support a green claim — see
+    /// [`Rollup::because`] and [`Rollup::blind_spots`].
+    Inconclusive,
+}
+
+impl RollupVerdict {
+    /// The stable wire string (`clean` / `drifted` / `inconclusive`).
+    pub fn wire(&self) -> &'static str {
+        match self {
+            RollupVerdict::Clean => "clean",
+            RollupVerdict::Drifted => "drifted",
+            RollupVerdict::Inconclusive => "inconclusive",
+        }
+    }
+}
+
+/// The rollup block: the verdict, the tally behind it, why it is what it is,
+/// and the concrete next actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Rollup {
+    /// The verdict.
+    pub verdict: RollupVerdict,
+    /// Total findings over the current key, summed across every class.
+    pub findings_total: usize,
+    /// One sentence explaining the verdict. Always populated — a verdict
+    /// without a reason is a number a reader has to re-derive.
+    pub because: String,
+    /// Axes this measurement could not speak to, each named concretely.
+    /// Empty on a substantive pass. Non-empty forces `Inconclusive` unless
+    /// findings were actually recorded (an observed finding is real whatever
+    /// else the pass could not see).
+    pub blind_spots: Vec<String>,
+    /// Top concrete actions, most severe class first. Empty when there is
+    /// nothing to act on.
+    pub actions: Vec<String>,
+}
+
+/// Finding classes in the order a reader should act on them: a wrong
+/// projection misleads, drift is stale, an unresolvable anchor is broken
+/// bookkeeping, uncovered is unwritten work, and a queued item is not yet
+/// adjudicated at all.
+const CLASS_SEVERITY: [&str; 5] = [
+    "wrong",
+    "drifted",
+    "unresolvable-anchor",
+    "uncovered",
+    "queued-for-adjudication",
+];
+
+/// The concrete action for one finding class.
+fn class_action(class: &str, n: usize, binding: &str) -> String {
+    match class {
+        "wrong" => format!(
+            "{n} entity/entities contradict their source — read them against the source and \
+             correct the entity (`memstead projection brief {binding}` lists them)"
+        ),
+        "drifted" => format!(
+            "{n} anchored artifact(s) moved since the entity was written — re-read the source \
+             and update the entity, then re-verify to advance the baseline"
+        ),
+        "unresolvable-anchor" => format!(
+            "{n} anchor(s) no longer resolve to anything — repoint them at the artifact's new \
+             location or unset them (`memstead_update` `anchors_unset`)"
+        ),
+        "uncovered" => format!(
+            "{n} in-scope source artifact(s) carry no anchor — cover them via \
+             `memstead projection brief {binding} --sync`, or record a disposition for the \
+             ones deliberately excluded"
+        ),
+        "queued-for-adjudication" => format!(
+            "{n} finding(s) are queued and not yet adjudicated — run \
+             `memstead projection verify {binding} --full` to work the backlog down"
+        ),
+        other => format!("{n} `{other}` finding(s) recorded"),
+    }
+}
+
+impl FidelityReport {
+    /// Derive the [`Rollup`] from this report's own figures.
+    ///
+    /// Pure and total — same report, same verdict, no engine access. The
+    /// derivation is deliberately conservative in one direction only: it will
+    /// downgrade a green claim it cannot support, and it will never upgrade a
+    /// recorded finding away.
+    pub fn rollup(&self) -> Rollup {
+        let findings_total: usize = self.findings_by_class.values().sum();
+
+        let mut blind_spots: Vec<String> = Vec::new();
+        match &self.coverage.denominator {
+            DenominatorBasis::NonEnumerable { reason } => blind_spots.push(format!(
+                "the source scope is not enumerable ({reason}) — coverage is reported over \
+                 anchors only, so an uncovered artifact cannot be detected"
+            )),
+            DenominatorBasis::Enumerated { count: 0 } => blind_spots.push(
+                "the enumerated source scope is empty (0 artifacts) — every coverage figure \
+                 below is vacuous, not clean"
+                    .to_string(),
+            ),
+            DenominatorBasis::Enumerated { .. } => {}
+        }
+        if self.anchors.observed == 0 {
+            blind_spots.push(
+                "no anchor carried a resolution state this pass — nothing was adjudicated"
+                    .to_string(),
+            );
+        }
+        for cap in &self.capabilities {
+            if !cap.change_signal {
+                blind_spots.push(format!(
+                    "facet `{}` ({}) provides no change signal — drift on it cannot be \
+                     observed at all",
+                    cap.facet, cap.medium_type
+                ));
+            }
+        }
+
+        let mut actions: Vec<String> = Vec::new();
+        for class in CLASS_SEVERITY {
+            if let Some(&n) = self.findings_by_class.get(class)
+                && n > 0
+            {
+                actions.push(class_action(class, n, &self.binding));
+            }
+        }
+        // Any class the vocabulary grew past this list still surfaces, after
+        // the ranked ones — an unknown class is never silently dropped.
+        for (class, &n) in &self.findings_by_class {
+            if n > 0 && !CLASS_SEVERITY.contains(&class.as_str()) {
+                actions.push(class_action(class, n, &self.binding));
+            }
+        }
+
+        // The adopt case (E1): a mem that predates its binding is expected to
+        // be 0% anchored, so uncovered findings there are the backfill
+        // worklist, not drift. A red verdict must never be produced SOLELY by
+        // pre-binding history — but the pass is not clean either, so it lands
+        // inconclusive with the onboarding reason.
+        let only_uncovered = findings_total > 0
+            && self
+                .findings_by_class
+                .iter()
+                .all(|(class, &n)| n == 0 || class == "uncovered");
+
+        let (verdict, because) = if self.adopt && only_uncovered {
+            (
+                RollupVerdict::Inconclusive,
+                format!(
+                    "this mem predates its binding — the {findings_total} uncovered artifact(s) \
+                     are the backfill worklist, not drift"
+                ),
+            )
+        } else if findings_total > 0 {
+            let tally = self
+                .findings_by_class
+                .iter()
+                .filter(|(_, n)| **n > 0)
+                .map(|(class, n)| format!("{class}: {n}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                RollupVerdict::Drifted,
+                format!("{findings_total} finding(s) recorded over the current key ({tally})"),
+            )
+        } else if !blind_spots.is_empty() {
+            (
+                RollupVerdict::Inconclusive,
+                format!(
+                    "no findings recorded, but the pass could not speak to {} axis/axes — \
+                     this is not a clean bill of health",
+                    blind_spots.len()
+                ),
+            )
+        } else {
+            (
+                RollupVerdict::Clean,
+                "the pass was substantive on every axis and recorded no findings".to_string(),
+            )
+        };
+
+        Rollup {
+            verdict,
+            findings_total,
+            because,
+            blind_spots,
+            actions,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Rendered output
 // ---------------------------------------------------------------------------
 
@@ -306,6 +517,32 @@ fn ratio(num: usize, den: usize) -> String {
 fn render_hard_required(report: &FidelityReport) -> String {
     let mut md = String::new();
     md.push_str(&format!("# Fidelity report — `{}`\n\n", report.binding));
+
+    // --- Rollup verdict (opens the report) ---
+    // A reader gets the answer before the provenance. Derived from the
+    // figures below, never measured separately, so the headline cannot
+    // disagree with its own body.
+    let rollup = report.rollup();
+    md.push_str(&format!(
+        "**Verdict: {}** — {}.\n\n",
+        rollup.verdict.wire().to_uppercase(),
+        rollup.because
+    ));
+    if !rollup.actions.is_empty() {
+        md.push_str("**Do next:**\n\n");
+        for action in &rollup.actions {
+            md.push_str(&format!("1. {action}\n"));
+        }
+        md.push('\n');
+    }
+    if !rollup.blind_spots.is_empty() {
+        md.push_str("**This pass could not see:**\n\n");
+        for spot in &rollup.blind_spots {
+            md.push_str(&format!("- {spot}\n"));
+        }
+        md.push('\n');
+    }
+
     md.push_str(&format!(
         "- **Destination mem:** `{}`\n- **Coverage semantics:** {}{}\n\n",
         report.destination_mem,
@@ -1769,5 +2006,214 @@ mod tests {
             !md.contains("(resolved from the sources' media"),
             "no resolution marker on a declared value: {md}"
         );
+    }
+}
+
+#[cfg(test)]
+mod rollup_tests {
+    use super::*;
+
+    /// A report whose every axis is substantive and whose findings are empty
+    /// — the only shape that may verdict `clean`. Each test degrades exactly
+    /// one axis from here, so a failure names the axis that moved.
+    fn clean_report() -> FidelityReport {
+        FidelityReport {
+            binding: "engine/graph".to_string(),
+            destination_mem: "engine".to_string(),
+            adopt: false,
+            coverage_semantics: CoverageSemantics::Exhaustive,
+            coverage_semantics_declared: true,
+            capabilities: vec![FacetCapability {
+                facet: "src".to_string(),
+                medium_type: "codebase".to_string(),
+                enumerable: true,
+                change_signal: true,
+                base_version_retrievable: true,
+                anchor_namespace: "path".to_string(),
+                signal: "git".to_string(),
+            }],
+            freshness: vec![FacetFreshness {
+                facet: "src".to_string(),
+                signal: "git".to_string(),
+                synced: Some("deadbeef".to_string()),
+                verified: None,
+                change_detectable: true,
+            }],
+            source_moved_past_synced: Some(false),
+            coverage: GrainCoverage {
+                denominator: DenominatorBasis::Enumerated { count: 4 },
+                direct_covered: 4,
+                tree_only_covered: 0,
+                uncovered: Vec::new(),
+                tree_anchors: Vec::new(),
+            },
+            anchors: AnchorComposition {
+                by_class: BTreeMap::from([("anchored".to_string(), 4)]),
+                by_grain: BTreeMap::from([("file".to_string(), 4)]),
+                authored: 0,
+                observed: 4,
+                resolves: 4,
+                drifted: 0,
+                recheck: 0,
+                orphaned: 0,
+                unobserved: 0,
+            },
+            findings_by_class: BTreeMap::new(),
+            backlog: 0,
+            superseded: Vec::new(),
+            disposed_excluded: 0,
+            disposed_excluded_rationales: Vec::new(),
+            degradations: Vec::new(),
+        }
+    }
+
+    /// A substantive pass with nothing recorded is the only way to green.
+    #[test]
+    fn clean_requires_a_substantive_pass_and_no_findings() {
+        let mut r = clean_report();
+        assert_eq!(r.rollup().verdict, RollupVerdict::Clean);
+        assert!(r.rollup().blind_spots.is_empty());
+        assert!(r.rollup().actions.is_empty());
+
+        r.findings_by_class.insert("drifted".to_string(), 2);
+        let roll = r.rollup();
+        assert_eq!(roll.verdict, RollupVerdict::Drifted);
+        assert_eq!(roll.findings_total, 2);
+        assert!(
+            roll.actions[0].contains("moved since the entity was written"),
+            "the top action is the concrete next step: {:?}",
+            roll.actions
+        );
+    }
+
+    /// Criterion 4's complement: a vacuous measurement is never summarized as
+    /// clean. The graph medium's `0/0` case reports `enumerable: true` and
+    /// enumerates nothing, which is exactly how a "0 findings" run could look
+    /// green while having observed no source at all.
+    #[test]
+    fn a_vacuous_zero_over_zero_is_inconclusive_not_clean() {
+        let mut r = clean_report();
+        r.coverage.denominator = DenominatorBasis::Enumerated { count: 0 };
+        let roll = r.rollup();
+        assert_eq!(
+            roll.verdict,
+            RollupVerdict::Inconclusive,
+            "0/0 is not a clean bill of health"
+        );
+        assert!(
+            roll.blind_spots.iter().any(|s| s.contains("vacuous")),
+            "the blindness is named, not implied: {:?}",
+            roll.blind_spots
+        );
+    }
+
+    /// A medium with no change signal cannot observe drift, so it cannot
+    /// support a green verdict on that axis — the capability row decides,
+    /// not the finding count.
+    #[test]
+    fn a_facet_without_a_change_signal_blocks_green() {
+        let mut r = clean_report();
+        r.capabilities[0].change_signal = false;
+        let roll = r.rollup();
+        assert_eq!(roll.verdict, RollupVerdict::Inconclusive);
+        assert!(
+            roll.blind_spots
+                .iter()
+                .any(|s| s.contains("no change signal")),
+            "{:?}",
+            roll.blind_spots
+        );
+    }
+
+    /// A non-enumerable scope means an uncovered artifact is undetectable —
+    /// silence there is absence of evidence, not evidence of absence.
+    #[test]
+    fn a_non_enumerable_scope_blocks_green() {
+        let mut r = clean_report();
+        r.coverage.denominator = DenominatorBasis::NonEnumerable {
+            reason: "web medium".to_string(),
+        };
+        assert_eq!(r.rollup().verdict, RollupVerdict::Inconclusive);
+    }
+
+    /// A pass that adjudicated nothing observed nothing.
+    #[test]
+    fn zero_observed_anchors_blocks_green() {
+        let mut r = clean_report();
+        r.anchors.observed = 0;
+        r.anchors.resolves = 0;
+        assert_eq!(r.rollup().verdict, RollupVerdict::Inconclusive);
+    }
+
+    /// E1: a mem that predates its binding is expected to be 0% anchored, so
+    /// uncovered findings there are the backfill worklist. No red verdict may
+    /// be produced SOLELY by pre-binding history — but it is not clean either.
+    #[test]
+    fn adopt_with_only_uncovered_is_never_red() {
+        let mut r = clean_report();
+        r.adopt = true;
+        r.findings_by_class.insert("uncovered".to_string(), 12);
+        let roll = r.rollup();
+        assert_eq!(
+            roll.verdict,
+            RollupVerdict::Inconclusive,
+            "onboarding is neither drift nor a clean bill: {roll:?}"
+        );
+        assert!(
+            roll.because.contains("backfill worklist"),
+            "the reason states the onboarding framing: {}",
+            roll.because
+        );
+
+        // Real drift on an adopting mem is still drift — the E1 framing
+        // covers pre-binding history, not everything that follows it.
+        r.findings_by_class.insert("drifted".to_string(), 1);
+        assert_eq!(r.rollup().verdict, RollupVerdict::Drifted);
+    }
+
+    /// An observed finding outranks a blind spot: the pass could not see
+    /// everything, but what it did see is real.
+    #[test]
+    fn findings_outrank_blind_spots() {
+        let mut r = clean_report();
+        r.capabilities[0].change_signal = false;
+        r.findings_by_class.insert("wrong".to_string(), 1);
+        let roll = r.rollup();
+        assert_eq!(roll.verdict, RollupVerdict::Drifted);
+        assert!(
+            !roll.blind_spots.is_empty(),
+            "the blindness is still reported alongside the verdict"
+        );
+    }
+
+    /// Actions are ordered by what a reader should fix first, and a class the
+    /// vocabulary grows past the ranked list is never silently dropped.
+    #[test]
+    fn actions_are_severity_ordered_and_never_drop_a_class() {
+        let mut r = clean_report();
+        r.findings_by_class.insert("uncovered".to_string(), 3);
+        r.findings_by_class.insert("wrong".to_string(), 1);
+        r.findings_by_class
+            .insert("some-future-class".to_string(), 2);
+        let roll = r.rollup();
+        assert!(
+            roll.actions[0].contains("contradict their source"),
+            "{roll:?}"
+        );
+        assert_eq!(roll.actions.len(), 3, "{roll:?}");
+        assert!(
+            roll.actions.iter().any(|a| a.contains("some-future-class")),
+            "an unranked class still surfaces: {roll:?}"
+        );
+    }
+
+    /// The wire vocabulary is closed and stable — consumers branch on it.
+    #[test]
+    fn verdict_wire_strings_are_stable() {
+        assert_eq!(RollupVerdict::Clean.wire(), "clean");
+        assert_eq!(RollupVerdict::Drifted.wire(), "drifted");
+        assert_eq!(RollupVerdict::Inconclusive.wire(), "inconclusive");
+        let json = serde_json::to_string(&RollupVerdict::Inconclusive).unwrap();
+        assert_eq!(json, "\"inconclusive\"");
     }
 }

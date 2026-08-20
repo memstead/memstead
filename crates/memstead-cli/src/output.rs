@@ -11,6 +11,16 @@
 //! | 3 | Not found (entity / mem / resource missing) |
 //! | 4 | Hash mismatch (optimistic-lock violation) |
 //! | 5 | Validation error (schema, relation type, etc.) |
+//! | 6 | Findings present (a completed measurement found something) |
+//!
+//! Code 6 is the odd one and deliberately so: 1–5 all mean *the command
+//! failed*, 6 means *the command succeeded and you should care about the
+//! answer*. It exists so a CI job can branch on three outcomes —
+//! completed-and-clean, completed-with-findings, failed — without parsing
+//! output. Only opt-in gate modes return it (`projection verify
+//! --fail-on-findings`); no operational path may, or the distinction it
+//! exists to draw collapses. The full report is always rendered before it
+//! fires.
 //!
 //! In `--json` mode, errors emit the documented `{code, message,
 //! details}` envelope — same shape agents consume over MCP — to
@@ -32,6 +42,10 @@ pub enum ExitKind {
     NotFound = 3,
     HashMismatch = 4,
     Validation = 5,
+    /// A completed run whose result the caller asked to be gated on —
+    /// **not** a failure. Reserved for explicit opt-in gate modes; never
+    /// returned for an operational error.
+    Findings = 6,
 }
 
 /// Which standard stream a rendered CLI error is written to.

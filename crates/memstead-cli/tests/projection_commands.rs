@@ -3106,3 +3106,214 @@ fn verify_full_refuses_non_enumerable_medium() {
         "the refusal states why: {env}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// CI gate — `projection verify --fail-on-findings`
+// ---------------------------------------------------------------------------
+
+/// The three-outcome contract, all three demonstrated against the same
+/// fixture so the codes are provably pairwise distinct: a completed clean run
+/// exits 0, a completed run with a seeded drift exits **6**, and an
+/// operational failure keeps its own typed code (3, not found). The whole
+/// point of a dedicated findings code is that a CI job can tell "the mem
+/// drifted" from "the engine could not run" — that distinction is what these
+/// assertions pin.
+#[test]
+fn gate_exits_zero_clean_six_on_findings_and_typed_code_on_error() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    // (1) Clean fixture in gate mode → 0. (Runs once ungated first so the
+    //     hash backfill has landed and the anchor adjudicates deterministically.)
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-findings",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["rollup"]["findings_total"], 0,
+        "the fixture is clean before the drift is seeded: {env}"
+    );
+    assert_eq!(
+        env["rollup"]["verdict"], "clean",
+        "a substantive pass with no findings is clean: {env}"
+    );
+
+    // (2) Seed a drift in the anchored artifact → the dedicated findings code.
+    let src = root.join("src");
+    std::fs::write(src.join("a.rs"), "one-drifted").unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "drift"]);
+
+    let assertion = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-findings",
+        ])
+        .assert()
+        .code(6);
+    let stdout = assertion.get_output().stdout.clone();
+    let text = String::from_utf8_lossy(&stdout);
+
+    // (3) An operational failure over the same workspace keeps its own code,
+    //     and it is not 6 — that is the distinction the gate exists to draw.
+    memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/nonexistent",
+            "--fail-on-findings",
+        ])
+        .assert()
+        .code(3);
+
+    // Criterion 2: the report is emitted before the findings exit fires. In
+    // `--json` mode stdout carries both the report envelope and the typed
+    // error envelope, so a pipeline consumer can read either.
+    assert!(
+        text.contains("memstead-verify/v1"),
+        "the report envelope lands before the gate fails: {text}"
+    );
+    assert!(
+        text.contains("PROJECTION_VERIFY_FINDINGS"),
+        "the typed error envelope still reaches stdout: {text}"
+    );
+}
+
+/// The gate is opt-in: a bare `projection verify` over a drifted fixture
+/// exits 0 exactly as it always has. This is the compatibility promise — a
+/// silent default flip would break every existing consumer, including this
+/// project's own loops.
+#[test]
+fn gate_is_opt_in_bare_verify_still_exits_zero_with_findings() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+
+    let src = root.join("src");
+    std::fs::write(src.join("a.rs"), "one-drifted").unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "drift"]);
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["report"]["findings_by_class"]["drifted"], 1,
+        "the drift IS present — the ungated run simply does not gate on it: {env}"
+    );
+    assert_eq!(
+        env["rollup"]["verdict"], "drifted",
+        "the verdict reports the drift even ungated: {env}"
+    );
+}
+
+/// The human report opens with the rollup verdict and the concrete actions —
+/// making the fidelity-contract page's long-standing claim true.
+#[test]
+fn human_report_opens_with_verdict_and_actions() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+
+    let src = root.join("src");
+    std::fs::write(src.join("a.rs"), "one-drifted").unwrap();
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-qm", "drift"]);
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    let verdict_at = text.find("**Verdict: DRIFTED**").unwrap_or_else(|| {
+        panic!("the report opens with the rollup verdict: {text}");
+    });
+    let provenance_at = text
+        .find("Coverage semantics")
+        .expect("the denominator-provenance block still renders");
+    assert!(
+        verdict_at < provenance_at,
+        "the verdict comes BEFORE the provenance a reader used to open on: {text}"
+    );
+    assert!(
+        text.contains("**Do next:**"),
+        "the rollup carries top concrete actions: {text}"
+    );
+}
+
+/// The machine payload carries the pinned version marker, in the house style
+/// the two existing external envelopes established. A consumer asserts this
+/// before parsing, so a future shape change fails loudly.
+#[test]
+fn verify_json_carries_the_pinned_format_marker() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["format"], "memstead-verify/v1",
+        "the external contract is versioned: {env}"
+    );
+    assert!(
+        env["rollup"]["verdict"].is_string(),
+        "the rollup ships in the envelope, not only in the markdown: {env}"
+    );
+    assert!(
+        env["report"]["findings_by_class"].is_object(),
+        "the closed finding-class vocabulary still ships: {env}"
+    );
+    assert!(
+        env["report"]["coverage"]["denominator"].is_object(),
+        "the denominator union still ships: {env}"
+    );
+}

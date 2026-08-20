@@ -8,6 +8,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **`memstead projection verify --fail-on-findings` — a verify a CI job can
+  gate on.** Three outcomes a workflow can branch on without parsing output:
+  exit `0` the run completed and found nothing, exit `6` the run completed
+  and recorded findings, any other nonzero the measurement itself failed.
+  Code 6 is dedicated and no operational path returns it, which is the whole
+  point — a job can tell "the mem drifted from its source" from "the engine
+  could not boot". The full report is rendered before the findings exit
+  fires, so a red build still carries the report that explains it. Opt-in:
+  without the flag verify's exit behaviour is byte-for-byte unchanged.
+- **A rollup verdict on the fidelity report — `clean` / `drifted` /
+  `inconclusive`.** The report now opens with the answer instead of with
+  denominator provenance, plus the ranked concrete actions. The third value
+  is the one that matters: a measurement can complete without being able to
+  support a green claim, so a medium with no change signal, an empty
+  enumerated scope (the graph-medium `0/0` case), or a pass that adjudicated
+  no anchor all resolve to `inconclusive` with the blindness named, never to
+  `clean`. Derived from the report's own figures, so the headline cannot
+  disagree with the body. A mem that predates its binding is never rendered
+  red for pre-binding history alone.
+- **`projection verify --json` is versioned.** The payload carries
+  `"format": "memstead-verify/v1"` in the house style
+  (`memstead-export/v1`, `workspace-dump/v0`) and ships the `rollup` block
+  alongside the report — consumers assert the marker, so a future shape
+  change fails loudly instead of misparsing.
+
 - **`memstead quickstart --repo <PATH>` — the guided point-at-your-repo
   first session.** One invocation from an existing repository leaves a
   workspace, a mem, a scaffolded `codebase` binding over that tree, agent
@@ -161,6 +186,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   anything.
 
 ### Fixed
+- The fidelity-contract page has claimed since it was written that the
+  report "opens with a rollup verdict and the top concrete actions". No code
+  produced one. It does now — the docs stopped being wrong by the code
+  catching up, not by the claim being deleted.
 - **The backfill path named a subcommand that does not exist.** The
   fidelity report and three health findings told the reader to run
   `memstead projection sync <binding>`; the CLI has no `projection sync`

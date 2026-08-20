@@ -57,6 +57,12 @@ use memstead_base::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
+
+/// Version marker on `projection verify --json`. External contract: bump the
+/// `vN` when the payload's shape changes so a consumer asserting it fails
+/// loudly instead of misparsing. House style — see `memstead-export/v1`
+/// (`commands/export.rs`) and `workspace-dump/v0` (`commands/workspace.rs`).
+pub const JSON_VERIFY_FORMAT: &str = "memstead-verify/v1";
 use crate::setup::{CliContext, workspace_not_initialised_error};
 
 #[derive(ClapArgs, Debug)]
@@ -383,6 +389,14 @@ pub struct VerifyArgs {
     /// unchanged.
     #[arg(long)]
     pub full: bool,
+    /// CI-gate mode: exit 6 when the completed run recorded findings, so a
+    /// pull-request gate can branch on three outcomes without parsing output
+    /// — 0 completed-and-clean, 6 completed-with-findings, any other nonzero
+    /// the measurement itself failed. The full report is rendered first,
+    /// either way. Opt-in by design: without this flag the exit behaviour is
+    /// byte-for-byte what it has always been, so no existing consumer breaks.
+    #[arg(long)]
+    pub fail_on_findings: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -1954,8 +1968,19 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
         .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
     })?;
 
+    // The rollup is derived from the assembled report, so the headline a
+    // human reads, the `rollup` block a consumer parses, and the gate exit
+    // code below are all the same judgement — they cannot disagree.
+    let rollup = report.rollup();
+
     if ctx.json {
         print_json(&json!({
+            // Version marker in the house style (`memstead-export/v1`,
+            // `workspace-dump/v0`): consumers assert it before parsing, so a
+            // future shape change fails loudly instead of misparsing. This
+            // payload is external contract — see the verify-in-CI guide.
+            "format": JSON_VERIFY_FORMAT,
+            "rollup": rollup,
             "binding": outcome.binding,
             "key": {
                 "binding_hash": outcome.key.binding_hash,
@@ -2014,6 +2039,32 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
             backfill_note,
             baseline_note
         ));
+    }
+
+    // --- CI gate (opt-in) ---
+    // Report first, then fail: `main` prints the error envelope and nothing
+    // else, so a findings exit that returned before this point would hand a
+    // CI job a red build with no report to read. Same ordering `health
+    // --strict` uses, with the ambiguity that one has removed — this code is
+    // dedicated, so a job can tell "the mem drifted" from "the engine failed
+    // to boot".
+    if args.fail_on_findings && rollup.findings_total > 0 {
+        return Err(CliError::new(
+            ExitKind::Findings,
+            "PROJECTION_VERIFY_FINDINGS",
+            format!(
+                "verify completed for `{binding_id}` and recorded {} finding(s) — {}",
+                rollup.findings_total, rollup.because
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "verdict": rollup.verdict.wire(),
+            "findings_total": rollup.findings_total,
+            "findings_by_class": report.findings_by_class,
+            "actions": rollup.actions,
+        }))
+        .into());
     }
     Ok(())
 }
