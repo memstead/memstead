@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memstead.io/schemas/memstead-plugin/v1/binding",
   "title": "memstead-plugin/v1 binding",
-  "description": "A Binding is ONE versioned record per pipeline at `.memstead/projections/<mem>/<name>.json`: the whole declaration (`intent`, inline `sources`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. The 2026-07 consolidation folded the retired standalone medium and facet records into the binding's `sources[]` — each source carries the medium half (where it lives: `type` / `pointer` / `change_detection`) and the facet half (which part of it: `scope` / `engagement` / `preparation`) under a `name` that keys per-source sync/verify state. `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults (verify is read-only). The `prune` block, when present, requests a deletion-proposal guarantee validated against the source medium at binding time.",
+  "description": "A Binding is ONE versioned record per pipeline at `.memstead/projections/<mem>/<name>.json`: the whole declaration (`intent`, inline `sources`, `reference_mems`, `destination_mem`, `deny_paths`, `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }` block. The 2026-07 consolidation folded the retired standalone medium and facet records into the binding's `sources[]` — each source carries the medium half (where it lives: `type` / `pointer` / `change_detection`) and the facet half (which part of it: `scope` / `engagement` / `preparation`) under a `name` that keys per-source sync/verify state. `reference_mems` supply read-only cross-mem context; `destination_mem` is the mem the binding writes into. Every operation is optional: an absent build/sync makes that mutating operation refuse at run time with a `projection enable <op>` remedy; an absent verify means engine defaults. Verify mutates no entity, but it is not a pure read: a completed run records its findings store, backfills observed hashes onto hash-less anchors, and records a `#verified` baseline. The `prune` block, when present, requests a deletion-proposal guarantee validated against the source medium at binding time.",
   "type": "object",
   "required": [
     "version",
@@ -148,7 +148,7 @@
       "additionalProperties": false
     },
     "verifyOperation": {
-      "description": "The verify operation — read-only measurement. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.",
+      "description": "The verify operation — measurement. Mutates no entity, but records findings, backfills observed anchor hashes, and writes a `#verified` baseline. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.",
       "type": "object",
       "required": [
         "trigger",

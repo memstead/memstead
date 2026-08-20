@@ -6,8 +6,9 @@ description: >
   conservatively. The single maintenance writer for bound mems; run `--all` on
   a loop to keep every bound mem current (the loop ends itself once every
   binding reports quiescence), `--verify <binding>` for a
-  read-only fidelity report (coverage, accuracy, freshness) that changes
-  nothing, or `--inventory <binding>` for the on-demand full stock-take —
+  fidelity report (coverage, accuracy, freshness) that writes no entity but
+  does record findings and a verified baseline, or `--inventory <binding>` for
+  the on-demand full stock-take —
   measure the whole binding, repair to quiescence, report. Not a
   version-control operation: changes flow from your source into your mem,
   never the reverse.
@@ -18,8 +19,8 @@ argument-hint: "[--all | <binding> | --verify <binding> | --inventory <binding>]
 # Memstead Sync
 
 Bring a bound mem up to date with its source — the **sole maintenance
-writer** — or measure it read-only with `--verify`. Read-only on your source,
-write-only on the mem; engine refusals are surfaced verbatim, never worked around.
+writer** — or measure it with `--verify`: no entity writes, but it does record
+findings and a `#verified` baseline. Read-only on your source; refusals verbatim.
 
 ## Steps
 

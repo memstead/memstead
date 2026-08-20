@@ -48,8 +48,15 @@ GUIDE = REPO / "docs-site" / "src" / "content" / "docs" / "guides" / "verify-in-
 
 BINDING = "docs/graph"
 GATE_ARGS = ["projection", "verify", BINDING, "--fail-on-findings"]
-# The exact substring the guide must print. Keep this the literal command
-# line, not a paraphrase — it is the anti-drift assertion's whole basis.
+# The exact line the guide's copyable workflow must contain — the YAML
+# `run:` step, not a bare command substring. A bare substring is not an
+# anti-drift check: the same words appear in the guide's `--json` example
+# further down, so deleting the entire workflow block still left the
+# assertion passing. Anchor on the step, so removing the job fails.
+DOCUMENTED_STEP = "run: memstead projection verify docs/graph --fail-on-findings"
+# The command that step runs, as a stranger would type it: human mode, no
+# global --json. The harness runs BOTH modes, because the mode the guide
+# prints must be the mode something gates.
 DOCUMENTED_COMMAND = "memstead projection verify docs/graph --fail-on-findings"
 
 EXIT_CLEAN = 0
@@ -82,13 +89,10 @@ def stage_fixture(dest: Path) -> Path:
     return workspace
 
 
-def run_gate(memstead: Path, workspace: Path, *extra: str) -> tuple[int, str]:
-    proc = subprocess.run(
-        [str(memstead), "--json", *GATE_ARGS[:-1], *extra, GATE_ARGS[-1]],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-    )
+def run_gate(memstead: Path, workspace: Path, json_mode: bool = True) -> tuple[int, str]:
+    """Run the gate. `json_mode=False` is verbatim what the guide prints."""
+    argv = [str(memstead)] + (["--json"] if json_mode else []) + GATE_ARGS
+    proc = subprocess.run(argv, cwd=workspace, capture_output=True, text=True)
     return proc.returncode, proc.stdout
 
 
@@ -99,13 +103,14 @@ def run(memstead: Path) -> int:
     if not GUIDE.exists():
         return fail(f"the guide this harness gates does not exist: {GUIDE}")
     guide_text = GUIDE.read_text(encoding="utf-8")
-    if DOCUMENTED_COMMAND not in guide_text:
+    if DOCUMENTED_STEP not in guide_text:
         failures += fail(
-            f"the guide no longer prints the command this harness runs "
-            f"({DOCUMENTED_COMMAND!r}) — the example and the exercise have drifted"
+            f"the guide's copyable workflow no longer contains the step this "
+            f"harness exercises ({DOCUMENTED_STEP!r}) — the example and the "
+            f"exercise have drifted, or the job was removed outright"
         )
     else:
-        print("  ✓ the guide prints the command this harness runs")
+        print("  ✓ the guide's workflow step is the command this harness runs")
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = stage_fixture(Path(tmp))
@@ -144,6 +149,52 @@ def run(memstead: Path) -> int:
             failures += fail(f"the typed error envelope did not reach stdout:\n{out}")
         else:
             print("  ✓ drifted fixture → exit 6, report and typed error both on stdout")
+
+        # (2b) The SAME command in the mode the guide actually prints. The
+        #      job a stranger copies has no `--json`, so gating only the
+        #      JSON path would leave the copied one exercised by nothing.
+        code, out = run_gate(memstead, workspace, json_mode=False)
+        if code != EXIT_FINDINGS:
+            failures += fail(
+                f"human-mode gate (the mode the guide prints) exited {code}, "
+                f"expected {EXIT_FINDINGS}\n{out}"
+            )
+        elif "Verdict: DRIFTED" not in out:
+            failures += fail(f"human-mode gate rendered no verdict before failing:\n{out}")
+        elif "Do next:" not in out:
+            failures += fail(f"human-mode gate rendered no actions:\n{out}")
+        else:
+            print("  ✓ human-mode gate (as printed in the guide) → exit 6, verdict rendered")
+
+        # (2c) The guide tells readers to recover the typed code from the
+        #      LAST stdout document, because the gate path emits two. Prove
+        #      the shape that advice assumes.
+        code, out = run_gate(memstead, workspace)
+        decoder = json.JSONDecoder()
+        parsed, idx = [], 0
+        try:
+            while idx < len(out):
+                while idx < len(out) and out[idx] in " \t\r\n":
+                    idx += 1
+                if idx >= len(out):
+                    break
+                obj, idx = decoder.raw_decode(out, idx)
+                parsed.append(obj)
+        except json.JSONDecodeError as exc:
+            failures += fail(f"gate stdout is not a JSON document stream: {exc}\n{out}")
+            parsed = []
+        if parsed:
+            if len(parsed) != 2:
+                failures += fail(
+                    f"gate stdout carried {len(parsed)} JSON document(s), expected 2 "
+                    f"(report then typed error) — the documented jq recipe assumes 2"
+                )
+            elif parsed[0].get("format") != "memstead-verify/v1":
+                failures += fail(f"first document is not the report envelope: {parsed[0]!r}")
+            elif parsed[-1].get("code") != "PROJECTION_VERIFY_FINDINGS":
+                failures += fail(f"last document is not the typed error: {parsed[-1]!r}")
+            else:
+                print("  ✓ gate stdout is report-then-error, as the guide's jq recipe assumes")
 
     # (3) An operational failure keeps its own code. Runs in a second
     #     staged copy so step 2's writes cannot influence it.

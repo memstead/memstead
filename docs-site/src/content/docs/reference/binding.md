@@ -23,7 +23,7 @@ A **binding** (stored as a `projection` file at `.memstead/projections/<mem>/<na
 
 ## Operations
 
-Each operation under `operations` is optional. An absent **build** or **sync** makes that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an absent **verify** means engine defaults (verify is read-only, never a refusal).
+Each operation under `operations` is optional. An absent **build** or **sync** makes that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an absent **verify** means engine defaults (verify never refuses on an absent operation block). Verify mutates no entity, but it is not a pure read: a completed run records its findings store, backfills observed hashes onto hash-less anchors, and records a `#verified` baseline.
 
 ### `build`
 
@@ -47,7 +47,7 @@ The sync operation — the sole maintenance writer. Carries no mode. An absent s
 
 ### `verify`
 
-The verify operation — read-only measurement. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.
+The verify operation — measurement. Mutates no entity, but records findings, backfills observed anchor hashes, and writes a `#verified` baseline. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.
 
 | Field | Type | Required | Allowed values | Description |
 | --- | --- | --- | --- | --- |

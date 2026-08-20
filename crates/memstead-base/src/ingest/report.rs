@@ -402,6 +402,22 @@ impl FidelityReport {
                     cap.facet, cap.medium_type
                 ));
             }
+            // Checked per facet, not only on the binding-level denominator:
+            // in a MIXED binding one enumerable facet makes `S(D)` non-empty,
+            // so the denominator reads `Enumerated` and the binding-level
+            // blind spot above never fires — while the non-enumerable facet's
+            // coverage stays unmeasurable. Every medium that is non-enumerable
+            // today also lacks a change signal, so this adds no blind spot
+            // under the current matrix; it is here so a future
+            // non-enumerable-but-change-detectable medium cannot silently
+            // render a mixed binding green.
+            if !cap.enumerable {
+                blind_spots.push(format!(
+                    "facet `{}` ({}) is not enumerable — an uncovered artifact under it \
+                     cannot be detected, only an anchored one",
+                    cap.facet, cap.medium_type
+                ));
+            }
         }
 
         let mut actions: Vec<String> = Vec::new();
@@ -2103,6 +2119,44 @@ mod rollup_tests {
         assert!(
             roll.blind_spots.iter().any(|s| s.contains("vacuous")),
             "the blindness is named, not implied: {:?}",
+            roll.blind_spots
+        );
+    }
+
+    /// A facet that cannot be enumerated blocks green on its own, even when
+    /// a sibling facet makes the binding-level denominator `Enumerated`. The
+    /// mixed-binding case is exactly where a per-binding check would miss it.
+    #[test]
+    fn a_non_enumerable_facet_blocks_green_even_in_a_mixed_binding() {
+        let mut r = clean_report();
+        r.capabilities.push(FacetCapability {
+            facet: "site".to_string(),
+            medium_type: "web".to_string(),
+            enumerable: false,
+            // Deliberately TRUE: isolates the enumerability axis from the
+            // change-signal one, so this test fails if only the latter is
+            // checked.
+            change_signal: true,
+            base_version_retrievable: false,
+            anchor_namespace: "url".to_string(),
+            signal: "none".to_string(),
+        });
+        // The enumerable sibling keeps the denominator populated.
+        assert!(matches!(
+            r.coverage.denominator,
+            DenominatorBasis::Enumerated { count } if count > 0
+        ));
+        let roll = r.rollup();
+        assert_eq!(
+            roll.verdict,
+            RollupVerdict::Inconclusive,
+            "one enumerable facet must not launder a non-enumerable one: {roll:?}"
+        );
+        assert!(
+            roll.blind_spots
+                .iter()
+                .any(|s| s.contains("not enumerable")),
+            "{:?}",
             roll.blind_spots
         );
     }

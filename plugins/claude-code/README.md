@@ -81,10 +81,12 @@ changes. Everything in this loop is operable today:
    sync brief (what changed since the last sync plus any open findings) and
    updates only the affected entities, conservatively. Reads your source, writes
    your mem — never the reverse, and commits nothing itself.
-4. **Measure — `/sync --verify`.** A read-only fidelity report — coverage,
-   accuracy, freshness — that leads with a verdict and the top actions, and
-   records findings for the next `/sync` run to act on. It changes nothing
-   itself.
+4. **Measure — `/sync --verify`.** A fidelity report — coverage, accuracy,
+   freshness — that leads with a verdict and the top actions, and records
+   findings for the next `/sync` run to act on. It writes no entity, but it is
+   not a pure read: a completed run records the findings store, backfills
+   observed content hashes onto hash-less anchors, and records a `#verified`
+   baseline.
 5. **Stock-take — `/sync --inventory`.** The on-demand full measurement: a
    complete, unsampled verify of the whole binding, then repair passes until
    nothing remains to sync — closing with a fidelity report whose numbers are

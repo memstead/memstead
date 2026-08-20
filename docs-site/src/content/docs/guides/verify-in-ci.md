@@ -20,7 +20,7 @@ one of three outcomes:
 | Exit | Meaning | What CI should do |
 |------|---------|-------------------|
 | `0` | The run completed and found nothing | Pass |
-| `6` | The run completed and **recorded findings** | Fail — the mem drifted |
+| `6` | The run completed and **recorded findings** | Fail — the mem and its source disagree |
 | anything else | The measurement itself failed | Fail — but this is a broken job, not a drifted mem |
 
 Code `6` is deliberately outside the ordinary error range. Codes 1–5 all
@@ -31,6 +31,12 @@ without parsing any output.
 
 Without `--fail-on-findings`, verify exits 0 whether it found anything
 or not — unchanged, so adding the flag breaks no existing script.
+
+The gate fires on **any** finding class, not only `drifted`. On a mem
+still being backfilled onto a new binding, that includes `uncovered`
+artifacts — real work, but onboarding rather than drift. The rollup says
+so (`verdict: inconclusive`, with the backfill framing); the exit code
+does not distinguish. Finish the backfill before turning the gate on.
 
 ## The job
 
@@ -122,8 +128,45 @@ of misparsing:
 `report.coverage.denominator` is a tagged union — either
 `{"Enumerated": {"count": N}}` or `{"NonEnumerable": {"reason": "…"}}`.
 
-The typed error envelope also lands on stdout on the failure path, so
-`… --json | jq -r .code` works either way.
+Two per-facet arrays carry what the measurement *could* do, which is how
+you tell a real green from a lucky one:
+
+- **`report.capabilities[]`** — one row per source facet: `facet`,
+  `medium_type`, `enumerable` (is `S(D)` computable), `change_signal`
+  (can drift be observed at all), `base_version_retrievable`,
+  `anchor_namespace` (`path` / `path+commit` / `entity` / `url`), and
+  the resolved `signal` (`git` / `mtime` / `graph` / `none`). A `false`
+  in `enumerable` or `change_signal` is what forces `inconclusive`.
+- **`report.freshness[]`** — per facet: `signal`, the recorded `synced`
+  and `verified` baselines (`null` when never recorded), and
+  `change_detectable`. A facet with `change_detectable: false` is
+  structurally unable to render a green freshness verdict.
+
+Both are contract: they carry the same version marker and change only
+with it.
+
+### Two documents on the gate's failure path
+
+On exit 6 stdout carries **two** JSON documents: the report envelope,
+then the typed error envelope. That is the report-before-exit guarantee
+paying out, but it means a plain `json.loads(stdout)` fails and the
+usual `… --json | jq -r .code` recipe sees the first document too.
+
+Read them as a stream:
+
+```bash
+# the typed code, from the last document on stdout
+memstead projection verify docs/graph --fail-on-findings --json \
+  | jq -s -r '.[-1].code'
+
+# the verdict, from the first
+memstead projection verify docs/graph --fail-on-findings --json \
+  | jq -s -r '.[0].rollup.verdict'
+```
+
+On exit 0 there is exactly one document (the report), and on an
+operational failure exactly one (the error envelope) — the two-document
+case is specific to the findings exit.
 
 ## What this gate cannot see
 

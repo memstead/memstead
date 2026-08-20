@@ -89,7 +89,10 @@ fn render(schema: &Value) -> String {
     md.push_str(
         "Each operation under `operations` is optional. An absent **build** or **sync** makes \
          that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an \
-         absent **verify** means engine defaults (verify is read-only, never a refusal).\n\n",
+         absent **verify** means engine defaults (verify never refuses on an absent \
+         operation block). Verify mutates no entity, but it is not a pure read: a \
+         completed run records its findings store, backfills observed hashes onto \
+         hash-less anchors, and records a `#verified` baseline.\n\n",
     );
     for (op_key, def_name) in [
         ("build", "buildOperation"),
