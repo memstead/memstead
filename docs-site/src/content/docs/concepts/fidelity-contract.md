@@ -94,8 +94,10 @@ the contract would rather admit a blind spot than paper over one.
 
 ## What the contract does not cover yet
 
-Two capabilities are **deferred this cycle** — a positioning decision, stated plainly
-rather than left as a silent gap or dressed up as an imminent feature:
+Four caps bound what the contract can currently claim — positioning decisions and
+known gaps, stated plainly rather than left silent or dressed up as imminent
+features. If you are gating a pull request on verify ([the CI
+guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
 
 - **Web-medium sync and enumeration.** A `web` medium can be named and read, but the
   engine does not enumerate or maintain it. Because its capability row advertises no
@@ -113,6 +115,28 @@ rather than left as a silent gap or dressed up as an imminent feature:
   you hit it, not when you declare it — which is the honest description of
   where the edge currently sits.
 
-Neither is a roadmap promise, and neither is omitted: the honest shape of a contract
+- **Graph-medium verify is inert.** A binding whose source is another mem enumerates
+  nothing and leaves its anchors permanently unobserved: coverage reads `0/0` even
+  though the capability row says `enumerable: true`. The rollup refuses to summarize
+  that as clean — a vacuous measurement returns `inconclusive` with the blindness
+  named — but the measurement itself is not there yet, so a graph-source binding is
+  not gateable today.
+- **The mtime `#synced` baseline does not survive a fresh checkout.** A binding using
+  mtime change-detection compares modification times against a recorded baseline. A CI
+  clone gives every file a new mtime, so such a binding flags everything on its first
+  run in a new checkout. Use git change-detection for anything you intend to gate.
+
+None is a roadmap promise, and none is omitted: the honest shape of a contract
 is to name its own edges. When these land, they will enter the capability matrix the
 report already renders, and the refusals will become measurements.
+
+## Verify writes
+
+Verify is **not a read-only command**, and no part of this contract should be read as
+saying it is. A completed run records its findings store, backfills observed
+content hashes onto hash-less anchors in the mem's anchors sidecar, and records a
+`#verified` baseline — on a mem-repo-backed mem, that last one is a commit. The
+measurement pass itself takes a shared engine borrow and is structurally incapable of
+mutating an entity; what it writes is measurement bookkeeping, and a failed or aborted
+run never advances the baseline. On CI's ephemeral checkout this is harmless. In a
+working tree you need pristine, it is not.

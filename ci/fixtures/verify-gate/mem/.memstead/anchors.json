@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "entities": {
+    "docs--alpha": [
+      {
+        "artifact": "src/alpha.md",
+        "grain": "file",
+        "class": "anchored",
+        "hash": "bc3ff9b548bc91f3",
+        "hash_stability": "stable"
+      }
+    ],
+    "docs--beta": [
+      {
+        "artifact": "src/beta.md",
+        "grain": "file",
+        "class": "anchored",
+        "hash": "ea4f1be2c8524b89",
+        "hash_stability": "stable"
+      }
+    ]
+  }
+}

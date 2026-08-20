@@ -249,6 +249,27 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Gate: the documented verify-in-CI example still works"
+echo "══════════════════════════════════"
+# The guide prints a GitHub Actions job strangers copy. A printed example
+# nobody runs rots silently, so the same command runs here against the
+# committed fixture in both polarities (clean -> 0, drifted -> 6) plus an
+# operational failure (-> 3, never 6). The harness also asserts the guide
+# still prints the command it runs, so the example and the exercise cannot
+# drift apart. Needs the full-feature binary the engine leg above built.
+if [ -x "$ROOT/target/debug/memstead" ]; then
+  if (cd "$ROOT" && python3 ci/verify_gate.py --memstead target/debug/memstead); then
+    echo "  ✓ verify-in-CI example exercised"
+  else
+    FAILED+=("verify-gate-example")
+    echo "  ✗ the documented verify-in-CI example FAILED"
+  fi
+else
+  echo "  (no target/debug/memstead built — nothing to exercise)"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Gate: target/debug/memstead is the full-feature binary"
 echo "══════════════════════════════════"
 # The behavioural invariant behind the lean target-dir isolation above: a

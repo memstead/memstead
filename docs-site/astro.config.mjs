@@ -95,6 +95,7 @@ export default defineConfig({
             { label: "Publish a mem", link: "/guides/publish-a-mem/" },
             { label: "Agent recipes", link: "/guides/agent-recipes/" },
             { label: "Back up a mem-repo", link: "/guides/back-up-a-mem-repo/" },
+            { label: "Gate a PR on mem fidelity", link: "/guides/verify-in-ci/" },
           ],
         },
         {

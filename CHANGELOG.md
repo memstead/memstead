@@ -27,6 +27,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `clean`. Derived from the report's own figures, so the headline cannot
   disagree with the body. A mem that predates its binding is never rendered
   red for pre-binding history alone.
+- **A verify-in-CI guide, exercised rather than printed.** The docs site
+  gains `guides/verify-in-ci` — the three-outcome table, a copyable
+  GitHub Actions job, how to read a red build, the JSON contract, and
+  every cap that bounds the gate's honesty. A committed fixture
+  workspace (`ci/fixtures/verify-gate/`) and `ci/verify_gate.py` run the
+  guide's own command on every `run-tests.sh`, in both polarities plus an
+  operational failure, and assert the guide still prints the command the
+  harness runs — so the published example and the exercised one cannot
+  drift apart silently.
 - **`projection verify --json` is versioned.** The payload carries
   `"format": "memstead-verify/v1"` in the house style
   (`memstead-export/v1`, `workspace-dump/v0`) and ships the `rollup` block
@@ -186,6 +195,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   anything.
 
 ### Fixed
+- **The fidelity contract named two of its four caps.** The page now also
+  states that graph-medium verify is inert (a binding whose source is
+  another mem enumerates nothing and reads `0/0`, so it is not gateable
+  today) and that an mtime `#synced` baseline does not survive a fresh
+  checkout — both of which bound what a CI gate can honestly claim. It
+  also says outright that verify **writes**: a findings store, an anchor
+  hash backfill, and a `#verified` baseline. No doc calls it read-only.
 - The fidelity-contract page has claimed since it was written that the
   report "opens with a rollup verdict and the top concrete actions". No code
   produced one. It does now — the docs stopped being wrong by the code
