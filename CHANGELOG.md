@@ -63,6 +63,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `## `/`# ` — the indented-code-block-opens-a-section round-trip fork
   — is now refused at ingress instead of forking the entity on its
   next read.
+- **HTML export stops rewriting wiki-links inside code.** The
+  exporter's `[[…]]` resolution was a hand-rolled string walk with no
+  masking, so a fenced or indented code sample documenting wiki-link
+  syntax came out as a rendered link — or marked `*(unresolved)*` —
+  inside `<pre><code>`. It now scans the same masked view every other
+  reader uses and slices from the original, leaving code byte-identical
+  while prose links resolve exactly as before. The renderer's parser
+  options are derived from the engine's one dialect rather than
+  rebuilt, so a flag added to the reader reaches the renderer too.
 - **Merge-conflict detection reads frontmatter too, and is no longer
   blinded by it.** The guard that refuses an entity file carrying git
   conflict markers now scans one rejoined view — raw frontmatter plus

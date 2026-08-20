@@ -40,20 +40,32 @@ fn esc(s: &str) -> String {
 /// its in-document anchor; a cross-mem target becomes a labelled
 /// plain-text reference; a dangling target stays plain text (no
 /// dangling anchors, mechanically guaranteed).
+///
+/// Links inside code blocks and inline code spans are left verbatim,
+/// by the one definition every other reader uses
+/// ([`crate::markdown::mask_code_blocks_and_spans`]). An export is the
+/// surface most likely to carry a code sample *documenting* wiki-link
+/// syntax, and rewriting one silently corrupts the sample: what a
+/// renderer shows as code is what the engine treats as code, here too.
+/// The scan runs over the masked copy and every slice is taken from
+/// the original, so the output is byte-identical outside real links.
 fn resolve_wiki_links(body: &str, mem: &str, exported_ids: &[String]) -> String {
+    let masked = crate::markdown::mask_code_blocks_and_spans(body);
     let mut out = String::with_capacity(body.len());
-    let mut rest = body;
-    while let Some(start) = rest.find("[[") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        match after.find("]]") {
+    let mut cursor = 0usize;
+    while let Some(rel) = masked[cursor..].find("[[") {
+        let start = cursor + rel;
+        out.push_str(&body[cursor..start]);
+        let after_start = start + 2;
+        match masked[after_start..].find("]]") {
             None => {
-                out.push_str(&rest[start..]);
-                rest = "";
+                out.push_str(&body[start..]);
+                cursor = body.len();
                 break;
             }
-            Some(end) => {
-                let target = &after[..end];
+            Some(rel_end) => {
+                let end = after_start + rel_end;
+                let target = &body[after_start..end];
                 let full_id = if target.contains("--") {
                     target.to_string()
                 } else {
@@ -70,11 +82,11 @@ fn resolve_wiki_links(body: &str, mem: &str, exported_ids: &[String]) -> String 
                     // Cross-mem reference — labelled, never an anchor.
                     let _ = write!(out, "{full_id} *(other mem)*");
                 }
-                rest = &after[end + 2..];
+                cursor = end + 2;
             }
         }
     }
-    out.push_str(rest);
+    out.push_str(&body[cursor..]);
     out
 }
 
@@ -127,7 +139,13 @@ fn link_dest_allowed(dest: &str, exported_ids: &[String]) -> bool {
 /// and everything else renders through the CommonMark machinery the
 /// engine already carries.
 fn markdown_to_safe_html(md: &str, exported_ids: &[String]) -> String {
-    let parser = Parser::new_ext(md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH);
+    // The engine's one reader dialect plus the extensions that are
+    // rendering-only. Derived from `parser_options()` rather than
+    // rebuilt, so a flag added to the reader reaches the renderer too
+    // — an independently constructed `Options` here is how two
+    // referees start.
+    let options = crate::markdown::parser_options() | Options::ENABLE_STRIKETHROUGH;
+    let parser = Parser::new_ext(md, options);
     let mut events: Vec<Event> = Vec::new();
     let mut skipping_image: Option<(String, String)> = None; // (url, alt)
     // Depth-tracked suppression of disallowed links: the wrapper is
@@ -459,6 +477,64 @@ mod tests {
     use crate::engine::test_helpers::{cli_actor, folder_mount};
     use crate::storage::FilesystemMemWriter;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+
+    /// The export scan uses the one definition of "not a link": a
+    /// `[[…]]` inside a code block or inline span is a code sample, not
+    /// a reference, and an export is the surface most likely to carry
+    /// one — a page documenting wiki-link syntax. Rewriting it
+    /// corrupts the sample it is trying to show.
+    #[test]
+    fn wiki_link_resolution_leaves_code_verbatim() {
+        let exported = vec!["m--real".to_string()];
+        for body in [
+            "```\n[[m--real]]\n```",
+            "~~~\n[[m--real]]\n~~~",
+            "    [[m--real]]",
+            "> ```\n> [[m--real]]\n> ```",
+            "An inline `[[m--real]]` sample.",
+            "A double ``[[m--real]]`` sample.",
+        ] {
+            assert_eq!(
+                resolve_wiki_links(body, "m", &exported),
+                body,
+                "code content must survive byte-identical: {body:?}"
+            );
+        }
+    }
+
+    /// …and a dangling target inside code is not marked either — the
+    /// `*(unresolved)*` suffix is just as much a corruption.
+    #[test]
+    fn wiki_link_resolution_does_not_mark_code_as_unresolved() {
+        let body = "```\n[[m--ghost]]\n```\n\n    [[m--other-ghost]]\n";
+        assert_eq!(resolve_wiki_links(body, "m", &[]), body);
+    }
+
+    /// Complement: prose links on either side of a code block still
+    /// resolve exactly as before — anchor, unresolved marker, and
+    /// cross-mem label alike.
+    #[test]
+    fn wiki_link_resolution_still_rewrites_prose() {
+        let exported = vec!["m--real".to_string()];
+        let body =
+            "See [[m--real]].\n\n```\n[[m--real]]\n```\n\nAnd [[m--ghost]] and [[other--thing]].\n";
+        let out = resolve_wiki_links(body, "m", &exported);
+        assert!(out.contains("[m--real](#m--real)"), "{out}");
+        assert!(out.contains("m--ghost *(unresolved)*"), "{out}");
+        assert!(out.contains("other--thing *(other mem)*"), "{out}");
+        assert!(
+            out.contains("```\n[[m--real]]\n```"),
+            "code untouched: {out}"
+        );
+    }
+
+    /// An unterminated `[[` still passes through verbatim rather than
+    /// truncating the body — the offset walk must not lose the tail.
+    #[test]
+    fn wiki_link_resolution_passes_through_an_unterminated_open() {
+        let body = "text [[not-closed and more text after\n";
+        assert_eq!(resolve_wiki_links(body, "m", &[]), body);
+    }
 
     /// Pre-boot on-disk fixture: the renderer is a read surface, so
     /// the fixture is written as existing markdown (including a
