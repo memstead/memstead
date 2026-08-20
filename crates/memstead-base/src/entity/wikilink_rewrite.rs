@@ -1,7 +1,7 @@
 //! Wiki-link rewriter — shared lexical discipline with
 //! [`crate::entity::parser::extract_inline_links`].
 //!
-//! Operates on the same masked-text model: fenced code blocks and
+//! Operates on the same masked-text model: CommonMark code blocks and
 //! inline code spans are excluded from rewriting (matches inside them
 //! remain bit-identical). Used by `Engine::rename_entity`'s
 //! referrer-walk: [`rewrite_bare_slug`] rewrites same-mem
@@ -10,26 +10,21 @@
 
 use regex::Regex;
 
-/// Mask fenced code blocks and inline code spans with spaces of equal
-/// length so byte offsets in the masked text match the original. This
-/// is the offset-preserving sibling of the masking
-/// [`crate::entity::parser::extract_inline_links`] performs — the
-/// extractor doesn't need offset preservation because it never maps
-/// back to the original text, but a rewriter does.
+/// Mask code blocks and inline code spans with spaces of equal length
+/// so byte offsets in the masked text match the original.
+///
+/// One definition, shared with
+/// [`crate::entity::parser::extract_inline_links`] and the strict
+/// validator: a link the validator cannot see is a link this rewriter
+/// does not touch and the extractor does not turn into an edge.
 fn mask_for_link_scan(text: &str) -> String {
-    let code_masked = crate::entity::parser::mask_code_blocks(text);
-    let inline_code_re = Regex::new(r"`[^`]+`").unwrap();
-    inline_code_re
-        .replace_all(&code_masked, |caps: &regex::Captures<'_>| {
-            " ".repeat(caps[0].len())
-        })
-        .into_owned()
+    crate::markdown::mask_code_blocks_and_spans(text)
 }
 
 /// Rewrite every same-mem `[[<old_slug>]]` (with or without a
 /// `|label` suffix) in `text` to `[[<new_slug>]]`, preserving the
-/// label and surrounding bytes verbatim. Wiki-links inside fenced
-/// code blocks or inline code spans are not touched.
+/// label and surrounding bytes verbatim. Wiki-links inside code
+/// blocks or inline code spans are not touched.
 ///
 /// Cross-mem forms (`[[<mem>:<slug>]]`, `[[<mem>--<slug>]]`)
 /// are deliberately out of scope here — the renaming entity's own
@@ -41,7 +36,7 @@ fn mask_for_link_scan(text: &str) -> String {
 /// rewritten (so callers can short-circuit when nothing changed).
 pub(crate) fn rewrite_bare_slug(text: &str, old_slug: &str, new_slug: &str) -> (String, usize) {
     let masked = mask_for_link_scan(text);
-    let link_re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let link_re = Regex::new(r"\[\[([^\]]*)\]\]").unwrap();
     let mut out = String::with_capacity(text.len());
     let mut last_end = 0usize;
     let mut rewritten = 0usize;
@@ -84,7 +79,7 @@ pub(crate) fn rewrite_bare_slug(text: &str, old_slug: &str, new_slug: &str) -> (
 /// - `[[<old_mem>:<old_slug>]]` → `[[<old_mem>:<new_slug>]]`
 /// - `[[<old_mem>--<old_slug>]]` → `[[<old_mem>--<new_slug>]]`
 ///
-/// Matches inside fenced code blocks and inline code spans are not
+/// Matches inside code blocks and inline code spans are not
 /// rewritten (same discipline as [`rewrite_bare_slug`]). Slug halves
 /// that don't equal `old_slug` are left alone — this function only
 /// rewrites the renamed entity's cross-mem references, not every
@@ -99,7 +94,7 @@ pub(crate) fn rewrite_cross_mem_slug(
     new_slug: &str,
 ) -> (String, usize) {
     let masked = mask_for_link_scan(text);
-    let link_re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let link_re = Regex::new(r"\[\[([^\]]*)\]\]").unwrap();
     let mut out = String::with_capacity(text.len());
     let mut last_end = 0usize;
     let mut rewritten = 0usize;
@@ -147,12 +142,12 @@ pub(crate) fn rewrite_cross_mem_slug(
 /// that function retargets one renamed entity, this one retargets a
 /// whole renamed mem.
 ///
-/// Matches inside fenced code blocks and inline code spans are not
+/// Matches inside code blocks and inline code spans are not
 /// rewritten (same discipline as the two sibling rewriters). Returns
 /// the rewritten text plus a count of how many matches were changed.
 pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (String, usize) {
     let masked = mask_for_link_scan(text);
-    let link_re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    let link_re = Regex::new(r"\[\[([^\]]*)\]\]").unwrap();
     let mut out = String::with_capacity(text.len());
     let mut last_end = 0usize;
     let mut rewritten = 0usize;

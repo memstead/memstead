@@ -342,9 +342,17 @@ An entity is the smallest unit the engine reads, writes, links, or validates. It
 
 - **ID** — a slug-shaped, mem-prefixed identifier of the form `<mem>--<title-slug>` (e.g. `engine--commit-provenance-trailers`). Renaming an entity changes its ID; the engine rewrites incoming wikilinks atomically as part of the rename operation.
 - **Type** — declared in frontmatter; must be one of the types declared by the mem's pinned [schema](#schema).
-- **Sections** — named content blocks (e.g. `## Identity`, `## Purpose`, `## Definition`, `## Rationale`). The schema declares which sections each type requires, allows, or treats as catch-all.
+- **Sections** — named content blocks (e.g. `## Identity`, `## Purpose`, `## Definition`, `## Rationale`). The schema declares which sections each type requires, allows, or treats as catch-all. What *creates* one is a narrow, explicit contract — see below.
 - **Metadata fields** — typed key-value pairs in frontmatter (e.g. `created_date`, `tags`, `level`). The schema declares which fields each type requires, their types, and any enum constraints.
 - **Outgoing relationships** — typed wikilinks to other entities, either within the mem (`[[slug]]`) or via [cross-mem edges](#cross-mem-edge) (`[[target-mem:target-slug]]`).
+
+**Section contract.** A section is opened by an ATX heading of exactly level 2 — two `#`, one space, at least one more character — starting at **column 0**. Nothing else opens one:
+
+- **Setext headings do not.** A line of `---` or `===` underneath text is a heading to CommonMark, but not to Memstead: it creates no section, anywhere.
+- **Indented ATX headings do not.** `  ## Heading` is a heading to CommonMark; it opens no section here.
+- **Code-block content never does.** Content inside *any* CommonMark code block — a backtick or tilde fence at any legal indent, inside a list item or blockquote, or a plain indented code block — is invisible to every content reader: it opens no section, registers no heading, never becomes the entity's title, and yields no wikilink. One CommonMark parser draws that boundary for the splitter, the read path, and the write-time validator alike, so what a renderer shows as code is exactly what the engine treats as code.
+
+The contract is deliberately narrower than CommonMark's heading grammar. Widening it would change how existing entities parse for no gain; narrowing what code hides fixed real damage. Deeper headings (`### ` and below) are ordinary content within a section — the engine indexes them for search-time heading paths, but they never split one.
 
 **Identity.** An entity is identified by its ID, not by its file path or storage location. The same entity may be encoded as a `.md` file (folder backend), a git blob (git-branch backend), or a zip entry (archive backend); identity is content plus ID, not encoding.
 

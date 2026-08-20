@@ -659,11 +659,26 @@ pub struct MissingRequiredSection {
 
 /// Refuse section content that would round-trip through the compose
 /// pipeline as a section delimiter. The compose-then-reparse loop's
-/// parser anchors on `(?m)^## (.+)$`, so a section body containing a
-/// `^## ` line gets split at that heading on the next read — content
-/// after the heading lands under a different section key (or a
-/// fabricated one). Deeper headings (`### ` and below) are safe — the
-/// parser only matches level 2.
+/// parser anchors on `(?m)^## (.+)$` over the *masked* body, so a
+/// section body that shows a `^## ` line to that scan gets split at
+/// that heading on the next read — content after the heading lands
+/// under a different section key (or a fabricated one). Deeper
+/// headings (`### ` and below) are safe — the parser only matches
+/// level 2.
+///
+/// The guard is applied to the content **as the reparse will see it**,
+/// which is what makes it exact rather than approximate:
+///
+/// - the content is trimmed first, because the splitter stores the
+///   trimmed body — an indented block opening a section loses its
+///   indent on write-back, so `    ## Not A Heading` becomes a real
+///   column-0 delimiter on the next parse. Checking the still-indented
+///   provided content missed that fork entirely;
+/// - code blocks are masked first, by the same CommonMark referee the
+///   splitter uses ([`crate::markdown`]) — a `## ` inside a fenced or
+///   indented code block never splits anything, so refusing it was the
+///   write path disagreeing with the read path about what a code block
+///   is.
 pub fn validate_section_content<'a>(
     sections: impl Iterator<Item = (&'a str, &'a str)>,
 ) -> Result<(), ValidationError> {
@@ -690,7 +705,13 @@ pub fn validate_section_content<'a>(
                 byte_offset,
             });
         }
-        for line in value.lines() {
+        // What the splitter will store, and what the splitter will
+        // see in it. `stored` and `masked` share byte offsets and line
+        // count, so the two line sequences correspond one-to-one and
+        // the refusal can quote the real line.
+        let stored = value.trim();
+        let masked = crate::markdown::mask_code_blocks(stored);
+        for (line, masked_line) in stored.lines().zip(masked.lines()) {
             // Match the parser's regex shape: `^## ` (two hashes, one
             // space, at least one trailing char). The trailing space
             // requirement excludes bare `##` (which the parser does
@@ -698,8 +719,8 @@ pub fn validate_section_content<'a>(
             // guard (plan 08): h1 and h2 are the entity's own levels
             // — the title and the section delimiters — so neither may
             // be embedded in a section body.
-            if (line.starts_with("## ") && line.len() > 3)
-                || (line.starts_with("# ") && line.len() > 2)
+            if (masked_line.starts_with("## ") && masked_line.len() > 3)
+                || (masked_line.starts_with("# ") && masked_line.len() > 2)
             {
                 return Err(ValidationError::SectionContentInvalid {
                     section: key.to_string(),
@@ -2031,5 +2052,50 @@ write_rules: []
             .expect_err("embedded `## ` heading must still be refused");
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
         assert!(matches!(err, ValidationError::SectionContentInvalid { .. }));
+    }
+
+    /// The write guard classifies code blocks the way the splitter
+    /// does: a `## ` line inside a code block splits nothing on
+    /// reparse, so refusing it was the write path disagreeing with the
+    /// read path about what a code block is.
+    #[test]
+    fn section_content_admits_a_heading_inside_a_code_block() {
+        for body in [
+            "intro\n\n```\n## Not A Heading\n```\n",
+            "intro\n\n~~~\n## Not A Heading\n~~~\n",
+            "intro\n\n> ```\n> ## Not A Heading\n> ```\n",
+            "intro\n\n    ## Not A Heading\n",
+        ] {
+            validate_section_content([("body", body)].into_iter())
+                .unwrap_or_else(|e| panic!("code-block content must be admitted: {body:?} -> {e}"));
+        }
+    }
+
+    /// The trim-fork class: the splitter stores the *trimmed* body, so
+    /// an indented code block that opens a section loses its indent on
+    /// write-back and its `## ` line lands at column 0 on the next
+    /// parse. The guard sees what the reparse will see.
+    #[test]
+    fn section_content_refuses_the_trim_fork() {
+        let err =
+            validate_section_content([("body", "    ## Not A Heading\n    more\n")].into_iter())
+                .expect_err("content whose trim exposes a column-0 heading must be refused");
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
+        match err {
+            ValidationError::SectionContentInvalid {
+                embedded_heading, ..
+            } => assert_eq!(
+                embedded_heading, "## Not A Heading",
+                "the refusal quotes the line the reparse will see"
+            ),
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn section_content_refuses_the_trim_fork_for_h1_too() {
+        let err = validate_section_content([("body", "  # Not A Title\n")].into_iter())
+            .expect_err("h1 exposed by the trim must be refused");
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
     }
 }

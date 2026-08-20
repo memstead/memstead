@@ -32,6 +32,43 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   root, the uncollapsed form of `init_filesystem_mem`.
 
 ### Changed
+- **One CommonMark referee for code.** Section splitting, title
+  extraction, heading spans, wiki-link extraction, wiki-link rewriting,
+  the strict validator and the write-time section guard now share one
+  definition of what a code block and an inline code span are, taken
+  from `pulldown-cmark` (`memstead_base::markdown`) instead of two
+  hand-rolled line scanners that disagreed. Content inside **any**
+  CommonMark code block — a backtick or tilde fence at any legal
+  indent, a fence inside a list item or blockquote, a fence whose
+  would-be closer carries an info string, a fence longer than the one
+  that tries to close it, or a plain indented code block — opens no
+  section, registers no heading, never becomes an entity title, and
+  yields no wikilink on any path. Inline code spans come from the
+  parser too, so a multi-backtick span (```` `` ```` / ```` ``` ````) is
+  one span rather than a run of mis-paired delimiters that used to
+  swallow whole paragraphs of prose — or leave real code spans exposed.
+  Heading recognition is unchanged: a section is still an ATX `## ` at
+  column 0, setext headings and indented ATX create sections nowhere
+  (the contract is now stated in `GLOSSARY.md`). Migration evidence: a
+  structural re-parse diff over 766 documents — all 9 mems of the
+  dogfood workspace (681 entities), the agentic test workspaces, the
+  crate fixtures — changed no section, heading, title or heading span
+  anywhere; the only differences are 60 wikilink visibility changes in
+  8 documents, every one of them a mis-paired-backtick misparse now
+  fixed.
+- **The write-time section guard checks what the reparse will see.** It
+  masks code blocks first, so a `## ` inside a fenced or indented code
+  block is no longer refused as an embedded heading; and it trims
+  first, so content whose stored (trimmed) form exposes a column-0
+  `## `/`# ` — the indented-code-block-opens-a-section round-trip fork
+  — is now refused at ingress instead of forking the entity on its
+  next read.
+- **`[[]]` is visible to every path.** The wiki-link pattern the
+  extractor uses accepts an empty target, so an empty link routes to
+  the same typed refusal the strict validator already emitted instead
+  of being invisible to one side of the seam. The read-side lenient
+  scanner sees it and decodes nothing, as it does for any target it
+  cannot resolve.
 - **The build brief tells the truth about its destination, its source and
   its anchor names.** A binding scaffolded before its mem exists (an
   order `projection init` deliberately allows) rendered a brief whose

@@ -34,7 +34,9 @@ use gix::object::tree::diff::Change;
 use memstead_base::backend::BackendError;
 use memstead_base::entity::EntityId;
 use memstead_base::entity::id::file_path_to_id;
-use memstead_base::entity::parser::{extract_inline_links_lenient, peek_title_and_type};
+use memstead_base::entity::parser::{
+    body_after_frontmatter, extract_inline_links_lenient, peek_title_and_type,
+};
 use memstead_base::ops::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 
 use crate::EMPTY_TREE_SHA;
@@ -659,7 +661,10 @@ fn scan_tree_ripple(
             Ok(s) => s,
             Err(_) => continue,
         };
-        for target in extract_inline_links_lenient(content, mem) {
+        // The BODY, not the whole blob: frontmatter is not markdown,
+        // and a YAML value that reads as a fence opener would mask the
+        // body away and drop every link in it from the ripple list.
+        for target in extract_inline_links_lenient(body_after_frontmatter(content), mem) {
             if target == referrer_id {
                 continue;
             }
@@ -1176,6 +1181,64 @@ mod tests {
                         "specs--gamma@ref_b".to_string(),
                     ],
                     "ripple must list beta on ref_a and gamma on ref_b",
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// The ripple scanner holds a whole git blob, not a section body,
+    /// so it must trim the frontmatter before the link scan. Without
+    /// that, a YAML value that reads as a CommonMark fence opener
+    /// (legal at 1-3 spaces) opens a code block that runs past the
+    /// `---` terminator to end of file and masks every link in the
+    /// body away — the referrer silently vanishes from the ripple list.
+    #[test]
+    fn ripple_survives_frontmatter_that_looks_like_a_fence() {
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+
+        let alpha_v1 = body_with_title("Alpha-v1");
+        // `notes: |` opens a YAML block scalar whose first line is a
+        // 3-space-indented fence.
+        let beta = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\nnotes: |\n   ```\n   sample\n---\n# Beta\n\n## Identity\n\nLinks to [[specs--alpha]].\n"
+            .to_string();
+        write_and_commit(
+            &gitdir,
+            "specs",
+            &[("alpha.md", &alpha_v1), ("beta.md", &beta)],
+            "seed",
+        );
+        let sha_a = sha_for(&gix::open(&gitdir).unwrap(), "refs/heads/specs").unwrap();
+
+        let alpha_v2 = body_with_title("Alpha-v2");
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/specs".to_string());
+        writer
+            .write_entity(Path::new("alpha.md"), alpha_v2.as_bytes())
+            .unwrap();
+        writer.commit("rev2", &CommitContext::internal()).unwrap();
+
+        let diff = diff_two_refs(
+            &gitdir,
+            "specs",
+            &sha_a,
+            "refs/heads/specs",
+            &DiffConfig::default(),
+        )
+        .unwrap();
+
+        let alpha = diff
+            .entries
+            .iter()
+            .find(|e| matches!(e, EntityDiff::Modified { id, .. } if id.to_string() == "specs--alpha"))
+            .expect("alpha must show as modified");
+        match alpha {
+            EntityDiff::Modified { ripple, .. } => {
+                assert!(
+                    ripple
+                        .iter()
+                        .any(|r| r.from_id.to_string() == "specs--beta"),
+                    "beta's prose link must still ripple; frontmatter masked the body away: {ripple:?}"
                 );
             }
             _ => unreachable!(),

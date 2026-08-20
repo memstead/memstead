@@ -72,7 +72,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `INVALID_REL_SHAPE` | engine | `crates/memstead-base/src/runtime_validator.rs:201` |
 | `INVALID_REL_TYPE` | engine | `crates/memstead-base/src/runtime_validator.rs:200` |
 | `INVALID_ROLE` | CLI, MCP | `crates/memstead-cli/src/main.rs:107`<br>`crates/memstead-mcp/src/server.rs:191` |
-| `INVALID_TABLE_COLUMNS` | engine | `crates/memstead-base/src/section_format.rs:521` |
+| `INVALID_TABLE_COLUMNS` | engine | `crates/memstead-base/src/section_format.rs:523` |
 | `INVALID_TITLE` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1200`<br>`crates/memstead-cli/src/commands/batch_create.rs:196`<br>`crates/memstead-cli/src/commands/create.rs:227`<br>`crates/memstead-mcp/src/server.rs:1278` |
 | `INVALID_VERDICT` | CLI, MCP | `crates/memstead-cli/src/commands/check.rs:41`<br>`crates/memstead-mcp/src/server.rs:3233` |
 | `INVALID_VERSION` | CLI | `crates/memstead-cli/src/commands/publish.rs:129` |
@@ -178,10 +178,10 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `SEARCH_MEM_INDEX_UNAVAILABLE` | engine | `crates/memstead-base/src/ops/mod.rs:1766` |
 | `SEARCH_RESULTS_TRUNCATED` | engine | `crates/memstead-base/src/ops/mod.rs:1753` |
 | `SEARCH_UNAVAILABLE_IN_WASM` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1258`<br>`crates/memstead-mcp/src/server.rs:1656` |
-| `SECTION_CONTENT_INVALID` | engine | `crates/memstead-base/src/runtime_validator.rs:202`<br>`crates/memstead-base/src/runtime_validator.rs:203`<br>`crates/memstead-base/src/section_format.rs:522` |
-| `SECTION_CONTENT_MISMATCH` | engine | `crates/memstead-base/src/section_format.rs:519` |
+| `SECTION_CONTENT_INVALID` | engine | `crates/memstead-base/src/runtime_validator.rs:202`<br>`crates/memstead-base/src/runtime_validator.rs:203`<br>`crates/memstead-base/src/section_format.rs:524` |
+| `SECTION_CONTENT_MISMATCH` | engine | `crates/memstead-base/src/section_format.rs:521` |
 | `SECTION_HEADING_DIVERGENCE` | engine | `crates/memstead-base/src/ops/mod.rs:1780` |
-| `SECTION_ITEM_PATTERN_MISMATCH` | engine | `crates/memstead-base/src/section_format.rs:520` |
+| `SECTION_ITEM_PATTERN_MISMATCH` | engine | `crates/memstead-base/src/section_format.rs:522` |
 | `SECTION_NOT_UPDATABLE` | engine | `crates/memstead-base/src/runtime_validator.rs:199` |
 | `SELF_LINK_IGNORED` | engine | `crates/memstead-base/src/ops/mod.rs:1783` |
 | `SET_AND_UNSET_CONFLICT` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1229`<br>`crates/memstead-mcp/src/server.rs:1212` |

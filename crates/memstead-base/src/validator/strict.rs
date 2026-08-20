@@ -12,7 +12,7 @@ use regex::Regex;
 
 use super::ValidationError;
 use crate::entity::id::wiki_link_to_id;
-use crate::entity::parser::mask_code_blocks;
+use crate::entity::parser::{mask_code_blocks, split_sections};
 use crate::entity::{Entity, MetadataValue};
 
 /// Run every strict check against one entity. `raw_bytes` is the
@@ -169,9 +169,15 @@ fn value_matches_type(value: &MetadataValue, expected: FieldType) -> bool {
 /// lines of the body. The tolerant parser falls back to the filename
 /// slug when no `# ` heading is found — the point of this check is to
 /// make that fallback unreachable at ingress.
+///
+/// Scans the masked body, because the parser's title extraction does:
+/// a `# ` line inside a code block is not a title on either side of
+/// the seam. Line *counting* stays on the original so a leading code
+/// block still consumes the three-line window.
 fn check_title_presence(body: &str, path: &str) -> Result<(), ValidationError> {
+    let masked_body = mask_code_blocks(body);
     let mut lines_seen = 0;
-    for line in body.lines() {
+    for (line, masked) in body.lines().zip(masked_body.lines()) {
         if line.trim().is_empty() {
             continue;
         }
@@ -179,7 +185,7 @@ fn check_title_presence(body: &str, path: &str) -> Result<(), ValidationError> {
         if lines_seen > 3 {
             break;
         }
-        if let Some(rest) = line.strip_prefix("# ")
+        if let Some(rest) = masked.strip_prefix("# ")
             && !rest.trim().is_empty()
         {
             return Ok(());
@@ -228,16 +234,15 @@ fn check_unknown_sections(
         .chain(std::iter::once("Relationships"))
         .collect();
 
-    let masked = mask_code_blocks(body);
-    for line in masked.lines() {
-        if let Some(rest) = line.strip_prefix("## ") {
-            let heading = rest.trim();
-            if !known_headings.contains(&heading) {
-                return Err(ValidationError::UnknownSection {
-                    path: path.to_string(),
-                    section: heading.to_string(),
-                });
-            }
+    // Section boundaries come from the one splitter — the validator
+    // must not carry a second definition of what opens a section.
+    let (_, _, raw_headings) = split_sections(body, &mask_code_blocks(body));
+    for heading in &raw_headings {
+        if !known_headings.contains(&heading.as_str()) {
+            return Err(ValidationError::UnknownSection {
+                path: path.to_string(),
+                section: heading.clone(),
+            });
         }
     }
     Ok(())
@@ -278,25 +283,16 @@ fn relationships_format_def() -> &'static memstead_schema::SectionDef {
 }
 
 fn check_relationships_syntax(body: &str, path: &str) -> Result<(), ValidationError> {
-    // Extract the `## Relationships` section body (code fences
-    // masked so an embedded `## Relationships` inside a fence cannot
-    // open the section).
-    let masked = mask_code_blocks(body);
-    let mut section = String::new();
-    let mut in_rel = false;
-    for line in masked.lines() {
-        if line.starts_with("## ") {
-            in_rel = line.strip_prefix("## ").map(str::trim) == Some("Relationships");
-            continue;
-        }
-        if in_rel {
-            section.push_str(line);
-            section.push('\n');
-        }
-    }
-    if section.trim().is_empty() {
-        return Ok(());
-    }
+    // The section body comes from the one splitter, sliced from the
+    // ORIGINAL body — not reassembled from the masked copy. The
+    // content checker below is a CommonMark parser; feeding it a body
+    // whose code blocks had already become whitespace was the seam
+    // where splitter and validator judged differently shaped input.
+    let (sections, _, _) = split_sections(body, &mask_code_blocks(body));
+    let section = match sections.get("relationships") {
+        Some(s) if !s.trim().is_empty() => s.clone(),
+        _ => return Ok(()),
+    };
     if let Some(v) =
         crate::section_format::check_section_format(relationships_format_def(), &section)
             .into_iter()
@@ -334,27 +330,20 @@ fn rel_type_regex() -> &'static Regex {
 }
 
 /// Bracket-balance + slug-regex + reserved-syntax check for every
-/// wiki-link in the body. Operates on the code-block-masked body so
-/// fenced code sections are ignored. Inline `` `…` `` spans are also
-/// stripped so grammar examples like `` `[[<target>]]` `` in prose don't
-/// trip the slug-regex check — mirrors what `entity::parser::extract_inline_links`
-/// already does on the extraction side.
+/// wiki-link in the body. Operates on the masked body, so content in
+/// any CommonMark code block is ignored and inline `` `…` `` spans are
+/// invisible too — grammar examples like `` `[[<target>]]` `` in prose
+/// don't trip the slug-regex check. Exactly the masking
+/// `entity::parser::extract_inline_links` performs on the extraction
+/// side: one definition, both paths.
 ///
-/// Two inline passes, in order: first the CommonMark double-backtick
-/// delimiter (``` `` ` `` ``` — used to display a literal backtick, or
-/// to wrap content that itself contains a single backtick), then plain
-/// single-backtick spans. Running them in that order prevents the
-/// single-backtick regex from slicing into the middle of a double-
-/// backtick span and leaving stray `` ` `` / `[[` remnants that would
-/// then fool the bracket checker.
+/// Inline code spans come from the CommonMark parser, not from a
+/// delimiter-count regex: multi-backtick spans (``` `` ` `` ```, used
+/// to display a literal backtick) are one span to the parser, where a
+/// single-backtick regex would slice into the middle of one and leave
+/// stray `` ` `` / `[[` remnants that then fool the bracket checker.
 fn check_wiki_links(body: &str, path: &str) -> Result<(), ValidationError> {
-    let fenced_masked = mask_code_blocks(body);
-    let after_double = inline_double_backtick_regex()
-        .replace_all(&fenced_masked, "")
-        .to_string();
-    let masked = inline_code_regex()
-        .replace_all(&after_double, "")
-        .to_string();
+    let masked = crate::markdown::mask_code_blocks_and_spans(body);
 
     check_bracket_balance(&masked, path)?;
 
@@ -446,16 +435,6 @@ fn check_bracket_balance(masked: &str, path: &str) -> Result<(), ValidationError
 fn wiki_link_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\[\[([^\]]*)\]\]").unwrap())
-}
-
-fn inline_code_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"`[^`]+`").unwrap())
-}
-
-fn inline_double_backtick_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"``[\s\S]*?``").unwrap())
 }
 
 #[cfg(test)]
@@ -790,5 +769,148 @@ Design notes.
         let stripped = raw.strip_prefix('\u{feff}').unwrap();
         let entity = parse(stripped);
         validate(&raw, &entity).unwrap();
+    }
+
+    // --- the CommonMark referee: validator and splitter agree ------
+
+    /// Build a spec whose `## Specifies` body is `body`.
+    fn spec_with_specifies(body: &str) -> String {
+        MINIMAL_SPEC.replace("What it covers.", body)
+    }
+
+    /// Every builtin type declares a catch-all section, which makes
+    /// `check_unknown_sections` a no-op for them — so the check is
+    /// exercised against a variant of the spec type whose sections all
+    /// declare themselves closed.
+    fn spec_type_without_catch_all() -> std::sync::Arc<memstead_schema::TypeDefinition> {
+        let mut t = (*spec_type()).clone();
+        for section in &mut t.sections {
+            section.catch_all = false;
+        }
+        std::sync::Arc::new(t)
+    }
+
+    fn validate_no_catch_all(content: &str) -> Result<(), ValidationError> {
+        let ty = spec_type_without_catch_all();
+        let entity = crate::entity::parser::parse_markdown(content, "test.md", &ty, "specs")
+            .unwrap()
+            .entity;
+        validate_strict(content, &entity, &ty, "test.md")
+    }
+
+    /// The unknown-section check now draws boundaries from the one
+    /// splitter, so a `## ` inside any CommonMark code block is not a
+    /// section on either side of the seam.
+    #[test]
+    fn unknown_section_check_ignores_code_block_headings() {
+        for body in [
+            "```\n## Not A Section\n```",
+            "~~~\n## Not A Section\n~~~",
+            "> ```\n> ## Not A Section\n> ```",
+            "````\n```\n## Not A Section\n```\n````",
+            "    ## Not A Section",
+        ] {
+            let content = spec_with_specifies(body);
+            validate_no_catch_all(&content).unwrap_or_else(|e| {
+                panic!("code-block heading must not be a section: {body:?} -> {e}")
+            });
+        }
+    }
+
+    /// Complement: a real column-0 `## ` in prose is still an unknown
+    /// section.
+    #[test]
+    fn unknown_section_check_still_refuses_a_prose_heading() {
+        let content = spec_with_specifies("text\n\n## Invented Section\n\nmore");
+        let err = validate_no_catch_all(&content).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::UnknownSection { ref section, .. } if section == "Invented Section"),
+            "{err:?}"
+        );
+    }
+
+    /// The title check scans the masked body, because the parser's
+    /// title extraction does.
+    #[test]
+    fn title_check_ignores_a_heading_inside_a_code_block() {
+        let content = MINIMAL_SPEC.replace("# Test Entity", "```\n# Fake\n```");
+        let entity = parse(&content);
+        let err = validate(&content, &entity).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::MissingTitle { .. }),
+            "{err:?}"
+        );
+    }
+
+    /// One inline-code definition: a link the validator cannot see is
+    /// a link no path synthesises an edge from. A multi-backtick span
+    /// is the case a delimiter-count regex slices through.
+    #[test]
+    fn inline_code_spans_hide_links_from_the_validator() {
+        let content = spec_with_specifies("`[[Not A Slug]]` and ``[[Also Not]]`` are literals.");
+        let entity = parse(&content);
+        validate(&content, &entity).expect("links inside inline code are not links to any path");
+    }
+
+    /// Complement: the same malformed link in prose is still refused.
+    #[test]
+    fn a_malformed_link_in_prose_is_still_refused() {
+        let content = spec_with_specifies("See [[Not A Slug]].");
+        let entity = parse(&content);
+        let err = validate(&content, &entity).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::InvalidWikiLink { .. }),
+            "{err:?}"
+        );
+    }
+
+    /// The seam: the relationship-syntax check used to reassemble the
+    /// section by line-scanning the *masked* body, so the CommonMark
+    /// content checker judged a body whose code blocks had already
+    /// become whitespace — and a code block in the Relationships
+    /// section read as an empty section and passed silently. The
+    /// section now comes from the one splitter, sliced from the
+    /// original.
+    #[test]
+    fn relationships_section_is_judged_on_the_original_body() {
+        let content = MINIMAL_SPEC.replace(
+            "## Rationale\n\nDesign notes.\n",
+            "## Rationale\n\nDesign notes.\n\n## Relationships\n\n```\n- **USES**: [[x]]\n```\n",
+        );
+        let entity = parse(&content);
+        let err = validate(&content, &entity).expect_err("a code block is not a relationship list");
+        assert!(
+            matches!(err, ValidationError::InvalidRelationshipLine { .. }),
+            "{err:?}"
+        );
+    }
+
+    /// Complement: the ordinary bullet list still validates, and a
+    /// `## Relationships` heading that only appears inside a code
+    /// block still opens no section.
+    #[test]
+    fn relationships_section_complements() {
+        let ok = MINIMAL_SPEC.replace(
+            "## Rationale\n\nDesign notes.\n",
+            "## Rationale\n\nDesign notes.\n\n## Relationships\n\n- **USES**: [[some-target]]\n",
+        );
+        let entity = parse(&ok);
+        validate(&ok, &entity).expect("a bullet relationship list is valid");
+
+        let fenced = spec_with_specifies("```\n## Relationships\n\nnot a list at all\n```");
+        let entity = parse(&fenced);
+        validate(&fenced, &entity).expect("a fenced `## Relationships` opens no section to check");
+    }
+
+    /// The empty-target refusal — the asymmetry's typed side — stays.
+    #[test]
+    fn empty_wiki_link_target_is_still_refused() {
+        let content = spec_with_specifies("An empty [[]] link.");
+        let entity = parse(&content);
+        let err = validate(&content, &entity).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::InvalidWikiLink { ref reason, .. } if reason == "empty target"),
+            "{err:?}"
+        );
     }
 }

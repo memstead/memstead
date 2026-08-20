@@ -30,14 +30,16 @@ pub fn parse_markdown(
     // Compute content hash from raw markdown
     let content_hash = compute_hash(content);
 
-    // Mask fenced code blocks so patterns inside them are not detected
-    let masked = mask_code_blocks(content);
-
-    // Extract YAML frontmatter
-    let (metadata, body, masked_body) = split_frontmatter(content, &masked)?;
+    // Extract YAML frontmatter FIRST — frontmatter is not markdown, and
+    // handing it to a CommonMark parser invents block structure that is
+    // not there (a value line that reads as a fence opener would open a
+    // code block running past the closing `---` and mask the whole
+    // body). Only the body is markdown, so only the body is masked.
+    let (metadata, body) = split_frontmatter(content)?;
+    let masked_body = mask_code_blocks(&body);
 
     // Extract title (first # heading)
-    let title = extract_title(&body).unwrap_or_else(|| id.name().to_string());
+    let title = extract_title(&body, &masked_body).unwrap_or_else(|| id.name().to_string());
 
     // Split body into ## sections (match against masked, slice from original).
     // Duplicate `## Heading` lines whose slug matches a schema-declared key
@@ -233,15 +235,27 @@ pub fn peek_type_from_frontmatter(content: &str) -> Option<String> {
 /// when the frontmatter lacks a non-empty `type:`.
 pub fn peek_title_and_type(content: &str) -> (Option<String>, Option<String>) {
     let entity_type = peek_type_from_frontmatter(content);
-    let title = extract_title(body_after_frontmatter(content));
+    let body = body_after_frontmatter(content);
+    let title = extract_title(body, &mask_code_blocks(body));
     (title, entity_type)
 }
 
-/// Return the body slice after a leading `---`-fenced frontmatter block,
-/// or the whole input when no frontmatter is present. Mirrors the
-/// offset arithmetic in [`split_frontmatter`] but borrows rather than
-/// allocating — the title peek only needs to scan, not own.
-fn body_after_frontmatter(content: &str) -> &str {
+/// Return the body slice after a leading `---` frontmatter block, or
+/// the whole input when no frontmatter is present. Mirrors the offset
+/// arithmetic in [`split_frontmatter`] but borrows rather than
+/// allocating — a scan needs to read, not own.
+///
+/// **Call this before handing a whole entity file to any markdown
+/// reader in this module.** Frontmatter is not markdown: a CommonMark
+/// parser reads block structure into it that is not there, and a YAML
+/// value that looks like a fence opener (legal at 1–3 spaces) opens a
+/// code block that runs past the `---` terminator to end of file,
+/// masking the entire body. Every reader here — [`mask_code_blocks`],
+/// [`extract_inline_links`], [`extract_inline_links_lenient`],
+/// [`split_sections`] — expects a body, and the callers inside the
+/// engine that hold one already pass section bodies. A caller holding
+/// a raw file or git blob does not, and must trim it here first.
+pub fn body_after_frontmatter(content: &str) -> &str {
     let after_open = if content.starts_with("---\r\n") {
         5
     } else if content.starts_with("---\n") {
@@ -260,11 +274,9 @@ fn body_after_frontmatter(content: &str) -> &str {
 }
 
 /// Split content into frontmatter metadata string and body.
-/// Returns (metadata_string, body, masked_body).
-fn split_frontmatter<'a>(
-    content: &'a str,
-    masked: &'a str,
-) -> Result<(String, String, String), ParseError> {
+/// Returns (metadata_string, body). Both boundaries are found in the
+/// raw content — the caller masks the body afterwards.
+fn split_frontmatter(content: &str) -> Result<(String, String), ParseError> {
     // Look for YAML frontmatter: ---\n...\n---
     if content.starts_with("---\n") || content.starts_with("---\r\n") {
         let after_open = if content.starts_with("---\r\n") { 5 } else { 4 };
@@ -282,13 +294,12 @@ fn split_frontmatter<'a>(
                 body_start
             };
             let body = content[body_start..].to_string();
-            let masked_body = masked[body_start..].to_string();
-            return Ok((metadata, body, masked_body));
+            return Ok((metadata, body));
         }
     }
 
     // No frontmatter found — entire content is body
-    Ok((String::new(), content.to_string(), masked.to_string()))
+    Ok((String::new(), content.to_string()))
 }
 
 /// Parse metadata key-value pairs with JS-compatible type coercion.
@@ -404,36 +415,14 @@ fn strip_quotes(s: &str) -> String {
 // Code block masking
 // ---------------------------------------------------------------------------
 
-/// Mask fenced code blocks by replacing content with spaces (preserves line count and offsets).
-/// Handles unclosed code blocks safely — they mask to end of text.
-pub fn mask_code_blocks(text: &str) -> String {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let mut result = Vec::with_capacity(lines.len());
-    let mut fence: Option<String> = None;
-
-    for line in &lines {
-        if let Some(ref _f) = fence {
-            // Inside a code block — check for closing fence
-            let trimmed = line.trim_end();
-            if trimmed.starts_with("```") {
-                result.push(" ".repeat(line.len()));
-                fence = None;
-            } else {
-                result.push(" ".repeat(line.len()));
-            }
-        } else {
-            // Outside — check for opening fence
-            if line.starts_with("```") {
-                fence = Some("```".to_string());
-                result.push(" ".repeat(line.len()));
-            } else {
-                result.push((*line).to_string());
-            }
-        }
-    }
-
-    result.join("\n")
-}
+/// Mask every CommonMark code block by replacing its bytes with spaces
+/// (preserves line count and byte offsets). Handles unclosed blocks
+/// safely — they mask to end of text.
+///
+/// The definition lives in [`crate::markdown`] — one referee for every
+/// content reader in the engine. Re-exported here because this module's
+/// callers are the historical ones.
+pub use crate::markdown::{mask_code_blocks, mask_code_blocks_and_spans};
 
 // ---------------------------------------------------------------------------
 // Merge-conflict detection
@@ -441,10 +430,10 @@ pub fn mask_code_blocks(text: &str) -> String {
 
 /// True when `text` carries a complete git merge-conflict block: an
 /// ordered `<<<<<<< …` / `=======` / `>>>>>>> …` triple at line starts,
-/// evaluated over [`mask_code_blocks`] output so a fenced code example
+/// evaluated over [`mask_code_blocks`] output so a code example
 /// documenting conflict markers never trips the check. The masking is
 /// a legibility trade-off, not a soundness one: a real conflict whose
-/// markers all fall inside one fenced block goes undetected (the file
+/// markers all fall inside one code block goes undetected (the file
 /// then loads/degrades exactly as it did before this check existed) —
 /// git writes markers without regard for fences, so that shape is
 /// rare, while marker examples in documentation entities are not.
@@ -474,7 +463,7 @@ pub fn has_merge_conflict_markers(text: &str) -> bool {
 /// the original literal text from the first occurrence (e.g. `Realization`).
 /// `occurrences` counts every header line for that key — first plus
 /// duplicates.
-pub(super) struct DuplicateSection {
+pub(crate) struct DuplicateSection {
     pub key: String,
     pub heading: String,
     pub occurrences: usize,
@@ -490,7 +479,7 @@ pub(super) struct DuplicateSection {
 /// (duplicates included) — the raw material for the health check that
 /// distinguishes "section absent" from "content under a non-deriving
 /// heading".
-pub(super) fn split_sections(
+pub(crate) fn split_sections(
     body: &str,
     masked_body: &str,
 ) -> (HashMap<String, String>, Vec<DuplicateSection>, Vec<String>) {
@@ -558,10 +547,15 @@ pub(super) fn split_sections(
 }
 
 /// Extract the title from the first `# ` heading.
-fn extract_title(body: &str) -> Option<String> {
-    for line in body.lines() {
-        if let Some(title) = line.strip_prefix("# ") {
-            return Some(title.trim().to_string());
+///
+/// Scans the masked body so a `# ` line inside a code block can never
+/// become the entity title, and reads the text back from the original —
+/// masking preserves byte offsets and line count, so the two line
+/// sequences correspond one-to-one.
+fn extract_title(body: &str, masked_body: &str) -> Option<String> {
+    for (line, masked) in body.lines().zip(masked_body.lines()) {
+        if masked.starts_with("# ") {
+            return Some(line[2..].trim().to_string());
         }
     }
     None
@@ -573,7 +567,7 @@ fn extract_title(body: &str) -> Option<String> {
 
 /// Extract H3–H6 heading spans from each section's content. Byte offsets are
 /// into the (trimmed) section string stored in `result_sections`. Code blocks
-/// are masked before scanning so `### foo` inside a fenced block is ignored.
+/// are masked before scanning so `### foo` inside any code block is ignored.
 ///
 /// End offsets use a level-aware closing rule: a span closes at the next
 /// heading with the same or lower level (H3 closes on next H3 or H2 — but
@@ -810,15 +804,15 @@ pub struct WikiLink {
 }
 
 /// The `[[target]]` / `[[target|label]]` wiki-link pattern, compiled once.
+///
+/// The inner group is `*`, not `+`, so an empty target `[[]]` is *seen*
+/// by every path — the strict validator refuses it with a typed
+/// `InvalidWikiLink`, and this module's strict extractor routes it to
+/// the same refusal. A pattern that cannot see `[[]]` is how one path
+/// came to silently ignore what another path refused.
 fn wiki_link_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\[\[([^\]]+)\]\]").unwrap())
-}
-
-/// Inline code spans (masked out before link extraction), compiled once.
-fn inline_code_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"`[^`]+`").unwrap())
+    RE.get_or_init(|| Regex::new(r"\[\[([^\]]*)\]\]").unwrap())
 }
 
 /// Extract all wiki-links from markdown content.
@@ -838,7 +832,8 @@ pub fn extract_wiki_links(content: &str) -> Vec<WikiLink> {
 
 /// Extract unique mem-prefixed entity IDs from inline wiki-links,
 /// strictly validating each target against the slug-form grammar.
-/// Strips fenced code blocks and inline code before scanning.
+/// Strips code blocks and inline code spans before scanning, by the
+/// one CommonMark definition ([`crate::markdown`]).
 ///
 /// Returns the deduped valid ids on success, or every refusal in the
 /// scan window on failure (errors are collected, not fail-fast — the
@@ -852,8 +847,7 @@ pub(crate) fn extract_inline_links(
     text: &str,
     mem: &str,
 ) -> Result<Vec<EntityId>, Vec<WikiLinkError>> {
-    let stripped = mask_code_blocks(text);
-    let stripped = inline_code_re().replace_all(&stripped, "");
+    let stripped = mask_code_blocks_and_spans(text);
 
     let link_re = wiki_link_re();
     let mut seen = HashSet::new();
@@ -885,14 +879,20 @@ pub(crate) fn extract_inline_links(
 /// link reporters and graph inspectors. Mutation paths MUST NOT use this
 /// helper — see [`extract_inline_links`] for the strict variant.
 pub fn extract_inline_links_lenient(text: &str, mem: &str) -> Vec<EntityId> {
-    let stripped = mask_code_blocks(text);
-    let stripped = inline_code_re().replace_all(&stripped, "");
+    let stripped = mask_code_blocks_and_spans(text);
 
     let link_re = wiki_link_re();
     let mut seen = HashSet::new();
     let mut links = Vec::new();
 
     for cap in link_re.captures_iter(&stripped) {
+        // An empty target decodes to no id. The read side tolerates
+        // drift by ignoring what it cannot decode; the strict side
+        // refuses it (`extract_inline_links`). Both *see* it — that is
+        // the part that must not diverge.
+        if cap[1].is_empty() {
+            continue;
+        }
         let id = wiki_link_to_id_lenient(&cap[1], mem);
         if seen.insert(id.0.clone()) {
             links.push(id);
@@ -1757,5 +1757,187 @@ Second occurrence body.
         // First-wins: the rendered Identity body is `A`, not `C`.
         assert!(rendered.contains("\n## Identity\n\nA\n"));
         assert!(!rendered.contains("C\n"), "second body must not survive");
+    }
+}
+
+/// End-to-end pins for the six verified code-block misparse classes,
+/// on the real entity paths: section splitting, title extraction,
+/// heading spans, and wiki-link extraction. The unit-level pins for
+/// the mask itself live in [`crate::markdown`]; these assert the
+/// classes are actually fixed where they did damage.
+#[cfg(test)]
+mod commonmark_referee {
+    use super::*;
+    use memstead_schema::{builtin_names, type_by_name};
+    use std::sync::Arc;
+
+    fn spec_schema() -> Arc<TypeDefinition> {
+        type_by_name(builtin_names::SPEC).unwrap()
+    }
+
+    /// Wrap a `## Specifies` body in a minimal, valid spec entity.
+    fn entity_with_specifies(body: &str) -> ParseResult {
+        let md = format!(
+            "---\ntype: spec\n---\n\n# Referee Test\n\n## Identity\n\nx\n\n## Specifies\n\n{body}\n"
+        );
+        parse_markdown(&md, "referee-test.md", &spec_schema(), "specs").unwrap()
+    }
+
+    fn headings(result: &ParseResult) -> Vec<&str> {
+        result
+            .entity
+            .raw_section_headings
+            .iter()
+            .map(String::as_str)
+            .collect()
+    }
+
+    fn link_targets(result: &ParseResult) -> Vec<String> {
+        result.inline_links.iter().map(|id| id.0.clone()).collect()
+    }
+
+    /// The complement first: without it, every assertion below could
+    /// pass because the paths do nothing at all.
+    #[test]
+    fn complement_prose_headings_and_links_still_work() {
+        let r = entity_with_specifies("See [[real-target]] here.");
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert_eq!(link_targets(&r), vec!["specs--real-target".to_string()]);
+        assert_eq!(r.entity.title, "Referee Test");
+    }
+
+    #[test]
+    fn class_1_indented_code_block() {
+        let r = entity_with_specifies("Example:\n\n    ## Not A Section\n    [[not-a-link]]\n");
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert!(link_targets(&r).is_empty(), "{:?}", link_targets(&r));
+    }
+
+    #[test]
+    fn class_2_fence_indented_one_to_three_spaces() {
+        let r = entity_with_specifies(
+            "- item\n\n   ```\n   ## Not A Section\n   [[not-a-link]]\n   ```\n",
+        );
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert!(link_targets(&r).is_empty(), "{:?}", link_targets(&r));
+    }
+
+    #[test]
+    fn class_3_tilde_fence() {
+        let r = entity_with_specifies("~~~\n## Not A Section\n[[not-a-link]]\n~~~\n");
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert!(link_targets(&r).is_empty(), "{:?}", link_targets(&r));
+    }
+
+    #[test]
+    fn class_4_info_string_on_the_closing_line() {
+        let r = entity_with_specifies(
+            "```\ncode\n``` still-code\n## Not A Section\n[[not-a-link]]\n```\n",
+        );
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert!(link_targets(&r).is_empty(), "{:?}", link_targets(&r));
+    }
+
+    #[test]
+    fn class_5_fence_inside_a_blockquote() {
+        let r = entity_with_specifies("> ```\n> ## Not A Section\n> [[not-a-link]]\n> ```\n");
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert!(link_targets(&r).is_empty(), "{:?}", link_targets(&r));
+    }
+
+    #[test]
+    fn class_6_opening_fence_length_is_honoured_on_close() {
+        let r = entity_with_specifies("````\n```\n## Not A Section\n[[not-a-link]]\n```\n````\n");
+        assert_eq!(headings(&r), vec!["Identity", "Specifies"]);
+        assert!(link_targets(&r).is_empty(), "{:?}", link_targets(&r));
+    }
+
+    /// The title extractor was the one scanner with no masking at all.
+    #[test]
+    fn a_heading_inside_a_code_block_never_becomes_the_title() {
+        let md =
+            "---\ntype: spec\n---\n\n```\n# Fake Title\n```\n\n# Real Title\n\n## Identity\n\nx\n";
+        let r = parse_markdown(md, "title-test.md", &spec_schema(), "specs").unwrap();
+        assert_eq!(r.entity.title, "Real Title");
+    }
+
+    /// …and when the code block is the whole body, the filename
+    /// fallback applies rather than a title mined out of code.
+    #[test]
+    fn a_code_block_only_body_falls_back_to_the_filename() {
+        let md = "---\ntype: spec\n---\n\n    # Fake Title\n\n## Identity\n\nx\n";
+        let r = parse_markdown(md, "fallback-test.md", &spec_schema(), "specs").unwrap();
+        assert_eq!(r.entity.title, "fallback-test");
+    }
+
+    #[test]
+    fn heading_spans_ignore_code_block_content() {
+        let r = entity_with_specifies("### Real Sub\n\n~~~\n### Fake Sub\n~~~\n");
+        let spans = r.entity.heading_spans.get("specifies").expect("spans");
+        let titles: Vec<&str> = spans.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, vec!["Real Sub"]);
+    }
+
+    /// One definition of "not visible to a link scanner": a link the
+    /// strict validator cannot see is a link no path turns into an
+    /// edge. Multi-backtick spans are the case a delimiter-count regex
+    /// slices through.
+    #[test]
+    fn inline_code_spans_hide_links_on_the_extraction_path() {
+        let r = entity_with_specifies("`[[hidden-one]]` and ``[[hidden-two]]`` but [[visible]].");
+        assert_eq!(link_targets(&r), vec!["specs--visible".to_string()]);
+    }
+
+    /// The empty-target asymmetry: the strict extractor now *sees*
+    /// `[[]]` and routes it to the same refusal the validator emits,
+    /// instead of a pattern that could not match it at all.
+    #[test]
+    fn empty_wiki_link_target_is_refused_by_the_strict_extractor() {
+        let errors = extract_inline_links("an empty [[]] link", "specs")
+            .expect_err("empty target must refuse");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+    }
+
+    /// The read side tolerates drift by ignoring what it cannot
+    /// decode — but it sees the same token the strict side refuses.
+    #[test]
+    fn empty_wiki_link_target_yields_no_id_on_the_lenient_path() {
+        assert!(extract_inline_links_lenient("an empty [[]] link", "specs").is_empty());
+    }
+
+    /// Frontmatter is not markdown. Masking the whole file would hand
+    /// a CommonMark parser YAML it can read as block structure: a
+    /// value line that looks like a fence opener (legal at 1–3 spaces
+    /// since the indented-fence class was fixed) would open a code
+    /// block that runs past the closing `---` and mask the entire
+    /// body — no title, no sections, no links. The split happens
+    /// first; only the body is masked.
+    #[test]
+    fn frontmatter_never_opens_a_code_block_over_the_body() {
+        for fm in [
+            "notes: |\n  ```rust",
+            "notes: |\n   ~~~",
+            "notes: |\n  ```\n  still open",
+            "notes: |\n    indented block\n",
+        ] {
+            let md = format!(
+                "---\ntype: spec\n{fm}\n---\n\n# Real Title\n\n## Identity\n\nSee [[a-link]].\n"
+            );
+            let r = parse_markdown(&md, "fm-test.md", &spec_schema(), "specs").unwrap();
+            assert_eq!(
+                r.entity.title, "Real Title",
+                "frontmatter ate the title: {fm:?}"
+            );
+            assert_eq!(
+                headings(&r),
+                vec!["Identity"],
+                "frontmatter ate the sections: {fm:?}"
+            );
+            assert_eq!(
+                link_targets(&r),
+                vec!["specs--a-link".to_string()],
+                "frontmatter ate the links: {fm:?}"
+            );
+        }
     }
 }

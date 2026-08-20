@@ -19,7 +19,7 @@
 //! observes.
 
 use memstead_schema::content_expr::ObservedBlock;
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 
 /// One top-level block of a section body: what it is, where it
 /// starts, and the per-kind material the format checks consume.
@@ -116,8 +116,10 @@ fn heading_depth(level: HeadingLevel) -> u8 {
 
 /// Reduce a section body to its top-level block sequence.
 pub fn reduce_section(source: &str) -> ReducedSection {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
+    // The engine's one CommonMark dialect — never a second inline
+    // construction. A flag added here and not there (or the reverse)
+    // silently re-opens the two-referee problem.
+    let options = crate::markdown::parser_options();
 
     let mut blocks: Vec<ReducedBlock> = Vec::new();
     let mut setext_reserved: Vec<SetextReservedHeading> = Vec::new();
