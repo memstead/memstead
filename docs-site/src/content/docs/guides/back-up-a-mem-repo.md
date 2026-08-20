@@ -2,7 +2,7 @@
 title: Back up a mem-repo to a remote
 description: "Push a workspace's mems to any git remote and recover them on another machine — fetch, pull, push, and branch-reset end to end."
 sidebar:
-  order: 5
+  order: 6
 ---
 
 A mem-repo workspace keeps every mem as a branch in one local git

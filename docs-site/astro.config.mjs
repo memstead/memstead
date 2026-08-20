@@ -90,6 +90,7 @@ export default defineConfig({
           label: "Guides",
           items: [
             { label: "Getting started", link: "/guides/getting-started/" },
+            { label: "Grow a mem from a source", link: "/guides/grow-a-mem-from-a-source/" },
             { label: "Author a schema", link: "/guides/author-a-schema/" },
             { label: "Publish a mem", link: "/guides/publish-a-mem/" },
             { label: "Agent recipes", link: "/guides/agent-recipes/" },

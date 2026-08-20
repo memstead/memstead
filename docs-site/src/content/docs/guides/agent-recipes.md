@@ -2,7 +2,7 @@
 title: Agent recipes
 description: "Worked MCP tool-call sequences with real request and response payloads: cold start, search then read, create with recovery, optimistic locking, typed edges."
 sidebar:
-  order: 4
+  order: 5
 ---
 
 The [MCP tools reference](../../reference/mcp/) is the authoritative surface description — every tool, every parameter, every error code. This page is its on-ramp: five worked sequences an agent actually runs, captured verbatim against a live `memstead-mcp` server over a small workspace (one mem, `my-graph`, pinned to `default@1.3.0`). Requests show the `tools/call` params; responses show the `structured_content` envelope. Long payloads are trimmed where marked (`…`) — nothing is paraphrased. The schema pin shown was refreshed from `default@1.0.0` to the version the shipped binary now writes, so a command copied from this page pins nothing stale; the tool shapes and envelopes are otherwise as captured.

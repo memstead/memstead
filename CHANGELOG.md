@@ -31,6 +31,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workspace counterpart: a folder mem in a subdirectory of the workspace
   root, the uncollapsed form of `init_filesystem_mem`.
 
+### Changed
+- **The build brief tells the truth about its destination and its anchor
+  names.** A binding scaffolded before its mem exists (an order
+  `projection init` deliberately allows) rendered a brief whose whole
+  mandate is "mutate the destination", with nothing saying the mem was
+  not there — the agent found out on its first write. The Destination
+  block now names the absence and carries `memstead mem init <mem>`. And
+  the provenance block promised that an undeclared `source` name "refuses
+  `INVALID_ANCHOR` with the declared names in the recovery payload";
+  that check only fires when the anchor also carries its producing
+  binding, which the brief never asks for. It now states what actually
+  happens: the name decides attribution and the path join, so a wrong one
+  usually refuses on the path.
+
 ### Fixed
 - **The backfill path named a subcommand that does not exist.** The
   fidelity report and three health findings told the reader to run

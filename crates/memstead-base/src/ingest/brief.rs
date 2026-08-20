@@ -272,6 +272,20 @@ pub fn render_operative_data(
         .map(|s| format!(" — schema: `{s}`"))
         .unwrap_or_default();
     lines.push(format!("- **{}**{schema_bit}", resolved.destination_mem));
+    // No pinned schema means the engine could not resolve the destination as
+    // a mem of this workspace — a binding scaffolded before its mem exists,
+    // which `projection init` deliberately allows. Say so here rather than
+    // describing a destination that is not there: the brief's mandate is to
+    // mutate this mem, and an agent that discovers its absence on the first
+    // create has been told something untrue by the surface that sent it.
+    if destination_schema.is_none() {
+        lines.push(format!(
+            "  - **This mem does not exist in this workspace yet.** Create it \
+             before writing: `memstead mem init {}`. Until it does, every \
+             mutation this brief asks for will refuse.",
+            resolved.destination_mem
+        ));
+    }
     lines.push(String::new());
 
     // Paired process mem
@@ -574,8 +588,13 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
     if !primary_names.is_empty() {
         block.push_str(&format!(
             "Set each anchor's `source` to the binding source name you drew the artifact \
-             from — this binding declares: {}. A name outside that list refuses \
-             `INVALID_ANCHOR` with the declared names in the recovery payload.\n\n",
+             from — this binding declares: {}. The name decides which source the \
+             anchor is attributed to, and the artifact path is resolved by joining \
+             onto that source's pointer, so a name outside the list leaves the \
+             anchor unattributed and usually refuses `INVALID_ANCHOR` on the path \
+             instead. Where the anchor also carries its producing binding, the name \
+             is checked against the declared list directly and the refusal names \
+             them.\n\n",
             primary_names
                 .iter()
                 .map(|n| format!("`{n}`"))
@@ -1461,7 +1480,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let out = render_operative_data(&r, &skipped, None);
         assert!(out.contains("- **f** (filesystem, primary)\n"));
         assert!(!out.contains("Cross-mem references"), "no reference note");
+        // A destination with no pinned schema is a mem the engine could not
+        // resolve — the block says so and names the remedy.
         assert!(out.contains("### Destination\n\n- **g**\n"));
+        assert!(
+            out.contains("This mem does not exist in this workspace yet")
+                && out.contains("memstead mem init g"),
+            "an unresolvable destination must be named as such: {out}",
+        );
         assert!(
             !out.contains("Paired process mem"),
             "skipped process mem omitted"

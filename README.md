@@ -130,6 +130,8 @@ memstead projection verify my-graph/some-repo   # what is covered, what has drif
 
 The brief is written for the agent, not for you — hand it to a session (the Claude Code plugin's ingest skill does exactly this on a loop) and repeat until `verify` says the coverage is where you want it. Every entity still lands through the same validated write path as a hand-authored one.
 
+The full walkthrough, with the commands verified against the workspace it builds: [Grow a mem from a source](https://memstead.com/guides/grow-a-mem-from-a-source/).
+
 ## How a Memstead system runs
 
 Memstead ships no scheduler, no notifications, and no recurrence engine — by design. **The agent writes, the engine enforces, and a periodically-invoked agent run measures, maintains, and advances what needs advancing: curated by agents, enforced by schema, run by the agent loop.** The engine is the deterministic half — it validates every write, measures drift and due-ness (`memstead health`, `memstead due`, `memstead projection verify`), and renders briefs that tell the next agent run what to do. The loop is the runtime: an agent session invoked on whatever cadence the holding needs — a cron'd Claude Code run, a CI job, the plugin's `/sync` skill — reads the brief, does the work, advances recurring dates, and records the outcome. Evaluate the engine alone and you are measuring half the system; recurrence, freshness, and follow-through are the loop's job, not missing engine features.

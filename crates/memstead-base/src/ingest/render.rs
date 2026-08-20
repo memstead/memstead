@@ -1,5 +1,5 @@
 //! Top-level run-brief rendering — the one engine entry point every
-//! consuming surface calls (the CLI via `memstead ingest brief`), so the
+//! consuming surface calls (the CLI via `memstead projection brief`), so the
 //! brief a client emits is byte-identical to the CLI's **by construction**
 //! (a single code path), not by parallel re-implementation.
 //!
@@ -87,7 +87,7 @@ pub fn mode_name(mode: BuildMode) -> &'static str {
 /// binding id `<mem>/<stem>` (D3) — the shape `projection brief` / `--all`
 /// selection use. As a transition bridge, a slash-free legacy argument (the
 /// old flat ingest stem, e.g. `engine-graph`) is also matched against each
-/// binding's `<mem>-<stem>` dashed form, so `memstead ingest brief engine-graph`
+/// binding's `<mem>-<stem>` dashed form, so `memstead projection brief engine-graph`
 /// keeps rendering the migrated `engine/graph` binding without a router change.
 /// Returns the canonical binding id and the binding.
 fn find_binding<'a>(

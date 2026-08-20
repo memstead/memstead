@@ -2,7 +2,7 @@
 title: Publish a mem
 description: "Share a mem through the memstead.io registry: describe it, dry-run, publish, and the install line others run."
 sidebar:
-  order: 3
+  order: 4
 ---
 
 A mem is the packaged unit of sharing: a whole typed model — entities, relationships, and the schema they conform to — sealed into one `.mem` archive. Publishing puts that archive on the [memstead.io](https://memstead.io) registry under your GitHub handle, where anyone can install it with one command. This guide walks the first publish end to end.

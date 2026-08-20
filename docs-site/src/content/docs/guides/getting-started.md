@@ -168,6 +168,8 @@ memstead projection verify my-graph/some-repo   # coverage, drift, freshness
 
 The brief is written for the agent, not for you: it names the source slice, the destination mem, and the anchoring rules that let `verify` measure the result. Hand it to an agent session and repeat until `verify` reports the coverage you want. The Claude Code plugin's ingest skill runs exactly this loop for you.
 
+[Grow a mem from a source](../grow-a-mem-from-a-source/) walks the whole loop end to end — declaring the binding, working a batch, measuring what landed, and stopping and resuming without losing your place.
+
 Entities created this way go through the same validated write path as the ones you typed — a binding changes who does the writing, not what the engine accepts.
 
 ## 6. Connect your AI agent

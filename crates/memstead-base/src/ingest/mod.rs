@@ -19,7 +19,7 @@
 //! layer (joins an ingest config to its projection, facets, and mediums), the
 //! [`change_detection`] primitives, the [`cursor`] driver that assembles a
 //! per-source changed slice across the git / graph / mtime strategies, and
-//! [`brief`] assembly — all reachable through `memstead ingest brief` (CLI),
+//! [`brief`] assembly — all reachable through `memstead projection brief` (CLI),
 //! which the plugin skill consumes as a thin client.
 
 pub mod advance;

@@ -1962,6 +1962,60 @@ fn migrate_gen1_dry_run_writes_nothing() {
     assert!(!root.join(".memstead/mediums/engine/src.json").exists());
 }
 
+/// A binding scaffolded before its mem exists still renders — `projection
+/// init` deliberately allows that order — but the brief SAYS the destination
+/// is not there and names the command that creates it. The agent's mandate is
+/// to mutate that mem; discovering its absence on the first create means the
+/// surface that sent it said something untrue.
+///
+/// Fixture needs `mem-repo init`, which the lean build does not carry.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn brief_names_a_destination_mem_that_does_not_exist_yet() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "absent-mem",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "code",
+        ])
+        .assert()
+        .success();
+
+    let out = String::from_utf8(
+        memstead()
+            .current_dir(&ws)
+            .args(["projection", "brief", "absent-mem/code"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        out.contains("This mem does not exist in this workspace yet"),
+        "the brief must name the absent destination:\n{out}",
+    );
+    assert!(
+        out.contains("memstead mem init absent-mem"),
+        "…and carry the command that creates it:\n{out}",
+    );
+}
+
 // ── AC4: absent-operation-block refusal + `projection enable` remedy ─────────
 
 /// D6/AC4: `projection brief` on a binding with **no build block** refuses with
