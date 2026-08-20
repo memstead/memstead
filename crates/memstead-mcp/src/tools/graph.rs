@@ -121,7 +121,7 @@ pub struct OverviewParams {
 #[serde(deny_unknown_fields)]
 pub struct SchemaParams {
     #[schemars(
-        description = "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`."
+        description = "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.3.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`."
     )]
     pub name: Option<String>,
     #[schemars(

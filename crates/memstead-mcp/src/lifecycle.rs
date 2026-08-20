@@ -93,7 +93,7 @@ pub struct MemCreateParams {
     )]
     pub location: String,
     #[schemars(
-        description = "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.0.0`. Resolved against the per-mem schema registry at init time."
+        description = "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.3.0`. Resolved against the per-mem schema registry at init time."
     )]
     pub schema: String,
     #[schemars(
@@ -240,7 +240,7 @@ pub struct WorkspaceAllowCreateParams {
     )]
     pub pattern: String,
     #[schemars(
-        description = "Schema pins admitted by this rule. `[\"*\"]` is the any-schema escape. Each entry is a canonical `name@version` pin (e.g. `\"default@1.0.0\"`)."
+        description = "Schema pins admitted by this rule. `[\"*\"]` is the any-schema escape. Each entry is a canonical `name@version` pin (e.g. `\"default@1.3.0\"`)."
     )]
     pub schemas: Vec<String>,
     #[schemars(

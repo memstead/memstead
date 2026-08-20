@@ -105,7 +105,7 @@ but it cannot be re-produced. The reconstruction side is fully rerunnable:
 mkdir lpd-workspace && cd lpd-workspace
 memstead mem-repo init
 memstead workspace allow-create --schema '*' notes
-memstead mem init notes --schema default@1.0.0
+memstead mem init notes --schema default@1.3.0
 unzip landing-page-design-0.1.0.mem '.memstead/schema/*' -d unpack
 memstead schema install ./unpack/.memstead/schema
 memstead install ./landing-page-design-0.1.0.mem

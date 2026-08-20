@@ -12,7 +12,7 @@ stored as plain markdown in git.
 This crate defines what a schema *is*: entity type definitions (sections,
 metadata fields, required/optional shape), the controlled relationship
 vocabulary, validation rules, and the loading pipeline that resolves a
-schema reference (`default@1.0.0`) from workspace-installed files or the
+schema reference (`default@1.3.0`) from workspace-installed files or the
 embedded built-ins. Every write the engine accepts is validated against
 these types, so a mem never drifts away from its pinned schema.
 

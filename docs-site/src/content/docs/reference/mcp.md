@@ -844,7 +844,7 @@ Create and register a new writable mem at runtime. Requires workspace opt-in via
       "description": "Explicit recovery action when on-disk storage residue is detected at the composed branch path. Three accepted values: `reattach` (adopt the residual entities, skip the seed commit), `force_overwrite` (destroy the residue — it is removed atomically, so either the residue is gone and the mem is created or nothing changed; the prior entities are gone by design), `hard_cleanup_first` (refuse with `MEM_STORAGE_RESIDUE_DETECTED`, instructing the caller to run `memstead_mem_delete` first). When omitted, the engine routes by whether the residue was left by a deliberate `memstead mem unregister`: such residue defaults to `reattach` and emits a `MEM_REATTACHED_AFTER_UNREGISTER` warning; residue from a crash refuses with `MEM_STORAGE_RESIDUE_DETECTED`. Bare create against a name with no residue ignores this field."
     },
     "schema": {
-      "description": "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.0.0`. Resolved against the per-mem schema registry at init time.",
+      "description": "Schema pin for the new mem. Format: `name@x.y.z` — e.g. `default@1.3.0`. Resolved against the per-mem schema registry at init time.",
       "type": "string"
     },
     "schema_verbosity": {
@@ -1275,7 +1275,7 @@ Read one schema. Default `verbosity` is "lite": a structural skeleton — entity
       ]
     },
     "name": {
-      "description": "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.0.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`.",
+      "description": "Schema name as listed in memstead_overview's `## Schemas` section (e.g. \"default\" or \"default@1.3.0\"). Schemas are workspace-globally unique by name; the workspace registry resolves a bare name to the pinned version. Mutually exclusive with `mem`.",
       "type": [
         "string",
         "null"
@@ -1910,7 +1910,7 @@ Append a `[[mem_management.create]]` rule admitting mem names matching `pattern`
       "type": "string"
     },
     "schemas": {
-      "description": "Schema pins admitted by this rule. `[\"*\"]` is the any-schema escape. Each entry is a canonical `name@version` pin (e.g. `\"default@1.0.0\"`).",
+      "description": "Schema pins admitted by this rule. `[\"*\"]` is the any-schema escape. Each entry is a canonical `name@version` pin (e.g. `\"default@1.3.0\"`).",
       "items": {
         "type": "string"
       },
