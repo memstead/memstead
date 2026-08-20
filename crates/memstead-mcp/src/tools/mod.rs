@@ -10,8 +10,9 @@
 //! be created or deleted, and which cross-mem links are granted, is the
 //! operator deciding what an agent is allowed to do — putting those
 //! switches on the agent's own tool surface would hand the constrained
-//! party the keys to its constraints. Policy is edited with
-//! `memstead workspace <action>`, and a policy-gated mutation refuses
+//! party the keys to its constraints. Policy is edited on operator
+//! surfaces — `memstead workspace <action>` and the
+//! operator-authenticated web API — and a policy-gated mutation refuses
 //! with the exact command to report. External agents that need to
 //! discover mems read `memstead_health.writable_mems` and
 //! `memstead_health.read_mems`.

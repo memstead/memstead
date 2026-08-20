@@ -5,8 +5,9 @@
 //! `memstead_entity`, `memstead_health`, `memstead_overview`,
 //! `memstead_schema`, `memstead_search`; mutation: `memstead_create`,
 //! `memstead_delete`, `memstead_relate`, `memstead_rename`,
-//! `memstead_update`; admin: `memstead_changes_since`, `memstead_diff`,
-//! `memstead_reload`; mem lifecycle: `memstead_mem_create`,
+//! `memstead_update`; process: `memstead_check`; admin:
+//! `memstead_changes_since`, `memstead_diff`, `memstead_reload`; mem
+//! lifecycle: `memstead_mem_create`, `memstead_mem_configure`,
 //! `memstead_mem_delete`, `memstead_mem_set_schema`,
 //! `memstead_mem_set_version`. The asserted count is
 //! `EXPECTED_TOOLS.len()` —
@@ -23,8 +24,9 @@
 //! So is the whole `memstead_workspace_*` family (allow/revoke create,
 //! allow/revoke delete, grant/revoke cross-link): workspace policy is
 //! the operator deciding what an agent may do, and the constrained
-//! party does not hold the keys to its constraints, so it is a CLI
-//! surface only.
+//! party does not hold the keys to its constraints, so it lives on
+//! operator surfaces (the CLI and the operator-authenticated web API)
+//! and never here.
 //!
 //! Mem lifecycle is not workspace configuration. The lifecycle family
 //! (`memstead_mem_create` / `memstead_mem_delete` /

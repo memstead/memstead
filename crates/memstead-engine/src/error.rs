@@ -185,10 +185,11 @@ impl RecoveryAction {
 /// pattern and the schema pin because `allow-create` requires both;
 /// delete rules have no schema dimension.
 ///
-/// CLI only, deliberately: workspace policy is the operator deciding
-/// what an agent may do, so it is not editable from the agent's own
-/// tool surface. An agent meeting this refusal reports the command; a
-/// person runs it. Naming an MCP tool here would point at one that no
+/// Operator surfaces only, deliberately: workspace policy is the
+/// operator deciding what an agent may do, so it is not editable from
+/// the agent's own tool surface. The CLI form is what an agent reports
+/// and a person runs; the operator-authenticated web API carries the
+/// same operations. Naming an MCP tool here would point at one that no
 /// longer exists.
 fn allowlist_remedy(policy_table: &str) -> &'static str {
     if policy_table == "mem_management.delete" {
