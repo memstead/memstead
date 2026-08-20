@@ -45,7 +45,7 @@
 # describe internals). A blunt grep there false-positives. The audit
 # that introduced this guard scrubbed the agent-facing message leaks it
 # found (cross-link-policy delete refusals that pointed the agent at
-# `.memstead/workspace.toml` instead of `memstead_workspace_revoke_cross_link`);
+# `.memstead/workspace.toml` instead of naming the CLI revoke command);
 # new message strings stay a review item.
 #
 # Known-actionable survivors the marker set deliberately does NOT flag:

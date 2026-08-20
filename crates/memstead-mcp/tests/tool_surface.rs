@@ -68,11 +68,11 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_mem_delete",
     "memstead_mem_set_schema",
     "memstead_mem_set_version",
-    // Workspace-policy mutations (6).
-    // Closes [MCP F7] by exposing the cross-mem-link grant +
-    // revoke surface and the lifecycle allowlist editor — an
-    // MCP-driven agent can now complete the full dynamic mem
-    // lifecycle without dropping to CLI.
+    // No workspace-policy family: the six `memstead_workspace_*` tools
+    // were removed on 2026-08-20. An agent completes the dynamic mem
+    // lifecycle only within permissions the operator already granted;
+    // widening them is a CLI / operator-web-API act, and a policy-gated
+    // refusal names the command to report.
 ];
 
 fn current_tool_names() -> Vec<String> {
@@ -604,13 +604,6 @@ fn expected_hints(tool_name: &str) -> HintTriple {
             idempotent: Some(false),
             open_world: Some(false),
         },
-        // Workspace-policy mutations.
-        // All idempotent (`Err` → `Ok(Warning)` flip) and
-        // non-destructive (the rule lists / grant tables grow or
-        // shrink, but underlying mem data is never touched). The
-        // `revoke` half flips `destructive=true` because removing a
-        // grant or rule changes downstream authorization (e.g.,
-        // future `memstead_mem_create` may refuse).
         _ => panic!("unexpected tool in hint table: {tool_name}"),
     }
 }
@@ -2035,7 +2028,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Version-default literal.
             "0.1.0",
         ],
-        // Workspace-policy mutation tools.
         _ => &[],
     }
 }
