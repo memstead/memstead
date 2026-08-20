@@ -125,8 +125,11 @@ of misparsing:
 
 `report.findings_by_class` uses a closed vocabulary: `drifted`, `wrong`,
 `uncovered`, `unresolvable-anchor`, `queued-for-adjudication`.
-`report.coverage.denominator` is a tagged union — either
-`{"Enumerated": {"count": N}}` or `{"NonEnumerable": {"reason": "…"}}`.
+`report.coverage.denominator` is an internally-tagged union on `kind` —
+either `{"kind": "enumerated", "count": N}` or
+`{"kind": "non-enumerable", "reason": "…"}`. Branch on `kind`; a
+`non-enumerable` denominator means an uncovered artifact is undetectable,
+not that there are none.
 
 Two per-facet arrays carry what the measurement *could* do, which is how
 you tell a real green from a lucky one:
@@ -196,7 +199,9 @@ another mem enumerates nothing and leaves its anchors permanently
 unobserved — coverage reads `0/0` despite the capability row saying
 `enumerable: true`. The rollup refuses to call that clean and returns
 `inconclusive`, but the underlying measurement is not there yet. Do not
-gate a graph-source binding on this today.
+gate a graph-source binding on this today. Unlike the caps above, this
+one is a **defect with a fix planned**, not a deliberate boundary — when
+it lands, the row starts measuring and this paragraph goes away.
 
 **The mtime baseline does not survive a fresh checkout.** A binding
 using mtime change-detection compares file modification times against a

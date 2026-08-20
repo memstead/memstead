@@ -42,7 +42,7 @@ findings and a `#verified` baseline. Read-only on your source; refusals verbatim
    cancel the schedule driving the loop and report quiescence in one line (a
    standing watch is a deliberate restart at a slower cadence).
    Otherwise execute each returned brief faithfully per its named operation:
-   verify is report-only measurement; build grows the mem — a build brief IS
+   verify measures and records findings, never entities; build grows the mem — a build brief IS
    the sanctioned backfill channel, so cover the batch it asks for rather
    than declining it as out-of-scope (steps 2 and 4 apply); sync maintains
    it (steps 2–5).

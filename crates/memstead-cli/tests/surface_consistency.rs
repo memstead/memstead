@@ -36,12 +36,19 @@ fn exit_code_table_documents_usage_error_two() {
         "exit-code table must document the clap usage-error code; got:\n{EXIT_CODES_HELP}",
     );
     // Existing codes keep their meanings (not renumbered).
+    // 6 is in this list for the same reason as the rest: the row is the
+    // published contract a CI author branches on, and nothing else pins it.
+    // The BEHAVIOUR is covered by an integration test asserting `.code(6)`;
+    // without this line the documented row could be deleted from the epilog
+    // and the drift gate would carry the deletion into the published page
+    // as a "current" regeneration.
     for line in [
         "0  success",
         "1  generic failure",
         "3  not found",
         "4  hash mismatch",
         "5  validation",
+        "6  findings present",
     ] {
         assert!(
             EXIT_CODES_HELP.contains(line),

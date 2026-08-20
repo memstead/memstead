@@ -102,6 +102,16 @@ def run(memstead: Path) -> int:
     # (0) The example and the exercise must be the same command.
     if not GUIDE.exists():
         return fail(f"the guide this harness gates does not exist: {GUIDE}")
+    # The two constants must describe the same command, or the anti-drift
+    # check below asserts a string this harness never runs. Cheap, and it
+    # closes the last way the guide and the exercise could disagree.
+    built = "memstead " + " ".join(GATE_ARGS)
+    if built != DOCUMENTED_COMMAND:
+        failures += fail(
+            f"the harness runs {built!r} but asserts {DOCUMENTED_COMMAND!r} into the "
+            f"guide — the anti-drift check would be pinning the wrong command"
+        )
+
     guide_text = GUIDE.read_text(encoding="utf-8")
     if DOCUMENTED_STEP not in guide_text:
         failures += fail(

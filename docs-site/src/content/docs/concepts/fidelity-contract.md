@@ -127,9 +127,16 @@ guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
   clone gives every file a new mtime, so such a binding flags everything on its first
   run in a new checkout. Use git change-detection for anything you intend to gate.
 
-None is a roadmap promise, and none is omitted: the honest shape of a contract
-is to name its own edges. When these land, they will enter the capability matrix the
-report already renders, and the refusals will become measurements.
+The first two are **positioning decisions** — deliberate boundaries, not
+roadmap promises. The last two are **known defects with fixes planned**: the
+graph-medium row already claims a capability its verify does not deliver, and
+the mtime baseline's non-portability is a portability bug, not a choice. The
+distinction matters to anyone deciding what to build a gate on — a boundary
+will still be there next year; a defect should not be. When the defects are
+fixed, their refusals become measurements and these paragraphs retire.
+
+None of the four is omitted: the honest shape of a contract is to name its own
+edges, and to say which of them it intends to keep.
 
 ## Verify writes
 

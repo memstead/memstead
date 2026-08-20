@@ -106,6 +106,7 @@ Command-line interface for Memstead — query and mutate typed entity graphs fro
 
 **Usage:** `memstead [OPTIONS] <COMMAND>`
 
+```
 Exit codes:
   0  success
   1  generic failure (catch-all for non-classified errors)
@@ -119,10 +120,11 @@ Exit codes:
      "the mem drifted" from "the engine could not run".
 
   For programmatic branching, prefer `--json` over the exit code:
-    memstead &lt;subcommand> ... --json | jq -r .code
+    memstead <subcommand> ... --json | jq -r .code
   The JSON envelope's `code` field carries the typed token
   (e.g. INVALID_TITLE, HAS_INCOMING_REFS, CROSS_MEM_LINK_NOT_ALLOWED)
   with structured recovery details under `.details`.
+```
 
 ###### **Subcommands:**
 
@@ -141,7 +143,7 @@ Exit codes:
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
 * `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it. MEM-REPO WORKSPACES ONLY (see `install`)
-* `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Read-only
+* `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Mutates no entity, but records its findings store like any verify run
 * `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
 * `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
@@ -510,7 +512,7 @@ Remove an installed read-mem's workspace-level mount. The global cache copy surv
 
 ## `memstead verify-anchors`
 
-Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Read-only
+Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Mutates no entity, but records its findings store like any verify run
 
 **Usage:** `memstead verify-anchors --mem <NAME>`
 

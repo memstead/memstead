@@ -911,14 +911,47 @@ fn write_cli_reference(output: &Path) -> Result<()> {
     // placeholder like `--status <S>` outside a code span parses as a raw
     // HTML tag downstream (tag names are case-insensitive — `<S>` is the
     // strikethrough element and struck out the rest of the rendered page).
-    let cli = escape_raw_html_in_markdown(&clap_markdown::help_markdown_command(
+    let cli = escape_raw_html_in_markdown(&fence_epilog(&clap_markdown::help_markdown_command(
         &memstead_cli::cli::Cli::command(),
-    ));
+    )));
     write_if_changed(
         &cli_dir.join("cli.md"),
         &with_frontmatter("CLI (`memstead`)", &cli),
     )?;
     Ok(())
+}
+
+/// Wrap the top-level `--help` epilog in a fenced code block.
+///
+/// clap epilogs are plain text laid out with leading spaces — an aligned
+/// table, indented two or three columns. `clap_markdown` embeds them
+/// verbatim, and CommonMark treats 2-space-indented lines under a
+/// paragraph as *lazy continuations*: every row collapses into one
+/// run-together sentence on the published page. The source looked like a
+/// table and the rendered page was prose, which is how the exit-code
+/// table shipped mangled without anyone noticing (it reads fine in
+/// `--help`, where the alignment is honoured).
+///
+/// Fencing it preserves the layout and, as a side effect, stops the
+/// escaper mangling `<subcommand>` into `&lt;subcommand&gt;` — inside a
+/// fence there is no raw-HTML hazard to escape against.
+fn fence_epilog(md: &str) -> String {
+    let epilog = memstead_cli::cli::EXIT_CODES_HELP;
+    match md.find(epilog) {
+        Some(at) => {
+            let mut out = String::with_capacity(md.len() + 8);
+            out.push_str(&md[..at]);
+            out.push_str("```\n");
+            out.push_str(epilog);
+            out.push_str("\n```");
+            out.push_str(&md[at + epilog.len()..]);
+            out
+        }
+        // The epilog is not in this render (a future clap or
+        // clap_markdown change). Leave the document alone rather than
+        // guess — the drift gate will show the diff.
+        None => md.to_string(),
+    }
 }
 
 /// Escape raw HTML-tag lookalikes in generated Markdown prose.

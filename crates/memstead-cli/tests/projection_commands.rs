@@ -3319,8 +3319,22 @@ fn verify_json_carries_the_pinned_format_marker() {
         env["report"]["findings_by_class"].is_object(),
         "the closed finding-class vocabulary still ships: {env}"
     );
+    // The denominator is INTERNALLY tagged on `kind`. Pinned because the
+    // guide documents that exact shape as external contract, and serde's
+    // default for an enum is externally tagged — dropping the
+    // `#[serde(tag = "kind")]` attribute would silently reshape a payload
+    // consumers branch on, while still passing an `is_object()` check.
+    let denom = &env["report"]["coverage"]["denominator"];
     assert!(
-        env["report"]["coverage"]["denominator"].is_object(),
+        denom.is_object(),
         "the denominator union still ships: {env}"
+    );
+    assert_eq!(
+        denom["kind"], "enumerated",
+        "denominator is internally tagged on `kind`, as the guide documents: {env}"
+    );
+    assert!(
+        denom["count"].is_number(),
+        "an enumerated denominator carries its count alongside the tag: {env}"
     );
 }

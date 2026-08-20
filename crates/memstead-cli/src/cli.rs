@@ -150,7 +150,8 @@ pub enum Command {
     Uninstall(commands::uninstall::Args),
 
     /// Verify every anchor in a mem against its declared source — the
-    /// standalone drift statement, no binding required. Read-only.
+    /// standalone drift statement, no binding required. Mutates no entity,
+    /// but records its findings store like any verify run.
     #[command(name = "verify-anchors")]
     VerifyAnchors(commands::verify_anchors::Args),
 
