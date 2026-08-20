@@ -394,12 +394,34 @@ impl FidelityReport {
                     .to_string(),
             );
         }
+        // A facet is change-blind if EITHER its medium cannot signal change
+        // or the binding resolved that medium to no strategy. The two are
+        // different: a `codebase` medium reports `change_signal: true` while
+        // a binding declaring `change_detection: "none"` resolves it to
+        // `ChangeStrategy::None`, which is exactly the freshness row's
+        // `change_detectable`. Reading only the capability row let such a
+        // binding render CLEAN while the report body two screens down said
+        // "freshness unknowable" — the headline disagreeing with its own
+        // evidence, which is the one thing this derivation exists to prevent.
+        let change_blind: std::collections::BTreeSet<&str> = self
+            .freshness
+            .iter()
+            .filter(|f| !f.change_detectable)
+            .map(|f| f.facet.as_str())
+            .collect();
         for cap in &self.capabilities {
             if !cap.change_signal {
                 blind_spots.push(format!(
                     "facet `{}` ({}) provides no change signal — drift on it cannot be \
                      observed at all",
                     cap.facet, cap.medium_type
+                ));
+            } else if change_blind.contains(cap.facet.as_str()) {
+                blind_spots.push(format!(
+                    "facet `{}` ({}) resolved to change-detection `{}` — the medium could \
+                     signal change, but this binding asked it not to, so drift on it \
+                     cannot be observed",
+                    cap.facet, cap.medium_type, cap.signal
                 ));
             }
             // Checked per facet, not only on the binding-level denominator:
@@ -2157,6 +2179,35 @@ mod rollup_tests {
                 .iter()
                 .any(|s| s.contains("not enumerable")),
             "{:?}",
+            roll.blind_spots
+        );
+    }
+
+    /// A binding that declares `change_detection: "none"` over a medium that
+    /// COULD signal change is change-blind all the same. The capability row
+    /// still reads `change_signal: true` — only the resolved signal and the
+    /// freshness row know — so a rollup reading capabilities alone renders
+    /// this green while its own body prints "freshness unknowable".
+    #[test]
+    fn a_resolved_signal_of_none_blocks_green_even_when_the_medium_could_signal() {
+        let mut r = clean_report();
+        // Exactly the shape `change_detection: "none"` over a codebase
+        // produces: the MEDIUM can signal, the BINDING declined to.
+        r.capabilities[0].change_signal = true;
+        r.capabilities[0].signal = "none".to_string();
+        r.freshness[0].change_detectable = false;
+        r.freshness[0].signal = "none".to_string();
+        let roll = r.rollup();
+        assert_eq!(
+            roll.verdict,
+            RollupVerdict::Inconclusive,
+            "a change-blind binding is not a clean bill of health: {roll:?}"
+        );
+        assert!(
+            roll.blind_spots
+                .iter()
+                .any(|s| s.contains("asked it not to")),
+            "the blind spot names the binding's own choice: {:?}",
             roll.blind_spots
         );
     }

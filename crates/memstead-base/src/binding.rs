@@ -135,9 +135,10 @@ fn default_full_resync_every() -> u32 {
     DEFAULT_FULL_RESYNC_EVERY
 }
 
-/// The **verify** operation — read-only measurement. Optional: an absent
-/// `verify` block means engine defaults, never a refusal (verify is
-/// read-only). Carries no mode.
+/// The **verify** operation — measurement. Optional: an absent `verify`
+/// block means engine defaults, never a refusal (verify has no mutating
+/// operation to gate). Mutates no entity, but records findings, backfills
+/// observed anchor hashes and writes a `#verified` baseline. Carries no mode.
 ///
 /// `adjudication_cap` and `full_resync_every` are the tier-3 operations knobs
 /// (bundle plan `05-verify-sync-engine`, group D): scheduling attributes on the
@@ -229,8 +230,8 @@ pub struct PruneConfig {
 /// The operations block of a [`Binding`]: every operation is **optional**.
 /// An absent `build` / `sync` block makes that *mutating* operation
 /// refuse at run time with a `projection enable <op>` remedy; an absent
-/// `verify` block means engine defaults (verify is read-only — never a
-/// refusal). `build` is optional in serde so an absent block yields the
+/// `verify` block means engine defaults (verify has no mutating operation to
+/// gate — never a refusal). `build` is optional in serde so an absent block yields the
 /// remedy-bearing refusal rather than a generic "missing field" parse error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Operations {

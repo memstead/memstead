@@ -11,9 +11,10 @@ codebase, a filesystem, another mem — to a destination mem and populates it. T
 it will tell you, deterministically and without inventing numbers, how faithfully
 the mem still reflects the sources its binding declares.
 
-`memstead projection verify <binding>` computes that measurement. It never mutates
-the destination — it reads the store, the anchors, and the source, records durable
-findings, and renders a report. Repair is a separate operation (`sync`); verify only
+`memstead projection verify <binding>` computes that measurement. It mutates no
+entity in the destination — it reads the store, the anchors, and the source, records
+durable findings, and renders a report. It is not a pure read, though: see
+[Verify writes](#verify-writes) below. Repair is a separate operation (`sync`); verify only
 measures.
 
 ## What the contract measures

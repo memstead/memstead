@@ -853,11 +853,13 @@ pub fn render_verify_brief(resolved: &ResolvedIngest, backlog: usize) -> String 
     lines.push("### Out of scope for verify — no mutation".to_string());
     lines.push(String::new());
     lines.push(
-        "Verify writes **nothing** into the destination mem. Do not update a \
+        "Verify writes **no entity content**. Do not update a \
          `specifies` / `constraints` section, do not create or delete an entity, do not \
          add or remove a relationship. When measurement shows the graph is wrong, that \
          is a **finding** — the sync brief (`memstead projection brief --sync`) is the \
-         one place those repairs are made. Leave every fix to it."
+         one place those repairs are made. Leave every fix to it. (The run itself does \
+         record its findings store, backfill observed anchor hashes, and write a \
+         `#verified` baseline — engine bookkeeping, not your edits.)"
             .to_string(),
     );
     lines.push(String::new());
@@ -1931,7 +1933,17 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         // C1 REFUSAL: structurally no destination-mutation instruction. The
         // brief never tells the agent to write into the mem — it says the
         // opposite, and hands repairs to the sync brief.
-        assert!(out.contains("Verify writes **nothing** into the destination mem"));
+        //
+        // Reworded 2026-08-20. This assertion used to pin "Verify writes
+        // **nothing** into the destination mem", which was false: a completed
+        // run records its findings store, backfills observed anchor hashes and
+        // writes a `#verified` baseline. The refusal this test exists to
+        // protect is about ENTITY CONTENT — that is what an agent reading the
+        // brief must not touch — so the claim is narrowed to what is true
+        // rather than deleted, and the bookkeeping is asserted alongside it so
+        // the correction cannot silently regress.
+        assert!(out.contains("Verify writes **no entity content**"));
+        assert!(out.contains("`#verified` baseline"));
         assert!(out.contains("memstead projection brief --sync"));
         // No create/update/relate/delete *instruction* — the only occurrences of
         // those verbs are in the negated "do not …" refusal line.
@@ -1943,7 +1955,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let zero = render_verify_brief(&r, 0);
         assert!(zero.contains("No findings are queued for adjudication"));
         assert!(zero.contains("record any drift you observe as a finding"));
-        assert!(zero.contains("Verify writes **nothing**"));
+        assert!(zero.contains("Verify writes **no entity content**"));
     }
 
     /// C2 — the sync brief carries BOTH inputs in ONE render: the cursor slice

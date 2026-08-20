@@ -1550,8 +1550,14 @@ fn brief_verify_renders_measurement_only() {
         .clone();
     let brief = String::from_utf8(out).unwrap();
     assert!(brief.contains("## Verify — measure fidelity, do not mutate"));
+    // Reworded 2026-08-20 with the engine-side assertion in
+    // `ingest::brief::tests`: the brief used to claim verify writes
+    // "**nothing**", which is false — a completed run records findings,
+    // backfills anchor hashes and writes a `#verified` baseline. The refusal
+    // being pinned is about ENTITY CONTENT, so the claim is narrowed to what
+    // holds rather than dropped.
     assert!(
-        brief.contains("Verify writes **nothing** into the destination mem"),
+        brief.contains("Verify writes **no entity content**"),
         "C1 refusal present; got:\n{brief}"
     );
     // C1/C2 refusal: the verify brief carries NO repair block.
@@ -2404,8 +2410,9 @@ fn absent_sync_names_the_enable_remedy_only_where_the_medium_can_carry_it() {
 fn brief_refuses_absent_build_then_enable_build_remedy_succeeds() {
     let tmp = advance_workspace();
     let root = tmp.path();
-    // Strip the build block — a verify-only binding (verify is read-only, never
-    // a refusal, so it is a legal build-less shape).
+    // Strip the build block — a verify-only binding (verify has no mutating
+    // operation to gate, so an absent block is never a refusal and this is a
+    // legal build-less shape).
     write_store(
         root,
         "projections/engine/graph.json",

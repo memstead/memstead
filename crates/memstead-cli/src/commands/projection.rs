@@ -154,13 +154,15 @@ pub enum ProjectionCommand {
     /// mined and warrants no destination entity, because …" capability.
     Exclude(ExcludeArgs),
     /// Measure a binding's fidelity and record durable findings (E3b, group A).
-    /// Read-only on the destination mem: verify adjudicates the mem's anchors
+    /// Read-only on the destination mem's ENTITIES: verify adjudicates its anchors
     /// against the live source and samples in-scope artifacts, writing findings
     /// keyed `(hash(D), source_head)` into the engine-owned findings store
     /// (`.memstead/state/findings/`). A binding-declaration edit or a source-head
     /// move partitions the keyspace, so prior findings are segregated as
-    /// superseded, never presented as current. Verify never mutates the mem —
-    /// any repair routes through the (later) sync brief. It then renders the
+    /// superseded, never presented as current. Verify mutates no entity — any
+    /// repair routes through the (later) sync brief — but it is not a pure read:
+    /// a completed run records the findings store, backfills observed content
+    /// hashes onto hash-less anchors, and records a `#verified` baseline. It then renders the
     /// deterministic, token-budgeted **tier-1 fidelity report** (group B) over
     /// the findings just recorded: grain-classed coverage with tree-anchor
     /// fan-out on its own axis, anchor-resolution %, freshness vs. both

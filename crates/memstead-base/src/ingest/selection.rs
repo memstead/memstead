@@ -60,7 +60,7 @@ pub enum OperationKind {
     Build,
     /// The sync operation (the sole maintenance writer).
     Sync,
-    /// The verify operation (read-only measurement).
+    /// The verify operation (measurement — writes no entity).
     Verify,
 }
 

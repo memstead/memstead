@@ -195,13 +195,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   anything.
 
 ### Fixed
+- **"Verify is read-only" was false on eleven surfaces, including the ones
+  agents read.** Verify mutates no entity, but a completed run records its
+  findings store, backfills observed content hashes onto hash-less anchors,
+  and writes a `#verified` baseline. The claim is corrected everywhere it was
+  made — the CLI's own clap comments (which regenerate into the published
+  reference twice), the fidelity-contract page's opening, the glossary, the
+  binding-format generator and its JSON schema, the plugin README and `sync`
+  skill, and the verify brief an agent reads at run time. Two grading rounds
+  were needed to find them all: the first swept the obvious ones, and the
+  page that still contradicted itself top-to-bottom survived it.
+- **The rollup could render `clean` on a change-blind binding.** It read the
+  medium's capability row, which says a `codebase` source *can* signal
+  change — while a binding declaring `change_detection: "none"` resolves that
+  medium to no strategy at all. Such a run printed a green verdict above a
+  body that said "freshness unknowable" two screens down. The derivation now
+  reads the resolved signal, so a binding that asked its medium not to report
+  change is `inconclusive` and says which facet and why.
 - **The fidelity contract named two of its four caps.** The page now also
   states that graph-medium verify is inert (a binding whose source is
   another mem enumerates nothing and reads `0/0`, so it is not gateable
   today) and that an mtime `#synced` baseline does not survive a fresh
   checkout — both of which bound what a CI gate can honestly claim. It
   also says outright that verify **writes**: a findings store, an anchor
-  hash backfill, and a `#verified` baseline. No doc calls it read-only.
+  hash backfill, and a `#verified` baseline.
 - The fidelity-contract page has claimed since it was written that the
   report "opens with a rollup verdict and the top concrete actions". No code
   produced one. It does now — the docs stopped being wrong by the code

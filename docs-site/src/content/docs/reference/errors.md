@@ -116,36 +116,36 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `PARSE_ERROR` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1235`<br>`crates/memstead-base/src/engine/error.rs:1236`<br>`crates/memstead-mcp/src/filesystem_server.rs:855`<br>`crates/memstead-mcp/src/filesystem_server.rs:857`<br>`crates/memstead-mcp/src/server.rs:1629`<br>`crates/memstead-mcp/src/server.rs:1638` |
 | `PATCH_OLD_NOT_FOUND` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1233`<br>`crates/memstead-mcp/src/server.rs:1234` |
 | `PATCH_SECTION_EMPTY` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1232`<br>`crates/memstead-mcp/src/filesystem_server.rs:829`<br>`crates/memstead-mcp/src/server.rs:1221` |
-| `PROJECTION_ADVANCE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1540`<br>`crates/memstead-cli/src/commands/projection.rs:1585`<br>`crates/memstead-cli/src/commands/projection.rs:1620` |
-| `PROJECTION_ADVANCE_UNKNOWN_ARTIFACT` | CLI | `crates/memstead-cli/src/commands/projection.rs:1575` |
-| `PROJECTION_BRIEF_BINDING_REQUIRED` | CLI | `crates/memstead-cli/src/commands/projection.rs:567` |
-| `PROJECTION_BUILD_NOT_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:515` |
-| `PROJECTION_CAPABILITY_UNSUPPORTED` | CLI | `crates/memstead-cli/src/commands/projection.rs:478`<br>`crates/memstead-cli/src/commands/projection.rs:1495`<br>`crates/memstead-cli/src/commands/projection.rs:1903` |
-| `PROJECTION_ENABLE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1363` |
-| `PROJECTION_EXCLUDE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1717`<br>`crates/memstead-cli/src/commands/projection.rs:1751` |
-| `PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER` | CLI | `crates/memstead-cli/src/commands/projection.rs:1712` |
-| `PROJECTION_EXISTS` | CLI | `crates/memstead-cli/src/commands/projection.rs:800` |
-| `PROJECTION_FINDINGS_READ_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:521` |
-| `PROJECTION_INIT_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:749`<br>`crates/memstead-cli/src/commands/quickstart.rs:596` |
-| `PROJECTION_INVALID_DISPOSITIONS` | CLI | `crates/memstead-cli/src/commands/projection.rs:1606` |
-| `PROJECTION_INVALID_EXCLUSIONS` | CLI | `crates/memstead-cli/src/commands/projection.rs:1738` |
-| `PROJECTION_INVALID_NAME` | CLI | `crates/memstead-cli/src/commands/projection.rs:529`<br>`crates/memstead-cli/src/commands/projection.rs:774`<br>`crates/memstead-cli/src/commands/projection.rs:1346`<br>`crates/memstead-cli/src/commands/projection.rs:1538`<br>`crates/memstead-cli/src/commands/projection.rs:1553`<br>`crates/memstead-cli/src/commands/projection.rs:1707` |
-| `PROJECTION_LOAD_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:509`<br>`crates/memstead-cli/src/commands/projection.rs:584`<br>`crates/memstead-cli/src/commands/projection.rs:630` |
-| `PROJECTION_MIGRATE_DANGLING_REF` | CLI | `crates/memstead-cli/src/commands/projection.rs:911` |
-| `PROJECTION_MIGRATE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:937`<br>`crates/memstead-cli/src/commands/projection.rs:1128`<br>`crates/memstead-cli/src/commands/projection.rs:1240`<br>`crates/memstead-cli/src/commands/projection.rs:1249`<br>`crates/memstead-cli/src/commands/projection.rs:1259` |
-| `PROJECTION_MIGRATE_INERT_PROJECTION` | CLI | `crates/memstead-cli/src/commands/projection.rs:1180` |
-| `PROJECTION_MIGRATE_MALFORMED_REF` | CLI | `crates/memstead-cli/src/commands/projection.rs:904` |
-| `PROJECTION_MIGRATE_ORPHAN_RECORDS` | CLI | `crates/memstead-cli/src/commands/projection.rs:916` |
-| `PROJECTION_MIGRATE_REFINEMENT` | CLI | `crates/memstead-cli/src/commands/projection.rs:899` |
-| `PROJECTION_NOT_FOUND` | CLI | `crates/memstead-cli/src/commands/projection.rs:526`<br>`crates/memstead-cli/src/commands/projection.rs:1021`<br>`crates/memstead-cli/src/commands/projection.rs:1401` |
-| `PROJECTION_OP_ALREADY_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1436` |
-| `PROJECTION_QUARANTINED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1005` |
+| `PROJECTION_ADVANCE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1542`<br>`crates/memstead-cli/src/commands/projection.rs:1587`<br>`crates/memstead-cli/src/commands/projection.rs:1622` |
+| `PROJECTION_ADVANCE_UNKNOWN_ARTIFACT` | CLI | `crates/memstead-cli/src/commands/projection.rs:1577` |
+| `PROJECTION_BRIEF_BINDING_REQUIRED` | CLI | `crates/memstead-cli/src/commands/projection.rs:569` |
+| `PROJECTION_BUILD_NOT_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:517` |
+| `PROJECTION_CAPABILITY_UNSUPPORTED` | CLI | `crates/memstead-cli/src/commands/projection.rs:480`<br>`crates/memstead-cli/src/commands/projection.rs:1497`<br>`crates/memstead-cli/src/commands/projection.rs:1905` |
+| `PROJECTION_ENABLE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1365` |
+| `PROJECTION_EXCLUDE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1719`<br>`crates/memstead-cli/src/commands/projection.rs:1753` |
+| `PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER` | CLI | `crates/memstead-cli/src/commands/projection.rs:1714` |
+| `PROJECTION_EXISTS` | CLI | `crates/memstead-cli/src/commands/projection.rs:802` |
+| `PROJECTION_FINDINGS_READ_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:523` |
+| `PROJECTION_INIT_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:751`<br>`crates/memstead-cli/src/commands/quickstart.rs:596` |
+| `PROJECTION_INVALID_DISPOSITIONS` | CLI | `crates/memstead-cli/src/commands/projection.rs:1608` |
+| `PROJECTION_INVALID_EXCLUSIONS` | CLI | `crates/memstead-cli/src/commands/projection.rs:1740` |
+| `PROJECTION_INVALID_NAME` | CLI | `crates/memstead-cli/src/commands/projection.rs:531`<br>`crates/memstead-cli/src/commands/projection.rs:776`<br>`crates/memstead-cli/src/commands/projection.rs:1348`<br>`crates/memstead-cli/src/commands/projection.rs:1540`<br>`crates/memstead-cli/src/commands/projection.rs:1555`<br>`crates/memstead-cli/src/commands/projection.rs:1709` |
+| `PROJECTION_LOAD_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:511`<br>`crates/memstead-cli/src/commands/projection.rs:586`<br>`crates/memstead-cli/src/commands/projection.rs:632` |
+| `PROJECTION_MIGRATE_DANGLING_REF` | CLI | `crates/memstead-cli/src/commands/projection.rs:913` |
+| `PROJECTION_MIGRATE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:939`<br>`crates/memstead-cli/src/commands/projection.rs:1130`<br>`crates/memstead-cli/src/commands/projection.rs:1242`<br>`crates/memstead-cli/src/commands/projection.rs:1251`<br>`crates/memstead-cli/src/commands/projection.rs:1261` |
+| `PROJECTION_MIGRATE_INERT_PROJECTION` | CLI | `crates/memstead-cli/src/commands/projection.rs:1182` |
+| `PROJECTION_MIGRATE_MALFORMED_REF` | CLI | `crates/memstead-cli/src/commands/projection.rs:906` |
+| `PROJECTION_MIGRATE_ORPHAN_RECORDS` | CLI | `crates/memstead-cli/src/commands/projection.rs:918` |
+| `PROJECTION_MIGRATE_REFINEMENT` | CLI | `crates/memstead-cli/src/commands/projection.rs:901` |
+| `PROJECTION_NOT_FOUND` | CLI | `crates/memstead-cli/src/commands/projection.rs:528`<br>`crates/memstead-cli/src/commands/projection.rs:1023`<br>`crates/memstead-cli/src/commands/projection.rs:1403` |
+| `PROJECTION_OP_ALREADY_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1438` |
+| `PROJECTION_QUARANTINED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1007` |
 | `PROJECTION_STORE_LEGACY` | engine | `crates/memstead-base/src/workspace_store.rs:162` |
-| `PROJECTION_SYNC_NOT_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:488` |
-| `PROJECTION_VERIFY_BACKFILL_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1935` |
-| `PROJECTION_VERIFY_BASELINE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1962` |
-| `PROJECTION_VERIFY_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1851`<br>`crates/memstead-cli/src/commands/projection.rs:1914` |
-| `PROJECTION_VERIFY_FINDINGS` | CLI | `crates/memstead-cli/src/commands/projection.rs:2054` |
+| `PROJECTION_SYNC_NOT_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:490` |
+| `PROJECTION_VERIFY_BACKFILL_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1937` |
+| `PROJECTION_VERIFY_BASELINE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1964` |
+| `PROJECTION_VERIFY_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1853`<br>`crates/memstead-cli/src/commands/projection.rs:1916` |
+| `PROJECTION_VERIFY_FINDINGS` | CLI | `crates/memstead-cli/src/commands/projection.rs:2056` |
 | `PUSHED_COMMITS_PROTECTED` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1195`<br>`crates/memstead-mcp/src/server.rs:861` |
 | `RANGE_FILTER_KEY_MALFORMED` | engine | `crates/memstead-base/src/ops/mod.rs:1754` |
 | `RANGE_FILTER_TYPE_SCOPED` | engine | `crates/memstead-base/src/ops/mod.rs:1762` |
@@ -186,7 +186,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `SECTION_NOT_UPDATABLE` | engine | `crates/memstead-base/src/runtime_validator.rs:199` |
 | `SELF_LINK_IGNORED` | engine | `crates/memstead-base/src/ops/mod.rs:1783` |
 | `SET_AND_UNSET_CONFLICT` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1229`<br>`crates/memstead-mcp/src/server.rs:1212` |
-| `SOURCE_UNREACHABLE` | CLI | `crates/memstead-cli/src/commands/projection.rs:1883` |
+| `SOURCE_UNREACHABLE` | CLI | `crates/memstead-cli/src/commands/projection.rs:1885` |
 | `STUB_CANNOT_RELATE` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1221`<br>`crates/memstead-mcp/src/server.rs:1284` |
 | `STUB_FILTER_EXCLUDES_ALL` | engine | `crates/memstead-base/src/ops/mod.rs:1730` |
 | `STUB_NOT_RENAMABLE` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1223`<br>`crates/memstead-mcp/src/server.rs:1302` |

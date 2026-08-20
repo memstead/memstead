@@ -76,7 +76,7 @@ findings and a `#verified` baseline. Read-only on your source; refusals verbatim
    listed. The baseline advances once the slice is fully dispositioned.
 
 6. `--verify <binding>`: run `memstead --workspace "$WS" projection verify <binding>` —
-   report-only, nothing changes; it measures the mem, not your project's
+   it records findings, never entities; it measures the mem, not your project's
    changes or tests. Present the engine's deterministic report as ordered —
    verdict and top actions first, never re-ranked. A near-zero first report on
    a pre-binding mem is onboarding — name the route (`/ingest`, then `/sync`).

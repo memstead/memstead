@@ -1,8 +1,10 @@
 //! The engine-owned durable **findings store** and the thin `projection verify`
 //! write path that populates it (bundle plan `05-verify-sync-engine`, group A).
 //!
-//! Verify **measures** fidelity and records durable findings; it never mutates
-//! the destination mem. The store is the real home behind plan 03's findings
+//! Verify **measures** fidelity and records durable findings; it mutates no
+//! entity in the destination mem (though a completed run does write this
+//! store, backfill observed anchor hashes, and record a `#verified`
+//! baseline). The store is the real home behind plan 03's findings
 //! schema stub ([`crate::binding`]'s removed `FindingKey` / `FindingRecord`).
 //!
 //! ## Keying: `hash(D)` alone — findings survive head movement
@@ -1248,8 +1250,8 @@ fn run_verify(
     // Tier-3 operations knobs (group D): the per-run adjudication cap (D1), the
     // scheduled full-walk cadence (D3), and the sample window size. All come off
     // the `verify` block, defaulting to the dogfood-tuned engine defaults when it
-    // is absent (verify is read-only — an absent block is defaults, never a
-    // refusal).
+    // is absent (verify has no mutating operation to gate — an absent block is
+    // defaults, never a refusal).
     let verify_op = binding.operations.verify.as_ref();
     let cap = verify_op.map_or(DEFAULT_ADJUDICATION_CAP, |v| v.adjudication_cap);
     let full_resync_every = verify_op.map_or(DEFAULT_FULL_RESYNC_EVERY, |v| v.full_resync_every);
@@ -1942,7 +1944,7 @@ mod tests {
         );
     }
 
-    // ---- A1/A5 end-to-end: verify writes durable findings, read-only on mem --
+    // ---- A1/A5 end-to-end: verify writes durable findings, no entity write --
 
     use crate::anchor::AnchorSidecar;
     use crate::binding::{
