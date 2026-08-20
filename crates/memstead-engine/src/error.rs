@@ -179,23 +179,22 @@ impl RecoveryAction {
     }
 }
 
-/// The concrete grant command for a refusing allowlist table, CLI and
-/// MCP forms — the single source both the prose and the structured
-/// `details.remedy` render, so the two channels cannot drift. The
-/// create form names the pattern and the schema pin because
-/// `allow-create` requires both; delete rules have no schema
-/// dimension.
-fn allowlist_remedy(policy_table: &str) -> (&'static str, &'static str) {
+/// The concrete grant command for a refusing allowlist table — the
+/// single source both the prose and the structured `details.remedy`
+/// render, so the two channels cannot drift. The create form names the
+/// pattern and the schema pin because `allow-create` requires both;
+/// delete rules have no schema dimension.
+///
+/// CLI only, deliberately: workspace policy is the operator deciding
+/// what an agent may do, so it is not editable from the agent's own
+/// tool surface. An agent meeting this refusal reports the command; a
+/// person runs it. Naming an MCP tool here would point at one that no
+/// longer exists.
+fn allowlist_remedy(policy_table: &str) -> &'static str {
     if policy_table == "mem_management.delete" {
-        (
-            "memstead workspace allow-delete '<pattern>'",
-            "memstead_workspace_allow_delete",
-        )
+        "memstead workspace allow-delete '<pattern>'"
     } else {
-        (
-            "memstead workspace allow-create '<pattern>' --schema <name@version>",
-            "memstead_workspace_allow_create",
-        )
+        "memstead workspace allow-create '<pattern>' --schema <name@version>"
     }
 }
 
@@ -236,14 +235,14 @@ impl FullEngineError {
                 } else {
                     "creation"
                 };
-                let (allow_cmd, allow_tool) = allowlist_remedy(policy_table);
+                let allow_cmd = allowlist_remedy(policy_table);
                 match *reason {
                     "no_allowlist_configured" => format!(
-                        "mem {verb} is refused by default: this workspace has no `[[{policy_table}]]` allowlist rules (candidate '{candidate}', resolved location '{}'). Grant the permission first — `{allow_cmd}` (MCP: `{allow_tool}`), e.g. with pattern '{candidate}' — then retry.",
+                        "mem {verb} is refused by default: this workspace has no `[[{policy_table}]]` allowlist rules (candidate '{candidate}', resolved location '{}'). Grant the permission first — `{allow_cmd}`, e.g. with pattern '{candidate}' — then retry. Workspace policy is an operator surface: report the command, a person runs it.",
                         attempted.display()
                     ),
                     "no_match" => format!(
-                        "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') matched none of the configured patterns: {patterns_inline}. Use a name matching an existing pattern, or add a covering rule — `{allow_cmd}` (MCP: `{allow_tool}`).",
+                        "mem path not allowed by `[[{policy_table}]]`: candidate '{candidate}' (resolved location '{}') matched none of the configured patterns: {patterns_inline}. Use a name matching an existing pattern, or ask the operator to add a covering rule — `{allow_cmd}`.",
                         attempted.display()
                     ),
                     _ => format!(
@@ -277,7 +276,7 @@ impl FullEngineError {
                     referring_mems.join(", ")
                 };
                 format!(
-                    "mem {name} cannot be deleted: workspace `[cross_mem_links]` policy grants the following mems write-into permission: {inline}. Revoke each grant (`memstead_workspace_revoke_cross_link`) and retry."
+                    "mem {name} cannot be deleted: workspace `[cross_mem_links]` policy grants the following mems write-into permission: {inline}. Ask the operator to revoke each grant (`memstead workspace revoke-cross-link <from> <to>`) and retry."
                 )
             }
             // InvalidMemName, ConfigAlreadyExists, MemStorageResidueDetected:
@@ -320,8 +319,8 @@ impl FullEngineError {
                 // remedy: `outside_workspace` is not fixed by an
                 // allowlist rule, so it carries none.
                 if matches!(*reason, "no_allowlist_configured" | "no_match") {
-                    let (cli, mcp) = allowlist_remedy(policy_table);
-                    d["remedy"] = serde_json::json!({ "cli": cli, "mcp": mcp });
+                    let cli = allowlist_remedy(policy_table);
+                    d["remedy"] = serde_json::json!({ "cli": cli });
                 }
                 d
             }
@@ -498,8 +497,8 @@ mod tests {
             "prose names the schema pin: {prose}"
         );
         assert!(
-            prose.contains("memstead_workspace_allow_create"),
-            "prose names the MCP remedy: {prose}"
+            prose.contains("operator surface"),
+            "prose names policy as an operator act: {prose}"
         );
         let details = err.details();
         assert!(
@@ -509,7 +508,16 @@ mod tests {
                 .contains("allow-create"),
             "details carry the remedy: {details}"
         );
-        assert_eq!(details["remedy"]["mcp"], "memstead_workspace_allow_create");
+        // Policy is not editable from MCP, so the remedy names no tool
+        // — a pointer at a removed tool is worse than no pointer.
+        assert!(
+            details["remedy"]["mcp"].is_null(),
+            "the remedy names no MCP tool: {details}"
+        );
+        assert!(
+            !prose.contains("memstead_workspace_"),
+            "prose names no removed MCP tool: {prose}"
+        );
 
         // Delete-path variant names allow-delete, without a schema pin.
         let err = FullEngineError::MemPathNotAllowed {
@@ -522,9 +530,13 @@ mod tests {
         let prose = err.prose_render();
         assert!(prose.contains("memstead workspace allow-delete"), "{prose}");
         assert!(!prose.contains("--schema"), "{prose}");
-        assert_eq!(
-            err.details()["remedy"]["mcp"],
-            "memstead_workspace_allow_delete"
+        assert!(
+            err.details()["remedy"]["cli"]
+                .as_str()
+                .unwrap()
+                .contains("allow-delete"),
+            "{:?}",
+            err.details()
         );
     }
 

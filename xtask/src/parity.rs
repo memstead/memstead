@@ -29,6 +29,13 @@ struct Operation {
     cli: Option<String>,
     #[serde(default)]
     wasm: Option<String>,
+    /// Why this operation is deliberately absent from a surface.
+    /// Optional and free-form; when present it renders as a footnote
+    /// under the matrix and the row is marked. An empty cell alone
+    /// cannot say whether the gap is a decision or an oversight — this
+    /// is how a decision says so.
+    #[serde(default)]
+    rationale: Option<String>,
 }
 
 pub struct Inputs {
@@ -132,12 +139,33 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
             Some(name) => format!("`{}`", name),
             None => "—".to_string(),
         };
+        let marker = if op.rationale.is_some() { " †" } else { "" };
         out.push_str(&format!(
-            "| `{}` | {} | {} | {} |\n",
-            op.name, mcp_cell, cli_cell, wasm_cell,
+            "| `{}`{} | {} | {} | {} |\n",
+            op.name, marker, mcp_cell, cli_cell, wasm_cell,
         ));
     }
     out.push('\n');
+
+    let explained: Vec<&Operation> = ops
+        .operation
+        .iter()
+        .filter(|o| o.rationale.is_some())
+        .collect();
+    if !explained.is_empty() {
+        out.push_str(
+            "† These absences are decisions, not gaps. Every other empty \
+             cell is simply an operation that surface does not carry.\n\n",
+        );
+        for op in explained {
+            out.push_str(&format!(
+                "- `{}` — {}\n",
+                op.name,
+                op.rationale.as_deref().unwrap_or_default(),
+            ));
+        }
+        out.push('\n');
+    }
 
     let claimed_mcp: BTreeSet<&str> = ops
         .operation

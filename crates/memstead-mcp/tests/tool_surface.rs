@@ -8,10 +8,8 @@
 //! `memstead_update`; admin: `memstead_changes_since`, `memstead_diff`,
 //! `memstead_reload`; mem lifecycle: `memstead_mem_create`,
 //! `memstead_mem_delete`, `memstead_mem_set_schema`,
-//! `memstead_mem_set_version`; workspace policy:
-//! `memstead_workspace_allow_create` / `_allow_delete` /
-//! `_grant_cross_link` / `_revoke_create` / `_revoke_cross_link` /
-//! `_revoke_delete`. The asserted count is `EXPECTED_TOOLS.len()` —
+//! `memstead_mem_set_version`. The asserted count is
+//! `EXPECTED_TOOLS.len()` —
 //! `tool_count_matches_expected_set` pins it against the live router.
 //!
 //! Several former tools are now folded in and must not re-appear:
@@ -22,16 +20,20 @@
 //! `memstead_batch_update`, `memstead_export`, `memstead_stats`,
 //! `memstead_status`, `memstead_relations`, `memstead_context`,
 //! `memstead_type_info` are gone (`memstead_status` never minted — D11).
+//! So is the whole `memstead_workspace_*` family (allow/revoke create,
+//! allow/revoke delete, grant/revoke cross-link): workspace policy is
+//! the operator deciding what an agent may do, and the constrained
+//! party does not hold the keys to its constraints, so it is a CLI
+//! surface only.
 //!
-//! Mem lifecycle is not workspace configuration, but both are on the
-//! MCP surface. The lifecycle family (`memstead_mem_create` /
-//! `memstead_mem_delete` / `memstead_mem_set_schema` /
-//! `memstead_mem_set_version`) creates/removes/reconfigures a whole
-//! mem at runtime; workspace-policy mutation (allowlists and
-//! cross-mem link policy in `.memstead/workspace.toml`) is the
-//! `memstead_workspace_*` family. Every MCP tool must carry the
-//! `memstead_` prefix — an un-namespaced `workspace_*` tool (or any
-//! other non-`memstead_` tool) must fail this test.
+//! Mem lifecycle is not workspace configuration. The lifecycle family
+//! (`memstead_mem_create` / `memstead_mem_delete` /
+//! `memstead_mem_set_schema` / `memstead_mem_set_version`)
+//! creates/removes/reconfigures a whole mem at runtime and stays on
+//! this surface, gated by the `[mem_management]` allowlists the
+//! operator owns. Every MCP tool must carry the `memstead_` prefix —
+//! an un-namespaced `workspace_*` tool (or any other non-`memstead_`
+//! tool) must fail this test.
 //!
 //! Drives the generated `McpServer::tool_router()` directly rather than
 //! spawning a server over stdio — the router's tool list is the contract.
@@ -71,12 +73,6 @@ const EXPECTED_TOOLS: &[&str] = &[
     // revoke surface and the lifecycle allowlist editor — an
     // MCP-driven agent can now complete the full dynamic mem
     // lifecycle without dropping to CLI.
-    "memstead_workspace_allow_create",
-    "memstead_workspace_allow_delete",
-    "memstead_workspace_grant_cross_link",
-    "memstead_workspace_revoke_create",
-    "memstead_workspace_revoke_cross_link",
-    "memstead_workspace_revoke_delete",
 ];
 
 fn current_tool_names() -> Vec<String> {
@@ -615,42 +611,6 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // `revoke` half flips `destructive=true` because removing a
         // grant or rule changes downstream authorization (e.g.,
         // future `memstead_mem_create` may refuse).
-        "memstead_workspace_grant_cross_link" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(false),
-            idempotent: Some(true),
-            open_world: Some(false),
-        },
-        "memstead_workspace_revoke_cross_link" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(true),
-            idempotent: Some(true),
-            open_world: Some(false),
-        },
-        "memstead_workspace_allow_create" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(false),
-            idempotent: Some(true),
-            open_world: Some(false),
-        },
-        "memstead_workspace_revoke_create" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(true),
-            idempotent: Some(true),
-            open_world: Some(false),
-        },
-        "memstead_workspace_allow_delete" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(false),
-            idempotent: Some(true),
-            open_world: Some(false),
-        },
-        "memstead_workspace_revoke_delete" => HintTriple {
-            read_only: Some(false),
-            destructive: Some(true),
-            idempotent: Some(true),
-            open_world: Some(false),
-        },
         _ => panic!("unexpected tool in hint table: {tool_name}"),
     }
 }
@@ -757,11 +717,6 @@ fn descriptions_start_with_verb() {
         "Unregister",
         "Reload",
         "Update",
-        // The six `memstead_workspace_*` tools lead with operation
-        // verbs.
-        "Grant",
-        "Revoke",
-        "Append",
     ];
     const BANNED_LEADS: &[&str] = &["This", "Allows", "A", "An", "The"];
 
@@ -2081,106 +2036,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "0.1.0",
         ],
         // Workspace-policy mutation tools.
-        "memstead_workspace_grant_cross_link" => &[
-            // Response-shape + section-name refs.
-            "from",
-            "to",
-            "warnings",
-            "cross_mem_links",
-            // Idempotency warning + conflict error codes.
-            "GRANT_ALREADY_PRESENT",
-            "CROSS_LINK_CONFLICT",
-            "WORKSPACE_NOT_INITIALISED",
-            "INVALID_TOML",
-            "IO_ERROR",
-            // F7 workflow cross-tool references.
-            "memstead_mem_create",
-            "memstead_mem_delete",
-            "memstead_relate",
-            "memstead_workspace_revoke_cross_link",
-            // Workspace config path tokens.
-            ".memstead",
-            "workspace.toml",
-        ],
-        "memstead_workspace_revoke_cross_link" => &[
-            "from",
-            "to",
-            "warnings",
-            "cross_mem_links",
-            "GRANT_NOT_FOUND",
-            "MEM_REFERENCED_BY_POLICY",
-            "WORKSPACE_NOT_INITIALISED",
-            "INVALID_TOML",
-            "IO_ERROR",
-            "memstead_mem_delete",
-            ".memstead",
-            "workspace.toml",
-        ],
-        "memstead_workspace_allow_create" => &[
-            "pattern",
-            "schemas",
-            "before",
-            "default_cross_links",
-            "warnings",
-            // Section names cited in the description.
-            "mem_management.create",
-            "cross_mem_links",
-            // Idempotency warning + related error codes.
-            "RULE_ALREADY_PRESENT",
-            "BEFORE_PATTERN_NOT_FOUND",
-            "WORKSPACE_NOT_INITIALISED",
-            "MEM_PATH_NOT_ALLOWED",
-            // Schema-differ refusal code + its structured recovery payload.
-            "RULE_EXISTS_SCHEMAS_DIFFER",
-            "details.stored_schemas",
-            "details.requested_schemas",
-            "details.recovery",
-            // Cross-tool refs.
-            "memstead_mem_create",
-            "memstead_workspace_grant_cross_link",
-            "memstead_overview",
-            "memstead_workspace_revoke_create",
-            // Rule-derived cross-link grant is surfaced under this
-            // workspace-policy posture key.
-            "cross_mem_links_from_rules",
-            // `.memstead/workspace.toml` slashed token.
-            ".memstead",
-            "workspace.toml",
-        ],
-        "memstead_workspace_revoke_create" => &[
-            "pattern",
-            "warnings",
-            "RULE_NOT_FOUND_NOOP",
-            "WORKSPACE_NOT_INITIALISED",
-            "INVALID_TOML",
-            "IO_ERROR",
-            "memstead_workspace_allow_create",
-            ".memstead",
-            "workspace.toml",
-        ],
-        "memstead_workspace_allow_delete" => &[
-            "pattern",
-            "warnings",
-            "mem_management.delete",
-            "RULE_ALREADY_PRESENT",
-            "WORKSPACE_NOT_INITIALISED",
-            "MEM_PATH_NOT_ALLOWED",
-            "memstead_mem_delete",
-            "memstead_workspace_allow_create",
-            ".memstead",
-            "workspace.toml",
-        ],
-        "memstead_workspace_revoke_delete" => &[
-            "pattern",
-            "warnings",
-            "RULE_NOT_FOUND_NOOP",
-            "WORKSPACE_NOT_INITIALISED",
-            "INVALID_TOML",
-            "IO_ERROR",
-            "memstead_workspace_allow_delete",
-            ".memstead",
-            "workspace.toml",
-        ],
         _ => &[],
     }
 }

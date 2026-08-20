@@ -6,12 +6,15 @@
 //! ([`crate::server::McpServer`]). Full-only tool parameters
 //! (mem-lifecycle family) live in [`crate::lifecycle`].
 //!
-//! Workspace-policy mutation **is** an MCP surface: the
-//! `memstead_workspace_*` family (allow/revoke create, allow/revoke
-//! delete, grant/revoke cross-link) edits the workspace allowlists and
-//! cross-mem link policy without a process restart. External agents
-//! that need to discover mems read
-//! `memstead_health.writable_mems` and `memstead_health.read_mems`.
+//! Workspace-policy mutation is **not** an MCP surface. Which mems may
+//! be created or deleted, and which cross-mem links are granted, is the
+//! operator deciding what an agent is allowed to do — putting those
+//! switches on the agent's own tool surface would hand the constrained
+//! party the keys to its constraints. Policy is edited with
+//! `memstead workspace <action>`, and a policy-gated mutation refuses
+//! with the exact command to report. External agents that need to
+//! discover mems read `memstead_health.writable_mems` and
+//! `memstead_health.read_mems`.
 //! **Mem lifecycle** (create/delete a whole mem) is a distinct
 //! concept and also lives on the MCP surface as `memstead_mem_create`
 //! / `memstead_mem_delete` — gated by workspace-level

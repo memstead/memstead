@@ -213,7 +213,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `WORKSPACE_ALREADY_EXISTS_ABOVE` | CLI | `crates/memstead-cli/src/lib.rs:49` |
 | `WORKSPACE_ALREADY_INITIALISED` | CLI | `crates/memstead-cli/src/commands/quickstart.rs:633` |
 | `WORKSPACE_CONFIG_READ_FAILED` | CLI | `crates/memstead-cli/src/commands/workspace.rs:469` |
-| `WORKSPACE_NOT_INITIALISED` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:2120`<br>`crates/memstead-base/src/workspace_store.rs:157`<br>`crates/memstead-cli/src/commands/changes.rs:246`<br>`crates/memstead-cli/src/commands/export.rs:410`<br>`crates/memstead-cli/src/commands/publish.rs:390`<br>`crates/memstead-cli/src/setup.rs:41`<br>`crates/memstead-mcp/src/server.rs:4358` |
+| `WORKSPACE_NOT_INITIALISED` | engine, CLI | `crates/memstead-base/src/engine/error.rs:2120`<br>`crates/memstead-base/src/workspace_store.rs:157`<br>`crates/memstead-cli/src/commands/changes.rs:246`<br>`crates/memstead-cli/src/commands/export.rs:410`<br>`crates/memstead-cli/src/commands/publish.rs:390`<br>`crates/memstead-cli/src/setup.rs:41` |
 | `WORKSPACE_STORE_ERROR` | engine | `crates/memstead-base/src/workspace_store.rs:164` |
 | `WORKSPACE_STORE_FORMAT_MISMATCH` | engine | `crates/memstead-base/src/workspace_store.rs:160` |
 | `WORKSPACE_STORE_IO` | engine | `crates/memstead-base/src/workspace_store.rs:158` |

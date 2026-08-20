@@ -32,6 +32,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   root, the uncollapsed form of `init_filesystem_mem`.
 
 ### Removed
+- **The six `memstead_workspace_*` MCP tools.** Workspace policy —
+  which mems may be created or deleted, which cross-mem links are
+  granted — is the operator deciding what an agent is allowed to do.
+  Exposing those switches on the agent's own tool surface handed the
+  constrained party the keys to its constraints. The capability is
+  unchanged and reachable via `memstead workspace <action>`; a
+  policy-gated mutation still refuses with the typed code and now
+  names the exact CLI command to report, rather than an MCP tool the
+  agent cannot call. The pro server drops from 25 tools to 19; the
+  lean server and the memstead.ai session endpoint never carried them.
 - **`memstead_base::entity::parser::extract_wiki_links` and its
   `WikiLink` struct.** A public wiki-link extractor that scanned raw
   content with no code-block masking, with zero callers anywhere in the

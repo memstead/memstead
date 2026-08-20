@@ -129,33 +129,33 @@ cli = "mem"
 
 [[operation]]
 name = "workspace-allow-create"
-mcp = "memstead_workspace_allow_create"
 cli = "workspace"
+rationale = "workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report."
 
 [[operation]]
 name = "workspace-revoke-create"
-mcp = "memstead_workspace_revoke_create"
 cli = "workspace"
+rationale = "workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report."
 
 [[operation]]
 name = "workspace-allow-delete"
-mcp = "memstead_workspace_allow_delete"
 cli = "workspace"
+rationale = "workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report."
 
 [[operation]]
 name = "workspace-revoke-delete"
-mcp = "memstead_workspace_revoke_delete"
 cli = "workspace"
+rationale = "workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report."
 
 [[operation]]
 name = "workspace-grant-cross-link"
-mcp = "memstead_workspace_grant_cross_link"
 cli = "workspace"
+rationale = "workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report."
 
 [[operation]]
 name = "workspace-revoke-cross-link"
-mcp = "memstead_workspace_revoke_cross_link"
 cli = "workspace"
+rationale = "workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report."
 
 # Binding (projection-promotion) surface — the `memstead projection` tree.
 # The projection is the unit: one versioned binding per source→mem

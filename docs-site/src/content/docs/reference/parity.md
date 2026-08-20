@@ -33,12 +33,12 @@ Every public engine operation across the three programmatic surfaces (MCP, CLI, 
 | `mem-create` | `memstead_mem_create` *(full only)* | `mem` *(full only)* | — |
 | `mem-delete` | `memstead_mem_delete` *(full only)* | `mem` *(full only)* | — |
 | `mem-set-version` | `memstead_mem_set_version` *(full only)* | `mem` *(full only)* | — |
-| `workspace-allow-create` | `memstead_workspace_allow_create` *(full only)* | `workspace` *(full only)* | — |
-| `workspace-revoke-create` | `memstead_workspace_revoke_create` *(full only)* | `workspace` *(full only)* | — |
-| `workspace-allow-delete` | `memstead_workspace_allow_delete` *(full only)* | `workspace` *(full only)* | — |
-| `workspace-revoke-delete` | `memstead_workspace_revoke_delete` *(full only)* | `workspace` *(full only)* | — |
-| `workspace-grant-cross-link` | `memstead_workspace_grant_cross_link` *(full only)* | `workspace` *(full only)* | — |
-| `workspace-revoke-cross-link` | `memstead_workspace_revoke_cross_link` *(full only)* | `workspace` *(full only)* | — |
+| `workspace-allow-create` † | — | `workspace` *(full only)* | — |
+| `workspace-revoke-create` † | — | `workspace` *(full only)* | — |
+| `workspace-allow-delete` † | — | `workspace` *(full only)* | — |
+| `workspace-revoke-delete` † | — | `workspace` *(full only)* | — |
+| `workspace-grant-cross-link` † | — | `workspace` *(full only)* | — |
+| `workspace-revoke-cross-link` † | — | `workspace` *(full only)* | — |
 | `projection-brief` | — | `projection` *(lean + full)* | — |
 | `projection-init` | — | `projection` *(lean + full)* | — |
 | `projection-migrate` | — | `projection` *(lean + full)* | — |
@@ -51,6 +51,15 @@ Every public engine operation across the three programmatic surfaces (MCP, CLI, 
 | `apply-commit` | — | — | `applyCommit` |
 | `mem-names` | — | — | `memNames` |
 | `set-panic-hook` | — | — | `setPanicHook` |
+
+† These absences are decisions, not gaps. Every other empty cell is simply an operation that surface does not carry.
+
+- `workspace-allow-create` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
+- `workspace-revoke-create` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
+- `workspace-allow-delete` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
+- `workspace-revoke-delete` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
+- `workspace-grant-cross-link` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
+- `workspace-revoke-cross-link` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
 
 ## Unaligned
 
