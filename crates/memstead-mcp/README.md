@@ -28,9 +28,12 @@ lean folder + archive surface.
 
 The easiest path is `memstead quickstart` from the
 [`memstead-cli`](../memstead-cli/) crate — it
-bootstraps a workspace and writes the MCP config for the agents you pick
-(on the v0.1.0 release binaries, which predate `quickstart`, bootstrap
-with `memstead init --name <name> --schema default@1.0.0`).
+bootstraps a workspace and writes the MCP config for the agents you pick.
+Run it in a fresh directory, or as `memstead quickstart --repo .` in a
+repository you already have (same artifacts, plus a source binding over
+that repository).
+(On the v0.1.0 release binaries, which predate `quickstart`, bootstrap
+with `memstead init --name <name> --schema default@1.3.0`.)
 Manual wiring is one entry in your agent's MCP config pointing at the
 `memstead-mcp` binary, run from inside a Memstead workspace.
 

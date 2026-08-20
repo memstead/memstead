@@ -30,7 +30,7 @@ bootstrap with a built-in pin, install the example package, then move the pin:
 
 ```bash
 mkdir my-mem && cd my-mem
-memstead init --name my-mem --schema default@1.0.0
+memstead init --name my-mem --schema default@1.3.0
 memstead schema install <path-to-this-repo>/examples/schemas/agent-program
 memstead mem set-schema my-mem agent-program@0.1.0
 ```

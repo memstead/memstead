@@ -38,9 +38,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   verb — the sync brief is `memstead projection brief <binding> --sync`.
   Four printed sites corrected, the pinning test with them.
 - **Superseded `default@1.0.0` citations** in the repo README, the CLI
-  crate README, `docs/build.md`, `docs/workspace.toml.example`, and
-  `docs/sizing-curve.md` — every one taught a schema pin the shipped
-  binary no longer writes.
+  crate README, `docs/build.md`, `docs/workspace.toml.example`,
+  `docs/sizing-curve.md`, the MCP crate README, `examples/README.md` and
+  the plugin setup skill's README — every one taught a schema pin the
+  shipped binary no longer writes. (The same misstatement inside the
+  sealed built-in schema packages is deliberately left alone: their
+  content is hash-pinned by the retention gate.)
+- **The crate READMEs and the installer offered only the empty-directory
+  entry.** `memstead-cli`'s `## Start`, the `memstead-mcp` wiring
+  section, and `install.sh`'s next-step line now name
+  `memstead quickstart --repo .` beside it.
 
 ## [0.9.0] - 2026-08-19
 

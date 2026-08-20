@@ -27,10 +27,23 @@ surface (multi-mem, git-backed via the `mem-repo` feature);
 
 ## Start
 
+In a fresh directory:
+
 ```bash
 mkdir my-graph && cd my-graph
 memstead quickstart
 ```
+
+…or in the repository you already have:
+
+```bash
+cd my-existing-repo
+memstead quickstart --repo .
+```
+
+`--repo` adds a source binding over that repository, with the mem in a
+folder of its own so none of your files are adopted as entities. Nothing
+is ingested — the receipt names the command that starts the ingest loop.
 
 (On the v0.1.0 release binaries, which predate `quickstart`, use
 `memstead init --name my-graph --schema default@1.3.0` instead.)
