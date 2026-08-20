@@ -820,13 +820,6 @@ fn classify_description_tail(tail: &str) -> DescriptionTail {
 // Wiki-links
 // ---------------------------------------------------------------------------
 
-/// A wiki-link found in markdown content.
-#[derive(Debug, Clone)]
-pub struct WikiLink {
-    pub target: String,
-    pub label: Option<String>,
-}
-
 /// The `[[target]]` / `[[target|label]]` wiki-link pattern, compiled once.
 ///
 /// The inner group is `*`, not `+`, so an empty target `[[]]` is *seen*
@@ -837,21 +830,6 @@ pub struct WikiLink {
 fn wiki_link_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\[\[([^\]]*)\]\]").unwrap())
-}
-
-/// Extract all wiki-links from markdown content.
-pub fn extract_wiki_links(content: &str) -> Vec<WikiLink> {
-    let re = wiki_link_re();
-    re.captures_iter(content)
-        .map(|cap| {
-            let raw = &cap[1];
-            let (target, label) = match raw.find('|') {
-                Some(i) => (raw[..i].to_string(), Some(raw[i + 1..].to_string())),
-                None => (raw.to_string(), None),
-            };
-            WikiLink { target, label }
-        })
-        .collect()
 }
 
 /// Extract unique mem-prefixed entity IDs from inline wiki-links,
@@ -1110,15 +1088,6 @@ mod tests {
         let masked = mask_code_blocks(input);
         assert!(masked.contains("before"));
         assert!(!masked.contains("code"));
-    }
-
-    #[test]
-    fn extract_wiki_links_basic() {
-        let links = extract_wiki_links("See [[target]] and [[other|label]]");
-        assert_eq!(links.len(), 2);
-        assert_eq!(links[0].target, "target");
-        assert_eq!(links[1].target, "other");
-        assert_eq!(links[1].label.as_deref(), Some("label"));
     }
 
     #[test]

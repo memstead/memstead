@@ -31,6 +31,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workspace counterpart: a folder mem in a subdirectory of the workspace
   root, the uncollapsed form of `init_filesystem_mem`.
 
+### Removed
+- **`memstead_base::entity::parser::extract_wiki_links` and its
+  `WikiLink` struct.** A public wiki-link extractor that scanned raw
+  content with no code-block masking, with zero callers anywhere in the
+  workspace. Dead pre-migration semantics standing beside the unified
+  extractors is how a future caller reaches for the wrong one; the
+  masked strict and lenient extractors are the surface.
+
 ### Changed
 - **One CommonMark referee for code.** Section splitting, title
   extraction, heading spans, wiki-link extraction, wiki-link rewriting,
