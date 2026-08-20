@@ -82,7 +82,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   definition rule exists to prevent. Real rows are untouched: the scan
   reads the masked body and takes every captured span from the original,
   so type normalisation, em-dash descriptions and ambiguous-delimiter
-  warnings behave exactly as before.
+  warnings behave exactly as before. Inline code spans count as code
+  here too: a row inside a multi-line span was invisible to the
+  validator and every extractor while still building an edge.
+- **Two more readers joined the one definition.**
+  `filesystem::tier3::extract_tier3_refs` (the registry's Tier 3
+  `[[scope/name:slug]]` scanner) and health's `enum_from_neighbour`
+  bullet harvest both read raw text; a reference or a legal value
+  written inside a code sample counted as real. Both now mask.
 - **HTML export stops rewriting wiki-links inside code.** The
   exporter's `[[…]]` resolution was a hand-rolled string walk with no
   masking, so a fenced or indented code sample documenting wiki-link

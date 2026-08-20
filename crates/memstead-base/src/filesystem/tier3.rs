@@ -200,12 +200,18 @@ fn tier3_re() -> &'static Regex {
 /// references in the same body are emitted once per occurrence
 /// (callers that want unique-by-key dedup do so themselves).
 pub fn extract_tier3_refs(text: &str) -> Vec<Tier3Ref> {
+    // Code is not a reference, by the one definition every other link
+    // scanner uses ([`crate::markdown`]). A Tier 3 reference written
+    // inside a fence or an inline span documents the syntax rather
+    // than using it. Masking preserves byte offsets, so captures are
+    // read back from the original.
+    let masked = crate::markdown::mask_code_blocks_and_spans(text);
     let re = tier3_re();
-    re.captures_iter(text)
+    re.captures_iter(&masked)
         .map(|cap| Tier3Ref {
-            scope: cap[1].to_string(),
-            name: cap[2].to_string(),
-            slug: cap[3].to_string(),
+            scope: text[cap.get(1).unwrap().range()].to_string(),
+            name: text[cap.get(2).unwrap().range()].to_string(),
+            slug: text[cap.get(3).unwrap().range()].to_string(),
         })
         .collect()
 }
@@ -258,6 +264,33 @@ mod tests {
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].as_display(), "anthropic/core:agents");
         assert_eq!(refs[1].as_display(), "scope/name:foo-bar");
+    }
+
+    #[test]
+    fn extract_tier3_refs_ignores_code() {
+        for body in [
+            "```\n[[scope/name:slug]]\n```",
+            "~~~\n[[scope/name:slug]]\n~~~",
+            "    [[scope/name:slug]]",
+            "An inline `[[scope/name:slug]]` sample.",
+        ] {
+            assert!(
+                extract_tier3_refs(body).is_empty(),
+                "code content is not a reference: {body:?}"
+            );
+        }
+    }
+
+    /// Complement: a prose reference still resolves, with every part
+    /// read back from the original.
+    #[test]
+    fn extract_tier3_refs_still_finds_prose_beside_code() {
+        let refs =
+            extract_tier3_refs("See [[scope/name:slug]].\n\n```\n[[other/thing:ghost]]\n```\n");
+        assert_eq!(refs.len(), 1, "{refs:?}");
+        assert_eq!(refs[0].scope, "scope");
+        assert_eq!(refs[0].name, "name");
+        assert_eq!(refs[0].slug, "slug");
     }
 
     #[test]

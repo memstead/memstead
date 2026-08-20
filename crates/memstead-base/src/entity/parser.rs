@@ -740,9 +740,14 @@ pub(crate) fn parse_relationships_with_warnings(
     });
     let mut relationships = Vec::new();
     let mut warnings = Vec::new();
-    // Masking preserves byte offsets, so a match found in the masked
-    // copy indexes the original exactly.
-    let masked = mask_code_blocks(text);
+    // Blocks AND inline spans — the same mask every link scanner uses.
+    // A legitimate row's target can never sit inside a code span, so
+    // masking spans costs nothing and closes the seam: with a
+    // blocks-only mask a row inside a multi-line inline span stayed
+    // invisible to the validator and to every extractor while still
+    // building an edge and a stub. Masking preserves byte offsets, so a
+    // match found in the masked copy indexes the original exactly.
+    let masked = mask_code_blocks_and_spans(text);
     for cap in re.captures_iter(&masked) {
         let rel_type = text[cap.get(1).unwrap().range()].to_uppercase();
         // Read-time parsing of the ## Relationships table tolerates
@@ -1966,6 +1971,32 @@ mod commonmark_referee {
             assert!(
                 rels.is_empty(),
                 "code-block row must not become an edge: {body:?} -> {rels:?}"
+            );
+        }
+    }
+
+    /// …and a row hidden inside an INLINE CODE SPAN is not one either.
+    /// A blocks-only mask left this row invisible to the strict
+    /// validator and to every link extractor — both of which mask
+    /// spans — while still building an edge and a stub from it. A
+    /// multi-line span is the shape that bites: a lazy paragraph
+    /// continuation keeps the backticks open across the row.
+    #[test]
+    fn a_relationship_row_inside_an_inline_code_span_is_not_a_relationship() {
+        for body in [
+            // The row is indented, so it does not interrupt the
+            // paragraph as a list — it is a lazy continuation and the
+            // backtick pair holds the span open across all three lines.
+            // (At column 0 a `-` DOES start a list, the span never
+            // forms, and the row is a real relationship — correctly.)
+            "Example `open\n    - **REFERENCES**: [[ghost]]\nclose`",
+            "A `- **REFERENCES**: [[ghost]]` sample.",
+            "A ``- **REFERENCES**: [[ghost]]`` sample.",
+        ] {
+            let (rels, _) = parse_relationships_with_warnings(body, "specs", None);
+            assert!(
+                rels.is_empty(),
+                "code-span row must not become an edge: {body:?} -> {rels:?}"
             );
         }
     }

@@ -1204,7 +1204,7 @@ pub fn unsatisfied_constraints(
                     .filter(|rel| rel.rel_type == *rel_type)
                     .filter_map(|rel| store.get(&rel.target))
                     .filter_map(|neighbour| neighbour.sections.get(section.as_str()))
-                    .any(|body| bullet_entries(body).any(|entry| entry == value));
+                    .any(|body| bullet_entries(body).contains(&value));
                 if backed {
                     return None;
                 }
@@ -1239,13 +1239,26 @@ fn tuple_of(entity: &crate::entity::Entity, fields: &[String]) -> Option<Vec<Str
 
 /// The bullet entries of a section body — trimmed text of `- item` /
 /// `* item` lines. The legal-value shape `enum_from_neighbour` reads.
-fn bullet_entries(body: &str) -> impl Iterator<Item = &str> {
-    body.lines().filter_map(|line| {
-        let t = line.trim_start();
-        t.strip_prefix("- ")
-            .or_else(|| t.strip_prefix("* "))
-            .map(str::trim)
-    })
+fn bullet_entries(body: &str) -> Vec<String> {
+    // A bullet inside a code block is an example of the list, not a
+    // member of it — the same referee every other content reader uses
+    // ([`crate::markdown`]). Masking preserves byte offsets and line
+    // count, so each masked line pairs with its original.
+    let masked = crate::markdown::mask_code_blocks_and_spans(body);
+    body.lines()
+        .zip(masked.lines())
+        .filter_map(|(line, masked_line)| {
+            let m = masked_line.trim_start();
+            if m.starts_with("- ") || m.starts_with("* ") {
+                let t = line.trim_start();
+                t.strip_prefix("- ")
+                    .or_else(|| t.strip_prefix("* "))
+                    .map(|e| e.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// One entity's violated declared constraints, surfaced from the
@@ -1795,6 +1808,37 @@ mod tests {
     use crate::store::Store;
     use indexmap::IndexMap;
     use memstead_schema::type_by_name;
+
+    /// A bullet inside a code block is an example of the list, not a
+    /// member of it. `enum_from_neighbour` harvests legal values from a
+    /// neighbour's section body, so an unmasked scan would accept any
+    /// value someone documented in a fenced sample.
+    #[test]
+    fn bullet_entries_ignores_code() {
+        let body = "- real-one\n- real-two\n\n```\n- fenced-ghost\n```\n\n    - indented-ghost\n\nA `- span-ghost` sample.\n";
+        let entries = bullet_entries(body);
+        assert_eq!(
+            entries,
+            vec!["real-one".to_string(), "real-two".to_string()],
+            "only prose bullets are legal values: {entries:?}"
+        );
+    }
+
+    /// Complement: indentation, `*` markers and inline formatting in a
+    /// prose bullet all still read exactly as before — the entry text
+    /// comes from the original, not the mask.
+    #[test]
+    fn bullet_entries_still_reads_prose_bullets_verbatim() {
+        let entries = bullet_entries("- alpha\n  * beta\n* `gamma`\n");
+        assert_eq!(
+            entries,
+            vec![
+                "alpha".to_string(),
+                "beta".to_string(),
+                "`gamma`".to_string()
+            ]
+        );
+    }
 
     /// Agent-trust plan 14, criterion 4: a destination config
     /// declaring its process mem resolves the pairing regardless of
