@@ -71,6 +71,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `## `/`# ` — the indented-code-block-opens-a-section round-trip fork
   — is now refused at ingress instead of forking the entity on its
   next read.
+- **A relationship row inside a code block is no longer an edge.** The
+  `## Relationships` row parser scanned the section body unmasked, so a
+  fenced or indented `- **REFERENCES**: [[target]]` — the obvious thing
+  to write in an entity documenting the row syntax — became a real graph
+  edge and auto-created a stub, while the strict validator, the link
+  extractor, the rewriter and the dangling-link reporter all correctly
+  treated that link as invisible. One path synthesising an edge from
+  what every other path refuses to see is the asymmetry the one-
+  definition rule exists to prevent. Real rows are untouched: the scan
+  reads the masked body and takes every captured span from the original,
+  so type normalisation, em-dash descriptions and ambiguous-delimiter
+  warnings behave exactly as before.
 - **HTML export stops rewriting wiki-links inside code.** The
   exporter's `[[…]]` resolution was a hand-rolled string walk with no
   masking, so a fenced or indented code sample documenting wiki-link

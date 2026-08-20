@@ -717,6 +717,15 @@ fn build_catch_all(sections: &HashMap<String, String>, schema: &TypeDefinition) 
 /// AMBIGUOUS-delimiter rows (`-- text`, `- text`, en-dash, minus). On
 /// AMBIGUOUS rows the description is dropped — the renderer will
 /// normalise the row to the simple form on next write.
+///
+/// Rows inside a code block are not relationships. The scan runs over
+/// the masked section body and reads every captured span from the
+/// original, so a fenced or indented example of the row syntax — the
+/// obvious thing to write in an entity documenting that syntax — no
+/// longer becomes a live edge and an auto-stub. Without the mask this
+/// path synthesised edges from links the strict validator cannot see
+/// (`validator::strict::check_wiki_links` masks), which is exactly the
+/// asymmetry the one-definition rule exists to prevent.
 pub(crate) fn parse_relationships_with_warnings(
     text: &str,
     mem: &str,
@@ -731,15 +740,18 @@ pub(crate) fn parse_relationships_with_warnings(
     });
     let mut relationships = Vec::new();
     let mut warnings = Vec::new();
-    for cap in re.captures_iter(text) {
-        let rel_type = cap[1].to_uppercase();
+    // Masking preserves byte offsets, so a match found in the masked
+    // copy indexes the original exactly.
+    let masked = mask_code_blocks(text);
+    for cap in re.captures_iter(&masked) {
+        let rel_type = text[cap.get(1).unwrap().range()].to_uppercase();
         // Read-time parsing of the ## Relationships table tolerates
         // pre-strict on-disk drift so legacy rows whose target fails
         // the wiki-link grammar continue to round-trip. The mutation
         // pipeline (`memstead_relate`, declare_relations) gates strictly
         // via `validate_relation_target_grammar`.
-        let target = wiki_link_to_id_lenient(&cap[2], mem);
-        let tail = cap.name("tail").map(|m| m.as_str()).unwrap_or("");
+        let target = wiki_link_to_id_lenient(&text[cap.get(2).unwrap().range()], mem);
+        let tail = cap.name("tail").map(|m| &text[m.range()]).unwrap_or("");
         let description = match classify_description_tail(tail) {
             DescriptionTail::None => None,
             DescriptionTail::EmDash(text) => Some(text),
@@ -1934,6 +1946,58 @@ mod commonmark_referee {
     fn a_fenced_conflict_marker_example_still_does_not_trip_the_guard() {
         let content = "---\ntype: spec\n---\n\n# T\n\n## Identity\n\n```\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n```\n";
         assert!(!has_merge_conflict_markers(content));
+    }
+
+    /// A relationship row inside a code block is an example of the
+    /// syntax, not a relationship. It used to become a live edge and an
+    /// auto-stub while the strict validator — which masks — could not
+    /// see the link at all: one path synthesising an edge from what
+    /// another path refuses to see.
+    #[test]
+    fn a_relationship_row_inside_a_code_block_is_not_a_relationship() {
+        for body in [
+            "```\n- **REFERENCES**: [[ghost]]\n```",
+            "~~~\n- **REFERENCES**: [[ghost]]\n~~~",
+            "    - **REFERENCES**: [[ghost]]",
+            "> ```\n> - **REFERENCES**: [[ghost]]\n> ```",
+            "````\n```\n- **REFERENCES**: [[ghost]]\n```\n````",
+        ] {
+            let (rels, _) = parse_relationships_with_warnings(body, "specs", None);
+            assert!(
+                rels.is_empty(),
+                "code-block row must not become an edge: {body:?} -> {rels:?}"
+            );
+        }
+    }
+
+    /// Complement: a real row still parses, keeps its type, target and
+    /// em-dash description, and still warns on an ambiguous delimiter —
+    /// every captured span is read from the original, not the mask.
+    #[test]
+    fn real_relationship_rows_are_unchanged_by_the_mask() {
+        let body = "- **REFERENCES**: [[alpha]]\n- **uses**: [[beta]] — because it must\n\n```\n- **REFERENCES**: [[ghost]]\n```\n";
+        let (rels, _) = parse_relationships_with_warnings(body, "specs", None);
+        assert_eq!(rels.len(), 2, "{rels:?}");
+        assert_eq!(rels[0].rel_type, "REFERENCES");
+        assert_eq!(rels[0].target.0, "specs--alpha");
+        assert_eq!(rels[0].description, None);
+        assert_eq!(
+            rels[1].rel_type, "USES",
+            "case is normalised from the original"
+        );
+        assert_eq!(rels[1].target.0, "specs--beta");
+        assert_eq!(rels[1].description.as_deref(), Some("because it must"));
+    }
+
+    #[test]
+    fn ambiguous_delimiter_warning_still_fires_on_a_real_row() {
+        let id = file_path_to_id("x.md", "specs");
+        let (_, warnings) = parse_relationships_with_warnings(
+            "- **REFERENCES**: [[alpha]] -- not an em dash\n",
+            "specs",
+            Some(&id),
+        );
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
     }
 
     /// Frontmatter is not markdown. Masking the whole file would hand
