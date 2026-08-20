@@ -63,6 +63,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `## `/`# ` — the indented-code-block-opens-a-section round-trip fork
   — is now refused at ingress instead of forking the entity on its
   next read.
+- **Merge-conflict detection reads frontmatter too, and is no longer
+  blinded by it.** The guard that refuses an entity file carrying git
+  conflict markers now scans one rejoined view — raw frontmatter plus
+  masked body — instead of masking the whole file. Two consequences:
+  markers written into the frontmatter are caught for the first time
+  (git writes them wherever the hunks fall), and a conflict triple that
+  straddles the `---` terminator is caught as well. Previously a
+  frontmatter value that read as a code-fence opener could hide the
+  markers, and the file would load with both merge sides fused into one
+  body — the outcome the guard exists to prevent. The complement is
+  unchanged: a fenced code example documenting conflict markers in a
+  section body still does not trip it.
+- **A mem rename no longer leaves dangling cross-mem links behind.**
+  The mem sweep's wiki-link rewriter takes whole entity files, and
+  masked them as markdown; a frontmatter value that read as a fence
+  opener blanked the body, so the scan found no links and the rewrite
+  reported zero changes — indistinguishable from having nothing to
+  rewrite. It now masks the body only.
 - **`[[]]` is visible to every path.** The wiki-link pattern the
   extractor uses accepts an empty target, so an empty link routes to
   the same typed refusal the strict validator already emitted instead

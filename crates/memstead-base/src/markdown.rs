@@ -34,6 +34,25 @@
 //! still a column-0 ATX `## ` line and nothing else — setext headings
 //! and indented ATX create sections nowhere. This module fixes what code
 //! blocks hide; it does not change what counts as a heading.
+//!
+//! # Give these functions a BODY, never a whole entity file
+//!
+//! Frontmatter is not markdown. Handing it to a CommonMark parser
+//! invents block structure that is not there: a YAML value that reads
+//! as a fence opener — legal at 1–3 spaces, and honoured here since
+//! indented fences were fixed — opens a code block that runs past the
+//! `---` terminator to end of file and blanks the entire body. Every
+//! `## ` heading, every `[[link]]`, and every git conflict marker in
+//! that file becomes invisible to whatever scans the result.
+//!
+//! Callers holding a section body are already safe — section bodies
+//! are frontmatter-free by construction. A caller holding a raw file
+//! or a git blob is not, and must trim it first with
+//! [`crate::entity::parser::body_after_frontmatter`]. This bit the
+//! engine three times during the migration that introduced these
+//! masks: in `parse_markdown`, in the git-branch ripple scanner, and
+//! in the merge-conflict guard — the last one silently defeating a
+//! data-integrity check. Any new caller is the fourth unless it trims.
 
 use std::ops::Range;
 
@@ -97,6 +116,8 @@ fn code_ranges(text: &str, spans: bool) -> Vec<Range<usize>> {
 /// Content inside a masked block is whitespace to every line scanner
 /// that runs over the result — it can never open a section, register a
 /// heading, become a title, or yield a wiki-link.
+///
+/// **Pass a body, not a whole entity file** — see the module header.
 pub fn mask_code_blocks(text: &str) -> String {
     mask_ranges(text, &code_ranges(text, false))
 }
@@ -109,6 +130,8 @@ pub fn mask_code_blocks(text: &str) -> String {
 /// one path cannot see is a link no other path synthesises an edge
 /// from. Multi-backtick delimiters (`` `` ``, `` ``` ``) are handled by
 /// the parser, not by a delimiter-count regex.
+///
+/// **Pass a body, not a whole entity file** — see the module header.
 pub fn mask_code_blocks_and_spans(text: &str) -> String {
     mask_ranges(text, &code_ranges(text, true))
 }

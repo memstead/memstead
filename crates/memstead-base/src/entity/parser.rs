@@ -428,20 +428,44 @@ pub use crate::markdown::{mask_code_blocks, mask_code_blocks_and_spans};
 // Merge-conflict detection
 // ---------------------------------------------------------------------------
 
-/// True when `text` carries a complete git merge-conflict block: an
-/// ordered `<<<<<<< …` / `=======` / `>>>>>>> …` triple at line starts,
-/// evaluated over [`mask_code_blocks`] output so a code example
-/// documenting conflict markers never trips the check. The masking is
-/// a legibility trade-off, not a soundness one: a real conflict whose
-/// markers all fall inside one code block goes undetected (the file
-/// then loads/degrades exactly as it did before this check existed) —
-/// git writes markers without regard for fences, so that shape is
-/// rare, while marker examples in documentation entities are not.
+/// True when `text` — a whole entity file — carries a complete git
+/// merge-conflict block: an ordered `<<<<<<< …` / `=======` /
+/// `>>>>>>> …` triple at line starts.
+///
+/// The frontmatter is scanned **raw** and the body over
+/// [`mask_code_blocks`] output. Both halves of that split are
+/// load-bearing:
+///
+/// - Masking the body is why a code example documenting conflict
+///   markers never trips the check. It is a legibility trade-off, not
+///   a soundness one: a real conflict whose markers all fall inside
+///   one code block goes undetected (the file then loads/degrades
+///   exactly as it did before this check existed) — git writes markers
+///   without regard for fences, so that shape is rare, while marker
+///   examples in documentation entities are not.
+/// - Frontmatter is **not** masked, because frontmatter is not
+///   markdown. Handing it to a CommonMark parser invents block
+///   structure that is not there: a YAML value that reads as a fence
+///   opener (legal at 1–3 spaces) opens a code block that runs past
+///   the `---` terminator to end of file and blanks the entire body,
+///   markers and all — a conflicted file would then load with both
+///   sides fused into one entity, which is precisely the outcome
+///   `entity::loader`'s caller exists to prevent. Git also writes
+///   conflict markers into frontmatter, so scanning it is not merely
+///   safe, it is required.
 pub fn has_merge_conflict_markers(text: &str) -> bool {
-    let masked = mask_code_blocks(text);
+    // One view, not two scans: a conflict can straddle the `---`
+    // terminator (git writes markers wherever the hunks fall), so the
+    // raw frontmatter and the masked body are rejoined and scanned as
+    // a single text. Masking preserves byte length, so the join is the
+    // original file with only body code blocks blanked.
+    let body = body_after_frontmatter(text);
+    let frontmatter = &text[..text.len() - body.len()];
+    let view = format!("{frontmatter}{}", mask_code_blocks(body));
+
     let mut seen_start = false;
     let mut seen_separator = false;
-    for line in masked.lines() {
+    for line in view.lines() {
         if line.starts_with("<<<<<<< ") {
             seen_start = true;
             seen_separator = false;
@@ -1903,6 +1927,44 @@ mod commonmark_referee {
     #[test]
     fn empty_wiki_link_target_yields_no_id_on_the_lenient_path() {
         assert!(extract_inline_links_lenient("an empty [[]] link", "specs").is_empty());
+    }
+
+    /// A conflicted file must be refused however its frontmatter is
+    /// shaped. Masking the whole file let a YAML value that reads as a
+    /// fence opener blank the body — markers included — so the file
+    /// loaded as a normal entity with BOTH merge sides fused into one
+    /// body, which is the exact outcome the guard exists to prevent.
+    #[test]
+    fn merge_conflict_markers_are_seen_through_fence_shaped_frontmatter() {
+        let body = "\n# T\n\n## Identity\n\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n";
+        for fm in [
+            "---\ntype: spec\n---",
+            "---\ntype: spec\nnotes: |\n  ```rust\n  fn x() {}\n---",
+            "---\ntype: spec\nnotes: |\n   ~~~\n---",
+            "---\ntype: spec\nnotes: |\n    indented block\n---",
+        ] {
+            assert!(
+                has_merge_conflict_markers(&format!("{fm}{body}")),
+                "conflict markers must be seen through frontmatter: {fm:?}"
+            );
+        }
+    }
+
+    /// …and markers in the frontmatter itself count: git writes them
+    /// wherever the hunks fall, including above the `---`.
+    #[test]
+    fn merge_conflict_markers_in_frontmatter_are_seen() {
+        let content =
+            "---\n<<<<<<< HEAD\ntype: spec\n=======\ntype: memo\n>>>>>>> branch\n---\n\n# T\n";
+        assert!(has_merge_conflict_markers(content));
+    }
+
+    /// Complement: a fenced code example documenting conflict markers
+    /// in a section body still does not trip the guard.
+    #[test]
+    fn a_fenced_conflict_marker_example_still_does_not_trip_the_guard() {
+        let content = "---\ntype: spec\n---\n\n# T\n\n## Identity\n\n```\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n```\n";
+        assert!(!has_merge_conflict_markers(content));
     }
 
     /// Frontmatter is not markdown. Masking the whole file would hand

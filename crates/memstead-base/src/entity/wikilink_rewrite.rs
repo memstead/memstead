@@ -21,6 +21,29 @@ fn mask_for_link_scan(text: &str) -> String {
     crate::markdown::mask_code_blocks_and_spans(text)
 }
 
+/// [`mask_for_link_scan`] for a WHOLE entity file rather than a section
+/// body: the frontmatter is left raw and only the body is masked, then
+/// the two are rejoined.
+///
+/// Frontmatter is not markdown (see the [`crate::markdown`] header): a
+/// YAML value that reads as a fence opener would otherwise mask the
+/// body away, the scan would find no links, and the rewrite would
+/// report zero changes on a file that needed them — a mem rename would
+/// silently leave dangling cross-mem references behind. Masking
+/// preserves byte length, so the rejoined view stays offset-aligned
+/// with the original, which is what lets the rewriter splice by offset.
+///
+/// The split is done here rather than inside [`mask_for_link_scan`] on
+/// purpose: a *section body* may legitimately open with a `---`
+/// thematic break, which the frontmatter trim would mistake for a
+/// frontmatter block and cut real content away. Only a caller that
+/// knows it holds a whole file may trim.
+fn mask_file_for_link_scan(text: &str) -> String {
+    let body = crate::entity::parser::body_after_frontmatter(text);
+    let frontmatter = &text[..text.len() - body.len()];
+    format!("{frontmatter}{}", mask_for_link_scan(body))
+}
+
 /// Rewrite every same-mem `[[<old_slug>]]` (with or without a
 /// `|label` suffix) in `text` to `[[<new_slug>]]`, preserving the
 /// label and surrounding bytes verbatim. Wiki-links inside code
@@ -145,8 +168,12 @@ pub(crate) fn rewrite_cross_mem_slug(
 /// Matches inside code blocks and inline code spans are not
 /// rewritten (same discipline as the two sibling rewriters). Returns
 /// the rewritten text plus a count of how many matches were changed.
+///
+/// Unlike its siblings this one takes a **whole entity file** — the
+/// mem sweep rewrites files in place — so it masks via
+/// [`mask_file_for_link_scan`].
 pub(crate) fn rewrite_mem_prefix(text: &str, old_mem: &str, new_mem: &str) -> (String, usize) {
-    let masked = mask_for_link_scan(text);
+    let masked = mask_file_for_link_scan(text);
     let link_re = Regex::new(r"\[\[([^\]]*)\]\]").unwrap();
     let mut out = String::with_capacity(text.len());
     let mut last_end = 0usize;
@@ -339,6 +366,35 @@ mod tests {
         );
         assert_eq!(out, "[[old-name]] [[specs:new-name]]");
         assert_eq!(n, 1);
+    }
+
+    /// The mem sweep hands this rewriter a WHOLE entity file. Masking
+    /// the file rather than its body let a YAML value that reads as a
+    /// fence opener blank the body, so the scan found no links, the
+    /// rewrite reported zero changes, and a mem rename left dangling
+    /// cross-mem references behind — silently, since zero changes is
+    /// indistinguishable from nothing to change.
+    #[test]
+    fn mem_prefix_rewrite_survives_fence_shaped_frontmatter() {
+        let file = "---\ntype: spec\nnotes: |\n   ```\n   sample\n---\n\n# T\n\n## Identity\n\nSee [[old:target]].\n";
+        let (out, count) = rewrite_mem_prefix(file, "old", "new");
+        assert_eq!(count, 1, "the link must be found and rewritten: {out}");
+        assert!(out.contains("[[new:target]]"), "{out}");
+        assert!(
+            out.contains("notes: |"),
+            "frontmatter must survive verbatim: {out}"
+        );
+    }
+
+    /// Complement: a link inside a real code block in the body is
+    /// still left alone, whole-file input notwithstanding.
+    #[test]
+    fn mem_prefix_rewrite_still_skips_body_code_blocks() {
+        let file = "---\ntype: spec\n---\n\n# T\n\n## Identity\n\n```\n[[old:target]]\n```\n\nAnd [[old:other]].\n";
+        let (out, count) = rewrite_mem_prefix(file, "old", "new");
+        assert_eq!(count, 1, "only the prose link may be rewritten: {out}");
+        assert!(out.contains("```\n[[old:target]]\n```"), "{out}");
+        assert!(out.contains("[[new:other]]"), "{out}");
     }
 
     #[test]
