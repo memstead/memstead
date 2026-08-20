@@ -305,6 +305,67 @@ fn dest_guidance(engine: &Engine, dest: &str) -> ResolvedGuidance {
     resolve_writing_guidance(&defaults, &mem_guidance)
 }
 
+/// Primary source names whose medium base does not exist on disk. Only
+/// path-namespace media can be checked this way; a `web` or `graph`
+/// pointer is out of scope and never reported absent.
+fn absent_source_names(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<String> {
+    resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(p),
+            ResolvedSource::Reference { .. } => None,
+        })
+        .filter(|p| {
+            matches!(
+                p.medium_type,
+                crate::pipeline::MediumType::Codebase
+                    | crate::pipeline::MediumType::Filesystem
+                    | crate::pipeline::MediumType::Git
+            ) && !super::cursor::medium_base(&p.pointer, workspace_root).exists()
+        })
+        .map(|p| p.name.clone())
+        .collect()
+}
+
+/// The note the Destination block carries when the destination mem is not
+/// in this workspace — and the remedy that actually works in the shape the
+/// reader is standing in. `memstead mem init` is mem-repo-only, so naming
+/// it unconditionally hands a filesystem-mem reader (the shape `memstead
+/// quickstart` produces) a command that refuses; there, the binding is
+/// simply pointed at the wrong mem and repointing it is the whole fix.
+fn absent_destination_note(engine: &Engine, dest: &str, workspace_root: &Path) -> Option<String> {
+    if engine.schema_pin(dest).is_some() {
+        return None;
+    }
+    let mut writable: Vec<&str> = engine
+        .mem_router()
+        .writable_mems()
+        .iter()
+        .map(String::as_str)
+        .collect();
+    writable.sort_unstable();
+    let remedy = if crate::workspace_store::is_mem_repo_shaped(workspace_root) {
+        format!("Create it before writing: `memstead mem init {dest}`.")
+    } else if writable.is_empty() {
+        "This workspace has no writable mem to point it at.".to_string()
+    } else {
+        format!(
+            "This is a filesystem-mem workspace, which holds one mem and cannot \
+             add another — point the binding's `destination_mem` at {} instead.",
+            writable
+                .iter()
+                .map(|m| format!("`{m}`"))
+                .collect::<Vec<_>>()
+                .join(" or ")
+        )
+    };
+    Some(format!(
+        "**This mem does not exist in this workspace yet.** {remedy} Until then, \
+         every mutation this brief asks for will refuse."
+    ))
+}
+
 /// Assemble the discovery brief from the engine's live view of the
 /// destination mem: its schema defaults, per-mem writing-guidance additions,
 /// pinned schema ref, paired-process-mem existence, and the source cursor.
@@ -319,11 +380,15 @@ fn render_discovery(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
     let cursor = compute_source_cursor(engine, resolved, workspace_root);
     let preface = render_changed_slice(&cursor);
 
+    let dest_note = absent_destination_note(engine, dest, workspace_root);
+    let absent = absent_source_names(resolved, workspace_root);
     assemble_discovery_brief(
         resolved,
         &guidance,
         &process_mem,
         dest_schema.as_deref(),
+        dest_note.as_deref(),
+        &absent,
         &preface,
     )
 }
@@ -344,6 +409,10 @@ fn render_one_shot(engine: &Engine, resolved: &ResolvedIngest) -> String {
         &guidance,
         &process_mem,
         dest_schema.as_deref(),
+        // The one-shot lens has no workspace root in hand; its destination
+        // set is validated by the lens block itself.
+        None,
+        &[],
         dest_purpose.as_deref(),
     )
 }

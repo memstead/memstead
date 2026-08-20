@@ -32,6 +32,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   root, the uncollapsed form of `init_filesystem_mem`.
 
 ### Changed
+- **An anchor's `source` name is validated against the binding's declared
+  names even when the anchor carries no producing binding** — which is
+  every anchor an agent following a brief writes, since the brief asks
+  for `source` and never for `binding`. Until now an undeclared name was
+  accepted, resolved and counted toward coverage while the brief promised
+  it would refuse. Checked against the union of declared names over the
+  bindings writing into that mem; a mem with no bindings, or an
+  unloadable store, still accepts any non-empty name.
+- **The build brief tells the truth about its destination, its source and
+  its anchor names.** The absent-destination remedy is now chosen by
+  workspace shape: `memstead mem init` is mem-repo-only and refuses in
+  the filesystem-mem workspace `memstead quickstart` produces, so that
+  shape is told to repoint the binding instead. A source pointer that
+  resolves to nothing on disk is named as such, and the Sources block
+  prints the pointer it is talking about.
 - **The build brief tells the truth about its destination and its anchor
   names.** A binding scaffolded before its mem exists (an order
   `projection init` deliberately allows) rendered a brief whose whole

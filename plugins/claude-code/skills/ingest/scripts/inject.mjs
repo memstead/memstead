@@ -101,6 +101,21 @@ if (r.status !== 0) {
   // Unknown binding, unsupported mode, load failure — surface the engine's
   // own message so the agent sees the refusal, not an empty prompt.
   const msg = refusalMessage(r);
+  // …except "there is no workspace here", which is not a refusal the user
+  // can act on as written: it names an engine file, and the first-session
+  // reader has nothing set up at all. That is the ramp's own case one step
+  // earlier — no workspace rather than no binding — so route it the same
+  // way, to the command that creates one.
+  if (/no workspace found|workspace_not_initialised|\.memstead\/workspace\.toml/i.test(msg || '')) {
+    process.stdout.write(
+      `> **[${LABEL}] There is no Memstead workspace here yet — nothing to build into.** ` +
+        `Run \`/setup\` to create one (it bootstraps the workspace and wires this agent to it), ` +
+        `then \`/ingest\` again. Already inside a project you want to model? ` +
+        `\`memstead quickstart --repo .\` sets the workspace up over it and declares the ` +
+        `source binding in one step.\n`,
+    );
+    process.exit(0);
+  }
   if (msg) process.stdout.write(`> **[${LABEL}] ${msg}**\n`);
   process.exit(0);
 }

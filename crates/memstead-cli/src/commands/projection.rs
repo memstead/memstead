@@ -744,6 +744,29 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
         warnings.push(w);
     }
 
+    // A source that is not there yet is legal to declare — the tree may
+    // arrive later — but silence here is how the setup ramp produces a
+    // binding that can never yield anything from a mistyped answer. Say it
+    // at the moment the pointer is chosen, where the typo is still in view.
+    if matches!(
+        medium_type,
+        memstead_base::MediumType::Codebase
+            | memstead_base::MediumType::Filesystem
+            | memstead_base::MediumType::Git
+    ) {
+        let base = memstead_base::ingest::cursor::medium_base(&args.source, &root);
+        if !base.exists() {
+            warnings.push(format!(
+                "source '{}' resolves to '{}', which does not exist — the binding is \
+                 declared, but nothing can be read from it until that path is there \
+                 (check the path, or correct the pointer in \
+                 .memstead/projections/{mem}/{stem}.json)",
+                args.source,
+                base.display(),
+            ));
+        }
+    }
+
     // Write the one record. The id-collision refusal above already
     // guaranteed a fresh binding, so this path only runs on a clean
     // scaffold; a store IO failure surfaces the typed

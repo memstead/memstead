@@ -464,9 +464,13 @@ pub enum AnchorValidationError {
     /// own (resolvable) producing binding. Carries the declared names
     /// as the recovery payload. Only fires when the `binding` hash
     /// still resolves in this workspace — an orphaned or since-edited
-    /// binding accepts any non-empty name.
+    /// binding accepts any non-empty name, deliberately: a legacy
+    /// anchor whose binding was renamed keeps writing as long as its
+    /// artifact reference is alive under the workspace-relative
+    /// fallback (`mem_commands::source_dialect_anchors_join_fallback_collide_and_refuse`).
     #[error(
-        "anchor `source` {got:?} is not declared by the anchor's producing binding; declared          sources: {}",
+        "anchor `source` {got:?} is not declared by the anchor's producing binding; \
+         declared sources: {}",
         declared.join(", ")
     )]
     SourceNotDeclared { got: String, declared: Vec<String> },

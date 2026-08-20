@@ -194,6 +194,8 @@ pub fn render_operative_data(
     resolved: &ResolvedIngest,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
+    destination_note: Option<&str>,
+    absent_sources: &[String],
 ) -> String {
     let mut lines: Vec<String> = Vec::new();
     lines.push("## Operative data".to_string());
@@ -213,10 +215,23 @@ pub fn render_operative_data(
                     // (plan 03a: an agent copying this bullet verbatim
                     // must not earn an INVALID_ANCHOR).
                     lines.push(format!(
-                        "- **{}** ({}, primary)",
+                        "- **{}** ({}, primary) — `{}`",
                         p.name,
-                        medium_type_label(p.medium_type)
+                        medium_type_label(p.medium_type),
+                        p.pointer
                     ));
+                    // Same obligation as the destination note: an agent
+                    // told to read a tree that is not there has been sent
+                    // on work it cannot do, and cannot tell that from a
+                    // source that is merely empty.
+                    if absent_sources.iter().any(|n| n == &p.name) {
+                        lines.push(
+                            "  - **This source does not resolve to anything on disk.** \
+                             Nothing can be read from it until the path exists or the \
+                             binding's pointer is corrected."
+                                .to_string(),
+                        );
+                    }
                     let allows: Vec<&str> = p
                         .scope
                         .iter()
@@ -278,13 +293,12 @@ pub fn render_operative_data(
     // describing a destination that is not there: the brief's mandate is to
     // mutate this mem, and an agent that discovers its absence on the first
     // create has been told something untrue by the surface that sent it.
-    if destination_schema.is_none() {
-        lines.push(format!(
-            "  - **This mem does not exist in this workspace yet.** Create it \
-             before writing: `memstead mem init {}`. Until it does, every \
-             mutation this brief asks for will refuse.",
-            resolved.destination_mem
-        ));
+    // The caller supplies this: whether the destination resolves, and what
+    // to do about it, both depend on the workspace shape — which this
+    // renderer cannot see. A remedy naming a command that refuses in the
+    // reader's own workspace is the defect this note exists to prevent.
+    if let Some(note) = destination_note {
+        lines.push(format!("  - {note}"));
     }
     lines.push(String::new());
 
@@ -588,13 +602,13 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
     if !primary_names.is_empty() {
         block.push_str(&format!(
             "Set each anchor's `source` to the binding source name you drew the artifact \
-             from — this binding declares: {}. The name decides which source the \
-             anchor is attributed to, and the artifact path is resolved by joining \
-             onto that source's pointer, so a name outside the list leaves the \
-             anchor unattributed and usually refuses `INVALID_ANCHOR` on the path \
-             instead. Where the anchor also carries its producing binding, the name \
-             is checked against the declared list directly and the refusal names \
-             them.\n\n",
+             from — this binding declares: {}. The name selects the pointer the \
+             artifact path is joined onto, so the wrong one usually refuses \
+             `INVALID_ANCHOR` (the path resolves under no candidate join). A name \
+             outside the list is NOT itself refused when the path happens to \
+             resolve workspace-relative — that tolerance exists for anchors whose \
+             binding was later renamed — so getting it right is on you, not on a \
+             gate.\n\n",
             primary_names
                 .iter()
                 .map(|n| format!("`{n}`"))
@@ -605,18 +619,27 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
     block
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_discovery_brief(
     resolved: &ResolvedIngest,
     guidance: &ResolvedGuidance,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
+    destination_note: Option<&str>,
+    absent_sources: &[String],
     changed_slice_preface: &str,
 ) -> String {
     let parts = [
         render_situation(resolved, process_mem),
         render_intent(resolved),
         render_goal_and_avoid(guidance),
-        render_operative_data(resolved, process_mem, destination_schema),
+        render_operative_data(
+            resolved,
+            process_mem,
+            destination_schema,
+            destination_note,
+            absent_sources,
+        ),
         render_anchor_instruction(resolved),
         changed_slice_preface.to_string(),
     ];
@@ -730,18 +753,27 @@ pub fn render_one_shot_lens(
 /// operative-data, and the lens-routing block. Mirrors the plugin's one-shot
 /// `parts`. A one-shot ingest has no paired process mem, so `process_mem`
 /// should carry `skipped = true`.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_one_shot_brief(
     resolved: &ResolvedIngest,
     guidance: &ResolvedGuidance,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
+    destination_note: Option<&str>,
+    absent_sources: &[String],
     destination_purpose: Option<&str>,
 ) -> String {
     let parts = [
         render_situation(resolved, process_mem),
         render_intent(resolved),
         render_goal_and_avoid(guidance),
-        render_operative_data(resolved, process_mem, destination_schema),
+        render_operative_data(
+            resolved,
+            process_mem,
+            destination_schema,
+            destination_note,
+            absent_sources,
+        ),
         render_anchor_instruction(resolved),
         render_one_shot_lens(resolved, destination_schema, destination_purpose),
     ];
@@ -1439,13 +1471,19 @@ mod tests {
                 },
             ],
         );
-        let out = render_operative_data(&r, &process_present("macos"), Some("macos-code@0.1.0"));
+        let out = render_operative_data(
+            &r,
+            &process_present("macos"),
+            Some("macos-code@0.1.0"),
+            None,
+            &[],
+        );
         let expected = "\
 ## Operative data
 
 ### Sources
 
-- **f** (codebase, primary)
+- **f** (codebase, primary) — `../src`
   - Paths: src/**/*.swift
   - Ignore: src/gen/**
 - **graph** (reference) — mem: engine
@@ -1477,16 +1515,17 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             leaf_name: "g".to_string(),
             mem_label: "ingest/g".to_string(),
         };
-        let out = render_operative_data(&r, &skipped, None);
-        assert!(out.contains("- **f** (filesystem, primary)\n"));
+        let out = render_operative_data(&r, &skipped, None, Some("**absent** — probe"), &[]);
+        // The bullet carries the pointer: an agent told to read a source
+        // must be able to see WHICH tree it was pointed at.
+        assert!(out.contains("- **f** (filesystem, primary) — `"));
         assert!(!out.contains("Cross-mem references"), "no reference note");
-        // A destination with no pinned schema is a mem the engine could not
-        // resolve — the block says so and names the remedy.
         assert!(out.contains("### Destination\n\n- **g**\n"));
+        // The caller decides the destination note — this renderer only
+        // places it, because the remedy depends on the workspace shape.
         assert!(
-            out.contains("This mem does not exist in this workspace yet")
-                && out.contains("memstead mem init g"),
-            "an unresolvable destination must be named as such: {out}",
+            out.contains("**absent** — probe"),
+            "the caller's destination note must be rendered: {out}",
         );
         assert!(
             !out.contains("Paired process mem"),
@@ -1505,7 +1544,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         );
         let g = guidance(Some("build coverage"), None);
         let pm = process_present("macos");
-        let brief = assemble_discovery_brief(&r, &g, &pm, Some("s@1"), "");
+        let brief = assemble_discovery_brief(&r, &g, &pm, Some("s@1"), None, &[], "");
 
         // Blocks appear in order and the empty preface is dropped.
         let sit = brief.find("## Situation").unwrap();
@@ -1523,8 +1562,15 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         );
 
         // A non-empty preface is appended verbatim at the end.
-        let with_slice =
-            assemble_discovery_brief(&r, &g, &pm, Some("s@1"), "## Source changes\n\n…\n\n");
+        let with_slice = assemble_discovery_brief(
+            &r,
+            &g,
+            &pm,
+            Some("s@1"),
+            None,
+            &[],
+            "## Source changes\n\n…\n\n",
+        );
         assert!(with_slice.ends_with("## Source changes\n\n…\n\n"));
     }
 
@@ -1781,7 +1827,8 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             leaf_name: "os".to_string(),
             mem_label: "ingest/os".to_string(),
         };
-        let brief = assemble_one_shot_brief(&r, &g, &skipped, Some("s@1"), Some("purpose"));
+        let brief =
+            assemble_one_shot_brief(&r, &g, &skipped, Some("s@1"), None, &[], Some("purpose"));
         assert!(brief.contains("(one-shot mode)"));
         assert!(brief.contains("No process mem is paired with this ingest (mode=one-shot;"));
         assert!(brief.contains("## Mode: one-shot — lens routing"));
@@ -2234,15 +2281,15 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let preface = render_changed_slice(&changed_cursor);
         assert_clean(
             "discovery build brief (plain roam)",
-            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), ""),
+            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), None, &[], ""),
         );
         assert_clean(
             "discovery build brief (changed slice)",
-            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), &preface),
+            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), None, &[], &preface),
         );
         assert_clean(
             "one-shot build brief",
-            &assemble_one_shot_brief(&r, &g, &pm, Some("s@1"), Some("purpose")),
+            &assemble_one_shot_brief(&r, &g, &pm, Some("s@1"), None, &[], Some("purpose")),
         );
 
         // Verify brief — with and without an adjudication backlog.

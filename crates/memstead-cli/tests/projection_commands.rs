@@ -354,8 +354,17 @@ fn init_codebase_scaffolds_all_three_with_full_operations() {
     // warns with the works/degrades split and the common-parent recipe
     // (never the retired "anchors orphan" claim — post pointer-join,
     // out-of-root anchors resolve) and still succeeds.
+    // Two warnings: the layout caveat, and — because this fixture's source
+    // tree does not exist — the absent-source note. A declared pointer that
+    // resolves to nothing is legal but never silent.
     let warnings = env["warnings"].as_array().expect("warnings array");
-    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("which does not exist")),
+        "the absent source must be named: {warnings:?}",
+    );
     let w = warnings[0].as_str().unwrap();
     assert!(w.contains("outside the workspace root"), "got: {w}");
     assert!(
@@ -544,9 +553,16 @@ fn init_filesystem_scaffolds_full_operations() {
         serde_json::json!(["build", "sync", "verify"])
     );
     // `../docs` is outside the workspace root — the consequence-naming
-    // warning fires here too (filesystem medium).
+    // warning fires here too (filesystem medium) — and the fixture's tree
+    // does not exist, so the absent-source note joins it.
     let warnings = env["warnings"].as_array().expect("warnings array");
-    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("which does not exist")),
+        "the absent source must be named: {warnings:?}",
+    );
     assert!(
         warnings[0]
             .as_str()
@@ -1960,6 +1976,148 @@ fn migrate_gen1_dry_run_writes_nothing() {
             .exists()
     );
     assert!(!root.join(".memstead/mediums/engine/src.json").exists());
+}
+
+/// The absent-destination remedy must work in the workspace the reader is
+/// standing in. `memstead mem init` is mem-repo-only, so in the
+/// filesystem-mem shape `memstead quickstart` produces it refuses — the
+/// brief there must name the repointing fix instead. The mem-repo variant
+/// of this test cannot catch that, which is why this one exists.
+#[test]
+fn brief_absent_destination_remedy_suits_the_workspace_shape() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("app");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(repo.join("src/a.rs"), b"pub fn a() {}\n").unwrap();
+    memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--repo", ".", "--agent", "claude-code"])
+        .assert()
+        .success();
+
+    // Repoint the binding at a mem that is not there.
+    let record = repo.join(".memstead/projections/app/app.json");
+    let mut binding: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    binding["destination_mem"] = Value::String("ghost".into());
+    std::fs::write(&record, serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
+
+    let out = String::from_utf8(
+        memstead()
+            .current_dir(&repo)
+            .args(["projection", "brief", "app/app"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        out.contains("This mem does not exist in this workspace yet"),
+        "the absence must be named:\n{out}",
+    );
+    assert!(
+        !out.contains("memstead mem init"),
+        "`mem init` refuses in a filesystem-mem workspace — the brief must not \
+         name it here:\n{out}",
+    );
+    assert!(
+        out.contains("point the binding's `destination_mem` at `app`"),
+        "…and must name the fix that works here:\n{out}",
+    );
+}
+
+/// A source pointer that resolves to nothing on disk is named as such.
+/// The brief tells the agent to read from it; an absent tree is
+/// indistinguishable from an empty one unless the brief says so.
+#[test]
+fn brief_names_a_source_that_does_not_resolve() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("app2");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(repo.join("src/a.rs"), b"pub fn a() {}\n").unwrap();
+    memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--repo", ".", "--agent", "claude-code"])
+        .assert()
+        .success();
+
+    let record = repo.join(".memstead/projections/app2/app2.json");
+    let mut binding: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    binding["sources"][0]["pointer"] = Value::String("no-such-tree".into());
+    std::fs::write(&record, serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
+
+    let out = String::from_utf8(
+        memstead()
+            .current_dir(&repo)
+            .args(["projection", "brief", "app2/app2"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        out.contains("`no-such-tree`") && out.contains("does not resolve to anything on disk"),
+        "the brief must print the pointer and name its absence:\n{out}",
+    );
+}
+
+/// The brief says a wrong `source` name "usually refuses" because the path
+/// no longer joins — and that it is NOT refused when the path resolves
+/// workspace-relative anyway. Both halves, so the sentence cannot drift
+/// back into promising a gate that the legacy tolerance deliberately does
+/// not provide.
+#[test]
+fn an_undeclared_anchor_source_refuses_on_the_path_but_is_tolerated_when_it_resolves() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("app3");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(repo.join("src/a.rs"), b"pub fn a() {}\n").unwrap();
+    memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--repo", ".", "--agent", "claude-code"])
+        .assert()
+        .success();
+
+    // Source-relative path + undeclared name: the join fails, so it refuses.
+    let out = memstead()
+        .current_dir(&repo)
+        .args([
+            "--json", "create", "--type", "concept", "--title", "Probe",
+            "--section", "definition=d", "--section", "explanation=e",
+            "--anchor",
+            r#"{"artifact":"nowhere/a.rs","grain":"file","class":"anchored","source":"not-declared"}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("refusal must emit JSON");
+    assert_eq!(env["code"], "INVALID_ANCHOR");
+
+    // …but a path that resolves workspace-relative is written even with an
+    // undeclared name. This is the documented legacy tolerance, not an
+    // oversight — a brief that promised a refusal here would be wrong.
+    memstead()
+        .current_dir(&repo)
+        .args([
+            "create",
+            "--type",
+            "concept",
+            "--title",
+            "Tolerated",
+            "--section",
+            "definition=d",
+            "--section",
+            "explanation=e",
+            "--anchor",
+            r#"{"artifact":"src/a.rs","grain":"file","class":"anchored","source":"not-declared"}"#,
+        ])
+        .assert()
+        .success();
 }
 
 /// A binding scaffolded before its mem exists still renders — `projection

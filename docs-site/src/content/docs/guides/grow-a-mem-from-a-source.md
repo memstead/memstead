@@ -54,7 +54,7 @@ memstead create --type concept \
   --anchor '{"artifact":"src/auth.rs","grain":"file","class":"anchored","source":"some-repo"}'
 ```
 
-The `source` value is the binding's declared source **name**, which the brief prints. It decides which source the anchor is attributed to, and the artifact path is resolved by joining onto that source's pointer — so a wrong name usually refuses `INVALID_ANCHOR` because the path no longer resolves. Write the path exactly as the brief lists it.
+The `source` value is the binding's declared source **name**, which the brief prints. It selects the pointer the artifact path is joined onto, so a wrong name usually refuses `INVALID_ANCHOR` — the path resolves under no candidate join. It is not refused when the path happens to resolve workspace-relative anyway, so write both exactly as the brief lists them.
 
 One batch is one bounded piece of work — depth on a coherent area beats breadth across unrelated ones. Stop when the area is covered.
 
