@@ -114,10 +114,14 @@ Exit codes:
   3  not found (entity / mem / resource missing)
   4  hash mismatch (optimistic-locking failure on a mutation)
   5  validation / schema / policy refusal
-  6  findings present — the command SUCCEEDED and found something
-     you asked to be gated on (`projection verify --fail-on-findings`).
-     Never returned for an operational error, so a CI job can tell
-     "the mem drifted" from "the engine could not run".
+  6  findings present — the measurement COMPLETED and recorded
+     something you asked to be gated on
+     (`projection verify --fail-on-findings`). A run that could not
+     complete returns its own code above, so a CI job can tell "the
+     mem and its source disagree" from "the engine could not run".
+     An artifact the pass could not read is a finding, not an error:
+     it was observed, and not being able to adjudicate it is the
+     measurement's answer.
 
   For programmatic branching, prefer `--json` over the exit code:
     memstead <subcommand> ... --json | jq -r .code

@@ -17,11 +17,20 @@ use crate::commands;
 /// granular `code` from `--json | jq .code`.
 ///
 /// Code 6 breaks that success/failure symmetry on purpose: it means the
-/// command succeeded and the caller asked to be gated on what it found.
-/// A CI job needs three outcomes, not two, and it cannot get the third
-/// from a code that also means "the engine failed to boot". Keep it
-/// exclusive to explicit opt-in gate modes — the moment an operational
-/// path returns 6, the distinction stops being worth anything.
+/// measurement completed and the caller asked to be gated on what it
+/// found. A CI job needs three outcomes, not two, and it cannot get the
+/// third from a code that also means "the engine failed to boot". Keep
+/// it exclusive to explicit opt-in gate modes — the moment a run that
+/// FAILED returns 6, the distinction stops being worth anything.
+///
+/// The line is "did the measurement complete", not "was everything
+/// well". An artifact the pass could not read is a finding: it was
+/// observed and could not be adjudicated, which is an answer. An
+/// unreadable anchors sidecar is not: nothing could be observed at all,
+/// so verify refuses with `ANCHORS_SIDECAR_UNREADABLE` rather than
+/// reporting every artifact uncovered — that was a live defect, found
+/// 2026-08-21, where a corrupt file produced a red build blaming the
+/// mem.
 ///
 /// This string is the source the published reference renders from
 /// (`docs-site/.../reference/cli/cli.md`, xtask-generated and
@@ -35,10 +44,14 @@ Exit codes:
   3  not found (entity / mem / resource missing)
   4  hash mismatch (optimistic-locking failure on a mutation)
   5  validation / schema / policy refusal
-  6  findings present — the command SUCCEEDED and found something
-     you asked to be gated on (`projection verify --fail-on-findings`).
-     Never returned for an operational error, so a CI job can tell
-     \"the mem drifted\" from \"the engine could not run\".
+  6  findings present — the measurement COMPLETED and recorded
+     something you asked to be gated on
+     (`projection verify --fail-on-findings`). A run that could not
+     complete returns its own code above, so a CI job can tell \"the
+     mem and its source disagree\" from \"the engine could not run\".
+     An artifact the pass could not read is a finding, not an error:
+     it was observed, and not being able to adjudicate it is the
+     measurement's answer.
 
   For programmatic branching, prefer `--json` over the exit code:
     memstead <subcommand> ... --json | jq -r .code

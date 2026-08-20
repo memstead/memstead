@@ -311,6 +311,27 @@ impl Engine {
     /// ([`crate::anchor::resolve_anchor`] / [`crate::anchor::compose_entity_anchors`]);
     /// the live per-anchor *state* (which requires observing the source
     /// artifacts through the medium/preparation pipeline) is E3b's concern.
+    /// The anchors sidecar's parse error for `mem`, if it has one.
+    ///
+    /// The anchor readers below degrade a malformed sidecar to "no anchors",
+    /// which keeps a read path alive but makes a corrupt file
+    /// indistinguishable from an empty one. For a *reader* that is the right
+    /// trade; for anything that draws a conclusion from the absence of
+    /// anchors it is not — a fidelity pass would report every artifact
+    /// uncovered and call it a finding, when the truth is that it could not
+    /// read the file. Callers that need that distinction ask here first and
+    /// refuse. `None` means the sidecar is absent (legitimately no anchors
+    /// yet) or parses cleanly; the binding store draws the same distinction
+    /// with its quarantine path.
+    pub fn anchors_sidecar_error(&self, mem: &str) -> Option<String> {
+        let mount = self.mounts.iter().find(|m| m.mount.mem == mem)?;
+        let bytes = mount.backend.read_anchors_sidecar().ok().flatten()?;
+        match crate::anchor::AnchorSidecar::from_bytes(&bytes) {
+            Ok(_) => None,
+            Err(e) => Some(e.to_string()),
+        }
+    }
+
     pub fn entity_anchors(&self, id: &EntityId) -> Vec<crate::anchor::Anchor> {
         let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == id.mem()) else {
             return Vec::new();
@@ -320,6 +341,9 @@ impl Engine {
         };
         match crate::anchor::AnchorSidecar::from_bytes(&bytes) {
             Ok(sc) => sc.get(id.as_ref()).to_vec(),
+            // Deliberate degrade-to-empty for the read path; a caller that
+            // must not confuse "unreadable" with "none" checks
+            // [`Self::anchors_sidecar_error`] first.
             Err(_) => Vec::new(),
         }
     }

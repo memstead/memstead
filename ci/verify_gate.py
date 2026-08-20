@@ -54,6 +54,18 @@ GATE_ARGS = ["projection", "verify", BINDING, "--fail-on-findings"]
 # further down, so deleting the entire workflow block still left the
 # assertion passing. Anchor on the step, so removing the job fails.
 DOCUMENTED_STEP = "run: memstead projection verify docs/graph --fail-on-findings"
+# The rest of the printed job. Pinning only the `run:` line left three of the
+# workflow's four steps free to rot: a grade broke the checkout action, the
+# install URL and `fetch-depth` and this harness stayed green. Each entry is a
+# line the copied job needs to actually work.
+DOCUMENTED_JOB_LINES = [
+    "uses: actions/checkout@v4",
+    # The guide's own cap prose says a shallow clone hides drift, so this is
+    # load-bearing, not decoration.
+    "fetch-depth: 0",
+    "https://memstead.io/install.sh",
+    'echo "$HOME/.memstead/bin" >> "$GITHUB_PATH"',
+]
 # The command that step runs, as a stranger would type it: human mode, no
 # global --json. The harness runs BOTH modes, because the mode the guide
 # prints must be the mode something gates.
@@ -121,6 +133,16 @@ def run(memstead: Path) -> int:
         )
     else:
         print("  ✓ the guide's workflow step is the command this harness runs")
+
+    missing = [line for line in DOCUMENTED_JOB_LINES if line not in guide_text]
+    if missing:
+        failures += fail(
+            f"the guide's copyable workflow lost {len(missing)} load-bearing "
+            f"line(s) — a reader copying it would get a job that does not work: "
+            f"{missing}"
+        )
+    else:
+        print("  ✓ the printed workflow still carries every step it needs")
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = stage_fixture(Path(tmp))

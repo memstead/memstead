@@ -816,7 +816,9 @@ pub fn render_verify_brief(resolved: &ResolvedIngest, backlog: usize) -> String 
         "You are measuring the fidelity of `{}` — how faithfully the destination mem \
          `{}` still matches its source. This pass **only measures**: read the source \
          and the mem's anchors, judge whether the graph still holds, and record what \
-         you find. Nothing here writes into the destination mem.",
+         you find. **You** write nothing into the destination mem — the run itself \
+         records its findings store, backfills observed anchor hashes, and writes a \
+         `#verified` baseline, which is engine bookkeeping, not your edits.",
         resolved.name, resolved.destination_mem
     ));
     lines.push(String::new());

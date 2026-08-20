@@ -1,7 +1,8 @@
 //! `memstead verify-anchors --mem <name>` — the standalone drift
 //! statement: verify every anchor in a mem against its declared source,
-//! with no binding required. Read-only on mem content — pure sidecar
-//! read plus filesystem observation, no commit on any backend.
+//! with no binding required. Read-only on mem CONTENT — a sidecar read
+//! plus filesystem observation, no entity touched. It is not a pure
+//! read: like any verify, a completed run records its findings store.
 
 use clap::Parser;
 use serde_json::json;
@@ -18,7 +19,7 @@ use crate::setup::CliContext;
 /// reach) — honestly, never fabricating a state. Works on a
 /// hand-authored mem with no binding at all; on a binding-backed mem it
 /// reports the same states the binding verify sees (one shared
-/// resolution mechanism). Read-only: no entity changes, no commit.
+/// resolution mechanism). No entity changes; findings are recorded.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Which mem to verify (by name).

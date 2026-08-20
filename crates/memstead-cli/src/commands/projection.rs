@@ -1835,9 +1835,10 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
 
 /// `projection verify <binding>` — measure fidelity and record durable findings
 /// (group A). Read-only on the destination mem's *entities*; a completed run
-/// records its `#verified` baseline through the engine's sync-state writer
-/// (the one sanctioned post-run write — an aborted or failed run never
-/// advances the token).
+/// makes three sanctioned bookkeeping writes — the findings store, the
+/// prepared-hash backfill onto hash-less anchors, and the `#verified` baseline
+/// through the engine's sync-state writer. An aborted or failed run makes none
+/// of them; in particular it never advances the baseline token.
 fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -1869,6 +1870,33 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     // completed-run baseline write below.
     let mut cli_engine = ctx.cli_engine_at(&root)?;
     let engine = cli_engine.base_mut();
+
+    // A malformed anchors sidecar reads as "no anchors", which a fidelity
+    // pass would faithfully report as every artifact uncovered — findings,
+    // and under `--fail-on-findings` a red build blaming the mem for a file
+    // the engine could not parse. Refuse instead: the measurement cannot be
+    // trusted, so this is an operational failure with its own code, never a
+    // findings exit. Same posture the binding store takes when its own
+    // record fails to load.
+    if let Some(err) = engine.anchors_sidecar_error(&resolved.destination_mem) {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "ANCHORS_SIDECAR_UNREADABLE",
+            format!(
+                "verify refused for `{binding_id}`: the anchors sidecar for mem `{}` \
+does not parse ({err}) — every anchor would read as absent and every artifact \
+as uncovered, which is a measurement this run cannot honestly make. Repair or \
+remove the sidecar and re-run",
+                resolved.destination_mem
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "mem": resolved.destination_mem,
+            "error": err,
+        }))
+        .into());
+    }
 
     let run = if args.full {
         verify_binding_full

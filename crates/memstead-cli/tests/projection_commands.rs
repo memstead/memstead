@@ -3208,6 +3208,45 @@ fn gate_exits_zero_clean_six_on_findings_and_typed_code_on_error() {
     );
 }
 
+/// An unreadable anchors sidecar is an operational failure, not findings.
+///
+/// The regression this pins was live: the anchor readers degrade a malformed
+/// sidecar to "no anchors", so a fidelity pass read every artifact as
+/// uncovered, recorded that as findings, and exited 6 — a red CI build
+/// blaming the mem for a file the engine could not parse, with nothing on
+/// stderr. The distinction the whole exit-code contract rests on is that 6
+/// means the measurement SUCCEEDED; one made over an unreadable input did not.
+#[test]
+fn an_unreadable_anchors_sidecar_refuses_and_never_returns_the_findings_code() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    std::fs::write(root.join("engine-mem/.memstead/anchors.json"), "{ broken").unwrap();
+
+    let assertion = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-findings",
+        ])
+        .assert()
+        .code(5);
+    let out = String::from_utf8(assertion.get_output().stdout.clone()).unwrap();
+    let env: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(env["code"], "ANCHORS_SIDECAR_UNREADABLE", "{env}");
+    assert_eq!(env["details"]["mem"], "engine", "{env}");
+
+    // Ungated too: the refusal is about the measurement being untrustworthy,
+    // not about the gate flag.
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .code(5);
+}
+
 /// The gate is opt-in: a bare `projection verify` over a drifted fixture
 /// exits 0 exactly as it always has. This is the compatibility promise — a
 /// silent default flip would break every existing consumer, including this

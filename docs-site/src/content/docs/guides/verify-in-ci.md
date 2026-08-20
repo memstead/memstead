@@ -24,10 +24,18 @@ one of three outcomes:
 | anything else | The measurement itself failed | Fail — but this is a broken job, not a drifted mem |
 
 Code `6` is deliberately outside the ordinary error range. Codes 1–5 all
-mean *the command failed*; 6 means *the command succeeded and you should
-care about the answer*. No operational path ever returns 6, so a job can
-tell "the mem drifted from its source" from "the engine could not boot"
-without parsing any output.
+mean *the run could not complete*; 6 means *it completed and you should
+care about the answer*. A run that fails returns its own code, so a job
+can tell "the mem and its source disagree" from "the engine could not
+boot" without parsing any output.
+
+The line is **did the measurement complete**, not *was everything well*.
+An artifact the pass could not read is a finding — it was observed, and
+being unable to adjudicate it is the measurement's answer. An input the
+pass could not read at all is not: an unreadable anchors sidecar refuses
+with `ANCHORS_SIDECAR_UNREADABLE` (exit 5) rather than reporting every
+artifact uncovered, because "no anchors parsed" and "no anchors exist"
+are different facts and only one of them is the mem's fault.
 
 Without `--fail-on-findings`, verify exits 0 whether it found anything
 or not — unchanged, so adding the flag breaks no existing script.

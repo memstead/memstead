@@ -12,9 +12,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   gate on.** Three outcomes a workflow can branch on without parsing output:
   exit `0` the run completed and found nothing, exit `6` the run completed
   and recorded findings, any other nonzero the measurement itself failed.
-  Code 6 is dedicated and no operational path returns it, which is the whole
-  point — a job can tell "the mem drifted from its source" from "the engine
-  could not boot". The full report is rendered before the findings exit
+  Code 6 is dedicated: a run that cannot complete returns its own code
+  instead, which is the whole point — a job can tell "the mem and its source
+  disagree" from "the engine could not boot". The line is *did the
+  measurement complete*, not *was everything well*: an artifact the pass
+  could not read is a finding (it was observed), while an input it could not
+  read at all refuses — an unreadable anchors sidecar now returns
+  `ANCHORS_SIDECAR_UNREADABLE` rather than reporting every artifact
+  uncovered. The full report is rendered before the findings exit
   fires, so a red build still carries the report that explains it. Opt-in:
   without the flag verify's exit behaviour is byte-for-byte unchanged.
 - **A rollup verdict on the fidelity report — `clean` / `drifted` /
@@ -195,6 +200,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   anything.
 
 ### Fixed
+- **A corrupt anchors sidecar produced a red CI build blaming the mem.** The
+  anchor readers degrade a malformed sidecar to "no anchors" — right for a
+  reader, wrong for anything concluding from the absence of anchors. A
+  fidelity pass read every artifact as uncovered, recorded that as findings
+  and exited 6, with nothing on stderr: "no anchors parsed" and "no anchors
+  exist" are different facts and only one is the mem's fault. `verify` now
+  asks `Engine::anchors_sidecar_error` first and refuses with
+  `ANCHORS_SIDECAR_UNREADABLE`. The diagnostic is general — any caller that
+  must not confuse unreadable with absent can ask.
 - **"Verify is read-only" was false on eleven surfaces, including the ones
   agents read.** Verify mutates no entity, but a completed run records its
   findings store, backfills observed content hashes onto hash-less anchors,
