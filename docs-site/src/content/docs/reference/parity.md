@@ -54,12 +54,12 @@ Every public engine operation across the three programmatic surfaces (MCP, CLI, 
 
 † These absences are decisions, not gaps. Every other empty cell is simply an operation that surface does not carry.
 
-- `workspace-allow-create` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
-- `workspace-revoke-create` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
-- `workspace-allow-delete` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
-- `workspace-revoke-delete` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
-- `workspace-grant-cross-link` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
-- `workspace-revoke-cross-link` — workspace policy decides what an agent may do, so it is an operator surface: CLI only, never MCP. A policy-gated mutation refuses with the exact command to report.
+- `workspace-allow-create` — workspace policy decides what an agent may do, so it is an operator surface: the CLI and the operator-authenticated web API, never the agent's MCP surface. A policy-gated mutation refuses with the exact command to report.
+- `workspace-revoke-create` — workspace policy decides what an agent may do, so it is an operator surface: the CLI and the operator-authenticated web API, never the agent's MCP surface. A policy-gated mutation refuses with the exact command to report.
+- `workspace-allow-delete` — workspace policy decides what an agent may do, so it is an operator surface: the CLI and the operator-authenticated web API, never the agent's MCP surface. A policy-gated mutation refuses with the exact command to report.
+- `workspace-revoke-delete` — workspace policy decides what an agent may do, so it is an operator surface: the CLI and the operator-authenticated web API, never the agent's MCP surface. A policy-gated mutation refuses with the exact command to report.
+- `workspace-grant-cross-link` — workspace policy decides what an agent may do, so it is an operator surface: the CLI and the operator-authenticated web API, never the agent's MCP surface. A policy-gated mutation refuses with the exact command to report.
+- `workspace-revoke-cross-link` — workspace policy decides what an agent may do, so it is an operator surface: the CLI and the operator-authenticated web API, never the agent's MCP surface. A policy-gated mutation refuses with the exact command to report.
 
 ## Unaligned
 

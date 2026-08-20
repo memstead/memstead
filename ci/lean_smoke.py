@@ -38,7 +38,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
 
         with McpServer(memstead_mcp, workspace) as server:
             tools = server.list_tools()
-            # The lean surface is filesystem-shape: 12 tools today,
+            # The lean surface is filesystem-shape: 13 tools today,
             # named `memstead_*`. Don't pin the exact count — surface
             # changes are out of scope for this probe — but every tool
             # this probe calls must be present.

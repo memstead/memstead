@@ -114,7 +114,7 @@ fn every_tool_uses_memstead_prefix() {
     for tool in &tools {
         assert!(
             tool.name.starts_with("memstead_"),
-            "Tool '{}' lacks the required memstead_ prefix — every MCP tool, workspace-policy tools included, must be namespaced under memstead_",
+            "Tool '{}' lacks the required memstead_ prefix — every MCP tool must be namespaced under memstead_",
             tool.name
         );
     }
