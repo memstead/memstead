@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-20T15:29:00Z
-last_modified: 2026-08-20T15:29:00Z
+last_modified: 2026-08-20T16:23:13Z
 authority: established
 universality: domain-wide
 tags: mcp, trust-model, workspace-policy, tool-surface, operator
@@ -10,7 +10,7 @@ tags: mcp, trust-model, workspace-policy, tool-surface, operator
 # An agent does not hold the keys to its own constraints
 
 ## Statement
-A switch that decides what an agent is permitted to do does not appear on that agent's own tool surface. Workspace policy — which mems may be created or deleted, which cross-mem links are granted — is the operator's decision about the agent, so it is reachable from the CLI and never from MCP.
+A switch that decides what an agent is permitted to do does not appear on that agent's own tool surface. Workspace policy — which mems may be created or deleted, which cross-mem links are granted — is the operator's decision about the agent, so it is reachable from operator surfaces (the `memstead workspace` CLI and the operator-authenticated web API `ui-api` serves at `/api/v1/workspace/policy/*`) and never from MCP.
 
 The division of labour is the refusal contract: a policy-gated mutation refuses with a typed code and the exact command that would unblock it; the agent reports that command; a person runs it. The refusal is the whole mechanism — nothing is hidden from the agent except the ability to grant itself permission.
 
@@ -25,7 +25,9 @@ The removal also serves the tool-count budget — the pro server went from 25 to
 
 ## Exceptions
 
-None on MCP. A future non-agent programmatic surface (a management API, an operator UI) may carry policy editing: the constraint is about who holds the switch, not about which protocol carries it.
+None on MCP.
+
+Not an exception, but the boundary stated precisely: the operator-authenticated web API **already** carries policy editing today (`ui-api/src/mutate/workspace.rs`, routed at `ui-api/src/lib.rs`), and that is consistent with this principle rather than a carve-out from it. The constraint is about who holds the switch, not which protocol carries it: a human authenticating to an operator console is the operator. Do not read "never from MCP" as "CLI only" — that phrasing was used briefly on 2026-08-20 and is false.
 
 ## Consequences
 
