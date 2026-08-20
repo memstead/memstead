@@ -40,7 +40,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   block now names the absence and a remedy verified to work in the
   reader's own workspace shape: `mem init` alone in a mem-repo workspace
   that already admits the name, the `workspace allow-create` pair where
-  it does not, and — in a filesystem-mem workspace, which holds one mem —
+  it does not — both steps naming one concrete schema pin the reader can
+  copy, resolved from the registry, rather than a `<name@version>`
+  placeholder they would have to fetch vocabulary for — and, in a
+  filesystem-mem workspace, which holds one mem,
   re-declaring the binding, because the record's folder decides which
   mem's anchors resolve and editing `destination_mem` in place leaves
   every anchored write refusing. A source pointer resolving to nothing on disk is
@@ -70,6 +73,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   shipped binary no longer writes. (The same misstatement inside the
   sealed built-in schema packages is deliberately left alone: their
   content is hash-pinned by the retention gate.)
+- **A refusal offered a remedy that refuses.** `projection brief <binding>
+  --sync` and `projection advance` on a binding with no sync block named
+  `projection enable sync <binding>` unconditionally — but over a medium
+  whose capability row cannot carry sync (a `web` source), that command
+  refuses too, bouncing the reader from refusal to remedy to capability gap
+  with nothing that closes it. The absent-operation refusal now validates a
+  candidate carrying the operation — the same question `enable` asks — and
+  names the gap directly where the medium cannot carry it, keeping the
+  one-command remedy everywhere it is honest. `concepts/fidelity-contract`
+  said web-medium sync is refused "at declaration time, not at run time";
+  `projection init` in fact scaffolds build-only with a warning and the
+  refusal arrives when sync is asked for, which is what it now says.
+- **`/ingest --clear` handed a first-session reader an engine internal.**
+  In a filesystem-mem workspace — the shape `memstead quickstart`
+  produces — the router echoed the engine's `VALIDATION_FAILED: memstead
+  mem delete requires a mem-repo workspace … is filesystem-shaped`, which
+  names a workspace shape the reader never chose. It now says what is
+  true: such a workspace holds one mem, so there is no paired process mem
+  to clear, and starting the build over means removing `.memstead/` and
+  the mem's folder and re-running `quickstart`.
 - **The crate READMEs and the installer offered only the empty-directory
   entry.** `memstead-cli`'s `## Start`, the `memstead-mcp` wiring
   section, and `install.sh`'s next-step line now name

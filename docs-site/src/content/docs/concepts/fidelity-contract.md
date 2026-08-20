@@ -99,9 +99,12 @@ rather than left as a silent gap or dressed up as an imminent feature:
 
 - **Web-medium sync and enumeration.** A `web` medium can be named and read, but the
   engine does not enumerate or maintain it. Because its capability row advertises no
-  enumeration and no retrievable base, **binding validation refuses** a sync or
-  enumeration-dependent operation against a web medium — with a remedy-bearing error,
-  at declaration time, not at run time.
+  enumeration and no retrievable base, a sync or enumeration-dependent operation
+  **cannot be declared** against a web medium: `projection init` scaffolds the binding
+  build-only and says which operations it dropped and why; `projection enable sync`
+  refuses outright; and a record that carries one anyway is refused at validation.
+  Asking a web binding to sync therefore names the capability gap itself, never a
+  remedy no medium can honour.
 - **Preparation of non-text media (e.g. PDF).** A facet may declare a preparation
   step (PDF→markdown, audio→transcript), but no preparation implementation ships
   today. A source that declares one is **skipped at run time**: the record is

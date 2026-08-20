@@ -628,8 +628,15 @@ pub enum CapabilityError {
     },
     /// A source declares a deterministic preparation step. No preparation
     /// implementation exists ([`PREPARATION_IMPL_VERSION`] is `0`), so any
-    /// declared preparation is unsupported — refused at validation time, not
-    /// only at render time.
+    /// declared preparation is unsupported.
+    ///
+    /// Raised by [`validate_binding`], which the edit/validate paths call —
+    /// NOT `projection init` (which has no `--preparation` flag) and not the
+    /// brief renderer. A record that acquires a preparation some other way is
+    /// therefore accepted at rest and skipped at run time with exit 0; see
+    /// `GLOSSARY.md` and `crate::pipeline::Source::preparation`. "Refused at
+    /// validation" is true of this error's own call sites, not of every path
+    /// by which a preparation can reach a record.
     #[error(
         "source '{source_name}' declares preparation '{preparation}', which has no implementation \
          (preparation impl version {impl_version})"

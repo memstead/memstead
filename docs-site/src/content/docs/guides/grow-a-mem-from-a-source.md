@@ -82,7 +82,7 @@ Then render the next brief and repeat. **The mem is your continuity**: each run 
 memstead projection brief my-graph/some-repo
 ```
 
-When a binding has nothing due — its source has not moved since the last pass — the rotation says so rather than inventing work.
+Naming a binding renders that binding's brief — it does not consult the rotation, so it never reports "nothing due". The *rotation* — `memstead projection brief --all --consume`, which is what `/ingest` runs — is the surface that skips a binding whose source has not moved since its last worked pass, rather than inventing work for it.
 
 ## What this loop does not do
 

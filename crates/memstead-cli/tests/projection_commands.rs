@@ -2222,9 +2222,177 @@ fn brief_names_a_destination_mem_that_does_not_exist_yet() {
         "the brief must name the absent destination:\n{out}",
     );
     assert!(
-        out.contains("memstead mem init absent-mem"),
-        "…and carry the command that creates it:\n{out}",
+        !out.contains("<name@version>"),
+        "the remedy must name a concrete pin, not a placeholder the reader has \
+         to fetch vocabulary for:\n{out}",
     );
+
+    // Follow the remedy verbatim — the sibling filesystem-shape test earned
+    // this method three times over. Wording assertions passed while every
+    // wrong version of this message shipped; running it is what caught them.
+    let remedy = out
+        .lines()
+        .find(|l| l.contains("does not exist in this workspace yet"))
+        .expect("the remedy line");
+    let spans: Vec<&str> = remedy
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|c| c.starts_with("memstead "))
+        .collect();
+    // The sentence names the bare verb (`memstead mem init`) to say it
+    // refuses on its own, then gives the full invocation. A mention that is a
+    // proper prefix of an actual command is not a command — running it would
+    // fail on missing arguments and prove nothing about the remedy.
+    let commands: Vec<&str> = spans
+        .iter()
+        .copied()
+        .filter(|c| {
+            !spans
+                .iter()
+                .any(|o| o != c && o.starts_with(&format!("{c} ")))
+        })
+        .collect();
+    assert!(
+        !commands.is_empty(),
+        "the remedy must carry runnable commands, got {spans:?} from: {remedy}",
+    );
+    for command in &commands {
+        let run = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command.replace("memstead ", &format!("{} ", memstead_bin().display())))
+            .current_dir(&ws)
+            .output()
+            .expect("shell runs");
+        assert!(
+            run.status.success(),
+            "the remedy's command must run: {command}\n{}",
+            String::from_utf8_lossy(&run.stderr),
+        );
+    }
+
+    // …and the mem the brief said was missing is now there, described as
+    // present by the same block that reported it absent.
+    let after = String::from_utf8(
+        memstead()
+            .current_dir(&ws)
+            .args(["projection", "brief", "absent-mem/code"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        !after.contains("This mem does not exist in this workspace yet"),
+        "after the remedy the destination must be present:\n{after}",
+    );
+    assert!(
+        after.contains("absent-mem") && after.contains("schema:"),
+        "the Destination block must describe the created mem:\n{after}",
+    );
+}
+
+/// A refusal names `projection enable <op>` as the remedy. Over a medium
+/// whose capability row cannot carry the operation, that remedy refuses too
+/// — so the reader is bounced from run-time refusal to enable to capability
+/// gap with nothing they can do. The gap must be the answer at the first
+/// refusal, and the remedy must survive where it IS honest. Both halves, run.
+#[test]
+fn absent_sync_names_the_enable_remedy_only_where_the_medium_can_carry_it() {
+    let tmp = TempDir::new().unwrap();
+
+    // (a) a web source: sync is out of scope, so no remedy may be offered.
+    let web = tmp.path().join("web-ws");
+    std::fs::create_dir_all(&web).unwrap();
+    memstead()
+        .current_dir(&web)
+        .args(["quickstart", "--name", "web-check"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&web)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "web-check",
+            "--source",
+            "https://example.com/docs",
+            "--medium-type",
+            "web",
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(&web)
+        .args(["--json", "projection", "brief", "web-check/docs", "--sync"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("refusal must emit JSON");
+    assert_eq!(env["code"], "PROJECTION_CAPABILITY_UNSUPPORTED");
+    let message = env["message"].as_str().unwrap_or_default();
+    assert!(
+        !message.contains("projection enable"),
+        "a remedy that would itself refuse must not be offered:\n{message}",
+    );
+    assert!(
+        message.contains("cannot carry one"),
+        "the capability gap must be named:\n{message}",
+    );
+
+    // (b) a codebase source with its sync block stripped: the remedy is real,
+    // and running it verbatim makes the same brief render.
+    let repo = tmp.path().join("code-ws");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(repo.join("src/a.rs"), b"pub fn a() {}\n").unwrap();
+    memstead()
+        .current_dir(&repo)
+        .args(["quickstart", "--repo", ".", "--agent", "claude-code"])
+        .assert()
+        .success();
+    let record = repo.join(".memstead/projections/code-ws/code-ws.json");
+    let mut binding: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    binding["operations"]
+        .as_object_mut()
+        .unwrap()
+        .remove("sync");
+    std::fs::write(&record, serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
+
+    let out = memstead()
+        .current_dir(&repo)
+        .args(["--json", "projection", "brief", "code-ws/code-ws", "--sync"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("refusal must emit JSON");
+    assert_eq!(env["code"], "PROJECTION_SYNC_NOT_ENABLED");
+    let remedy = env["details"]["remedy"]["cli"]
+        .as_str()
+        .expect("the remedy command")
+        .to_string();
+    let run = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(remedy.replace("memstead ", &format!("{} ", memstead_bin().display())))
+        .current_dir(&repo)
+        .output()
+        .expect("shell runs");
+    assert!(
+        run.status.success(),
+        "the remedy must run: {remedy}\n{}",
+        String::from_utf8_lossy(&run.stderr),
+    );
+    memstead()
+        .current_dir(&repo)
+        .args(["projection", "brief", "code-ws/code-ws", "--sync"])
+        .assert()
+        .success();
 }
 
 // ── AC4: absent-operation-block refusal + `projection enable` remedy ─────────

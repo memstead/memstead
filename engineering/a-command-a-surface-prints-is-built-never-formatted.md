@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-15T03:19:33Z
-last_modified: 2026-08-15T03:19:37Z
+last_modified: 2026-08-20T07:27:27Z
 authority: accepted
 universality: domain-wide
 tags: cli, output, shell-quoting, surfaces, instructions, onboarding
@@ -22,6 +22,7 @@ It does NOT govern prose that merely mentions a command's name ("the `memstead` 
 ## Relationships
 - **REFERENCES**: [[advertised-front-door-commands-serve-a-fresh-non-maintainer-workspace]]
 - **GOVERNS**: [[every-workspace-creating-command-discloses-the-shape-it-just-made]]
+- **REFERENCES**: [[a-test-gate-that-exists-must-gate]]
 
 ## Justification
 
@@ -35,6 +36,10 @@ This is the concrete form of [[engineering--advertised-front-door-commands-serve
 
 Placeholder invocations that teach a shape rather than name a run (`memstead install <scope>/<name>`) are documentation, not instructions, and are exempt from the runnable test — the angle brackets are the marker.
 
+That exemption does NOT extend to a remedy. When a surface tells a reader how to repair the state it just reported, every value in the printed command is resolved by the surface — a remedy carrying `--schema <name@version>` is an instruction the reader cannot complete without fetching vocabulary from somewhere else, which is the failure the remedy exists to prevent. The engine knows a usable value in every case where it knows enough to print the remedy at all; where two printed steps must agree on that value, both name the same resolved one rather than letting one fall back to its own default.
+
+The extract-and-run guard meets the mention/instruction line in reverse: a remedy that names a bare verb to say it refuses on its own ("`memstead mem init` alone refuses: …") and then gives the full invocation puts both in code spans. A span that is a proper prefix of another extracted span is the mention, not the command — running it proves nothing and fails on missing arguments.
+
 A command may also be named while explicitly disowned: the lean build points at `memstead mem-repo init` while stating in the same sentence that this build does not carry it. That is honest, and the guard recognises the disowning.
 
 ## Consequences
@@ -44,3 +49,8 @@ A new printed command inherits the treatment by construction, and is covered by 
 The program-resolution half has a visible cost: a reader whose binary is not on `PATH` sees absolute paths in their receipt rather than a tidy `memstead`. That is the correct trade — a tidy command that fails is worse than a long one that works — and the resolution collapses to the bare name whenever `PATH` genuinely carries this binary.
 
 Where a surface prints a command it did NOT itself configure (quickstart leaving an existing `.mcp.json` entry untouched), the printed check must describe what is actually wired rather than what would have been — the same rule applied to the claim rather than the syntax.
+
+
+Running the printed command is not the end of the check when that command is itself a refusal's remedy: a remedy may run and still leave the reader stuck, because what it leads to refuses. `projection brief <b> --sync` on a binding with no sync block named `projection enable sync <b>` unconditionally; over a `web` medium `enable` refuses on the capability row, so the reader was bounced refusal → remedy → gap with nothing that closes it. Asking whether the remedy is honest needs the same question the remedy itself would ask — here, validating a CANDIDATE record carrying the operation, because validating the record as it stands finds no declaration to refuse and reports no gap at all. Where the gap exists it IS the answer; where it does not, the one-command remedy stays.
+
+A constraint on how such a refusal is factored: the generated error index is a static scan for code literals at their construction sites. Hoisting the code into a helper parameter compiles, behaves identically, and silently drops the code from the published index — one more [[engineering--a-test-gate-that-exists-must-gate]] instance. Share the decision, spell each code where it is constructed.

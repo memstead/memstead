@@ -341,6 +341,31 @@ fn absent_source_names(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<
         .collect()
 }
 
+/// A schema pin the reader can copy verbatim into `allow-create` and
+/// `mem init`. Prefers one already in use in this workspace, so a mem
+/// created by following a remedy speaks its neighbours' vocabulary; falls
+/// back to the newest builtin `default` generation when the workspace has
+/// no mem yet (the shape a fresh `mem-repo init` leaves behind). The
+/// version is resolved from the registry rather than written literally, so
+/// a schema generation bump cannot leave this remedy naming a stale pin.
+fn suggested_schema_pin(engine: &Engine, writable: &[&str]) -> String {
+    writable
+        .iter()
+        .find_map(|m| engine.schema_pin(m))
+        .map(|r| r.as_display())
+        .or_else(|| {
+            memstead_schema::SchemaRegistry::builtin()
+                .available_versions("default")
+                .into_iter()
+                .max()
+                .map(|v| format!("default@{v}"))
+        })
+        // Unreachable with a sane binary: the builtin catalogue always
+        // carries `default`. A placeholder is still better than a pin that
+        // does not exist.
+        .unwrap_or_else(|| "<name@version>".to_string())
+}
+
 /// The note the Destination block carries when the destination mem is not
 /// in this workspace — and the remedy that actually works in the shape the
 /// reader is standing in. `memstead mem init` is mem-repo-only, so naming
@@ -375,13 +400,19 @@ fn absent_destination_note(
             crate::mem_management::CreateRuleSet::new(engine.settings().mem_create_rules.clone())
                 .ok()
                 .is_some_and(|set| set.matches(std::path::Path::new(dest)));
+        // Both steps name the SAME concrete pin. A placeholder here would be
+        // the one point on the first-session path where the reader must fetch
+        // vocabulary from somewhere else; and naming a pin on the rule while
+        // letting `mem init` fall back to its own default would refuse when
+        // the two disagree.
+        let pin = suggested_schema_pin(engine, &writable);
         if admitted {
-            format!("Create it before writing: `memstead mem init {dest}`.")
+            format!("Create it before writing: `memstead mem init {dest} --schema {pin}`.")
         } else {
             format!(
                 "Creating it takes two steps — this workspace admits no mem name yet, \
                  so `memstead mem init` alone refuses: `memstead workspace allow-create \
-                 '{dest}' --schema <name@version>`, then `memstead mem init {dest}`."
+                 '{dest}' --schema {pin}`, then `memstead mem init {dest} --schema {pin}`."
             )
         }
     } else if writable.is_empty() {

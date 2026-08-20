@@ -69,6 +69,19 @@ if (clearMode) {
     process.stdout.write(`[${LABEL} | clear] ${target} — deleted.\n`);
   } else if (/unknown (writable )?mem/i.test(r.stderr || '')) {
     process.stdout.write(`[${LABEL} | clear] ${target} — already absent.\n`);
+  } else if (/requires a mem-repo workspace/i.test(r.stderr || '')) {
+    // The engine's own wording names a workspace shape the first-session
+    // reader has never chosen and cannot act on. A filesystem-mem workspace
+    // holds exactly one mem, so it has no paired process mem to clear and
+    // no mem the engine will delete — say that, and name what clearing
+    // would have been for.
+    process.stdout.write(
+      `> **[${LABEL} | clear] Nothing to clear here.** This workspace holds a single mem, ` +
+        `so there is no paired process mem to delete — clearing one is a mem-repo workspace ` +
+        `operation, and the engine will not delete the only mem a filesystem-mem workspace ` +
+        `has. To start this mem's build from scratch, remove the workspace's \`.memstead/\` ` +
+        `directory and the mem's own folder beside it, then re-run \`memstead quickstart\`.\n`,
+    );
   } else {
     process.stdout.write(
       `> **[${LABEL} | clear] clear failed: ${stderrTail(r, 2) || '(no detail)'}**\n`,

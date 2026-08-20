@@ -46,6 +46,9 @@ switch (mode) {
   case 'delete-ok': process.exit(0);
   case 'delete-absent': err('memstead: ERROR [UNKNOWN_MEM]: unknown mem: app/graph\\n'); process.exit(3);
   case 'delete-fail': err('memstead: ERROR [GENERIC]: disk on fire\\n'); process.exit(1);
+  case 'delete-fs-shape':
+    err('memstead: ERROR [VALIDATION_FAILED]: \`memstead mem delete\` requires a mem-repo workspace; the workspace at /w is filesystem-shaped.\\n');
+    process.exit(3);
   default: process.exit(0);
 }
 `;
@@ -158,6 +161,21 @@ describe('ingest router — --clear <binding>', () => {
   it('is idempotent — an already-absent mem is not an error', () => {
     const { stdout } = runRouter(['--clear', 'app/graph'], 'delete-absent');
     assert.match(stdout, /already absent/);
+  });
+
+  it('explains the filesystem-mem shape instead of echoing the engine wording', () => {
+    // A filesystem-mem workspace holds one mem, so it has no paired process
+    // mem to clear — and the engine's own refusal names a workspace shape the
+    // first-session reader never chose. Same class as the no-workspace case
+    // the brief path already routes to /setup.
+    const { stdout } = runRouter(['--clear', 'app/graph'], 'delete-fs-shape');
+    assert.match(stdout, /Nothing to clear here/);
+    assert.match(stdout, /single mem/);
+    assert.doesNotMatch(
+      stdout,
+      /filesystem-shaped|VALIDATION_FAILED/,
+      'the engine-internal wording must not reach the reader',
+    );
   });
 
   it('reports a genuine clear failure', () => {

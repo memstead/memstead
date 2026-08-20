@@ -397,6 +397,92 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 }
 
+/// The capability gap that would stop `projection enable <operation>`, if
+/// there is one.
+///
+/// Asks the question `enable` asks: validate a CANDIDATE record carrying the
+/// operation. Validating the record as it stands answers nothing — the
+/// operation is absent, so there is no declaration for the matrix to refuse,
+/// and the gap stays invisible exactly where a caller needs it.
+fn operation_capability_gap(
+    binding: &memstead_base::binding::Binding,
+    operation: &'static str,
+) -> Option<String> {
+    let mut candidate = binding.clone();
+    let batch_size = candidate
+        .operations
+        .build
+        .as_ref()
+        .map_or(20, |b| b.batch_size);
+    match operation {
+        "sync" => {
+            candidate.operations.sync = Some(SyncOperation {
+                trigger: IngestTrigger::Manual,
+                batch_size,
+            });
+        }
+        "verify" => {
+            candidate.operations.verify = Some(VerifyOperation {
+                trigger: IngestTrigger::Manual,
+                batch_size,
+                adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+            });
+        }
+        // `build` is carried by every medium — no capability row refuses it,
+        // so the enable remedy is always honest for it.
+        _ => return None,
+    }
+    validate_binding(&candidate).err().and_then(|refusals| {
+        refusals
+            .iter()
+            .find(|r| {
+                matches!(
+                    r,
+                    CapabilityError::OperationOutOfScope { operation: op, .. } if *op == operation
+                )
+            })
+            .map(|gap| gap.to_string())
+    })
+}
+
+/// The refusal for a binding that declares no `sync` operation.
+///
+/// `projection enable sync <binding>` is the remedy — but only where the
+/// medium *can* carry sync. Over a medium whose capability row refuses it (a
+/// `web` source), `enable` refuses too, so naming it bounces the reader:
+/// the refusal points at `enable`, `enable` points at the capability gap,
+/// and nothing they can do closes it. Where the gap exists it IS the answer,
+/// so it is what this says.
+///
+/// Both codes are spelled as literals here, at their construction sites, so
+/// the generated error index (xtask) keeps finding them.
+fn absent_sync_error(binding_id: &str, binding: &memstead_base::binding::Binding) -> CliError {
+    if let Some(gap) = operation_capability_gap(binding, "sync") {
+        return CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_CAPABILITY_UNSUPPORTED",
+            format!(
+                "binding `{binding_id}` has no sync operation, and this medium \
+                 cannot carry one: {gap}"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id, "operation": "sync" }));
+    }
+    CliError::new(
+        ExitKind::Validation,
+        "PROJECTION_SYNC_NOT_ENABLED",
+        format!(
+            "binding `{binding_id}` has no sync operation — enable it with \
+             `memstead projection enable sync {binding_id}`"
+        ),
+    )
+    .with_details(json!({
+        "binding": binding_id,
+        "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
+    }))
+}
+
 /// Map a [`RenderBriefError`] to a typed CLI error (D12). Not-found bindings /
 /// facets / mediums exit `NotFound`; a malformed id is a `Validation` name
 /// error; config-load and mode-unsupported failures are generic. Codes are
@@ -492,19 +578,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
                 && record.config.operations.sync.is_none()
             {
-                return Err(CliError::new(
-                    ExitKind::Validation,
-                    "PROJECTION_SYNC_NOT_ENABLED",
-                    format!(
-                        "binding `{binding_id}` has no sync operation — enable it with \
-                         `memstead projection enable sync {binding_id}`"
-                    ),
-                )
-                .with_details(json!({
-                    "binding": binding_id,
-                    "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
-                }))
-                .into());
+                return Err(absent_sync_error(&binding_id, &record.config).into());
             }
         }
         let (rendered, operation) = if args.verify {
@@ -1542,21 +1616,11 @@ fn advance(ctx: &CliContext, args: AdvanceArgs) -> anyhow::Result<()> {
 
     // D6/AC4: advance is the sync (maintenance-write) path — refuse when the
     // binding declares no `sync` operation, carrying the one-command remedy
-    // `projection enable sync <binding>` (which, run verbatim, makes it succeed).
+    // `projection enable sync <binding>` (which, run verbatim, makes it
+    // succeed) — except over a medium whose capability row refuses sync
+    // outright, where the gap is named instead of a remedy that would bounce.
     if record.config.operations.sync.is_none() {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_SYNC_NOT_ENABLED",
-            format!(
-                "binding `{binding_id}` has no sync operation — enable it with \
-                 `memstead projection enable sync {binding_id}`"
-            ),
-        )
-        .with_details(json!({
-            "binding": binding_id,
-            "remedy": { "cli": format!("memstead projection enable sync {binding_id}") },
-        }))
-        .into());
+        return Err(absent_sync_error(&binding_id, &record.config).into());
     }
 
     let resolved = resolve_binding_run(&binding_id, &record.config)
