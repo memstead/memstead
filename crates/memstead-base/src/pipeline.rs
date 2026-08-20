@@ -84,8 +84,9 @@ pub struct Source {
     pub engagement: Option<serde_json::Value>,
     /// Optional deterministic preparation step (string identifier, e.g.
     /// `pdf-to-markdown`). Unset for every text source today. A source that
-    /// names a preparation the engine has no implementation for is refused
-    /// at validation time — no silent skip, no crash.
+    /// names a preparation the engine has no implementation for is accepted
+    /// at rest and reported unsupported at run time (the run prints
+    /// "Skipping." and exits 0) — not refused at declaration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preparation: Option<String>,
 }

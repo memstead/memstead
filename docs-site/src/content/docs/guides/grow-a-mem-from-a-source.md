@@ -32,7 +32,7 @@ memstead projection verify my-graph/some-repo --full
 On a fresh binding this reports **0% anchored** and says so plainly — that is onboarding, not drift. The number it gives you is the denominator: how many source artifacts are in scope after the binding's deny list.
 
 :::caution
-Run this only once the destination mem exists — `quickstart` and the commands above create it. Against a binding whose mem is not there yet, `verify` records its findings and then fails writing the baseline (`PROJECTION_VERIFY_BASELINE_FAILED: unknown mem`). Create the mem first; the brief in step 2 tells you how if you are unsure.
+Run this only once the destination mem exists — `quickstart` and the commands above create it. Against a binding whose mem is not there yet, `verify` records its findings and then fails writing the baseline (`PROJECTION_VERIFY_BASELINE_FAILED: unknown mem`). If you are unsure, render the brief first (step 2): its Destination block says whether the mem is there and what to do about it in your workspace shape.
 :::
 
 :::note
@@ -49,7 +49,7 @@ The output is not for you — it is the prompt an agent works from. It names the
 
 Two things in it matter for the loop to work:
 
-- **The destination.** If the mem does not exist yet, the brief says so and gives you the command that creates it. Create it before working the batch.
+- **The destination.** If the mem does not exist yet, the brief says so and gives you the fix for the workspace shape you are in — a `mem init` (and, where the workspace admits no name yet, the `workspace allow-create` that must precede it) in a mem-repo workspace; in a filesystem-mem workspace, which holds exactly one mem and cannot add another, the commands to re-declare the binding against the mem you have. Do that before working the batch: until the destination resolves, every write this brief asks for refuses.
 - **Anchors.** The brief tells the agent to attach an `anchors` list to every write, naming the source artifact the entity is drawn from and the binding source name it came from. This is what makes the next two steps possible: unanchored writes leave coverage blind.
 
 ## 3. Work one batch
