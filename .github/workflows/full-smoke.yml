@@ -6,7 +6,7 @@
 # Sister workflow to `lean-smoke.yml`: same harness
 # (`ci/mcp_client.py`), same shape (build → upload → probe), but
 # the workspace setup uses the gitdir-backed mem-repo path and the
-# probe asserts the 24-tool full surface (`memstead_mem_create`,
+# probe exercises the full surface (`memstead_mem_create`,
 # `memstead_mem_delete`, `memstead_reload` are full-only).
 #
 # Why a separate workflow rather than a matrix dimension on

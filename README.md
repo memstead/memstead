@@ -164,7 +164,7 @@ Schema (.memstead/schemas/<name>@<version>/ — types, sections, metadata, relat
   ↓
 Engine (parse ↔ in-memory store ↔ generate, write-through to markdown in git)
   ↓
-MCP server (memstead_* + workspace_* tools over STDIO)  ─┐
+MCP server (memstead_* tools over STDIO)  ─┐
                                                      ├─→  AI agent or shell
 CLI (`memstead` mirrors nearly every MCP tool; parity matrix has the map)  ─┘
 ```

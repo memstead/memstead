@@ -58,14 +58,13 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
         with McpServer(memstead_mcp, workspace) as server:
             tools = server.list_tools()
             # The full surface — read-only + mutation + mem-lifecycle
-            # (`memstead_mem_create`, `memstead_mem_delete`), workspace
-            # `memstead_reload`. The
-            # exact roster and count are pinned by `EXPECTED_TOOLS` in
+            # (`memstead_mem_create`, `memstead_mem_delete`) + admin
+            # (`memstead_reload`). The exact roster and count are pinned
+            # by `EXPECTED_TOOLS` in
             # `crates/memstead-mcp/tests/tool_surface.rs` — that test is
             # the authority; this probe deliberately does not re-count.
             # It exercises the entity-surface subset; the lifecycle
-            # tools are covered in `memstead-workspace`'s in-process
-            # tests already.
+            # tools are covered by that crate's in-process tests.
             for required in (
                 "memstead_create",
                 "memstead_search",
