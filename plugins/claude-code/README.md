@@ -73,7 +73,7 @@ changes. Everything in this loop is operable today:
    yet? `/ingest` asks three plain questions — what to read, what the mem should
    capture, which mem — and sets one up for you; you never write config.
    The same loop without the plugin, step by step:
-   <https://memstead.com/guides/grow-a-mem-from-a-source/>.
+   <https://memstead.com/dev/guides/grow-a-mem-from-a-source/>.
 2. **Check freshness — `memstead status`.** Shows, per mem, what has moved in
    the source since the mem last kept pace — so you know when a mem has fallen
    behind before you rely on it.

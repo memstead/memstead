@@ -104,9 +104,11 @@ rather than left as a silent gap or dressed up as an imminent feature:
   at declaration time, not at run time.
 - **Preparation of non-text media (e.g. PDF).** A facet may declare a preparation
   step (PDF→markdown, audio→transcript), but no preparation implementation ships
-  today. A facet that declares one its medium cannot support is **refused at binding
-  validation** with a capability error naming the unsupported operation — again at
-  declaration time, so a workspace never discovers the gap mid-run.
+  today. A source that declares one is **skipped at run time**: the record is
+  accepted at declaration, and the run that would consume it reports the
+  unsupported preparation and exits without doing work. The gap is named when
+  you hit it, not when you declare it — which is the honest description of
+  where the edge currently sits.
 
 Neither is a roadmap promise, and neither is omitted: the honest shape of a contract
 is to name its own edges. When these land, they will enter the capability matrix the

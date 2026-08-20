@@ -28,6 +28,11 @@ fn memstead() -> Command {
     Command::cargo_bin("memstead").expect("memstead binary must be built by cargo")
 }
 
+/// The binary's own path, for replaying a printed command through a shell.
+fn memstead_bin() -> std::path::PathBuf {
+    assert_cmd::cargo::cargo_bin("memstead")
+}
+
 /// Write `contents` to `<root>/.memstead/<rel>`, creating parent dirs.
 fn write_store(root: &Path, rel: &str, contents: &str) {
     let path = root.join(".memstead").join(rel);
@@ -2021,27 +2026,58 @@ fn brief_absent_destination_remedy_suits_the_workspace_shape() {
         "`mem init` refuses in a filesystem-mem workspace — the brief must not \
          name it here:\n{out}",
     );
-    // The remedy names the field AND the file it lives in — a bare field
-    // name is not actionable — and that file exists.
-    assert!(
-        out.contains("set `destination_mem` to `app`"),
-        "…and must name the fix that works here:\n{out}",
-    );
-    let record_claim = out
+    // The only assertion that matters: FOLLOW the remedy, verbatim, and the
+    // brief's own mandate must then succeed. Two earlier versions of this
+    // message were each defensible as prose and each left the reader stuck
+    // — one naming a command that refuses in this shape, one naming a field
+    // whose edit does not move the record, so every anchored write still
+    // failed INVALID_ANCHOR.
+    let remedy = out
         .lines()
-        .find(|l| l.contains("binding record"))
-        .expect("the remedy names the record file");
-    let path = record_claim
-        .rsplit_once("binding record `")
-        .expect("backticked path")
-        .1
+        .find(|l| l.contains("does not exist in this workspace yet"))
+        .expect("the remedy line");
+    let commands: Vec<&str> = remedy
         .split('`')
-        .next()
-        .unwrap();
+        .skip(1)
+        .step_by(2)
+        .filter(|c| c.starts_with("rm ") || c.starts_with("memstead "))
+        .collect();
     assert!(
-        repo.join(path).is_file(),
-        "the record path the remedy names must exist: {path}",
+        commands.len() >= 2,
+        "the remedy must carry runnable commands, got {commands:?} from: {remedy}",
     );
+    for command in &commands {
+        let run = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command.replace("memstead ", &format!("{} ", memstead_bin().display())))
+            .current_dir(&repo)
+            .output()
+            .expect("shell runs");
+        assert!(
+            run.status.success(),
+            "the remedy's command must run: {command}\n{}",
+            String::from_utf8_lossy(&run.stderr),
+        );
+    }
+
+    // …and now the anchored write the brief mandates lands.
+    memstead()
+        .current_dir(&repo)
+        .args([
+            "create",
+            "--type",
+            "concept",
+            "--title",
+            "After Remedy",
+            "--section",
+            "definition=d",
+            "--section",
+            "explanation=e",
+            "--anchor",
+            r#"{"artifact":"src/a.rs","grain":"file","class":"anchored","source":"app"}"#,
+        ])
+        .assert()
+        .success();
 }
 
 /// A source pointer that resolves to nothing on disk is named as such.

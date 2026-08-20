@@ -37,8 +37,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   order `projection init` deliberately allows) rendered a brief whose
   whole mandate is "mutate the destination", with nothing saying the mem
   was not there — the agent found out on its first write. The Destination
-  block now names the absence and the remedy that works in the reader's
-  own workspace shape. A source pointer resolving to nothing on disk is
+  block now names the absence and a remedy verified to work in the
+  reader's own workspace shape: `mem init` alone in a mem-repo workspace
+  that already admits the name, the `workspace allow-create` pair where
+  it does not, and — in a filesystem-mem workspace, which holds one mem —
+  re-declaring the binding, because the record's folder decides which
+  mem's anchors resolve and editing `destination_mem` in place leaves
+  every anchored write refusing. A source pointer resolving to nothing on disk is
   named as such, and the Sources block prints the pointer it is talking
   about. And the provenance block promised that an undeclared anchor
   `source` name always refuses; that check fires only for anchors

@@ -130,7 +130,7 @@ memstead projection verify my-graph/some-repo   # what is covered, what has drif
 
 The brief is written for the agent, not for you — hand it to a session (the Claude Code plugin's ingest skill does exactly this on a loop) and repeat until `verify` says the coverage is where you want it. Every entity still lands through the same validated write path as a hand-authored one.
 
-The full walkthrough, with the commands verified against the workspace it builds: [Grow a mem from a source](https://memstead.com/guides/grow-a-mem-from-a-source/).
+The full walkthrough, with the commands verified against the workspace it builds: [Grow a mem from a source](https://memstead.com/dev/guides/grow-a-mem-from-a-source/).
 
 ## How a Memstead system runs
 

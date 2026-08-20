@@ -305,6 +305,19 @@ fn dest_guidance(engine: &Engine, dest: &str) -> ResolvedGuidance {
     resolve_writing_guidance(&defaults, &mem_guidance)
 }
 
+/// The `--medium-type` flag value for a medium — the wire spelling a
+/// caller can paste back into `projection init`.
+fn medium_type_wire(t: crate::pipeline::MediumType) -> &'static str {
+    use crate::pipeline::MediumType as M;
+    match t {
+        M::Codebase => "codebase",
+        M::Filesystem => "filesystem",
+        M::Git => "git",
+        M::Graph => "graph",
+        M::Web => "web",
+    }
+}
+
 /// Primary source names whose medium base does not exist on disk. Only
 /// path-namespace media can be checked this way; a `web` or `graph`
 /// pointer is out of scope and never reported absent.
@@ -336,10 +349,11 @@ fn absent_source_names(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<
 /// simply pointed at the wrong mem and repointing it is the whole fix.
 fn absent_destination_note(
     engine: &Engine,
-    dest: &str,
+    resolved: &ResolvedIngest,
     binding_id: &str,
     workspace_root: &Path,
 ) -> Option<String> {
+    let dest = resolved.destination_mem.as_str();
     if engine.schema_pin(dest).is_some() {
         return None;
     }
@@ -373,16 +387,40 @@ fn absent_destination_note(
     } else if writable.is_empty() {
         "This workspace has no writable mem to point it at.".to_string()
     } else {
+        // Re-declare rather than hand-edit. The record's LOCATION decides
+        // the binding id and the mem whose anchors resolve — editing
+        // `destination_mem` in place leaves the record under the wrong mem
+        // folder, and every anchored write the brief mandates still refuses
+        // with INVALID_ANCHOR. Naming the field alone would be a remedy the
+        // reader could follow exactly and still be stuck.
+        let stem = binding_id.rsplit('/').next().unwrap_or(binding_id);
+        let redeclare = resolved
+            .sources
+            .iter()
+            .find_map(|s| match s {
+                crate::ingest::resolve::ResolvedSource::Primary(p) => Some(p),
+                crate::ingest::resolve::ResolvedSource::Reference { .. } => None,
+            })
+            .map(|p| {
+                format!(
+                    " Re-declare it against that mem: `rm .memstead/projections/{binding_id}.json` \
+                     then `memstead projection init --mem {} --source {} --medium-type {} \
+                     --name {}`.",
+                    writable.first().copied().unwrap_or("<mem>"),
+                    p.pointer,
+                    medium_type_wire(p.medium_type),
+                    // `--name` is not optional here: a `.` pointer (the
+                    // `quickstart --repo .` layout) derives no stem and
+                    // refuses PROJECTION_INVALID_NAME without it.
+                    stem,
+                )
+            })
+            .unwrap_or_default();
         format!(
             "This is a filesystem-mem workspace, which holds one mem and cannot \
-             add another — set `destination_mem` to {} in the binding record \
-             `.memstead/projections/{}.json`.",
-            writable
-                .iter()
-                .map(|m| format!("`{m}`"))
-                .collect::<Vec<_>>()
-                .join(" or "),
-            binding_id,
+             add another, so this binding names a mem that can never exist here.{redeclare} \
+             Editing `destination_mem` alone is not enough — the record's folder \
+             decides which mem's anchors resolve."
         )
     };
     Some(format!(
@@ -405,7 +443,7 @@ fn render_discovery(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
     let cursor = compute_source_cursor(engine, resolved, workspace_root);
     let preface = render_changed_slice(&cursor);
 
-    let dest_note = absent_destination_note(engine, dest, &resolved.name, workspace_root);
+    let dest_note = absent_destination_note(engine, resolved, &resolved.name, workspace_root);
     let absent = absent_source_names(resolved, workspace_root);
     assemble_discovery_brief(
         resolved,
