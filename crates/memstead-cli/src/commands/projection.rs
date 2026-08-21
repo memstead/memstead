@@ -530,6 +530,14 @@ fn map_brief_err(binding_id: &str, err: RenderBriefError) -> CliError {
             ResolveError::MalformedProjectionRef { .. } => {
                 CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
             }
+            // A scope nothing can interpret is a declaration defect the
+            // author must fix — Validation, with the legal forms named in
+            // the message rather than left for the reader to find.
+            ResolveError::UninterpretableScope { .. } => CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_SCOPE_UNINTERPRETABLE",
+                message,
+            ),
         },
     };
     mapped.with_details(json!({ "binding": binding_id }))
@@ -1539,6 +1547,11 @@ fn map_resolve_err(binding_id: &str, err: ResolveError) -> CliError {
         ResolveError::MalformedProjectionRef { .. } => {
             CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
         }
+        ResolveError::UninterpretableScope { .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_SCOPE_UNINTERPRETABLE",
+            message,
+        ),
         _ => CliError::new(ExitKind::Generic, "PROJECTION_ADVANCE_FAILED", message),
     };
     mapped.with_details(json!({ "binding": binding_id }))

@@ -92,6 +92,19 @@ pub enum ResolveError {
         /// The malformed value.
         projection: String,
     },
+    /// A source's scope carries a pattern its medium's namespace cannot
+    /// express, so the declared selection reaches nothing. Refused when the
+    /// binding is resolved for a run, not only when it is edited: a scope
+    /// nothing interprets is decorative wherever it came from, and
+    /// hand-editing the record is a route the CLI's own refusal text
+    /// recommends.
+    #[error("binding '{binding}' cannot run: {reason}")]
+    UninterpretableScope {
+        /// The binding whose scope cannot be interpreted.
+        binding: String,
+        /// What is wrong and how to fix it.
+        reason: String,
+    },
 }
 
 /// Render a name list for an error message: `a, b, c` or `(none)`.
@@ -128,6 +141,32 @@ pub fn resolve_binding_run(
         })?;
     let mem = mem.to_string();
     let name = name.to_string();
+
+    // A scope rule nothing interprets is refused HERE, on the run path, and
+    // not only on the edit paths that call `validate_binding`. Scaffolding the
+    // right shape only protects bindings this engine wrote: every graph
+    // binding scaffolded before the entity vocabulary existed carries the path
+    // glob `**/*`, and a hand-edited record is a route the CLI's own
+    // name-collision refusal points people at. Left unguarded, such a binding
+    // ran clean over an S(D) of zero and recorded a `#verified` baseline for a
+    // measurement that never happened.
+    for source in &binding.sources {
+        if source.medium_type == crate::pipeline::MediumType::Graph {
+            for rule in &source.scope {
+                if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+                    return Err(ResolveError::UninterpretableScope {
+                        binding: binding_id.to_string(),
+                        reason: format!(
+                            "source '{}' is a graph medium, but its scope pattern '{}' is not an \
+                             entity selector — a graph source selects entities, not paths. Write \
+                             '*' for the whole mem, 'type:<entity_type>', or 'id:<glob>'",
+                            source.name, rule.path
+                        ),
+                    });
+                }
+            }
+        }
+    }
 
     let mut sources = Vec::with_capacity(binding.sources.len() + binding.reference_mems.len());
     for source in &binding.sources {

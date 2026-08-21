@@ -606,9 +606,10 @@ impl Engine {
     ///
     /// Additive read surface: the durable data is unchanged; `state` is the
     /// [`crate::anchor::resolve_anchor`] outcome against an observation the
-    /// engine produces for a single `path`-namespace medium, or `None` when
-    /// unobserved (never fabricated). The verify pipeline consumes it to
-    /// adjudicate a mem's anchors against the source; audit/health can reuse it.
+    /// engine produces — the working tree for a `path`-namespace anchor, the
+    /// live graph for an `entity` one — or `None` when unobserved (never
+    /// fabricated). The verify pipeline consumes it to adjudicate a mem's
+    /// anchors against the source; audit/health can reuse it.
     pub fn mem_anchors_resolved(&self, mem: &str) -> Vec<(EntityId, ResolvedAnchor)> {
         let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
             return Vec::new();
@@ -2065,8 +2066,11 @@ pub struct ResolvedAnchor {
     #[serde(flatten)]
     pub anchor: crate::anchor::Anchor,
     /// The live resolution state, or `None` when the engine could not observe
-    /// the source artifact this pass (non-path medium, ambiguous / absent
-    /// medium, no workspace root, or a non-filesystem grain).
+    /// the source artifact this pass: a `url` grain, no workspace root, an
+    /// ambiguous or absent path medium, or an `entity` grain whose mem is not
+    /// mounted. That last case is load-bearing — an unmounted mem is not a mem
+    /// of deleted entities, so it must read as unobserved rather than
+    /// `Orphaned`, which prune would act on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<crate::anchor::AnchorState>,
     /// The prepared-content hash the observation computed this pass —

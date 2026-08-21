@@ -1102,6 +1102,11 @@ pub fn compute_fidelity_report(
     s_d.sort();
     s_d.dedup();
 
+    // Whether a medium the matrix marks enumerable produced an empty walk —
+    // read by the degradation block below, which otherwise stayed silent about
+    // exactly the case this plan exists to make honest.
+    let enumeration_yielded_nothing = s_d.is_empty() && enumerable_facets > 0;
+
     let denominator = if !s_d.is_empty() {
         DenominatorBasis::Enumerated { count: s_d.len() }
     } else if enumerable_facets == 0 {
@@ -1109,8 +1114,9 @@ pub fn compute_fidelity_report(
             reason: "the medium type(s) are not enumerable this cycle".to_string(),
         }
     } else {
-        // Enumerable per the matrix but the walk yielded nothing (empty scope /
-        // non-path medium type not walked this cycle).
+        // Enumerable per the matrix but the walk yielded nothing — an empty
+        // or over-narrow scope. The degradation block below says so out loud;
+        // `--full` refuses this case outright rather than measuring it.
         DenominatorBasis::NonEnumerable {
             reason: "no source artifacts enumerated in scope".to_string(),
         }
@@ -1255,6 +1261,19 @@ pub fn compute_fidelity_report(
         if !c.enumerable {
             degradations.push(format!(
                 "enumeration-unavailable:`{}` — `S(D)` coverage denominator not computable",
+                c.facet
+            ));
+        } else if enumeration_yielded_nothing {
+            // The matrix CLAIMS this medium enumerates and the walk produced
+            // nothing. That is a capability unavailable in this pass, and the
+            // block above only ever spoke for media the matrix already marks
+            // non-enumerable — so the honest case rendered `Degradations:
+            // (none)` beside a report with no denominator. `--full` refuses
+            // this outright; a plain pass measures what it can and must say
+            // what it could not.
+            degradations.push(format!(
+                "enumeration-empty:`{}` — the medium claims enumerability but the walk yielded \
+                 no artifacts; coverage is reported over anchors only",
                 c.facet
             ));
         }

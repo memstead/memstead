@@ -2095,7 +2095,8 @@ impl McpServer {
             // field). A present hash-bearing anchor adjudicates its recorded
             // prepared-content hash against the observed one, so `drifted` is
             // deterministic on a stable medium; `state` is absent when the
-            // source is unobserved (non-path medium), never fabricated.
+            // source is unobserved (a `url` grain, or an `entity` grain whose
+            // mem is not mounted), never fabricated.
             let resolved = engine.entity_anchors_resolved(&id);
             if !resolved.is_empty() {
                 let anchors: Vec<memstead_base::anchor::Anchor> =

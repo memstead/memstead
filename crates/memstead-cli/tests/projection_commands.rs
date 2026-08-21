@@ -3827,6 +3827,106 @@ fn an_unmounted_graph_source_refuses_instead_of_reporting_deletions() {
     );
 }
 
+/// Criterion 5's complement, on the path that matters: a graph facet carrying
+/// a scope pattern nothing interprets must be REFUSED WHEN IT RUNS, not only
+/// when it is edited.
+///
+/// Scaffolding the right shape protects only bindings this engine wrote. Every
+/// graph binding scaffolded before the entity vocabulary existed carries the
+/// path glob `**/*`, and hand-editing the record is a route the CLI's own
+/// name-collision refusal points people at. Left unguarded, such a binding ran
+/// clean over an S(D) of zero and recorded a `#verified` baseline for a
+/// measurement that never happened.
+#[test]
+fn a_graph_scope_nothing_interprets_is_refused_on_the_run_path() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    // Hand-edit the binding to the pre-vocabulary path glob.
+    let binding = root.join(".memstead/projections/dest/mirror.json");
+    let text = std::fs::read_to_string(&binding).unwrap();
+    std::fs::write(
+        &binding,
+        text.replace(
+            r#"{"path":"*","mode":"allow"}"#,
+            r#"{"path":"**/*","mode":"allow"}"#,
+        ),
+    )
+    .unwrap();
+
+    // Every run path refuses — not just the edit paths that call
+    // `validate_binding`. Verify is the one that used to record a `#verified`
+    // baseline over an empty walk.
+    for args in [
+        vec!["--json", "projection", "verify", "dest/mirror"],
+        vec!["--json", "projection", "brief", "dest/mirror"],
+    ] {
+        let out = memstead()
+            .current_dir(root)
+            .args(&args)
+            .assert()
+            .failure()
+            .get_output()
+            .stdout
+            .clone();
+        let env: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(
+            env["code"], "PROJECTION_SCOPE_UNINTERPRETABLE",
+            "`{args:?}` must refuse a scope nothing interprets: {env}"
+        );
+        let msg = env["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("type:") && msg.contains("id:"),
+            "the refusal names the legal forms rather than leaving them to be \
+             found: {env}"
+        );
+    }
+}
+
+/// Criterion 3's complement, second clause: a capability the matrix CLAIMS but
+/// the pass could not deliver renders as a degradation, never as silence. The
+/// degradation block only ever spoke for media already marked non-enumerable,
+/// so an enumerable medium whose walk came back empty printed
+/// `Degradations: (none)` beside a report with no denominator.
+#[test]
+fn an_empty_walk_on_an_enumerable_medium_renders_a_degradation() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    // A well-formed selector that legitimately matches nothing — no
+    // uninterpretable-scope hole involved.
+    let binding = root.join(".memstead/projections/dest/mirror.json");
+    let text = std::fs::read_to_string(&binding).unwrap();
+    std::fs::write(
+        &binding,
+        text.replace(
+            r#"{"path":"*","mode":"allow"}"#,
+            r#"{"path":"type:nosuchtype","mode":"allow"}"#,
+        ),
+    )
+    .unwrap();
+
+    let out = String::from_utf8(
+        memstead()
+            .current_dir(root)
+            .args(["projection", "verify", "dest/mirror"])
+            .assert()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+
+    assert!(
+        out.contains("enumeration-empty"),
+        "the unavailable enumeration is named as a degradation: {out}"
+    );
+    assert!(
+        !out.contains("_(none)_") || !out.contains("## Degradations\n\n_(none)_"),
+        "the Degradations block is not silent about it: {out}"
+    );
+}
+
 /// Criterion 6 proper: build→sync→verify over a graph binding whose source mem
 /// is **git-branch backed**, so a real snapshot token and a real changed slice
 /// exist. The folder-mem fixture above cannot reach this — a folder mount
