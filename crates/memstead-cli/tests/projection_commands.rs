@@ -3927,6 +3927,75 @@ fn an_empty_walk_on_an_enumerable_medium_renders_a_degradation() {
     );
 }
 
+/// Criteria 1 and 3's complements, in the shape that hid them: a MIXED
+/// binding, where one facet walks and another does not.
+///
+/// Both guards were binding-level — the `--full` refusal tested the union of
+/// every facet's walk, and the degradation flag was computed over that same
+/// union while being rendered per facet. One facet with artifacts therefore
+/// spoke for a sibling that had none: `--full` returned clean over a scope
+/// nobody looked at, and the Degradations block stayed silent about a
+/// capability the matrix claimed and the pass never delivered.
+#[test]
+fn an_empty_facet_is_not_excused_by_a_sibling_that_walked() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    // Add a second, path-medium facet that DOES walk, alongside a graph facet
+    // narrowed to a well-formed selector matching nothing.
+    std::fs::create_dir_all(root.join("code")).unwrap();
+    std::fs::write(root.join("code").join("a.rs"), "fn a() {}\n").unwrap();
+    write_store(
+        root,
+        "projections/dest/mirror.json",
+        r#"{"version":2,"intent":"mixed","sources":[
+            {"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"type:nosuchtype","mode":"allow"}]},
+            {"name":"code-facet","type":"filesystem","pointer":"code","change_detection":"mtime","scope":[{"path":"code/**/*","mode":"allow"}]}
+        ],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+    );
+
+    // (1) `--full` must refuse, naming the empty facet — not pass because the
+    //     sibling produced a non-empty union.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror", "--full"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["code"], "PROJECTION_CAPABILITY_UNSUPPORTED",
+        "a full measurement refuses when any enumerable facet walked nothing: {env}"
+    );
+    assert_eq!(
+        env["details"]["facet"], "src-graph",
+        "the refusal names the facet that walked nothing, not the whole binding: {env}"
+    );
+
+    // (2) A plain pass measures what it can — and says what it could not.
+    let out = String::from_utf8(
+        memstead()
+            .current_dir(root)
+            .args(["projection", "verify", "dest/mirror"])
+            .assert()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        out.contains("enumeration-empty:`src-graph`"),
+        "the empty facet is named as a degradation even though a sibling \
+         walked: {out}"
+    );
+    assert!(
+        !out.contains("enumeration-empty:`code-facet`"),
+        "the facet that DID walk is not accused of walking nothing: {out}"
+    );
+}
+
 /// Criterion 6 proper: build→sync→verify over a graph binding whose source mem
 /// is **git-branch backed**, so a real snapshot token and a real changed slice
 /// exist. The folder-mem fixture above cannot reach this — a folder mount

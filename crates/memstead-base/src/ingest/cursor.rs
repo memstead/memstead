@@ -729,37 +729,6 @@ pub fn enumerate_source_artifacts(
     }
 }
 
-/// Enumerate the whole binding's `S(D)` — the union over its primary sources,
-/// sorted and de-duplicated. `enumerable_only` restricts the union to sources
-/// whose medium the capability matrix marks enumerable (what the coverage
-/// denominator and the findings sample want); passing `false` unions every
-/// primary source (what the exclude membership gate and the refinement
-/// rotation want, since a non-enumerable medium contributes nothing anyway).
-pub fn enumerate_binding_s_d(
-    engine: &Engine,
-    resolved: &ResolvedIngest,
-    workspace_root: &Path,
-    enumerable_only: bool,
-) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for source in &resolved.sources {
-        if let ResolvedSource::Primary(p) = source {
-            if enumerable_only && !crate::binding::medium_capabilities(p.medium_type).enumerable {
-                continue;
-            }
-            out.extend(enumerate_source_artifacts(
-                engine,
-                p,
-                &resolved.deny_paths,
-                workspace_root,
-            ));
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
 /// Compute the graph changed slice for a source mem between its stored
 /// baseline snapshot token and the mem's current head. Mirrors
 /// `computeGraphSlice`, using the engine's own change history.

@@ -385,10 +385,12 @@ pub struct VerifyArgs {
     /// rotating sample scheduler is bypassed), treat the per-run adjudication
     /// cap as unlimited, and perform the prepared-hash backfill — the
     /// report's coverage and accuracy figures are computed over everything,
-    /// with no sampling or truncation caveat. Refuses (typed) when a facet's
-    /// medium is non-enumerable rather than render a fabricated-complete
-    /// report. Without this flag the capped/sampled loop economics are
-    /// unchanged.
+    /// with no sampling or truncation caveat. Refuses (typed) rather than
+    /// render a fabricated-complete report in two cases, both per facet: a
+    /// facet whose medium is non-enumerable, and a facet whose medium claims
+    /// enumerability but whose own walk yields no artifacts — a sibling facet
+    /// that walked does not excuse it. Without this flag the capped/sampled
+    /// loop economics are unchanged.
     #[arg(long)]
     pub full: bool,
     /// CI-gate mode: exit 6 when the completed run recorded findings, so a

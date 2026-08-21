@@ -2074,9 +2074,12 @@ pub struct ResolvedAnchor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<crate::anchor::AnchorState>,
     /// The prepared-content hash the observation computed this pass —
-    /// present only for a hash-bearing (`anchored` / `derived`) `file` /
-    /// `span` anchor whose artifact resolved to a readable file. The verify
-    /// pass's backfill leg records it onto a hash-less anchor. Engine-internal
+    /// present only for a hash-bearing (`anchored` / `derived`) anchor whose
+    /// artifact could be read: a `file` / `span` anchor resolving to a
+    /// readable file, or an `entity` anchor whose mem is mounted (hashed over
+    /// the canonical rendered markdown, so the value means the same thing in
+    /// both namespaces). The verify pass's backfill leg records it onto a
+    /// hash-less anchor. Engine-internal
     /// observation detail, deliberately not serialized: the wire shape stays
     /// the stored anchor plus `state`.
     #[serde(skip)]

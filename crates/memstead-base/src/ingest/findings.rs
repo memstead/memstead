@@ -75,7 +75,7 @@ use crate::binding::{
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
 use super::advance::is_single_component;
-use super::cursor::{compute_source_cursor, enumerate_binding_s_d, enumerate_source_artifacts};
+use super::cursor::{compute_source_cursor, enumerate_source_artifacts};
 use super::refinement::{
     ROTATION_ANCHOR_ADJUDICATION, bump_verify_runs, next_batch, next_rotation_batch,
 };
@@ -1220,33 +1220,29 @@ fn run_verify(
         // This guard survives the enumerator being fixed: it is the standing
         // check that a future medium cannot be added to the matrix as
         // enumerable without an enumeration arm and still report green.
-        let walked = enumerate_binding_s_d(engine, resolved, workspace_root, true);
-        if walked.is_empty() {
-            let facets: Vec<String> = resolved
-                .sources
-                .iter()
-                .filter_map(|s| match s {
-                    ResolvedSource::Primary(p) => Some(p.name.clone()),
-                    _ => None,
-                })
-                .collect();
-            return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
-                facet: facets.join(", "),
-                medium_type: resolved
-                    .sources
-                    .iter()
-                    .filter_map(|s| match s {
-                        ResolvedSource::Primary(p) => Some(medium_type_wire(p.medium_type)),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                reason: "every source medium claims to be enumerable, but the enumeration \
-                         yielded no artifacts — a full measurement over an empty walk would \
-                         report complete coverage of nothing. Check the sources' scope \
+        // Checked PER FACET. A binding-level union hides the mixed case: one
+        // facet that walks makes the union non-empty, so `--full` returned
+        // clean while a sibling enumerable facet was never walked at all —
+        // complete coverage claimed over a scope nobody looked at. Each
+        // enumerable facet must produce something of its own.
+        for source in &resolved.sources {
+            if let ResolvedSource::Primary(p) = source
+                && medium_capabilities(p.medium_type).enumerable
+                && enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root)
+                    .is_empty()
+            {
+                let medium_type = medium_type_wire(p.medium_type);
+                return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
+                    facet: p.name.clone(),
+                    medium_type: medium_type.clone(),
+                    reason: format!(
+                        "medium type '{medium_type}' claims to be enumerable, but this facet's \
+                         enumeration yielded no artifacts — a full measurement over an empty \
+                         walk would report complete coverage of nothing. Check that its scope \
                          patterns actually select something"
-                    .to_string(),
-            }));
+                    ),
+                }));
+            }
         }
     }
 

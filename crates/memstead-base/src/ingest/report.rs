@@ -31,7 +31,7 @@
 //! - **Denominator provenance** is stated: coverage is relative to the
 //!   per-medium enumeration `S(D)` (B5).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::Serialize;
@@ -1085,27 +1085,29 @@ pub fn compute_fidelity_report(
     // --- S(D) enumeration + grain-classed coverage ---
     let mut s_d: Vec<String> = Vec::new();
     let mut enumerable_facets = 0usize;
+    // Facets whose medium the matrix marks enumerable and whose OWN walk came
+    // back empty. Tracked per facet, not over the union: in a mixed binding one
+    // facet that walks makes `S(D)` non-empty, so a binding-level flag reads
+    // "something was enumerated" while the empty facet's coverage stays
+    // unmeasured — and the degradation below, which names a facet, could not
+    // honestly speak for it. Same reasoning as the per-facet blind spot above.
+    let mut empty_enumerable_facets: BTreeSet<String> = BTreeSet::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
             let caps = medium_capabilities(p.medium_type);
             if caps.enumerable {
                 enumerable_facets += 1;
             }
-            s_d.extend(enumerate_source_artifacts(
-                engine,
-                p,
-                &resolved.deny_paths,
-                workspace_root,
-            ));
+            let walked =
+                enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root);
+            if caps.enumerable && walked.is_empty() {
+                empty_enumerable_facets.insert(p.name.clone());
+            }
+            s_d.extend(walked);
         }
     }
     s_d.sort();
     s_d.dedup();
-
-    // Whether a medium the matrix marks enumerable produced an empty walk —
-    // read by the degradation block below, which otherwise stayed silent about
-    // exactly the case this plan exists to make honest.
-    let enumeration_yielded_nothing = s_d.is_empty() && enumerable_facets > 0;
 
     let denominator = if !s_d.is_empty() {
         DenominatorBasis::Enumerated { count: s_d.len() }
@@ -1263,7 +1265,7 @@ pub fn compute_fidelity_report(
                 "enumeration-unavailable:`{}` — `S(D)` coverage denominator not computable",
                 c.facet
             ));
-        } else if enumeration_yielded_nothing {
+        } else if empty_enumerable_facets.contains(&c.facet) {
             // The matrix CLAIMS this medium enumerates and the walk produced
             // nothing. That is a capability unavailable in this pass, and the
             // block above only ever spoke for media the matrix already marks
