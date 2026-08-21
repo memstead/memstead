@@ -171,6 +171,22 @@ pub enum ProjectionCommand {
     /// ship; heavy per-artifact lists greedy-fill under `--budget` and drop to
     /// hints (forced back in with `--include`).
     Verify(VerifyArgs),
+    /// Answer deny verdicts: is a path (or Glob/Grep pattern) hidden by a
+    /// binding's `deny_paths`? Evaluates each candidate against the named
+    /// binding — or, with `--binding` omitted, the ACTIVE binding (the one
+    /// whose brief was last consumed) — using the engine's own deny dialect:
+    /// the facet-scope glob grammar resolved against the workspace root, plus
+    /// the literal-base directory-prefix rule (`dev/**` also blocks a read of
+    /// `dev` itself). Single-path form takes the candidate as an argument;
+    /// `--batch` reads `{"cwd": "<dir>", "paths": ["...", ...]}` from stdin
+    /// and answers every candidate in one process — the form a per-tool-call
+    /// consumer (the plugin's PreToolUse deny hook) amortizes subprocess cost
+    /// with. Engine-free and read-only: verdicts come from the binding record
+    /// and the path alone, no workspace boot. Output names the matched deny
+    /// entry on a block; the exit code stays 0 for an answered check — a
+    /// non-zero exit means the check itself could not run (unknown or
+    /// quarantined binding, no active binding, malformed batch).
+    CheckPath(CheckPathArgs),
 }
 
 /// The medium type flag for `projection init` — the CLI-facing mirror of
@@ -368,6 +384,29 @@ pub struct ExcludeArgs {
 }
 
 #[derive(ClapArgs, Debug)]
+pub struct CheckPathArgs {
+    /// The candidate — a path (absolute, or relative to `--cwd`) or a
+    /// Glob/Grep pattern. Omitted in `--batch` mode.
+    #[arg(required_unless_present = "batch", conflicts_with = "batch")]
+    pub path: Option<String>,
+    /// Binding to check against, canonical `<mem>/<stem>`. Defaults to the
+    /// active binding — the one whose brief was last consumed; refuses typed
+    /// (`NO_ACTIVE_BINDING`) when none is.
+    #[arg(long)]
+    pub binding: Option<String>,
+    /// Batch mode: read one JSON object from stdin —
+    /// `{"cwd": "<dir>", "paths": ["...", ...]}` — and answer every
+    /// candidate. A malformed payload refuses whole (`INVALID_INPUT`), never
+    /// part-answers. The payload's `cwd` wins over `--cwd`.
+    #[arg(long)]
+    pub batch: bool,
+    /// Directory relative candidates resolve against (default: the process
+    /// working directory).
+    #[arg(long)]
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+#[derive(ClapArgs, Debug)]
 pub struct VerifyArgs {
     /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
     pub binding: String,
@@ -412,6 +451,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         ProjectionCommand::Advance(a) => advance(ctx, a),
         ProjectionCommand::Exclude(a) => exclude(ctx, a),
         ProjectionCommand::Verify(a) => verify(ctx, a),
+        ProjectionCommand::CheckPath(a) => check_path(ctx, a),
     }
 }
 
@@ -1538,6 +1578,124 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// `projection check-path` — deny verdicts for tool-call candidates, engine-
+/// free: binding records are pure file I/O and the dialect evaluation needs
+/// no store, so the check stays cheap enough to run on every tool call.
+fn check_path(ctx: &CliContext, args: CheckPathArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    // Batch payload first: its `cwd` outranks the flag, and a malformed
+    // payload refuses before any binding work — never a part-answer.
+    let (candidates, payload_cwd): (Vec<String>, Option<std::path::PathBuf>) = if args.batch {
+        let mut raw = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw)
+            .map_err(|e| batch_invalid(format!("stdin unreadable: {e}")))?;
+        let value: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|e| batch_invalid(format!("not JSON: {e}")))?;
+        let paths = value
+            .get("paths")
+            .and_then(|p| p.as_array())
+            .ok_or_else(|| batch_invalid("missing `paths` array".to_string()))?;
+        let mut out = Vec::with_capacity(paths.len());
+        for p in paths {
+            match p.as_str() {
+                Some(s) => out.push(s.to_string()),
+                None => {
+                    return Err(batch_invalid(format!("non-string entry in `paths`: {p}")).into());
+                }
+            }
+        }
+        let cwd = match value.get("cwd") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::String(s)) => Some(std::path::PathBuf::from(s)),
+            Some(other) => {
+                return Err(batch_invalid(format!("`cwd` is not a string: {other}")).into());
+            }
+        };
+        (out, cwd)
+    } else {
+        (vec![args.path.clone().expect("clap requires PATH")], None)
+    };
+
+    // The binding: named, or the active one (published by the last consuming
+    // brief render). No active binding is a typed refusal, never an implicit
+    // "allowed" — the caller decides that an unanswerable check fails open.
+    let binding_id = match args.binding.clone() {
+        Some(id) => id,
+        None => memstead_base::ingest::read_active_binding_file(&root).ok_or_else(|| {
+            CliError::new(
+                ExitKind::NotFound,
+                "NO_ACTIVE_BINDING",
+                "no active binding — no consuming brief render has published one; name a \
+                 binding explicitly with --binding <mem>/<stem>",
+            )
+        })?,
+    };
+
+    let configs = load_pipeline_configs(&root).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_LOAD_FAILED",
+            format!("binding store unreadable: {e}"),
+        )
+    })?;
+    let binding = configs
+        .bindings
+        .iter()
+        .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
+        .map(|r| &r.config)
+        .ok_or_else(|| binding_miss_error(&configs, &binding_id))?;
+
+    let cwd = match payload_cwd.or(args.cwd) {
+        Some(dir) => dir,
+        None => std::env::current_dir()?,
+    };
+    let verdicts =
+        memstead_base::ingest::check_deny_paths(&binding.deny_paths, &candidates, &cwd, &root);
+
+    if ctx.json {
+        print_json(&json!({
+            "binding": binding_id,
+            "results": verdicts
+                .iter()
+                .map(|v| json!({
+                    "path": v.path,
+                    "denied": v.denied,
+                    "matched": v.matched,
+                }))
+                .collect::<Vec<_>>(),
+        }))?;
+    } else {
+        let mut out = format!("# Check path — binding `{binding_id}`\n\n");
+        for v in &verdicts {
+            match &v.matched {
+                Some(entry) => {
+                    out.push_str(&format!("- DENIED `{}` — matched `{entry}`\n", v.path));
+                }
+                None => out.push_str(&format!("- allowed `{}`\n", v.path)),
+            }
+        }
+        print_markdown(&out);
+    }
+    Ok(())
+}
+
+/// A malformed `--batch` payload: refuse whole, name the defect.
+fn batch_invalid(reason: String) -> CliError {
+    CliError::new(
+        ExitKind::Validation,
+        "INVALID_INPUT",
+        format!(
+            "--batch expects one JSON object on stdin — {{\"cwd\": \"<dir>\", \
+             \"paths\": [\"...\"]}} — {reason}"
+        ),
+    )
 }
 
 /// Map a `resolve_binding_run` failure to a typed CLI error. With inline

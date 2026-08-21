@@ -36,10 +36,11 @@
 //! — the exact grammar and resolution root as a facet-scope entry, resolved by
 //! the same [`build_glob_set`] / `:(glob,exclude)` machinery. The plugin's
 //! PreToolUse deny hook enforces the *identical* dialect against the ingest
-//! agent's Read/Glob/Grep, reading the active list from an engine-written cache
-//! file. [`write_active_deny_file`] publishes that file during brief rendering
-//! (remove-then-write, overwrite-always), so hook enforcement tracks the last
-//! rendered ingest and is never stale. A deny entry that selects **no file** in
+//! agent's Read/Glob/Grep by asking the engine itself: `projection
+//! check-path` answers through [`super::check_path::check_deny_paths`], which
+//! reads the active binding's record fresh on every call (the pointer channel
+//! is [`super::check_path::write_active_binding_file`], published on
+//! consuming brief renders). A deny entry that selects **no file** in
 //! the project tree is surfaced as a rendered brief warning
 //! ([`SourceCursor::dead_denies`]) rather than silently no-op'ing — catching
 //! typos and un-migrated legacy bare names, never a hard error.
@@ -90,7 +91,7 @@ use crate::pipeline::Source;
 /// Lexically normalize a path — resolve `.` and `..` without touching the
 /// filesystem (no symlink resolution), matching Node's `path.resolve` on an
 /// already-absolute path.
-fn normalize_lexical(path: &Path) -> PathBuf {
+pub(super) fn normalize_lexical(path: &Path) -> PathBuf {
     let mut out: Vec<Component> = Vec::new();
     for comp in path.components() {
         match comp {
@@ -110,7 +111,7 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 
 /// The relative path from `from` to `to` (both normalized), matching Node's
 /// `path.relative`.
-fn relative_path(from: &Path, to: &Path) -> PathBuf {
+pub(super) fn relative_path(from: &Path, to: &Path) -> PathBuf {
     let from = normalize_lexical(from);
     let to = normalize_lexical(to);
     let from_comps: Vec<Component> = from.components().collect();
@@ -898,54 +899,6 @@ fn write_cursor_memo(cache_root: &Path, ingest: &str, facet: &str, aggregate: &s
     }
 }
 
-// ── active-deny hook channel & dead-deny detection ──────────────────────────
-//
-// The plugin's PreToolUse deny hook (`deny-meta-files.mjs`) blocks the ingest
-// agent from Read/Glob/Grep against the *active* ingest's `deny_paths`. It
-// reads the list from an engine-written cache file; the engine writes that file
-// during CONSUMING brief renders only (below), so the hook always enforces the
-// list of the ingest whose brief was last consumed — never a stale one, and
-// never one a peek-only render merely looked at. Same workspace-relative glob
-// dialect the engine resolves here.
-
-/// The hook's active-deny cache path:
-/// `<workspace>/.memstead.cache/projection/active-deny-paths.json`.
-fn active_deny_path(workspace_root: &Path) -> PathBuf {
-    workspace_root
-        .join(".memstead.cache")
-        .join("projection")
-        .join("active-deny-paths.json")
-}
-
-/// Write the active ingest's deny list for the plugin hook, **stale-safe**.
-///
-/// Rendering a brief for ingest X publishes X's name and X's (dialect-normalized)
-/// deny entries here; a later render for Y overwrites it. An ingest with an
-/// empty `deny_paths` writes an explicit empty list (so the hook enforces
-/// *nothing*, rather than inheriting a previous ingest's list).
-///
-/// **Remove-then-write:** the previous file is unlinked *before* the new write,
-/// so a failed write can never leave X's list in place to be enforced against
-/// Y. Best-effort like the mtime memo (engine-internal cache, not a tracked
-/// mutation) — but the failure mode is fail-*closed* (no file ⇒ the hook
-/// blocks nothing), never fail-stale.
-pub fn write_active_deny_file(workspace_root: &Path, ingest_name: &str, deny_paths: &[String]) {
-    let path = active_deny_path(workspace_root);
-    // Unlink first: a subsequent write failure then leaves *no* file rather
-    // than a stale previous-ingest file the hook would keep enforcing.
-    let _ = std::fs::remove_file(&path);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let payload = serde_json::json!({
-        "ingest": ingest_name,
-        "deny_paths": deny_paths,
-    });
-    if let Ok(bytes) = serde_json::to_vec(&payload) {
-        let _ = std::fs::write(&path, bytes);
-    }
-}
-
 /// VCS metadata directories — never source artifacts. Pruned from source
 /// enumeration (`S(D)`, mtime slices, advance) and from the dead-deny scan.
 const VCS_INTERNAL_DIRS: &[&str] = &[".git", ".svn", ".hg"];
@@ -1413,31 +1366,36 @@ mod tests {
         }
     }
 
-    /// Shared deny-dialect fixture: the SAME entry list must exclude the SAME
-    /// files from an engine slice as it blocks in the plugin hook
-    /// (`deny-meta-files.test.js` asserts the hook half against this file).
-    /// Proven here by materialising every `blocked` + `allowed` path into a
-    /// temp workspace, scoping a facet to `**` (everything), applying the
-    /// fixture `entries` as the ingest `deny_paths`, and asserting
-    /// `enumerate_facet_files` yields exactly `allowed`.
+    /// One dialect, one implementation: the SAME entry list must exclude the
+    /// SAME files from an engine slice as [`super::check_path::check_deny_paths`]
+    /// denies. Successor to the retired cross-boundary fixture test that
+    /// pinned the engine against the plugin's JS dialect clone — both callers
+    /// now run engine code, and this test keeps the two engine consumers
+    /// (enumeration, path check) agreeing on shared data. Proven by
+    /// materialising every path into a temp workspace, scoping a facet to
+    /// `**` (everything), applying the entries as the ingest `deny_paths`,
+    /// and asserting `enumerate_facet_files` yields exactly `allowed`.
     #[test]
-    fn deny_dialect_fixture_matches_engine_slice() {
-        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../plugins/claude-code/hooks/deny-dialect-fixture.json");
-        let raw = std::fs::read(&fixture_path)
-            .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
-        let fixture: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-        let strs = |key: &str| -> Vec<String> {
-            fixture[key]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_str().unwrap().to_string())
-                .collect()
-        };
-        let entries = strs("entries");
-        let blocked = strs("blocked");
-        let allowed = strs("allowed");
+    fn deny_dialect_agrees_between_slice_and_check() {
+        let strs =
+            |items: &[&str]| -> Vec<String> { items.iter().map(|s| s.to_string()).collect() };
+        let entries = strs(&["dev/**", "**/VISION.md", "docs/meta/CLAUDE.md"]);
+        let blocked = strs(&[
+            "dev/notes/a.md",
+            "dev/x.rs",
+            "dev/deep/nested/y.txt",
+            "VISION.md",
+            "crates/foo/VISION.md",
+            "docs/meta/CLAUDE.md",
+        ]);
+        let allowed = strs(&[
+            "src/lib.rs",
+            "dev-tools/x.rs",
+            "VISION-draft.md",
+            "docs/meta/README.md",
+            "other/CLAUDE.md",
+            "crates/foo/mod.rs",
+        ]);
 
         let ws = tempfile::tempdir().unwrap();
         for rel in blocked.iter().chain(allowed.iter()) {
@@ -1466,38 +1424,19 @@ mod tests {
                 "denied `{b}` leaked into the engine slice"
             );
         }
-        for a in &allowed {
-            assert!(
-                got.contains(a),
-                "allowed `{a}` missing from the engine slice"
+        // The path check agrees on every case — the two engine consumers of
+        // the dialect can never drift apart silently.
+        let all: Vec<String> = blocked.iter().chain(allowed.iter()).cloned().collect();
+        let checks =
+            super::super::check_path::check_deny_paths(&entries, &all, ws.path(), ws.path());
+        for c in &checks {
+            let expect = blocked.contains(&c.path);
+            assert_eq!(
+                c.denied, expect,
+                "check_deny_paths disagrees with the slice on `{}`",
+                c.path
             );
         }
-    }
-
-    /// The active-deny hook channel: a render for ingest X publishes X's list;
-    /// a render for Y overwrites it (never a stale X); an empty deny list writes
-    /// an explicit empty array (so the hook enforces nothing, not a leftover).
-    #[test]
-    fn active_deny_file_overwrites_and_writes_empty() {
-        let ws = tempfile::tempdir().unwrap();
-        let path = active_deny_path(ws.path());
-
-        write_active_deny_file(ws.path(), "x-graph", &["dev/**".to_string()]);
-        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(v["ingest"], "x-graph");
-        assert_eq!(v["deny_paths"], serde_json::json!(["dev/**"]));
-
-        // A later render for Y overwrites — nothing from X survives.
-        write_active_deny_file(ws.path(), "y-graph", &["**/VISION.md".to_string()]);
-        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(v["ingest"], "y-graph");
-        assert_eq!(v["deny_paths"], serde_json::json!(["**/VISION.md"]));
-
-        // An empty-deny ingest writes an explicit empty list.
-        write_active_deny_file(ws.path(), "z-graph", &[]);
-        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(v["ingest"], "z-graph");
-        assert_eq!(v["deny_paths"], serde_json::json!([]));
     }
 
     /// A cross-repo deny (its target sibling to the medium's git repo)

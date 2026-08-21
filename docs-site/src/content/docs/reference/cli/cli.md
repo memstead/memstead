@@ -99,6 +99,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead projection advance`↴](#memstead-projection-advance)
 * [`memstead projection exclude`↴](#memstead-projection-exclude)
 * [`memstead projection verify`↴](#memstead-projection-verify)
+* [`memstead projection check-path`↴](#memstead-projection-check-path)
 
 ## `memstead`
 
@@ -1656,6 +1657,7 @@ Pipeline tooling — one versioned v2 binding per pipeline, sources inline. `mem
 * `advance` — Advance a binding's sync baseline by recording per-artifact dispositions (D7). The engine freezes the presented changed slice, subtracts already-disposed artifacts on re-presentation, appends new-HEAD deltas when the source moves mid-pass, and — when the remainder empties — advances the destination mem's `#synced` token via the sync-state writer (provenance piggybacks that commit). Dispositions are durable (`.memstead/state/advance/`), so a partial pass resumes across process restarts. The gate accepts **only** artifact ids the engine presented — an unknown id refuses the whole call atomically (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies a disposition for **every** artifact explicitly (auto-derivation lands later)
 * `exclude` — Declare authored **exclusions** for in-scope source artifacts. Unlike `advance` (whose gate accepts only artifacts in the changed slice), this gates on enumerable `S(D)` membership, so a stable, unchanged artifact can be recorded as deliberately not-modeled with a rationale. Each accepted `(artifact, rationale)` lands in the durable exclusion ledger the fidelity report consults, so the artifact stops re-surfacing as `uncovered` under exhaustive coverage and keeps its reasoning. An artifact outside `S(D)` refuses the whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`); re-declaring merges into the ledger. The write path for the option-(a) process-mem judgment migration, and the general "this in-scope artifact is mined and warrants no destination entity, because …" capability
 * `verify` — Measure a binding's fidelity and record durable findings (E3b, group A). Read-only on the destination mem's ENTITIES: verify adjudicates its anchors against the live source and samples in-scope artifacts, writing findings keyed `(hash(D), source_head)` into the engine-owned findings store (`.memstead/state/findings/`). A binding-declaration edit or a source-head move partitions the keyspace, so prior findings are segregated as superseded, never presented as current. Verify mutates no entity — any repair routes through the (later) sync brief — but it is not a pure read: a completed run records the findings store, backfills observed content hashes onto hash-less anchors, and records a `#verified` baseline. It then renders the deterministic, token-budgeted **tier-1 fidelity report** (group B) over the findings just recorded: grain-classed coverage with tree-anchor fan-out on its own axis, anchor-resolution %, freshness vs. both `sync_state` tokens (`signal: none` → freshness unknowable), the capability-matrix block, and the tier-3 backlog depth — aggregates always ship; heavy per-artifact lists greedy-fill under `--budget` and drop to hints (forced back in with `--include`)
+* `check-path` — Answer deny verdicts: is a path (or Glob/Grep pattern) hidden by a binding's `deny_paths`? Evaluates each candidate against the named binding — or, with `--binding` omitted, the ACTIVE binding (the one whose brief was last consumed) — using the engine's own deny dialect: the facet-scope glob grammar resolved against the workspace root, plus the literal-base directory-prefix rule (`dev/**` also blocks a read of `dev` itself). Single-path form takes the candidate as an argument; `--batch` reads `{"cwd": "<dir>", "paths": ["...", ...]}` from stdin and answers every candidate in one process — the form a per-tool-call consumer (the plugin's PreToolUse deny hook) amortizes subprocess cost with. Engine-free and read-only: verdicts come from the binding record and the path alone, no workspace boot. Output names the matched deny entry on a block; the exit code stays 0 for an answered check — a non-zero exit means the check itself could not run (unknown or quarantined binding, no active binding, malformed batch)
 
 
 
@@ -1805,6 +1807,24 @@ Measure a binding's fidelity and record durable findings (E3b, group A). Read-on
 * `--include <INCLUDE>` — Force a heavy report section in past the budget (repeatable): `uncovered_artifacts` | `tree_fanout` | `superseded_findings`
 * `--full` — Full measurement: walk the entire enumerable source `S(D)` (the rotating sample scheduler is bypassed), treat the per-run adjudication cap as unlimited, and perform the prepared-hash backfill — the report's coverage and accuracy figures are computed over everything, with no sampling or truncation caveat. Refuses (typed) rather than render a fabricated-complete report in two cases, both per facet: a facet whose medium is non-enumerable, and a facet whose medium claims enumerability but whose own walk yields no artifacts — a sibling facet that walked does not excuse it. Without this flag the capped/sampled loop economics are unchanged
 * `--fail-on-findings` — CI-gate mode: exit 6 when the completed run recorded findings, so a pull-request gate can branch on three outcomes without parsing output — 0 completed-and-clean, 6 completed-with-findings, any other nonzero the measurement itself failed. The full report is rendered first, either way. Opt-in by design: without this flag the exit behaviour is byte-for-byte what it has always been, so no existing consumer breaks
+
+
+
+## `memstead projection check-path`
+
+Answer deny verdicts: is a path (or Glob/Grep pattern) hidden by a binding's `deny_paths`? Evaluates each candidate against the named binding — or, with `--binding` omitted, the ACTIVE binding (the one whose brief was last consumed) — using the engine's own deny dialect: the facet-scope glob grammar resolved against the workspace root, plus the literal-base directory-prefix rule (`dev/**` also blocks a read of `dev` itself). Single-path form takes the candidate as an argument; `--batch` reads `{"cwd": "<dir>", "paths": ["...", ...]}` from stdin and answers every candidate in one process — the form a per-tool-call consumer (the plugin's PreToolUse deny hook) amortizes subprocess cost with. Engine-free and read-only: verdicts come from the binding record and the path alone, no workspace boot. Output names the matched deny entry on a block; the exit code stays 0 for an answered check — a non-zero exit means the check itself could not run (unknown or quarantined binding, no active binding, malformed batch)
+
+**Usage:** `memstead projection check-path [OPTIONS] [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — The candidate — a path (absolute, or relative to `--cwd`) or a Glob/Grep pattern. Omitted in `--batch` mode
+
+###### **Options:**
+
+* `--binding <BINDING>` — Binding to check against, canonical `<mem>/<stem>`. Defaults to the active binding — the one whose brief was last consumed; refuses typed (`NO_ACTIVE_BINDING`) when none is
+* `--batch` — Batch mode: read one JSON object from stdin — `{"cwd": "<dir>", "paths": ["...", ...]}` — and answer every candidate. A malformed payload refuses whole (`INVALID_INPUT`), never part-answers. The payload's `cwd` wins over `--cwd`
+* `--cwd <CWD>` — Directory relative candidates resolve against (default: the process working directory)
 
 
 

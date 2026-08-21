@@ -1355,15 +1355,15 @@ fn brief_renders_for_scaffolded_binding() {
     );
 }
 
-/// Backlog-sweep plan 09a criterion 2: the deny-paths hook cache derives
-/// only from CONSUMING renders. A peek-only brief (any named render — the
-/// `--consume` flag requires `--all`, so named briefs are peeks by
-/// construction) leaves every cache byte-identical and never points the
-/// hook at the peeked binding; a consuming `--all --consume` render
-/// publishes the picked binding's list.
+/// Backlog-sweep plan 09a criterion 2, re-expressed against the pointer
+/// channel: the ACTIVE-BINDING pointer derives only from CONSUMING renders.
+/// A peek-only brief (any named render — the `--consume` flag requires
+/// `--all`, so named briefs are peeks by construction) leaves every cache
+/// byte-identical and never points enforcement at the peeked binding; a
+/// consuming `--all --consume` render publishes the picked binding's id.
 #[cfg(feature = "mem-repo")]
 #[test]
-fn deny_cache_derives_only_from_consuming_renders() {
+fn active_binding_pointer_derives_only_from_consuming_renders() {
     fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
         let mut out = Vec::new();
         let mut stack = vec![dir.to_path_buf()];
@@ -1411,9 +1411,9 @@ fn deny_cache_derives_only_from_consuming_renders() {
     let cache_file = ws
         .join(".memstead.cache")
         .join("projection")
-        .join("active-deny-paths.json");
+        .join("active-binding.json");
 
-    // Peek binding beta: a pure read — the deny cache is not created.
+    // Peek binding beta: a pure read — the pointer is not created.
     memstead()
         .current_dir(&ws)
         .args(["projection", "brief", "ws/beta"])
@@ -1421,7 +1421,7 @@ fn deny_cache_derives_only_from_consuming_renders() {
         .success();
     assert!(
         !cache_file.exists(),
-        "a peek-only render must not create the deny cache"
+        "a peek-only render must not create the active-binding pointer"
     );
 
     // Repeated peeks are byte-idempotent on ALL caches.
@@ -1437,7 +1437,7 @@ fn deny_cache_derives_only_from_consuming_renders() {
         "repeated peeks must leave every cache byte-identical"
     );
 
-    // A consuming rotation render publishes the PICKED binding's list.
+    // A consuming rotation render publishes the PICKED binding's id.
     let out = memstead()
         .current_dir(&ws)
         .args(["--json", "projection", "brief", "--all", "--consume"])
@@ -1449,15 +1449,293 @@ fn deny_cache_derives_only_from_consuming_renders() {
     let payload: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let brief = payload["brief"].as_str().expect("rotation renders a brief");
     let cache: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&cache_file).expect("a consuming render must publish the deny cache"),
+        &std::fs::read(&cache_file)
+            .expect("a consuming render must publish the active-binding pointer"),
     )
     .unwrap();
-    let guarded = cache["ingest"].as_str().unwrap();
+    let guarded = cache["binding"].as_str().unwrap();
+    let stem = guarded.split_once('/').map(|(_, s)| s).unwrap_or(guarded);
     assert!(
-        brief.contains(guarded),
-        "the hook must guard the binding whose brief was consumed: cache names \
+        brief.contains(stem),
+        "enforcement must target the binding whose brief was consumed: pointer names \
          `{guarded}`, brief:\n{brief}"
     );
+}
+
+/// `projection check-path`: single and `--batch` stdin forms answer deny
+/// verdicts against a named binding, naming the matched deny entry on a
+/// block; the directory-prefix rule and `..`-escaping candidates produce the
+/// verdicts the retired hook dialect produced.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn check_path_answers_single_and_batch() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "alpha",
+        ])
+        .assert()
+        .success();
+    // The author adds denies to the scaffolded record: a subtree and a
+    // workspace-escaping entry (the dogfood cross-medium dialect).
+    let record_path = ws
+        .join(".memstead")
+        .join("projections")
+        .join("ws")
+        .join("alpha.json");
+    let mut record: Value = serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+    let denies = record["deny_paths"].as_array_mut().unwrap();
+    denies.push(Value::String("dev/**".into()));
+    denies.push(Value::String("../CLAUDE.md".into()));
+    std::fs::write(&record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+
+    // Single form: a denied path names the matched entry.
+    let out = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "check-path",
+            "--binding",
+            "ws/alpha",
+            "dev/notes/a.md",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["binding"], "ws/alpha");
+    assert_eq!(v["results"][0]["denied"], true);
+    assert_eq!(v["results"][0]["matched"], "dev/**");
+
+    // Batch form: one process answers every candidate — the directory-
+    // targeted read (`dev` itself), a `..`-escaping sibling candidate, a
+    // recursing Glob pattern, and an allowed path.
+    let batch = serde_json::json!({
+        "cwd": ws.to_str().unwrap(),
+        "paths": [
+            "dev",
+            tmp.path().join("CLAUDE.md").to_str().unwrap(),
+            "dev/**/*.md",
+            "src/lib.rs",
+        ],
+    });
+    let out = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "projection",
+            "check-path",
+            "--binding",
+            "ws/alpha",
+            "--batch",
+        ])
+        .write_stdin(batch.to_string())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: Value = serde_json::from_slice(&out).unwrap();
+    let results = v["results"].as_array().unwrap();
+    assert_eq!(results.len(), 4);
+    assert_eq!(
+        results[0]["denied"], true,
+        "a read of the denied directory itself is blocked (prefix rule)"
+    );
+    assert_eq!(
+        results[1]["denied"], true,
+        "a `..`-escaping candidate matches a `../` deny entry"
+    );
+    assert_eq!(results[1]["matched"], "../CLAUDE.md");
+    assert_eq!(
+        results[2]["denied"], true,
+        "a Glob pattern recursing the denied subtree is blocked"
+    );
+    assert_eq!(results[3]["denied"], false);
+    assert_eq!(results[3]["matched"], Value::Null);
+}
+
+/// `projection check-path` refusals are typed, never "allowed" by omission:
+/// an unknown binding, a quarantined binding, a missing active pointer, and
+/// a malformed batch each refuse with their own code.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn check_path_refuses_typed() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+
+    // Unknown binding → PROJECTION_NOT_FOUND (exit 3).
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "check-path",
+            "--binding",
+            "ws/ghost",
+            "dev/a.md",
+        ])
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicates::str::contains("PROJECTION_NOT_FOUND"));
+
+    // No --binding and no active pointer → NO_ACTIVE_BINDING (exit 3).
+    memstead()
+        .current_dir(&ws)
+        .args(["projection", "check-path", "dev/a.md"])
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicates::str::contains("NO_ACTIVE_BINDING"));
+
+    // A quarantined binding refuses with its typed reason, never answering
+    // "allowed": a version-gate-failing record file lands in quarantine.
+    write_store(
+        &ws,
+        "projections/ws/legacy.json",
+        r#"{ "version": 1, "destination_mem": "ws" }"#,
+    );
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "check-path",
+            "--binding",
+            "ws/legacy",
+            "dev/a.md",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("PROJECTION_QUARANTINED"));
+
+    // A malformed batch refuses whole (INVALID_INPUT, exit 5) — never a
+    // part-answer.
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "ws",
+            "--source",
+            "../src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "alpha",
+        ])
+        .assert()
+        .success();
+    for bad in ["not json", r#"{"cwd": "/x"}"#, r#"{"paths": ["ok", 42]}"#] {
+        memstead()
+            .current_dir(&ws)
+            .args([
+                "projection",
+                "check-path",
+                "--binding",
+                "ws/alpha",
+                "--batch",
+            ])
+            .write_stdin(bad)
+            .assert()
+            .failure()
+            .code(5)
+            .stderr(predicates::str::contains("INVALID_INPUT"));
+    }
+}
+
+/// With `--binding` omitted, `check-path` answers against the ACTIVE binding
+/// — the one the last consuming render published — so enforcement follows
+/// the loop with no list ever cached: after the pointer moves, the previous
+/// binding's denies are no longer enforced (the stale-enforcement regression,
+/// re-expressed at the new seam).
+#[cfg(feature = "mem-repo")]
+#[test]
+fn check_path_follows_the_active_binding() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("ws");
+    memstead()
+        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
+        .assert()
+        .success();
+    for name in ["alpha", "beta"] {
+        memstead()
+            .current_dir(&ws)
+            .args([
+                "projection",
+                "init",
+                "--mem",
+                "ws",
+                "--source",
+                "../src",
+                "--medium-type",
+                "codebase",
+                "--name",
+                name,
+            ])
+            .assert()
+            .success();
+    }
+    // Alpha denies `secrets/**` on top of the scaffold defaults.
+    let record_path = ws
+        .join(".memstead")
+        .join("projections")
+        .join("ws")
+        .join("alpha.json");
+    let mut record: Value = serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+    record["deny_paths"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::String("secrets/**".into()));
+    std::fs::write(&record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+
+    let pointer = ws
+        .join(".memstead.cache")
+        .join("projection")
+        .join("active-binding.json");
+    std::fs::create_dir_all(pointer.parent().unwrap()).unwrap();
+
+    let check = |expect_denied: bool| {
+        let out = memstead()
+            .current_dir(&ws)
+            .args(["--json", "projection", "check-path", "secrets/key.txt"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["results"][0]["denied"], expect_denied);
+    };
+
+    std::fs::write(&pointer, r#"{"binding":"ws/alpha"}"#).unwrap();
+    check(true);
+    // The loop moves to beta: alpha's extra deny must not survive, because
+    // nothing of alpha's list is cached anywhere — only the pointer moved.
+    std::fs::write(&pointer, r#"{"binding":"ws/beta"}"#).unwrap();
+    check(false);
 }
 
 /// `projection brief --all` on a workspace with NO bindings configured reports

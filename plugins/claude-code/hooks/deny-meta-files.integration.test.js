@@ -1,110 +1,167 @@
-// End-to-end tests for the ingest deny hook runner (`deny-meta-files.mjs`).
+// End-to-end tests for the ingest deny hook (`deny-meta-files.mjs`).
 //
-// Unlike the pure-`checkCandidate` unit suite, these spawn the actual hook
-// against a temp workspace and the engine-written cache file
-// (`.memstead.cache/projection/active-deny-paths.json`), asserting the runtime
-// exit codes AND the stale-file failure mode (evidence 5 of the fidelity plan)
-// is fixed: the hook enforces exactly the ingest whose brief was rendered LAST,
-// never a leftover from a previous ingest.
+// The hook is a thin caller of `memstead projection check-path`, so these
+// tests build a REAL workspace with the real CLI (mem-repo init + projection
+// init), point the active-binding pointer at a binding, and spawn the actual
+// hook — asserting the runtime exit codes, the never-stale property at the
+// new seam (enforcement follows the ACTIVE binding, whose deny list is read
+// fresh from its record on every check), and fail-open outside a workspace.
+//
+// Requires the built CLI (target/debug/memstead, or $MEMSTEAD_BIN). The
+// suite SKIPS when no binary is available so an isolated `node --test` run
+// stays green; under run-tests.sh the binary always exists.
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const HOOKS_DIR = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HOOKS_DIR, 'deny-meta-files.mjs');
+const REPO_ROOT = resolve(HOOKS_DIR, '..', '..', '..');
+const MEMSTEAD_BIN =
+  process.env.MEMSTEAD_BIN || join(REPO_ROOT, 'target', 'debug', 'memstead');
+const HAVE_BIN = existsSync(MEMSTEAD_BIN);
 
-let ws; // temp workspace root
-const cacheFile = () =>
-  join(ws, '.memstead.cache', 'projection', 'active-deny-paths.json');
+let tmp; // temp root
+let ws; // the workspace root inside it
 
-/** Write the engine-managed active-deny cache (simulates a brief render). */
-function publishDeny(ingest, denyPaths) {
-  mkdirSync(dirname(cacheFile()), { recursive: true });
-  writeFileSync(cacheFile(), JSON.stringify({ ingest, deny_paths: denyPaths }));
+const pointerFile = () =>
+  join(ws, '.memstead.cache', 'projection', 'active-binding.json');
+
+/** Point enforcement at a binding (what a consuming brief render publishes). */
+function activate(bindingId) {
+  mkdirSync(dirname(pointerFile()), { recursive: true });
+  writeFileSync(pointerFile(), JSON.stringify({ binding: bindingId }));
+}
+
+function deactivate() {
+  rmSync(pointerFile(), { force: true });
 }
 
 /** Run the hook from `cwd = ws` with a tool_input; return exit status. */
-function run(toolInput) {
+function run(toolInput, cwd = ws) {
   const res = spawnSync('node', [HOOK], {
-    input: JSON.stringify({ cwd: ws, tool_input: toolInput }),
+    input: JSON.stringify({ cwd, tool_input: toolInput }),
     encoding: 'utf-8',
+    env: { ...process.env, MEMSTEAD_BIN },
   });
-  return { status: res.status, stdout: res.stdout ?? '' };
+  return { status: res.status, stderr: res.stderr ?? '' };
 }
 
-before(() => {
-  ws = mkdtempSync(join(tmpdir(), 'memstead-deny-'));
-  // Minimal workspace marker so the hook resolves this dir as the workspace.
-  mkdirSync(join(ws, '.memstead'), { recursive: true });
-  writeFileSync(join(ws, '.memstead', 'workspace.toml'), '');
+function cli(args, cwd) {
+  const res = spawnSync(MEMSTEAD_BIN, args, { cwd, encoding: 'utf-8' });
+  assert.equal(
+    res.status,
+    0,
+    `memstead ${args.join(' ')} failed:\n${res.stderr}`,
+  );
+}
+
+before(function () {
+  if (!HAVE_BIN) return;
+  tmp = mkdtempSync(join(tmpdir(), 'memstead-deny-'));
+  ws = join(tmp, 'ws');
+  cli(['mem-repo', 'init', ws, '--no-gitignore'], tmp);
+  // Two bindings: alpha carries an extra deny (`secrets/**`, patched into its
+  // record the way an author would edit their binding); beta keeps only the
+  // scaffold defaults.
+  for (const name of ['alpha', 'beta']) {
+    cli(
+      [
+        'projection',
+        'init',
+        '--mem',
+        'ws',
+        '--source',
+        '../src',
+        '--medium-type',
+        'codebase',
+        '--name',
+        name,
+      ],
+      ws,
+    );
+  }
+  const alphaRecord = join(ws, '.memstead', 'projections', 'ws', 'alpha.json');
+  const record = JSON.parse(readFileSync(alphaRecord, 'utf-8'));
+  record.deny_paths = [...(record.deny_paths ?? []), 'secrets/**'];
+  writeFileSync(alphaRecord, JSON.stringify(record, null, 2));
 });
 
 after(() => {
-  if (ws) rmSync(ws, { recursive: true, force: true });
+  if (tmp) rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('deny hook — runtime enforcement (glob dialect)', () => {
-  it('blocks a Read denied by the active list (exit 2)', () => {
-    publishDeny('engine-graph', ['dev/**', '**/VISION.md']);
-    assert.equal(run({ file_path: join(ws, 'dev/notes/a.md') }).status, 2);
-    assert.equal(run({ file_path: join(ws, 'VISION.md') }).status, 2);
+describe('deny hook — runtime enforcement (engine-answered)', { skip: !HAVE_BIN && 'no memstead binary built' }, () => {
+  it('blocks a Read denied by the active binding (exit 2)', () => {
+    activate('ws/alpha');
+    const res = run({ file_path: join(ws, 'secrets/key.txt') });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /BLOCKED: secrets\/\*\*/);
   });
 
   it('blocks a Glob pattern that recurses a denied subtree (exit 2)', () => {
-    publishDeny('engine-graph', ['dev/**']);
-    assert.equal(run({ pattern: 'dev/**/*.md' }).status, 2);
+    activate('ws/alpha');
+    assert.equal(run({ pattern: 'secrets/**/*.txt' }).status, 2);
   });
 
   it('blocks a Grep whose path targets a denied subtree (exit 2)', () => {
-    publishDeny('engine-graph', ['dev/**']);
-    assert.equal(run({ pattern: 'TODO', path: 'dev' }).status, 2);
+    activate('ws/alpha');
+    assert.equal(run({ pattern: 'TODO', path: 'secrets' }).status, 2);
   });
 
   it('allows a non-denied Read (exit 0)', () => {
-    publishDeny('engine-graph', ['dev/**', '**/VISION.md']);
+    activate('ws/alpha');
     assert.equal(run({ file_path: join(ws, 'crates/foo/lib.rs') }).status, 0);
   });
 
-  it('allows everything when the active list is empty (exit 0)', () => {
-    publishDeny('project-graph', []); // an empty-deny ingest
-    assert.equal(run({ file_path: join(ws, 'dev/notes/a.md') }).status, 0);
-    assert.equal(run({ file_path: join(ws, 'VISION.md') }).status, 0);
+  it('fails open when no binding is active (exit 0)', () => {
+    deactivate();
+    assert.equal(run({ file_path: join(ws, 'secrets/key.txt') }).status, 0);
+  });
+
+  it('fails open when the active pointer names a missing binding (exit 0)', () => {
+    activate('ws/ghost');
+    assert.equal(run({ file_path: join(ws, 'secrets/key.txt') }).status, 0);
   });
 });
 
-describe('deny hook — never stale (evidence 5 regression)', () => {
-  it('after a render for Y, X’s entries are no longer enforced', () => {
-    // Ingest X denied `dev/**`; its brief was rendered, publishing X's list.
-    publishDeny('x-graph', ['dev/**']);
-    assert.equal(run({ file_path: join(ws, 'dev/notes/a.md') }).status, 2);
-
-    // Now ingest Y renders — the engine OVERWRITES the cache with Y's list
-    // (which denies something else). X's `dev/**` must no longer bite.
-    publishDeny('y-graph', ['secrets/**']);
-    assert.equal(
-      run({ file_path: join(ws, 'dev/notes/a.md') }).status,
-      0,
-      "X's deny_paths must not survive a render for Y",
-    );
-    // Y's own list is enforced instead.
+describe('deny hook — never stale', { skip: !HAVE_BIN && 'no memstead binary built' }, () => {
+  it('after the loop moves to binding beta, alpha’s denies no longer bite', () => {
+    // Alpha active: its `secrets/**` deny is enforced.
+    activate('ws/alpha');
     assert.equal(run({ file_path: join(ws, 'secrets/key.txt') }).status, 2);
+
+    // The loop consumes beta's brief — the pointer moves. Alpha's extra deny
+    // must not survive: beta's record (scaffold defaults only) is read fresh.
+    activate('ws/beta');
+    assert.equal(
+      run({ file_path: join(ws, 'secrets/key.txt') }).status,
+      0,
+      "alpha's deny_paths must not survive the move to beta",
+    );
+    // Beta's own list is enforced instead (a scaffold-default entry).
+    assert.equal(run({ file_path: join(ws, 'x/.DS_Store') }).status, 2);
   });
 
   it('fails open (exit 0) when cwd is not inside any workspace', () => {
     const outside = mkdtempSync(join(tmpdir(), 'memstead-nows-'));
     try {
-      const res = spawnSync('node', [HOOK], {
-        input: JSON.stringify({
-          cwd: outside,
-          tool_input: { file_path: join(outside, 'dev/x.md') },
-        }),
-        encoding: 'utf-8',
-      });
+      const res = run(
+        { file_path: join(outside, 'secrets/x.md') },
+        outside,
+      );
       assert.equal(res.status, 0, 'no workspace resolvable → inert (fail open)');
     } finally {
       rmSync(outside, { recursive: true, force: true });

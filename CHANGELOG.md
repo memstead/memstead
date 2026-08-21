@@ -20,6 +20,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **`memstead projection check-path` — one deny dialect, engine-answered.**
+  Is a path (or a Glob/Grep pattern) hidden by a binding's `deny_paths`? The
+  engine now answers directly — single-path and `--batch` stdin forms, the
+  verdict naming the matched deny entry — evaluated with the same `globset`
+  machinery the enumeration path uses, plus the directory-prefix rule the
+  plugin hook carried (`dev/**` also blocks a read of `dev` itself). With
+  `--binding` omitted it answers for the *active* binding: the one whose
+  brief was last consumed, published as a pointer by consuming renders.
+  Generic by design — any consumer gets the same authoritative answer; the
+  plugin's PreToolUse deny hook is the first, now a thin subprocess caller.
+
+  Retired with it: the hook's 167-line JavaScript re-implementation of the
+  engine's glob semantics (parity was guaranteed only for `*`, `**`, `?`
+  and literals — character classes and brace alternates now follow engine
+  semantics everywhere), the shared dialect fixture pinning the two
+  implementations together, its Rust consumer (which reached from the engine
+  crate into the plugin tree by relative path — that cross-boundary
+  dependency is gone), and the engine-written deny-list cache. Enforcement
+  now reads the active binding's record fresh on every check, so a stale
+  deny list can no longer be enforced by construction — the pointer file
+  (`.memstead.cache/projection/active-binding.json`) carries only the
+  binding id, never a list.
 - **`memstead export --format llms-txt` — any mem as one document an agent
   reads in a single pass.** Every non-stub entity once, in stable id order,
   with its type visible and its `[[wiki-links]]` resolved to working Markdown

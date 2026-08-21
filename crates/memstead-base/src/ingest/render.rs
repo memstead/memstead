@@ -19,7 +19,8 @@ use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice,
     render_sync_brief, render_verify_brief,
 };
-use super::cursor::{compute_source_cursor, write_active_deny_file};
+use super::check_path::write_active_binding_file;
+use super::cursor::compute_source_cursor;
 use super::findings::{FindingClass, current_findings};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
 use super::prune::prune_proposals;
@@ -128,10 +129,10 @@ fn find_binding<'a>(
 /// `consume` mirrors the scheduler's peek/consume split (decision 12,
 /// backlog-sweep plan 03) onto derived caches: a peek (`false`) is a
 /// pure read that leaves every cache byte-identical, while a consuming
-/// render (`true`) additionally publishes the binding's deny list for
-/// the plugin hook. Without this, a peek of binding A rewrote the
-/// deny cache so a later consuming run of binding B was briefly
-/// guarded by A's list.
+/// render (`true`) additionally publishes this binding as the ACTIVE
+/// one for deny enforcement (`projection check-path`). Without this, a
+/// peek of binding A repointed enforcement so a later consuming run of
+/// binding B was briefly guarded by A's denies.
 pub fn render_ingest_brief(
     engine: &Engine,
     workspace_root: &Path,
@@ -153,14 +154,16 @@ pub fn render_ingest_brief(
 
     let resolved = resolve_binding_run(&binding_id, binding)?;
 
-    // Publish this ingest's deny list for the plugin's PreToolUse deny hook —
+    // Publish this binding as the ACTIVE one for the deny enforcement path
+    // (`projection check-path` resolves "active" through this pointer) —
     // stale-safe (remove-then-write), overwrite-always, before any mode branch
     // so the channel is live for every consumed brief and never pins a
-    // previous ingest's list. Best-effort engine cache, not a tracked
-    // mutation. Consuming renders only: a peek changes no state a later
-    // actor depends on — derived caches included.
+    // previous binding. Only the id is published; the deny list itself is
+    // read fresh from the binding record on every check. Best-effort engine
+    // cache, not a tracked mutation. Consuming renders only: a peek changes
+    // no state a later actor depends on — derived caches included.
     if consume {
-        write_active_deny_file(workspace_root, &resolved.name, &resolved.deny_paths);
+        write_active_binding_file(workspace_root, &binding_id);
     }
 
     // Refuse an ingest whose source facet declares a deterministic preparation
