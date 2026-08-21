@@ -40,6 +40,13 @@ jobs:
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2
         with:
           tool: cargo-nextest
+      # ci/verify_gate.py parses the docs guide's printed workflow with a
+      # real YAML parser rather than pattern-matching it, so the one gate
+      # depends on PyYAML. Declared here because a missing package would
+      # otherwise surface as "the documented verify-in-CI example FAILED" —
+      # fail-closed, but with a confidently wrong diagnosis.
+      - name: Install PyYAML (for the verify-in-CI gate harness)
+        run: python3 -m pip install --user pyyaml
       - name: Run the full test surface
         run: ./run-tests.sh
 

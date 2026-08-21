@@ -42,7 +42,16 @@ import shutil
 import subprocess
 import sys
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - environment guard
+    sys.exit(
+        "  ✗ verify_gate.py needs PyYAML (it parses the guide's printed workflow "
+        "rather than pattern-matching it).\n"
+        "    Install it: python3 -m pip install pyyaml\n"
+        "    This is the only non-stdlib import in ci/; the failure above is a "
+        "missing package, not a broken example."
+    )
 import tempfile
 from pathlib import Path
 
@@ -162,9 +171,22 @@ def stage_fixture(dest: Path) -> Path:
     return workspace
 
 
-def run_gate(memstead: Path, workspace: Path, json_mode: bool = True) -> tuple[int, str]:
-    """Run the gate. `json_mode=False` is verbatim what the guide prints."""
-    argv = [str(memstead)] + (["--json"] if json_mode else []) + GATE_ARGS
+def run_gate(
+    memstead: Path,
+    workspace: Path,
+    json_mode: bool = True,
+    binding: str | None = None,
+) -> tuple[int, str]:
+    """Run the gate. `json_mode=False` is verbatim what the guide prints.
+
+    `binding` overrides the documented one, for the operational-failure
+    polarity only — the drift checks must keep using GATE_ARGS verbatim
+    so the anti-drift pin stays meaningful.
+    """
+    args = GATE_ARGS if binding is None else [
+        binding if a == BINDING else a for a in GATE_ARGS
+    ]
+    argv = [str(memstead)] + (["--json"] if json_mode else []) + args
     proc = subprocess.run(argv, cwd=workspace, capture_output=True, text=True)
     return proc.returncode, proc.stdout
 
@@ -440,6 +462,30 @@ def run(memstead: Path) -> int:
                 failures += fail(f"last document is not the typed error: {parsed[-1]!r}")
             else:
                 print("  ✓ gate stdout is report-then-error, as the guide's jq recipe assumes")
+
+    # (3) The polarity that gives the contract its point: an operational
+    #     failure must NOT come back as the findings code. A CI job that
+    #     cannot tell "the mem drifted" from "the engine could not run"
+    #     will merge broken work the moment the engine breaks — and the
+    #     failure mode is silent, because both look like a red build.
+    #     This harness claimed to assert it long before it did; the gap
+    #     was found by a grade reading the docstring against run().
+    with tempfile.TemporaryDirectory() as tmp:
+        workspace = stage_fixture(Path(tmp))
+        code, out = run_gate(memstead, workspace, binding="docs/nonexistent")
+        if code == EXIT_FINDINGS:
+            failures += fail(
+                "an unknown binding returned the findings code — an operational "
+                f"failure is indistinguishable from drift:\n{out}"
+            )
+        elif code != EXIT_NOT_FOUND:
+            failures += fail(
+                f"unknown binding exited {code}, expected {EXIT_NOT_FOUND}\n{out}"
+            )
+        elif "PROJECTION_NOT_FOUND" not in out:
+            failures += fail(f"unknown binding emitted no typed envelope:\n{out}")
+        else:
+            print("  ✓ unknown binding → exit 3 (operational), never 6")
 
     # (4) Run the printed job END TO END, as a copied workflow would.
     #     Step 1 produces the file step 2 reads; running them separately is
