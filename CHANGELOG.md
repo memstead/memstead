@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **Four README/SECURITY doc-vs-code drifts, reported by an external review of
+  the public repository.** The repository table no longer claims the serve and
+  bridge crates live here (they are in the private commercial repository; the
+  wasm crate stays listed); `memstead_search` is described as ranked lexical
+  search (BM25) rather than "exact"; the CI claim now states the actual
+  posture (developed on macOS, CI test gate on Linux only); and the trust
+  posture's `SECURITY.md` pointer lands on real content — the third-party mem
+  trust model (structural-only schema serving, `origin` tagging, the host-side
+  residual) is now documented there, with a bypass declared in scope for
+  security reports.
+
 ### Added
 - **Graph-medium bindings now measure fidelity instead of performing it.** A
   binding whose source is another mem enumerates that mem's in-scope entities

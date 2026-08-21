@@ -41,6 +41,16 @@ Please include:
 
 We do not currently operate a paid bug bounty program. Reports are appreciated and credited; monetary rewards are not available at this stage.
 
+## Third-party mem trust model
+
+A mem that did not originate in your own workspace — installed from the registry, or adopted from a foreign folder or clone — is a channel for someone else's text to enter an agent's reasoning loop. The engine treats it as untrusted input:
+
+- **Foreign instruction prose is withheld.** A third-party mem's schema is served structural-only regardless of requested verbosity: its `system_context` and `write_rules` prose is never served as instructions.
+- **Foreign content is labeled.** Non-first-party entity content carries a machine-readable `origin` tag on every read surface (`memstead_schema`, `memstead_entity`, `memstead_search`, `memstead_overview`, the registry manifest, the served read tier's discovery manifest).
+- **The residual risk is the host's.** The engine guarantees its half — omit foreign instruction prose, label foreign data — but cannot force a consuming agent or host to gate consequential actions on untrusted input. Treat third-party content as quoted data, not instructions.
+
+A bypass of this model — third-party `system_context`/`write_rules` prose served as instructions, or foreign content served without its `origin` tag — is a security issue under this policy; report it via the channel above.
+
 ## Out of scope
 
 The following are not considered security vulnerabilities under this policy:

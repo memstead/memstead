@@ -175,7 +175,7 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 
 | Folder | What it is |
 |---|---|
-| `crates/` | The Rust engine — schema layer, in-memory store, the two storage backends (folder + git-branch), the `memstead` CLI, the `memstead-mcp` server, plus serve/bridge/wasm crates |
+| `crates/` | The Rust engine — schema layer, in-memory store, the two storage backends (folder + git-branch), the `memstead` CLI, the `memstead-mcp` server, plus the wasm crate. The serve and bridge crates live in the private commercial repository (see [LICENSING.md](LICENSING.md)) |
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
 | [`docs/`](docs/), [`examples/`](examples/) | [Documentation](docs/) (organized by Diátaxis: tutorial / how-to / reference / explanation) and [example schemas](examples/) (`agent-program`, and the paired `reimpl-source`/`reimpl-target`) |
 
@@ -185,11 +185,11 @@ Memstead also has a hosted registry; that is a separate, closed-source part of t
 
 Stated here so you don't have to discover it:
 
-- **No semantic / embedding search.** `memstead_search` is exact and structural (content match, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
+- **No semantic / embedding search.** `memstead_search` is ranked lexical search plus structural filters (BM25-scored content matches, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
 - **No one-shot import command.** Nothing turns a folder of notes into a mem in a single command — every entity enters through a schema-validated write. Bulk ingestion is a declared path instead: bind a source (a codebase, a docs tree, a URL) to a mem as a [projection](GLOSSARY.md), and the Claude Code plugin's `/ingest` and `/sync` skills build the graph from the binding's brief and keep it current, batch by batch.
 - **The engine does not calculate.** It can know a statement is due (`memstead due`), hold every input as typed entities (rates, allocation keys, receipts), and name exactly what is missing — and it will still never produce the statement, the sum, or the filled form. That output is the periodically-invoked agent's work; the engine's query path stays deterministic, with no model call and no computation in it.
 - **No built-in visualization.** The graph is queryable (status, overview, relations) but ships no renderer; projections and exports are the extension point.
-- **Windows is untested.** Developed and CI-tested on macOS and Linux. Release archives include a Windows build, but no Windows CI gate exists yet — expect rough edges, path handling especially.
+- **Windows is untested.** Developed on macOS; the CI test gate runs on Linux only. Release archives include a Windows build, but no Windows CI gate exists yet — expect rough edges, path handling especially.
 
 ## Development
 
