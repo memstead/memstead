@@ -790,6 +790,8 @@ impl Engine {
             // A runtime-created mem is authored live, not installed from
             // an archive — it carries no archive-borne provenance payload.
             archive_provenance: None,
+            // Registered live and loaded in this call — never deferred.
+            deferred: false,
         });
 
         // Step 7: COW snapshot swap on mem_router, branched on the
@@ -1899,6 +1901,83 @@ impl Engine {
     /// full-flavour engine where they have meaning.
     ///
     /// Invalidates community + search-index memos on success.
+    /// Load every DEFERRED (lazy, not-yet-loaded) mem matching `mem`
+    /// (`None` = all) into the store — the first-read trigger of the
+    /// lazy-mount lifecycle. Runs before the staleness probes on every
+    /// operation ([`Self::reload_if_stale`] calls it first), so an
+    /// operation scoped to one mem loads exactly that mem, and a
+    /// workspace-scoped operation (search, overview, health) loads
+    /// whatever it needs to answer over a complete store — a count
+    /// computed over a partial store is never presented as truth.
+    ///
+    /// Loading rides the ordinary per-mem reload (entity walk, store
+    /// push, the workspace-global validation passes, memo
+    /// invalidation), so a lazily-loaded mem gets the same refusals and
+    /// warnings an eager boot produces for the same content — deferral
+    /// changes WHEN the gauntlet runs, never whether. After each load,
+    /// pending `SuspiciousNestedPrefix` warnings whose target arrived
+    /// with this mem are dropped — the same legitimate-cross-mem
+    /// exemption the eager boot applies once every mount is loaded.
+    ///
+    /// A deferred load that FAILS quarantines the mem with the same
+    /// typed reporting an eager boot failure produces, at this first
+    /// read: the mount leaves the serving roster, the quarantine roster
+    /// gains the typed reason, and the existing reattach contract
+    /// applies. Deferral never converts a load failure into an
+    /// empty-mem impression.
+    ///
+    /// No-op for workspaces without lazy mounts, for already-loaded
+    /// mems, and for a filter naming no deferred mem.
+    pub fn ensure_mems_loaded(&mut self, mem: Option<&str>) {
+        let pending: Vec<String> = self
+            .mounts
+            .iter()
+            .filter(|m| m.deferred && mem.is_none_or(|v| m.mount.mem == v))
+            .map(|m| m.mount.mem.clone())
+            .collect();
+        for name in pending {
+            match self.reload_one_mem(&name) {
+                Ok(_) => {
+                    if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name) {
+                        state.deferred = false;
+                    }
+                    // Cross-mem links INTO this mem were scanned by the
+                    // nested-prefix detector against a store that did
+                    // not yet carry it; now that its entities exist,
+                    // drop any hit the arrival resolves (mirrors the
+                    // boot-time retain over the complete store).
+                    let store = &self.store;
+                    self.load_warnings.retain(|w| match w {
+                        crate::ops::WarningHint::SuspiciousNestedPrefix { resolved_id, .. } => {
+                            store.get(resolved_id).is_none_or(|e| e.stub)
+                        }
+                        _ => true,
+                    });
+                }
+                Err(e) => {
+                    // Quarantine at the moment of first read — mirror
+                    // the eager boot failure path byte-for-byte in
+                    // consequence: out of the serving roster, onto the
+                    // quarantine roster with the typed reason.
+                    let Some(idx) = self.mounts.iter().position(|m| m.mount.mem == name) else {
+                        continue;
+                    };
+                    let removed = self.mounts.remove(idx);
+                    self.schemas.remove(&name);
+                    self.quarantined.push(crate::engine::QuarantinedMem {
+                        mount: removed.mount,
+                        reason_code: e.code().to_string(),
+                        reason_message: e.to_string(),
+                    });
+                    self.mem_router = std::sync::Arc::new(
+                        crate::engine::boot::build_mem_router_from_mounts(&self.mounts),
+                    );
+                    self.invalidate_communities();
+                }
+            }
+        }
+    }
+
     pub fn reload_one_mem(&mut self, mem: &str) -> Result<crate::ops::ReloadResult, EngineError> {
         // Per-mem reload refreshes THIS mem's slice of the engine-wide
         // `load_warnings` accumulator: stale boot-time warnings for the
@@ -2081,6 +2160,9 @@ impl Engine {
             last_known_head,
             mem_config,
             archive_provenance,
+            // The reattach loads entities immediately below — a
+            // quarantine return-to-service is never deferred.
+            deferred: false,
         });
         self.mem_router = std::sync::Arc::new(crate::engine::boot::build_mem_router_from_mounts(
             &self.mounts,

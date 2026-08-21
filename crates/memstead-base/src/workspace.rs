@@ -198,9 +198,16 @@ pub enum MountCapability {
 pub enum MountLifecycle {
     /// Open the backend at engine start.
     Eager,
-    /// Defer initialisation until first read. V1 runtime ignores
-    /// this and treats every mount as `Eager`; the slot is reserved
-    /// for archive-backed mounts that should not unzip at boot.
+    /// Defer the ENTITY load until the first operation that needs the
+    /// mem. The metadata half (config, provenance, schema pin) still
+    /// resolves at boot, so the mem is on the roster with its pin —
+    /// present, never silently absent — and a broken pin quarantines at
+    /// boot exactly as an eager mount's would. The first read triggers
+    /// the load through the per-operation funnel
+    /// (`Engine::ensure_mems_loaded`, called by `reload_if_stale`),
+    /// running the same validation gauntlet an eager boot runs; a load
+    /// failure quarantines at that moment with the same typed
+    /// reporting. Opt-in per mount; nothing sets it by default.
     Lazy,
 }
 

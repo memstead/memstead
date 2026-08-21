@@ -131,6 +131,10 @@ impl Engine {
                 last_known_head,
                 mem_config,
                 archive_provenance,
+                // Set below, after the schema pin resolves: a lazy mount
+                // whose METADATA half fails still quarantines at boot;
+                // only the entity load defers.
+                deferred: false,
             });
         }
 
@@ -180,6 +184,12 @@ impl Engine {
         let mut quarantined: Vec<crate::engine::QuarantinedMem> = Vec::new();
         let mut quarantined_idx: std::collections::HashSet<usize> =
             std::collections::HashSet::new();
+        // Mounts whose entity load is DEFERRED (`lifecycle: lazy`): the
+        // metadata half above and the schema resolution below still run
+        // at boot — the roster must know the mem exists, with its pin —
+        // but the entity walk is skipped until the first operation that
+        // needs the mem triggers [`Engine::ensure_mems_loaded`].
+        let mut deferred_idx: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         for (m_idx, m) in mounted.iter().enumerate() {
             // Schema-pin authority: the mem's own per-mem config is
@@ -336,6 +346,16 @@ impl Engine {
                 });
             }
 
+            // Lazy lifecycle: everything above (config, provenance, pin
+            // resolution, schema warnings — the metadata half) ran; the
+            // entity walk is the expensive leg and defers to first read.
+            // A lazy mount with a broken pin still quarantined above —
+            // deferral never converts a metadata failure into silence.
+            if m.mount.lifecycle == crate::workspace::MountLifecycle::Lazy {
+                deferred_idx.insert(m_idx);
+                continue;
+            }
+
             let (entries, read_errors) = match collect_source_entries(m.backend.as_ref()) {
                 Ok(pair) => pair,
                 Err(e) => {
@@ -380,6 +400,12 @@ impl Engine {
             } else {
                 load_errors.extend(load_result.errors);
             }
+        }
+
+        // Stamp the deferred flags before the quarantine retain below
+        // renumbers the vector.
+        for idx in &deferred_idx {
+            mounted[*idx].deferred = true;
         }
 
         // Drop quarantined mounts from the serving roster: a
@@ -3457,4 +3483,220 @@ write_rules: []
     }
 
     // ---- Engine::reload_one_mem -----------------------------------
+
+    // ---- lazy mounts (flywheel W7/01) -----------------------------
+
+    fn lazy_folder_mount(mem: &str, path: std::path::PathBuf) -> Mount {
+        Mount {
+            lifecycle: MountLifecycle::Lazy,
+            ..folder_mount(mem, path)
+        }
+    }
+
+    fn write_spec(dir: &Path, slug: &str, title: &str, extra: &str) {
+        std::fs::write(
+            dir.join(format!("{slug}.md")),
+            format!("---\ntype: spec\n---\n# {title}\n\n## Identity\n\nBody.\n{extra}"),
+        )
+        .unwrap();
+    }
+
+    fn two_mem_dirs(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+        let eager_dir = tmp.path().join("eag");
+        let lazy_dir = tmp.path().join("laz");
+        std::fs::create_dir_all(&eager_dir).unwrap();
+        std::fs::create_dir_all(&lazy_dir).unwrap();
+        write_spec(&eager_dir, "alpha", "Alpha", "");
+        write_spec(&lazy_dir, "omega", "Omega", "");
+        (eager_dir, lazy_dir)
+    }
+
+    fn mixed_engine(eager_dir: &Path, lazy_dir: &Path) -> Engine {
+        Engine::from_mounts(vec![
+            (
+                folder_mount("eag", eager_dir.to_path_buf()),
+                Box::new(FilesystemMemWriter::new(eager_dir.to_path_buf())) as Box<dyn MemBackend>,
+            ),
+            (
+                lazy_folder_mount("laz", lazy_dir.to_path_buf()),
+                Box::new(FilesystemMemWriter::new(lazy_dir.to_path_buf())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap()
+    }
+
+    /// The lazy lifecycle defers exactly the entity load: boot carries
+    /// the mem on the roster with its schema resolved but no entities;
+    /// the first operation touching it (the `reload_if_stale` funnel)
+    /// triggers the load; afterwards the mem behaves identically to an
+    /// eager mount and the deferred state is gone for good.
+    #[test]
+    fn lazy_mount_defers_and_first_read_loads() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        // Boot: eager loaded, lazy on the roster but deferred.
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("eag", "alpha"))
+                .is_some()
+        );
+        assert_eq!(engine.deferred_mems(), vec!["laz"]);
+        assert!(engine.mem_is_deferred("laz"));
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("laz", "omega"))
+                .is_none(),
+            "deferred mem's entities are not in the store yet"
+        );
+        // Never absent: the mount roster and schema map both carry it.
+        assert!(engine.schema_for("laz").is_some());
+
+        // First read triggers the load through the operation funnel.
+        engine.reload_if_stale(Some("laz"));
+        assert!(engine.deferred_mems().is_empty());
+        let omega = engine
+            .get_entity(&crate::EntityId::new("laz", "omega"))
+            .expect("first read loads the mem");
+        assert_eq!(omega.title, "Omega");
+
+        // Identical to eager from here on: a write round-trips.
+        let (actor, client) = cli_actor();
+        engine
+            .create_entity(
+                empty_create_args("laz", "Later"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("laz", "later"))
+                .is_some()
+        );
+    }
+
+    /// An operation scoped to an eager mem never loads a lazy sibling
+    /// as a side effect; a workspace-scoped funnel pass loads every
+    /// deferred mem so no answer computes over a partial store.
+    #[test]
+    fn scoped_operation_never_loads_lazy_sibling() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        engine.reload_if_stale(Some("eag"));
+        assert_eq!(
+            engine.deferred_mems(),
+            vec!["laz"],
+            "an eager-scoped operation must not load the lazy sibling"
+        );
+
+        engine.reload_if_stale(None);
+        assert!(
+            engine.deferred_mems().is_empty(),
+            "a workspace-scoped pass loads every deferred mem"
+        );
+    }
+
+    /// A deferred load that fails quarantines the mem at the moment of
+    /// first read, with the same typed reporting an eager boot failure
+    /// produces — never an empty-mem impression.
+    #[test]
+    fn lazy_load_failure_quarantines_typed() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        // The backend's tree is destroyed between boot and first read —
+        // a plain file now sits where the mem directory was, so the
+        // entity walk errors rather than reading an empty directory.
+        std::fs::remove_dir_all(&lazy_dir).unwrap();
+        std::fs::write(&lazy_dir, b"not a directory").unwrap();
+        engine.reload_if_stale(Some("laz"));
+
+        let q = engine
+            .quarantine_reason("laz")
+            .expect("failed deferred load quarantines, never serves empty");
+        assert!(!q.reason_code.is_empty());
+        assert!(
+            !engine.mem_names().contains(&"laz"),
+            "a quarantined mem leaves the serving roster"
+        );
+        assert!(engine.deferred_mems().is_empty());
+    }
+
+    /// The lazy load runs the same validation gauntlet an eager boot
+    /// runs: content an eager boot warns about produces the SAME
+    /// warning when its mem loads lazily — deferral changes when, not
+    /// whether.
+    #[test]
+    fn lazy_load_runs_the_same_validation_gauntlet() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        // Hand-authored invalid relation in the LAZY mem.
+        std::fs::write(
+            lazy_dir.join("bad.md"),
+            "---\ntype: spec\n---\n# Bad\n\n## Identity\n\nx.\n\n## Relationships\n\n- **MADE_UP_TYPE**: [[laz--omega]]\n",
+        )
+        .unwrap();
+
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+        let warned_before = engine
+            .load_warnings()
+            .iter()
+            .any(|w| matches!(w, WarningHint::ParsedRelationInvalid { .. }));
+        engine.reload_if_stale(Some("laz"));
+        let warned_after = engine
+            .load_warnings()
+            .iter()
+            .any(|w| matches!(w, WarningHint::ParsedRelationInvalid { .. }));
+        assert!(
+            !warned_before && warned_after,
+            "the gauntlet fires at load time: before={warned_before} after={warned_after}, \
+             warnings: {:?}",
+            engine.load_warnings()
+        );
+        // And the offending relation was dropped, as an eager boot drops it.
+        let bad = engine
+            .get_entity(&crate::EntityId::new("laz", "bad"))
+            .unwrap();
+        assert!(bad.relationships.is_empty());
+    }
+
+    /// A cross-mem body link from an eager mem into a lazy one is a
+    /// stub until the target mem loads, and resolves to the real entity
+    /// afterwards — never silently dropped, never a spurious permanent
+    /// warning.
+    #[test]
+    fn cross_mem_link_into_lazy_mem_resolves_on_load() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        write_spec(
+            &eager_dir,
+            "linker",
+            "Linker",
+            "\nSee [[laz--omega]] for detail.\n",
+        );
+
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+        let target = crate::EntityId::new("laz", "omega");
+        assert!(
+            engine.get_entity(&target).is_none_or(|e| e.stub),
+            "before the lazy load the cross-mem target is at most a stub, never real"
+        );
+
+        engine.reload_if_stale(Some("laz"));
+        let resolved = engine.get_entity(&target).expect("target loaded");
+        assert!(!resolved.stub, "after the load the target is real");
+        assert!(
+            !engine.load_warnings().iter().any(
+                |w| matches!(w, WarningHint::SuspiciousNestedPrefix { resolved_id, .. } if resolved_id.as_ref() == target.as_ref())
+            ),
+            "no lingering nested-prefix warning for a resolved cross-mem link: {:?}",
+            engine.load_warnings()
+        );
+    }
 }

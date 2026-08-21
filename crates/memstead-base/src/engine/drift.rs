@@ -60,6 +60,15 @@ impl Engine {
     /// Cache invalidation rides on `reload_one_mem` — community
     /// and search-index memos drop when any mem reloads.
     pub fn reload_if_stale(&mut self, mem: Option<&str>) -> Vec<crate::ops::WarningHint> {
+        // Phase 0 — the lazy-mount first-read trigger. Every operation
+        // funnels through this check, so a deferred mem the operation's
+        // scope touches loads here, before the staleness probes — a
+        // scoped operation loads exactly its mem, a workspace-scoped one
+        // loads every deferred mem so no answer is computed over a
+        // partial store. Operations scoped to eager mems never load a
+        // lazy sibling as a side effect.
+        self.ensure_mems_loaded(mem);
+
         // Phase 1 — pick candidate mem names that match the filter.
         // Cloned so the immutable borrow doesn't survive into the
         // mutation phase.

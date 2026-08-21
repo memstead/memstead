@@ -478,6 +478,14 @@ impl CliContext {
                 let mut engine =
                     engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
                 engine.set_role(self.role);
+                // Interim lazy-mount posture (flywheel W7/01): the CLI
+                // loads every deferred mem up front, so its one-shot
+                // commands behave byte-identically to the all-eager
+                // world. The per-command scoped trigger (loading only
+                // the mems a command touches — the cold-path win the
+                // sizing curve names) is the follow-up cut; until it
+                // lands, correctness beats speed here.
+                engine.ensure_mems_loaded(None);
                 return Ok(CliEngine::MemRepo(engine));
             }
             #[cfg(not(feature = "mem-repo"))]
@@ -496,6 +504,8 @@ impl CliContext {
         let mut engine =
             BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
         engine.set_role(self.role);
+        // Same interim posture as the mem-repo branch above.
+        engine.ensure_mems_loaded(None);
         Ok(CliEngine::Filesystem(engine))
     }
 
@@ -538,6 +548,8 @@ impl CliContext {
         let mut engine =
             engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
         engine.set_role(self.role);
+        // Same interim lazy-mount posture as `cli_engine_at`.
+        engine.ensure_mems_loaded(None);
         Ok(engine)
     }
 }

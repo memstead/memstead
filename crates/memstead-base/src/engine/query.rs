@@ -1137,6 +1137,27 @@ impl Engine {
         self.quarantined.iter().find(|q| q.mount.mem == mem)
     }
 
+    /// Mems whose lazy entity load is still DEFERRED — on the mount
+    /// roster with a resolved schema pin, but with no entities in the
+    /// store yet. Read surfaces that render per-mem counts or
+    /// distributions consult this: a count over a deferred mem's slice
+    /// of the store is a count over nothing, and rendering it as a
+    /// bare zero is the silent absence the lazy-mount contract forbids.
+    /// Either trigger the load ([`Self::ensure_mems_loaded`]) or render
+    /// the load state explicitly.
+    pub fn deferred_mems(&self) -> Vec<&str> {
+        self.mounts
+            .iter()
+            .filter(|m| m.deferred)
+            .map(|m| m.mount.mem.as_str())
+            .collect()
+    }
+
+    /// Whether `mem` is a lazy mount whose entity load has not run yet.
+    pub fn mem_is_deferred(&self, mem: &str) -> bool {
+        self.mounts.iter().any(|m| m.deferred && m.mount.mem == mem)
+    }
+
     /// The typed error for a mem name that did not resolve to a
     /// serving mount: `MEM_QUARANTINED` (carrying the underlying boot
     /// failure and its repair command) when the mem is on the

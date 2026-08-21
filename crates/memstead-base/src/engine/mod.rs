@@ -109,6 +109,19 @@ pub(crate) struct MountedBackend {
     /// malformed payload is downgraded to `None` rather than failing the
     /// mount: the member is additive.
     archive_provenance: Option<memstead_schema::ArchiveProvenance>,
+    /// `true` while a [`MountLifecycle::Lazy`] mount's entities have not
+    /// been loaded into the store — the mount's metadata half (config,
+    /// schema pin, provenance) is resolved at boot, the entity load is
+    /// deferred to the first operation that needs the mem
+    /// ([`Engine::ensure_mems_loaded`]). Always `false` for eager
+    /// mounts, and permanently `false` once the deferred load lands.
+    /// A deferred mem is never absent: it stays on the mount roster
+    /// with its schema resolved, and every read surface either triggers
+    /// the load or reports the state — silence is the one forbidden
+    /// rendering.
+    ///
+    /// [`MountLifecycle::Lazy`]: crate::workspace::MountLifecycle::Lazy
+    deferred: bool,
 }
 
 /// One quarantined mem: the mem-level boot failure that took it out of
@@ -628,7 +641,12 @@ pub(super) mod test_helpers {
             schema: Some(pin("default")),
             storage: MountStorage::Archive { path },
             capability: MountCapability::ReadOnly,
-            lifecycle: MountLifecycle::Lazy,
+            // Eager, matching every production archive-mount site: these
+            // tests pin archive READ semantics over a loaded store. The
+            // lifecycle slot became real (flywheel W7/01) — a `Lazy`
+            // value here would defer the load these tests read through.
+            // The lazy behaviour has its own tests in `boot.rs`.
+            lifecycle: MountLifecycle::Eager,
             cross_linkable: false,
             migration_target: None,
         }
