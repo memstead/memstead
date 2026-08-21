@@ -1336,6 +1336,40 @@ fn llms_txt_export_pins_the_document_shape() {
         "a CLI export never claims a deployment's provenance: {doc}"
     );
 
+    // Stub filtering, asserted rather than assumed. A relationship to an
+    // absent target auto-creates a stub; the document must exclude it AND its
+    // `Entities:` count must agree, or the header's own contract is false.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["relate", "cli-test--alpha", "USES", "cli-test--phantom"])
+        .assert()
+        .success();
+    let with_stub = String::from_utf8(
+        memstead()
+            .current_dir(tmp.path())
+            .args(["export", "--format", "llms-txt"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        !with_stub.contains("# Phantom") && !with_stub.contains("cli-test--phantom\n"),
+        "the stub entity has no body in the document: {with_stub}"
+    );
+    assert!(
+        with_stub.contains("Entities: 2"),
+        "the count excludes the stub, matching the header's own promise: {with_stub}"
+    );
+
+    // Ordering is lexical by id, asserted by position — a sort that silently
+    // disappeared would otherwise change nothing any test can see.
+    let a_at = with_stub.find("# Alpha").expect("alpha present");
+    let b_at = with_stub.find("# Beta").expect("beta present");
+    assert!(a_at < b_at, "entities are in lexical id order: {with_stub}");
+
     // The type line, and each entity exactly once.
     assert!(doc.contains("_Type: spec_"), "type line rendered: {doc}");
     assert_eq!(
@@ -1437,6 +1471,99 @@ Exercises link resolution.
     assert!(
         !absolute.contains("[["),
         "the bare slug resolved rather than surviving raw: {absolute}"
+    );
+}
+
+/// Criterion 2's substance, end to end on a real workspace: the foreign-slug
+/// passes must actually run.
+///
+/// They were unreachable once, and invisibly: engine-authored bare wiki-links
+/// materialise a LOCAL stub, so with stubs in the link map every bare slug
+/// resolved locally — to a stub the document itself excludes. A unit test over
+/// a hand-built map could not see it, because that map was a shape the engine
+/// cannot produce.
+#[test]
+fn llms_txt_foreign_slug_passes_resolve_and_never_guess() {
+    let tmp = TempDir::new().unwrap();
+    let mk = |name: &str, entities: &[(&str, &str)]| {
+        let dir = tmp.path().join(name);
+        fs::create_dir_all(dir.join(".memstead")).unwrap();
+        fs::write(
+            dir.join(".memstead/config.json"),
+            r#"{ "schema": "default@1.0.0" }"#,
+        )
+        .unwrap();
+        for (slug, body) in entities {
+            fs::write(
+                dir.join(format!("{slug}.md")),
+                format!(
+                    "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n\
+# {slug}\n\n## Identity\n\n{body}\n\n## Purpose\n\nFixture.\n"
+                ),
+            )
+            .unwrap();
+        }
+        dir
+    };
+
+    // `shared` exists in BOTH foreign mems; `only-alpha` in one; `ghost` in none.
+    let home = mk("home", &[("seed", "Placeholder.")]);
+    let alpha = mk("alpha", &[("shared", "A."), ("only-alpha", "B.")]);
+    let beta = mk("beta", &[("shared", "C.")]);
+    init_real_mem_repo_from_disk(
+        tmp.path(),
+        &[(&home, "home"), (&alpha, "alpha"), (&beta, "beta")],
+    );
+
+    // The referencing entity is written through the MUTATION surface, not as a
+    // raw file — that is what auto-stubs each bare wiki-link into a local
+    // stub, which is the state that made the foreign passes unreachable. A
+    // raw-file fixture never creates those stubs and so cannot see the bug.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--mem",
+            "home",
+            "--title",
+            "Hub",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Refs [[shared]] and [[only-alpha]] and [[ghost]].",
+            "--section",
+            "purpose=Fixture.",
+        ])
+        .assert()
+        .success();
+
+    let doc = String::from_utf8(
+        memstead()
+            .current_dir(tmp.path())
+            .args(["export", "--format", "llms-txt", "--mem", "home"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+
+    assert!(
+        doc.contains("(entity/alpha--only-alpha)"),
+        "a slug unique to one foreign mem resolves there: {doc}"
+    );
+    assert!(
+        doc.contains("[[shared]]"),
+        "a slug two foreign mems both own is never guessed — it stays raw: {doc}"
+    );
+    assert!(
+        doc.contains("[[ghost]]"),
+        "a reference to nothing stays raw rather than linking to a stub: {doc}"
+    );
+    assert!(
+        !doc.contains("entity/home--shared") && !doc.contains("entity/home--ghost"),
+        "no link points at a stub the document excludes: {doc}"
     );
 }
 

@@ -20,6 +20,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **`memstead export --format llms-txt` — any mem as one document an agent
+  reads in a single pass.** Every non-stub entity once, in stable id order,
+  with its type visible and its `[[wiki-links]]` resolved to working Markdown
+  links; empty sections are kept, because an explicitly empty slot tells an
+  agent the schema asked and nobody answered. `--base-url` renders absolute
+  links exactly as a Memstead deployment serves them; without it they are
+  document-relative, and there is no third form. Links inside code are left
+  alone — resolution scans the engine's masked view and slices from the
+  original, so a fenced sample documenting wiki-link syntax survives verbatim.
+  A slug two foreign mems both own stays raw rather than being guessed. This
+  is the shape memstead.ai serves at `/llms-full.txt`, and it is now literally
+  the same code: the renderer moved into the engine and the served endpoint
+  consumes it, so the exported and served documents cannot drift.
 - **Graph-medium bindings now measure fidelity instead of performing it.** A
   binding whose source is another mem enumerates that mem's in-scope entities
   as a real `S(D)` denominator, so coverage is computed rather than vacuously

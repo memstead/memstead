@@ -84,33 +84,43 @@ pub fn strip_frontmatter(md: &str) -> String {
     md.to_string()
 }
 
-/// Rewrite `[[…]]` wiki-links to markdown links, in three passes with a
-/// deliberate precedence.
+/// Rewrite `[[…]]` wiki-links to markdown links, resolving each occurrence
+/// under a three-rule precedence:
 ///
 /// 1. **Full ids** (`[[mem--slug]]`) — unambiguous, always resolve.
-/// 2. **Foreign bare slugs** — a slug owned by exactly one *other* mem
+/// 2. **Local bare slugs** — a slug present in the source mem binds there,
+///    however many other mems reuse it. That is the engine's authoring
+///    semantics: a bare wiki-link is a same-mem reference.
+/// 3. **Foreign bare slugs** — a slug owned by exactly one *other* mem
 ///    resolves to it; a slug two foreign mems both own **stays raw text**.
 ///    Guessing between them would fabricate a reference the author never
 ///    made, and a visibly unresolved `[[slug]]` is the honest output.
-/// 3. **Local bare slugs** — applied last so they win: a bare wiki-link is a
-///    same-mem reference in the engine's authoring semantics, so a slug that
-///    exists in the source mem binds there however many other mems reuse it.
+///
+/// **Code is never rewritten.** Resolution scans the engine's masked view —
+/// the same one every other reader uses — and slices from the original, so a
+/// fenced or inline code sample documenting wiki-link syntax comes out
+/// byte-identical. A hand-rolled string walk without masking is exactly the
+/// defect the HTML exporter was fixed for; sharing the masked view is what
+/// stops this renderer reintroducing it.
+///
+/// `id_titles` must contain **no stubs**. A stub is an unresolved reference
+/// the engine materialised, not content — and this document excludes stubs,
+/// so resolving a link to one would emit a link to a page the document itself
+/// does not contain. Worse, because an engine-authored bare wiki-link creates
+/// a *local* stub, stubs in the map make rule 2 match every bare slug and
+/// rules 3's foreign passes unreachable.
 pub fn linkify_wikilinks(
-    mut body: String,
+    body: String,
     id_titles: &[(String, String)],
     href_prefix: &str,
     source_mem: &str,
 ) -> String {
-    for (id, title) in id_titles {
-        body = body.replace(
-            &format!("[[{id}]]"),
-            &entity_md_link(href_prefix, id, title),
-        );
-    }
+    let mut by_id: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     let mut local: std::collections::HashMap<&str, (&str, &str)> = std::collections::HashMap::new();
     let mut foreign: std::collections::HashMap<&str, Option<(&str, &str)>> =
         std::collections::HashMap::new();
     for (id, title) in id_titles {
+        by_id.insert(id.as_str(), title.as_str());
         if let Some((mem, slug)) = id.split_once("--") {
             if mem == source_mem {
                 local.insert(slug, (id.as_str(), title.as_str()));
@@ -122,24 +132,52 @@ pub fn linkify_wikilinks(
             }
         }
     }
-    for (slug, hit) in foreign {
-        if local.contains_key(slug) {
+
+    let resolve = |inner: &str| -> Option<(String, String)> {
+        if let Some(title) = by_id.get(inner) {
+            return Some((inner.to_string(), title.to_string()));
+        }
+        if let Some((id, title)) = local.get(inner) {
+            return Some((id.to_string(), title.to_string()));
+        }
+        // `Some(None)` is an ambiguous foreign slug — deliberately unresolved.
+        foreign
+            .get(inner)
+            .copied()
+            .flatten()
+            .map(|(id, title)| (id.to_string(), title.to_string()))
+    };
+
+    // Offsets come from the masked view; every byte emitted comes from the
+    // original, so masking can only change WHICH spans are rewritten, never
+    // the bytes of the ones that are not.
+    let masked = crate::markdown::mask_code_blocks_and_spans(&body);
+    let mut out = String::with_capacity(body.len());
+    let mut cursor = 0usize;
+    let bytes = masked.as_bytes();
+    let mut i = 0usize;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'['
+            && bytes[i + 1] == b'['
+            && let Some(rel) = masked[i + 2..].find("]]")
+        {
+            let inner_start = i + 2;
+            let inner_end = inner_start + rel;
+            // The link text is read from the ORIGINAL: the masked view is
+            // only a map of where code is.
+            let inner = &body[inner_start..inner_end];
+            if let Some((id, title)) = resolve(inner) {
+                out.push_str(&body[cursor..i]);
+                out.push_str(&entity_md_link(href_prefix, &id, &title));
+                cursor = inner_end + 2;
+            }
+            i = inner_end + 2;
             continue;
         }
-        if let Some((id, title)) = hit {
-            body = body.replace(
-                &format!("[[{slug}]]"),
-                &entity_md_link(href_prefix, id, title),
-            );
-        }
+        i += 1;
     }
-    for (slug, (id, title)) in local {
-        body = body.replace(
-            &format!("[[{slug}]]"),
-            &entity_md_link(href_prefix, id, title),
-        );
-    }
-    body
+    out.push_str(&body[cursor..]);
+    out
 }
 
 impl crate::Engine {
@@ -221,7 +259,12 @@ impl crate::Engine {
                 .iter()
                 .map(|(url, what)| format!("- {url} — {what}.\n"))
                 .collect();
-            format!("The wider project:\n{lines}")
+            // Trailing blank line: the served document has always had one
+            // between the list and the closing sentence, and without it the
+            // sentence becomes a lazy continuation of the last list item in
+            // Markdown. A `contains`-based test cannot see the difference,
+            // which is exactly why it went unnoticed.
+            format!("The wider project:\n{lines}\n")
         };
         let links_sentence = if ctx.href_prefix.is_empty() {
             "Entity references are relative links to that entity's own page."
@@ -269,16 +312,19 @@ sections. {links_sentence}\n\n\
     /// another mounted mem, and resolving it is what makes the flat document
     /// navigable.
     fn entity_id_titles(&self) -> Vec<(String, String)> {
-        let ids: Vec<String> = self.store.all_ids().map(|i| i.to_string()).collect();
-        ids.into_iter()
-            .map(|id| {
-                let title = self
-                    .get_entity(&EntityId::canonical(&id))
-                    .map(|e| e.title.clone())
-                    .unwrap_or_else(|| id.clone());
-                (id, title)
-            })
-            .collect()
+        // Stubs are excluded. This document omits stub entities, so linking to
+        // one would point at a page the document does not contain — and since
+        // an engine-authored bare wiki-link materialises a LOCAL stub, leaving
+        // stubs in would make every bare slug resolve locally and the
+        // foreign-slug rules unreachable.
+        let mut out: Vec<(String, String)> = self
+            .store
+            .all_entities()
+            .filter(|e| !e.stub)
+            .map(|e| (e.id.to_string(), e.title.clone()))
+            .collect();
+        out.sort();
+        out
     }
 }
 
@@ -362,6 +408,44 @@ mod tests {
         assert_eq!(
             linkify_wikilinks("[[m--x]]".to_string(), &t, "", "m"),
             "[A (bracketed) title](entity/m--x)"
+        );
+    }
+
+    /// Wiki-link syntax inside code is documentation, not a reference. A
+    /// fenced block or inline span showing `[[slug]]` must come out
+    /// byte-identical — the defect the HTML exporter was fixed for, which a
+    /// hand-rolled string walk reintroduces the moment nobody checks.
+    #[test]
+    fn code_spans_and_fences_are_never_rewritten() {
+        let t = titles();
+        let body = "Prose [[engine--mem]] resolves.\n\n\
+             Inline `[[engine--mem]]` does not.\n\n\
+             ```\n[[engine--mem]]\n```\n";
+        let out = linkify_wikilinks(body.to_string(), &t, "", "engine");
+
+        assert!(
+            out.contains("Prose [Mem](entity/engine--mem) resolves."),
+            "prose still resolves: {out}"
+        );
+        assert!(
+            out.contains("Inline `[[engine--mem]]` does not."),
+            "an inline code span is left alone: {out}"
+        );
+        assert!(
+            out.contains("```\n[[engine--mem]]\n```"),
+            "a fenced block is left alone: {out}"
+        );
+    }
+
+    /// A reference to nothing stays raw — the same output an ambiguous foreign
+    /// slug gets, for the same reason: say what could not be resolved rather
+    /// than invent a target.
+    #[test]
+    fn an_unresolvable_reference_stays_raw() {
+        let t = titles();
+        assert_eq!(
+            linkify_wikilinks("See [[ghost]].".to_string(), &t, "", "engine"),
+            "See [[ghost]]."
         );
     }
 
