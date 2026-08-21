@@ -166,9 +166,26 @@ pub fn linkify_wikilinks(
             // The link text is read from the ORIGINAL: the masked view is
             // only a map of where code is.
             let inner = &body[inner_start..inner_end];
+            // The engine's wiki-link grammar is `[[target]]`,
+            // `[[target|label]]` and `[[target#Section]]` — the entity parser
+            // and the strict validator both read all three. Only the TARGET
+            // half resolves; an author-supplied label wins as link text,
+            // because that is what the author chose a reader to see.
+            //
+            // Passing the whole span to the resolver instead made every
+            // aliased reference miss, and land in the plain-text arm — which
+            // then printed the internal id and the pipe into prose exactly
+            // where the author had written a display label.
+            let (target, label) = match inner.split_once('|') {
+                Some((t, l)) => (t.trim(), Some(l.trim())),
+                None => (inner.trim(), None),
+            };
+            let target = target.split('#').next().unwrap_or(target).trim();
             out.push_str(&body[cursor..i]);
-            match resolve(inner) {
-                Some((id, title)) => out.push_str(&entity_md_link(href_prefix, &id, &title)),
+            match resolve(target) {
+                Some((id, title)) => {
+                    out.push_str(&entity_md_link(href_prefix, &id, label.unwrap_or(&title)))
+                }
                 // Unresolvable: name it as PLAIN TEXT — never a link, never
                 // surviving `[[…]]` syntax.
                 //
@@ -179,7 +196,10 @@ pub fn linkify_wikilinks(
                 // syntax in front of a reader the header promised a
                 // self-contained document to. Plain text is the third option,
                 // and the only one that is neither a guess nor a leak.
-                None => out.push_str(inner),
+                // Print the label when the author gave one, else the target —
+                // never the raw `target|label` span, which would put an
+                // internal id and a pipe in front of the reader.
+                None => out.push_str(label.unwrap_or(target)),
             }
             cursor = inner_end + 2;
             i = inner_end + 2;
@@ -446,6 +466,46 @@ mod tests {
         assert!(
             out.contains("```\n[[engine--mem]]\n```"),
             "a fenced block is left alone: {out}"
+        );
+    }
+
+    /// The engine's grammar has three wiki-link forms and this renderer must
+    /// read all of them. Only the target half resolves; an author-supplied
+    /// label is what a reader sees, and a `#Section` suffix addresses within
+    /// the target rather than naming a different one.
+    ///
+    /// Passing the whole span to the resolver made every aliased reference
+    /// miss and fall to the plain-text arm — printing the internal id and the
+    /// pipe into prose, precisely where the author had written a label.
+    #[test]
+    fn alias_and_anchor_wiki_link_forms_resolve() {
+        let t = titles();
+
+        // `[[target|label]]` — resolves, and the LABEL is the link text.
+        assert_eq!(
+            linkify_wikilinks("See [[engine--mem|the mem]].".to_string(), &t, "", "engine"),
+            "See [the mem](entity/engine--mem)."
+        );
+        // `[[target#Section]]` — the anchor addresses within the target.
+        assert_eq!(
+            linkify_wikilinks(
+                "See [[engine--mem#Identity]].".to_string(),
+                &t,
+                "",
+                "engine"
+            ),
+            "See [Mem](entity/engine--mem)."
+        );
+        // Both at once, and on a bare slug rather than a full id.
+        assert_eq!(
+            linkify_wikilinks("See [[mem#Identity|here]].".to_string(), &t, "", "engine"),
+            "See [here](entity/engine--mem)."
+        );
+        // Unresolvable WITH a label: the reader gets the label, never the
+        // internal target or the pipe.
+        assert_eq!(
+            linkify_wikilinks("See [[ghost|that thing]].".to_string(), &t, "", "engine"),
+            "See that thing."
         );
     }
 

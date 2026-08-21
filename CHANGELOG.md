@@ -29,10 +29,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   document-relative, and there is no third form. Links inside code are left
   alone — resolution scans the engine's masked view and slices from the
   original, so a fenced sample documenting wiki-link syntax survives verbatim.
-  A slug two foreign mems both own stays raw rather than being guessed. This
+  A reference that cannot be resolved — a slug two foreign mems both own, or a
+  target that does not exist — is named in plain text: never guessed, and never
+  left as wiki-link syntax in a document promised as self-contained. This
   is the shape memstead.ai serves at `/llms-full.txt`, and it is now literally
   the same code: the renderer moved into the engine and the served endpoint
   consumes it, so the exported and served documents cannot drift.
+
+  One deliberate change to what a Memstead deployment serves: an
+  unresolvable reference on the served pages used to reach the reader as
+  literal `[[slug]]` and is now plain text, because the shared renderer fixed
+  that leak for both surfaces at once. Everything else the served document
+  emits is unchanged.
 - **Graph-medium bindings now measure fidelity instead of performing it.** A
   binding whose source is another mem enumerates that mem's in-scope entities
   as a real `S(D)` denominator, so coverage is computed rather than vacuously

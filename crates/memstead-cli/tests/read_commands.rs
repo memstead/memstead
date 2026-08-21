@@ -1368,11 +1368,53 @@ fn llms_txt_export_pins_the_document_shape() {
         "the count excludes the stub, matching the header's own promise: {with_stub}"
     );
 
-    // Ordering is lexical by id, asserted by position — a sort that silently
-    // disappeared would otherwise change nothing any test can see.
-    let a_at = with_stub.find("# Alpha").expect("alpha present");
-    let b_at = with_stub.find("# Beta").expect("beta present");
-    assert!(a_at < b_at, "entities are in lexical id order: {with_stub}");
+    // Ordering is lexical by id, asserted as a full sequence over THREE
+    // entities. Two would not do it: the store iterates a HashMap, so with two
+    // entries a dropped `ids.sort()` passes roughly half the time — a coin
+    // flip, not an assertion. A third id that sorts between the other two
+    // makes any unsorted order fail.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--mem",
+            "cli-test",
+            "--title",
+            "Amber",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Sorts between alpha and beta.",
+            "--section",
+            "purpose=Ordering fixture.",
+        ])
+        .assert()
+        .success();
+    let ordered = String::from_utf8(
+        memstead()
+            .current_dir(tmp.path())
+            .args(["export", "--format", "llms-txt"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    let positions: Vec<usize> = ["# Alpha", "# Amber", "# Beta"]
+        .iter()
+        .map(|h| {
+            ordered
+                .find(h)
+                .unwrap_or_else(|| panic!("{h} present in: {ordered}"))
+        })
+        .collect();
+    let mut sorted = positions.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        positions, sorted,
+        "entities render in lexical id order (alpha, amber, beta): {ordered}"
+    );
 
     // The type line, and each entity exactly once.
     assert!(doc.contains("_Type: spec_"), "type line rendered: {doc}");

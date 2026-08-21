@@ -137,7 +137,7 @@ pub enum Command {
     /// date falls inside the window (default 90d), overdue first.
     Due(commands::due::Args),
 
-    /// Export the write mem as markdown (in place) or as a portable `.mem` archive.
+    /// Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`).
     Export(commands::export::Args),
 
     /// Initialise a filesystem mem in the current (or named) folder.

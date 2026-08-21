@@ -147,7 +147,7 @@ Exit codes:
 * `type` — Describe one type, or list all types when no name given
 * `health` — Health summary (orphans, stubs, stale entities, missing fields)
 * `due` — Render the due-brief: open entities whose schema-declared due date falls inside the window (default 90d), overdue first
-* `export` — Export the write mem as markdown (in place) or as a portable `.mem` archive
+* `export` — Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`)
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
@@ -416,7 +416,7 @@ Render the due-brief: open entities whose schema-declared due date falls inside 
 
 ## `memstead export`
 
-Export the write mem as markdown (in place) or as a portable `.mem` archive
+Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`)
 
 **Usage:** `memstead export [OPTIONS]`
 
