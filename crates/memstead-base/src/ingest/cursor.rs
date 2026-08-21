@@ -343,7 +343,9 @@ fn facet_unscoped(source: &Source) -> bool {
 
 /// Enumerate the workspace-relative file paths a primary source's facet scope
 /// selects — the `mtime` strategy's input set. Mirrors the plugin's
-/// `enumerateFacetFiles`: only `codebase`/`filesystem` mediums; the facet's
+/// `enumerateFacetFiles`: the path-shaped mediums (`codebase` / `filesystem` /
+/// `git` — a git source's artifacts are paths pinned at a commit, so the walk
+/// is identical and only the anchor namespace differs); the facet's
 /// allow globs minus its deny globs, evaluated over the medium's directory
 /// tree. Returns a sorted, de-duplicated list. An unscoped facet (no allows)
 /// yields an empty list here — but callers must not treat that as signal: the
@@ -761,7 +763,65 @@ pub fn enumerate_binding_s_d(
 /// Compute the graph changed slice for a source mem between its stored
 /// baseline snapshot token and the mem's current head. Mirrors
 /// `computeGraphSlice`, using the engine's own change history.
-fn compute_graph_slice(engine: &Engine, source_mem: &str, baseline: Option<&str>) -> SliceOutcome {
+/// Restrict a graph changed slice to the facet's scope. Without this the
+/// selector was honoured by enumeration and ignored by change detection, so a
+/// brief could print `Entities: type:concept` and then hand the agent a
+/// changed `memo` two sections below — an artifact its own coverage model
+/// says is out of scope, which `advance` would then accept because its gate
+/// is the presented slice.
+///
+/// Added and modified entities are classified from the live store. **Deleted
+/// entities are kept unconditionally**: the entity is gone, so its type can no
+/// longer be read, and a deletion that cannot be classified must be reported
+/// rather than dropped — a missed deletion is the highest-signal drift there
+/// is. An `id:` selector still applies to deletions, because an id is all a
+/// deletion leaves behind.
+fn filter_graph_slice_to_scope(engine: &Engine, source: &Source, slice: &mut Slice) {
+    let mut allows: Vec<EntitySelector> = Vec::new();
+    let mut denies: Vec<EntitySelector> = Vec::new();
+    for rule in &source.scope {
+        let Some(sel) = parse_entity_selector(&rule.path) else {
+            continue;
+        };
+        match rule.mode {
+            PatternMode::Allow => allows.push(sel),
+            PatternMode::Deny => denies.push(sel),
+        }
+    }
+    if allows.is_empty() {
+        return;
+    }
+    let in_scope = |id: &str, known_type: Option<&str>| {
+        // A `type:` selector cannot judge an entity whose type is unreadable
+        // (a deletion). Treat it as matching so the artifact survives to be
+        // reported, rather than silently vanishing from the slice.
+        let matches = |s: &EntitySelector| match (s, known_type) {
+            (EntitySelector::Type(_), None) => true,
+            _ => selector_matches(s, id, known_type.unwrap_or_default()),
+        };
+        allows.iter().any(&matches) && !denies.iter().any(&matches)
+    };
+    let type_of = |id: &str| {
+        engine
+            .store()
+            .get(&crate::entity::EntityId::canonical(id))
+            .map(|e| e.entity_type.clone())
+    };
+    slice
+        .added
+        .retain(|id| in_scope(id, type_of(id).as_deref()));
+    slice
+        .modified
+        .retain(|id| in_scope(id, type_of(id).as_deref()));
+    slice.deleted.retain(|id| in_scope(id, None));
+}
+
+fn compute_graph_slice(
+    engine: &Engine,
+    source: Option<&Source>,
+    source_mem: &str,
+    baseline: Option<&str>,
+) -> SliceOutcome {
     let current = match engine.mem_head_sha(source_mem) {
         Ok(Some(sha)) => sha,
         // Source has no snapshot signal, or is unknown — degrade.
@@ -773,7 +833,7 @@ fn compute_graph_slice(engine: &Engine, source_mem: &str, baseline: Option<&str>
     };
     // Fetch the entity delta only when the source actually moved.
     let changed = matches!(baseline, Some(b) if is_git_token(b) && b != current);
-    if changed {
+    let mut outcome = if changed {
         let baseline = baseline.expect("changed implies a baseline");
         match engine.changes_since(source_mem, baseline, None) {
             Ok(report) => graph_slice_outcome(Some(baseline), &current, &report.changes),
@@ -784,7 +844,16 @@ fn compute_graph_slice(engine: &Engine, source_mem: &str, baseline: Option<&str>
         }
     } else {
         graph_slice_outcome(baseline, &current, &[])
+    };
+    // The scope narrows the slice exactly as it narrows S(D). Applied after
+    // the diff rather than pushed into it, mirroring how the path strategies
+    // apply deny pathspecs — one place decides what "in scope" means.
+    // A reference mem carries no facet scope — it is read whole by design,
+    // so there is nothing to narrow by and `None` is the honest input.
+    if let (Some(source), SliceOutcome::Changed { slice, .. }) = (source, &mut outcome) {
+        filter_graph_slice_to_scope(engine, source, slice);
     }
+    outcome
 }
 
 // ── mtime source-cursor memo ────────────────────────────────────────────────
@@ -1188,7 +1257,9 @@ pub fn compute_source_cursor(
                     ChangeStrategy::Graph if facet_unscoped(p) => SliceOutcome::NoSignal {
                         reason: NoSignalReason::Unscoped,
                     },
-                    ChangeStrategy::Graph => compute_graph_slice(engine, &p.pointer, baseline),
+                    ChangeStrategy::Graph => {
+                        compute_graph_slice(engine, Some(p), &p.pointer, baseline)
+                    }
                     ChangeStrategy::Mtime => compute_mtime_slice(
                         p,
                         &resolved.name,
@@ -1207,7 +1278,10 @@ pub fn compute_source_cursor(
             ResolvedSource::Reference { mem } => {
                 let key = format!("{}/{}#synced", resolved.name, mem);
                 let baseline = baseline_map.get(&key).map(String::as_str);
-                (mem.clone(), compute_graph_slice(engine, mem, baseline))
+                (
+                    mem.clone(),
+                    compute_graph_slice(engine, None, mem, baseline),
+                )
             }
         };
 
@@ -1966,6 +2040,270 @@ mod tests {
             "url anchors stay unobserved — the fix widens observation, never the \
              scoring of non-observation"
         );
+    }
+
+    /// Criterion 6's regression pin: the graph change-detection half is
+    /// untouched except for the deliberate unscoped gate. A SCOPED graph
+    /// facet still routes to the graph strategy and reports the same
+    /// no-signal reason it always did when the source mem exposes no
+    /// snapshot token (a folder mem tracks no head); an UNSCOPED one now
+    /// refuses as `Unscoped`, exactly as the git and mtime arms have always
+    /// done. Distinguishing the two is the whole point — before this, an
+    /// unscoped graph facet silently proceeded.
+    #[test]
+    fn graph_scoping_changes_only_the_unscoped_arm() {
+        use crate::binding::BuildMode;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("srcmem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("one.md"),
+            "---\ntype: decision\n---\n\n# One\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        {
+            use crate::workspace::{
+                Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+            };
+            use crate::workspace_store::WorkspaceStoreAdapter;
+            crate::FileWorkspaceStore::new()
+                .save_state(
+                    root,
+                    &Workspace {
+                        mounts: vec![Mount {
+                            mem: "srcmem".to_string(),
+                            schema: Some("default@1.0.0".parse().unwrap()),
+                            storage: MountStorage::Folder {
+                                path: mem_dir.clone(),
+                            },
+                            capability: MountCapability::Write,
+                            lifecycle: MountLifecycle::Eager,
+                            cross_linkable: false,
+                            migration_target: None,
+                        }],
+                        settings: WorkspaceSettings::default(),
+                    },
+                )
+                .unwrap();
+        }
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+
+        let resolved_with = |scope: Vec<crate::pipeline::PatternEntry>| ResolvedIngest {
+            name: "srcmem/p".to_string(),
+            mode: BuildMode::Discovery,
+            trigger: crate::pipeline::IngestTrigger::Manual,
+            batch_size: 20,
+            deny_paths: Vec::new(),
+            projection_ref: "srcmem/p".to_string(),
+            projection_mem: "srcmem".to_string(),
+            projection_name: "p".to_string(),
+            intent: None,
+            sources: vec![ResolvedSource::Primary(Source {
+                name: "g".to_string(),
+                medium_type: MediumType::Graph,
+                pointer: "srcmem".to_string(),
+                change_detection: None,
+                scope,
+                engagement: None,
+                preparation: None,
+            })],
+            destination_mem: "srcmem".to_string(),
+            rules: None,
+            post_actions: None,
+        };
+
+        let scoped = compute_source_cursor(
+            &engine,
+            &resolved_with(vec![crate::pipeline::PatternEntry {
+                path: "*".to_string(),
+                mode: PatternMode::Allow,
+            }]),
+            root,
+        );
+        let unscoped = compute_source_cursor(&engine, &resolved_with(Vec::new()), root);
+
+        let reason_of = |c: &SourceCursor| c.no_signal.first().map(|n| n.reason);
+        assert_eq!(
+            reason_of(&scoped),
+            Some(NoSignalReason::GraphSnapshotMissing),
+            "a scoped graph facet still routes to the graph strategy and reports \
+             its own no-signal reason — the change-detection half is untouched"
+        );
+        assert_eq!(
+            reason_of(&unscoped),
+            Some(NoSignalReason::Unscoped),
+            "an unscoped graph facet refuses like every other medium's, instead of \
+             silently proceeding"
+        );
+    }
+
+    /// The git medium enumerates through the same path walk as codebase and
+    /// filesystem — its artifacts are paths pinned at a commit, so the walk is
+    /// identical and only the anchor namespace differs. It was excluded from
+    /// that arm for no reason beyond the arm's shape, which made its
+    /// `enumerable: true` row a claim nothing delivered. Pinned so a refactor
+    /// cannot quietly drop it back out.
+    #[test]
+    fn git_medium_enumerates_through_the_path_walk() {
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        std::fs::write(root.join("a.rs"), "").unwrap();
+        std::fs::write(root.join("b.rs"), "").unwrap();
+
+        let source = |medium: MediumType| Source {
+            name: "s".to_string(),
+            medium_type: medium,
+            pointer: ".".to_string(),
+            change_detection: None,
+            scope: vec![crate::pipeline::PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            }],
+            engagement: None,
+            preparation: None,
+        };
+
+        let want = vec!["a.rs".to_string(), "b.rs".to_string()];
+        for medium in [
+            MediumType::Codebase,
+            MediumType::Filesystem,
+            MediumType::Git,
+        ] {
+            assert_eq!(
+                enumerate_facet_files(&source(medium), &[], root),
+                want,
+                "{medium:?} walks the file tree — every medium the matrix marks \
+                 enumerable with a path namespace must actually enumerate"
+            );
+            assert!(
+                crate::binding::medium_capabilities(medium).enumerable,
+                "{medium:?} claims enumerability, and now delivers it"
+            );
+        }
+    }
+
+    /// A narrowing selector must bound the CHANGED SLICE, not only `S(D)`.
+    /// It used to bound only enumeration, so a brief could print
+    /// `Entities: type:concept` and then present a changed `memo` two
+    /// sections below — an artifact its own coverage model calls out of
+    /// scope, which `advance` would accept because its gate is the presented
+    /// slice. Scope interpreted in one place and decorative in the other is
+    /// the defect this pins closed.
+    #[test]
+    fn a_narrowing_selector_bounds_the_changed_slice_too() {
+        use crate::workspace::{
+            Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("srcmem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let write = |slug: &str, ty: &str| {
+            std::fs::write(
+                mem_dir.join(format!("{slug}.md")),
+                format!("---\ntype: {ty}\n---\n\n# {slug}\n\n## Decision\n\nBody.\n"),
+            )
+            .unwrap();
+        };
+        write("kept", "decision");
+        write("other", "memo");
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "srcmem".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+
+        let source = Source {
+            name: "g".to_string(),
+            medium_type: MediumType::Graph,
+            pointer: "srcmem".to_string(),
+            change_detection: None,
+            scope: vec![crate::pipeline::PatternEntry {
+                path: "type:decision".to_string(),
+                mode: PatternMode::Allow,
+            }],
+            engagement: None,
+            preparation: None,
+        };
+
+        let mut slice = Slice {
+            added: vec!["srcmem--other".to_string()],
+            modified: vec!["srcmem--kept".to_string(), "srcmem--other".to_string()],
+            deleted: vec!["srcmem--vanished".to_string()],
+        };
+        filter_graph_slice_to_scope(&engine, &source, &mut slice);
+
+        assert_eq!(
+            slice.modified,
+            vec!["srcmem--kept".to_string()],
+            "the out-of-scope memo is dropped from the slice the brief presents"
+        );
+        assert!(
+            slice.added.is_empty(),
+            "an added out-of-scope entity is out of scope too"
+        );
+        assert_eq!(
+            slice.deleted,
+            vec!["srcmem--vanished".to_string()],
+            "a DELETED entity is kept even though its type can no longer be \
+             read — a deletion that cannot be classified must be reported, \
+             never silently dropped"
+        );
+
+        // The complement: the whole-mem selector narrows nothing.
+        let mut wide = Slice {
+            added: Vec::new(),
+            modified: vec!["srcmem--kept".to_string(), "srcmem--other".to_string()],
+            deleted: Vec::new(),
+        };
+        let mut all = source.clone();
+        all.scope = vec![crate::pipeline::PatternEntry {
+            path: "*".to_string(),
+            mode: PatternMode::Allow,
+        }];
+        filter_graph_slice_to_scope(&engine, &all, &mut wide);
+        assert_eq!(wide.modified.len(), 2, "`*` selects the whole mem");
     }
 
     /// The entity-selector grammar is closed: three legal forms, everything

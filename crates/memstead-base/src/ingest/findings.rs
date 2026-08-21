@@ -548,7 +548,7 @@ pub enum FindingsError {
     /// full measurement promises complete figures, so a partial walk is not
     /// an answer.)
     #[error(
-        "full verify refused: facet '{}' resolves over non-enumerable medium type '{}' — {}",
+        "full verify refused: facet '{}' over medium type '{}' cannot be fully walked — {}",
         .0.facet, .0.medium_type, .0.reason
     )]
     FullWalkNonEnumerable(FullResyncRefusal),
@@ -1283,6 +1283,27 @@ fn run_verify(
                     path: base.display().to_string(),
                 });
             }
+        }
+    }
+
+    // The same refusal for a graph source, which needs it just as badly and
+    // for a worse reason. A graph source's "tree" is a mounted mem; if that
+    // mem is absent from the workspace, every entity anchor into it misses
+    // the store and observes as ABSENT — a definite `orphaned`, not an
+    // honest "unobserved". The pass would then report drift, tell the reader
+    // to repoint or unset anchors that are perfectly fine, and — because
+    // `orphaned` is the one state that satisfies prune's all-orphaned gate —
+    // let prune propose deleting the destination entities. An unmounted mem
+    // must never be indistinguishable from a deleted one.
+    for source in &resolved.sources {
+        if let ResolvedSource::Primary(p) = source
+            && p.medium_type == crate::pipeline::MediumType::Graph
+            && !engine.mem_names().iter().any(|m| *m == p.pointer)
+        {
+            return Err(FindingsError::SourceUnreachable {
+                source_name: p.name.clone(),
+                path: format!("mem `{}` (not mounted in this workspace)", p.pointer),
+            });
         }
     }
 

@@ -1829,7 +1829,7 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
             }
             for r in refused {
                 s.push_str(&format!(
-                    "\n> **Refused (non-enumerable):** `{}` ({}) — {}",
+                    "\n> **Refused (cannot fully walk):** `{}` ({}) — {}",
                     r.facet, r.medium_type, r.reason
                 ));
             }

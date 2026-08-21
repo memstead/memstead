@@ -3529,3 +3529,536 @@ fn verify_json_carries_the_pinned_format_marker() {
         "an enumerated denominator carries its count alongside the tag: {env}"
     );
 }
+
+// ── graph-medium fidelity: a two-mem graph→graph binding, end to end ────────
+//
+// The S1b pilot drove a source change through a graph binding end-to-end and
+// then watched a deliberately stale anchor over the changed entity go
+// unflagged: anchor resolution 0/0, coverage 0/0, drift undetected, while the
+// capability matrix claimed full parity. This fixture is that scenario,
+// re-run through the CLI as separate processes — it cannot pass silently again.
+
+/// A workspace with two folder mems: `srcmem` (the source graph) and `dest`
+/// (the destination), bound by a graph-medium binding scoped to the whole
+/// source mem. `dest` holds two entities anchored at source entities, both
+/// hash-less so the first verify backfills them — the same shape the codebase
+/// fixture uses, proving the backfill path is namespace-agnostic.
+fn graph_binding_workspace() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[
+            {"mem":"srcmem","schema":"default@1.0.0","storage":{"type":"folder","path":"src-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false},
+            {"mem":"dest","schema":"default@1.0.0","storage":{"type":"folder","path":"dest-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}
+        ]}"#,
+    );
+
+    // A graph source selects entities, so its scope is the entity vocabulary.
+    // `deny_paths` stays empty — a glob deny is illegal over this namespace.
+    write_store(
+        root,
+        "projections/dest/mirror.json",
+        r#"{"version":2,"intent":"mirror srcmem into dest","sources":[{"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+    );
+
+    // `concept` with definition/explanation is a real `default@1.0.0` type with
+    // its real required sections. An earlier draft wrote `type: decision`,
+    // which that schema does not declare — the raw-markdown read path tolerates
+    // it while `memstead create` refuses it, so the fixture would have been
+    // passing on an asymmetry rather than on the behaviour under test.
+    let entity = |dir: &Path, slug: &str, ty: &str, title: &str, body: &str| {
+        std::fs::write(
+            dir.join(format!("{slug}.md")),
+            format!(
+                "---\ntype: {ty}\n---\n\n# {title}\n\n## Definition\n\n{title} is a fixture concept.\n\n## Explanation\n\n{body}\n"
+            ),
+        )
+        .unwrap();
+    };
+
+    // Source mem: three entities. `gamma` is deliberately unprojected — it must
+    // surface as an uncovered member of S(D), which a 0/0 denominator could
+    // never do.
+    let src_mem = root.join("src-mem");
+    std::fs::create_dir_all(src_mem.join(".memstead")).unwrap();
+    std::fs::write(
+        src_mem.join(".memstead").join("config.json"),
+        r#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    entity(&src_mem, "alpha", "concept", "Alpha", "Alpha body.");
+    entity(&src_mem, "beta", "concept", "Beta", "Beta body.");
+    entity(&src_mem, "gamma", "concept", "Gamma", "Gamma body.");
+
+    // Destination mem: two entities, each anchored at a source ENTITY (not a
+    // path), hash-less so the first verify backfills.
+    let dest_mem = root.join("dest-mem");
+    std::fs::create_dir_all(dest_mem.join(".memstead")).unwrap();
+    std::fs::write(
+        dest_mem.join(".memstead").join("config.json"),
+        r#"{"format":1,"schema":"default@1.0.0"}"#,
+    )
+    .unwrap();
+    entity(
+        &dest_mem,
+        "from-alpha",
+        "decision",
+        "From alpha",
+        "Mirrors alpha.",
+    );
+    entity(
+        &dest_mem,
+        "from-beta",
+        "decision",
+        "From beta",
+        "Mirrors beta.",
+    );
+    std::fs::write(
+        dest_mem.join(".memstead").join("anchors.json"),
+        r#"{"version":1,"entities":{
+            "dest--from-alpha":[{"artifact":"srcmem--alpha","grain":"entity","class":"anchored","hash_stability":"stable"}],
+            "dest--from-beta":[{"artifact":"srcmem--beta","grain":"entity","class":"anchored","hash_stability":"stable"}]
+        }}"#,
+    )
+    .unwrap();
+
+    tmp
+}
+
+/// Criterion 1 + 2, positively, through the CLI: a graph binding's verify
+/// reports a REAL enumerated denominator (the source mem's in-scope entities),
+/// surfaces the unprojected source entity as uncovered, backfills its entity
+/// anchors, and — after one source entity changes — adjudicates that anchor
+/// `drifted` while the untouched one still resolves.
+#[test]
+fn graph_binding_verify_enumerates_and_detects_entity_drift() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    // (1) First verify: a real denominator, and the hash-less entity anchors
+    //     gain their prepared hashes.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+
+    assert_eq!(
+        env["report"]["coverage"]["denominator"]["kind"], "enumerated",
+        "a graph source enumerates for real — not the 'no S(D) denominator' bail: {env}"
+    );
+    assert_eq!(
+        env["report"]["coverage"]["denominator"]["count"], 3,
+        "S(D) is the source mem's three in-scope entities: {env}"
+    );
+    assert_eq!(
+        env["hash_backfilled"], 2,
+        "both hash-less ENTITY anchors backfill, exactly as path anchors do: {env}"
+    );
+
+    // (2) Idempotent, and the unprojected source entity is a real gap.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["hash_backfilled"], 0, "backfill happens once: {env}");
+    assert_eq!(
+        env["report"]["anchors"]["resolves"], 2,
+        "both entity anchors resolve against the live graph — not 'unobserved': {env}"
+    );
+    let body = serde_json::to_string(&env).unwrap();
+    assert!(
+        body.contains("srcmem--gamma"),
+        "the unprojected source entity surfaces as an uncovered member of S(D): {env}"
+    );
+
+    // (3) The pilot's move: change ONE source entity. Its anchor must drift.
+    std::fs::write(
+        root.join("src-mem").join("alpha.md"),
+        "---\ntype: decision\n---\n\n# Alpha\n\n## Decision\n\nAlpha body, rewritten.\n",
+    )
+    .unwrap();
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["report"]["anchors"]["drifted"], 1,
+        "the stale-pinned anchor over the CHANGED source entity is drifted — \
+         this is the pilot failure that went unflagged: {env}"
+    );
+    assert_eq!(
+        env["report"]["anchors"]["resolves"], 1,
+        "the anchor over the untouched entity still resolves: {env}"
+    );
+}
+
+/// Criterion 1's exclude clause: `projection exclude` gates on S(D)
+/// membership, so a genuine entity of the source mem is accepted and a
+/// non-member is refused. Before graph enumeration, S(D) was empty and the
+/// gate refused *every* id — the command was unusable over a graph binding.
+#[test]
+fn graph_binding_exclude_accepts_a_real_source_entity() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "dest/mirror",
+            "--exclusions",
+            r#"{"srcmem--gamma": "out of scope for this mem"}"#,
+        ])
+        .assert()
+        .success();
+
+    // The complement: an id that is not in S(D) is still refused.
+    memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "dest/mirror",
+            "--exclusions",
+            r#"{"srcmem--not-a-real-entity": "typo"}"#,
+        ])
+        .assert()
+        .failure();
+}
+
+/// Criterion 2's complement, at its sharpest: an **unmounted source mem** must
+/// refuse, not resolve as a mem full of deleted entities.
+///
+/// Every entity anchor into an absent mem misses the store and observes as
+/// ABSENT — a definite `orphaned`, not an honest "unobserved". The pass would
+/// report drift, instruct the reader to repoint or unset anchors that are
+/// perfectly fine, and — because `orphaned` is the one state satisfying
+/// prune's all-orphaned gate — let prune propose deleting the destination
+/// entities. The path mediums have always refused a vanished source; the graph
+/// medium needs the same refusal for a worse consequence.
+#[test]
+fn an_unmounted_graph_source_refuses_instead_of_reporting_deletions() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    // Baseline: mounted, the anchors resolve.
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror"])
+        .assert()
+        .success();
+
+    // Now unmount the source mem, leaving the binding pointing at it.
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[
+            {"mem":"dest","schema":"default@1.0.0","storage":{"type":"folder","path":"dest-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}
+        ]}"#,
+    );
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["code"], "SOURCE_UNREACHABLE",
+        "an absent source mem is a typed refusal, not a measurement: {env}"
+    );
+    let body = serde_json::to_string(&env).unwrap();
+    assert!(
+        !body.contains("orphaned"),
+        "nothing is scored orphaned — an unmounted mem must never be \
+         indistinguishable from a deleted one: {env}"
+    );
+}
+
+/// Criterion 6 proper: build→sync→verify over a graph binding whose source mem
+/// is **git-branch backed**, so a real snapshot token and a real changed slice
+/// exist. The folder-mem fixture above cannot reach this — a folder mount
+/// tracks no head, so its graph source can only ever report "snapshot missing",
+/// which pins the token's *absence* rather than the token.
+///
+/// This pins the working change-detection half the plan requires stay
+/// observably unchanged: the snapshot token appears in the findings key, the
+/// changed slice names the modified source entity in the sync brief, and
+/// `advance` writes the baseline forward.
+///
+/// Gated on `mem-repo`: `--storage git-branch` refuses without it, so the
+/// true-lean flavour (which omits the feature) cannot host this fixture. The
+/// folder-mem graph tests above run in every flavour and carry the coverage
+/// and drift criteria; this one adds the git-backed change-detection half.
+#[cfg(feature = "mem-repo")]
+#[test]
+fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // A mem-repo workspace — the shape `--storage git-branch` requires.
+    std::process::Command::new("git")
+        .args(["init", "-q", "mem-repo"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+
+    let run = |args: &[&str]| {
+        memstead()
+            .current_dir(root)
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+
+    run(&[
+        "workspace",
+        "allow-create",
+        "*",
+        "--schema",
+        "default@1.0.0",
+    ]);
+    run(&[
+        "mem",
+        "init",
+        "srcmem",
+        "--schema",
+        "default@1.0.0",
+        "--storage",
+        "git-branch",
+    ]);
+    run(&[
+        "mem",
+        "init",
+        "dest",
+        "--schema",
+        "default@1.0.0",
+        "--storage",
+        "git-branch",
+    ]);
+
+    for title in ["Alpha", "Beta", "Gamma"] {
+        run(&[
+            "create",
+            "--mem",
+            "srcmem",
+            "--title",
+            title,
+            "--type",
+            "concept",
+            "--section",
+            &format!("definition={title} is a fixture concept."),
+            "--section",
+            &format!("explanation=Body of {title}."),
+        ]);
+    }
+
+    write_store(
+        root,
+        "projections/dest/mirror.json",
+        r#"{"version":2,"intent":"mirror srcmem into dest","sources":[{"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+    );
+
+    // (1) BUILD: the build leg of a graph binding is a discovery brief plus
+    //     agent writes — there is no `projection build` command. Render the
+    //     brief the agent works from, then make the write it prescribes:
+    //     a destination entity anchored at a source ENTITY. That anchor is
+    //     what verify measures coverage and drift against below, so the
+    //     chain is genuinely build→sync→verify in one workspace rather than
+    //     a verify fixture with the build hand-seeded on disk.
+    let build_brief = String::from_utf8(run(&["projection", "brief", "dest/mirror"])).unwrap();
+    assert!(
+        build_brief.contains("**src-graph** (graph, primary)"),
+        "the build brief names the graph source: {build_brief}"
+    );
+    assert!(
+        build_brief.contains("Entities: *"),
+        "a graph source's scope renders on the entity axis, not as `Paths`: {build_brief}"
+    );
+    assert!(
+        build_brief.contains("memstead_search mem=srcmem"),
+        "the brief hands the agent an executable route to the source baseline \
+         — a changed slice alone is a delta with no baseline: {build_brief}"
+    );
+    assert!(
+        !build_brief.contains("Paths:"),
+        "no path-glob guidance is rendered for an entity-namespace source: {build_brief}"
+    );
+
+    run(&[
+        "create",
+        "--mem",
+        "dest",
+        "--title",
+        "From alpha",
+        "--type",
+        "concept",
+        "--section",
+        "definition=Mirrors the alpha concept.",
+        "--section",
+        "explanation=Written from the build brief.",
+        "--anchor",
+        r#"{"artifact":"srcmem--alpha","grain":"entity","class":"anchored","source":"src-graph"}"#,
+    ]);
+
+    // (2) VERIFY: a real enumerated denominator AND a real snapshot token.
+    //     The token is the half a folder-mem source can never produce.
+    let env: Value =
+        serde_json::from_slice(&run(&["--json", "projection", "verify", "dest/mirror"])).unwrap();
+    assert_eq!(
+        env["report"]["coverage"]["denominator"]["count"], 3,
+        "the git-backed source mem's three entities are S(D): {env}"
+    );
+    // The build leg's write is what verify measures: the entity it anchored is
+    // covered, the two it did not are gaps. Without this the build leg would
+    // be decorative — a brief rendered and a write nothing checks.
+    let uncovered = serde_json::to_string(&env["report"]).unwrap();
+    assert!(
+        uncovered.contains("srcmem--beta") && uncovered.contains("srcmem--gamma"),
+        "the two unprojected source entities are gaps: {env}"
+    );
+    assert!(
+        !env["report"]["coverage"]["uncovered"]
+            .as_array()
+            .map(|a| a.iter().any(|v| v == "srcmem--alpha"))
+            .unwrap_or(false),
+        "the entity the build leg anchored is NOT a gap — the write is measured: {env}"
+    );
+
+    let source_head = env["key"]["source_head"].as_str().unwrap().to_string();
+    let token = source_head
+        .strip_prefix("src-graph=")
+        .expect("the findings key carries the per-source snapshot token")
+        .to_string();
+    assert_eq!(
+        token.len(),
+        40,
+        "the graph snapshot token is the source mem's head SHA, not an empty \
+         placeholder: {source_head}"
+    );
+
+    // (3) SYNC: with that token recorded as the baseline, a change to one
+    //     source entity must surface as the changed slice — the half the
+    //     brief steers by.
+    run(&[
+        "mem",
+        "set-sync-state",
+        "dest",
+        "dest/mirror/src-graph#synced",
+        &token,
+    ]);
+    run(&[
+        "update",
+        "srcmem--alpha",
+        "--auto-hash",
+        "--section",
+        "explanation=Alpha body, rewritten.",
+    ]);
+
+    let brief = String::from_utf8(run(&["projection", "brief", "dest/mirror"])).unwrap();
+    assert!(
+        brief.contains("Source changes since the last sync"),
+        "the source moved, so the brief presents a changed slice: {brief}"
+    );
+    assert!(
+        brief.contains("srcmem--alpha"),
+        "the changed slice names the modified source ENTITY: {brief}"
+    );
+    assert!(
+        !brief.contains("srcmem--beta") && !brief.contains("srcmem--gamma"),
+        "only the changed entity is in the slice — a delta, not the whole source: {brief}"
+    );
+
+    // (4) ADVANCE: disposing the whole slice completes the pass and writes the
+    //     baseline forward to the source's new head.
+    let env: Value = serde_json::from_slice(&run(&[
+        "--json",
+        "projection",
+        "advance",
+        "dest/mirror",
+        "--dispositions",
+        r#"{"srcmem--alpha": "worked"}"#,
+    ]))
+    .unwrap();
+    assert_eq!(
+        env["completed"], true,
+        "the slice's only artifact is disposed — the pass completes: {env}"
+    );
+
+    assert_eq!(
+        env["tokens_written"],
+        serde_json::json!(["dest/mirror/src-graph#synced"]),
+        "a completed pass writes the per-source baseline token: {env}"
+    );
+
+    let dump: Value = serde_json::from_slice(&run(&["--json", "workspace", "dump"])).unwrap();
+    let sync_state = dump["mems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "dest")
+        .and_then(|m| m["sync_state"].as_object())
+        .expect("the destination mem carries sync state")
+        .clone();
+
+    let synced = sync_state["dest/mirror/src-graph#synced"].as_str().unwrap();
+    assert_ne!(
+        synced, token,
+        "the #synced baseline advanced past the head the pass started on: {sync_state:?}"
+    );
+    assert_eq!(
+        synced.len(),
+        40,
+        "it advanced to a real head SHA: {sync_state:?}"
+    );
+
+    // The #verified baseline is a DIFFERENT key and legitimately still holds
+    // the head verify ran at — advancing sync must not move it. Asserting the
+    // two independently is the point: one dump-wide substring check would
+    // have read verify's untouched token as a failure to advance sync.
+    assert_eq!(
+        sync_state["dest/mirror/src-graph#verified"]
+            .as_str()
+            .unwrap(),
+        token,
+        "verify's baseline stays at the head it measured: {sync_state:?}"
+    );
+}

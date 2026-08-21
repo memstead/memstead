@@ -273,11 +273,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   body that said "freshness unknowable" two screens down. The derivation now
   reads the resolved signal, so a binding that asked its medium not to report
   change is `inconclusive` and says which facet and why.
-- **The fidelity contract named two of its four caps.** The page now also
-  states that graph-medium verify is inert (a binding whose source is
-  another mem enumerates nothing and reads `0/0`, so it is not gateable
-  today) and that an mtime `#synced` baseline does not survive a fresh
-  checkout — both of which bound what a CI gate can honestly claim. It
+- **The fidelity contract named its remaining caps.** The page now also
+  states that an mtime `#synced` baseline does not survive a fresh
+  checkout, which bounds what a CI gate can honestly claim. (It named
+  graph-medium verify as a cap too; that one was fixed rather than
+  documented — see the graph-fidelity entry above.) It
   also says outright that verify **writes**: a findings store, an anchor
   hash backfill, and a `#verified` baseline.
 - The fidelity-contract page has claimed since it was written that the

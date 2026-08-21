@@ -266,7 +266,11 @@ pub fn render_operative_data(
                     }
                     if is_graph {
                         lines.push(format!(
-                            "  - Read the source baseline with `memstead_search mem={}`                              (add `entity_type=` to match a `type:` selector). The changed                              slice below is a delta against the last pass — it is not the                              whole source, and an entity absent from it may still be                              unprojected.",
+                            "  - Read the source baseline with `memstead_search mem={}` \
+                             (add `entity_type=` to match a `type:` selector). The changed \
+                             slice below is a delta against the last pass — it is not the \
+                             whole source, and an entity absent from it may still be \
+                             unprojected.",
                             p.pointer
                         ));
                     }
