@@ -151,20 +151,43 @@ pub fn resolve_binding_run(
     // ran clean over an S(D) of zero and recorded a `#verified` baseline for a
     // measurement that never happened.
     for source in &binding.sources {
-        if source.medium_type == crate::pipeline::MediumType::Graph {
-            for rule in &source.scope {
-                if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+        match source.medium_type {
+            crate::pipeline::MediumType::Graph => {
+                for rule in &source.scope {
+                    if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+                        return Err(ResolveError::UninterpretableScope {
+                            binding: binding_id.to_string(),
+                            reason: format!(
+                                "source '{}' is a graph medium, but its scope pattern '{}' is \
+                                 not an entity selector — a graph source selects entities, not \
+                                 paths. Write '*' for the whole mem, 'type:<entity_type>', or \
+                                 'id:<glob>'",
+                                source.name, rule.path
+                            ),
+                        });
+                    }
+                }
+            }
+            // A web source has no scope vocabulary at all, so any rule on it
+            // is uninterpretable — the same class, and gating the run-path
+            // refusal on graph alone is how it survived the declaration gate
+            // being graph-only.
+            crate::pipeline::MediumType::Web => {
+                if let Some(rule) = source.scope.first() {
                     return Err(ResolveError::UninterpretableScope {
                         binding: binding_id.to_string(),
                         reason: format!(
-                            "source '{}' is a graph medium, but its scope pattern '{}' is not an \
-                             entity selector — a graph source selects entities, not paths. Write \
-                             '*' for the whole mem, 'type:<entity_type>', or 'id:<glob>'",
+                            "source '{}' is a web medium, which has no scope vocabulary — its \
+                             scope pattern '{}' would select nothing while looking like \
+                             selection. Remove the scope rule",
                             source.name, rule.path
                         ),
                     });
                 }
             }
+            crate::pipeline::MediumType::Codebase
+            | crate::pipeline::MediumType::Filesystem
+            | crate::pipeline::MediumType::Git => {}
         }
     }
 

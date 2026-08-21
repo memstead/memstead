@@ -1210,6 +1210,11 @@ pub fn compute_source_cursor(
     for source in &resolved.sources {
         // Key: "<ingest>/<facet_ref>" for primaries, "<ingest>/<mem>" for
         // reference sources — matching the plugin's sync_state keying.
+        // The note's remedy is medium-shaped, so the medium travels with it.
+        let primary_medium = match source {
+            ResolvedSource::Primary(p) => Some(p.medium_type),
+            ResolvedSource::Reference { .. } => None,
+        };
         let (facet_ref, outcome) = match source {
             ResolvedSource::Primary(p) => {
                 let key = format!("{}/{}#synced", resolved.name, p.name);
@@ -1264,6 +1269,7 @@ pub fn compute_source_cursor(
             SliceOutcome::NoSignal { reason } => no_signal.push(NoSignalNote {
                 source: facet_ref.clone(),
                 reason,
+                medium_type: primary_medium,
             }),
             SliceOutcome::Reseed { token } => reseed.push(SyncCommand { key, token }),
             SliceOutcome::Changed {

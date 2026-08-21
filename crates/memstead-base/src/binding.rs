@@ -628,6 +628,24 @@ pub enum CapabilityError {
         /// The offending pattern, verbatim.
         pattern: String,
     },
+    /// A source's scope carries a pattern its medium has no vocabulary to
+    /// express at all, so nothing anywhere can interpret it. Distinct from
+    /// [`Self::GraphScopeNotEntitySelector`], which names the legal forms
+    /// because a legal form exists; here there is none, so the only honest
+    /// scope is no scope.
+    #[error(
+        "scope pattern '{pattern}' on source '{source_name}' cannot be interpreted: a \
+         '{medium_type}' medium has no scope vocabulary, so the pattern would select \
+         nothing while looking like selection — remove the scope rule"
+    )]
+    ScopeNotInterpretable {
+        /// The source declaring it.
+        source_name: String,
+        /// The offending pattern, verbatim.
+        pattern: String,
+        /// The medium with no scope vocabulary.
+        medium_type: String,
+    },
     /// Glob `deny_paths` are declared over a medium whose namespace is not
     /// path-shaped (`graph`, `web`) — a glob cannot select in that namespace.
     #[error(
@@ -780,19 +798,36 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
             }
         }
 
-        // A graph facet's scope is an entity selector, not a path glob. The
+        // A scope rule must be one its medium's namespace can express. The
         // engine used to accept any string here and interpret none of them,
-        // so `**/*` scaffolded by `projection init` looked like scope and
+        // so `**/*` scaffolded onto a graph facet looked like scope and
         // selected nothing. Refuse the undefined form at declaration.
-        if source.medium_type == MediumType::Graph {
-            for rule in &source.scope {
-                if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
-                    refusals.push(CapabilityError::GraphScopeNotEntitySelector {
+        //
+        // Checked for every medium whose namespace is not path-shaped, not for
+        // graph alone: `web` has no selector vocabulary either, and gating on
+        // one medium is how the class survived a round — fixed where it had
+        // been demonstrated and left standing one row over.
+        match source.medium_type {
+            MediumType::Graph => {
+                for rule in &source.scope {
+                    if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+                        refusals.push(CapabilityError::GraphScopeNotEntitySelector {
+                            source_name: source.name.clone(),
+                            pattern: rule.path.clone(),
+                        });
+                    }
+                }
+            }
+            MediumType::Web => {
+                for rule in &source.scope {
+                    refusals.push(CapabilityError::ScopeNotInterpretable {
                         source_name: source.name.clone(),
                         pattern: rule.path.clone(),
+                        medium_type: medium_type.clone(),
                     });
                 }
             }
+            MediumType::Codebase | MediumType::Filesystem | MediumType::Git => {}
         }
 
         // Glob deny_paths over a non-path-shaped namespace is illegal.
@@ -1794,12 +1829,16 @@ mod tests {
 
     // ---- coverage semantics: resolution / refusal / hash stability ------
 
+    /// A clean web source carries NO scope: the medium has no scope
+    /// vocabulary, so any rule on it is uninterpretable and refuses. This
+    /// helper used to hand out `**/*` — which made every web fixture carry a
+    /// decorative rule, and is why the defect went unnoticed here.
     fn web_source(name: &str) -> Source {
         source(
             name,
             MediumType::Web,
             "https://example.test",
-            vec![allow("**/*")],
+            vec![],
             None,
             None,
         )

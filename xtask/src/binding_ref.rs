@@ -127,7 +127,11 @@ fn render(schema: &Value) -> String {
     md.push_str(
         "Which fields and operations a binding may legally declare depends on the **medium** its \
          source facets resolve to. The engine derives this from the capability matrix below and \
-         refuses an illegal combination at **binding-validation** time (never at run time).\n\n",
+         refuses an illegal combination at **binding-validation** time. A scope pattern its \
+         medium cannot express is additionally refused when the binding is resolved for a \
+         run, because validation reaches only the paths that EDIT a record — a hand-authored \
+         or pre-vocabulary binding would otherwise run over a scope that selects \
+         nothing.\n\n",
     );
     md.push_str(
         "| Medium | Enumerable | Change signal | Base retrievable | Anchor namespace | Glob `deny_paths` | Prune guarantee |\n",
@@ -164,8 +168,9 @@ fn render(schema: &Value) -> String {
     md.push_str(
         "- **`graph` scope is an entity selector, not a path glob.** A graph source selects \
          entities, so its `scope` patterns are `*` (the whole mem), `type:<entity_type>`, or \
-         `id:<glob>` over the full `mem--slug` id. A path-shaped pattern is refused at binding \
-         validation rather than accepted and ignored — scope that selects nothing while looking \
+         `id:<glob>` over the full `mem--slug` id. A path-shaped pattern is refused — at binding \
+         validation and again when the binding is resolved for a run — rather than accepted \
+         and ignored — scope that selects nothing while looking \
          like selection is the failure this rule prevents. The columns describe the medium's \
          declared capability, not the current state of every operation over it.\n",
     );

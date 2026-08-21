@@ -3996,6 +3996,98 @@ fn an_empty_facet_is_not_excused_by_a_sibling_that_walked() {
     );
 }
 
+/// Criterion 4's complement, on the path a grade found: the brief must never
+/// instruct an agent to write a scope the engine then refuses.
+///
+/// An unscoped facet's remedy was medium-agnostic — "write `**/*` in the facet
+/// scope" — printed at a graph source whose run path refuses exactly that as
+/// not an entity selector. The engine told the agent to do the one thing it
+/// would reject. This asserts the round trip: whatever the brief tells you to
+/// write must actually run.
+#[test]
+fn the_unscoped_remedy_is_one_the_medium_accepts() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    let binding = root.join(".memstead/projections/dest/mirror.json");
+    let text = std::fs::read_to_string(&binding).unwrap();
+    std::fs::write(
+        &binding,
+        text.replace(r#""scope":[{"path":"*","mode":"allow"}]"#, r#""scope":[]"#),
+    )
+    .unwrap();
+
+    let brief = String::from_utf8(
+        memstead()
+            .current_dir(root)
+            .args(["projection", "brief", "dest/mirror"])
+            .assert()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        brief.contains("unscoped facet"),
+        "the unscoped facet is reported: {brief}"
+    );
+    assert!(
+        !brief.contains("write `**/*`"),
+        "a graph source is never told to write a path glob — the engine refuses \
+         that scope, so printing it is an instruction to fail: {brief}"
+    );
+    assert!(
+        brief.contains("write `*` in the"),
+        "the remedy names a selector this medium actually accepts: {brief}"
+    );
+
+    // The round trip: take the brief's advice and the binding must RUN.
+    std::fs::write(
+        &binding,
+        std::fs::read_to_string(&binding)
+            .unwrap()
+            .replace(r#""scope":[]"#, r#""scope":[{"path":"*","mode":"allow"}]"#),
+    )
+    .unwrap();
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "dest/mirror"])
+        .assert()
+        .success();
+}
+
+/// Criterion 5's complement, second clause, for the medium it was left on. A
+/// `web` facet has no scope vocabulary at all, so any rule is uninterpretable —
+/// yet the declaration gate checked graph alone and the brief printed
+/// `Paths: **/*` at the agent as selection. Fixing the medium where a defect
+/// was demonstrated and leaving its twin standing is how this class survived a
+/// round.
+#[test]
+fn a_web_facet_cannot_carry_scope_either() {
+    let tmp = graph_binding_workspace();
+    let root = tmp.path();
+
+    write_store(
+        root,
+        "projections/dest/web.json",
+        r#"{"version":2,"intent":"web","sources":[{"name":"web-facet","type":"web","pointer":"https://example.com","scope":[{"path":"**/*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+    );
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "brief", "dest/web"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["code"], "PROJECTION_SCOPE_UNINTERPRETABLE",
+        "a web facet's scope rule is refused, not printed as selection: {env}"
+    );
+}
+
 /// Criterion 6 proper: build→sync→verify over a graph binding whose source mem
 /// is **git-branch backed**, so a real snapshot token and a real changed slice
 /// exist. The folder-mem fixture above cannot reach this — a folder mount

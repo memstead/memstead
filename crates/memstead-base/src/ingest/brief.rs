@@ -366,6 +366,12 @@ pub struct NoSignalNote {
     pub source: String,
     /// Why detection produced no signal.
     pub reason: NoSignalReason,
+    /// The source's medium, when it is a primary source. Carried so the
+    /// remedy the note prints is one this medium actually accepts — a
+    /// medium-agnostic remedy told a graph source's agent to write `**/*`,
+    /// which the engine then refuses as not an entity selector. `None` for a
+    /// reference mem, which has no facet scope to remedy.
+    pub medium_type: Option<MediumType>,
 }
 
 /// The combined source-cursor across a projection's source facets — the
@@ -439,12 +445,22 @@ fn render_slice_class(lines: &mut Vec<String>, label: &str, paths: &[String]) {
 /// reason renders as distinct text, so the agent can tell the no-signal
 /// conditions apart (and all apart from a genuinely-unchanged source, which
 /// renders nothing at all).
-fn no_signal_reason_text(reason: NoSignalReason) -> &'static str {
+fn no_signal_reason_text(reason: NoSignalReason, medium: Option<MediumType>) -> &'static str {
     match reason {
-        NoSignalReason::Unscoped => {
-            "unscoped facet (no allow patterns) — nothing is monitored; write `**/*` in the \
-             facet scope to watch the whole medium"
-        }
+        // The remedy is medium-shaped, because scope is. Naming a path glob at
+        // a graph source sent the agent to write the one thing the engine
+        // refuses — the brief instructing a write it would then reject.
+        NoSignalReason::Unscoped => match medium {
+            Some(MediumType::Graph) => {
+                "unscoped facet (no allow patterns) — nothing is monitored; write `*` in the \
+                 facet scope to watch the whole mem, or `type:<entity_type>` / `id:<glob>` \
+                 to narrow it (a graph source selects entities, not paths)"
+            }
+            _ => {
+                "unscoped facet (no allow patterns) — nothing is monitored; write `**/*` in the \
+                 facet scope to watch the whole medium"
+            }
+        },
         NoSignalReason::DetectionNone => {
             "`signal:none` — change detection is disabled for this source (declared `none`)"
         }
@@ -526,7 +542,7 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
             lines.push(format!(
                 "- `{}`: {}",
                 note.source,
-                no_signal_reason_text(note.reason)
+                no_signal_reason_text(note.reason, note.medium_type)
             ));
         }
         lines.push(String::new());
@@ -1619,6 +1635,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
 
     fn note(source: &str, reason: NoSignalReason) -> NoSignalNote {
         NoSignalNote {
+            medium_type: None,
             source: source.to_string(),
             reason,
         }
@@ -1767,10 +1784,10 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(out.contains("- `ref-mem`: graph snapshot missing"));
         // The four reason texts are mutually distinct.
         let texts = [
-            no_signal_reason_text(NoSignalReason::Unscoped),
-            no_signal_reason_text(NoSignalReason::DetectionNone),
-            no_signal_reason_text(NoSignalReason::GitUnavailable),
-            no_signal_reason_text(NoSignalReason::GraphSnapshotMissing),
+            no_signal_reason_text(NoSignalReason::Unscoped, None),
+            no_signal_reason_text(NoSignalReason::DetectionNone, None),
+            no_signal_reason_text(NoSignalReason::GitUnavailable, None),
+            no_signal_reason_text(NoSignalReason::GraphSnapshotMissing, None),
         ];
         for (i, a) in texts.iter().enumerate() {
             for b in &texts[i + 1..] {
