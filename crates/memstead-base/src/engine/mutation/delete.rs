@@ -121,6 +121,15 @@ impl Engine {
             return Err(EngineError::ReadOnlyMount(mem));
         }
 
+        // Delete's race guard is `HAS_INCOMING_REFS`, and incoming
+        // edges can originate in ANY mem — so the check is only
+        // truthful over a complete store. A deferred (lazy, unloaded)
+        // mem's referrers would otherwise be invisible and the delete
+        // would silently admit what an eager boot refuses (the third
+        // lazy-mount grade demonstrated exactly that). Full load first;
+        // the drift reload below stays scoped to the target mem.
+        self.ensure_mems_loaded(None);
+
         // Reload-before-operation: reload if a sibling advanced the
         // mem ref, so the `expected_hash` compare and the
         // referrer classification below see current truth. Notice

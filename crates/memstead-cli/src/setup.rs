@@ -474,8 +474,11 @@ impl CliContext {
     /// cross-mem state — incoming edges, workspace-wide counts, search
     /// without a mem filter — must use [`Self::cli_engine`], whose
     /// full load keeps every answer computed over a complete store.
-    /// Engine mutations need no scoping either way: every mutation runs
-    /// the `reload_if_stale` funnel for its target mem itself.
+    /// Engine mutations need no caller-side scoping either way: each
+    /// runs the `reload_if_stale` funnel for its target mem itself, and
+    /// the ones whose guards read cross-mem state take the full load
+    /// themselves (delete's incoming-refs guards, relate's two
+    /// endpoints).
     pub fn cli_engine_scoped(&self, mem: &str) -> anyhow::Result<CliEngine> {
         match self.workspace_shape() {
             Some((_, root)) => {

@@ -3666,6 +3666,90 @@ write_rules: []
         assert!(bad.relationships.is_empty());
     }
 
+    /// The destructive guard sees referrers living in DEFERRED mems:
+    /// deleting an entity whose incoming references originate in a lazy,
+    /// not-yet-loaded mem refuses `HAS_INCOMING_REFS` exactly as an
+    /// eager boot refuses it. The third final grade demonstrated the
+    /// counterexample live — the scoped reload left the referrer's mem
+    /// unloaded and the delete destroyed the entity an eager boot
+    /// protects. The guard now takes the full load first.
+    #[test]
+    fn delete_guard_sees_referrers_in_deferred_mems() {
+        use crate::engine::{DeleteEntityArgs, RelateEntityArgs};
+
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let (actor, client) = cli_actor();
+
+        // Author the cross-mem referrer through the mutation surface
+        // while both mems are eager (with the cross-link grant), so the
+        // persisted relation is exactly what a real workspace carries.
+        {
+            let mut authoring = Engine::from_mounts(vec![
+                (
+                    folder_mount("eag", eager_dir.to_path_buf()),
+                    Box::new(FilesystemMemWriter::new(eager_dir.to_path_buf()))
+                        as Box<dyn MemBackend>,
+                ),
+                (
+                    folder_mount("laz", lazy_dir.to_path_buf()),
+                    Box::new(FilesystemMemWriter::new(lazy_dir.to_path_buf()))
+                        as Box<dyn MemBackend>,
+                ),
+            ])
+            .unwrap();
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            settings.cross_mem_links.insert(
+                "laz".to_string(),
+                memstead_schema::workspace_config::CrossLinkValue::List(vec!["eag".to_string()]),
+            );
+            authoring.set_settings(settings);
+            authoring
+                .relate_entity(
+                    RelateEntityArgs {
+                        source: crate::EntityId::new("laz", "omega"),
+                        expected_hash: None,
+                        rel_type: "USES".to_string(),
+                        target: crate::EntityId::new("eag", "alpha"),
+                        remove: false,
+                        description: None,
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .expect("cross-mem relate lands under the grant");
+        }
+
+        // Fresh boot with the REFERRER's mem lazy: the incoming edge
+        // into `eag--alpha` lives in an unloaded mem. The guard must
+        // still see it — full load before destructive adjudication.
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+        assert!(engine.mem_is_deferred("laz"));
+        let err = engine
+            .delete_entity(
+                DeleteEntityArgs {
+                    id: crate::EntityId::new("eag", "alpha"),
+                    expected_hash: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("a referenced entity must refuse deletion, lazy referrer or not");
+        assert!(
+            matches!(err, EngineError::HasIncomingRefs { .. }),
+            "expected HAS_INCOMING_REFS, got {err:?}"
+        );
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("eag", "alpha"))
+                .is_some(),
+            "the entity survives"
+        );
+    }
+
     /// A cross-mem body link from an eager mem into a lazy one is a
     /// stub until the target mem loads, and resolves to the real entity
     /// afterwards — never silently dropped, never a spurious permanent
