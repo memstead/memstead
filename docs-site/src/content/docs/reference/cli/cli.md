@@ -422,7 +422,7 @@ Export the write mem as markdown (in place) or as a portable `.mem` archive
 
 ###### **Options:**
 
-* `--format <FORMAT>` — Output format. `markdown` regenerates the mem directory in place (folder-backed mems only); `mem` writes a portable `.mem` zip suitable for sharing (every backend); `json` prints every non-stub entity of the selected mem(s) as one structured JSON document on stdout (every backend, read-only)
+* `--format <FORMAT>` — Output format. `markdown` regenerates the mem directory in place (folder-backed mems only); `mem` writes a portable `.mem` zip suitable for sharing (every backend); `json` prints every non-stub entity of the selected mem(s) as one structured JSON document on stdout (every backend, read-only); `html` writes one self-contained page; `llms-txt` prints the whole mem as one agent-readable Markdown document (every backend, read-only) — the same shape a Memstead deployment serves at `/llms-full.txt`, rendered by the same engine code so the two cannot drift
 
   Default value: `markdown`
 
@@ -435,9 +435,12 @@ Export the write mem as markdown (in place) or as a portable `.mem` archive
     Print the full entity set as one JSON document on stdout
   - `html`:
     Write one self-contained HTML file — the read surface for non-operators: no server, no scripts, zero network requests
+  - `llms-txt`:
+    Write the whole mem as one agent-readable Markdown document — the `/llms-full.txt` shape, rendered by the same engine code the served endpoint uses, so the two cannot drift
 
-* `-o`, `--output <PATH>` — Output path for `--format mem` (default `./<name>-<version>.mem`) and `--format html` (default `./<mem>.html`). Ignored for `--format markdown`; refused for `--format json` (that document goes to stdout)
+* `-o`, `--output <PATH>` — Output path for `--format mem` (default `./<name>-<version>.mem`) and `--format html` (default `./<mem>.html`). Optional for `--format llms-txt`, which prints to stdout when omitted. Ignored for `--format markdown`; refused for `--format json` (that document goes to stdout)
 * `--mem <NAME>` — Which mem to export (by name). For `--format markdown`, omitting this argument runs a workspace-wide export and reports any declined mounts under `skipped_mounts`. For `--format mem`, required when more than one write mem is loaded; defaults to the first writable mem otherwise. For `--format json`, omitting it exports every writable mem; naming a read-only mount exports that mount (read-mems are excluded from the workspace-wide default — they are someone else's published content)
+* `--base-url <URL>` — Absolute base URL for entity links in `--format llms-txt` (e.g. `https://example.com`). With it, references render as absolute links exactly as the served document does; without it they target the document-relative `entity/<id>`. There is no third form. Ignored by every other format
 
 
 

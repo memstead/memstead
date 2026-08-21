@@ -42,6 +42,7 @@ pub mod due;
 pub mod error;
 pub mod events;
 pub mod export_html;
+pub mod export_llms_txt;
 #[cfg(feature = "file-watcher")]
 pub mod file_watcher;
 pub mod history;

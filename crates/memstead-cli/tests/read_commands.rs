@@ -1286,6 +1286,160 @@ fn due_brief_cli_wiring() {
         .stdout(contains("90d"));
 }
 
+/// `memstead export --format llms-txt` — the whole mem as one Markdown
+/// document, on the **mem-repo** backend. Pins the shape properties the
+/// deployed `/llms-full.txt` promises, so the exported and served documents
+/// cannot drift apart in future changes: header block, one occurrence per
+/// non-stub entity, the visible type line, empty sections kept, and a
+/// separator between entities.
+#[test]
+fn llms_txt_export_pins_the_document_shape() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = seed_cli_test_mem(tmp.path());
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("llms-txt"));
+
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--format", "llms-txt"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let doc = String::from_utf8(out).unwrap();
+
+    // Header block: the document says what it is before it says anything.
+    assert!(doc.starts_with("# cli-test"), "header names the mem: {doc}");
+    for field in [
+        "Mem: ",
+        "Subject: ",
+        "Schema: ",
+        "Entities: ",
+        "Provenance: ",
+    ] {
+        assert!(doc.contains(field), "header carries `{field}`: {doc}");
+    }
+    assert!(
+        doc.contains("Every non-stub entity of this Memstead graph follows, once"),
+        "the header states its own contract: {doc}"
+    );
+    // No deployment is vouching for a file exported from a workspace, and the
+    // header must not claim one is.
+    assert!(
+        !doc.contains("this deployment vouches"),
+        "a CLI export never claims a deployment's provenance: {doc}"
+    );
+
+    // The type line, and each entity exactly once.
+    assert!(doc.contains("_Type: spec_"), "type line rendered: {doc}");
+    assert_eq!(
+        doc.matches("# Alpha\n").count(),
+        1,
+        "each entity appears exactly once: {doc}"
+    );
+    assert!(doc.contains("\n---\n"), "entities are separated: {doc}");
+    assert!(
+        !doc.contains("[["),
+        "no raw wiki-link syntax survives: {doc}"
+    );
+
+    // An unmounted mem refuses rather than emitting an empty document — a
+    // document reporting zero entities about a mem this workspace never
+    // mounted is a confident wrong answer.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["export", "--format", "llms-txt", "--mem", "nope"])
+        .assert()
+        .failure()
+        .stderr(contains("UNKNOWN_MEM"));
+}
+
+/// The two pinned link forms, and only those two: `--base-url` renders
+/// absolute links exactly as the served document does; without it the same
+/// text targets the document-relative `entity/<id>`.
+#[test]
+fn llms_txt_export_emits_only_the_two_pinned_link_forms() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("cli-test");
+    fs::create_dir_all(&dir).unwrap();
+    make_test_mem(&dir);
+    // A second entity whose body wiki-links the first by bare slug — the
+    // local-mem resolution pass.
+    fs::write(
+        dir.join("beta.md"),
+        r#"---
+type: spec
+created_date: 2026-01-01
+last_modified: 2026-01-01
+level: M0
+---
+# Beta
+
+## Identity
+
+Beta references [[alpha]] by bare slug.
+
+## Purpose
+
+Exercises link resolution.
+"#,
+    )
+    .unwrap();
+    init_real_mem_repo_from_disk(tmp.path(), &[(&dir, "cli-test")]);
+
+    let relative = String::from_utf8(
+        memstead()
+            .current_dir(tmp.path())
+            .args(["export", "--format", "llms-txt"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        relative.contains("(entity/cli-test--alpha)"),
+        "without --base-url the link is document-relative: {relative}"
+    );
+    assert!(
+        !relative.contains("(/entity/"),
+        "and never root-relative — that is a third form: {relative}"
+    );
+
+    let absolute = String::from_utf8(
+        memstead()
+            .current_dir(tmp.path())
+            .args([
+                "export",
+                "--format",
+                "llms-txt",
+                "--base-url",
+                "https://example.com",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        absolute.contains("(https://example.com/entity/cli-test--alpha)"),
+        "with --base-url the link is absolute: {absolute}"
+    );
+    assert!(
+        !absolute.contains("[["),
+        "the bare slug resolved rather than surviving raw: {absolute}"
+    );
+}
+
 /// `memstead export --format html` (first-author-path plan 11): the
 /// CLI wiring — the format appears in help, a fixture workspace
 /// exports one self-contained file, and an unknown mem refuses with

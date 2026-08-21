@@ -2661,3 +2661,49 @@ fn quickstart_repo_receipt_discloses_the_shape_and_the_mem_folder() {
         "the collapsed-shape wording would be untrue here; got:\n{out}",
     );
 }
+
+/// Criterion 1's other half: `--format llms-txt` is backend-uniform, so it
+/// produces the same document shape on a **filesystem** mem as on a mem-repo
+/// one. `quickstart` is the shortest route to a real filesystem workspace.
+///
+/// This exists because "backend-uniform" is the kind of claim that holds until
+/// nobody checks: the mem-repo path is what every other export test exercises.
+#[test]
+fn llms_txt_export_works_on_a_filesystem_mem() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("fs-graph");
+    memstead()
+        .args(["quickstart", "--json"])
+        .arg(&root)
+        .assert()
+        .success();
+
+    let doc = stdout_of(
+        memstead()
+            .current_dir(&root)
+            .args(["export", "--format", "llms-txt"])
+            .assert()
+            .success(),
+    );
+
+    assert!(doc.starts_with("# fs-graph"), "header names the mem: {doc}");
+    for field in [
+        "Mem: ",
+        "Subject: ",
+        "Schema: ",
+        "Entities: ",
+        "Provenance: ",
+    ] {
+        assert!(doc.contains(field), "header carries `{field}`: {doc}");
+    }
+    assert!(
+        doc.contains("_Type: "),
+        "the seed entity carries a visible type line: {doc}"
+    );
+    assert!(doc.contains("\n---\n"), "entities are separated: {doc}");
+    assert!(!doc.contains("[["), "no raw wiki-link syntax: {doc}");
+    assert!(
+        !doc.contains("this deployment vouches"),
+        "a CLI export claims no deployment provenance: {doc}"
+    );
+}

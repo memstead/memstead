@@ -29,14 +29,19 @@ pub struct Args {
     /// (folder-backed mems only); `mem` writes a portable `.mem` zip
     /// suitable for sharing (every backend); `json` prints every
     /// non-stub entity of the selected mem(s) as one structured JSON
-    /// document on stdout (every backend, read-only).
+    /// document on stdout (every backend, read-only); `html` writes one
+    /// self-contained page; `llms-txt` prints the whole mem as one
+    /// agent-readable Markdown document (every backend, read-only) —
+    /// the same shape a Memstead deployment serves at `/llms-full.txt`,
+    /// rendered by the same engine code so the two cannot drift.
     #[arg(long, value_enum, default_value_t = Format::Markdown)]
     pub format: Format,
 
     /// Output path for `--format mem` (default `./<name>-<version>.mem`)
-    /// and `--format html` (default `./<mem>.html`). Ignored for
-    /// `--format markdown`; refused for `--format json` (that document
-    /// goes to stdout).
+    /// and `--format html` (default `./<mem>.html`). Optional for
+    /// `--format llms-txt`, which prints to stdout when omitted.
+    /// Ignored for `--format markdown`; refused for `--format json`
+    /// (that document goes to stdout).
     #[arg(long, short = 'o', value_name = "PATH")]
     pub output: Option<PathBuf>,
 
@@ -50,6 +55,14 @@ pub struct Args {
     /// default — they are someone else's published content).
     #[arg(long = "mem", value_name = "NAME")]
     pub mem_name: Option<String>,
+
+    /// Absolute base URL for entity links in `--format llms-txt` (e.g.
+    /// `https://example.com`). With it, references render as absolute
+    /// links exactly as the served document does; without it they target
+    /// the document-relative `entity/<id>`. There is no third form.
+    /// Ignored by every other format.
+    #[arg(long = "base-url", value_name = "URL")]
+    pub base_url: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -63,6 +76,10 @@ pub enum Format {
     /// Write one self-contained HTML file — the read surface for
     /// non-operators: no server, no scripts, zero network requests.
     Html,
+    /// Write the whole mem as one agent-readable Markdown document —
+    /// the `/llms-full.txt` shape, rendered by the same engine code the
+    /// served endpoint uses, so the two cannot drift.
+    LlmsTxt,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -72,6 +89,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if matches!(args.format, Format::Html) {
         return run_html(ctx, args);
     }
+    if matches!(args.format, Format::LlmsTxt) {
+        return run_llms_txt(ctx, args);
+    }
     match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => match args.format {
@@ -79,6 +99,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Format::Mem => run_mem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
             Format::Html => unreachable!("dispatched to run_html above"),
+            Format::LlmsTxt => unreachable!("dispatched to run_llms_txt above"),
         },
         CliEngine::Filesystem(engine) => match args.format {
             // `--format markdown` regenerates files in place. The
@@ -95,6 +116,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Format::Mem => run_mem_filesystem(ctx, &engine, args),
             Format::Json => unreachable!("dispatched to run_json above"),
             Format::Html => unreachable!("dispatched to run_html above"),
+            Format::LlmsTxt => unreachable!("dispatched to run_llms_txt above"),
         },
     }
 }
@@ -504,6 +526,95 @@ fn default_output_path(
         memstead_schema::ARCHIVE_EXTENSION
     );
     Ok(PathBuf::from(filename))
+}
+
+/// `--format llms-txt` — the whole mem as one Markdown document an agent can
+/// read in a single pass. Backend-uniform via [`CliEngine::base`] and
+/// observably read-only, like `--format json`.
+///
+/// The document shape is the engine's, shared with the served
+/// `/llms-full.txt` endpoint. This function supplies only what a *deployment*
+/// would otherwise supply and a CLI cannot: the link base. It deliberately
+/// supplies no authority and no wider-project block — a file exported from
+/// someone's own workspace has no deployment vouching for it, and a header
+/// claiming otherwise would put a false provenance line atop the one document
+/// written to be read whole.
+fn run_llms_txt(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    let engine_holder = ctx.cli_engine()?;
+    let engine = engine_holder.base();
+    let mem = resolve_single_mem(engine, args.mem_name.as_deref())?;
+
+    let ctx_opts = memstead_base::engine::export_llms_txt::LlmsTxtContext {
+        authority: None,
+        href_prefix: args
+            .base_url
+            .clone()
+            .map(|u| u.trim_end_matches('/').to_string())
+            .unwrap_or_default(),
+        wider_project: Vec::new(),
+    };
+    let doc = engine
+        .render_llms_txt(&mem, &ctx_opts)
+        .map_err(CliError::from_engine_op)?;
+
+    match &args.output {
+        Some(path) => {
+            std::fs::write(path, &doc).map_err(|e| {
+                CliError::new(
+                    ExitKind::Generic,
+                    "IO_ERROR",
+                    format!("write {}: {e}", path.display()),
+                )
+            })?;
+            if ctx.json {
+                print_json(&serde_json::json!({
+                    "mem": mem,
+                    "written": path.display().to_string(),
+                    "bytes": doc.len(),
+                }))?;
+            } else {
+                println!("Wrote {} ({} bytes)", path.display(), doc.len());
+            }
+        }
+        // No `-o` prints the document itself — it is text meant to be read or
+        // piped, so stdout is the natural destination rather than a file the
+        // caller then has to find.
+        None => print!("{doc}"),
+    }
+    Ok(())
+}
+
+/// Resolve the one mem an export targets: an explicit `--mem` wins (read-only
+/// mounts allowed); otherwise the sole writable mem, refusing when there is
+/// none or several rather than picking one.
+fn resolve_single_mem(
+    engine: &memstead_base::Engine,
+    requested: Option<&str>,
+) -> Result<String, CliError> {
+    if let Some(m) = requested {
+        return Ok(m.to_string());
+    }
+    let writables: Vec<String> = engine
+        .writable_mem_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    match writables.as_slice() {
+        [one] => Ok(one.clone()),
+        [] => Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "no writable mem loaded — pass --mem <name>",
+        )),
+        _ => Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "multiple writable mems loaded ({}) — pass --mem <name>",
+                writables.join(", ")
+            ),
+        )),
+    }
 }
 
 /// `--format html` — one self-contained HTML file per mem (the read
