@@ -3457,6 +3457,49 @@ fn verify_json_carries_the_pinned_format_marker() {
         env["report"]["findings_by_class"].is_object(),
         "the closed finding-class vocabulary still ships: {env}"
     );
+
+    // Every field the guide names as contract, asserted by name. A grade
+    // found six of these documented and pinned by nothing: a rename would
+    // reshape the `v1` payload and falsify the guide while the marker kept
+    // saying `memstead-verify/v1`, which is exactly the silent break the
+    // marker exists to prevent. `is_null()` rather than a value check —
+    // the point is that the key survives a refactor, not what it holds.
+    for field in [
+        "verdict",
+        "findings_total",
+        "because",
+        "blind_spots",
+        "actions",
+    ] {
+        assert!(
+            !env["rollup"][field].is_null(),
+            "rollup.{field} is documented as contract but missing: {env}"
+        );
+    }
+    for facet in env["report"]["capabilities"].as_array().unwrap() {
+        for field in [
+            "facet",
+            "medium_type",
+            "enumerable",
+            "change_signal",
+            "base_version_retrievable",
+            "anchor_namespace",
+            "signal",
+        ] {
+            assert!(
+                !facet[field].is_null(),
+                "capabilities[].{field} is documented as contract but missing: {facet}"
+            );
+        }
+    }
+    for facet in env["report"]["freshness"].as_array().unwrap() {
+        for field in ["facet", "signal", "change_detectable"] {
+            assert!(
+                !facet[field].is_null(),
+                "freshness[].{field} is documented as contract but missing: {facet}"
+            );
+        }
+    }
     // The denominator is INTERNALLY tagged on `kind`. Pinned because the
     // guide documents that exact shape as external contract, and serde's
     // default for an enum is externally tagged — dropping the

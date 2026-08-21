@@ -125,6 +125,11 @@ Exit codes:
 
   For programmatic branching, prefer `--json` over the exit code:
     memstead <subcommand> ... --json | jq -r .code
+  One caveat, and it bites exactly where code 6 matters: a gate-mode run
+  that exits 6 emits TWO documents on stdout — the report, then the typed
+  error. The recipe above reads only the first and prints `null`. Read the
+  stream instead:
+    memstead ... --fail-on-findings --json | jq -s -r '.[-1].code'
   The JSON envelope's `code` field carries the typed token
   (e.g. INVALID_TITLE, HAS_INCOMING_REFS, CROSS_MEM_LINK_NOT_ALLOWED)
   with structured recovery details under `.details`.

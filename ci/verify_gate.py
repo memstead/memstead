@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -109,6 +110,16 @@ DOCUMENTED_CONTRACT = [
     "It is not a read-only command",
 ]
 
+# The generated CLI reference renders from the clap epilog, and it is the
+# page this guide's own "Related" section sends a CI author to for the
+# exit-code table. It recommended `jq -r .code`, which the guide documents
+# as misreading the gate path — so the two pages disagreed about the one
+# command code 6 exists for. Pinned here rather than only in the guide.
+CLI_REFERENCE = (
+    REPO / "docs-site" / "src" / "content" / "docs" / "reference" / "cli" / "cli.md"
+)
+CLI_REFERENCE_CONTRACT = ["jq -s -r '.[-1].code'"]
+
 # Every exit code the binary can actually return. The guide's prose must
 # not mention one outside this set: a grade rewrote every prose mention of
 # "exit 6" to "exit 7", left the pinned table cell intact, and this harness
@@ -155,45 +166,77 @@ def run_gate(memstead: Path, workspace: Path, json_mode: bool = True) -> tuple[i
     return proc.returncode, proc.stdout
 
 
-def extract_verdict_script(guide_text: str) -> str | None:
-    """Lift the guide's second-step shell script out of its YAML block.
+# The two steps of the guide's job, by their `name:` headings. The job is
+# executed as a COMPOSED whole below — step 1 producing the file step 2
+# reads — because running them in isolation is how the last version of this
+# harness passed a job that went green on real drift: `|| true` on step 1
+# plus a narrowed condition in step 2 are each survivable alone and
+# ungating together. A gate that cannot see the seam cannot gate the seam.
+STEP_NAMES = ("Verify the mem against its source", VERDICT_STEP_NAME)
 
-    Pinning the step's presence proves it is printed; running it proves it
-    WORKS. A grade inverted this script's comparison, broke its jq path and
-    deleted it outright — three mutations that each leave a copied job
-    broken, and all three passed a presence check.
+# GitHub-Actions attributes that neuter a step regardless of its script.
+# None of them appear in a working job, and each silently disarms the gate.
+FORBIDDEN_JOB_ATTRS = ("continue-on-error", "if: false", "if: ${{ false")
+
+
+def extract_step_scripts(guide_text: str) -> dict[str, str] | None:
+    """Lift each named step's shell script out of the guide's YAML block.
+
+    Returns a name→script map, or None when the block or a step is missing.
     """
     for block in re.findall(r"```yaml\n(.*?)```", guide_text, re.DOTALL):
-        if VERDICT_STEP_NAME not in block:
+        if not all(name in block for name in STEP_NAMES):
             continue
-        after = block.split(VERDICT_STEP_NAME, 1)[1]
-        lines = after.splitlines()
-        try:
-            start = next(i for i, ln in enumerate(lines) if ln.strip() == "run: |") + 1
-        except StopIteration:
-            return None
-        body, indent = [], None
-        for ln in lines[start:]:
-            if not ln.strip():
-                body.append("")
+        scripts: dict[str, str] = {}
+        for name in STEP_NAMES:
+            after = block.split(f"name: {name}", 1)[1]
+            lines = after.splitlines()
+            try:
+                start = next(
+                    i for i, ln in enumerate(lines) if ln.strip() in ("run: |", "run:")
+                )
+            except StopIteration:
+                return None
+            head = lines[start].strip()
+            if head != "run: |":
+                # A single-line `run: cmd` step.
+                scripts[name] = head[len("run:") :].strip()
                 continue
-            lead = len(ln) - len(ln.lstrip())
-            if indent is None:
-                indent = lead
-            elif lead < indent:
-                break
-            body.append(ln[indent:])
-        return "\n".join(body).strip()
+            body, indent = [], None
+            for ln in lines[start + 1 :]:
+                if not ln.strip():
+                    body.append("")
+                    continue
+                lead = len(ln) - len(ln.lstrip())
+                if indent is None:
+                    indent = lead
+                elif lead < indent:
+                    break
+                body.append(ln[indent:])
+            scripts[name] = "\n".join(body).strip()
+        return scripts
     return None
 
 
-def run_verdict_step(script: str, workspace: Path, report: str) -> int:
-    """Run the guide's step-2 script exactly as printed, on a real payload."""
-    (workspace / "report.json").write_text(report, encoding="utf-8")
-    proc = subprocess.run(
-        ["bash", "-c", script], cwd=workspace, capture_output=True, text=True
-    )
-    return proc.returncode
+def run_job(scripts: dict[str, str], workspace: Path, memstead: Path) -> int:
+    """Run the printed job end to end, as a copied workflow would.
+
+    `memstead` is put on PATH rather than substituted into the script, so the
+    command text executed is byte-for-byte what the guide prints. Steps run in
+    order and the first non-zero status ends the job — GitHub's own semantics.
+    """
+    env = {**os.environ, "PATH": f"{memstead.parent}:{os.environ['PATH']}"}
+    for name in STEP_NAMES:
+        proc = subprocess.run(
+            ["bash", "-c", scripts[name]],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if proc.returncode != 0:
+            return proc.returncode
+    return 0
 
 
 def run(memstead: Path) -> int:
@@ -235,6 +278,18 @@ def run(memstead: Path) -> int:
         )
     else:
         print("  ✓ the printed workflow still carries every step it needs")
+
+    if CLI_REFERENCE.exists():
+        cli_text = CLI_REFERENCE.read_text(encoding="utf-8")
+        missing_cli = [c for c in CLI_REFERENCE_CONTRACT if c not in cli_text]
+        if missing_cli:
+            failures += fail(
+                f"the generated CLI reference lost the stream-aware recipe "
+                f"{missing_cli} — it is where the guide sends a CI author for the "
+                f"exit-code table, and the plain `jq -r .code` misreads exit 6"
+            )
+        else:
+            print("  ✓ the CLI reference carries the recipe that works on exit 6")
 
     missing_contract = [c for c in DOCUMENTED_CONTRACT if c not in guide_text]
     if missing_contract:
@@ -360,72 +415,54 @@ def run(memstead: Path) -> int:
             else:
                 print("  ✓ gate stdout is report-then-error, as the guide's jq recipe assumes")
 
-    # (4) RUN the guide's second step, not merely assert it is printed. Its
-    #     whole job is to fail a pass that recorded nothing but could not see
-    #     anything — so it is exercised against exactly that.
-    script = extract_verdict_script(guide_text)
-    if script is None:
+    # (4) Run the printed job END TO END, as a copied workflow would.
+    #     Step 1 produces the file step 2 reads; running them separately is
+    #     how the previous harness passed a job that went green on drift.
+    scripts = extract_step_scripts(guide_text)
+    if scripts is None:
         failures += fail(
-            f"could not find the {VERDICT_STEP_NAME!r} step's script in the guide's "
-            f"workflow — the step that makes the gate trustworthy is not there to run"
+            "could not find both named steps and their scripts in the guide's "
+            "workflow — the job a stranger copies is not there to run"
         )
     else:
-        with tempfile.TemporaryDirectory() as tmp2:
-            ws = stage_fixture(Path(tmp2))
-            _, clean_report = run_gate(memstead, ws)
-            if run_verdict_step(script, ws, clean_report) != 0:
+        for attr in FORBIDDEN_JOB_ATTRS:
+            if any(attr in b for b in yaml_blocks):
                 failures += fail(
-                    "the guide's verdict step rejected a CLEAN run — a copied job "
-                    "would fail every green build"
+                    f"the printed job carries {attr!r}, which disarms a step "
+                    f"whatever its script says — the gate would not gate"
                 )
-            else:
-                print("  ✓ the guide's verdict step passes a clean run")
 
-            # An inconclusive pass: the binding asks for no change detection,
-            # so the run records nothing AND can see nothing. It exits 0 —
-            # which is precisely why step 2 has to exist.
-            binding = ws / ".memstead" / "projections" / "docs" / "graph.json"
-            binding.write_text(
-                binding.read_text(encoding="utf-8").replace(
-                    '"change_detection":"git"', '"change_detection":"none"'
-                ),
-                encoding="utf-8",
-            )
-            code, incon = run_gate(memstead, ws)
-            verdict = json.loads(incon)["rollup"]["verdict"]
-            if code != EXIT_CLEAN:
-                failures += fail(f"expected the inconclusive run to exit 0, got {code}")
-            elif verdict != "inconclusive":
-                failures += fail(f"fixture did not go inconclusive, got {verdict!r}")
-            elif run_verdict_step(script, ws, incon) == 0:
-                failures += fail(
-                    "the guide's verdict step PASSED an inconclusive run — the exact "
-                    "case it exists to catch, and the one the exit code cannot express"
-                )
-            else:
-                print("  ✓ the guide's verdict step fails an inconclusive run (exit 0)")
-
-    # (3) An operational failure keeps its own code. Runs in a second
-    #     staged copy so step 2's writes cannot influence it.
-    with tempfile.TemporaryDirectory() as tmp:
-        workspace = stage_fixture(Path(tmp))
-        proc = subprocess.run(
-            [str(memstead), "--json", "projection", "verify", "docs/nope", "--fail-on-findings"],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode == EXIT_FINDINGS:
-            failures += fail(
-                "an operational failure returned the findings code — the distinction "
-                "the gate exists to draw is gone"
-            )
-        elif proc.returncode != EXIT_NOT_FOUND:
-            failures += fail(
-                f"unknown binding exited {proc.returncode}, expected {EXIT_NOT_FOUND}\n{proc.stdout}"
-            )
-        else:
-            print("  ✓ unknown binding → exit 3, never 6")
+        # clean → the job passes. drifted → step 1 fails it. inconclusive →
+        # step 1 exits 0 and step 2 must fail it; that is step 2's whole job.
+        polarities = [("clean", 0), ("drifted", 6), ("inconclusive", 1)]
+        for kind, want in polarities:
+            with tempfile.TemporaryDirectory() as tmp2:
+                ws = stage_fixture(Path(tmp2))
+                if kind == "drifted":
+                    (ws / "src" / "alpha.md").write_text(
+                        "Alpha now says something else entirely.\n", encoding="utf-8"
+                    )
+                    git(ws / "src", "add", "-A")
+                    git(ws / "src", "commit", "-qm", "drift alpha")
+                elif kind == "inconclusive":
+                    binding = ws / ".memstead" / "projections" / "docs" / "graph.json"
+                    binding.write_text(
+                        binding.read_text(encoding="utf-8").replace(
+                            '"change_detection":"git"', '"change_detection":"none"'
+                        ),
+                        encoding="utf-8",
+                    )
+                rc = run_job(scripts, ws, memstead)
+                ok = (rc == 0) if want == 0 else (rc != 0)
+                if not ok:
+                    failures += fail(
+                        f"the printed job returned {rc} on a {kind} run — expected "
+                        f"{'success' if want == 0 else 'failure'}. A stranger copying "
+                        f"this workflow would get the wrong answer."
+                    )
+                else:
+                    verb = "passes" if want == 0 else "fails"
+                    print(f"  ✓ the printed job {verb} a {kind} run (end to end)")
 
     return 1 if failures else 0
 
