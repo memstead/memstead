@@ -79,8 +79,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Err(e) => serde_json::json!({ "unavailable": e.to_string() }),
         })
     };
+    // Load scope: everything this command renders lives in the target
+    // mem's slice of the store — the entity, its sections, and its
+    // OUTGOING edges (carried by its own source record) — plus mount
+    // metadata. So a lazy workspace pays only the target mem's load,
+    // the cold-path cut the plan names. The one exception is
+    // `--include-relations`, whose INCOMING edges can originate in any
+    // mem: that form takes the full load, never a partial answer.
+    let engine_handle = if args.include_relations {
+        ctx.cli_engine()?
+    } else {
+        ctx.cli_engine_scoped(id.mem())?
+    };
     let (entity, output, outgoing_snapshot, incoming_snapshot, origin, provenance) =
-        match ctx.cli_engine()? {
+        match engine_handle {
             #[cfg(feature = "mem-repo")]
             CliEngine::MemRepo(engine) => {
                 let entity = engine

@@ -3341,3 +3341,85 @@ fn read_hash_of(harness: &mut WireHarness, id: &str) -> Value {
     let r = harness.call_tool("memstead_entity", json!({ "id": id }));
     r["structuredContent"]["_hash"].clone()
 }
+
+/// Lazy-mount regression (flywheel W7/01 final grade): `memstead_entity`
+/// with `include_relations: true` renders INCOMING edges, which can
+/// originate in any mem — so that form must take the full lazy-mount
+/// load. The refuted first cut scoped the reload to the target's mem and
+/// silently dropped incoming edges from unloaded lazy mems (14 of 25 on
+/// the dogfood bench). This pins the fix: an incoming cross-mem edge
+/// from a LAZY, not-yet-loaded mem appears in the answer.
+#[test]
+fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
+    use memstead_base::WorkspaceStoreAdapter;
+
+    let tmp = TempDir::new().unwrap();
+    // Cross-mem edges are default-deny; grant linker → target so the
+    // fixture edge can land.
+    let toml = format!("{WORKSPACE_TOML_BODY}\n[cross_mem_links]\nlinker = [\"target\"]\n");
+    seed_full_workspace_with_toml(
+        tmp.path(),
+        &[("linker", "default@1.0.0"), ("target", "default@1.0.0")],
+        &toml,
+    );
+
+    // Author the cross-mem edge while both mems are eager.
+    let (from, to) = {
+        let mut harness = WireHarness::start(tmp.path());
+        let create = |h: &mut WireHarness, mem: &str, title: &str| -> String {
+            let r = h.call_tool(
+                "memstead_create",
+                json!({
+                    "mem": mem,
+                    "title": title,
+                    "entity_type": "spec",
+                    "sections": { "identity": "seed", "purpose": "seed" },
+                }),
+            );
+            r["structuredContent"]["id"]
+                .as_str()
+                .expect("create returns id")
+                .to_string()
+        };
+        let from = create(&mut harness, "linker", "Source");
+        let to = create(&mut harness, "target", "Destination");
+        let rel = harness.call_tool(
+            "memstead_relate",
+            json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
+        );
+        assert!(
+            rel["structuredContent"]["results"][0]["to"].is_string(),
+            "cross-mem relate must land for this pin to mean anything: {rel}"
+        );
+        (from, to)
+    };
+
+    // Flip the LINKER mem to lazy — the incoming edge's origin is now a
+    // deferred mount on the next boot.
+    let mut workspace = memstead_base::FileWorkspaceStore::new()
+        .load(tmp.path())
+        .unwrap();
+    for mount in &mut workspace.mounts {
+        if mount.mem == "linker" {
+            mount.lifecycle = memstead_base::MountLifecycle::Lazy;
+        }
+    }
+    memstead_base::FileWorkspaceStore::new()
+        .save_state(tmp.path(), &workspace)
+        .unwrap();
+
+    // Fresh boot: linker is deferred; the include_relations read of the
+    // TARGET must still surface the incoming edge from linker.
+    let mut harness = WireHarness::start(tmp.path());
+    let r = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": to, "include_relations": true }),
+    );
+    let rendered = r["content"][0]["text"].as_str().unwrap_or_default();
+    let structured = serde_json::to_string(&r["structuredContent"]).unwrap_or_default();
+    assert!(
+        rendered.contains(&from) || structured.contains(&from),
+        "the incoming cross-mem edge from the lazy mem must appear — a partial-store \
+         answer is the refuted defect. rendered:\n{rendered}\nstructured:\n{structured}"
+    );
+}

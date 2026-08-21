@@ -94,15 +94,21 @@ per-entity creation scale to hours (plenum finding 1).
 Data, not decisions — each paragraph states what the curve says, the
 backlog items decide.
 
-**Real lazy mounts (plenum 7).** The curve says load is the only cold-path
-cost and it grows super-linearly with loaded entities. Every mounted mem
-adds its full entity count to every cold command, needed or not — a
-workspace of dozens of small mems pays the whole inventory each time. A
-lazy mount that defers a mem's load until first read would cut cold-path
-cost proportionally to the unread share; at the measured 0.6–0.75
-ms/entity above 5k, splitting a 7.5k workspace into five mems of 1.5k and
-touching one would turn a ~5.6 s command into roughly a ~0.8 s one. This
-is the largest lever the curve can see.
+**Real lazy mounts (plenum 7) — landed 2026-08-21, measured.** The curve
+says load is the only cold-path cost and it grows super-linearly with
+loaded entities. Every mounted mem used to add its full entity count to
+every cold command, needed or not. `"lifecycle": "lazy"` now defers a
+mem's entity load to first read, cutting cold-path cost proportionally to
+the unread share. Measured on the dogfood workspace (9 mounts, 687
+entities, release build, median of 10 cold runs): a single-mem read
+(`memstead entity`, target mem eager, the other 8 mounts lazy) dropped
+from 237 ms to 106 ms — the remaining cost is the process spawn plus the
+one mem actually read — while a deliberately workspace-scoped command
+(`search --mem` under the CLI's full-load default) stayed at ~300 ms,
+unchanged by design. The original projection stands for larger
+workspaces: at 0.6–0.75 ms/entity above 5k, splitting a 7.5k workspace
+into five mems and touching one turns a ~5.6 s command into roughly a
+~0.8 s one.
 
 **Incremental maintenance of derived structures (plenum 9).** The cold
 path cannot see this cost: search-after-mutation equals boot within noise

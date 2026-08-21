@@ -20,6 +20,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Lazy mounts are real: `"lifecycle": "lazy"` defers a mem's entity
+  load to first read.** The slot existed since V1, persisted but inert;
+  a mount that declares it now resolves only its metadata half at boot
+  (config, provenance, schema pin — a broken pin quarantines exactly as
+  an eager mount's would) and loads its entities when the first
+  operation touches the mem, through the same per-operation funnel every
+  MCP call already passes. A scoped operation loads exactly its mem; a
+  workspace-scoped or cross-mem one loads every deferred mem first —
+  search's graph-walking forms (`related_to`, `expand_via`), overview
+  (whose community partition is workspace-global even under a mem
+  filter), health without a filter, and `memstead_entity`'s
+  `include_relations` / `include_context` forms (incoming edges and
+  community context can originate anywhere) all take the full load, so
+  no answer is computed over a partial store — and a
+  lazy mem is never silently absent: the roster carries it with its pin,
+  and load state is observable. The lazy load runs the same validation
+  gauntlet an eager boot runs, and a failed deferred load quarantines at
+  first read with the same typed reporting. Opt-in per mount; a
+  workspace with no lazy mounts boots and serves byte-identically to
+  before. On the CLI, `memstead entity` pays only the target mem's load
+  (its `--include-relations` form, whose incoming edges can originate
+  anywhere, still loads fully); other commands load fully for now.
 - **`memstead publish --redact-anchors` — trust metadata without the
   source's identity.** Every artifact reference in the packaged anchors
   sidecar — the `artifact` field and each `derived_from` entry — becomes the

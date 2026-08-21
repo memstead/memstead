@@ -1935,6 +1935,16 @@ impl McpServer {
 
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        // Cross-mem forms take the FULL lazy-mount load before answering:
+        // `include_relations` renders INCOMING edges, which can originate
+        // in any mem, and `include_context` computes the workspace-global
+        // community clustering — either one over a partial store is a
+        // silently incomplete answer, the failure class the lazy-mount
+        // observability contract forbids. The plain read stays scoped to
+        // the target mem (the reload below), preserving the lazy win.
+        if p.include_relations.unwrap_or(false) || p.include_context.unwrap_or(false) {
+            engine.ensure_mems_loaded(None);
+        }
         let drift_warnings = engine.reload_if_stale(Some(id.mem()));
         // Drain the stashed structured notices: attached to the
         // response's `structured_content` below (and the markdown
@@ -2185,6 +2195,14 @@ impl McpServer {
 
         let unified = self.unified_engine();
         let mut engine = crate::lock_engine!(unified);
+        // Graph-walking forms cross mem boundaries — `related_to` is a
+        // BFS over the whole graph and `expand_via` follows edges
+        // wherever they lead — so they take the full lazy-mount load
+        // rather than walking a partial store. A plain mem-filtered
+        // text search stays scoped: its answer lives in one mem.
+        if scope.related_to.is_some() || scope.expand_via.is_some() {
+            engine.ensure_mems_loaded(None);
+        }
         let drift_warnings = engine.reload_if_stale(mem_filter.as_deref());
         let mem_changed_notices = engine.take_mem_changed_notices();
         let result = match engine.search(&scope) {
@@ -2266,6 +2284,12 @@ impl McpServer {
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = crate::lock_engine!(unified);
+        // Overview's community detection is workspace-global BY CONTRACT
+        // (a `mem` filter only scopes which clusters are reported, never
+        // the partition), so even a mem-scoped overview takes the full
+        // lazy-mount load — cluster ids computed over a partial store
+        // would be a different partition presented as the global one.
+        engine.ensure_mems_loaded(None);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
         let _ = engine.take_mem_changed_notices(); // leak-proof drain; see memstead_entity
 
