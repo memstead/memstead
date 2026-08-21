@@ -19,9 +19,24 @@ one of three outcomes:
 
 | Exit | Meaning | What CI should do |
 |------|---------|-------------------|
-| `0` | The run completed and found nothing | Pass |
+| `0` | The run completed and recorded no findings | **Read the verdict — see below** |
 | `6` | The run completed and **recorded findings** | Fail — the mem and its source disagree |
 | anything else | The measurement itself failed | Fail — but this is a broken job, not a drifted mem |
+
+**Exit 0 is necessary, not sufficient.** It says the run recorded no
+findings; it does not say the run could see anything. A pass whose verdict
+is `inconclusive` — a facet with no readable change signal, an empty
+enumerated scope, a graph-source binding — also records no findings and
+also exits 0. The exit code has no representation for that third answer,
+so a job that branches on the code alone goes green on exactly the runs
+this guide tells you not to gate on. Read `rollup.verdict`; the job below
+does.
+
+One more case the table cannot show: a run that records findings **and**
+then fails to write its bookkeeping (an unwritable `#verified` baseline,
+say) exits `1`, not `6` — the measurement's answer is on stdout, but the
+run could not finish recording it, and that is an operational failure.
+Rare, and the report is still there to read.
 
 Code `6` is deliberately outside the ordinary error range. Codes 1–5 all
 mean *the run could not complete*; 6 means *it completed and you should
@@ -67,8 +82,27 @@ jobs:
           echo "$HOME/.memstead/bin" >> "$GITHUB_PATH"
 
       - name: Verify the mem against its source
-        run: memstead projection verify docs/graph --fail-on-findings
+        run: |
+          set -o pipefail
+          memstead projection verify docs/graph --fail-on-findings --json \
+            | tee report.json
+        # Exit 6 fails the step here. Exit 0 continues to the check below.
+
+      - name: Require a conclusive verdict
+        run: |
+          verdict=$(jq -s -r '.[0].rollup.verdict' report.json)
+          echo "verdict: $verdict"
+          if [ "$verdict" != "clean" ]; then
+            echo "::error::verify could not support a clean verdict"
+            jq -s -r '.[0].rollup.blind_spots[]' report.json
+            exit 1
+          fi
 ```
+
+The second step is what makes the gate trustworthy: it fails on
+`inconclusive` as well as on drift, so a run that could not see its source
+does not pass for lack of anything to report. Drop it only if you have
+read the caps below and accept a green build on an unmeasurable binding.
 
 Replace `docs/graph` with your binding id (`memstead projection brief`
 lists them). `fetch-depth: 0` matters: a git-change-detection binding
@@ -206,6 +240,14 @@ names the facet.
 reported against anchors only, so an *uncovered* artifact cannot be
 detected: there is no denominator to be uncovered against. Freshness is
 similarly limited to what the medium exposes.
+
+**The exit code cannot express `inconclusive`.** The contract has three
+codes and the verdict has three values, but they are not the same three: a
+run that completed and recorded nothing exits `0` whether it saw everything
+or nothing. That is why the job above reads the verdict rather than trusting
+the code. A CI-visible signal for "could not measure" would need a change to
+the exit-code contract itself, which is not a change this guide can make on
+its own.
 
 **Graph-medium verify is currently inert.** A binding whose source is
 another mem enumerates nothing and leaves its anchors permanently

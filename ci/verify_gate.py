@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -48,12 +49,14 @@ GUIDE = REPO / "docs-site" / "src" / "content" / "docs" / "guides" / "verify-in-
 
 BINDING = "docs/graph"
 GATE_ARGS = ["projection", "verify", BINDING, "--fail-on-findings"]
-# The exact line the guide's copyable workflow must contain — the YAML
-# `run:` step, not a bare command substring. A bare substring is not an
-# anti-drift check: the same words appear in the guide's `--json` example
-# further down, so deleting the entire workflow block still left the
-# assertion passing. Anchor on the step, so removing the job fails.
-DOCUMENTED_STEP = "run: memstead projection verify docs/graph --fail-on-findings"
+# The command the copyable workflow must run, asserted INSIDE the ```yaml
+# block rather than anywhere in the page. A bare page-wide substring is not
+# an anti-drift check — the same words appear in the guide's `--json`
+# example further down, so deleting the whole workflow once left the
+# assertion passing. Scoping to the block survives the job being reshaped
+# (single-line `run:` vs. a `run: |` script) while still failing if the job
+# is removed or the command changed.
+DOCUMENTED_STEP = "memstead projection verify docs/graph --fail-on-findings"
 # The rest of the printed job. Pinning only the `run:` line left three of the
 # workflow's four steps free to rot: a grade broke the checkout action, the
 # install URL and `fetch-depth` and this harness stayed green. Each entry is a
@@ -91,6 +94,15 @@ DOCUMENTED_CONTRACT = [
     # The claim four grading rounds kept finding falsified elsewhere.
     "It is not a read-only command",
 ]
+
+# Every exit code the binary can actually return. The guide's prose must
+# not mention one outside this set: a grade rewrote every prose mention of
+# "exit 6" to "exit 7", left the pinned table cell intact, and this harness
+# stayed green — the guide then told a stranger to branch on a code the
+# binary never returns. Pinning six strings gates six strings; the prose
+# BETWEEN them still drifts. So this checks the class of claim rather than
+# adding a seventh pin.
+REAL_EXIT_CODES = {"0", "1", "2", "3", "4", "5", "6"}
 
 EXIT_CLEAN = 0
 EXIT_FINDINGS = 6
@@ -146,16 +158,20 @@ def run(memstead: Path) -> int:
         )
 
     guide_text = GUIDE.read_text(encoding="utf-8")
-    if DOCUMENTED_STEP not in guide_text:
+    yaml_blocks = re.findall(r"```yaml\n(.*?)```", guide_text, re.DOTALL)
+    if not yaml_blocks:
+        failures += fail("the guide no longer contains a copyable YAML workflow block")
+    elif not any(DOCUMENTED_STEP in block for block in yaml_blocks):
         failures += fail(
-            f"the guide's copyable workflow no longer contains the step this "
-            f"harness exercises ({DOCUMENTED_STEP!r}) — the example and the "
-            f"exercise have drifted, or the job was removed outright"
+            f"no YAML block in the guide runs the command this harness exercises "
+            f"({DOCUMENTED_STEP!r}) — the example and the exercise have drifted, "
+            f"or the job was removed outright"
         )
     else:
-        print("  ✓ the guide's workflow step is the command this harness runs")
+        print("  ✓ the guide's workflow runs the command this harness runs")
 
-    missing = [line for line in DOCUMENTED_JOB_LINES if line not in guide_text]
+    job = "\n".join(yaml_blocks) if yaml_blocks else ""
+    missing = [line for line in DOCUMENTED_JOB_LINES if line not in job]
     if missing:
         failures += fail(
             f"the guide's copyable workflow lost {len(missing)} load-bearing "
@@ -174,6 +190,25 @@ def run(memstead: Path) -> int:
         )
     else:
         print("  ✓ the documented contract still says what the binary does")
+
+    # `exit 7`, `exits 9`, `exit code 42` — any number the binary cannot
+    # produce. Deliberately narrow: only the phrasings that instruct a
+    # reader to branch on a code, so prose about (say) 40 minutes is not
+    # swept up.
+    bogus = sorted(
+        {
+            m.group(1)
+            for m in re.finditer(r"exits?(?:\s+code)?\s+`?(\d+)`?", guide_text)
+            if m.group(1) not in REAL_EXIT_CODES
+        }
+    )
+    if bogus:
+        failures += fail(
+            f"the guide tells a reader to branch on exit code(s) the binary never "
+            f"returns: {bogus} — the real set is {sorted(REAL_EXIT_CODES)}"
+        )
+    else:
+        print("  ✓ every exit code the guide names is one the binary returns")
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = stage_fixture(Path(tmp))

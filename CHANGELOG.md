@@ -203,6 +203,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   anything.
 
 ### Fixed
+- **The verify-in-CI guide's own job passed runs the same guide said were
+  not gateable.** Exit `0` means "recorded no findings", which an
+  `inconclusive` pass also does — a facet with no readable change signal, an
+  empty scope, a graph-source binding. The printed workflow branched on the
+  exit code alone, so it went green on exactly those. It now reads
+  `rollup.verdict` in a second step and fails on anything but `clean`, and
+  the outcomes table says plainly that exit 0 is necessary, not sufficient.
+  The underlying gap — the exit-code contract has no third value — is
+  recorded in the backlog as an operator call on the external contract.
 - **A corrupt anchors sidecar produced a red CI build blaming the mem.** The
   anchor readers degrade a malformed sidecar to "no anchors" — right for a
   reader, wrong for anything concluding from the absence of anchors. A
