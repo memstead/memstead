@@ -418,9 +418,11 @@ impl FidelityReport {
                 ));
             } else if change_blind.contains(cap.facet.as_str()) {
                 blind_spots.push(format!(
-                    "facet `{}` ({}) resolved to change-detection `{}` — the medium could \
-                     signal change, but this binding asked it not to, so drift on it \
-                     cannot be observed",
+                    "facet `{}` ({}) declares change-detection `{}` but this pass could \
+                     not read that signal — either the binding asked for none, or the \
+                     checkout cannot deliver it (a `git` source with no `.git`: an \
+                     archive, a container COPY, a vendored drop). Drift on it cannot \
+                     be observed",
                     cap.facet, cap.medium_type, cap.signal
                 ));
             }
@@ -1032,7 +1034,24 @@ pub fn compute_fidelity_report(
             .unwrap_or_default();
         let strategy = resolve_change_strategy(p, workspace_root);
         let signal = signal_wire(strategy).to_string();
-        let change_detectable = caps.change_signal && strategy != ChangeStrategy::None;
+        // Detectable means THIS PASS could read the signal, not that the
+        // binding declared one. A `git` strategy over a tree with no `.git`
+        // — a `git archive`, a Docker `COPY`, a vendored drop — declares a
+        // signal the checkout cannot deliver: the head resolves empty and no
+        // baseline is written. Reporting `change_detectable: true` there let
+        // the rollup call such a pass "substantive on every axis" and render
+        // CLEAN, which is the worst failure a gate can have. The declaration
+        // is not second-guessed (that is the resolver's job); what the run
+        // could observe is reported honestly.
+        let signal_readable = match strategy {
+            ChangeStrategy::Git => {
+                super::resolve::find_git_root(&super::resolve::source_base_path(p, workspace_root))
+                    .is_some()
+            }
+            _ => true,
+        };
+        let change_detectable =
+            caps.change_signal && strategy != ChangeStrategy::None && signal_readable;
         any_change_detectable |= change_detectable;
 
         capabilities.push(FacetCapability::from_caps(
@@ -2206,8 +2225,8 @@ mod rollup_tests {
         assert!(
             roll.blind_spots
                 .iter()
-                .any(|s| s.contains("asked it not to")),
-            "the blind spot names the binding's own choice: {:?}",
+                .any(|s| s.contains("could not read that signal")),
+            "the blind spot names the unreadable signal: {:?}",
             roll.blind_spots
         );
     }

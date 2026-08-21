@@ -325,7 +325,27 @@ impl Engine {
     /// with its quarantine path.
     pub fn anchors_sidecar_error(&self, mem: &str) -> Option<String> {
         let mount = self.mounts.iter().find(|m| m.mount.mem == mem)?;
-        let bytes = mount.backend.read_anchors_sidecar().ok().flatten()?;
+        // Three distinct ways to be unreadable, and only one of them is a
+        // parse error. `.ok().flatten()` would collapse the first into
+        // "absent", which is the very confusion this exists to prevent.
+        let bytes = match mount.backend.read_anchors_sidecar() {
+            // A backend error — permission denied, an IO fault. The file may
+            // be perfectly well-formed; we simply could not look at it.
+            Err(e) => return Some(format!("could not read the sidecar: {e}")),
+            // Genuinely absent: a mem with no anchors yet. Not an error.
+            Ok(None) => return None,
+            Ok(Some(b)) => b,
+        };
+        // An empty or whitespace-only file parses as "no anchors" by a
+        // deliberate tolerance in `from_bytes`. That tolerance is right for a
+        // reader and wrong here: a sidecar truncated to zero by an
+        // interrupted write is not a mem that never had anchors.
+        if bytes.iter().all(|b| b.is_ascii_whitespace()) {
+            return Some(
+                "the sidecar file is empty — an interrupted write leaves this state, and it is                  not the same as having no anchors; remove the file if the mem genuinely has none"
+                    .to_string(),
+            );
+        }
         match crate::anchor::AnchorSidecar::from_bytes(&bytes) {
             Ok(_) => None,
             Err(e) => Some(e.to_string()),

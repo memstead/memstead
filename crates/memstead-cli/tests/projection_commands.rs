@@ -1865,6 +1865,16 @@ fn migrate_v1_three_file_store_preserves_watermark_and_is_byte_idempotent() {
         r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"loop","batch_size":20}}}"#,
     );
 
+    // The fixture declares git change-detection, so give it a real git root:
+    // since 2026-08-21 a declared `git` is probed rather than trusted, and a
+    // tree with no `.git` resolves to `none` (a declaration cannot conjure a
+    // signal the checkout does not have). Without this the source renders
+    // `signal none` and the assertion below reads as a migration failure when
+    // the watermark is in fact preserved.
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-q", "."]);
+
     // A live watermark keyed `<binding>/<source>#synced` in the destination
     // mem's config — the load-bearing key migration must keep resolving.
     let watermark = "0123456789abcdef0123456789abcdef01234567";
@@ -3221,6 +3231,9 @@ fn an_unreadable_anchors_sidecar_refuses_and_never_returns_the_findings_code() {
     let tmp = verify_workspace();
     let root = tmp.path();
     std::fs::write(root.join("engine-mem/.memstead/anchors.json"), "{ broken").unwrap();
+    // Three ways to be unreadable, and the first fix caught only this one.
+    // A grade found the other two still producing a confident "every
+    // artifact uncovered" and exit 6, so they are pinned here beside it.
 
     let assertion = memstead()
         .current_dir(root)
@@ -3245,6 +3258,92 @@ fn an_unreadable_anchors_sidecar_refuses_and_never_returns_the_findings_code() {
         .args(["--json", "projection", "verify", "engine/graph"])
         .assert()
         .code(5);
+
+    // An EMPTY sidecar. `AnchorSidecar::from_bytes` tolerates whitespace-only
+    // bytes as "no anchors" — right for a reader, wrong here: an interrupted
+    // write leaves exactly this state, and it is not a mem that never had
+    // anchors.
+    std::fs::write(root.join("engine-mem/.memstead/anchors.json"), "   \n").unwrap();
+    memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-findings",
+        ])
+        .assert()
+        .code(5);
+}
+
+/// A source directory that exists but cannot be entered refuses, rather than
+/// enumerating nothing and calling the result drift.
+///
+/// The guard used to test existence alone, so an unreadable tree walked past
+/// it: the pass enumerated zero artifacts, every anchor came back
+/// unresolvable, and the verdict blamed a mem that had not moved — with the
+/// report's own denominator saying `non-enumerable` two screens down.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_source_directory_refuses_rather_than_reporting_drift() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    let src = root.join("src");
+    let restore = std::fs::metadata(&src).unwrap().permissions();
+    std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let assertion = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-findings",
+        ])
+        .assert()
+        .code(5);
+    let out = String::from_utf8(assertion.get_output().stdout.clone()).unwrap();
+    let env: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(env["code"], "SOURCE_UNREACHABLE", "{env}");
+
+    std::fs::set_permissions(&src, restore).unwrap();
+}
+
+/// A binding declaring `change_detection: "git"` over a tree with no `.git`
+/// cannot support a green verdict.
+///
+/// This is the CI shape the guide's `fetch-depth: 0` advice circles: a
+/// `git archive`, a Docker `COPY`, a vendored drop. The declaration used to
+/// be honoured without probing, so the capability row asserted a signal that
+/// could not be read and the rollup called the pass "substantive on every
+/// axis" while `source_head` was empty and no baseline was written.
+#[test]
+fn a_declared_git_binding_without_a_git_root_cannot_verdict_clean() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    std::fs::remove_dir_all(root.join("src/.git")).unwrap();
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["rollup"]["verdict"], "inconclusive",
+        "a git binding with no git root is not a clean bill of health: {env}"
+    );
+    assert!(
+        !env["rollup"]["blind_spots"].as_array().unwrap().is_empty(),
+        "the blindness is named: {env}"
+    );
 }
 
 /// The gate is opt-in: a bare `projection verify` over a drifted fixture

@@ -204,6 +204,13 @@ pub fn resolve_change_strategy(source: &Source, workspace_root: &Path) -> Change
     }
     match source.change_detection.as_deref() {
         Some("none") => ChangeStrategy::None,
+        // A declared strategy is NOT second-guessed here: this resolver maps
+        // the declaration, and an author who writes `git` means git. Whether
+        // the checkout can actually deliver that signal is a question about
+        // this pass, not about the binding — a `git archive` or Docker `COPY`
+        // has the sources and no `.git`, and the honest place to say so is the
+        // freshness row, which reports what the run observed. See
+        // `FacetFreshness::change_detectable`.
         Some("git") => ChangeStrategy::Git,
         Some("mtime") => ChangeStrategy::Mtime,
         // `auto`, unset, or any unrecognized value: probe the filesystem.

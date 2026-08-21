@@ -1226,7 +1226,13 @@ fn run_verify(
             )
         {
             let base = super::resolve::source_base_path(p, workspace_root);
-            if !base.exists() {
+            // Unreachable is not only "absent". A directory that exists but
+            // cannot be entered (permissions, a broken mount) enumerates
+            // nothing, and the pass then reports every anchor unresolvable —
+            // drift, in the verdict, blamed on a mem that did not move. The
+            // read attempt is the test: existence alone let that through.
+            let reachable = base.exists() && (!base.is_dir() || std::fs::read_dir(&base).is_ok());
+            if !reachable {
                 return Err(FindingsError::SourceUnreachable {
                     source_name: p.name.clone(),
                     path: base.display().to_string(),

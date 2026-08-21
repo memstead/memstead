@@ -129,7 +129,12 @@ of misparsing:
 - **`drifted`** — findings were recorded.
 - **`inconclusive`** — the pass completed but **cannot support a green
   claim**. `blind_spots` names why. Treat this as "not yet gated", not
-  as "passing".
+  as "passing". The triggers are not only the capability row: a facet that
+  is not `enumerable`, one with no `change_signal`, one whose *resolved*
+  `signal` is `none` (a binding declaring `change_detection: "none"`, or a
+  git binding in a checkout with no `.git` — `change_signal` stays `true`
+  in both), an empty enumerated scope, or a pass that adjudicated no
+  anchor. Branch on `verdict`, never on the capability fields directly.
 
 `report.findings_by_class` uses a closed vocabulary: `drifted`, `wrong`,
 `uncovered`, `unresolvable-anchor`, `queued-for-adjudication`.
@@ -211,11 +216,14 @@ gate a graph-source binding on this today. Unlike the caps above, this
 one is a **defect with a fix planned**, not a deliberate boundary — when
 it lands, the row starts measuring and this paragraph goes away.
 
-**The mtime baseline does not survive a fresh checkout.** A binding
-using mtime change-detection compares file modification times against a
-recorded baseline. A CI clone gives every file a fresh mtime, so such a
-binding flags everything on its first run in a new checkout. Use
-git change-detection for anything you intend to gate.
+**The mtime baseline does not survive a fresh checkout.** A binding using
+mtime change-detection compares file modification times against a recorded
+baseline, and a CI clone gives every file a fresh mtime, so the baseline is
+meaningless there. That bounds the *changed-source slice* — what `sync`
+acts on. `verify` adjudicates anchors by content hash, so a bumped-mtime
+checkout still verifies clean rather than flagging everything: the cap is
+real for the loop, milder for the gate. Use git change-detection for
+anything you intend to gate.
 
 ## Related
 

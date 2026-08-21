@@ -1913,7 +1913,8 @@ remove the sidecar and re-run",
             "SOURCE_UNREACHABLE",
             format!(
                 "verify refused for `{binding_id}`: source '{source_name}' resolves to \
-                 `{path}`, which does not exist — restore or remount the source (or \
+                 `{path}`, which cannot be read (absent, or present but not \
+                 enumerable) — restore or remount the source (or \
                  repoint its pointer); the recorded `#verified` baseline was left \
                  untouched"
             ),
@@ -1953,23 +1954,19 @@ remove the sidecar and re-run",
     // entity content is touched). Before the report, so the rendered
     // anchor-resolution figures reflect the recorded hashes. Idempotent: a
     // pass over fully-backfilled anchors observes an empty worklist.
-    let hashes_backfilled = record_anchor_hash_backfill(
+    // Bookkeeping-write failures are reported AFTER the report, never
+    // instead of it. Both of these say "verify completed and findings were
+    // recorded" — a run that completed owes the caller its measurement, and
+    // returning here would hand a CI job a red build with nothing to read.
+    // Same render-then-fail ordering the findings gate uses, extended to the
+    // paths that can fail between the measurement and the render.
+    let backfill_result = record_anchor_hash_backfill(
         engine,
         &resolved.destination_mem,
         &outcome,
         Some("projection verify: prepared-hash backfill onto hash-less anchors"),
-    )
-    .map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_BACKFILL_FAILED",
-            format!(
-                "verify completed and findings were recorded for `{binding_id}`, but \
-                 recording the prepared-hash backfill onto the anchors sidecar failed: {e}"
-            ),
-        )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
-    })?;
+    );
+    let hashes_backfilled = *backfill_result.as_ref().unwrap_or(&0);
 
     // Assemble + render the tier-1 fidelity report (group B) over the findings
     // the pass just recorded. Read-only — no destination-mem mutation.
@@ -1980,23 +1977,13 @@ remove the sidecar and re-run",
     // The run completed — record its `#verified` baseline per observed facet
     // head through the engine's sync-state writer (the backlog-prescribed
     // writer; a failed run returned above and never reaches this).
-    let verified_baseline = record_verified_baseline(
+    let baseline_result = record_verified_baseline(
         engine,
         &resolved.destination_mem,
         &outcome,
         Some("projection verify: completed-run #verified baseline"),
-    )
-    .map_err(|e| {
-        CliError::new(
-            ExitKind::Generic,
-            "PROJECTION_VERIFY_BASELINE_FAILED",
-            format!(
-                "verify completed and findings were recorded for `{binding_id}`, but writing \
-                 the `#verified` baseline failed: {e}"
-            ),
-        )
-        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
-    })?;
+    );
+    let verified_baseline = baseline_result.as_ref().cloned().unwrap_or_default();
 
     // The rollup is derived from the assembled report, so the headline a
     // human reads, the `rollup` block a consumer parses, and the gate exit
@@ -2069,6 +2056,36 @@ remove the sidecar and re-run",
             backfill_note,
             baseline_note
         ));
+    }
+
+    // --- Bookkeeping-write failures, now that the report has been rendered ---
+    // A failed write is an operational failure with its own code, never the
+    // findings exit: the measurement's own answer is already on stdout above,
+    // and this says the run could not finish recording it.
+    if let Err(e) = backfill_result {
+        return Err(CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_BACKFILL_FAILED",
+            format!(
+                "verify completed and findings were recorded for `{binding_id}` (the report is \
+above), but recording the prepared-hash backfill onto the anchors sidecar failed: {e}"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+        .into());
+    }
+    if let Err(e) = baseline_result {
+        return Err(CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_VERIFY_BASELINE_FAILED",
+            format!(
+                "verify completed and findings were recorded for `{binding_id}` (the report is \
+above), but writing the `#verified` baseline failed: {e} — the next run will treat this \
+binding as never verified"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id, "error": e.to_string() }))
+        .into());
     }
 
     // --- CI gate (opt-in) ---

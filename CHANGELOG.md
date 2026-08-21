@@ -21,7 +21,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `ANCHORS_SIDECAR_UNREADABLE` rather than reporting every artifact
   uncovered. The full report is rendered before the findings exit
   fires, so a red build still carries the report that explains it. Opt-in:
-  without the flag verify's exit behaviour is byte-for-byte unchanged.
+  without the flag verify's exit behaviour on a *measurable* binding is
+  byte-for-byte unchanged — clean and drifted both still exit 0. One ungated
+  exit did change, deliberately: an unreadable anchors sidecar now refuses
+  instead of completing (see Fixed).
 - **A rollup verdict on the fidelity report — `clean` / `drifted` /
   `inconclusive`.** The report now opens with the answer instead of with
   denominator provenance, plus the ranked concrete actions. The third value

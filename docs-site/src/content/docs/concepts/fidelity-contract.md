@@ -123,9 +123,12 @@ guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
   named — but the measurement itself is not there yet, so a graph-source binding is
   not gateable today.
 - **The mtime `#synced` baseline does not survive a fresh checkout.** A binding using
-  mtime change-detection compares modification times against a recorded baseline. A CI
-  clone gives every file a new mtime, so such a binding flags everything on its first
-  run in a new checkout. Use git change-detection for anything you intend to gate.
+  mtime change-detection compares modification times against a recorded baseline, and a
+  CI clone gives every file a new mtime, so the baseline is meaningless there. This
+  bounds the *changed-source slice* — what `sync` acts on. `verify` adjudicates anchors
+  by content hash, so a bumped-mtime checkout still verifies clean; the cap is real for
+  the loop, milder for the gate. Use git change-detection for anything you intend to
+  gate.
 
 The first two are **positioning decisions** — deliberate boundaries, not
 roadmap promises. The last two are **known defects with fixes planned**: the
