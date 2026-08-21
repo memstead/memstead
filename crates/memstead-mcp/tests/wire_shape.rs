@@ -3363,17 +3363,19 @@ fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
         &toml,
     );
 
-    // Author the cross-mem edge while both mems are eager.
+    // Author the cross-mem edges while both mems are eager: an explicit
+    // relation (the incoming-edge pin) AND a body wiki-link (the
+    // dangling-links pin — dangling adjudication reads body links).
     let (from, to) = {
         let mut harness = WireHarness::start(tmp.path());
-        let create = |h: &mut WireHarness, mem: &str, title: &str| -> String {
+        let create = |h: &mut WireHarness, mem: &str, title: &str, identity: &str| -> String {
             let r = h.call_tool(
                 "memstead_create",
                 json!({
                     "mem": mem,
                     "title": title,
                     "entity_type": "spec",
-                    "sections": { "identity": "seed", "purpose": "seed" },
+                    "sections": { "identity": identity, "purpose": "seed" },
                 }),
             );
             r["structuredContent"]["id"]
@@ -3381,8 +3383,13 @@ fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
                 .expect("create returns id")
                 .to_string()
         };
-        let from = create(&mut harness, "linker", "Source");
-        let to = create(&mut harness, "target", "Destination");
+        let to = create(&mut harness, "target", "Destination", "seed");
+        let from = create(
+            &mut harness,
+            "linker",
+            "Source",
+            "See [[target--destination]] for detail.",
+        );
         let rel = harness.call_tool(
             "memstead_relate",
             json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
@@ -3394,15 +3401,14 @@ fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
         (from, to)
     };
 
-    // Flip the LINKER mem to lazy — the incoming edge's origin is now a
-    // deferred mount on the next boot.
+    // Flip BOTH mems to lazy: the incoming edge's origin is a deferred
+    // mount on the next boot (the entity pin), and the edge's TARGET is
+    // deferred for a fresh-boot health call (the dangling pin).
     let mut workspace = memstead_base::FileWorkspaceStore::new()
         .load(tmp.path())
         .unwrap();
     for mount in &mut workspace.mounts {
-        if mount.mem == "linker" {
-            mount.lifecycle = memstead_base::MountLifecycle::Lazy;
-        }
+        mount.lifecycle = memstead_base::MountLifecycle::Lazy;
     }
     memstead_base::FileWorkspaceStore::new()
         .save_state(tmp.path(), &workspace)
@@ -3421,5 +3427,24 @@ fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
         rendered.contains(&from) || structured.contains(&from),
         "the incoming cross-mem edge from the lazy mem must appear — a partial-store \
          answer is the refuted defect. rendered:\n{rendered}\nstructured:\n{structured}"
+    );
+
+    // Second refuted surface (same grade cycle, one surface over), on
+    // its own FRESH boot so the earlier call's loads cannot mask it:
+    // mem-scoped health adjudicates dangling links over the whole
+    // graph — the cross-mem edge must NOT be reported dangling just
+    // because its target's mem is lazy and unloaded. Health takes the
+    // full load, mirroring overview.
+    drop(harness);
+    let mut harness = WireHarness::start(tmp.path());
+    let h = harness.call_tool(
+        "memstead_health",
+        json!({ "mem": "linker", "include": ["dangling_links"] }),
+    );
+    let h_text = h["content"][0]["text"].as_str().unwrap_or_default();
+    assert!(
+        !h_text.contains(&to),
+        "a resolvable cross-mem link must not read as dangling because its target's \
+         mem loaded lazily:\n{h_text}"
     );
 }

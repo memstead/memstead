@@ -3422,6 +3422,17 @@ impl McpServer {
         unified: Arc<Mutex<memstead_base::Engine>>,
     ) -> CallToolResult {
         let mut engine = crate::lock_engine!(unified);
+        // Health always takes the FULL lazy-mount load, mirroring
+        // overview: a `mem` filter scopes what is REPORTED, but the
+        // answer's cross-mem components — dangling-link adjudication
+        // (targets live anywhere; an unloaded real target reads as a
+        // stub and would be reported as a broken link) and the
+        // workspace-global community partition — are only truthful over
+        // a complete store. The second final grade demonstrated 28
+        // false dangling links on a mem-scoped health over a lazy
+        // workspace; a partial-store count presented as truth is the
+        // forbidden rendering.
+        engine.ensure_mems_loaded(None);
         let drift_warnings = engine.reload_if_stale(p.mem.as_deref());
         let mem_changed_notices = engine.take_mem_changed_notices();
 
