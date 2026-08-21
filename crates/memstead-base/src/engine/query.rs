@@ -373,10 +373,10 @@ impl Engine {
     ///
     /// Additive over [`Self::entity_anchors`]: the durable data is unchanged;
     /// `state` is the [`crate::anchor::resolve_anchor`] outcome against an
-    /// observation the engine produces here. It is produced **only** for a
-    /// `path`-namespace, single-medium mem (codebase / filesystem) whose
-    /// medium root resolves from the workspace — the engine observes
-    /// working-tree existence at the current HEAD:
+    /// observation the engine produces here. A `path`-namespace anchor
+    /// (codebase / filesystem / git) is observed against the working tree at
+    /// the current HEAD; an `entity`-namespace anchor is observed against the
+    /// live graph by [`Self::observe_entity_anchor`]:
     ///
     /// - artifact absent ⇒ [`AnchorState::Orphaned`](crate::anchor::AnchorState::Orphaned);
     /// - artifact present, non-hash class (`authored` / `informed-by`) ⇒
@@ -389,10 +389,16 @@ impl Engine {
     ///   unstable medium or when a hash is unavailable on either side (a
     ///   hash-less anchor, a `tree` grain, an unreadable artifact).
     ///
-    /// `state` is `None` (unobserved — never a fabricated state) when the mem
-    /// has no single path-medium, no workspace root, or the grain/namespace is
-    /// not a filesystem path. Non-`path` mediums / commit-pinned reads stay
-    /// deferred (E3b's remaining leg).
+    /// For an `entity` grain the same table applies, read off the store
+    /// rather than the filesystem: the entity missing (or present only as a
+    /// stub) is `Orphaned`, and a hash-bearing class compares the canonical
+    /// rendered markdown.
+    ///
+    /// `state` is `None` (unobserved — never a fabricated state) when there is
+    /// no workspace root, when the grain is `url` (whose observation stays
+    /// deferred), or when an `entity` anchor's mem is **not mounted** — an
+    /// unmounted mem is not a mem of deleted entities, and saying so would
+    /// route a deletion proposal to prune.
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
         let source_roots = self.anchor_source_roots(id.mem());
@@ -478,6 +484,24 @@ impl Engine {
         anchor: &crate::anchor::Anchor,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
         let id = EntityId::canonical(&anchor.artifact);
+
+        // The mem the anchor points into must be MOUNTED before a store miss
+        // can mean anything. If it is not, every entity in it is missing from
+        // the store, and reporting `Orphaned` would say "the source deleted
+        // these" about entities sitting untouched on disk. `None` — genuinely
+        // unobserved — is the honest answer.
+        //
+        // This guard lives here, at the one observation site, and not at the
+        // callers. An earlier fix put it in `run_verify` alone; `prune` reaches
+        // anchor resolution by its own path (`mem_anchors_resolved`), so the
+        // sync brief went on proposing the deletion of every destination
+        // entity — a data-loss suggestion routed to the graph's only
+        // maintenance writer, from a mem merely being unmounted. A guard that
+        // protects one caller is not a guard on the behaviour.
+        if !self.mounts.iter().any(|m| m.mount.mem == id.mem()) {
+            return None;
+        }
+
         let entity = self.store.get(&id).filter(|e| !e.stub);
         let Some(entity) = entity else {
             return Some((

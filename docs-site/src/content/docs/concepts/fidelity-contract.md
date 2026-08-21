@@ -95,7 +95,7 @@ the contract would rather admit a blind spot than paper over one.
 
 ## What the contract does not cover yet
 
-Four caps bound what the contract can currently claim — positioning decisions and
+Three caps bound what the contract can currently claim — positioning decisions and
 known gaps, stated plainly rather than left silent or dressed up as imminent
 features. If you are gating a pull request on verify ([the CI
 guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
@@ -137,8 +137,10 @@ real denominator and resolves its entity anchors against the live graph, so
 a stale-pinned anchor over a changed source entity reports `drifted` like
 any other.
 
-None of the four is omitted: the honest shape of a contract is to name its own
-edges, and to say which of them it intends to keep.
+None of the three is omitted: the honest shape of a contract is to name its own
+edges, and to say which of them it intends to keep. The list shrinks when a cap
+is fixed rather than when it is quietly dropped — graph-medium verify left it
+that way.
 
 ## Verify writes
 

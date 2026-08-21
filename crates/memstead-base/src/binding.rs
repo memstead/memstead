@@ -907,13 +907,24 @@ pub fn scaffold_binding(params: ScaffoldParams<'_>) -> ScaffoldedBinding {
         // matches globs against entity ids, so `**/*` scaffolded a facet that
         // looked scoped and selected nothing. The graph namespace gets its own
         // whole-mem selector; every path medium keeps `**/*` byte-for-byte.
-        scope: vec![PatternEntry {
-            path: match medium_type {
-                MediumType::Graph => "*".to_string(),
-                _ => "**/*".to_string(),
-            },
-            mode: crate::pipeline::PatternMode::Allow,
-        }],
+        //
+        // `web` gets no scope rule at all. Its namespace is `url`, nothing
+        // enumerates it, and no selector vocabulary exists for it — so any
+        // pattern scaffolded here would be decorative in exactly the way the
+        // graph glob was, and the brief would print it at an agent as
+        // selection. An absent scope is the honest scaffold: it renders as
+        // unmonitored rather than as a scope that reaches nothing.
+        scope: match medium_type {
+            MediumType::Graph => vec![PatternEntry {
+                path: "*".to_string(),
+                mode: crate::pipeline::PatternMode::Allow,
+            }],
+            MediumType::Web => Vec::new(),
+            _ => vec![PatternEntry {
+                path: "**/*".to_string(),
+                mode: crate::pipeline::PatternMode::Allow,
+            }],
+        },
         engagement: None,
         preparation: None,
     };
@@ -1068,6 +1079,50 @@ mod scaffold_tests {
 
 #[cfg(test)]
 mod tests {
+
+    /// Scaffolded scope is medium-shaped, and every rule it writes is one
+    /// something interprets. The path mediums keep `**/*` byte-for-byte;
+    /// `graph` gets the entity vocabulary; `web` gets NO rule, because its
+    /// namespace has no selector vocabulary and a pattern there would be
+    /// decorative in exactly the way the graph glob was — printed at an agent
+    /// as selection while reaching nothing.
+    #[test]
+    fn scaffolded_scope_is_medium_shaped_and_never_decorative() {
+        let scope_of = |medium: MediumType| {
+            scaffold_binding(ScaffoldParams {
+                destination_mem: "m",
+                source_name: "s",
+                pointer: "p",
+                medium_type: medium,
+                intent: None,
+                additional_deny_paths: Vec::new(),
+            })
+            .binding
+            .sources[0]
+                .scope
+                .iter()
+                .map(|r| r.path.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // Unchanged, and asserted so a graph-shaped fix can never drift them.
+        assert_eq!(scope_of(MediumType::Codebase), vec!["**/*".to_string()]);
+        assert_eq!(scope_of(MediumType::Filesystem), vec!["**/*".to_string()]);
+        assert_eq!(scope_of(MediumType::Git), vec!["**/*".to_string()]);
+
+        // Entity namespace: a legal selector, and one the run time honours.
+        assert_eq!(scope_of(MediumType::Graph), vec!["*".to_string()]);
+        assert!(
+            crate::ingest::cursor::parse_entity_selector("*").is_some(),
+            "the graph scaffold writes a selector the parser accepts"
+        );
+
+        // No vocabulary exists, so no rule is written.
+        assert!(
+            scope_of(MediumType::Web).is_empty(),
+            "a web facet carries no scope rather than one nothing interprets"
+        );
+    }
     use super::*;
     use crate::pipeline::PatternMode;
 

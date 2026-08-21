@@ -3566,7 +3566,7 @@ fn graph_binding_workspace() -> TempDir {
     write_store(
         root,
         "projections/dest/mirror.json",
-        r#"{"version":2,"intent":"mirror srcmem into dest","sources":[{"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+        r#"{"version":2,"intent":"mirror srcmem into dest","sources":[{"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"*","mode":"allow"}]}],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","prune":{"guarantee":"conflict-flag"},"operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
 
     // `concept` with definition/explanation is a real `default@1.0.0` type with
@@ -3802,6 +3802,28 @@ fn an_unmounted_graph_source_refuses_instead_of_reporting_deletions() {
         !body.contains("orphaned"),
         "nothing is scored orphaned — an unmounted mem must never be \
          indistinguishable from a deleted one: {env}"
+    );
+
+    // The polarity that matters more, and that verify's refusal does not
+    // cover: PRUNE reaches anchor resolution by its own path, so the sync
+    // brief must not propose deleting entities whose source is merely
+    // unmounted. An earlier fix guarded only `run_verify`, and this test
+    // asserted only the block above — it passed while the brief went on
+    // recommending the deletion of every destination entity.
+    let brief = String::from_utf8(
+        memstead()
+            .current_dir(root)
+            .args(["projection", "brief", "dest/mirror", "--sync"])
+            .assert()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
+    assert!(
+        !brief.contains("artifact(s) gone"),
+        "nothing is reported as gone from the source when the mem is merely \
+         unmounted — a data-loss suggestion to the sole maintenance writer: {brief}"
     );
 }
 
