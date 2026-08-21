@@ -75,7 +75,7 @@ use crate::binding::{
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
 use super::advance::is_single_component;
-use super::cursor::{compute_source_cursor, enumerate_facet_files};
+use super::cursor::{compute_source_cursor, enumerate_binding_s_d, enumerate_source_artifacts};
 use super::refinement::{
     ROTATION_ANCHOR_ADJUDICATION, bump_verify_runs, next_batch, next_rotation_batch,
 };
@@ -1209,6 +1209,45 @@ fn run_verify(
                 }
             }
         }
+
+        // The matrix claiming enumerability is not evidence that a walk
+        // happened. When a medium is declared enumerable but its walk yields
+        // nothing, `--full` used to sail through the gate above and return
+        // clean over a zero-artifact measurement — coverage 0/0, every anchor
+        // unobserved, verdict green. That is the exact shape a full
+        // measurement exists to make impossible, so refuse it.
+        //
+        // This guard survives the enumerator being fixed: it is the standing
+        // check that a future medium cannot be added to the matrix as
+        // enumerable without an enumeration arm and still report green.
+        let walked = enumerate_binding_s_d(engine, resolved, workspace_root, true);
+        if walked.is_empty() {
+            let facets: Vec<String> = resolved
+                .sources
+                .iter()
+                .filter_map(|s| match s {
+                    ResolvedSource::Primary(p) => Some(p.name.clone()),
+                    _ => None,
+                })
+                .collect();
+            return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
+                facet: facets.join(", "),
+                medium_type: resolved
+                    .sources
+                    .iter()
+                    .filter_map(|s| match s {
+                        ResolvedSource::Primary(p) => Some(medium_type_wire(p.medium_type)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                reason: "every source medium claims to be enumerable, but the enumeration \
+                         yielded no artifacts — a full measurement over an empty walk would \
+                         report complete coverage of nothing. Check the sources' scope \
+                         patterns actually select something"
+                    .to_string(),
+            }));
+        }
     }
 
     // Refuse a vanished or unmounted path-based source before observing
@@ -1409,7 +1448,8 @@ fn run_verify(
             if let ResolvedSource::Primary(p) = source
                 && medium_capabilities(p.medium_type).enumerable
             {
-                all.extend(enumerate_facet_files(
+                all.extend(enumerate_source_artifacts(
+                    engine,
                     p,
                     &resolved.deny_paths,
                     workspace_root,
@@ -1420,7 +1460,7 @@ fn run_verify(
         all.dedup();
         all
     } else {
-        next_batch(resolved, workspace_root, &cache_root, sample_batch)
+        next_batch(engine, resolved, workspace_root, &cache_root, sample_batch)
             .map(|b| b.files)
             .unwrap_or_default()
     };
@@ -1462,7 +1502,8 @@ fn run_verify(
         if let ResolvedSource::Primary(p) = source
             && medium_capabilities(p.medium_type).enumerable
         {
-            s_d.extend(enumerate_facet_files(
+            s_d.extend(enumerate_source_artifacts(
+                engine,
                 p,
                 &resolved.deny_paths,
                 workspace_root,

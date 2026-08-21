@@ -613,6 +613,21 @@ pub enum CapabilityError {
         /// The medium type that cannot support the operation.
         medium_type: String,
     },
+    /// A `graph` source's scope carries a pattern the entity-namespace
+    /// vocabulary does not define. Refused at declaration rather than
+    /// silently selecting nothing: a scope that looks like selection but
+    /// reaches nothing is the defect this rule exists to prevent.
+    #[error(
+        "scope pattern '{pattern}' on source '{source_name}' is not a legal entity selector: a \
+         graph medium selects entities, not paths — write '*' for the whole mem, \
+         'type:<entity_type>', or 'id:<glob>'"
+    )]
+    GraphScopeNotEntitySelector {
+        /// The source declaring it.
+        source_name: String,
+        /// The offending pattern, verbatim.
+        pattern: String,
+    },
     /// Glob `deny_paths` are declared over a medium whose namespace is not
     /// path-shaped (`graph`, `web`) — a glob cannot select in that namespace.
     #[error(
@@ -765,6 +780,21 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
             }
         }
 
+        // A graph facet's scope is an entity selector, not a path glob. The
+        // engine used to accept any string here and interpret none of them,
+        // so `**/*` scaffolded by `projection init` looked like scope and
+        // selected nothing. Refuse the undefined form at declaration.
+        if source.medium_type == MediumType::Graph {
+            for rule in &source.scope {
+                if crate::ingest::cursor::parse_entity_selector(&rule.path).is_none() {
+                    refusals.push(CapabilityError::GraphScopeNotEntitySelector {
+                        source_name: source.name.clone(),
+                        pattern: rule.path.clone(),
+                    });
+                }
+            }
+        }
+
         // Glob deny_paths over a non-path-shaped namespace is illegal.
         if has_deny && !caps.glob_deny_legal {
             refusals.push(CapabilityError::GlobDenyIllegal {
@@ -872,8 +902,16 @@ pub fn scaffold_binding(params: ScaffoldParams<'_>) -> ScaffoldedBinding {
         medium_type,
         pointer: pointer.to_string(),
         change_detection: None,
+        // Scope is medium-shaped. A path glob over a graph source is not a
+        // narrower scope — it is an uninterpreted string: nothing anywhere
+        // matches globs against entity ids, so `**/*` scaffolded a facet that
+        // looked scoped and selected nothing. The graph namespace gets its own
+        // whole-mem selector; every path medium keeps `**/*` byte-for-byte.
         scope: vec![PatternEntry {
-            path: "**/*".to_string(),
+            path: match medium_type {
+                MediumType::Graph => "*".to_string(),
+                _ => "**/*".to_string(),
+            },
             mode: crate::pipeline::PatternMode::Allow,
         }],
         engagement: None,

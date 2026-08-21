@@ -23,8 +23,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::cursor::enumerate_facet_files;
+use super::cursor::enumerate_source_artifacts;
 use super::resolve::{ResolvedIngest, ResolvedSource};
+use crate::Engine;
 
 /// The rotation key the verify uncovered-artifact sampler walks under. Named so
 /// independent verify samples (uncovered files, anchor spot-checks) each get
@@ -98,11 +99,16 @@ fn state_path(cache_root: &Path, binding_name: &str) -> PathBuf {
 /// Each facet's enumeration applies the binding's `deny_paths` (the same
 /// strategy-invariant deny set the git and mtime slices honour), so a denied
 /// file never lands in a batch.
-fn enumerate_source_files(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<String> {
+fn enumerate_source_files(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    workspace_root: &Path,
+) -> Vec<String> {
     let mut files: Vec<String> = Vec::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
-            files.extend(enumerate_facet_files(
+            files.extend(enumerate_source_artifacts(
+                engine,
                 p,
                 &resolved.deny_paths,
                 workspace_root,
@@ -214,12 +220,13 @@ pub fn next_rotation_batch(
 /// wrapper over [`next_rotation_batch`] keyed [`ROTATION_UNCOVERED_FILES`].
 /// `None` when the binding has no source files (e.g. a non-enumerable medium).
 pub fn next_batch(
+    engine: &Engine,
     resolved: &ResolvedIngest,
     workspace_root: &Path,
     cache_root: &Path,
     batch_size: usize,
 ) -> Option<Batch> {
-    let all_files = enumerate_source_files(resolved, workspace_root);
+    let all_files = enumerate_source_files(engine, resolved, workspace_root);
     next_rotation_batch(
         cache_root,
         &resolved.name,
@@ -276,21 +283,24 @@ mod tests {
             std::fs::write(root.join(format!("f{i}.rs")), "").unwrap();
         }
         let r = resolved("ref", 2);
+        // A path-medium rotation needs no mounted mems; the engine is only
+        // consulted for graph sources.
+        let engine = Engine::from_mounts(Vec::new()).unwrap();
 
-        let b1 = next_batch(&r, root, cache.path(), 2).unwrap();
+        let b1 = next_batch(&engine, &r, root, cache.path(), 2).unwrap();
         assert_eq!(b1.rotation, 0);
         assert_eq!(b1.batch_index, 1);
         assert_eq!(b1.total_batches, 3); // ceil(5/2)
         assert_eq!(b1.files.len(), 2);
 
-        let b2 = next_batch(&r, root, cache.path(), 2).unwrap();
+        let b2 = next_batch(&engine, &r, root, cache.path(), 2).unwrap();
         assert_eq!(b2.batch_index, 2);
-        let b3 = next_batch(&r, root, cache.path(), 2).unwrap();
+        let b3 = next_batch(&engine, &r, root, cache.path(), 2).unwrap();
         assert_eq!(b3.batch_index, 3);
         assert_eq!(b3.files.len(), 1); // remainder
 
         // Rotation exhausted → next batch starts rotation 1.
-        let b4 = next_batch(&r, root, cache.path(), 2).unwrap();
+        let b4 = next_batch(&engine, &r, root, cache.path(), 2).unwrap();
         assert_eq!(b4.rotation, 1);
         assert_eq!(b4.batch_index, 1);
 

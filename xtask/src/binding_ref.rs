@@ -157,18 +157,17 @@ fn render(schema: &Value) -> String {
          `conflict-flag`. Requesting a stronger guarantee than the medium supports is refused at \
          binding validation.\n",
     );
-    // The matrix states what a medium's capability row DECLARES. For `graph`
-    // that currently over-promises what verify can actually do, and the row
-    // alone would let a reader gate a pull request on a measurement that
-    // observes nothing. Named here, next to the row, rather than only in the
-    // concepts page a table reader may never reach.
+    // A `graph` source selects entities, so its scope is not a path glob.
+    // Named here, next to the row, rather than only in the concepts page a
+    // table reader may never reach — the scaffolded path glob that nothing
+    // interpreted is exactly the mistake a reader would otherwise repeat.
     md.push_str(
-        "- **`graph` verify is inert today**, despite its *yes* in **Enumerable**: a binding whose \
-         source is another mem enumerates nothing and leaves its anchors permanently unobserved, \
-         so coverage reads `0/0`. The fidelity report refuses to call that clean (the rollup \
-         returns `inconclusive`), but the measurement is not there yet — do not gate on a \
-         graph-source binding. The columns describe the medium's declared capability, not the \
-         current state of every operation over it.\n",
+        "- **`graph` scope is an entity selector, not a path glob.** A graph source selects \
+         entities, so its `scope` patterns are `*` (the whole mem), `type:<entity_type>`, or \
+         `id:<glob>` over the full `mem--slug` id. A path-shaped pattern is refused at binding \
+         validation rather than accepted and ignored — scope that selects nothing while looking \
+         like selection is the failure this rule prevents. The columns describe the medium's \
+         declared capability, not the current state of every operation over it.\n",
     );
 
     md

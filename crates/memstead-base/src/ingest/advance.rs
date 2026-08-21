@@ -52,7 +52,7 @@ use std::path::{Path, PathBuf};
 use crate::Engine;
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
-use super::cursor::{compute_source_cursor, enumerate_facet_files};
+use super::cursor::{compute_source_cursor, enumerate_source_artifacts};
 use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::Slice;
 
@@ -627,6 +627,7 @@ pub enum ExcludeError {
 /// any in-flight advance store rather than clobbering it. Generic across every
 /// enumerable binding and medium.
 pub fn record_exclusions(
+    engine: &Engine,
     workspace_root: &Path,
     resolved: &ResolvedIngest,
     exclusions: &BTreeMap<String, String>,
@@ -640,7 +641,7 @@ pub fn record_exclusions(
     let mut s_d: BTreeSet<String> = BTreeSet::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
-            for f in enumerate_facet_files(p, &resolved.deny_paths, workspace_root) {
+            for f in enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root) {
                 s_d.insert(f);
             }
         }
@@ -1194,6 +1195,7 @@ mod tests {
 
         // Declare a.rs excluded with a rationale — accepted (S(D) member).
         let out = record_exclusions(
+            &Engine::from_mounts(Vec::new()).unwrap(),
             root,
             &resolved,
             &BTreeMap::from([("a.rs".to_string(), "mined; no entity".to_string())]),
@@ -1210,6 +1212,7 @@ mod tests {
 
         // An artifact outside S(D) refuses the whole call — the store is untouched.
         let err = record_exclusions(
+            &Engine::from_mounts(Vec::new()).unwrap(),
             root,
             &resolved,
             &BTreeMap::from([("does-not-exist.rs".to_string(), "x".to_string())]),
@@ -1231,6 +1234,7 @@ mod tests {
 
         // Re-declaring merges (b.rs added alongside a.rs).
         let out2 = record_exclusions(
+            &Engine::from_mounts(Vec::new()).unwrap(),
             root,
             &resolved,
             &BTreeMap::from([("b.rs".to_string(), "also mined".to_string())]),

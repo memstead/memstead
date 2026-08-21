@@ -25,9 +25,8 @@ one of three outcomes:
 
 **Exit 0 is necessary, not sufficient.** It says the run recorded no
 findings; it does not say the run could see anything. A pass whose verdict
-is `inconclusive` — a facet with no readable change signal, an empty
-enumerated scope, a graph-source binding — also records no findings and
-also exits 0. The exit code has no representation for that third answer,
+is `inconclusive` — a facet with no readable change signal, or an empty
+enumerated scope — also records no findings and also exits 0. The exit code has no representation for that third answer,
 so a job that branches on the code alone goes green on exactly the runs
 this guide tells you not to gate on. Read `rollup.verdict`; the job below
 does.
@@ -248,15 +247,6 @@ or nothing. That is why the job above reads the verdict rather than trusting
 the code. A CI-visible signal for "could not measure" would need a change to
 the exit-code contract itself, which is not a change this guide can make on
 its own.
-
-**Graph-medium verify is currently inert.** A binding whose source is
-another mem enumerates nothing and leaves its anchors permanently
-unobserved — coverage reads `0/0` despite the capability row saying
-`enumerable: true`. The rollup refuses to call that clean and returns
-`inconclusive`, but the underlying measurement is not there yet. Do not
-gate a graph-source binding on this today. Unlike the caps above, this
-one is a **defect with a fix planned**, not a deliberate boundary — when
-it lands, the row starts measuring and this paragraph goes away.
 
 **The mtime baseline does not survive a fresh checkout.** A binding using
 mtime change-detection compares file modification times against a recorded

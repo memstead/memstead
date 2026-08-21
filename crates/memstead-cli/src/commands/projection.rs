@@ -1764,7 +1764,13 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
     let resolved = resolve_binding_run(&binding_id, &record.config)
         .map_err(|e| map_resolve_err(&binding_id, e))?;
 
-    let outcome = record_exclusions(&root, &resolved, &exclusions)
+    // The S(D) membership gate now spans every enumerable medium, including
+    // graph — whose artifact set lives in the store, not on disk. So the
+    // exclude path needs an engine exactly as verify does.
+    let mut cli_engine = ctx.cli_engine_at(&root)?;
+    let engine = cli_engine.base_mut();
+
+    let outcome = record_exclusions(engine, &root, &resolved, &exclusions)
         .map_err(|e| map_exclude_err(&binding_id, e))?;
 
     if ctx.json {

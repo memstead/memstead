@@ -364,7 +364,7 @@ pub fn enumerate_facet_files(
 ) -> Vec<String> {
     if !matches!(
         source.medium_type,
-        MediumType::Codebase | MediumType::Filesystem
+        MediumType::Codebase | MediumType::Filesystem | MediumType::Git
     ) {
         return Vec::new();
     }
@@ -579,6 +579,183 @@ fn compute_git_slice(
         slice,
         degraded: false,
     }
+}
+
+/// One parsed entry of a **graph** facet's scope — the entity-namespace
+/// counterpart of a path glob. A graph source selects entities, and an entity
+/// is not a path: matching id-shaped globs against `mem--slug` invites the
+/// "looks scoped, selects nothing" failure the dead-deny lint exists to catch
+/// on paths, so the vocabulary is explicit about which axis it selects on.
+///
+/// Grammar (the whole of it):
+///
+/// - `*` — every entity in the source mem
+/// - `type:<entity_type>` — entities of exactly that type
+/// - `id:<glob>` — entities whose full `mem--slug` id matches the glob
+///
+/// Anything else is refused at binding validation
+/// ([`crate::binding::validate_binding`]) rather than silently selecting
+/// nothing: a scope nothing interprets is the defect, not a permissible form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntitySelector {
+    /// `*` — every entity in the mem.
+    All,
+    /// `type:<entity_type>` — exact type match.
+    Type(String),
+    /// `id:<glob>` — glob over the full entity id.
+    Id(String),
+}
+
+/// Parse one graph scope pattern. `None` for an unrecognised form — the
+/// caller decides whether that is a validation refusal (declaration time) or
+/// a skipped rule (run time, already refused at declaration).
+pub fn parse_entity_selector(pattern: &str) -> Option<EntitySelector> {
+    let pattern = pattern.trim();
+    if pattern == "*" {
+        return Some(EntitySelector::All);
+    }
+    if let Some(rest) = pattern.strip_prefix("type:") {
+        let rest = rest.trim();
+        if rest.is_empty() {
+            return None;
+        }
+        return Some(EntitySelector::Type(rest.to_string()));
+    }
+    if let Some(rest) = pattern.strip_prefix("id:") {
+        let rest = rest.trim();
+        if rest.is_empty() {
+            return None;
+        }
+        // A malformed glob is a refusal, not a rule that matches nothing.
+        Glob::new(rest).ok()?;
+        return Some(EntitySelector::Id(rest.to_string()));
+    }
+    None
+}
+
+/// Does `selector` select this entity?
+fn selector_matches(selector: &EntitySelector, id: &str, entity_type: &str) -> bool {
+    match selector {
+        EntitySelector::All => true,
+        EntitySelector::Type(t) => entity_type == t,
+        EntitySelector::Id(g) => Glob::new(g)
+            .ok()
+            .map(|glob| glob.compile_matcher().is_match(id))
+            .unwrap_or(false),
+    }
+}
+
+/// Enumerate the entity ids a **graph** source's facet scope selects — the
+/// graph medium's `S(D)`, the exact counterpart of [`enumerate_facet_files`]
+/// for a path medium. The source's `pointer` names the source mem; the store
+/// already holds every mounted mem's entities, so this is a filter over
+/// memory rather than any kind of walk.
+///
+/// Stubs are excluded: a stub is a placeholder the engine created for an
+/// unresolved reference, not an authored source artifact. Counting them would
+/// inflate the denominator with entities the source never wrote, making
+/// coverage look worse than it is for a reason no author can act on.
+///
+/// An unscoped facet (no allow rules) yields an empty list here — callers must
+/// not read that as "nothing in scope"; the strategy layer refuses an unscoped
+/// facet before reaching this, exactly as it does for the path mediums.
+pub fn enumerate_graph_entities(engine: &Engine, source: &Source) -> Vec<String> {
+    if source.medium_type != MediumType::Graph {
+        return Vec::new();
+    }
+    let mut allows: Vec<EntitySelector> = Vec::new();
+    let mut denies: Vec<EntitySelector> = Vec::new();
+    for rule in &source.scope {
+        // An unparseable rule is already a validation refusal; at run time it
+        // selects nothing rather than everything — a scope the engine cannot
+        // read must never widen reach.
+        let Some(sel) = parse_entity_selector(&rule.path) else {
+            continue;
+        };
+        match rule.mode {
+            PatternMode::Allow => allows.push(sel),
+            PatternMode::Deny => denies.push(sel),
+        }
+    }
+    if allows.is_empty() {
+        return Vec::new();
+    }
+    let mem = source.pointer.as_str();
+    let mut out: Vec<String> = Vec::new();
+    for entity in engine.store().all_entities() {
+        if entity.mem != mem || entity.stub {
+            continue;
+        }
+        let id = entity.id.0.as_str();
+        let ty = entity.entity_type.as_str();
+        if !allows.iter().any(|s| selector_matches(s, id, ty)) {
+            continue;
+        }
+        if denies.iter().any(|s| selector_matches(s, id, ty)) {
+            continue;
+        }
+        out.push(id.to_string());
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Enumerate one primary source's in-scope artifacts, whatever its medium —
+/// the single entry point every `S(D)` consumer uses. Path-shaped mediums
+/// (codebase / filesystem / git) walk the file tree; a graph source filters
+/// the source mem's entities. A medium the matrix marks non-enumerable
+/// yields nothing, and its callers render the non-enumerable basis rather
+/// than a denominator.
+///
+/// This exists because the enumeration bail was never in one place: five call
+/// sites each repeated the same loop over `enumerate_facet_files`, so teaching
+/// only the report about a new medium left the findings store, the refinement
+/// rotation, and the exclude membership gate empty-handed.
+pub fn enumerate_source_artifacts(
+    engine: &Engine,
+    source: &Source,
+    deny_paths: &[String],
+    workspace_root: &Path,
+) -> Vec<String> {
+    match source.medium_type {
+        MediumType::Codebase | MediumType::Filesystem | MediumType::Git => {
+            enumerate_facet_files(source, deny_paths, workspace_root)
+        }
+        MediumType::Graph => enumerate_graph_entities(engine, source),
+        MediumType::Web => Vec::new(),
+    }
+}
+
+/// Enumerate the whole binding's `S(D)` — the union over its primary sources,
+/// sorted and de-duplicated. `enumerable_only` restricts the union to sources
+/// whose medium the capability matrix marks enumerable (what the coverage
+/// denominator and the findings sample want); passing `false` unions every
+/// primary source (what the exclude membership gate and the refinement
+/// rotation want, since a non-enumerable medium contributes nothing anyway).
+pub fn enumerate_binding_s_d(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    workspace_root: &Path,
+    enumerable_only: bool,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for source in &resolved.sources {
+        if let ResolvedSource::Primary(p) = source {
+            if enumerable_only && !crate::binding::medium_capabilities(p.medium_type).enumerable {
+                continue;
+            }
+            out.extend(enumerate_source_artifacts(
+                engine,
+                p,
+                &resolved.deny_paths,
+                workspace_root,
+            ));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Compute the graph changed slice for a source mem between its stored
@@ -884,7 +1061,15 @@ fn current_primary_token(
             &source.pointer,
             workspace_root,
         ))?),
-        ChangeStrategy::Graph => engine.mem_head_sha(&source.pointer).ok().flatten(),
+        ChangeStrategy::Graph => {
+            if facet_unscoped(source) {
+                // Symmetric with the mtime arm: no signal at all, rather than
+                // a whole-mem token posing as a scoped one.
+                None
+            } else {
+                engine.mem_head_sha(&source.pointer).ok().flatten()
+            }
+        }
         ChangeStrategy::Mtime => {
             if facet_unscoped(source) {
                 // Unscoped facet has no signal — not an empty-set digest posing
@@ -996,6 +1181,13 @@ pub fn compute_source_cursor(
                         compute_git_slice(p, &resolved.deny_paths, workspace_root, baseline)
                     }
                     // A graph-typed primary's medium pointer is the source mem id.
+                    // An unscoped graph facet refuses exactly as the git and
+                    // mtime arms do: the graph slice alone used to proceed on
+                    // an empty scope, which is how a facet could carry scope
+                    // nothing interpreted and still look like it was working.
+                    ChangeStrategy::Graph if facet_unscoped(p) => SliceOutcome::NoSignal {
+                        reason: NoSignalReason::Unscoped,
+                    },
                     ChangeStrategy::Graph => compute_graph_slice(engine, &p.pointer, baseline),
                     ChangeStrategy::Mtime => compute_mtime_slice(
                         p,
@@ -1457,10 +1649,347 @@ mod tests {
         ]);
         assert_eq!(enumerate_facet_files(&source, &[], root), vec!["a.rs"]);
 
-        // A graph medium enumerates nothing (not a file tree).
+        // A graph medium is not a file tree, so the FILE walk yields nothing
+        // for it — but that is a statement about this function, not about
+        // graph enumerability. `enumerate_graph_entities` is the graph arm,
+        // and `enumerate_source_artifacts` is what every S(D) consumer calls.
         let mut graph_source = source.clone();
         graph_source.medium_type = MediumType::Graph;
         assert!(enumerate_facet_files(&graph_source, &[], root).is_empty());
+    }
+
+    /// Graph enumeration is real: a graph source's `S(D)` is the source mem's
+    /// in-scope entity set, selected by the entity vocabulary. This is the
+    /// bail the S1b pilot hit — enumeration returned empty for every graph
+    /// source, so coverage was vacuously 0/0 and `--full` passed over a
+    /// measurement that never happened.
+    #[test]
+    fn graph_enumeration_selects_the_source_mems_entities() {
+        use crate::workspace::{
+            Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("srcmem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+
+        let entity = |slug: &str, ty: &str, title: &str| {
+            std::fs::write(
+                mem_dir.join(format!("{slug}.md")),
+                format!("---\ntype: {ty}\n---\n\n# {title}\n\n## Decision\n\nBody.\n"),
+            )
+            .unwrap();
+        };
+        entity("alpha-choice", "decision", "Alpha choice");
+        entity("beta-choice", "decision", "Beta choice");
+        entity("gamma-note", "memo", "Gamma note");
+
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "srcmem".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+
+        let graph_source = |patterns: Vec<(&str, PatternMode)>| Source {
+            name: "g".to_string(),
+            medium_type: MediumType::Graph,
+            pointer: "srcmem".to_string(),
+            change_detection: None,
+            scope: patterns
+                .into_iter()
+                .map(|(p, mode)| crate::pipeline::PatternEntry {
+                    path: p.to_string(),
+                    mode,
+                })
+                .collect(),
+            engagement: None,
+            preparation: None,
+        };
+
+        // `*` — the whole mem. A real denominator, not an empty walk.
+        let all = enumerate_graph_entities(&engine, &graph_source(vec![("*", PatternMode::Allow)]));
+        assert_eq!(
+            all,
+            vec![
+                "srcmem--alpha-choice".to_string(),
+                "srcmem--beta-choice".to_string(),
+                "srcmem--gamma-note".to_string(),
+            ],
+            "the whole-mem selector enumerates every real entity"
+        );
+
+        // `type:` selects on the type axis.
+        let decisions = enumerate_graph_entities(
+            &engine,
+            &graph_source(vec![("type:decision", PatternMode::Allow)]),
+        );
+        assert_eq!(
+            decisions,
+            vec![
+                "srcmem--alpha-choice".to_string(),
+                "srcmem--beta-choice".to_string()
+            ],
+            "type selector excludes the memo"
+        );
+
+        // `id:` globs the id, and a deny subtracts from an allow.
+        let globbed = enumerate_graph_entities(
+            &engine,
+            &graph_source(vec![
+                ("id:srcmem--*-choice", PatternMode::Allow),
+                ("id:srcmem--beta-*", PatternMode::Deny),
+            ]),
+        );
+        assert_eq!(
+            globbed,
+            vec!["srcmem--alpha-choice".to_string()],
+            "deny subtracts from allow in the entity namespace too"
+        );
+
+        // An unscoped graph facet enumerates nothing — the same posture the
+        // path mediums have always had, and the reason the strategy layer
+        // refuses it before ever reaching here.
+        assert!(
+            enumerate_graph_entities(&engine, &graph_source(vec![])).is_empty(),
+            "an unscoped graph facet is never silently 'everything'"
+        );
+
+        // The dispatching entry point every S(D) consumer calls agrees.
+        assert_eq!(
+            enumerate_source_artifacts(
+                &engine,
+                &graph_source(vec![("*", PatternMode::Allow)]),
+                &[],
+                root
+            ),
+            all,
+            "enumerate_source_artifacts routes a graph source to the graph arm"
+        );
+    }
+
+    /// The S1b pilot's headline failure, encoded as a permanent regression
+    /// test: a stale-pinned entity anchor over a source entity that changed
+    /// since it was pinned must be flagged `drifted`. It used to go unflagged
+    /// — anchor resolution was 0/0 for every graph source, so drift was
+    /// structurally undetectable while the matrix claimed full parity.
+    #[test]
+    fn a_stale_entity_anchor_over_a_changed_entity_is_drifted() {
+        use crate::anchor::{
+            Anchor, AnchorGrain, AnchorProvenanceClass, AnchorSidecar, AnchorState,
+        };
+        use crate::entity::EntityId;
+        use crate::workspace::{
+            Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("pinned.md"),
+            "---\ntype: decision\n---\n\n# Pinned\n\n## Decision\n\nOriginal body.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("steady.md"),
+            "---\ntype: decision\n---\n\n# Steady\n\n## Decision\n\nUnchanged body.\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "mem".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // Hash the entities as they stand, so the anchors start out honest.
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let hash_of = |engine: &crate::Engine, id: &str| {
+            let e = engine.store().get(&EntityId::canonical(id)).unwrap();
+            crate::anchor::prepared_content_hash(
+                crate::render::render_entity_markdown(e, None).as_bytes(),
+            )
+        };
+        let pinned_hash = hash_of(&engine, "mem--pinned");
+        let steady_hash = hash_of(&engine, "mem--steady");
+
+        let entity_anchor = |artifact: &str, hash: &str| Anchor {
+            artifact: artifact.to_string(),
+            grain: AnchorGrain::Entity,
+            class: AnchorProvenanceClass::Anchored,
+            hash: Some(hash.to_string()),
+            source: None,
+            binding: None,
+            at_version: None,
+            derived_from: Vec::new(),
+            hash_stability: crate::anchor::AnchorHashStability::Stable,
+        };
+
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "mem--holder",
+            vec![
+                entity_anchor("mem--pinned", &pinned_hash),
+                entity_anchor("mem--steady", &steady_hash),
+                // An anchor over an entity that does not exist at all.
+                entity_anchor("mem--vanished", "deadbeefdeadbeef"),
+            ],
+        );
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("holder.md"),
+            "---\ntype: decision\n---\n\n# Holder\n\n## Decision\n\nHolds anchors.\n",
+        )
+        .unwrap();
+
+        // Now change ONE source entity — the pilot's move.
+        std::fs::write(
+            mem_dir.join("pinned.md"),
+            "---\ntype: decision\n---\n\n# Pinned\n\n## Decision\n\nBody rewritten.\n",
+        )
+        .unwrap();
+
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let resolved = engine.entity_anchors_resolved(&EntityId::canonical("mem--holder"));
+        let state_of = |artifact: &str| {
+            resolved
+                .iter()
+                .find(|r| r.anchor.artifact == artifact)
+                .unwrap_or_else(|| panic!("no resolved anchor for {artifact}"))
+                .state
+        };
+
+        assert_eq!(
+            state_of("mem--pinned"),
+            Some(AnchorState::Drifted),
+            "a stale-pinned anchor over a CHANGED entity must be drifted — \
+             this is the pilot failure that went unflagged"
+        );
+        assert_eq!(
+            state_of("mem--steady"),
+            Some(AnchorState::Resolves),
+            "an anchor over an unchanged entity still resolves"
+        );
+        assert_eq!(
+            state_of("mem--vanished"),
+            Some(AnchorState::Orphaned),
+            "an anchor over an entity that is not there is orphaned, not unobserved"
+        );
+
+        // The complement: a `url` grain genuinely cannot be observed, and must
+        // stay unobserved rather than being swept up by the widened arm.
+        let mut sc2 = AnchorSidecar::default();
+        sc2.set(
+            "mem--holder",
+            vec![Anchor {
+                artifact: "https://example.invalid/doc".to_string(),
+                grain: AnchorGrain::Url,
+                class: AnchorProvenanceClass::InformedBy,
+                hash: None,
+                source: None,
+                binding: None,
+                at_version: None,
+                derived_from: Vec::new(),
+                hash_stability: crate::anchor::AnchorHashStability::Stable,
+            }],
+        );
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            sc2.to_bytes(),
+        )
+        .unwrap();
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let url_state =
+            engine.entity_anchors_resolved(&EntityId::canonical("mem--holder"))[0].state;
+        assert_eq!(
+            url_state, None,
+            "url anchors stay unobserved — the fix widens observation, never the \
+             scoring of non-observation"
+        );
+    }
+
+    /// The entity-selector grammar is closed: three legal forms, everything
+    /// else refused. A pattern that parses to `None` is a validation refusal
+    /// at declaration — never a rule that silently selects nothing.
+    #[test]
+    fn entity_selector_grammar_is_closed() {
+        use super::EntitySelector;
+        assert_eq!(parse_entity_selector("*"), Some(EntitySelector::All));
+        assert_eq!(
+            parse_entity_selector("type:decision"),
+            Some(EntitySelector::Type("decision".to_string()))
+        );
+        assert_eq!(
+            parse_entity_selector("id:engine--*"),
+            Some(EntitySelector::Id("engine--*".to_string()))
+        );
+        // The path glob `projection init` used to scaffold for graph sources:
+        // it looks like scope and selects nothing. Refused, not accepted.
+        assert_eq!(parse_entity_selector("**/*"), None);
+        assert_eq!(parse_entity_selector("src/**"), None);
+        assert_eq!(parse_entity_selector("type:"), None);
+        assert_eq!(parse_entity_selector("id:"), None);
+        assert_eq!(parse_entity_selector(""), None);
     }
 
     /// The mtime driver reseeds on the first pass (writing the memo), then
@@ -1655,7 +2184,8 @@ mod tests {
             rules: None,
             post_actions: None,
         };
-        let batch = next_batch(&resolved, root, &cache, 20).unwrap();
+        let engine = crate::Engine::from_mounts(Vec::new()).unwrap();
+        let batch = next_batch(&engine, &resolved, root, &cache, 20).unwrap();
         assert!(
             batch.files.contains(&"keep.rs".to_string()),
             "keep.rs batched"
@@ -1767,7 +2297,14 @@ mod tests {
             post_actions: None,
         };
         assert!(
-            next_batch(&resolved, root, &cache, 20).is_none(),
+            next_batch(
+                &crate::Engine::from_mounts(Vec::new()).unwrap(),
+                &resolved,
+                root,
+                &cache,
+                20
+            )
+            .is_none(),
             "an all-unscoped ingest emits no refinement batch"
         );
     }

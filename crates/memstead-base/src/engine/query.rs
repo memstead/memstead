@@ -426,10 +426,12 @@ impl Engine {
     /// when the source-join does not resolve. A path resolving under both
     /// joins is decided by that priority, deterministically. An anchor
     /// without a `source` (a hand-authored mem, a binding-less write)
-    /// observes workspace-relative exactly as before. `url`/`entity`
-    /// grains have no filesystem observation and return `None` (the
-    /// report vocabulary's `unresolvable`), as does a workspace-root-less
-    /// engine. This replaces the retired `single_path_medium_root` gate,
+    /// observes workspace-relative exactly as before. A `url`
+    /// grain has no observation and returns `None` (the report vocabulary's
+    /// `unresolvable`), as does a workspace-root-less engine. An `entity`
+    /// grain is not a filesystem path but is not unobservable either — it
+    /// resolves against the live graph via
+    /// [`Self::observe_entity_anchor`]. This replaces the retired `single_path_medium_root` gate,
     /// whose single-source assumption nulled every anchor of a mem with
     /// zero or several bindings — the honest per-anchor answer supersedes
     /// the all-or-nothing mem-level one.
@@ -438,6 +440,15 @@ impl Engine {
         anchor: &crate::anchor::Anchor,
         source_roots: &std::collections::BTreeMap<String, String>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
+        // An `entity`-grain anchor points into a mem's graph, not a file
+        // tree. It has always returned `None` here — "unobserved this pass" —
+        // which meant it could never be drifted, never be orphaned, and always
+        // blocked prune. That is the bail the S1b pilot demonstrated: a
+        // deliberately stale anchor over a changed source entity went unflagged
+        // while the capability matrix claimed full parity.
+        if anchor.grain == crate::anchor::AnchorGrain::Entity {
+            return self.observe_entity_anchor(anchor);
+        }
         let root = self.workspace_root.as_deref()?;
         let source_pointer = anchor
             .source
@@ -445,6 +456,48 @@ impl Engine {
             .and_then(|name| source_roots.get(name))
             .map(String::as_str);
         observe_path_anchor(root, anchor, source_pointer)
+    }
+
+    /// Observe an `entity`-grain anchor against the live graph — the entity-
+    /// namespace counterpart of [`observe_path_anchor`], and the mechanism
+    /// that makes a graph-medium binding's drift real.
+    ///
+    /// The artifact is an entity id. Present/absent comes from the store, so
+    /// this works uniformly across backends — a git-branch mem has no
+    /// working-tree file to stat, which is exactly why observation cannot go
+    /// through the filesystem here. The compared form is the **canonical
+    /// rendered markdown**, hashed with the same `prepared_content_hash` the
+    /// path arm uses, so an anchor's recorded hash means the same thing in
+    /// both namespaces.
+    ///
+    /// A stub is treated as absent: a stub is the engine's placeholder for an
+    /// unresolved reference, not the entity the anchor claims to pin. Scoring
+    /// it as present would let a dangling anchor resolve clean.
+    fn observe_entity_anchor(
+        &self,
+        anchor: &crate::anchor::Anchor,
+    ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
+        let id = EntityId::canonical(&anchor.artifact);
+        let entity = self.store.get(&id).filter(|e| !e.stub);
+        let Some(entity) = entity else {
+            return Some((
+                crate::anchor::resolve_anchor(anchor, &crate::anchor::ArtifactObservation::Absent),
+                None,
+            ));
+        };
+        let current_hash = if anchor.class.is_hash_bearing() {
+            let rendered = crate::render::render_entity_markdown(entity, None);
+            Some(crate::anchor::prepared_content_hash(rendered.as_bytes()))
+        } else {
+            None
+        };
+        let observation = crate::anchor::ArtifactObservation::Present {
+            current_hash: current_hash.clone(),
+        };
+        Some((
+            crate::anchor::resolve_anchor(anchor, &observation),
+            current_hash,
+        ))
     }
 
     /// The `source name → pointer` map for `mem`'s bindings — the filesystem

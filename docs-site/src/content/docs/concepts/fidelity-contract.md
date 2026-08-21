@@ -116,12 +116,6 @@ guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
   you hit it, not when you declare it — which is the honest description of
   where the edge currently sits.
 
-- **Graph-medium verify is inert.** A binding whose source is another mem enumerates
-  nothing and leaves its anchors permanently unobserved: coverage reads `0/0` even
-  though the capability row says `enumerable: true`. The rollup refuses to summarize
-  that as clean — a vacuous measurement returns `inconclusive` with the blindness
-  named — but the measurement itself is not there yet, so a graph-source binding is
-  not gateable today.
 - **The mtime `#synced` baseline does not survive a fresh checkout.** A binding using
   mtime change-detection compares modification times against a recorded baseline, and a
   CI clone gives every file a new mtime, so the baseline is meaningless there. This
@@ -131,12 +125,17 @@ guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
   gate.
 
 The first two are **positioning decisions** — deliberate boundaries, not
-roadmap promises. The last two are **known defects with fixes planned**: the
-graph-medium row already claims a capability its verify does not deliver, and
-the mtime baseline's non-portability is a portability bug, not a choice. The
+roadmap promises. The last is a **known defect with a fix planned**: the
+mtime baseline's non-portability is a portability bug, not a choice. The
 distinction matters to anyone deciding what to build a gate on — a boundary
-will still be there next year; a defect should not be. When the defects are
-fixed, their refusals become measurements and these paragraphs retire.
+will still be there next year; a defect should not be. When the defect is
+fixed, its refusal becomes a measurement and the paragraph retires.
+
+Graph-medium verify was on this list until it started measuring: a
+graph-source binding now enumerates the source mem's in-scope entities as a
+real denominator and resolves its entity anchors against the live graph, so
+a stale-pinned anchor over a changed source entity reports `drifted` like
+any other.
 
 None of the four is omitted: the honest shape of a contract is to name its own
 edges, and to say which of them it intends to keep.

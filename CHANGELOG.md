@@ -8,6 +8,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Graph-medium bindings now measure fidelity instead of performing it.** A
+  binding whose source is another mem enumerates that mem's in-scope entities
+  as a real `S(D)` denominator, so coverage is computed rather than vacuously
+  `0/0` and an unprojected source entity surfaces as a gap. `entity`-grain
+  anchors resolve against the live graph: an anchor over a changed source
+  entity reports `drifted`, over an unchanged one `resolves`, over a deleted
+  one `orphaned`. Previously every graph anchor read "unobserved this pass",
+  which meant drift was structurally undetectable while the capability matrix
+  claimed full parity — a stale-pinned anchor over a changed entity went
+  unflagged. `git`-medium sources enumerate too; they were excluded from the
+  same walk for the same reason.
+- **Graph scope is an entity selector.** A graph source's `scope` patterns are
+  `*`, `type:<entity_type>`, or `id:<glob>` over the full entity id, enforced
+  at run time and refused at binding validation if they are anything else.
+  `projection init` scaffolds `*` for a graph source instead of the path glob
+  `**/*`, which nothing interpreted — a facet could carry scope that looked
+  like selection and reached nothing. An unscoped graph facet now refuses like
+  every other medium's, and a graph source's brief names its entities and how
+  to read the source baseline rather than printing path globs at an agent with
+  no glob tool over a mem.
+- **`verify --full` refuses an empty enumeration.** A medium the matrix marks
+  enumerable whose walk yields no artifacts refuses rather than reporting
+  complete coverage of nothing. This is the standing guard: a medium cannot be
+  added to the matrix as enumerable without an enumeration arm and still
+  return green.
 - **`memstead projection verify --fail-on-findings` — a verify a CI job can
   gate on.** Three outcomes a workflow can branch on without parsing output:
   exit `0` the run completed and found nothing, exit `6` the run completed

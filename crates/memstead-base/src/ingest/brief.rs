@@ -244,11 +244,31 @@ pub fn render_operative_data(
                         .filter(|r| r.mode == PatternMode::Deny)
                         .map(|r| r.path.as_str())
                         .collect();
+                    // Scope is medium-shaped, and so is the label. A graph
+                    // source selects entities, so calling its selectors
+                    // "Paths" sent the agent looking for a glob tool over a
+                    // mem — which does not exist. The changed slice alone is
+                    // a delta with no baseline; the reference-mem block below
+                    // is the precedent for directing an agent at a mem's
+                    // contents without dumping them, so a primary graph
+                    // source gets the same executable instruction.
+                    let is_graph = p.medium_type == MediumType::Graph;
+                    let (allow_label, deny_label) = if is_graph {
+                        ("Entities", "Excluding")
+                    } else {
+                        ("Paths", "Ignore")
+                    };
                     if !allows.is_empty() {
-                        lines.push(format!("  - Paths: {}", allows.join(", ")));
+                        lines.push(format!("  - {allow_label}: {}", allows.join(", ")));
                     }
                     if !denies.is_empty() {
-                        lines.push(format!("  - Ignore: {}", denies.join(", ")));
+                        lines.push(format!("  - {deny_label}: {}", denies.join(", ")));
+                    }
+                    if is_graph {
+                        lines.push(format!(
+                            "  - Read the source baseline with `memstead_search mem={}`                              (add `entity_type=` to match a `type:` selector). The changed                              slice below is a delta against the last pass — it is not the                              whole source, and an entity absent from it may still be                              unprojected.",
+                            p.pointer
+                        ));
                     }
                 }
                 ResolvedSource::Reference { mem } => {

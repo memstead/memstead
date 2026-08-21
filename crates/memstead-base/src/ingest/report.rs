@@ -42,7 +42,7 @@ use crate::binding::{Binding, CoverageSemantics, MediumCapabilities, medium_capa
 use crate::chunking::estimate_tokens;
 
 use super::advance::read_advance_store;
-use super::cursor::{enumerate_facet_files, source_moved};
+use super::cursor::{enumerate_source_artifacts, source_moved};
 use super::findings::{FindingClass, FindingKey, read_findings_store};
 use super::resolve::{ChangeStrategy, ResolvedIngest, ResolvedSource, resolve_change_strategy};
 
@@ -1091,7 +1091,8 @@ pub fn compute_fidelity_report(
             if caps.enumerable {
                 enumerable_facets += 1;
             }
-            s_d.extend(enumerate_facet_files(
+            s_d.extend(enumerate_source_artifacts(
+                engine,
                 p,
                 &resolved.deny_paths,
                 workspace_root,
