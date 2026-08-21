@@ -41,6 +41,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+import yaml
 import tempfile
 from pathlib import Path
 
@@ -50,13 +52,14 @@ GUIDE = REPO / "docs-site" / "src" / "content" / "docs" / "guides" / "verify-in-
 
 BINDING = "docs/graph"
 GATE_ARGS = ["projection", "verify", BINDING, "--fail-on-findings"]
-# The command the copyable workflow must run, asserted INSIDE the ```yaml
+# The command the copyable workflow must run, asserted INSIDE the workflow
 # block rather than anywhere in the page. A bare page-wide substring is not
 # an anti-drift check — the same words appear in the guide's `--json`
 # example further down, so deleting the whole workflow once left the
-# assertion passing. Scoping to the block survives the job being reshaped
-# (single-line `run:` vs. a `run: |` script) while still failing if the job
-# is removed or the command changed.
+# assertion passing. (An earlier version of this comment claimed the design
+# also survives a single-line `run:`; it did not — the hand-rolled locator
+# ran past its own step into the next one's script. That whole extractor is
+# gone: `extract_job_steps` parses the YAML properly.)
 DOCUMENTED_STEP = "memstead projection verify docs/graph --fail-on-findings"
 # The rest of the printed job. Pinning only the `run:` line left three of the
 # workflow's four steps free to rot: a grade broke the checkout action, the
@@ -166,69 +169,92 @@ def run_gate(memstead: Path, workspace: Path, json_mode: bool = True) -> tuple[i
     return proc.returncode, proc.stdout
 
 
-# The two steps of the guide's job, by their `name:` headings. The job is
-# executed as a COMPOSED whole below — step 1 producing the file step 2
-# reads — because running them in isolation is how the last version of this
-# harness passed a job that went green on real drift: `|| true` on step 1
-# plus a narrowed condition in step 2 are each survivable alone and
-# ungating together. A gate that cannot see the seam cannot gate the seam.
-STEP_NAMES = ("Verify the mem against its source", VERDICT_STEP_NAME)
+# Step keys a documented example may legally carry. Anything else is
+# rejected outright rather than blacklisted: a grade disarmed the gating
+# step with `if: ${{ 1 == 2 }}`, which no substring list of false-y
+# expressions would have caught, and there is no end to that list. An
+# example that needs a conditional is not an example a stranger can copy.
+ALLOWED_STEP_KEYS = {"name", "uses", "with", "run"}
 
-# GitHub-Actions attributes that neuter a step regardless of its script.
-# None of them appear in a working job, and each silently disarms the gate.
-FORBIDDEN_JOB_ATTRS = ("continue-on-error", "if: false", "if: ${{ false")
+# Steps that set up the environment this harness has already set up: it
+# stages a checkout-equivalent fixture and puts the binary on PATH. Named
+# explicitly — and still required to be present by DOCUMENTED_JOB_LINES —
+# so "skipped" never quietly becomes "missing from the printed job".
+SETUP_STEP_NAMES = {"Install memstead"}
+
+# The step whose absence a grade proved survivable — kept as a required
+# name so deleting it fails loudly rather than silently shrinking the job.
+REQUIRED_STEP_NAMES = ("Verify the mem against its source", VERDICT_STEP_NAME)
 
 
-def extract_step_scripts(guide_text: str) -> dict[str, str] | None:
-    """Lift each named step's shell script out of the guide's YAML block.
+def extract_job_steps(guide_text: str) -> tuple[list[dict], str | None]:
+    """Parse the guide's workflow with a real YAML parser.
 
-    Returns a name→script map, or None when the block or a step is missing.
+    Four rounds of hand-rolled extraction were evaded four different ways —
+    a decoy ```yaml block, a third step inserted between the two this
+    harness knew by name, the steps swapped so the printed order differed
+    from the executed one, and a `run:` locator that ran past its own step
+    into the next one's script. The lesson is not "add a fifth check": it
+    is that enumerating what you expect cannot gate what you did not.
+    So: exactly one workflow block, every step in printed order, no key
+    outside the allowed set. Returns (steps, error).
     """
-    for block in re.findall(r"```yaml\n(.*?)```", guide_text, re.DOTALL):
-        if not all(name in block for name in STEP_NAMES):
-            continue
-        scripts: dict[str, str] = {}
-        for name in STEP_NAMES:
-            after = block.split(f"name: {name}", 1)[1]
-            lines = after.splitlines()
-            try:
-                start = next(
-                    i for i, ln in enumerate(lines) if ln.strip() in ("run: |", "run:")
-                )
-            except StopIteration:
-                return None
-            head = lines[start].strip()
-            if head != "run: |":
-                # A single-line `run: cmd` step.
-                scripts[name] = head[len("run:") :].strip()
-                continue
-            body, indent = [], None
-            for ln in lines[start + 1 :]:
-                if not ln.strip():
-                    body.append("")
-                    continue
-                lead = len(ln) - len(ln.lstrip())
-                if indent is None:
-                    indent = lead
-                elif lead < indent:
-                    break
-                body.append(ln[indent:])
-            scripts[name] = "\n".join(body).strip()
-        return scripts
-    return None
+    blocks = re.findall(r"```ya?ml\n(.*?)```", guide_text, re.DOTALL)
+    workflows = []
+    for block in blocks:
+        try:
+            doc = yaml.safe_load(block)
+        except yaml.YAMLError as e:
+            return [], f"a ```yaml block in the guide is not valid YAML: {e}"
+        if isinstance(doc, dict) and "jobs" in doc:
+            workflows.append(doc)
+    if len(workflows) != 1:
+        return [], (
+            f"expected exactly one workflow block in the guide, found "
+            f"{len(workflows)} — a second one lets a decoy satisfy this harness "
+            f"while the job a reader copies is broken"
+        )
+
+    jobs = workflows[0]["jobs"]
+    if len(jobs) != 1:
+        return [], f"expected one job in the printed workflow, found {len(jobs)}"
+    steps = next(iter(jobs.values())).get("steps") or []
+
+    for i, step in enumerate(steps):
+        extra = set(step) - ALLOWED_STEP_KEYS
+        if extra:
+            return [], (
+                f"step {i + 1} ({step.get('name', '<unnamed>')!r}) carries "
+                f"{sorted(extra)}, which can disarm it regardless of its script — "
+                f"a copyable example carries none of these"
+            )
+    names = [s.get("name") for s in steps]
+    for required in REQUIRED_STEP_NAMES:
+        if required not in names:
+            return [], f"the printed job no longer has a {required!r} step"
+    if names.index(REQUIRED_STEP_NAMES[0]) > names.index(REQUIRED_STEP_NAMES[1]):
+        return [], (
+            "the printed job runs the verdict check before the report exists — "
+            "in that order a copied job fails every build"
+        )
+    return steps, None
 
 
-def run_job(scripts: dict[str, str], workspace: Path, memstead: Path) -> int:
-    """Run the printed job end to end, as a copied workflow would.
+def run_job(steps: list[dict], workspace: Path, memstead: Path) -> int:
+    """Run every `run:` step in printed order, as a copied workflow would.
 
-    `memstead` is put on PATH rather than substituted into the script, so the
-    command text executed is byte-for-byte what the guide prints. Steps run in
-    order and the first non-zero status ends the job — GitHub's own semantics.
+    `memstead` goes on PATH rather than being substituted into the script,
+    so the command text executed is byte-for-byte what the guide prints.
+    `bash -e` matches GitHub's default step shell. Steps that only `uses:`
+    an action are environment setup this harness already provides.
     """
     env = {**os.environ, "PATH": f"{memstead.parent}:{os.environ['PATH']}"}
-    for name in STEP_NAMES:
+    for step in steps:
+        script = step.get("run")
+        if not script or step.get("name") in SETUP_STEP_NAMES:
+            continue
         proc = subprocess.run(
-            ["bash", "-c", scripts[name]],
+            ["bash", "-e", "-c", script],
             cwd=workspace,
             capture_output=True,
             text=True,
@@ -418,24 +444,15 @@ def run(memstead: Path) -> int:
     # (4) Run the printed job END TO END, as a copied workflow would.
     #     Step 1 produces the file step 2 reads; running them separately is
     #     how the previous harness passed a job that went green on drift.
-    scripts = extract_step_scripts(guide_text)
-    if scripts is None:
-        failures += fail(
-            "could not find both named steps and their scripts in the guide's "
-            "workflow — the job a stranger copies is not there to run"
-        )
+    steps, step_err = extract_job_steps(guide_text)
+    if step_err:
+        failures += fail(step_err)
     else:
-        for attr in FORBIDDEN_JOB_ATTRS:
-            if any(attr in b for b in yaml_blocks):
-                failures += fail(
-                    f"the printed job carries {attr!r}, which disarms a step "
-                    f"whatever its script says — the gate would not gate"
-                )
-
         # clean → the job passes. drifted → step 1 fails it. inconclusive →
-        # step 1 exits 0 and step 2 must fail it; that is step 2's whole job.
-        polarities = [("clean", 0), ("drifted", 6), ("inconclusive", 1)]
-        for kind, want in polarities:
+        # step 1 exits 0 and the verdict step must fail it; that is its
+        # entire reason for existing, and the case the exit code cannot
+        # express.
+        for kind, want_pass in (("clean", True), ("drifted", False), ("inconclusive", False)):
             with tempfile.TemporaryDirectory() as tmp2:
                 ws = stage_fixture(Path(tmp2))
                 if kind == "drifted":
@@ -452,17 +469,16 @@ def run(memstead: Path) -> int:
                         ),
                         encoding="utf-8",
                     )
-                rc = run_job(scripts, ws, memstead)
-                ok = (rc == 0) if want == 0 else (rc != 0)
-                if not ok:
+                rc = run_job(steps, ws, memstead)
+                if (rc == 0) != want_pass:
                     failures += fail(
                         f"the printed job returned {rc} on a {kind} run — expected "
-                        f"{'success' if want == 0 else 'failure'}. A stranger copying "
+                        f"{'success' if want_pass else 'failure'}. A stranger copying "
                         f"this workflow would get the wrong answer."
                     )
                 else:
-                    verb = "passes" if want == 0 else "fails"
-                    print(f"  ✓ the printed job {verb} a {kind} run (end to end)")
+                    verb = "passes" if want_pass else "fails"
+                    print(f"  ✓ the printed job {verb} a {kind} run (every step, in order)")
 
     return 1 if failures else 0
 

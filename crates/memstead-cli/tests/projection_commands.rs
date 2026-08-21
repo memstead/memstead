@@ -3499,6 +3499,16 @@ fn verify_json_carries_the_pinned_format_marker() {
                 "freshness[].{field} is documented as contract but missing: {facet}"
             );
         }
+        // `synced` and `verified` are legitimately null when never recorded,
+        // so the !is_null idiom above cannot cover them — the KEY has to be
+        // present. The guide documents both as contract; a rename would
+        // falsify it while the marker still said `memstead-verify/v1`.
+        for field in ["synced", "verified"] {
+            assert!(
+                facet.get(field).is_some(),
+                "freshness[].{field} is documented as contract but the key is gone: {facet}"
+            );
+        }
     }
     // The denominator is INTERNALLY tagged on `kind`. Pinned because the
     // guide documents that exact shape as external contract, and serde's

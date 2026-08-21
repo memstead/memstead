@@ -265,7 +265,10 @@ if [ -x "$ROOT/target/debug/memstead" ]; then
     echo "  ✗ the documented verify-in-CI example FAILED"
   fi
 else
-  echo "  (no target/debug/memstead built — nothing to exercise)"
+  FAILED+=("verify-gate-example")
+  echo "  ✗ no target/debug/memstead — the verify-in-CI gate could not run"
+  echo "    (a gate that silently skips is a gate that silently stops gating;"
+  echo "     the engine leg above builds this binary, so its absence is a bug)"
 fi
 
 echo ""
