@@ -276,11 +276,18 @@ pub fn extract_entries(
             // publish-strip failure E3a exists to close. Validate the
             // structure here; thread the verbatim bytes through the
             // canonical re-pack on success.
-            crate::anchor::AnchorSidecar::from_bytes(&buf).map_err(|e| {
+            let sidecar = crate::anchor::AnchorSidecar::from_bytes(&buf).map_err(|e| {
                 ValidationError::InvalidAnchorsMember {
                     reason: e.to_string(),
                 }
             })?;
+            // An empty artifact reference is corruption the mutation
+            // surface never admits — including a botched publish-time
+            // redaction that blanked to nothing instead of the pinned
+            // sentinel. Caught here rather than shipped.
+            sidecar
+                .validate_artifact_references()
+                .map_err(|reason| ValidationError::InvalidAnchorsMember { reason })?;
             anchors_bytes = Some(buf);
         } else {
             let content = match std::str::from_utf8(&buf) {
@@ -431,6 +438,35 @@ mod tests {
             matches!(err, ValidationError::InvalidAnchorsMember { .. }),
             "expected InvalidAnchorsMember, got {err:?}"
         );
+    }
+
+    /// An anchors member with an EMPTY artifact reference refuses — the
+    /// mutation surface never admits one, so it is corruption: notably a
+    /// botched publish-time redaction that blanked to nothing instead of
+    /// the pinned sentinel. The sentinel form itself validates.
+    #[test]
+    fn rejects_empty_artifact_reference_in_anchors_member() {
+        let empty_ref = br#"{"version":1,"entities":{"v--foo":[{"artifact":"","grain":"file","class":"anchored","hash_stability":"stable"}]}}"#;
+        let zip = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/anchors.json", empty_ref),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let err = extract_entries(&zip, &ValidatorLimits::DEFAULT).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::InvalidAnchorsMember { .. }),
+            "expected InvalidAnchorsMember, got {err:?}"
+        );
+
+        let redacted = br#"{"version":1,"entities":{"v--foo":[{"artifact":"[redacted]","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        let zip = build_archive(&[
+            (".memstead/config.json", ok_config()),
+            (".memstead/anchors.json", redacted),
+            ("foo.md", b"# Foo\n"),
+        ]);
+        let entries = extract_entries(&zip, &ValidatorLimits::DEFAULT)
+            .expect("the pinned sentinel form is a valid member");
+        assert!(entries.anchors_bytes.is_some());
     }
 
     /// The optional `.memstead/provenance.json` payload is recognised and

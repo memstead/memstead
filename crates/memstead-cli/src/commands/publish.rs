@@ -76,6 +76,21 @@ pub struct Args {
     #[arg(long, value_name = "SEMVER")]
     pub version: Option<String>,
 
+    /// Blank every artifact reference in the packaged anchors sidecar —
+    /// the `artifact` field and each `derived_from` entry — so the
+    /// published mem discloses no source identity while the trust
+    /// metadata (provenance class, at_version, grain, hash, source name)
+    /// stays readable. Redact, not strip: consumers still see how
+    /// strongly each entity claims fidelity to a source, without
+    /// learning which source. The workspace's own sidecar is never
+    /// touched. Residual disclosure remains by design — grain reveals
+    /// the medium shape, at_version may carry a commit SHA, source is
+    /// your chosen name, and hash permits confirming guessed content.
+    /// Not valid with a pre-built archive PATH, whose anchors are
+    /// already baked in — use --mem or the bare folder shape instead.
+    #[arg(long)]
+    pub redact_anchors: bool,
+
     /// Assemble and resolve everything, print exactly what would be
     /// published (mem, version, scope, archive size), but POST
     /// nothing and mutate nothing — including no version bump. The safe
@@ -134,6 +149,21 @@ fn run_with_root(
         None => None,
     };
 
+    // 0b. `--redact-anchors` transforms the sidecar where the archive is
+    //     assembled — pre-built bytes are refused up front (before any
+    //     auth or network step), same precedent as `--version` above.
+    if args.redact_anchors && args.archive.is_some() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--redact-anchors cannot be combined with a pre-built archive PATH (its \
+             anchors are already baked in) — drop the PATH and use --mem <name>, or run \
+             the bare `memstead publish` from the mem's folder, both of which assemble \
+             the archive and can redact it",
+        )
+        .into());
+    }
+
     // 1. Resolve archive bytes by input shape (priority order):
     //    archive PATH > `--mem NAME` (engine export-to-bytes, any
     //    backend) > bare (folder assembly). The two assembling shapes
@@ -167,7 +197,7 @@ fn run_with_root(
             let bytes = engine
                 .export_mem_to_bytes(mem_name)
                 .map_err(CliError::from_engine_op)?;
-            stage_bytes_to_tempfile(&bytes)?
+            stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
         } else {
             let workspace_root = resolve_workspace_root(root_override.as_deref())?;
             let bytes = assemble_archive(&workspace_root).map_err(|e| {
@@ -177,7 +207,7 @@ fn run_with_root(
                     format!("assemble archive: {e}"),
                 )
             })?;
-            stage_bytes_to_tempfile(&bytes)?
+            stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
         };
 
     // 2. Dry run: report the resolved publish and stop — no auth, no
@@ -234,6 +264,22 @@ fn run_with_root(
         Ok(resp) => emit_success(ctx, &base, &resp),
         Err(e) => Err(map_publish_error(e).into()),
     }
+}
+
+/// Apply `--redact-anchors` to assembled archive bytes — publish-time
+/// only, on the staged copy; the workspace's own sidecar is untouched.
+/// An archive with no anchors member passes through byte-identical.
+fn redact_if_requested(args: &Args, bytes: Vec<u8>) -> Result<Vec<u8>, CliError> {
+    if !args.redact_anchors {
+        return Ok(bytes);
+    }
+    memstead_base::filesystem::publish::redact_archive_anchors(&bytes).map_err(|e| {
+        CliError::new(
+            ExitKind::Validation,
+            "ARCHIVE_ASSEMBLY_FAILED",
+            format!("redact anchors: {e}"),
+        )
+    })
 }
 
 /// A `<domain>:<handle>` scope override → the domain. A domain scope's prefix
@@ -722,6 +768,7 @@ mod tests {
                     scope: None,
                     version: None,
                     dry_run: false,
+                    redact_anchors: false,
                     token: Some("fixture-token".to_string()),
                     registry: Some(base_clone),
                 },
@@ -763,6 +810,7 @@ mod tests {
                 scope: None,
                 version: None,
                 dry_run: false,
+                redact_anchors: false,
                 token: Some("fixture-token".to_string()),
                 registry: Some("http://127.0.0.1:1".to_string()),
             },
@@ -799,6 +847,7 @@ mod tests {
                 scope: None,
                 version: None,
                 dry_run: false,
+                redact_anchors: false,
                 token: Some("fixture-token".to_string()),
                 registry: Some("http://127.0.0.1:1".to_string()),
             },
@@ -830,6 +879,7 @@ mod tests {
                 scope: None,
                 version: Some("0.2.0".to_string()),
                 dry_run: false,
+                redact_anchors: false,
                 token: None,
                 registry: Some("http://127.0.0.1:1".to_string()),
             },
@@ -868,6 +918,7 @@ mod tests {
                     scope: None,
                     version: None,
                     dry_run: true,
+                    redact_anchors: false,
                     token: None,
                     registry: Some(base_clone),
                 },
@@ -884,5 +935,101 @@ mod tests {
             captured.lock().unwrap().is_empty(),
             "dry-run must not POST anything to the registry"
         );
+    }
+
+    /// `--redact-anchors` with a pre-built archive PATH refuses typed,
+    /// BEFORE any auth or network step — the registry URL points at a
+    /// closed port, so reaching the network would surface a different
+    /// error than the refusal asserted here. The unflagged pre-built
+    /// shape is untouched by the new gate (it proceeds far enough to
+    /// hit the file read instead).
+    #[test]
+    fn redact_anchors_refuses_prebuilt_archive_path() {
+        let ctx = CliContext {
+            json: false,
+            quiet: false,
+            role: Default::default(),
+        };
+        let err = run_with_root(
+            &ctx,
+            Args {
+                archive: Some(PathBuf::from("/nonexistent/some.mem")),
+                mem: None,
+                scope: None,
+                version: None,
+                dry_run: false,
+                redact_anchors: true,
+                token: Some("fixture-token".to_string()),
+                registry: Some("http://127.0.0.1:1".to_string()),
+            },
+            None,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--redact-anchors") && msg.contains("baked in"),
+            "typed refusal names the flag and the alternative: {msg}"
+        );
+    }
+
+    /// A redacted bare-shape publish POSTs a package whose anchors
+    /// sidecar carries the sentinel and not the source path — and the
+    /// workspace's own sidecar is untouched afterwards.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn redacted_publish_posts_sentinel_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        write_publishable_workspace(&tmp, "demo");
+        std::fs::write(
+            tmp.path().join("first.md"),
+            "---\ntype: spec\n---\n# First\n",
+        )
+        .unwrap();
+        let sidecar_path = tmp.path().join(".memstead").join("anchors.json");
+        let local = br#"{"version":1,"entities":{"demo--first":[{"artifact":"src/private.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#;
+        std::fs::write(&sidecar_path, local).unwrap();
+
+        let (base, captured, handle) = spawn_fixture_publish_registry().await;
+        let workspace = tmp.path().to_path_buf();
+        let base_clone = base.clone();
+        let captured_clone = captured.clone();
+        let body = tokio::task::spawn_blocking(move || {
+            let ctx = CliContext {
+                json: false,
+                quiet: false,
+                role: Default::default(),
+            };
+            run_with_root(
+                &ctx,
+                Args {
+                    archive: None,
+                    mem: None,
+                    scope: None,
+                    version: None,
+                    dry_run: false,
+                    redact_anchors: true,
+                    token: Some("fixture-token".to_string()),
+                    registry: Some(base_clone),
+                },
+                Some(workspace),
+            )?;
+            Ok::<Vec<u8>, anyhow::Error>(captured_clone.lock().unwrap().clone())
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        handle.abort();
+
+        let posted = String::from_utf8_lossy(&body).into_owned();
+        assert!(
+            posted.contains("[redacted]"),
+            "posted package carries the sentinel"
+        );
+        assert!(
+            !posted.contains("src/private.rs"),
+            "posted package must not carry the artifact path"
+        );
+        // Publish-time only: the workspace sidecar still names the source.
+        let after = std::fs::read(&sidecar_path).unwrap();
+        assert_eq!(after, local, "local sidecar bytes are byte-identical");
     }
 }

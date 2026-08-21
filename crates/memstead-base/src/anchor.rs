@@ -66,6 +66,15 @@ pub const ANCHOR_SIDECAR_VERSION: u32 = 1;
 /// mutation refuses and the entity is not written.
 pub const INVALID_ANCHOR_CODE: &str = "INVALID_ANCHOR";
 
+/// The pinned sentinel a publish-time redaction writes into every
+/// artifact reference (`artifact`, `derived_from` entries). A fixed,
+/// visibly-artificial form rather than an empty string: the anchor entry
+/// stays readable (class, counts, `at_version`, hash — the trust
+/// metadata), while the reference discloses nothing — and an empty
+/// reference stays what it always was, malformed
+/// ([`AnchorSidecar::validate_artifact_references`]).
+pub const REDACTED_ARTIFACT_SENTINEL: &str = "[redacted]";
+
 // ---------------------------------------------------------------------------
 // Provenance class
 // ---------------------------------------------------------------------------
@@ -990,6 +999,49 @@ impl AnchorSidecar {
         }
     }
 
+    /// Blank every artifact reference — `artifact` and each `derived_from`
+    /// entry — to [`REDACTED_ARTIFACT_SENTINEL`], keeping everything else:
+    /// class, grain, `at_version`, hash, hash-stability, binding, source,
+    /// and the per-entity anchor counts. Redact, not strip: a consumer
+    /// still reads *how strongly* each entity claims fidelity to a source
+    /// without learning *which* source. Publish-time only by design — no
+    /// engine path calls this against workspace state.
+    pub fn redact_artifact_references(&mut self) {
+        for anchors in self.entities.values_mut() {
+            for anchor in anchors {
+                anchor.artifact = REDACTED_ARTIFACT_SENTINEL.to_string();
+                for input in &mut anchor.derived_from {
+                    *input = REDACTED_ARTIFACT_SENTINEL.to_string();
+                }
+            }
+        }
+    }
+
+    /// Structural check on artifact references: every `artifact` and every
+    /// `derived_from` entry must be non-empty. The mutation surface never
+    /// admits an empty reference (`INVALID_ANCHOR`), so a sidecar carrying
+    /// one is corruption — including a botched redaction that blanked to
+    /// nothing instead of the pinned sentinel. Returns the first offence.
+    pub fn validate_artifact_references(&self) -> Result<(), String> {
+        for (entity_id, anchors) in &self.entities {
+            for anchor in anchors {
+                if anchor.artifact.trim().is_empty() {
+                    return Err(format!(
+                        "entity `{entity_id}` carries an anchor with an empty artifact \
+                         reference"
+                    ));
+                }
+                if anchor.derived_from.iter().any(|d| d.trim().is_empty()) {
+                    return Err(format!(
+                        "entity `{entity_id}` carries an anchor with an empty \
+                         `derived_from` entry"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Drop `entity_id`'s anchors entirely (delete leg). Idempotent.
     pub fn remove(&mut self, entity_id: &str) {
         self.entities.remove(entity_id);
@@ -1014,6 +1066,105 @@ impl AnchorSidecar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Redaction blanks exactly the two artifact-reference fields — to the
+    /// pinned sentinel, never removal — and keeps everything else: class,
+    /// grain, `at_version`, hash, hash-stability, binding, source, and the
+    /// per-entity anchor counts.
+    #[test]
+    fn redaction_blanks_references_and_keeps_trust_metadata() {
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "m--alpha",
+            vec![
+                Anchor {
+                    artifact: "src/lib.rs".into(),
+                    grain: AnchorGrain::File,
+                    class: AnchorProvenanceClass::Anchored,
+                    at_version: Some(AnchorVersion::Commit("abc123".into())),
+                    hash: Some("h1".into()),
+                    hash_stability: AnchorHashStability::Stable,
+                    derived_from: vec![],
+                    binding: Some("bhash".into()),
+                    source: Some("source-tree".into()),
+                },
+                Anchor {
+                    artifact: "docs/summary.md".into(),
+                    grain: AnchorGrain::File,
+                    class: AnchorProvenanceClass::Derived,
+                    at_version: None,
+                    hash: Some("h2".into()),
+                    hash_stability: AnchorHashStability::Unstable,
+                    derived_from: vec!["notes/a.md".into(), "notes/b.md".into()],
+                    binding: None,
+                    source: None,
+                },
+            ],
+        );
+
+        sidecar.redact_artifact_references();
+
+        let anchors = sidecar.get("m--alpha");
+        assert_eq!(anchors.len(), 2, "no anchor entry is dropped");
+        for a in anchors {
+            assert_eq!(a.artifact, REDACTED_ARTIFACT_SENTINEL);
+            for d in &a.derived_from {
+                assert_eq!(d, REDACTED_ARTIFACT_SENTINEL);
+            }
+        }
+        assert_eq!(
+            anchors[0].at_version,
+            Some(AnchorVersion::Commit("abc123".into()))
+        );
+        assert_eq!(anchors[0].hash.as_deref(), Some("h1"));
+        assert_eq!(anchors[0].binding.as_deref(), Some("bhash"));
+        assert_eq!(anchors[0].source.as_deref(), Some("source-tree"));
+        assert_eq!(anchors[1].class, AnchorProvenanceClass::Derived);
+        assert_eq!(anchors[1].derived_from.len(), 2, "derivation arity kept");
+        // A redacted sidecar is structurally valid — the sentinel is not
+        // an empty reference.
+        sidecar.validate_artifact_references().unwrap();
+    }
+
+    /// The structural reference check refuses empty `artifact` and empty
+    /// `derived_from` entries — including a botched redaction that blanked
+    /// to nothing instead of the sentinel.
+    #[test]
+    fn empty_artifact_references_are_refused() {
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "m--alpha",
+            vec![Anchor {
+                artifact: "".into(),
+                grain: AnchorGrain::File,
+                class: AnchorProvenanceClass::Anchored,
+                at_version: None,
+                hash: None,
+                hash_stability: AnchorHashStability::Stable,
+                derived_from: vec![],
+                binding: None,
+                source: None,
+            }],
+        );
+        assert!(sidecar.validate_artifact_references().is_err());
+
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "m--beta",
+            vec![Anchor {
+                artifact: "docs/x.md".into(),
+                grain: AnchorGrain::File,
+                class: AnchorProvenanceClass::Derived,
+                at_version: None,
+                hash: None,
+                hash_stability: AnchorHashStability::Stable,
+                derived_from: vec!["  ".into()],
+                binding: None,
+                source: None,
+            }],
+        );
+        assert!(sidecar.validate_artifact_references().is_err());
+    }
 
     // -- wire vocabulary is the contract -----------------------------------
 

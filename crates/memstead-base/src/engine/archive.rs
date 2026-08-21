@@ -767,6 +767,128 @@ mod tests {
         );
     }
 
+    /// Publish-time redaction (W6/03): redacting an exported archive's
+    /// anchors passes validation, survives the canonical re-pack, and
+    /// installs with the redacted sidecar reading back intact — the
+    /// sentinel where the artifact reference was, the trust metadata
+    /// (class, hash) untouched, and the anchor count unchanged. The
+    /// unredacted bytes are not altered by the transform's existence:
+    /// an archive without the flag stays byte-identical, and a redacted
+    /// archive of a mem with NO anchors is byte-identical input too.
+    #[test]
+    fn redacted_archive_survives_repack_and_install() {
+        use crate::filesystem::publish::redact_archive_anchors;
+
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("specs");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+        let mut alpha = empty_create_args("specs", "Alpha");
+        alpha.anchors = vec![crate::anchor::AnchorInput {
+            artifact: Some("src/secret/module.rs".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            hash: Some("h1".to_string()),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        }];
+        engine
+            .create_entity(alpha, actor, Some(&client), None)
+            .unwrap();
+
+        let bytes = engine.export_mem_to_bytes("specs").unwrap();
+        let redacted = redact_archive_anchors(&bytes).unwrap();
+        assert_ne!(redacted, bytes, "redaction changes the anchors member");
+
+        // Validation and the canonical re-pack accept the redacted package.
+        let validated = crate::validator::validate_and_normalize_archive(&redacted)
+            .expect("redacted archive validates");
+        let canonical =
+            extract_entries(&validated.canonical_bytes, &ValidatorLimits::DEFAULT).unwrap();
+        let sidecar = crate::anchor::AnchorSidecar::from_bytes(
+            canonical.anchors_bytes.as_deref().expect("member survives"),
+        )
+        .unwrap();
+        let anchors = sidecar.get("specs--alpha");
+        assert_eq!(anchors.len(), 1, "anchor count unchanged");
+        assert_eq!(
+            anchors[0].artifact,
+            crate::anchor::REDACTED_ARTIFACT_SENTINEL
+        );
+        assert_eq!(
+            anchors[0].hash.as_deref(),
+            Some("h1"),
+            "trust metadata kept"
+        );
+
+        // Install reads the redacted state back honestly.
+        let installed = Engine::from_archive_bytes(validated.canonical_bytes).unwrap();
+        let read_back = installed.entity_anchors(&crate::EntityId::new("specs", "alpha"));
+        assert_eq!(read_back.len(), 1);
+        assert_eq!(
+            read_back[0].artifact,
+            crate::anchor::REDACTED_ARTIFACT_SENTINEL
+        );
+        assert!(
+            !String::from_utf8_lossy(&redacted).contains("src/secret/module.rs"),
+            "the artifact path must not survive anywhere in the package"
+        );
+
+        // The workspace the author published from is unchanged: the local
+        // sidecar still carries the real reference, and local anchors
+        // rendering reads it — redaction happened on the staged copy only.
+        let local =
+            std::fs::read_to_string(mem_dir.join(".memstead").join("anchors.json")).unwrap();
+        assert!(
+            local.contains("src/secret/module.rs"),
+            "local sidecar bytes untouched by a redacted publish"
+        );
+        assert_eq!(
+            engine.entity_anchors(&crate::EntityId::new("specs", "alpha"))[0].artifact,
+            "src/secret/module.rs"
+        );
+
+        // A mem with no anchors: the transform is a byte-identical no-op.
+        let mem_dir2 = tmp.path().join("plain");
+        std::fs::create_dir_all(mem_dir2.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir2.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let writer2 = FilesystemMemWriter::new(mem_dir2.clone());
+        let mut engine2 = Engine::from_mounts(vec![(
+            folder_mount("plain", mem_dir2.clone()),
+            Box::new(writer2) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        engine2
+            .create_entity(
+                empty_create_args("plain", "Only"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let plain_bytes = engine2.export_mem_to_bytes("plain").unwrap();
+        assert_eq!(
+            redact_archive_anchors(&plain_bytes).unwrap(),
+            plain_bytes,
+            "no anchors member ⇒ byte-identical passthrough"
+        );
+    }
+
     /// Serve sketch-session leg (criterion 5): an anchored write into an
     /// in-memory mem round-trips through session export → re-import. The
     /// in-memory backend is exactly what serve mounts, so this proves the

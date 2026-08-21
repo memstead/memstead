@@ -87,12 +87,47 @@ Every refusal carries a typed code (add `--json` and branch on `.code`):
 
 - **`NOT_AUTHENTICATED`** — no token and no TTY for the device flow: ``not logged in and stdin is not a TTY — set MEMSTEAD_TOKEN or run `memstead login` first``. Also the shape a 401 from the registry maps to (expired/revoked token): re-run `memstead login`.
 - **`WORKSPACE_NOT_INITIALISED`** — you ran publish outside any workspace: `no workspace found from <cwd> or any ancestor (missing .memstead/workspace.toml)`. `cd` into the workspace, pass `--workspace <path>`, or supply a pre-built archive path.
-- **`INVALID_INPUT`** — `--version` without `--mem` (the bump needs to know which mem to re-version), or `--version` combined with a pre-built archive path (its version is already baked in).
+- **`INVALID_INPUT`** — `--version` without `--mem` (the bump needs to know which mem to re-version), or `--version` / `--redact-anchors` combined with a pre-built archive path (its content is already baked in — assemble with `--mem` or the bare shape instead).
 - **`INVALID_VERSION`** — `--version` that isn't a semver.
 - **`REGISTRY_VALIDATION_FAILED`** — the registry rejected the archive's content (a 400); the message carries the validation variant, the offending path inside the archive, and the detail.
 - **`ARCHIVE_TOO_LARGE`** — the archive exceeds the 2 MB publisher cap. Slim the mem or split it.
 - **`RATE_LIMITED`** — too many publishes in a window; the message says how many seconds to wait.
 - **`FORBIDDEN`** — you tried to publish into a scope that isn't yours (`--scope` overrides are reserved for registry admins; normal publishes never need it).
+
+## Publishing over a private source: `--redact-anchors`
+
+A mem built from a source carries provenance anchors — durable records tying
+each entity to the artifacts it describes. They travel in the published
+archive by design: a consumer reads *how strongly* each entity claims
+fidelity to its source. But every anchor also names the source's file paths
+or URLs. If your source is private, publish with redaction:
+
+```bash
+memstead publish --mem my-notes --redact-anchors
+```
+
+Every artifact reference in the packaged sidecar — the `artifact` field and
+each `derived_from` entry — becomes the fixed sentinel `[redacted]`, while
+the trust metadata survives: provenance class, `at_version`, grain, hash,
+hash stability, and your source name. A consumer still sees the trust grade
+of every entity; they no longer see which files it came from. Reverse
+artifact lookup (`memstead anchors --artifact <path>`) on an installed
+redacted mem finds nothing — by design.
+
+Two things to know:
+
+- **Your workspace is untouched.** Redaction happens on the staged copy at
+  publish time; the local sidecar keeps its real references, and local
+  anchors, verify, and drift behaviour are unchanged.
+- **Redaction removes identity, not existence.** The kept fields still
+  disclose *something*: `grain` reveals the medium shape, `at_version` may
+  carry a commit SHA or ETag, `source` is the name you chose for the
+  source, and `hash` lets someone confirm guessed content against the
+  prepared form. A redacted package is not free of source-related
+  information — it just names no artifact.
+
+Without the flag, published anchors ride untouched — that honest default is
+unchanged.
 
 ## Publishing a pre-built archive
 
@@ -101,6 +136,9 @@ If you already have a `.mem` file — e.g. from `memstead export --format mem -o
 ```bash
 memstead publish my.mem
 ```
+
+Content-shaping flags (`--version`, `--redact-anchors`) refuse on this
+shape — the bytes are already baked. Re-export, or use an assembling shape.
 
 ## Where next
 

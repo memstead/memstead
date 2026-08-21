@@ -20,6 +20,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **`memstead publish --redact-anchors` — trust metadata without the
+  source's identity.** Every artifact reference in the packaged anchors
+  sidecar — the `artifact` field and each `derived_from` entry — becomes the
+  fixed sentinel `[redacted]`, while the provenance class, `at_version`,
+  grain, hash, hash stability, and source name survive: a consumer still
+  reads how strongly each entity claims fidelity to a source without
+  learning which source. Redact, not strip — and publish-time only: the
+  workspace's own sidecar is never touched, and without the flag published
+  anchors ride byte-identical to before. The pre-built archive shape
+  refuses the flag (its anchors are already baked in), same precedent as
+  `--version`. Redaction removes identity, not existence: the kept fields
+  still reveal the medium shape, possibly a commit SHA, the author's source
+  name, and a hash that permits confirming guessed content — the publish
+  guide states this plainly.
+
+  Two hardenings landed with it: the engine-agnostic folder assembler now
+  embeds the mem's anchors sidecar (a bare `memstead publish` of a folder
+  mem used to ship silently without the anchors its engine-exported sibling
+  carries — the publish-strip failure the anchors contract exists to
+  close), and archive validation refuses an anchors member carrying an
+  empty artifact reference, so a botched redaction is caught rather than
+  shipped.
 - **`memstead projection check-path` — one deny dialect, engine-answered.**
   Is a path (or a Glob/Grep pattern) hidden by a binding's `deny_paths`? The
   engine now answers directly — single-path and `--batch` stdin forms, the

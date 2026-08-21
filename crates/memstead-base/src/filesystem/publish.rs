@@ -88,6 +88,12 @@ pub enum AssembleError {
     /// Serialising the archive's `.memstead/config.json`.
     #[error("config serialisation: {0}")]
     Serialise(#[from] serde_json::Error),
+    /// The workspace's anchors sidecar (or an archive's anchors member)
+    /// is unreadable or malformed. A refusal, never a silent drop — an
+    /// archive shipping without the anchors its workspace carries is
+    /// exactly the publish-strip failure the anchors contract closes.
+    #[error("anchors sidecar: {0}")]
+    Anchors(String),
 }
 
 /// Build the archive bytes for the workspace at `workspace_root`.
@@ -149,6 +155,29 @@ pub fn assemble_archive(workspace_root: &Path) -> Result<Vec<u8>, AssembleError>
         zip.write_all(&config_bytes)
             .map_err(|e| AssembleError::Io(format!("write config: {e}")))?;
 
+        // .memstead/anchors.json — the engine-owned anchors sidecar,
+        // when the mem carries one. The engine exporters have always
+        // threaded it (E3a: anchors travel in published archives, by
+        // contract); this walker previously did not, so a bare
+        // `memstead publish` of a folder mem silently shipped without
+        // its anchors — the publish-strip failure the contract exists
+        // to close. A present-but-malformed sidecar refuses rather than
+        // drops.
+        let anchors_path = workspace_root.join(crate::anchor::ANCHOR_SIDECAR_PATH);
+        if anchors_path.exists() {
+            let bytes = std::fs::read(&anchors_path)
+                .map_err(|e| AssembleError::Anchors(format!("read: {e}")))?;
+            let sidecar = crate::anchor::AnchorSidecar::from_bytes(&bytes)
+                .map_err(|e| AssembleError::Anchors(e.to_string()))?;
+            // An anchorless sidecar file embeds nothing — the archive
+            // contract is "no anchors ⇒ no member".
+            if !sidecar.entities.is_empty() {
+                zip.start_file(crate::anchor::ANCHOR_SIDECAR_PATH, opts)?;
+                zip.write_all(&bytes)
+                    .map_err(|e| AssembleError::Io(format!("write anchors: {e}")))?;
+            }
+        }
+
         // .memstead/schema/* — `collect_schema_source` returns paths
         // rooted at the schema dir (`schema.yaml`, `types/<name>.yaml`).
         // Prepend the archive's `.memstead/schema/` root so the validator
@@ -173,6 +202,61 @@ pub fn assemble_archive(workspace_root: &Path) -> Result<Vec<u8>, AssembleError>
         }
 
         zip.finish()?;
+    }
+    Ok(buf)
+}
+
+/// Redact the anchors sidecar inside assembled `.mem` archive bytes:
+/// every `artifact` and every `derived_from` entry becomes
+/// [`crate::anchor::REDACTED_ARTIFACT_SENTINEL`]; class, grain,
+/// `at_version`, hash, hash-stability, binding, source, and the
+/// per-entity anchor counts survive — redact, not strip, so the trust
+/// grade stays readable without the source's identity.
+///
+/// Operates on finished archive bytes so ANY packaging caller can apply
+/// it, whichever assembler produced them (the engine's
+/// `export_mem_to_bytes`, this module's [`assemble_archive`]). An archive
+/// with no anchors member returns byte-identical input. Every member is
+/// rewritten with the same deterministic options the assembler uses; the
+/// registry's canonical re-pack normalises the bytes again regardless.
+pub fn redact_archive_anchors(archive: &[u8]) -> Result<Vec<u8>, AssembleError> {
+    use crate::anchor::{ANCHOR_SIDECAR_PATH, AnchorSidecar};
+    use std::io::Read as _;
+
+    let mut zip = zip::ZipArchive::new(Cursor::new(archive))
+        .map_err(|e| AssembleError::Anchors(format!("read archive: {e}")))?;
+    let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+    if !names.iter().any(|n| n == ANCHOR_SIDECAR_PATH) {
+        return Ok(archive.to_vec());
+    }
+
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let cursor = Cursor::new(&mut buf);
+        let mut out = zip::ZipWriter::new(cursor);
+        let opts = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .last_modified_time(zip::DateTime::default());
+        for index in 0..zip.len() {
+            let mut member = zip
+                .by_index(index)
+                .map_err(|e| AssembleError::Anchors(format!("read member: {e}")))?;
+            let name = member.name().to_string();
+            let mut bytes = Vec::new();
+            member
+                .read_to_end(&mut bytes)
+                .map_err(|e| AssembleError::Io(format!("read member {name}: {e}")))?;
+            if name == ANCHOR_SIDECAR_PATH {
+                let mut sidecar = AnchorSidecar::from_bytes(&bytes)
+                    .map_err(|e| AssembleError::Anchors(e.to_string()))?;
+                sidecar.redact_artifact_references();
+                bytes = sidecar.to_bytes();
+            }
+            out.start_file(&name, opts)?;
+            out.write_all(&bytes)
+                .map_err(|e| AssembleError::Io(format!("write member {name}: {e}")))?;
+        }
+        out.finish()?;
     }
     Ok(buf)
 }
@@ -259,6 +343,65 @@ mod tests {
             .collect();
         assert!(md_paths.contains(&"first.md"));
         assert!(md_paths.contains(&"second.md"));
+    }
+
+    /// The engine-agnostic assembler embeds the mem's anchors sidecar —
+    /// closing the gap where a bare `memstead publish` of a folder mem
+    /// silently shipped without the anchors its engine-exported sibling
+    /// carries. A malformed sidecar refuses (never a silent drop); an
+    /// anchorless (empty-entities) sidecar file embeds no member; and
+    /// [`redact_archive_anchors`] over the assembled bytes blanks the
+    /// references while the package keeps validating.
+    #[test]
+    fn assemble_archive_embeds_and_redacts_anchors() {
+        let tmp = TempDir::new().unwrap();
+        let root = write_workspace(&tmp, "demo", true);
+        write_spec(&root, "first", "First");
+        std::fs::write(
+            root.join(".memstead").join("anchors.json"),
+            br#"{"version":1,"entities":{"demo--first":[{"artifact":"src/private.rs","grain":"file","class":"anchored","hash_stability":"stable","hash":"h1"}]}}"#,
+        )
+        .unwrap();
+
+        let bytes = assemble_archive(&root).expect("archive must build");
+        let limits = ValidatorLimits::default();
+        let entries = extract_entries(&bytes, &limits).expect("validator must accept");
+        let sidecar_bytes = entries.anchors_bytes.expect("anchors member embedded");
+        assert!(String::from_utf8_lossy(&sidecar_bytes).contains("src/private.rs"));
+
+        // Redaction over the assembled bytes: sentinel in, identity out,
+        // and the package still validates.
+        let redacted = redact_archive_anchors(&bytes).unwrap();
+        let entries = extract_entries(&redacted, &limits).expect("redacted archive validates");
+        let sidecar =
+            crate::anchor::AnchorSidecar::from_bytes(&entries.anchors_bytes.unwrap()).unwrap();
+        assert_eq!(
+            sidecar.get("demo--first")[0].artifact,
+            crate::anchor::REDACTED_ARTIFACT_SENTINEL
+        );
+        assert!(!String::from_utf8_lossy(&redacted).contains("src/private.rs"));
+
+        // An empty-entities sidecar embeds no member.
+        std::fs::write(
+            root.join(".memstead").join("anchors.json"),
+            br#"{"version":1,"entities":{}}"#,
+        )
+        .unwrap();
+        let bytes = assemble_archive(&root).unwrap();
+        assert!(
+            extract_entries(&bytes, &limits)
+                .unwrap()
+                .anchors_bytes
+                .is_none(),
+            "no anchors ⇒ no member"
+        );
+
+        // A malformed sidecar refuses the assembly.
+        std::fs::write(root.join(".memstead").join("anchors.json"), b"{ nope").unwrap();
+        assert!(matches!(
+            assemble_archive(&root),
+            Err(AssembleError::Anchors(_))
+        ));
     }
 
     #[test]
