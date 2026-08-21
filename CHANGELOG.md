@@ -41,6 +41,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   literal `[[slug]]` and is now plain text, because the shared renderer fixed
   that leak for both surfaces at once. Everything else the served document
   emits is unchanged.
+
+  The resolver reads the full wiki-link grammar, the canonical colon
+  cross-mem form (`[[mem:slug]]`) included — target normalisation is the
+  same routine the parser and validators use, not a hand-rolled subset, so a
+  fully-qualified reference a live mem legitimately carries resolves instead
+  of degrading to plain text. A qualified miss stays a miss: the author
+  named a mem, and rebinding the slug elsewhere would be a guess.
 - **Graph-medium bindings now measure fidelity instead of performing it.** A
   binding whose source is another mem enumerates that mem's in-scope entities
   as a real `S(D)` denominator, so coverage is computed rather than vacuously

@@ -1368,28 +1368,37 @@ fn llms_txt_export_pins_the_document_shape() {
         "the count excludes the stub, matching the header's own promise: {with_stub}"
     );
 
-    // Ordering is lexical by id, asserted as a full sequence over THREE
-    // entities. Two would not do it: the store iterates a HashMap, so with two
-    // entries a dropped `ids.sort()` passes roughly half the time — a coin
-    // flip, not an assertion. A third id that sorts between the other two
-    // makes any unsorted order fail.
-    memstead()
-        .current_dir(tmp.path())
-        .args([
-            "create",
-            "--mem",
-            "cli-test",
-            "--title",
-            "Amber",
-            "--type",
-            "spec",
-            "--section",
-            "identity=Sorts between alpha and beta.",
-            "--section",
-            "purpose=Ordering fixture.",
-        ])
-        .assert()
-        .success();
+    // Ordering is lexical by id, asserted as a full sequence over EIGHT
+    // entities. The store iterates a HashMap, so a small sequence is a dice
+    // roll, not an assertion: over three entities a dropped `ids.sort()`
+    // still passed one run in six under fault injection. Eight (1/8! ≈
+    // 2.5e-5) makes an unsorted order fail every run that will ever matter.
+    for (title, blurb) in [
+        ("Amber", "Sorts between alpha and beta."),
+        ("Delta", "Ordering fixture."),
+        ("Echo", "Ordering fixture."),
+        ("Gamma", "Ordering fixture."),
+        ("Iota", "Ordering fixture."),
+        ("Zeta", "Ordering fixture."),
+    ] {
+        memstead()
+            .current_dir(tmp.path())
+            .args([
+                "create",
+                "--mem",
+                "cli-test",
+                "--title",
+                title,
+                "--type",
+                "spec",
+                "--section",
+                &format!("identity={blurb}"),
+                "--section",
+                "purpose=Ordering fixture.",
+            ])
+            .assert()
+            .success();
+    }
     let ordered = String::from_utf8(
         memstead()
             .current_dir(tmp.path())
@@ -1401,19 +1410,21 @@ fn llms_txt_export_pins_the_document_shape() {
             .clone(),
     )
     .unwrap();
-    let positions: Vec<usize> = ["# Alpha", "# Amber", "# Beta"]
-        .iter()
-        .map(|h| {
-            ordered
-                .find(h)
-                .unwrap_or_else(|| panic!("{h} present in: {ordered}"))
-        })
-        .collect();
+    let positions: Vec<usize> = [
+        "# Alpha", "# Amber", "# Beta", "# Delta", "# Echo", "# Gamma", "# Iota", "# Zeta",
+    ]
+    .iter()
+    .map(|h| {
+        ordered
+            .find(h)
+            .unwrap_or_else(|| panic!("{h} present in: {ordered}"))
+    })
+    .collect();
     let mut sorted = positions.clone();
     sorted.sort_unstable();
     assert_eq!(
         positions, sorted,
-        "entities render in lexical id order (alpha, amber, beta): {ordered}"
+        "entities render in lexical id order over all eight: {ordered}"
     );
 
     // The type line, and each entity exactly once.

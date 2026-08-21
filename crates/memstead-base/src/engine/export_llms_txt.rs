@@ -87,7 +87,11 @@ pub fn strip_frontmatter(md: &str) -> String {
 /// Rewrite `[[…]]` wiki-links to markdown links, resolving each occurrence
 /// under a three-rule precedence:
 ///
-/// 1. **Full ids** (`[[mem--slug]]`) — unambiguous, always resolve.
+/// 1. **Qualified references** — the dash form (`[[mem--slug]]`) and the
+///    canonical colon form (`[[mem:slug]]`, the grammar's cross-mem shape,
+///    which hierarchical mems can only write this way) — unambiguous,
+///    always resolve; a qualified miss never falls through to the slug
+///    passes, because the author named a mem.
 /// 2. **Local bare slugs** — a slug present in the source mem binds there,
 ///    however many other mems reuse it. That is the engine's authoring
 ///    semantics: a bare wiki-link is a same-mem reference.
@@ -133,16 +137,32 @@ pub fn linkify_wikilinks(
         }
     }
 
-    let resolve = |inner: &str| -> Option<(String, String)> {
-        if let Some(title) = by_id.get(inner) {
-            return Some((inner.to_string(), title.to_string()));
+    let resolve = |target: &str| -> Option<(String, String)> {
+        if let Some(title) = by_id.get(target) {
+            return Some((target.to_string(), title.to_string()));
         }
-        if let Some((id, title)) = local.get(inner) {
+        // The canonical colon form (`mem:slug`) is the same qualified
+        // reference as the dash form one grammar tier over — the entity
+        // parser and both wiki-link decoders read it, and hierarchical mems
+        // can only be referenced this way. Canonicalise and look up; a miss
+        // stays a miss, because the author named a mem and guessing a slug
+        // pass instead would rebind the reference.
+        if !target.contains("::")
+            && let Some((prefix, slug)) = target.split_once(':')
+            && !prefix.is_empty()
+            && !slug.is_empty()
+        {
+            let id = crate::entity::EntityId::new(prefix, slug);
+            return by_id
+                .get(id.as_ref())
+                .map(|title| (id.to_string(), title.to_string()));
+        }
+        if let Some((id, title)) = local.get(target) {
             return Some((id.to_string(), title.to_string()));
         }
         // `Some(None)` is an ambiguous foreign slug — deliberately unresolved.
         foreign
-            .get(inner)
+            .get(target)
             .copied()
             .flatten()
             .map(|(id, title)| (id.to_string(), title.to_string()))
@@ -166,23 +186,18 @@ pub fn linkify_wikilinks(
             // The link text is read from the ORIGINAL: the masked view is
             // only a map of where code is.
             let inner = &body[inner_start..inner_end];
-            // The engine's wiki-link grammar is `[[target]]`,
-            // `[[target|label]]` and `[[target#Section]]` — the entity parser
-            // and the strict validator both read all three. Only the TARGET
-            // half resolves; an author-supplied label wins as link text,
-            // because that is what the author chose a reader to see.
-            //
-            // Passing the whole span to the resolver instead made every
-            // aliased reference miss, and land in the plain-text arm — which
-            // then printed the internal id and the pipe into prose exactly
-            // where the author had written a display label.
-            let (target, label) = match inner.split_once('|') {
-                Some((t, l)) => (t.trim(), Some(l.trim())),
-                None => (inner.trim(), None),
-            };
-            let target = target.split('#').next().unwrap_or(target).trim();
+            // Only the TARGET half resolves; an author-supplied label wins
+            // as link text, because that is what the author chose a reader
+            // to see. Target normalisation is the decoders' own
+            // `strip_wiki_link_decorations` — `|label`, `#anchor`, `../`,
+            // `.md` — so this renderer reads exactly the grammar the parser
+            // and validators read, no form less. Two rounds of the same
+            // leak (the aliased form, then the colon form) came from
+            // hand-rolling a subset of it here.
+            let label = inner.split_once('|').map(|(_, l)| l.trim());
+            let target = crate::entity::id::strip_wiki_link_decorations(inner);
             out.push_str(&body[cursor..i]);
-            match resolve(target) {
+            match resolve(&target) {
                 Some((id, title)) => {
                     out.push_str(&entity_md_link(href_prefix, &id, label.unwrap_or(&title)))
                 }
@@ -199,7 +214,7 @@ pub fn linkify_wikilinks(
                 // Print the label when the author gave one, else the target —
                 // never the raw `target|label` span, which would put an
                 // internal id and a pipe in front of the reader.
-                None => out.push_str(label.unwrap_or(target)),
+                None => out.push_str(label.unwrap_or(&target)),
             }
             cursor = inner_end + 2;
             i = inner_end + 2;
@@ -506,6 +521,39 @@ mod tests {
         assert_eq!(
             linkify_wikilinks("See [[ghost|that thing]].".to_string(), &t, "", "engine"),
             "See that thing."
+        );
+    }
+
+    /// The canonical colon cross-mem form (`[[mem:slug]]`) is a qualified
+    /// reference like the dash form — the grammar's own shape for it, and
+    /// the only one a hierarchical mem can be written in. It resolves to
+    /// the same target, an author label still wins as link text, and a miss
+    /// degrades to plain text WITHOUT falling through to the slug passes:
+    /// the author named a mem, and rebinding the slug elsewhere would be a
+    /// guess. The body of a live mem carried exactly this form into prose
+    /// as unresolved text when only `|` and `#` were hand-stripped here.
+    #[test]
+    fn colon_cross_mem_form_resolves_as_a_qualified_reference() {
+        let t = titles();
+
+        assert_eq!(
+            linkify_wikilinks("See [[flagship:mem]].".to_string(), &t, "", "engine"),
+            "See [Mem](entity/flagship--mem)."
+        );
+        assert_eq!(
+            linkify_wikilinks(
+                "See [[engine:mem|the mem]].".to_string(),
+                &t,
+                "",
+                "flagship"
+            ),
+            "See [the mem](entity/engine--mem)."
+        );
+        // A colon miss is a miss: `pipeline` is unique in a foreign mem, but
+        // the author qualified it into a mem that does not own it.
+        assert_eq!(
+            linkify_wikilinks("See [[flagship:pipeline]].".to_string(), &t, "", "engine"),
+            "See flagship:pipeline."
         );
     }
 

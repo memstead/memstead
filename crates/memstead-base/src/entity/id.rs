@@ -584,7 +584,7 @@ pub fn wiki_link_to_id_lenient(link: &str, current_mem: &str) -> EntityId {
 /// `|alias` strip so `target#section|display` correctly drops both
 /// (the alias strip drops `|display` first, leaving `target#section`;
 /// the anchor strip then drops `#section`).
-fn strip_wiki_link_decorations(link: &str) -> String {
+pub(crate) fn strip_wiki_link_decorations(link: &str) -> String {
     let cleaned = link.trim_start_matches("[[").trim_end_matches("]]").trim();
     let target = match cleaned.find('|') {
         Some(i) => &cleaned[..i],
