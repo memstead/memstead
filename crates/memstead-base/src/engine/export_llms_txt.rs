@@ -166,11 +166,22 @@ pub fn linkify_wikilinks(
             // The link text is read from the ORIGINAL: the masked view is
             // only a map of where code is.
             let inner = &body[inner_start..inner_end];
-            if let Some((id, title)) = resolve(inner) {
-                out.push_str(&body[cursor..i]);
-                out.push_str(&entity_md_link(href_prefix, &id, &title));
-                cursor = inner_end + 2;
+            out.push_str(&body[cursor..i]);
+            match resolve(inner) {
+                Some((id, title)) => out.push_str(&entity_md_link(href_prefix, &id, &title)),
+                // Unresolvable: name it as PLAIN TEXT — never a link, never
+                // surviving `[[…]]` syntax.
+                //
+                // A link would invent a target: for an ambiguous foreign slug
+                // it would pick one of two arbitrarily, and for a stub target
+                // it would point at a page this document deliberately
+                // excludes. Leaving the brackets would put internal wiki-link
+                // syntax in front of a reader the header promised a
+                // self-contained document to. Plain text is the third option,
+                // and the only one that is neither a guess nor a leak.
+                None => out.push_str(inner),
             }
+            cursor = inner_end + 2;
             i = inner_end + 2;
             continue;
         }
@@ -372,11 +383,12 @@ mod tests {
             "A [Pipeline](entity/engine--pipeline)."
         );
 
-        // Ambiguous across two FOREIGN mems and absent locally: stays raw.
+        // Ambiguous across two FOREIGN mems and absent locally: named, not
+        // guessed — and not left as wiki-link syntax either.
         assert_eq!(
             linkify_wikilinks("A [[mem]].".to_string(), &t, "", "plugin"),
-            "A [[mem]].",
-            "an ambiguous foreign slug is never guessed"
+            "A mem.",
+            "an ambiguous foreign slug degrades to plain text, never a guess"
         );
     }
 
@@ -437,15 +449,31 @@ mod tests {
         );
     }
 
-    /// A reference to nothing stays raw — the same output an ambiguous foreign
-    /// slug gets, for the same reason: say what could not be resolved rather
-    /// than invent a target.
+    /// A reference to nothing is named in plain text — the same treatment an
+    /// ambiguous foreign slug gets, for the same reason: say what could not be
+    /// resolved without inventing a target, and without leaking internal
+    /// wiki-link syntax into a document promised as self-contained.
+    ///
+    /// The one place `[[…]]` legitimately survives is inside code, which is
+    /// never rewritten at all.
     #[test]
-    fn an_unresolvable_reference_stays_raw() {
+    fn an_unresolvable_reference_degrades_to_plain_text() {
         let t = titles();
         assert_eq!(
             linkify_wikilinks("See [[ghost]].".to_string(), &t, "", "engine"),
-            "See [[ghost]]."
+            "See ghost."
+        );
+        // A full id whose target is a stub is the same case: stubs are absent
+        // from the map by design, so the reference cannot resolve — and this
+        // is the shape the auto-generated `## Relationships` block emits.
+        assert_eq!(
+            linkify_wikilinks(
+                "- **USES**: [[engine--phantom]]".to_string(),
+                &t,
+                "",
+                "engine"
+            ),
+            "- **USES**: engine--phantom"
         );
     }
 

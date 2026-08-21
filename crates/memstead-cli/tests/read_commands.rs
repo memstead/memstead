@@ -1355,9 +1355,13 @@ fn llms_txt_export_pins_the_document_shape() {
             .clone(),
     )
     .unwrap();
+    // "No body" is the claim, not "no mention": after the plain-text
+    // degradation the stub's id legitimately appears as a named reference in
+    // the Relationships block. What must not appear is a rendered entity —
+    // a title heading of its own.
     assert!(
-        !with_stub.contains("# Phantom") && !with_stub.contains("cli-test--phantom\n"),
-        "the stub entity has no body in the document: {with_stub}"
+        !with_stub.contains("# Phantom"),
+        "the stub entity has no rendered body in the document: {with_stub}"
     );
     assert!(
         with_stub.contains("Entities: 2"),
@@ -1381,6 +1385,21 @@ fn llms_txt_export_pins_the_document_shape() {
     assert!(
         !doc.contains("[["),
         "no raw wiki-link syntax survives: {doc}"
+    );
+    // Checked on the POST-stub document too. The assertion above runs against
+    // `doc`, captured before the stub existed — so a reference that stops
+    // resolving *because* of stub exclusion would be invisible to it. The
+    // auto-generated `## Relationships` block emits full-id wiki-links to stub
+    // targets, which is exactly that case.
+    assert!(
+        !with_stub.contains("[["),
+        "an unresolvable reference is named in plain text, not left as \
+         wiki-link syntax: {with_stub}"
+    );
+    assert!(
+        with_stub.contains("cli-test--phantom"),
+        "and it is still named, so the reference is not silently dropped: \
+         {with_stub}"
     );
 
     // An unmounted mem refuses rather than emitting an empty document — a
@@ -1554,12 +1573,13 @@ fn llms_txt_foreign_slug_passes_resolve_and_never_guess() {
         "a slug unique to one foreign mem resolves there: {doc}"
     );
     assert!(
-        doc.contains("[[shared]]"),
-        "a slug two foreign mems both own is never guessed — it stays raw: {doc}"
+        !doc.contains("[[") && doc.contains("shared"),
+        "a slug two foreign mems both own is named in plain text, never \
+         guessed and never left as syntax: {doc}"
     );
     assert!(
-        doc.contains("[[ghost]]"),
-        "a reference to nothing stays raw rather than linking to a stub: {doc}"
+        doc.contains("ghost"),
+        "a reference to nothing is still named, just not linked: {doc}"
     );
     assert!(
         !doc.contains("entity/home--shared") && !doc.contains("entity/home--ghost"),
