@@ -62,13 +62,27 @@ DOCUMENTED_STEP = "memstead projection verify docs/graph --fail-on-findings"
 # install URL and `fetch-depth` and this harness stayed green. Each entry is a
 # line the copied job needs to actually work.
 DOCUMENTED_JOB_LINES = [
+    # Without a trigger the workflow never runs at all.
+    "on: [pull_request]",
+    # The install step is a `curl … | sh`; it needs a POSIX runner.
+    "runs-on: ubuntu-latest",
     "uses: actions/checkout@v4",
     # The guide's own cap prose says a shallow clone hides drift, so this is
     # load-bearing, not decoration.
     "fetch-depth: 0",
     "https://memstead.io/install.sh",
     'echo "$HOME/.memstead/bin" >> "$GITHUB_PATH"',
+    # Step 1 pipes through `tee`; without pipefail the step's status is
+    # tee's, so exit 6 is swallowed and the gate silently stops failing.
+    "set -o pipefail",
+    # Step 2 — the step the guide calls "what makes the gate trustworthy",
+    # and the half that was neither pinned nor run until a grade deleted it
+    # and this harness stayed green.
+    "Require a conclusive verdict",
 ]
+
+# The heading of the guide's second step, used to locate its script below.
+VERDICT_STEP_NAME = "Require a conclusive verdict"
 # The command that step runs, as a stranger would type it: human mode, no
 # global --json. The harness runs BOTH modes, because the mode the guide
 # prints must be the mode something gates.
@@ -141,6 +155,47 @@ def run_gate(memstead: Path, workspace: Path, json_mode: bool = True) -> tuple[i
     return proc.returncode, proc.stdout
 
 
+def extract_verdict_script(guide_text: str) -> str | None:
+    """Lift the guide's second-step shell script out of its YAML block.
+
+    Pinning the step's presence proves it is printed; running it proves it
+    WORKS. A grade inverted this script's comparison, broke its jq path and
+    deleted it outright — three mutations that each leave a copied job
+    broken, and all three passed a presence check.
+    """
+    for block in re.findall(r"```yaml\n(.*?)```", guide_text, re.DOTALL):
+        if VERDICT_STEP_NAME not in block:
+            continue
+        after = block.split(VERDICT_STEP_NAME, 1)[1]
+        lines = after.splitlines()
+        try:
+            start = next(i for i, ln in enumerate(lines) if ln.strip() == "run: |") + 1
+        except StopIteration:
+            return None
+        body, indent = [], None
+        for ln in lines[start:]:
+            if not ln.strip():
+                body.append("")
+                continue
+            lead = len(ln) - len(ln.lstrip())
+            if indent is None:
+                indent = lead
+            elif lead < indent:
+                break
+            body.append(ln[indent:])
+        return "\n".join(body).strip()
+    return None
+
+
+def run_verdict_step(script: str, workspace: Path, report: str) -> int:
+    """Run the guide's step-2 script exactly as printed, on a real payload."""
+    (workspace / "report.json").write_text(report, encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", "-c", script], cwd=workspace, capture_output=True, text=True
+    )
+    return proc.returncode
+
+
 def run(memstead: Path) -> int:
     failures = 0
 
@@ -195,10 +250,21 @@ def run(memstead: Path) -> int:
     # produce. Deliberately narrow: only the phrasings that instruct a
     # reader to branch on a code, so prose about (say) 40 minutes is not
     # swept up.
+    # Three shapes, because a grade dodged the first with a hyphen and a
+    # table row: prose ("exit 7", "exit-code 7", "returns code 9"), and the
+    # outcomes table's own leading cell (`| `7` |`). The table row is the
+    # sharpest miss — it is where a reader looks first, and it needs no
+    # `exit` token at all.
+    patterns = [
+        r"exits?[\s-]+(?:code[\s-]+)?`?(\d+)`?",
+        r"(?:returns?|yields?)\s+(?:exit[\s-]*)?code\s+`?(\d+)`?",
+        r"^\|\s*`(\d+)`\s*\|",
+    ]
     bogus = sorted(
         {
             m.group(1)
-            for m in re.finditer(r"exits?(?:\s+code)?\s+`?(\d+)`?", guide_text)
+            for pat in patterns
+            for m in re.finditer(pat, guide_text, re.MULTILINE)
             if m.group(1) not in REAL_EXIT_CODES
         }
     )
@@ -293,6 +359,51 @@ def run(memstead: Path) -> int:
                 failures += fail(f"last document is not the typed error: {parsed[-1]!r}")
             else:
                 print("  ✓ gate stdout is report-then-error, as the guide's jq recipe assumes")
+
+    # (4) RUN the guide's second step, not merely assert it is printed. Its
+    #     whole job is to fail a pass that recorded nothing but could not see
+    #     anything — so it is exercised against exactly that.
+    script = extract_verdict_script(guide_text)
+    if script is None:
+        failures += fail(
+            f"could not find the {VERDICT_STEP_NAME!r} step's script in the guide's "
+            f"workflow — the step that makes the gate trustworthy is not there to run"
+        )
+    else:
+        with tempfile.TemporaryDirectory() as tmp2:
+            ws = stage_fixture(Path(tmp2))
+            _, clean_report = run_gate(memstead, ws)
+            if run_verdict_step(script, ws, clean_report) != 0:
+                failures += fail(
+                    "the guide's verdict step rejected a CLEAN run — a copied job "
+                    "would fail every green build"
+                )
+            else:
+                print("  ✓ the guide's verdict step passes a clean run")
+
+            # An inconclusive pass: the binding asks for no change detection,
+            # so the run records nothing AND can see nothing. It exits 0 —
+            # which is precisely why step 2 has to exist.
+            binding = ws / ".memstead" / "projections" / "docs" / "graph.json"
+            binding.write_text(
+                binding.read_text(encoding="utf-8").replace(
+                    '"change_detection":"git"', '"change_detection":"none"'
+                ),
+                encoding="utf-8",
+            )
+            code, incon = run_gate(memstead, ws)
+            verdict = json.loads(incon)["rollup"]["verdict"]
+            if code != EXIT_CLEAN:
+                failures += fail(f"expected the inconclusive run to exit 0, got {code}")
+            elif verdict != "inconclusive":
+                failures += fail(f"fixture did not go inconclusive, got {verdict!r}")
+            elif run_verdict_step(script, ws, incon) == 0:
+                failures += fail(
+                    "the guide's verdict step PASSED an inconclusive run — the exact "
+                    "case it exists to catch, and the one the exit code cannot express"
+                )
+            else:
+                print("  ✓ the guide's verdict step fails an inconclusive run (exit 0)")
 
     # (3) An operational failure keeps its own code. Runs in a second
     #     staged copy so step 2's writes cannot influence it.

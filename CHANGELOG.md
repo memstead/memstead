@@ -203,6 +203,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   anything.
 
 ### Fixed
+- **Half the guide's own example was neither run nor pinned.** The printed
+  job has two steps; the harness exercised the first and pinned four lines
+  from it. A grade ran nine mutations against the second — the step the
+  guide calls "what makes the gate trustworthy" — and all nine passed,
+  including deleting the step outright, inverting its comparison, and
+  dropping `set -o pipefail` so exit 6 stops propagating through `tee`.
+  The harness now **executes** that step's script, lifted out of the
+  guide's own YAML, against a clean run (must pass) and an inconclusive
+  one (must fail) — the case it exists to catch. Pinning proves a step is
+  printed; running it proves it works.
 - **The verify-in-CI guide's own job passed runs the same guide said were
   not gateable.** Exit `0` means "recorded no findings", which an
   `inconclusive` pass also does — a facet with no readable change signal, an
