@@ -71,6 +71,27 @@ DOCUMENTED_JOB_LINES = [
 # prints must be the mode something gates.
 DOCUMENTED_COMMAND = "memstead projection verify docs/graph --fail-on-findings"
 
+# The guide's CONTRACT prose, as opposed to its copyable job. A grade broke
+# five of these — the exit-table row, the version marker, the finding-class
+# vocabulary, the jq recipe, and the "not a read-only command" sentence — and
+# this harness stayed green, because it pinned only the YAML. Criterion 6's
+# complement had no machine gate at all. These are the claims a consumer
+# actually implements against, so they are worth more than the workflow.
+DOCUMENTED_CONTRACT = [
+    # The dedicated findings code, in the outcomes table.
+    "| `6` |",
+    # The version marker consumers assert before parsing.
+    '"format": "memstead-verify/v1"',
+    # The closed finding-class vocabulary, every member.
+    "`drifted`, `wrong`,",
+    "`uncovered`, `unresolvable-anchor`, `queued-for-adjudication`",
+    # The recipe that works on the two-document gate path. A plain
+    # `jq -r .code` does not, and the guide used to print it.
+    "jq -s -r '.[-1].code'",
+    # The claim four grading rounds kept finding falsified elsewhere.
+    "It is not a read-only command",
+]
+
 EXIT_CLEAN = 0
 EXIT_FINDINGS = 6
 EXIT_NOT_FOUND = 3
@@ -143,6 +164,16 @@ def run(memstead: Path) -> int:
         )
     else:
         print("  ✓ the printed workflow still carries every step it needs")
+
+    missing_contract = [c for c in DOCUMENTED_CONTRACT if c not in guide_text]
+    if missing_contract:
+        failures += fail(
+            f"the guide lost {len(missing_contract)} contract claim(s) this harness "
+            f"holds it to — a consumer implementing the documented contract would "
+            f"now be implementing something else: {missing_contract}"
+        )
+    else:
+        print("  ✓ the documented contract still says what the binary does")
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = stage_fixture(Path(tmp))

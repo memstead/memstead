@@ -917,7 +917,24 @@ impl AnchorSidecar {
         if bytes.iter().all(u8::is_ascii_whitespace) {
             return Ok(Self::default());
         }
-        serde_json::from_slice(bytes)
+        let sidecar: Self = serde_json::from_slice(bytes)?;
+        // The version field is a contract, not decoration. Every sibling
+        // store refuses an unknown one — the binding record with
+        // `UNKNOWN_BINDING_VERSION`, the workspace stores with
+        // `WORKSPACE_STORE_FORMAT_MISMATCH` — and this one silently accepted
+        // it, so a sidecar written by a future engine parsed as whatever
+        // today's field names happened to match and verified CLEAN. Reading
+        // an unknown format optimistically is how a measurement ends up
+        // confidently describing something it does not understand.
+        if sidecar.version != ANCHOR_SIDECAR_VERSION {
+            return Err(serde::de::Error::custom(format!(
+                "unsupported anchors sidecar version {} (this engine reads version {}) — \
+                 the file was written by a different engine; upgrade, or remove the sidecar \
+                 to re-record anchors",
+                sidecar.version, ANCHOR_SIDECAR_VERSION
+            )));
+        }
+        Ok(sidecar)
     }
 
     /// Serialise to canonical pretty JSON with a trailing newline —

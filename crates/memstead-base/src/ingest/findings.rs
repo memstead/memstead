@@ -1231,7 +1231,13 @@ fn run_verify(
             // nothing, and the pass then reports every anchor unresolvable —
             // drift, in the verdict, blamed on a mem that did not move. The
             // read attempt is the test: existence alone let that through.
-            let reachable = base.exists() && (!base.is_dir() || std::fs::read_dir(&base).is_ok());
+            // These mediums (codebase / filesystem / git) are all
+            // directory-shaped — their scope globs enumerate under a tree —
+            // so reachable means it IS a readable directory. A regular file
+            // where the pointer promises a tree enumerates nothing and used
+            // to slip through to be reported as drift, though the refusal
+            // text already promised "present but not enumerable".
+            let reachable = base.is_dir() && std::fs::read_dir(&base).is_ok();
             if !reachable {
                 return Err(FindingsError::SourceUnreachable {
                     source_name: p.name.clone(),
