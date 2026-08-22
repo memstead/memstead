@@ -2008,6 +2008,12 @@ impl Engine {
                         crate::engine::boot::build_mem_router_from_mounts(&self.mounts),
                     );
                     self.invalidate_communities();
+                    // The schemas epoch just moved (`schemas_remove`),
+                    // so a filled search memo is stale-keyed — clear it
+                    // here or the next search trips the memo-key
+                    // assert (the first W8/01 grade demonstrated
+                    // exactly that on this branch).
+                    self.invalidate_search_indexes();
                 }
             }
         }
@@ -2223,6 +2229,11 @@ impl Engine {
                     reason_code: e.code().to_string(),
                     reason_message: e.to_string(),
                 });
+                // Same epoch-moved staleness as the deferred-load
+                // quarantine branch: `schemas_remove` bumped the
+                // epoch, so both memos must clear.
+                self.invalidate_communities();
+                self.invalidate_search_indexes();
                 Err(e)
             }
         }

@@ -111,15 +111,18 @@ workspaces: at 0.6–0.75 ms/entity above 5k, splitting a 7.5k workspace
 into five mems and touching one turns a ~5.6 s command into roughly a
 ~0.8 s one.
 
-**Incremental maintenance of derived structures (plenum 9).** The cold
-path cannot see this cost: search-after-mutation equals boot within noise
-at every size, because the full index rebuild is dwarfed by the full
-workspace load that precedes it. The rebuild cost is real but it hides
-inside load's shadow. The case for incremental maintenance therefore
-rests on the **warm path** (a long-lived MCP server absorbing mutations,
-where boot is already paid and the rebuild is the marginal cost) — which
-this harness deliberately does not measure. A warm-path measurement is
-the missing number for that decision.
+**Incremental maintenance of derived structures (plenum 9) — landed
+2026-08-22.** The cold path cannot see this cost: search-after-mutation
+equals boot within noise at every size, because the full index rebuild
+is dwarfed by the full workspace load that precedes it. The decision
+therefore ran on the **warm path** (a long-lived engine absorbing
+mutations, boot excluded), measured release-build with the same binary
+in maintained vs simulated whole-drop modes: search-share speedup 1.8x
+at 500 entities, 1.4x at 2000, 1.3x at 5000. Single mutations now
+maintain the index in place under a generation-keyed memo; the honest
+finding alongside: the per-query cost grows with store size in BOTH
+modes, so query-side work (not the rebuild) is the warm path's next
+lever.
 
 **Deferred cross-mem target resolution (plenum 8) — landed 2026-08-22.**
 The curve priced the forced mount this redesign removes: each

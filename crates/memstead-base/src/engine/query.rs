@@ -1951,6 +1951,19 @@ impl Engine {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn maintain_search_indexes(&mut self, _touched: &[crate::EntityId]) {}
 
+    /// Unconditionally drop the search-index memo, regardless of its
+    /// generation. The forced variant exists for embedders that want
+    /// to release the index's memory in a long-lived process (or force
+    /// a from-scratch rebuild for verification); the generation-checked
+    /// [`Self::invalidate_search_indexes`] stays the mutation-path
+    /// hook.
+    pub fn drop_search_indexes(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.search_indexes_memo = OnceCell::new();
+        }
+    }
+
     pub fn invalidate_search_indexes(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {

@@ -3630,6 +3630,52 @@ write_rules: []
         assert!(engine.deferred_mems().is_empty());
     }
 
+    /// Quarantine-ENTRY invalidation pin (flywheel W8/01, first
+    /// grade's refutation): entering quarantine from a failed deferred
+    /// load removes the mem's schema (epoch bump) — a search memo
+    /// filled beforehand is then stale-keyed and MUST clear, or the
+    /// next search trips the memo-key debug_assert (the grade's live
+    /// repro). Same rule pinned for the reattach-failure branch by
+    /// re-failing the reattach.
+    #[test]
+    fn quarantine_entry_invalidates_both_memos() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        // Fill both memos while the lazy mem is still deferred.
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        assert!(engine.search_indexes_memo.get().is_some());
+
+        // Destroy the backend; the first read quarantines the mem.
+        std::fs::remove_dir_all(&lazy_dir).unwrap();
+        std::fs::write(&lazy_dir, b"not a directory").unwrap();
+        engine.reload_if_stale(Some("laz"));
+        assert!(engine.quarantine_reason("laz").is_some());
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "quarantine entry bumps the schemas epoch — the search memo must clear"
+        );
+        assert!(
+            engine.community_memo.get().is_none(),
+            "quarantine entry must clear the community memo too"
+        );
+        // The next search must not trip the memo-key assert.
+        let _ = engine.search_indexes();
+
+        // Reattach FAILURE (backend still broken): same rule.
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        let _ = engine.reload_one_mem("laz");
+        assert!(engine.quarantine_reason("laz").is_some());
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "a failed reattach bumps the epoch — the search memo must clear"
+        );
+        let _ = engine.search_indexes();
+    }
+
     /// Quarantine-reattach regression pin (flywheel W8/01, criterion
     /// 2's complement): the reattach path routes through the one-mem
     /// reload, which invalidates BOTH derived memos — pinned so

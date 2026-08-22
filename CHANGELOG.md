@@ -20,6 +20,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Derived structures are maintained, not discarded.** The search
+  index and the community-partition memo key on a rollback-aware
+  `DerivedKey` (store generation + schemas epoch): repeated reads
+  serve the memo, a refused batch stays recompute-free, a rolled-back
+  interim state can never be served as fresh, and a schema switch
+  correctly invalidates both (closing a previously masked staleness:
+  the index field set and community weights derive from the pinned
+  schema). Single mutations maintain the search index in place —
+  exactly the touched documents are replaced or removed — with named,
+  scoped fallbacks (schema-shape change, index error) that rebuild
+  rather than serve stale results; batch and reload paths keep the
+  amortized whole-map rebuild. A seeded property test pins identity
+  with a from-scratch rebuild across arbitrary mutation sequences,
+  refused batches, schema switches, and reloads. Embedders gain
+  `Engine::drop_search_indexes` as an explicit memory-release /
+  forced-rebuild hook.
 - **Cross-mem targets verify against storage — no mount, no load.** A
   write referencing an entity in a mounted-but-unloaded (lazy) mem, or
   in a mem with no mount record at all whose content branch lives in
