@@ -205,7 +205,7 @@ pub struct Engine {
     /// restored, generation restored with it) keep serving the memo
     /// its state was computed from, and makes it impossible for the
     /// rolled-back interim state to be served as fresh.
-    community_memo: OnceCell<(u64, LouvainOutput)>,
+    community_memo: OnceCell<(DerivedKey, LouvainOutput)>,
     /// Lazily-computed per-mem search index map. Built on first call
     /// to [`Self::search_indexes`] via [`build_all`]; invalidated by
     /// [`Self::invalidate_search_indexes`] alongside the community
@@ -214,7 +214,15 @@ pub struct Engine {
     /// bridge (see `EngineError::SearchUnavailable`).
     #[cfg(not(target_arch = "wasm32"))]
     /// Generation-keyed like `community_memo`.
-    search_indexes_memo: OnceCell<(u64, HashMap<String, MemIndex>)>,
+    search_indexes_memo: OnceCell<(DerivedKey, HashMap<String, MemIndex>)>,
+    /// The second half of [`DerivedKey`]: bumped whenever the
+    /// `schemas` map changes (schema switch, mount register/remove).
+    /// Both derived structures depend on schemas as well as the store
+    /// — community weights and the index field set come from the
+    /// pinned schema — so a schema change must invalidate them even
+    /// though the STORE generation did not move (the schema-switch
+    /// staleness the whole-map drop used to mask).
+    schemas_epoch: u64,
     /// Workspace-level operator policy — mem create/delete rules,
     /// cross-mem link permissions. Defaults to empty; populated via
     /// [`Self::set_settings`] when [`Self::from_workspace_root`] (or
@@ -393,6 +401,17 @@ pub type BackendFactory =
 /// backend to ask plus the mem's schema pin when its config declares
 /// one, so the cross-schema edge routing can keep its authority
 /// without a mount.
+/// The validity key for derived-structure memos (flywheel W8/01):
+/// the store generation (bumped by every store mutation, carried by
+/// `Store::clone` so batch rollback restores it) plus the schemas
+/// epoch (bumped by every change to the engine's schema map). A memo
+/// is current exactly while both halves still match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedKey {
+    pub store_generation: u64,
+    pub schemas_epoch: u64,
+}
+
 pub struct UnmountedMemStorage {
     /// Transient backend over the discovered storage. Used for the
     /// cheap [`MemBackend::entity_exists`] probe and the one-blob

@@ -1240,17 +1240,26 @@ impl Engine {
         // read can arrive here. A mismatch would mean a mutation path
         // skipped its invalidation call (the exact silent-staleness
         // bug the generation exists to catch).
-        if let Some((memo_gen, _)) = self.community_memo.get() {
+        if let Some((memo_key, _)) = self.community_memo.get() {
             debug_assert_eq!(
-                *memo_gen,
-                self.store.generation(),
-                "community memo generation lags the store — a mutation path missed invalidate_communities"
+                *memo_key,
+                self.derived_key(),
+                "community memo key lags the engine — a mutation path missed invalidate_communities"
             );
         }
         &self
             .community_memo
-            .get_or_init(|| (self.store.generation(), self.compute_communities()))
+            .get_or_init(|| (self.derived_key(), self.compute_communities()))
             .1
+    }
+
+    /// The current validity key for derived-structure memos: store
+    /// generation plus schemas epoch (see [`super::DerivedKey`]).
+    pub fn derived_key(&self) -> super::DerivedKey {
+        super::DerivedKey {
+            store_generation: self.store.generation(),
+            schemas_epoch: self.schemas_epoch,
+        }
     }
 
     fn compute_communities(&self) -> LouvainOutput {
@@ -1292,8 +1301,8 @@ impl Engine {
     /// be pure waste. Every real mutation bumps the generation first,
     /// so those clears behave as before.
     pub fn invalidate_communities(&mut self) {
-        if let Some((memo_gen, _)) = self.community_memo.get()
-            && *memo_gen == self.store.generation()
+        if let Some((memo_key, _)) = self.community_memo.get()
+            && *memo_key == self.derived_key()
         {
             return;
         }
@@ -1851,21 +1860,16 @@ impl Engine {
     /// (see [`Self::search`] for the typed refuse).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn search_indexes(&self) -> &HashMap<String, MemIndex> {
-        if let Some((memo_gen, _)) = self.search_indexes_memo.get() {
+        if let Some((memo_key, _)) = self.search_indexes_memo.get() {
             debug_assert_eq!(
-                *memo_gen,
-                self.store.generation(),
-                "search memo generation lags the store — a mutation path missed invalidate_search_indexes"
+                *memo_key,
+                self.derived_key(),
+                "search memo key lags the engine — a mutation path missed invalidate_search_indexes"
             );
         }
         &self
             .search_indexes_memo
-            .get_or_init(|| {
-                (
-                    self.store.generation(),
-                    build_all(&self.store, &self.schemas),
-                )
-            })
+            .get_or_init(|| (self.derived_key(), build_all(&self.store, &self.schemas)))
             .1
     }
 
@@ -1878,8 +1882,8 @@ impl Engine {
             // Same generation check as `invalidate_communities`: keep
             // the memo when the store still sits at its generation
             // (the batch-rollback case), clear otherwise.
-            if let Some((memo_gen, _)) = self.search_indexes_memo.get()
-                && *memo_gen == self.store.generation()
+            if let Some((memo_key, _)) = self.search_indexes_memo.get()
+                && *memo_key == self.derived_key()
             {
                 return;
             }
@@ -3880,7 +3884,7 @@ community:
         );
         assert_eq!(
             engine.store().generation(),
-            memo_gen_before,
+            memo_gen_before.store_generation,
             "rollback restored the store to the memo's generation"
         );
 

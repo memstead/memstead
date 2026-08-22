@@ -489,6 +489,7 @@ impl Engine {
             mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_lean_backend,
             unmounted_storage_prober: None,
+            schemas_epoch: 0,
             git_branch_ops: None,
             event_subscribers: Arc::new(std::sync::Mutex::new(
                 crate::engine::events::SubscriberRegistry::new(),
@@ -3627,6 +3628,49 @@ write_rules: []
             "a quarantined mem leaves the serving roster"
         );
         assert!(engine.deferred_mems().is_empty());
+    }
+
+    /// Quarantine-reattach regression pin (flywheel W8/01, criterion
+    /// 2's complement): the reattach path routes through the one-mem
+    /// reload, which invalidates BOTH derived memos — pinned so
+    /// incremental maintenance can never silently degrade it.
+    #[test]
+    fn quarantine_reattach_invalidates_both_memos() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        // Quarantine the lazy mem: destroy its backend, trigger load.
+        std::fs::remove_dir_all(&lazy_dir).unwrap();
+        std::fs::write(&lazy_dir, b"not a directory").unwrap();
+        engine.reload_if_stale(Some("laz"));
+        assert!(engine.quarantine_reason("laz").is_some());
+
+        // Fill both memos while the mem sits quarantined.
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        assert!(engine.community_memo.get().is_some());
+        assert!(engine.search_indexes_memo.get().is_some());
+
+        // Restore the backend and reattach via the reload path.
+        std::fs::remove_file(&lazy_dir).unwrap();
+        std::fs::create_dir_all(&lazy_dir).unwrap();
+        write_spec(&lazy_dir, "omega", "Omega", "");
+        engine
+            .reload_one_mem("laz")
+            .expect("reattach succeeds once the backend is back");
+        assert!(engine.quarantine_reason("laz").is_none());
+
+        // Both memos cleared — the reattached mem's entities must be
+        // visible to the next partition and the next search.
+        assert!(
+            engine.community_memo.get().is_none(),
+            "reattach must invalidate the community memo"
+        );
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "reattach must invalidate the search memo"
+        );
     }
 
     /// The lazy load runs the same validation gauntlet an eager boot

@@ -66,6 +66,27 @@ impl Engine {
         self.backend_factory = factory;
     }
 
+    /// Insert into the engine's schema map, bumping the schemas epoch
+    /// (the second half of the derived-memo key — flywheel W8/01):
+    /// derived structures depend on schemas, so any change here must
+    /// be visible to the memo-invalidation hooks even when the store
+    /// generation did not move.
+    pub(crate) fn schemas_insert(
+        &mut self,
+        mem: String,
+        schema: std::sync::Arc<memstead_schema::Schema>,
+    ) {
+        self.schemas_epoch += 1;
+        self.schemas.insert(mem, schema);
+    }
+
+    /// Remove from the engine's schema map, bumping the schemas epoch
+    /// — see [`Self::schemas_insert`].
+    pub(crate) fn schemas_remove(&mut self, mem: &str) {
+        self.schemas_epoch += 1;
+        self.schemas.remove(mem);
+    }
+
     /// Install the unmounted-mem storage discovery hook (flywheel
     /// W7/02). Full boot sets it; without one, writes referencing
     /// unmounted mems keep the forward-reference mechanic unchanged.
@@ -491,7 +512,7 @@ impl Engine {
 
         // Drop the schema entry for this mem (kept in lockstep
         // with `self.mounts`).
-        self.schemas.remove(&mount.mount.mem);
+        self.schemas_remove(&mount.mount.mem);
 
         // Drop entities. The store's mem index is the
         // authoritative count; the return value (number of
@@ -566,7 +587,7 @@ impl Engine {
             return Ok(None);
         };
         let mount = self.mounts.remove(idx);
-        self.schemas.remove(&mount.mount.mem);
+        self.schemas_remove(&mount.mount.mem);
         let _removed = self.store.remove_entities_by_mem(mem_name);
         self.load_warnings
             .retain(|w| w.source_mem() != Some(mem_name));
@@ -750,7 +771,7 @@ impl Engine {
         self.load_errors.extend(load_result.errors);
 
         // Step 5: insert schema (kept in lockstep with `self.mounts`).
-        self.schemas.insert(mount.mem.clone(), schema);
+        self.schemas_insert(mount.mem.clone(), schema);
 
         // Re-run the parse-time relation validator now that the new
         // mem's schema is in `self.schemas`. Mirrors the boot path
@@ -1188,8 +1209,13 @@ impl Engine {
             self.persist_mem_schema_pin(mount_idx, target)?;
             self.mounts[mount_idx].mount.schema = Some(target.clone());
             self.mounts[mount_idx].mount.migration_target = None;
-            self.schemas.insert(mem.to_string(), target_schema);
+            self.schemas_insert(mem.to_string(), target_schema);
             self.invalidate_communities();
+            // The index field set derives from the pinned schema — the
+            // schema-switch staleness the whole-map drop used to mask
+            // (flywheel W8/01, criterion 2): this mem's index must be
+            // rebuilt against the new field set.
+            self.invalidate_search_indexes();
             self.persist_state()?;
             return Ok(SetSchemaOutcome {
                 mem: mem.to_string(),
@@ -1208,8 +1234,10 @@ impl Engine {
         self.mounts[mount_idx].mount.migration_target = Some(target.clone());
         // Writes validate against the target from this point on —
         // the load-bearing dual-pin semantic.
-        self.schemas.insert(mem.to_string(), target_schema);
+        self.schemas_insert(mem.to_string(), target_schema);
         self.invalidate_communities();
+        // Same field-set dependency as the atomic-switch branch above.
+        self.invalidate_search_indexes();
         self.persist_state()?;
         Ok(SetSchemaOutcome {
             mem: mem.to_string(),
@@ -1970,7 +1998,7 @@ impl Engine {
                         continue;
                     };
                     let removed = self.mounts.remove(idx);
-                    self.schemas.remove(&name);
+                    self.schemas_remove(&name);
                     self.quarantined.push(crate::engine::QuarantinedMem {
                         mount: removed.mount,
                         reason_code: e.code().to_string(),
@@ -2160,7 +2188,7 @@ impl Engine {
         // reload. An entity-load failure re-quarantines (the mount is
         // detached again) — quarantine is not tolerance.
         self.quarantined.remove(q_idx);
-        self.schemas.insert(mem.to_string(), schema);
+        self.schemas_insert(mem.to_string(), schema);
         self.mounts.push(crate::engine::MountedBackend {
             mount,
             backend,
@@ -2186,7 +2214,7 @@ impl Engine {
             Err(e) => {
                 let mount_idx = self.mounts.len() - 1;
                 let mounted = self.mounts.remove(mount_idx);
-                self.schemas.remove(mem);
+                self.schemas_remove(mem);
                 self.mem_router = std::sync::Arc::new(
                     crate::engine::boot::build_mem_router_from_mounts(&self.mounts),
                 );
@@ -4443,6 +4471,43 @@ community:
         assert_eq!(out.schema_pin, "mig-a@0.1.0");
         assert_eq!(out.migration_target, None);
         assert!(out.findings.is_empty());
+    }
+
+    /// Schema-switch invalidation (flywheel W8/01, criterion 2): a
+    /// schema switch changes NO store content — the store generation
+    /// stays put — yet both derived memos depend on the schema
+    /// (community weights, the index field set), so the switch must
+    /// clear them. The schemas EPOCH is what carries that dependency
+    /// into the memo key; without it the generation-checked hooks
+    /// would keep both memos and serve results computed against the
+    /// old schema (the staleness the whole-map drop used to mask).
+    #[test]
+    fn schema_switch_invalidates_both_memos_despite_unchanged_store() {
+        let (_tmp, mut engine) = migration_engine();
+
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        assert!(engine.community_memo.get().is_some());
+        assert!(engine.search_indexes_memo.get().is_some());
+        let store_gen_before = engine.store().generation();
+
+        engine
+            .set_mem_schema("specs", &sref("mig-a@0.2.0"))
+            .unwrap();
+
+        assert_eq!(
+            engine.store().generation(),
+            store_gen_before,
+            "a schema switch mutates no store content"
+        );
+        assert!(
+            engine.community_memo.get().is_none(),
+            "the community memo must clear on a schema switch (weights derive from the schema)"
+        );
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "the search memo must clear on a schema switch (the field set derives from the schema)"
+        );
     }
 
     #[test]
