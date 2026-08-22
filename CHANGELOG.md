@@ -8,6 +8,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Three parser defects found by the new adversarial harness, each fixed
+  at the parser.** A BOM-prefixed local file silently parsed as all-body
+  and lost its entire frontmatter, while the strict validator and the
+  archive path strip the BOM; the tolerant parser family (`parse_markdown`,
+  `body_after_frontmatter`, `peek_type_from_frontmatter`) now lands on the
+  same boundary. A document carrying multiple non-schema sections
+  reconstructed its catch-all in hash-random order, so canonical bytes
+  differed from parse to parse of the same input; non-schema sections now
+  re-emit in document order. A section whose content ends inside an open
+  code fence absorbed every section the generator wrote after it on the
+  next parse: content shifted between sections and the document grew on
+  every parse-generate round. The generator now terminates the open fence
+  (balanced content is byte-identical to before), making parse-generate a
+  fixpoint after one normalising round. Each fix is pinned by a fixture
+  regression test carrying its triggering input.
 - **Four README/SECURITY doc-vs-code drifts, reported by an external review of
   the public repository.** The repository table no longer claims the serve and
   bridge crates live here (they are in the private commercial repository; the
@@ -20,6 +35,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **A seeded adversarial smoke over the frontmatter/markdown parser
+  family.** A deterministic, bounded harness (hand-rolled xorshift64, no
+  fuzz dependency, about 1s) assembles adversarial inputs from a fragment
+  alphabet and mutated realistic documents, asserting on every case: no
+  entry point panics; the three frontmatter implementations (tolerant,
+  peek, strict) agree on where frontmatter ends and the body begins;
+  masking preserves byte length and newline positions; and parse-generate
+  is idempotent. Failures reproduce from the seed and case index in the
+  panic message.
 - **Derived structures are maintained, not discarded.** The search
   index and the community-partition memo key on a rollback-aware
   `DerivedKey` (store generation + schemas epoch): repeated reads

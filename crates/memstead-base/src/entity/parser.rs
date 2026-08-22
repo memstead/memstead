@@ -189,6 +189,7 @@ pub fn parse_file(
 /// config's default type is only a fallback for files that don't declare one.
 /// Returns None if there's no frontmatter, no `type:` line, or it's empty.
 pub fn peek_type_from_frontmatter(content: &str) -> Option<String> {
+    let content = strip_bom(content);
     let after_open = if content.starts_with("---\r\n") {
         5
     } else if content.starts_with("---\n") {
@@ -256,6 +257,7 @@ pub fn peek_title_and_type(content: &str) -> (Option<String>, Option<String>) {
 /// engine that hold one already pass section bodies. A caller holding
 /// a raw file or git blob does not, and must trim it here first.
 pub fn body_after_frontmatter(content: &str) -> &str {
+    let content = strip_bom(content);
     let after_open = if content.starts_with("---\r\n") {
         5
     } else if content.starts_with("---\n") {
@@ -273,10 +275,20 @@ pub fn body_after_frontmatter(content: &str) -> &str {
         .unwrap_or(rest)
 }
 
+/// Strip a leading UTF-8 BOM. The strict validator and the archive
+/// extraction layer both strip it before their frontmatter split; the
+/// tolerant family must land on the same boundary for the same document
+/// — before this, a BOM'd local file silently parsed as all-body and
+/// lost its entire frontmatter (the archive path was unaffected).
+fn strip_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
+}
+
 /// Split content into frontmatter metadata string and body.
 /// Returns (metadata_string, body). Both boundaries are found in the
 /// raw content — the caller masks the body afterwards.
-fn split_frontmatter(content: &str) -> Result<(String, String), ParseError> {
+pub(crate) fn split_frontmatter(content: &str) -> Result<(String, String), ParseError> {
+    let content = strip_bom(content);
     // Look for YAML frontmatter: ---\n...\n---
     if content.starts_with("---\n") || content.starts_with("---\r\n") {
         let after_open = if content.starts_with("---\r\n") { 5 } else { 4 };
@@ -506,8 +518,13 @@ pub(crate) struct DuplicateSection {
 pub(crate) fn split_sections(
     body: &str,
     masked_body: &str,
-) -> (HashMap<String, String>, Vec<DuplicateSection>, Vec<String>) {
-    let mut sections = HashMap::new();
+) -> (IndexMap<String, String>, Vec<DuplicateSection>, Vec<String>) {
+    // IndexMap, not HashMap: the catch-all builder re-emits non-schema
+    // sections in this map's iteration order, so the order must be the
+    // document's — hash-random order made canonical bytes unstable
+    // across parses whenever more than one non-schema section coexisted
+    // (reachable on the tolerant local-read path, which refuses nothing).
+    let mut sections = IndexMap::new();
     let mut duplicates: HashMap<String, DuplicateSection> = HashMap::new();
     let mut raw_headings = Vec::new();
     static SECTION_RE: OnceLock<Regex> = OnceLock::new();
@@ -541,7 +558,7 @@ pub(crate) fn split_sections(
         raw_headings.push(name.to_string());
 
         match sections.entry(key.clone()) {
-            std::collections::hash_map::Entry::Vacant(slot) => {
+            indexmap::map::Entry::Vacant(slot) => {
                 slot.insert(content);
                 duplicates.insert(
                     key.clone(),
@@ -552,7 +569,7 @@ pub(crate) fn split_sections(
                     },
                 );
             }
-            std::collections::hash_map::Entry::Occupied(_) => {
+            indexmap::map::Entry::Occupied(_) => {
                 // First-wins: drop this duplicate's body entirely. Bump the
                 // occurrence count for the warning emitted by the caller.
                 if let Some(d) = duplicates.get_mut(&key) {
@@ -659,7 +676,7 @@ fn extract_heading_spans(sections: &IndexMap<String, String>) -> HashMap<String,
 // ---------------------------------------------------------------------------
 
 /// Build catch-all section content from its own section + non-schema sections.
-fn build_catch_all(sections: &HashMap<String, String>, schema: &TypeDefinition) -> String {
+fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition) -> String {
     let catch_all = match schema.catch_all_section() {
         Some(s) => s,
         None => return String::new(),
@@ -681,14 +698,11 @@ fn build_catch_all(sections: &HashMap<String, String>, schema: &TypeDefinition) 
         parts.push(content.clone());
     }
 
-    // Then add all non-schema sections (with headings reconstructed).
-    // `sections: &HashMap` — iteration order is randomized per process.
-    // Non-determinism is invisible today because strict ingress rejects
-    // unknown sections unless the schema declares a catch-all, and then
-    // only the catch-all section itself lands here (see validator-v2 R6).
-    // If a future schema change lets multiple non-schema sections coexist
-    // under one catch-all, switch `sections` to `IndexMap` so canonical
-    // bytes stay stable.
+    // Then add all non-schema sections (with headings reconstructed),
+    // in document order — `sections` is an IndexMap for exactly this
+    // loop: with more than one non-schema section (reachable on the
+    // tolerant local-read path, which refuses nothing) a hash-random
+    // order made the reconstructed catch-all differ from parse to parse.
     for (key, content) in sections {
         if !known_sections.contains(key.as_str()) && !content.is_empty() {
             let heading = format!(
@@ -1327,6 +1341,118 @@ Real content after code block.
         assert!(!result.entity.sections.contains_key("not a section"));
         // The wiki-link inside code block should NOT be extracted
         assert!(result.inline_links.is_empty());
+    }
+
+    // Fixture pinned by the adversarial harness (seed 0x5eedf001, case 224):
+    // a BOM'd file parsed tolerantly as all-body — the entire frontmatter
+    // was silently lost — while the strict validator and the archive path
+    // strip the BOM and see the frontmatter. All three implementations
+    // must land on the same boundary for the same document.
+    #[test]
+    fn bom_prefixed_frontmatter_is_recognized() {
+        let md = "\u{feff}---\ntype: spec\n---\n# Bom Entity\n\n## Identity\n\nBody.\n";
+        assert_eq!(peek_type_from_frontmatter(md), Some("spec".to_string()));
+        assert_eq!(
+            body_after_frontmatter(md),
+            "# Bom Entity\n\n## Identity\n\nBody.\n"
+        );
+        let (meta, body) = split_frontmatter(md).unwrap();
+        assert_eq!(meta, "type: spec");
+        assert_eq!(body, "# Bom Entity\n\n## Identity\n\nBody.\n");
+        let result = parse_markdown(md, "bom.md", &spec_schema(), "specs").unwrap();
+        assert_eq!(
+            result.entity.metadata["type"],
+            MetadataValue::String("spec".to_string())
+        );
+        assert_eq!(result.entity.sections["identity"], "Body.");
+    }
+
+    // Fixture pinned by the adversarial harness (seed 0x5eedf001, case 46):
+    // a section whose content ends inside an open code fence absorbed every
+    // section the generator wrote after it on the next parse — content
+    // shifted between sections and the document GREW on every
+    // parse→generate round. The generator now terminates the open fence;
+    // the first round normalises, then parse→generate is a fixpoint.
+    #[test]
+    fn open_fence_in_section_content_does_not_swallow_following_sections() {
+        let md = "\
+---
+type: spec
+---
+# Code Test
+
+## Identity
+
+Base.
+
+## Specifies
+
+```
+truncated code with no closer";
+        let schema = spec_schema();
+        let e1 = parse_markdown(md, "open-fence.md", &schema, "specs").unwrap();
+        let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
+        let e2 = parse_markdown(&m1, "open-fence.md", &schema, "specs").unwrap();
+        assert_eq!(
+            e2.entity.sections["identity"], "Base.",
+            "sections before the open fence survive"
+        );
+        assert!(
+            !e2.entity.sections["specifies"].contains("## Constraints"),
+            "the generated sections after the fence are not absorbed into it"
+        );
+        let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
+        assert_eq!(
+            m1, m2,
+            "parse→generate is a fixpoint after one normalising round"
+        );
+    }
+
+    // Fixture pinned by the adversarial harness (seed 0x5eedf001, case 26):
+    // a document carrying MULTIPLE non-schema sections — reachable on the
+    // tolerant local-read path, which refuses nothing — reconstructed its
+    // catch-all in HashMap iteration order, so canonical bytes differed
+    // from parse to parse of the same input. The catch-all must re-emit
+    // non-schema sections in document order, and parse→generate must be
+    // idempotent for such input.
+    #[test]
+    fn catch_all_reconstruction_is_document_ordered_and_idempotent() {
+        let md = "\
+---
+type: spec
+---
+# Multi Unknown
+
+## Identity
+
+Base.
+
+## Claim
+
+First unknown.
+
+## Context
+
+Second unknown.
+
+## Substance
+
+Third unknown.
+";
+        let schema = spec_schema();
+        let e1 = parse_markdown(md, "multi-unknown.md", &schema, "specs").unwrap();
+        assert_eq!(
+            e1.entity.sections["specifies"],
+            "## Claim\nFirst unknown.\n\n## Context\nSecond unknown.\n\n## Substance\nThird unknown.",
+            "non-schema sections land in the catch-all in document order"
+        );
+        let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
+        let e2 = parse_markdown(&m1, "multi-unknown.md", &schema, "specs").unwrap();
+        let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
+        assert_eq!(
+            m1, m2,
+            "parse→generate is idempotent over multi-unknown-section input"
+        );
     }
 
     #[test]
