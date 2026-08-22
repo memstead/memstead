@@ -11,8 +11,9 @@ The engine's MCP instructions describe a mem as "designed for 1,000–5,000
 entities". Until this document, that span was advertised, not measured
 (plenum channel, finding 10). This page states what the four everyday
 operations actually cost across workspace sizes, so the deferred redesigns
-that wait for numbers (lazy mounts, incremental derived-structure
-maintenance, deferred cross-mem targets) can be argued from data.
+that wait for numbers (incremental derived-structure maintenance, deferred
+cross-mem targets — and lazy mounts, since landed and measured below) can
+be argued from data.
 
 ## Reproducing
 

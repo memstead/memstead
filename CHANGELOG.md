@@ -30,7 +30,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workspace-scoped or cross-mem one loads every deferred mem first —
   search's graph-walking forms (`related_to`, `expand_via`), overview
   (whose community partition is workspace-global even under a mem
-  filter), health without a filter, and `memstead_entity`'s
+  filter), health (always, mem filter included), and `memstead_entity`'s
   `include_relations` / `include_context` forms (incoming edges and
   community context can originate anywhere) all take the full load; the
   destructive-delete guards, the write-time acyclicity guard (single
