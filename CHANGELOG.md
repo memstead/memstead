@@ -35,6 +35,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **A seeded adversarial smoke over the content-expression parser and
+  matcher.** Foreign expression strings reach this parser through the
+  schema tree published archives embed. The harness generates
+  adversarial expressions (fragment assemblies, splices and truncations
+  of valid seeds) and asserts: parsing never panics (typed refusals
+  only); an accepted expression's verbatim source re-parses to a
+  structurally identical expression; the compiled NFA stays linear in
+  the expression's terminal count (no adversarial state blowup); and
+  matching arbitrary block sequences never panics, is deterministic,
+  and reports coherent failure payloads. 9000 cases, under a second; no
+  defect found.
 - **A seeded adversarial smoke over the archive trust boundary.** Foreign
   bytes through the validating entry point, covering the nested parsers
   (config, strict entity checks, schema loader, id and graph validation,

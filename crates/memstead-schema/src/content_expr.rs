@@ -757,3 +757,252 @@ mod tests {
         assert_eq!(e.mentioned_names(), vec!["heading", "list"]);
     }
 }
+
+/// Seeded adversarial smoke over the content-expression parser and
+/// matcher, the third trust-boundary target: published archives embed a
+/// schema tree, so foreign expression strings reach this parser.
+///
+/// Same discipline as the memstead-base harnesses (hand-rolled
+/// xorshift64, deterministic, bounded, failures reproduce from the seed
+/// and case index). Lives inside this module because the properties pin
+/// private structure: NFA size stays linear in the expression's
+/// terminal count (no adversarial state blowup), which needs `nfa` and
+/// `terms` access.
+///
+/// Per case:
+/// - parsing never panics; it returns `Ok` or a typed
+///   [`ContentExprError`];
+/// - parse-source-parse is stable: an accepted expression's verbatim
+///   `source()` re-parses to a structurally identical expression;
+/// - the compiled NFA is linearly bounded: `transitions.len()` never
+///   exceeds `1 + 2 x` the total terminal occurrences (OneOrMore builds
+///   its unit twice, everything else once);
+/// - matching arbitrary observed-block sequences never panics, is
+///   deterministic, and every failure payload is coherent: `found`
+///   present exactly when the failure is not end-of-body, `failed_at`
+///   in bounds, and `found` equal to the offending block's display.
+#[cfg(test)]
+mod adversarial {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    // Measured 2026-08-22 (debug build, M-series): 3 x 3000 cases with
+    // four match sequences each, well under a second.
+    const CASES_PER_SEED: usize = 3000;
+
+    struct Xorshift(u64);
+    impl Xorshift {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn pick(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    /// Decision-point fragments: every block name (and lookalikes with
+    /// wrong case or unknown spelling), every attribute shape (valid,
+    /// reserved, out-of-range, malformed), every operator, and junk.
+    const FRAGMENTS: &[&str] = &[
+        "paragraph",
+        "list",
+        "table",
+        "code",
+        "blockquote",
+        "heading",
+        "thematicBreak",
+        "html",
+        "bulletList",
+        "Paragraph",
+        "thematicbreak",
+        "p",
+        "(bullet)",
+        "(ordered)",
+        "(numbered)",
+        "(3)",
+        "(6)",
+        "(2)",
+        "(1)",
+        "(7)",
+        "(0)",
+        "(255)",
+        "(lang=rust)",
+        "(lang=)",
+        "(lang=a b)",
+        "()",
+        "(x y)",
+        "(a|b)",
+        "+",
+        "*",
+        "?",
+        "|",
+        "(",
+        ")",
+        " ",
+        "\t",
+        "\n",
+        "++",
+        "??",
+        "((",
+        "))",
+        "!",
+        "é",
+        "0",
+        "list(bullet)",
+        "heading(3)",
+    ];
+
+    /// Valid seed expressions the generator splices and truncates.
+    const SEED_EXPRS: &[&str] = &[
+        "list(bullet)",
+        "(heading(3) list(bullet))+",
+        "(paragraph | list) table?",
+        "paragraph*",
+        "paragraph list(bullet) paragraph?",
+        "code(lang=rust)",
+        "heading(3) list(bullet)+ (paragraph | blockquote)* thematicBreak? html",
+    ];
+
+    fn char_boundary(s: &str, mut i: usize) -> usize {
+        while i < s.len() && !s.is_char_boundary(i) {
+            i += 1;
+        }
+        i
+    }
+
+    fn gen_expr(rng: &mut Xorshift) -> String {
+        match rng.pick(3) {
+            0 => {
+                let n = 1 + rng.pick(12);
+                let mut out = String::new();
+                for _ in 0..n {
+                    out.push_str(FRAGMENTS[rng.pick(FRAGMENTS.len())]);
+                    if rng.pick(3) == 0 {
+                        out.push(' ');
+                    }
+                }
+                out
+            }
+            1 => {
+                let seed = SEED_EXPRS[rng.pick(SEED_EXPRS.len())];
+                let at = char_boundary(seed, rng.pick(seed.len() + 1));
+                let frag = FRAGMENTS[rng.pick(FRAGMENTS.len())];
+                format!("{}{}{}", &seed[..at], frag, &seed[at..])
+            }
+            _ => {
+                let seed = SEED_EXPRS[rng.pick(SEED_EXPRS.len())];
+                seed[..char_boundary(seed, rng.pick(seed.len() + 1))].to_string()
+            }
+        }
+    }
+
+    fn gen_block(rng: &mut Xorshift) -> ObservedBlock {
+        match rng.pick(8) {
+            0 => ObservedBlock::Paragraph,
+            1 => ObservedBlock::List {
+                ordered: rng.pick(2) == 0,
+            },
+            2 => ObservedBlock::Table,
+            3 => ObservedBlock::Code {
+                lang: ["", "rust", "python", "lang=", "é🦀"][rng.pick(5)].to_string(),
+            },
+            4 => ObservedBlock::Blockquote,
+            5 => ObservedBlock::Heading {
+                depth: (rng.pick(9)) as u8,
+            },
+            6 => ObservedBlock::ThematicBreak,
+            _ => ObservedBlock::Html,
+        }
+    }
+
+    fn exercise(rng: &mut Xorshift, source: &str) {
+        let Ok(expr) = ContentExpr::parse(source) else {
+            return; // a typed refusal is a correct outcome
+        };
+
+        // parse-source-parse stability: the verbatim source re-parses
+        // to a structurally identical expression.
+        let again = ContentExpr::parse(expr.source())
+            .expect("an accepted expression's source must re-parse");
+        assert_eq!(again, expr, "parse-source-parse is not stable");
+
+        // Linear NFA bound: OneOrMore builds its unit twice, everything
+        // else once, so states never exceed 1 + 2x terminal occurrences.
+        let total_members: usize = expr
+            .terms
+            .iter()
+            .map(|t| match t {
+                Term::Atom(..) => 1,
+                Term::Alternation(v, _) | Term::Sequence(v, _) => v.len(),
+            })
+            .sum();
+        assert!(
+            expr.nfa.transitions.len() <= 1 + 2 * total_members,
+            "NFA state blowup: {} states for {} terminal occurrences (source {source:?})",
+            expr.nfa.transitions.len(),
+            total_members
+        );
+
+        // Matching: no panic, deterministic, coherent failure payloads.
+        for _ in 0..4 {
+            let blocks: Vec<ObservedBlock> = (0..rng.pick(12)).map(|_| gen_block(rng)).collect();
+            let first = expr.match_blocks(&blocks);
+            let second = expr.match_blocks(&blocks);
+            assert_eq!(first, second, "matching is not deterministic");
+            if let Err(f) = first {
+                assert!(
+                    f.failed_at <= blocks.len(),
+                    "failed_at out of bounds: {} > {}",
+                    f.failed_at,
+                    blocks.len()
+                );
+                match &f.found {
+                    Some(found) => {
+                        assert!(f.failed_at < blocks.len(), "found set at end-of-body");
+                        assert_eq!(
+                            *found,
+                            blocks[f.failed_at].display(),
+                            "found does not name the offending block"
+                        );
+                    }
+                    None => assert_eq!(
+                        f.failed_at,
+                        blocks.len(),
+                        "end-of-body failure not at the end"
+                    ),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn content_expr_survives_adversarial_inputs() {
+        // The seed corpus is alive: every seed parses.
+        for seed_expr in SEED_EXPRS {
+            assert!(
+                ContentExpr::parse(seed_expr).is_ok(),
+                "seed expression must parse: {seed_expr:?}"
+            );
+        }
+        for seed in [0x5eed_e001_u64, 0x5eed_e002, 0x5eed_e003] {
+            let mut rng = Xorshift(seed);
+            for case in 0..CASES_PER_SEED {
+                let source = gen_expr(&mut rng);
+                if let Err(payload) = catch_unwind(AssertUnwindSafe(|| exercise(&mut rng, &source)))
+                {
+                    let msg = payload
+                        .downcast_ref::<String>()
+                        .map(|s| s.as_str())
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("<non-string panic payload>");
+                    panic!("seed {seed:#x} case {case}: {msg}\nexpression: {source:?}");
+                }
+            }
+        }
+    }
+}
