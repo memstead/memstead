@@ -197,6 +197,32 @@ impl GitTreeMemWriter {
             .map_err(|e| MemWriterError::Path(format!("git-tree writer: read blob {path}: {e}")))?;
         Ok(Some(object.data.clone()))
     }
+
+    /// Tree-lookup-class existence probe: ref → commit → tree →
+    /// `lookup_entry_by_path`, stopping at the entry — the blob's
+    /// bytes are never read (flywheel W7/02: the write-time cross-mem
+    /// target check's primitive; the listing walk reads every blob and
+    /// is the wrong tool for one path's existence).
+    fn path_exists_from_parent(
+        &self,
+        parent: gix::ObjectId,
+        path: &str,
+    ) -> Result<bool, MemWriterError> {
+        let repo = self.open_repo()?;
+        let commit = repo
+            .find_object(parent)
+            .map_err(|e| MemWriterError::Path(format!("git-tree writer: open parent commit: {e}")))?
+            .into_commit();
+        let tree = commit.tree().map_err(|e| {
+            MemWriterError::Path(format!("git-tree writer: peel commit to tree: {e}"))
+        })?;
+        let entry = tree.lookup_entry_by_path(path).map_err(|e| {
+            MemWriterError::Path(format!(
+                "git-tree writer: lookup {path} in parent tree: {e}"
+            ))
+        })?;
+        Ok(entry.is_some_and(|e| e.mode().is_blob()))
+    }
 }
 
 /// Normalise a mem-relative path to forward-slash form. Rejects
@@ -557,6 +583,41 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
                 .read_blob_from_parent(p, &key)
                 .map_err(memstead_base::backend::BackendError::from),
             None => Ok(None),
+        }
+    }
+
+    /// Existence probe with `read_entity`'s exact source-selection
+    /// semantics (pending buffer first, snapshotted parent
+    /// mid-transaction, live tip between transactions) — but stopping
+    /// at the tree entry, never reading the blob.
+    fn entity_exists(&self, rel_path: &Path) -> Result<bool, memstead_base::backend::BackendError> {
+        let key = normalise_rel_path(rel_path)?;
+        let pending = self.pending.lock().map_err(|_| {
+            memstead_base::backend::BackendError::Other(
+                "git-tree backend pending state poisoned".to_string(),
+            )
+        })?;
+        if let Some(state) = pending.ops.get(&key) {
+            return Ok(matches!(state, PendingState::Upsert(_)));
+        }
+        let snapshot_parent = if pending.ops.is_empty() {
+            None
+        } else {
+            pending.parent
+        };
+        drop(pending);
+
+        let source = match snapshot_parent {
+            Some(p) => Some(p),
+            None => self
+                .live_tip()
+                .map_err(memstead_base::backend::BackendError::from)?,
+        };
+        match source {
+            Some(p) => self
+                .path_exists_from_parent(p, &key)
+                .map_err(memstead_base::backend::BackendError::from),
+            None => Ok(false),
         }
     }
 
@@ -1281,6 +1342,45 @@ mod tests {
 
     fn tree_path_exists(gitdir: &Path, ref_name: &str, path: &str) -> bool {
         read_blob(gitdir, ref_name, path).is_some()
+    }
+
+    /// `entity_exists` mirrors `read_entity`'s source selection —
+    /// pending upsert true / pending delete false before commit, live
+    /// tip between transactions, unborn ref false — while stopping at
+    /// the tree entry (flywheel W7/02 primitive).
+    #[test]
+    fn entity_exists_tree_probe_and_pending_precedence() {
+        use memstead_base::backend::MemBackend;
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/test".to_string());
+
+        assert!(
+            !MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap(),
+            "unborn ref answers false"
+        );
+
+        MemBackend::write_entity(
+            &writer,
+            Path::new("notes/a.md"),
+            b"# a
+",
+        )
+        .unwrap();
+        assert!(
+            MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap(),
+            "staged upsert answers true before commit"
+        );
+
+        MemWriter::commit(&writer, "land a", &ctx_for_test()).unwrap();
+        assert!(MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap());
+        assert!(!MemBackend::entity_exists(&writer, Path::new("notes/b.md")).unwrap());
+
+        MemBackend::delete_entity(&writer, Path::new("notes/a.md")).unwrap();
+        assert!(
+            !MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap(),
+            "staged delete answers false while the branch tip still holds the blob"
+        );
     }
 
     #[test]

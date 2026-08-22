@@ -309,6 +309,25 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
         }
     }
 
+    /// Metadata-class existence probe: pending buffer first (same
+    /// precedence as `read_entity`), then one `symlink_metadata` call —
+    /// no file open, no byte read.
+    fn entity_exists(&self, rel_path: &Path) -> Result<bool, BackendError> {
+        let key = normalise_rel_path(rel_path)?;
+        let pending = self.pending.lock().map_err(|_| {
+            BackendError::Other("filesystem writer pending state poisoned".to_string())
+        })?;
+        if let Some(state) = pending.ops.get(&key) {
+            return Ok(matches!(state, PendingState::Upsert(_)));
+        }
+        drop(pending);
+        match std::fs::symlink_metadata(self.root.join(&key)) {
+            Ok(md) => Ok(md.is_file()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(BackendError::Io(e)),
+        }
+    }
+
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError> {
         <Self as MemWriter>::write_entity(self, rel_path, content).map_err(Into::into)
     }
@@ -576,6 +595,41 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         }
+    }
+
+    /// `entity_exists` observes the same pending-buffer precedence as
+    /// `read_entity`: staged upsert → true before any commit, staged
+    /// delete → false while the file still sits on disk, and the
+    /// committed state answers between transactions — all without
+    /// reading bytes (flywheel W7/02 primitive).
+    #[test]
+    fn entity_exists_metadata_probe_and_pending_precedence() {
+        use crate::backend::MemBackend;
+        let tmp = TempDir::new().unwrap();
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+
+        assert!(!MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap());
+
+        MemBackend::write_entity(
+            &writer,
+            Path::new("notes/a.md"),
+            b"# a
+",
+        )
+        .unwrap();
+        assert!(
+            MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap(),
+            "staged upsert answers true before commit"
+        );
+
+        MemWriter::commit(&writer, "land a", &ctx_for_test()).unwrap();
+        assert!(MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap());
+
+        MemBackend::delete_entity(&writer, Path::new("notes/a.md")).unwrap();
+        assert!(
+            !MemBackend::entity_exists(&writer, Path::new("notes/a.md")).unwrap(),
+            "staged delete answers false while the file is still on disk"
+        );
     }
 
     #[test]
