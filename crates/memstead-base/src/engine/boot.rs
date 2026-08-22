@@ -488,6 +488,7 @@ impl Engine {
             pipeline_configs: crate::pipeline_store::BindingConfigs::default(),
             mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_lean_backend,
+            unmounted_storage_prober: None,
             git_branch_ops: None,
             event_subscribers: Arc::new(std::sync::Mutex::new(
                 crate::engine::events::SubscriberRegistry::new(),

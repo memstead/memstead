@@ -757,23 +757,41 @@ pub(super) fn probe_deferred_target(
     engine: &super::Engine,
     target: &EntityId,
 ) -> Result<DeferredTargetProbe, EngineError> {
-    if !engine.mem_is_deferred(target.mem()) {
-        return Ok(DeferredTargetProbe::NotApplicable);
-    }
-    let Some(mounted) = engine.mounts.iter().find(|m| m.mount.mem == target.mem()) else {
-        return Ok(DeferredTargetProbe::NotApplicable);
-    };
     let rel_path = crate::entity::id::id_to_file_path(target);
-    Ok(
-        if mounted
-            .backend
-            .entity_exists(std::path::Path::new(&rel_path))?
-        {
-            DeferredTargetProbe::Exists
-        } else {
-            DeferredTargetProbe::Absent
-        },
-    )
+    if engine.mem_is_deferred(target.mem()) {
+        let Some(mounted) = engine.mounts.iter().find(|m| m.mount.mem == target.mem()) else {
+            return Ok(DeferredTargetProbe::NotApplicable);
+        };
+        return Ok(
+            if mounted
+                .backend
+                .entity_exists(std::path::Path::new(&rel_path))?
+            {
+                DeferredTargetProbe::Exists
+            } else {
+                DeferredTargetProbe::Absent
+            },
+        );
+    }
+    // UNMOUNTED mem: ask the workspace layer's discovery hook. No
+    // hook, or no discoverable storage → NotApplicable (the
+    // forward-reference mechanic governs, unchanged).
+    if engine.mount(target.mem()).is_none()
+        && let Some(prober) = &engine.unmounted_storage_prober
+        && let Some(storage) = prober(target.mem())
+    {
+        return Ok(
+            if storage
+                .backend
+                .entity_exists(std::path::Path::new(&rel_path))?
+            {
+                DeferredTargetProbe::Exists
+            } else {
+                DeferredTargetProbe::Absent
+            },
+        );
+    }
+    Ok(DeferredTargetProbe::NotApplicable)
 }
 
 /// The one-blob type read for a storage-verified deferred target: the
@@ -809,22 +827,55 @@ pub(super) fn peek_deferred_target_type(
     engine: &super::Engine,
     target: &EntityId,
 ) -> Result<Option<String>, EngineError> {
-    if !engine.mem_is_deferred(target.mem()) {
-        return Ok(None);
-    }
-    let Some(mounted) = engine.mounts.iter().find(|m| m.mount.mem == target.mem()) else {
+    let rel_path = crate::entity::id::id_to_file_path(target);
+    let bytes = if engine.mem_is_deferred(target.mem()) {
+        let Some(mounted) = engine.mounts.iter().find(|m| m.mount.mem == target.mem()) else {
+            return Ok(None);
+        };
+        mounted
+            .backend
+            .read_entity(std::path::Path::new(&rel_path))?
+    } else if engine.mount(target.mem()).is_none()
+        && let Some(prober) = &engine.unmounted_storage_prober
+        && let Some(storage) = prober(target.mem())
+    {
+        storage
+            .backend
+            .read_entity(std::path::Path::new(&rel_path))?
+    } else {
         return Ok(None);
     };
-    let rel_path = crate::entity::id::id_to_file_path(target);
-    let Some(bytes) = mounted
-        .backend
-        .read_entity(std::path::Path::new(&rel_path))?
-    else {
+    let Some(bytes) = bytes else {
         return Ok(None);
     };
     Ok(String::from_utf8(bytes)
         .ok()
         .and_then(|c| crate::entity::parser::peek_type_from_frontmatter(&c)))
+}
+
+/// The target-schema REF for cross-schema edge routing. Loaded mems
+/// answer from the engine's schema catalogue; an UNMOUNTED mem with
+/// discoverable storage answers from its stored config's pin via the
+/// discovery hook (flywheel W7/02) — the routing check
+/// (`validate_cross_mem_edge`) needs only the ref, never the full
+/// schema, so the source schema's `cross_mem_relationships:` entry
+/// keeps its authority without a mount. `None` falls back to the
+/// intra-mem path, exactly the pre-existing posture.
+pub(super) fn target_schema_ref_for_routing(
+    engine: &super::Engine,
+    target_mem: &str,
+) -> Option<memstead_schema::SchemaRef> {
+    if let Some(s) = engine.schemas.get(target_mem) {
+        let (name, version) = s.id();
+        return Some(memstead_schema::SchemaRef::new(name, version));
+    }
+    if engine.mount(target_mem).is_none()
+        && let Some(prober) = &engine.unmounted_storage_prober
+        && let Some(storage) = prober(target_mem)
+    {
+        return storage.schema;
+    }
+    None
 }
 
 /// Outcome of the engine's edge-validation router for a single
@@ -884,15 +935,11 @@ pub(super) fn route_edge_validation(
         .get(source_mem)
         .expect("schema present for every registered mount");
 
-    let target_schema_arc = if source_mem == target_mem {
+    let target_schema_ref: Option<SchemaRef> = if source_mem == target_mem {
         None
     } else {
-        engine.schemas.get(target_mem).cloned()
+        target_schema_ref_for_routing(engine, target_mem)
     };
-    let target_schema_ref: Option<SchemaRef> = target_schema_arc.as_ref().map(|s| {
-        let (name, version) = s.id();
-        SchemaRef::new(name, version)
-    });
     let cross_mem_different = match (&target_schema_ref, source_schema.id()) {
         (Some(target), (src_name, _)) => target.name != src_name,
         (None, _) => false,
@@ -1029,15 +1076,11 @@ pub(super) fn validate_description_posture(
         .schemas
         .get(source_mem)
         .expect("schema present for every registered mount");
-    let target_schema_arc = if source_mem == target_mem {
+    let target_schema_ref: Option<SchemaRef> = if source_mem == target_mem {
         None
     } else {
-        engine.schemas.get(target_mem).cloned()
+        target_schema_ref_for_routing(engine, target_mem)
     };
-    let target_schema_ref: Option<SchemaRef> = target_schema_arc.as_ref().map(|s| {
-        let (name, version) = s.id();
-        SchemaRef::new(name, version)
-    });
     let cross_mem_different = match (&target_schema_ref, source_schema.id()) {
         (Some(target), (src_name, _)) => target.name != src_name,
         (None, _) => false,

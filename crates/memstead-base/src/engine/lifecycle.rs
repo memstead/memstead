@@ -66,6 +66,13 @@ impl Engine {
         self.backend_factory = factory;
     }
 
+    /// Install the unmounted-mem storage discovery hook (flywheel
+    /// W7/02). Full boot sets it; without one, writes referencing
+    /// unmounted mems keep the forward-reference mechanic unchanged.
+    pub fn set_unmounted_storage_prober(&mut self, prober: super::UnmountedStorageProber) {
+        self.unmounted_storage_prober = Some(prober);
+    }
+
     /// Replace the mutation-timestamp clock — the source every
     /// engine-stamped metadata field (`init_timestamp` /
     /// `auto_timestamp` schema flags: `created_date`, `last_modified`)

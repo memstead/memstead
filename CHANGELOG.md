@@ -20,6 +20,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Cross-mem targets verify against storage — no mount, no load.** A
+  write referencing an entity in a mounted-but-unloaded (lazy) mem, or
+  in a mem with no mount record at all whose content branch lives in
+  the mem-repo, is verified against real storage at write time: a
+  tree-lookup-class existence probe (`MemBackend::entity_exists` —
+  metadata-class on folder backends, stop-at-entry tree lookup on
+  git-branch, never the blob-reading listing walk) plus one resolved
+  blob read for the target's entity type when the cross-schema shape
+  check needs it. A verified target admits as an ordinary reference
+  (its in-store stub carries the load-time kind and no
+  `AUTO_STUB_CREATED` / mem-uncreated warning); an absent target keeps
+  the exact semantics it had — the typed read-only refusal (now
+  answerable without the mem loaded, and never firing for an entity
+  storage actually contains), or the forward-reference auto-stub with
+  its warnings. Verification never loads a lazy mem and never adds a
+  mount — a dossier citing twenty unmounted topic mems pays twenty
+  tree lookups, not twenty permanent eager loads. Unmounted-mem
+  discovery (branch resolution plus the stored schema pin, so
+  cross-schema edge routing keeps its authority) is installed by the
+  full workspace boot; lean and embedded engines keep the
+  forward-reference mechanic unchanged. No new trust class exists:
+  every admitted cross-mem edge is either storage-verified at write
+  time or a forward-reference stub with today's semantics, and stub
+  kinds remain annotation, not state.
 - **Lazy mounts are real: `"lifecycle": "lazy"` defers a mem's entity
   load to first read.** The slot existed since V1, persisted but inert;
   a mount that declares it now resolves only its metadata half at boot

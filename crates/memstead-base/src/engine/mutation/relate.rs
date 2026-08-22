@@ -493,15 +493,15 @@ impl Engine {
         // schema to consult and the validation falls back to the
         // intra-mem path. Real workspaces always mount the target
         // mem before relating.
-        let target_schema = if source_mem == target_mem {
+        let target_schema_ref: Option<SchemaRef> = if source_mem == target_mem {
             None
         } else {
-            self.schemas.get(&target_mem).cloned()
+            // Loaded mems answer from the schema catalogue; an
+            // unmounted mem with discoverable storage answers from
+            // its stored config's pin (flywheel W7/02) — see
+            // `target_schema_ref_for_routing`.
+            super::target_schema_ref_for_routing(self, &target_mem)
         };
-        let target_schema_ref: Option<SchemaRef> = target_schema.as_ref().map(|s| {
-            let (name, version) = s.id();
-            SchemaRef::new(name, version)
-        });
         let cross_mem_different = match (&target_schema_ref, schema.id()) {
             (Some(target), (src_name, _)) => target.name != src_name,
             (None, _) => false,
@@ -575,6 +575,13 @@ impl Engine {
             }
             None => None,
         };
+        if target_verified_in_storage {
+            // A verified target's mem is not "uncreated" — for an
+            // unmounted mem the discovery hook just found its storage
+            // and the entity in it; the layered warning would claim
+            // the opposite.
+            target_mem_uncreated = false;
+        }
         // Shape validation is add-only. Edges that violated the
         // schema's shape before constraints landed must remain
         // removable through `memstead_relate remove=true` — otherwise the

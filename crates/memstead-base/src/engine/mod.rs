@@ -308,6 +308,10 @@ pub struct Engine {
     /// hot path matters for the multi-mem pattern this engine is
     /// designed around.
     backend_factory: BackendFactory,
+    /// Storage discovery for UNMOUNTED mems (flywheel W7/02) — set by
+    /// full boot, `None` in lean/embedded engines (which keep the
+    /// forward-reference mechanic unchanged for unmounted targets).
+    pub(crate) unmounted_storage_prober: Option<UnmountedStorageProber>,
     /// Git-branch ops bundle — function pointers for the per-mount
     /// operations whose implementations live in `memstead-git-branch`
     /// (and therefore can't sit on the `MemBackend` trait without
@@ -372,6 +376,30 @@ pub type MutationClock = Arc<dyn Fn() -> std::time::SystemTime + Send + Sync>;
 /// Stateless, `Send + Sync + Copy`.
 pub type BackendFactory =
     fn(&Mount) -> Result<Box<dyn MemBackend>, crate::workspace_store::InstantiateError>;
+
+/// Discovered storage for a mem that has NO mount record — the
+/// unmounted half of flywheel W7/02's write-time cross-mem target
+/// verification. The workspace layer owns the discovery convention
+/// (the mem-repo's branch registry, which memstead-base cannot see
+/// without inverting the crate dependency) and hands back a transient
+/// backend to ask plus the mem's schema pin when its config declares
+/// one, so the cross-schema edge routing can keep its authority
+/// without a mount.
+pub struct UnmountedMemStorage {
+    /// Transient backend over the discovered storage. Used for the
+    /// cheap [`MemBackend::entity_exists`] probe and the one-blob
+    /// type read — never registered, never loaded.
+    pub backend: Box<dyn MemBackend>,
+    /// The mem's pinned schema, when its stored config declares one.
+    pub schema: Option<memstead_schema::SchemaRef>,
+}
+
+/// Discovery hook: mem name → its storage, when the workspace layer
+/// can find any (`None` = no discoverable storage; the
+/// forward-reference mechanic governs, exactly as before). Boxed
+/// closure rather than a function pointer because discovery needs the
+/// workspace root and gitdir captured at boot.
+pub type UnmountedStorageProber = Box<dyn Fn(&str) -> Option<UnmountedMemStorage> + Send + Sync>;
 
 /// `Engine::changes_since` dispatch for git-branch mounts.
 ///
