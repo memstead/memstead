@@ -14,6 +14,8 @@ use crate::entity::Entity;
 use crate::graph::LouvainOutput;
 use crate::store::Store;
 
+#[cfg(test)]
+mod adversarial;
 pub mod archive;
 pub mod canonical;
 pub mod config;

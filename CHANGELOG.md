@@ -35,6 +35,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **A seeded adversarial smoke over the archive trust boundary.** Foreign
+  bytes through the validating entry point, covering the nested parsers
+  (config, strict entity checks, schema loader, id and graph validation,
+  the canonical re-pack) transitively: zip-level bit flips, truncations,
+  splices, inner-content mutations, and hostile extra entries (traversal
+  paths, meta-dir payloads, duplicates) over a seed corpus of valid
+  archives. Asserts no input panics the validator, every accepted
+  archive's canonical bytes re-validate to the same canonical bytes, and
+  the deliberate forward-compat tolerance (unrecognised `.memstead/`
+  members) never influences canonical output. Deterministic and bounded
+  (4500 cases, well under a second).
 - **A seeded adversarial smoke over the frontmatter/markdown parser
   family.** A deterministic, bounded harness (hand-rolled xorshift64, no
   fuzz dependency, about 1s) assembles adversarial inputs from a fragment
