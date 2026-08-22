@@ -3750,6 +3750,98 @@ write_rules: []
         );
     }
 
+    /// The write-time acyclicity guard sees edges living in DEFERRED
+    /// mems: an add that closes a cycle THROUGH a lazy, not-yet-loaded
+    /// mem refuses `RELATIONSHIP_CYCLE` exactly as an eager boot
+    /// refuses it. The fourth final grade demonstrated the
+    /// counterexample on a three-mem chain — the mid-path edge lived on
+    /// the lazy mem's entity, the walk over the endpoint mems missed
+    /// it, the cycle landed, and the next eager boot dropped an
+    /// INNOCENT pre-existing edge to break it. A two-mem fixture would
+    /// pass vacuously (relate loads both endpoint mems); three mems
+    /// with the middle one lazy is the discriminating shape.
+    #[test]
+    fn acyclicity_guard_sees_edges_in_deferred_mems() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let dirs: Vec<std::path::PathBuf> = ["ma", "mb", "mc"]
+            .iter()
+            .map(|m| {
+                let d = tmp.path().join(m);
+                std::fs::create_dir_all(&d).unwrap();
+                d
+            })
+            .collect();
+        write_spec(&dirs[0], "node", "Node A", "");
+        write_spec(&dirs[1], "node", "Node B", "");
+        write_spec(&dirs[2], "node", "Node C", "");
+
+        let mounts = |lazy_mid: bool| -> Vec<(Mount, Box<dyn MemBackend>)> {
+            ["ma", "mb", "mc"]
+                .iter()
+                .zip(dirs.iter())
+                .map(|(m, d)| {
+                    let mut mount = folder_mount(m, d.clone());
+                    if lazy_mid && *m == "ma" {
+                        mount.lifecycle = MountLifecycle::Lazy;
+                    }
+                    (
+                        mount,
+                        Box::new(FilesystemMemWriter::new(d.clone())) as Box<dyn MemBackend>,
+                    )
+                })
+                .collect()
+        };
+        let grants = || {
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            for (from, to) in [("mb", "ma"), ("ma", "mc"), ("mc", "mb")] {
+                settings
+                    .cross_mem_links
+                    .insert(from.to_string(), CrossLinkValue::List(vec![to.to_string()]));
+            }
+            settings
+        };
+        let relate = |engine: &mut Engine, from: &str, to: &str| {
+            let (actor, client) = cli_actor();
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: crate::EntityId::new(from, "node"),
+                    expected_hash: None,
+                    rel_type: "DEPENDS_ON".to_string(),
+                    target: crate::EntityId::new(to, "node"),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        // Author the chain mb→ma→mc while everything is eager.
+        {
+            let mut authoring = Engine::from_mounts(mounts(false)).unwrap();
+            authoring.set_settings(grants());
+            relate(&mut authoring, "mb", "ma").expect("mb→ma lands");
+            relate(&mut authoring, "ma", "mc").expect("ma→mc lands");
+        }
+
+        // Fresh boot with the MID-PATH mem lazy: closing mc→mb would
+        // complete the cycle mb→ma→mc→mb through the unloaded mem.
+        let mut engine = Engine::from_mounts(mounts(true)).unwrap();
+        engine.set_settings(grants());
+        assert!(engine.mem_is_deferred("ma"), "the mid-path mem is deferred");
+        let err = relate(&mut engine, "mc", "mb")
+            .expect_err("a cycle through a deferred mem must refuse, as eager refuses");
+        assert!(
+            matches!(err, EngineError::RelationshipCycle { .. }),
+            "expected RELATIONSHIP_CYCLE, got {err:?}"
+        );
+    }
+
     /// A cross-mem body link from an eager mem into a lazy one is a
     /// stub until the target mem loads, and resolves to the real entity
     /// afterwards — never silently dropped, never a spurious permanent

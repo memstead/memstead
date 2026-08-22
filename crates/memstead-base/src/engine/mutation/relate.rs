@@ -97,6 +97,22 @@ impl Engine {
         if target_mem != source_mem {
             drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
         }
+        // An ACYCLIC rel-type's cycle guard walks the whole rel-type
+        // subgraph (`would_cycle`), and a cycle can pass through any
+        // mem — an edge on a deferred (lazy, unloaded) mem's entity is
+        // invisible to a walk over the endpoint mems alone, so an add
+        // an eager boot refuses would land silently and corrupt an
+        // innocent edge on the next full load (the fourth lazy-mount
+        // grade demonstrated exactly that on a three-mem chain). Full
+        // load before the guard; non-acyclic rel-types skip the cost.
+        if !args.remove
+            && self
+                .schemas
+                .get(&source_mem)
+                .is_some_and(|s| s.relationship_acyclic(&args.rel_type))
+        {
+            self.ensure_mems_loaded(None);
+        }
 
         let dry_run = args.dry_run;
         let prepared = match self.prepare_relate(args, drift_warnings)? {

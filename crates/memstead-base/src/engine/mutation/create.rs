@@ -113,6 +113,17 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<CreateEntityOutcome, EngineError> {
         let drift_warnings = self.reload_if_stale(Some(&args.mem));
+        // Declared relations on an ACYCLIC rel-type run the same
+        // whole-subgraph cycle guard relate runs — full load first, or
+        // a cycle through a deferred mem's edge is invisible (see the
+        // relate path's comment for the demonstrated failure).
+        if args.relations.iter().any(|r| {
+            self.schemas
+                .get(&args.mem)
+                .is_some_and(|s| s.relationship_acyclic(&r.rel_type))
+        }) {
+            self.ensure_mems_loaded(None);
+        }
         match self.prepare_create(args, None, drift_warnings)? {
             CreatePrepareOutcome::Done(outcome) => Ok(outcome),
             CreatePrepareOutcome::Prepared(prepared) => {

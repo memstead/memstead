@@ -116,6 +116,17 @@ impl Engine {
         // unrelated concurrent write leaves this entity's hash intact
         // and the update proceeds. The drift notice rides the outcome.
         let mut drift_warnings = self.reload_if_stale(Some(args.id.mem()));
+        // Declared relations on an ACYCLIC rel-type run the same
+        // whole-subgraph cycle guard relate runs — full load first, or
+        // a cycle through a deferred mem's edge is invisible (see the
+        // relate path's comment for the demonstrated failure).
+        if args.declare_relations.iter().any(|r| {
+            self.schemas
+                .get(args.id.mem())
+                .is_some_and(|s| s.relationship_acyclic(&r.rel_type))
+        }) {
+            self.ensure_mems_loaded(None);
+        }
         let mut outcome = match self.prepare_update(args)? {
             PrepareOutcome::Done(outcome) => outcome,
             PrepareOutcome::Prepared(prepared) => {
