@@ -4426,6 +4426,295 @@ community:
     /// metadata) plus loadable `mig-a@0.2.0` (identical shape) and
     /// `mig-b@0.1.0` (required enum `status`) in the workspace
     /// schemas dir. Two conformant-under-A entities are created.
+    /// The criterion-4 property test (flywheel W8/01): a
+    /// deterministic, seeded, hand-rolled generator (xorshift64 — the
+    /// house discipline, no dependency) drives mutation sequences
+    /// across EVERY kind — create, update, relate, delete, rename,
+    /// batch update (applied AND refused/rolled-back), reload, and a
+    /// schema switch — asserting at checkpoints and at sequence end
+    /// that the maintained derived structures are identical to a
+    /// from-scratch rebuild over the current store. Coverage is
+    /// guaranteed by construction (the first pass cycles every kind
+    /// once before the random tail), and asserted, so a silently
+    /// narrowed generator fails the suite. A failing sequence
+    /// reproduces from the seed printed in the panic message alone.
+    #[test]
+    fn derived_structures_match_rebuild_across_random_mutation_sequences() {
+        for seed in [0x5eed_0001_u64, 0x5eed_0002, 0x5eed_0003] {
+            run_mutation_sequence(seed);
+        }
+    }
+
+    struct Xorshift(u64);
+    impl Xorshift {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn pick(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    fn assert_derived_oracles(engine: &Engine, seed: u64, label: &str) {
+        // Search oracle: the maintained per-mem index holds exactly
+        // the ids a from-scratch build over the current store holds.
+        let fresh = crate::search_index::build_all(engine.store(), &engine.schemas);
+        let live = engine.search_indexes();
+        let mut live_mems: Vec<&String> = live.keys().collect();
+        let mut fresh_mems: Vec<&String> = fresh.keys().collect();
+        live_mems.sort();
+        fresh_mems.sort();
+        assert_eq!(
+            live_mems, fresh_mems,
+            "seed {seed:#x} @ {label}: index mem set diverged from rebuild"
+        );
+        for (mem, idx) in live {
+            let mut got = idx.stored_ids().unwrap();
+            let mut want = fresh[mem].stored_ids().unwrap();
+            got.sort();
+            want.sort();
+            assert_eq!(
+                got, want,
+                "seed {seed:#x} @ {label}: mem `{mem}` index contents diverged from rebuild"
+            );
+        }
+        // Community oracle: the memoised partition equals a fresh
+        // detection with the same parameter source (smallest mem name).
+        let schema = engine
+            .schemas
+            .iter()
+            .min_by(|a, b| a.0.cmp(b.0))
+            .map(|(_, s)| s.clone())
+            .expect("schema present");
+        let weights_schema = schema.clone();
+        let fresh_partition = crate::graph::community::detect_communities(
+            engine.store(),
+            schema.manifest.community.resolution,
+            schema.manifest.community.seed,
+            move |rel_type| {
+                weights_schema
+                    .manifest
+                    .relationships
+                    .definitions
+                    .iter()
+                    .find(|d| d.name == rel_type)
+                    .map(|d| d.default_weight as f64)
+                    .unwrap_or(1.0)
+            },
+        );
+        assert_eq!(
+            engine.communities().entity_cluster_map,
+            fresh_partition.entity_cluster_map,
+            "seed {seed:#x} @ {label}: partition diverged from a fresh detection"
+        );
+    }
+
+    fn run_mutation_sequence(seed: u64) {
+        use indexmap::IndexMap;
+
+        let (_tmp, mut engine) = migration_engine();
+        let mut rng = Xorshift(seed);
+        let mut live: Vec<crate::EntityId> = vec![
+            crate::EntityId::new("specs", "one"),
+            crate::EntityId::new("specs", "two"),
+        ];
+        let mut counter = 0usize;
+        let mut kinds_hit: std::collections::HashSet<&'static str> =
+            std::collections::HashSet::new();
+
+        const KINDS: [&str; 7] = [
+            "create",
+            "update",
+            "relate",
+            "delete",
+            "rename",
+            "batch_applied",
+            "batch_refused",
+        ];
+
+        let bare_update = |id: crate::EntityId| crate::engine::UpdateEntityArgs {
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            id,
+            expected_hash: None,
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+        };
+
+        for op_i in 0..30usize {
+            // First pass cycles every kind once (coverage by
+            // construction); the tail is seed-driven.
+            let kind = *KINDS
+                .get(op_i)
+                .unwrap_or_else(|| &KINDS[rng.pick(KINDS.len())]);
+            match kind {
+                "create" => {
+                    counter += 1;
+                    let mut args = empty_create_args("specs", &format!("Gen {counter}"));
+                    args.entity_type = "doc".to_string();
+                    args.sections = IndexMap::from_iter([(
+                        "body".to_string(),
+                        format!("generated body {counter}"),
+                    )]);
+                    let out = engine
+                        .create_entity(args, crate::vcs::Actor::Cli, None, None)
+                        .expect("generated create is conformant");
+                    live.push(out.id);
+                    kinds_hit.insert("create");
+                }
+                "update" => {
+                    let id = live[rng.pick(live.len())].clone();
+                    let mut args = bare_update(id);
+                    args.append_sections
+                        .insert("body".to_string(), format!("appended at op {op_i}"));
+                    engine
+                        .update_entity(args, crate::vcs::Actor::Cli, None, None)
+                        .expect("append update is conformant");
+                    kinds_hit.insert("update");
+                }
+                "relate" => {
+                    if live.len() >= 2 {
+                        let a = rng.pick(live.len());
+                        let mut b = rng.pick(live.len());
+                        if a == b {
+                            b = (b + 1) % live.len();
+                        }
+                        engine
+                            .relate_entity(
+                                crate::engine::RelateEntityArgs {
+                                    source: live[a].clone(),
+                                    expected_hash: None,
+                                    rel_type: "USES".to_string(),
+                                    target: live[b].clone(),
+                                    remove: false,
+                                    description: None,
+                                    dry_run: false,
+                                },
+                                crate::vcs::Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .expect("USES relate is legal under mig-a");
+                        kinds_hit.insert("relate");
+                    }
+                }
+                "delete" => {
+                    // Only reference-free entities delete cleanly; keep
+                    // at least two so relate stays possible.
+                    if live.len() > 2
+                        && let Some(pos) = (0..live.len()).find(|&i| {
+                            engine.store().incoming(&live[i]).is_empty()
+                                && engine
+                                    .store()
+                                    .get(&live[i])
+                                    .is_some_and(|e| e.relationships.is_empty())
+                        })
+                    {
+                        let id = live.remove(pos);
+                        engine
+                            .delete_entity(
+                                crate::engine::DeleteEntityArgs {
+                                    id: id.clone(),
+                                    expected_hash: None,
+                                },
+                                crate::vcs::Actor::Cli,
+                                None,
+                                None,
+                            )
+                            .expect("reference-free delete lands");
+                        kinds_hit.insert("delete");
+                    }
+                }
+                "rename" => {
+                    counter += 1;
+                    let pos = rng.pick(live.len());
+                    let old = live[pos].clone();
+                    let out = engine
+                        .rename_entity(
+                            crate::engine::RenameEntityArgs {
+                                id: old,
+                                new_title: format!("Renamed {counter}"),
+                                expected_hash: None,
+                            },
+                            crate::vcs::Actor::Cli,
+                            None,
+                            None,
+                        )
+                        .expect("fresh-slug rename lands");
+                    live[pos] = out.new_id;
+                    kinds_hit.insert("rename");
+                }
+                "batch_applied" => {
+                    let id_a = live[rng.pick(live.len())].clone();
+                    let mut a = bare_update(id_a);
+                    a.append_sections
+                        .insert("body".to_string(), format!("batch line {op_i}"));
+                    let result = engine
+                        .batch_update(vec![(a, None)], crate::vcs::Actor::Cli, None, false)
+                        .expect("batch envelope");
+                    assert!(result.applied, "single-entry append batch applies");
+                    kinds_hit.insert("batch_applied");
+                }
+                "batch_refused" => {
+                    let id_a = live[rng.pick(live.len())].clone();
+                    let mut a = bare_update(id_a);
+                    a.append_sections
+                        .insert("body".to_string(), "doomed".to_string());
+                    let missing = bare_update(crate::EntityId::new("specs", "no-such-entity"));
+                    let result = engine
+                        .batch_update(
+                            vec![(a, None), (missing, None)],
+                            crate::vcs::Actor::Cli,
+                            None,
+                            false,
+                        )
+                        .expect("refused batch returns a report-all envelope");
+                    assert!(!result.applied, "the missing target refuses the batch");
+                    kinds_hit.insert("batch_refused");
+                }
+                _ => unreachable!(),
+            }
+
+            if op_i == 14 {
+                // The at-least-one schema switch the criterion demands
+                // (identical field shape, so the index rebuild is
+                // exercised through the epoch path).
+                engine
+                    .set_mem_schema("specs", &sref("mig-a@0.2.0"))
+                    .expect("integral switch");
+                kinds_hit.insert("schema_switch");
+            }
+            if op_i == 19 {
+                engine.reload_one_mem("specs").expect("reload lands");
+                kinds_hit.insert("reload");
+            }
+
+            if op_i % 10 == 9 {
+                assert_derived_oracles(&engine, seed, &format!("checkpoint op {op_i}"));
+            }
+        }
+
+        assert_derived_oracles(&engine, seed, "sequence end");
+
+        for kind in KINDS.iter().copied().chain(["schema_switch", "reload"]) {
+            assert!(
+                kinds_hit.contains(kind),
+                "seed {seed:#x}: generator coverage narrowed — kind `{kind}` never executed"
+            );
+        }
+    }
+
     fn migration_engine() -> (tempfile::TempDir, Engine) {
         let tmp = tempfile::TempDir::new().unwrap();
         let schemas_dir = tmp.path().join("schemas");

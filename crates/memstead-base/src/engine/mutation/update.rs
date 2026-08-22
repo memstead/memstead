@@ -220,7 +220,10 @@ impl Engine {
         let applied = self.apply_prepared_to_store(&prepared)?;
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): the updated entity is the
+        // whole touched set — declared-relation stubs are never
+        // indexed.
+        self.maintain_search_indexes(std::slice::from_ref(&prepared.id));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-commit path; the

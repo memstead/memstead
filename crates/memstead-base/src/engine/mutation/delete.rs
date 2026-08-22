@@ -279,7 +279,11 @@ impl Engine {
         };
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): the deleted id is removed from
+        // its index whether it left the store or demoted to a Residual
+        // stub (stubs are excluded either way); GC'd orphan stubs were
+        // never indexed.
+        self.maintain_search_indexes(std::slice::from_ref(id));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Gated on a landed commit: a stub delete

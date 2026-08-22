@@ -912,7 +912,9 @@ impl Engine {
         }
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): the new entity is the whole
+        // touched set — its stub targets are never indexed.
+        self.maintain_search_indexes(std::slice::from_ref(&id));
 
         // Stub-adoption visibility: project the incoming edges that
         // survived the upsert. Empty for a fresh create; populated

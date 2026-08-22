@@ -268,7 +268,10 @@ impl Engine {
             };
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): only the SOURCE entity's file
+        // was rewritten; stub targets and GC'd orphan stubs were never
+        // indexed.
+        self.maintain_search_indexes(std::slice::from_ref(&prepared.from));
 
         let PreparedRelate {
             from,

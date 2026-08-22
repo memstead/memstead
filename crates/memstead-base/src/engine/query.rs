@@ -1876,6 +1876,81 @@ impl Engine {
     /// Drop the cached per-mem search index map. No-op on `wasm32`
     /// where no index exists; the method stays present so mutation
     /// hooks can call it unconditionally.
+    /// Incrementally maintain the search-index memo for a known
+    /// touched-id set (flywheel W8/01, criterion 1): replace or remove
+    /// exactly the touched documents in place and advance the memo's
+    /// key, instead of dropping the whole map. Semantics:
+    ///
+    /// - Memo empty → nothing to maintain; the next read builds fresh.
+    /// - Memo current (key matches) → no-op (rollback already landed).
+    /// - Schemas epoch moved → the index FIELD SET may have changed:
+    ///   the named, scoped fallback — drop the memo for a full
+    ///   rebuild. Never a silent widening: this is the one case the
+    ///   plan names (schema-shape change).
+    /// - Otherwise: per touched id, a real non-stub entity in the
+    ///   store is re-indexed (delete-then-add on the id term), and an
+    ///   absent or stub entry is removed — stubs stay excluded exactly
+    ///   as the bulk build excludes them. Touched mems' writers
+    ///   commit; any tantivy error falls back to dropping the memo
+    ///   (warn-logged), never to serving a stale index.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn maintain_search_indexes(&mut self, touched: &[crate::EntityId]) {
+        let current = super::DerivedKey {
+            store_generation: self.store.generation(),
+            schemas_epoch: self.schemas_epoch,
+        };
+        let Some((memo_key, indexes)) = self.search_indexes_memo.get_mut() else {
+            return;
+        };
+        if *memo_key == current {
+            return;
+        }
+        if memo_key.schemas_epoch != current.schemas_epoch {
+            self.search_indexes_memo = OnceCell::new();
+            return;
+        }
+        let mut touched_mems: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for id in touched {
+            let Some(idx) = indexes.get_mut(id.mem()) else {
+                continue;
+            };
+            let result = match self.store.get(id) {
+                Some(entity) if !entity.stub => idx.index_entity(entity),
+                _ => idx.remove_entity(id),
+            };
+            if let Err(e) = result {
+                tracing::warn!(
+                    id = id.as_ref(),
+                    error = %e,
+                    "incremental index maintenance failed; dropping the memo for a full rebuild"
+                );
+                self.search_indexes_memo = OnceCell::new();
+                return;
+            }
+            touched_mems.insert(id.mem());
+        }
+        for (mem, idx) in indexes.iter_mut() {
+            if !touched_mems.contains(mem.as_str()) {
+                continue;
+            }
+            if let Err(e) = idx.commit() {
+                tracing::warn!(
+                    mem = mem.as_str(),
+                    error = %e,
+                    "incremental index commit failed; dropping the memo for a full rebuild"
+                );
+                self.search_indexes_memo = OnceCell::new();
+                return;
+            }
+        }
+        *memo_key = current;
+    }
+
+    /// No-op shim on `wasm32`, mirroring `invalidate_search_indexes`
+    /// so mutation paths call it unconditionally.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn maintain_search_indexes(&mut self, _touched: &[crate::EntityId]) {}
+
     pub fn invalidate_search_indexes(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
