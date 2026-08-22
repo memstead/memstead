@@ -198,7 +198,14 @@ pub struct Engine {
     /// calls after a successful write. `OnceCell` is `!Sync`; the
     /// engine is `Send` (it is moved into a `Mutex` by every consumer)
     /// but not `Sync`.
-    community_memo: OnceCell<LouvainOutput>,
+    /// Generation-keyed (flywheel W8/01): the memo carries the store
+    /// generation it was computed at; the invalidation hook clears it
+    /// only when the store has actually moved past that generation —
+    /// which is what makes a rolled-back batch (store snapshot
+    /// restored, generation restored with it) keep serving the memo
+    /// its state was computed from, and makes it impossible for the
+    /// rolled-back interim state to be served as fresh.
+    community_memo: OnceCell<(u64, LouvainOutput)>,
     /// Lazily-computed per-mem search index map. Built on first call
     /// to [`Self::search_indexes`] via [`build_all`]; invalidated by
     /// [`Self::invalidate_search_indexes`] alongside the community
@@ -206,7 +213,8 @@ pub struct Engine {
     /// search. Absent on `wasm32` targets — search lives behind the
     /// bridge (see `EngineError::SearchUnavailable`).
     #[cfg(not(target_arch = "wasm32"))]
-    search_indexes_memo: OnceCell<HashMap<String, MemIndex>>,
+    /// Generation-keyed like `community_memo`.
+    search_indexes_memo: OnceCell<(u64, HashMap<String, MemIndex>)>,
     /// Workspace-level operator policy — mem create/delete rules,
     /// cross-mem link permissions. Defaults to empty; populated via
     /// [`Self::set_settings`] when [`Self::from_workspace_root`] (or

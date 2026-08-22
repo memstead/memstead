@@ -1235,7 +1235,26 @@ impl Engine {
     /// workspace every mem's schema is identical, so the choice of
     /// key is immaterial there.
     pub fn communities(&self) -> &LouvainOutput {
-        self.community_memo.get_or_init(|| {
+        // Generation sanity: a stored memo must match the live store
+        // generation — the mutation hooks clear stale memos before any
+        // read can arrive here. A mismatch would mean a mutation path
+        // skipped its invalidation call (the exact silent-staleness
+        // bug the generation exists to catch).
+        if let Some((memo_gen, _)) = self.community_memo.get() {
+            debug_assert_eq!(
+                *memo_gen,
+                self.store.generation(),
+                "community memo generation lags the store — a mutation path missed invalidate_communities"
+            );
+        }
+        &self
+            .community_memo
+            .get_or_init(|| (self.store.generation(), self.compute_communities()))
+            .1
+    }
+
+    fn compute_communities(&self) -> LouvainOutput {
+        {
             // Select the parameter schema by a stable key (smallest
             // mem name) rather than unordered-map iteration, so the
             // partition does not vary between processes. Fall back to
@@ -1262,11 +1281,22 @@ impl Engine {
                     .map(|d| d.default_weight as f64)
                     .unwrap_or(1.0)
             })
-        })
+        }
     }
 
-    /// Drop the cached community detection result.
+    /// Drop the cached community detection result — unless the store
+    /// still sits at the generation the memo was computed from
+    /// (flywheel W8/01). The keep case is exactly the batch-rollback
+    /// path: the restored snapshot restored the generation with it,
+    /// so the memo describes the live state and recomputing it would
+    /// be pure waste. Every real mutation bumps the generation first,
+    /// so those clears behave as before.
     pub fn invalidate_communities(&mut self) {
+        if let Some((memo_gen, _)) = self.community_memo.get()
+            && *memo_gen == self.store.generation()
+        {
+            return;
+        }
         self.community_memo = OnceCell::new();
     }
 
@@ -1821,8 +1851,22 @@ impl Engine {
     /// (see [`Self::search`] for the typed refuse).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn search_indexes(&self) -> &HashMap<String, MemIndex> {
-        self.search_indexes_memo
-            .get_or_init(|| build_all(&self.store, &self.schemas))
+        if let Some((memo_gen, _)) = self.search_indexes_memo.get() {
+            debug_assert_eq!(
+                *memo_gen,
+                self.store.generation(),
+                "search memo generation lags the store — a mutation path missed invalidate_search_indexes"
+            );
+        }
+        &self
+            .search_indexes_memo
+            .get_or_init(|| {
+                (
+                    self.store.generation(),
+                    build_all(&self.store, &self.schemas),
+                )
+            })
+            .1
     }
 
     /// Drop the cached per-mem search index map. No-op on `wasm32`
@@ -1831,6 +1875,14 @@ impl Engine {
     pub fn invalidate_search_indexes(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            // Same generation check as `invalidate_communities`: keep
+            // the memo when the store still sits at its generation
+            // (the batch-rollback case), clear otherwise.
+            if let Some((memo_gen, _)) = self.search_indexes_memo.get()
+                && *memo_gen == self.store.generation()
+            {
+                return;
+            }
             self.search_indexes_memo = OnceCell::new();
         }
     }
@@ -3761,6 +3813,162 @@ community:
     // against a folder-mount engine with a small fixture of created
     // entities and one relate edge — enough to exercise both the
     // graph-query path and the cache-invalidation hooks.
+
+    /// Generation-keyed memos (flywheel W8/01). Four claims: repeated
+    /// reads serve the memo; a REFUSED engine batch leaves the memo
+    /// untouched (the refusal path calls no hook — pinned so it stays
+    /// cheap); a memo computed from an INTERIM (mid-batch) state never
+    /// survives a rollback as fresh — the store-carried generation is
+    /// what lets the invalidation hook adjudicate that correctly; and
+    /// a real mutation invalidates, with the recomputation identical
+    /// to a from-scratch detection (the criterion-3 identity oracle
+    /// for the mechanism).
+    #[test]
+    fn generation_keyed_memos_survive_rollback_and_track_mutations() {
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let mut engine = build_demo_engine(&tmp);
+
+        // 1. Repeated reads: cell filled once, generation stable.
+        let _ = engine.communities();
+        let memo_gen_before = engine.community_memo.get().expect("memo filled").0;
+        let _ = engine.communities();
+        assert_eq!(
+            engine.community_memo.get().expect("still filled").0,
+            memo_gen_before,
+            "repeated reads must serve the memo"
+        );
+
+        // 2. A REFUSED engine batch rolls the store back and leaves
+        // the memo untouched — refusal stays recompute-free.
+        let bare = |id: crate::EntityId| crate::engine::UpdateEntityArgs {
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            id,
+            expected_hash: None,
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+        };
+        let mut real = bare(crate::EntityId::new("specs", "source-one"));
+        real.append_sections
+            .insert("identity".to_string(), "appended line".to_string());
+        let missing = bare(crate::EntityId::new("specs", "does-not-exist"));
+        let (actor, client) = cli_actor();
+        let result = engine
+            .batch_update(
+                vec![(real, None), (missing, None)],
+                actor,
+                Some(&client),
+                false,
+            )
+            .expect("refused batch returns a report-all envelope");
+        assert!(
+            !result.applied,
+            "the missing target refuses the whole batch"
+        );
+        assert_eq!(
+            engine.community_memo.get().map(|m| m.0),
+            Some(memo_gen_before),
+            "a refused batch must leave the pre-batch memo standing"
+        );
+        assert_eq!(
+            engine.store().generation(),
+            memo_gen_before,
+            "rollback restored the store to the memo's generation"
+        );
+
+        // 3. The dangerous direction: a memo computed from an INTERIM
+        // state (simulated batch staging) must not survive the
+        // rollback as fresh. The store-carried generation is what the
+        // invalidation hook adjudicates with.
+        let snapshot = engine.store.clone();
+        let interim_id = crate::EntityId::new("specs", "interim-only");
+        let mut interim = engine
+            .store
+            .get(&crate::EntityId::new("specs", "source-one"))
+            .expect("demo entity present")
+            .clone();
+        interim.id = interim_id.clone();
+        interim.title = "Interim Only".to_string();
+        engine.store.upsert(interim_id, interim);
+        engine.invalidate_communities();
+        let _ = engine.communities();
+        let interim_gen = engine.community_memo.get().expect("interim memo").0;
+        assert_ne!(interim_gen, memo_gen_before);
+        engine.store = snapshot; // rollback, generation restored with it
+        engine.invalidate_communities();
+        engine.invalidate_search_indexes();
+        if let Some((g, _)) = engine.community_memo.get() {
+            assert_ne!(
+                *g, interim_gen,
+                "a rolled-back interim state must never be served as fresh"
+            );
+        }
+        assert!(
+            !engine
+                .communities()
+                .entity_cluster_map
+                .keys()
+                .any(|id| id.contains("interim-only")),
+            "the partition served after rollback reflects the restored store, not the interim one"
+        );
+
+        // 4. A real mutation invalidates; the recomputation equals a
+        // from-scratch detection and sees the new entity.
+        let (actor, client) = cli_actor();
+        engine
+            .create_entity(
+                empty_create_args("specs", "Fourth Entity"),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(
+            engine
+                .communities()
+                .entity_cluster_map
+                .keys()
+                .any(|id| id.contains("fourth-entity")),
+            "recomputed partition sees the new entity"
+        );
+        let fresh = {
+            let schema = engine
+                .schemas
+                .iter()
+                .min_by(|a, b| a.0.cmp(b.0))
+                .map(|(_, s)| s.clone())
+                .expect("demo engine has a schema");
+            let schema_for_weights = schema.clone();
+            crate::graph::community::detect_communities(
+                engine.store(),
+                schema.manifest.community.resolution,
+                schema.manifest.community.seed,
+                move |rel_type| {
+                    schema_for_weights
+                        .manifest
+                        .relationships
+                        .definitions
+                        .iter()
+                        .find(|d| d.name == rel_type)
+                        .map(|d| d.default_weight as f64)
+                        .unwrap_or(1.0)
+                },
+            )
+        };
+        assert_eq!(
+            engine.communities().entity_cluster_map,
+            fresh.entity_cluster_map,
+            "memo must equal a from-scratch detection over the current store"
+        );
+    }
 
     fn build_demo_engine(tmp: &TempDir) -> Engine {
         let mem_dir = tmp.path().to_path_buf();
