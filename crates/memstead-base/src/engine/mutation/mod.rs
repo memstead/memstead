@@ -721,6 +721,10 @@ pub(super) fn validate_cross_mem_add_policy(
     if let Some(mount) = engine.mount(target_mem)
         && mount.capability == crate::workspace::MountCapability::ReadOnly
         && !engine.store.contains(target)
+        && !matches!(
+            probe_deferred_target(engine, target)?,
+            DeferredTargetProbe::Exists
+        )
     {
         return Err(EngineError::CrossMemTargetNotFound {
             target_id: target.to_string(),
@@ -728,6 +732,99 @@ pub(super) fn validate_cross_mem_add_policy(
         });
     }
     Ok(())
+}
+
+/// Storage verdict for a cross-mem target whose mem is mounted but
+/// DEFERRED (lazy, not yet loaded) — the write-time verification of
+/// flywheel W7/02. The check asks the mem's real storage through the
+/// cheap [`crate::backend::MemBackend::entity_exists`] probe
+/// (tree-lookup-class on git-branch, metadata-class on folder) and
+/// never triggers the mem's load: verification must not convert into
+/// a full-load side effect (plan 01's seam).
+pub(super) enum DeferredTargetProbe {
+    /// The target's mem is loaded (the store is the truth) or not
+    /// mounted at all (no storage handle to ask — the
+    /// forward-reference mechanic governs).
+    NotApplicable,
+    /// Storage holds the entity: the reference is verified against
+    /// real storage even though the mem is unloaded.
+    Exists,
+    /// Storage answers and the entity is not there.
+    Absent,
+}
+
+pub(super) fn probe_deferred_target(
+    engine: &super::Engine,
+    target: &EntityId,
+) -> Result<DeferredTargetProbe, EngineError> {
+    if !engine.mem_is_deferred(target.mem()) {
+        return Ok(DeferredTargetProbe::NotApplicable);
+    }
+    let Some(mounted) = engine.mounts.iter().find(|m| m.mount.mem == target.mem()) else {
+        return Ok(DeferredTargetProbe::NotApplicable);
+    };
+    let rel_path = crate::entity::id::id_to_file_path(target);
+    Ok(
+        if mounted
+            .backend
+            .entity_exists(std::path::Path::new(&rel_path))?
+        {
+            DeferredTargetProbe::Exists
+        } else {
+            DeferredTargetProbe::Absent
+        },
+    )
+}
+
+/// The one-blob type read for a storage-verified deferred target: the
+/// shape check needs the target's real entity type, and a tree hit
+/// proves existence, not type. Reads exactly the resolved path's
+/// bytes and peeks the frontmatter `type:` — never the mem. Returns
+/// `None` when the entity is absent or declares no type (the shape
+/// gate then admits, the same posture the stub-bound case has
+/// always had — the check never guesses).
+/// The stub kind for a target being auto-stubbed on an add path: a
+/// target that storage VERIFIES inside a deferred mem gets the
+/// load-time kind — the stub is only plan 01's until-load
+/// representation of a link into an unloaded mem, not a forward
+/// reference to something that awaits creation. Everything else keeps
+/// `ForwardReference`. Kinds stay annotation-not-state either way.
+pub(super) fn deferred_verified_stub_kind(
+    engine: &super::Engine,
+    target: &EntityId,
+) -> Result<crate::entity::StubKind, EngineError> {
+    Ok(
+        if matches!(
+            probe_deferred_target(engine, target)?,
+            DeferredTargetProbe::Exists
+        ) {
+            crate::entity::StubKind::LoadTime
+        } else {
+            crate::entity::StubKind::ForwardReference
+        },
+    )
+}
+
+pub(super) fn peek_deferred_target_type(
+    engine: &super::Engine,
+    target: &EntityId,
+) -> Result<Option<String>, EngineError> {
+    if !engine.mem_is_deferred(target.mem()) {
+        return Ok(None);
+    }
+    let Some(mounted) = engine.mounts.iter().find(|m| m.mount.mem == target.mem()) else {
+        return Ok(None);
+    };
+    let rel_path = crate::entity::id::id_to_file_path(target);
+    let Some(bytes) = mounted
+        .backend
+        .read_entity(std::path::Path::new(&rel_path))?
+    else {
+        return Ok(None);
+    };
+    Ok(String::from_utf8(bytes)
+        .ok()
+        .and_then(|c| crate::entity::parser::peek_type_from_frontmatter(&c)))
 }
 
 /// Outcome of the engine's edge-validation router for a single

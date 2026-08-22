@@ -451,6 +451,14 @@ impl Engine {
                 .get(&rel.to)
                 .map(|e| e.entity_type.clone())
                 .filter(|t| !t.is_empty());
+            // Deferred-mem target (flywheel W7/02): the store cannot
+            // answer for an unloaded mem — the real type comes from
+            // the one resolved blob, without loading the mem. `None`
+            // for non-deferred or absent targets, unchanged posture.
+            let target_type = match target_type {
+                Some(t) => Some(t),
+                None => super::peek_deferred_target_type(self, &rel.to)?,
+            };
             match route_edge_validation(
                 self,
                 &rel.rel_type,
@@ -898,10 +906,8 @@ impl Engine {
         // (the args.relations vec is empty).
         for target in &relation_targets {
             if !self.store.contains(target) {
-                self.store.upsert(
-                    target.clone(),
-                    make_stub(target, crate::entity::StubKind::ForwardReference),
-                );
+                let kind = super::deferred_verified_stub_kind(self, target)?;
+                self.store.upsert(target.clone(), make_stub(target, kind));
             }
         }
 
@@ -1342,15 +1348,17 @@ impl Engine {
         );
         // Forward-reference stubs for OUT-OF-BATCH targets only —
         // in-batch targets are real entities now.
+        let mut out_of_batch_stubs: Vec<(EntityId, crate::entity::StubKind)> = Vec::new();
         for p in &prepared {
             for target in &p.relation_targets {
                 if !self.store.contains(target) {
-                    self.store.upsert(
-                        target.clone(),
-                        make_stub(target, crate::entity::StubKind::ForwardReference),
-                    );
+                    let kind = super::deferred_verified_stub_kind(self, target)?;
+                    out_of_batch_stubs.push((target.clone(), kind));
                 }
             }
+        }
+        for (target, kind) in out_of_batch_stubs {
+            self.store.upsert(target.clone(), make_stub(&target, kind));
         }
         self.invalidate_communities();
         self.invalidate_search_indexes();

@@ -3962,6 +3962,160 @@ write_rules: []
         );
     }
 
+    /// Write-time cross-mem target verification (flywheel W7/02): a
+    /// relate into a DEFERRED Write mem verifies the target against
+    /// storage without loading the mem. A storage-verified target is
+    /// admitted with a LoadTime stub and NO auto-stub warning (the
+    /// entity exists — it resolves when the mem loads); a genuinely
+    /// absent target keeps today's forward-reference mechanic, warning
+    /// included. Either way the target mem stays deferred.
+    #[test]
+    fn relate_into_deferred_mem_verifies_against_storage_without_load() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+        let mut settings = crate::workspace::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            "eag".to_string(),
+            CrossLinkValue::List(vec!["laz".to_string()]),
+        );
+        engine.set_settings(settings);
+
+        let relate = |engine: &mut Engine, to: &str| {
+            let (actor, client) = cli_actor();
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: crate::EntityId::new("eag", "alpha"),
+                    expected_hash: None,
+                    rel_type: "SUPPORTS".to_string(),
+                    target: crate::EntityId::new("laz", to),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        // Storage-verified target: laz--omega exists on disk.
+        let outcome = relate(&mut engine, "omega").expect("verified target admits");
+        assert!(
+            engine.mem_is_deferred("laz"),
+            "verification never loads the mem"
+        );
+        assert!(
+            !outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::AutoStubCreated { .. })),
+            "a storage-verified target is not an auto-stub case: {:?}",
+            outcome.warnings
+        );
+        let stub = engine
+            .store()
+            .get(&crate::EntityId::new("laz", "omega"))
+            .expect("until-load stub present");
+        assert!(stub.stub);
+        assert_eq!(
+            stub.stub_kind,
+            Some(crate::entity::StubKind::LoadTime),
+            "verified-in-storage stub carries the load-time kind"
+        );
+
+        // Genuinely absent target: forward-reference mechanic intact.
+        let outcome = relate(&mut engine, "missing").expect("absent Write-mem target auto-stubs");
+        assert!(engine.mem_is_deferred("laz"), "still no load");
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::AutoStubCreated { .. })),
+            "absent target keeps the auto-stub warning: {:?}",
+            outcome.warnings
+        );
+        let stub = engine
+            .store()
+            .get(&crate::EntityId::new("laz", "missing"))
+            .expect("forward-reference stub present");
+        assert_eq!(
+            stub.stub_kind,
+            Some(crate::entity::StubKind::ForwardReference)
+        );
+    }
+
+    /// The read-only contract, now answerable without load (flywheel
+    /// W7/02): an entity PRESENT in a deferred read-only mem's storage
+    /// is admitted — the refusal never fires merely because the mem is
+    /// unloaded — and an ABSENT one refuses with the existing typed
+    /// error. The mem stays deferred through both.
+    #[test]
+    fn readonly_deferred_target_answers_from_storage() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut ro_mount = lazy_folder_mount("laz", lazy_dir.to_path_buf());
+        ro_mount.capability = crate::workspace::MountCapability::ReadOnly;
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("eag", eager_dir.to_path_buf()),
+                Box::new(FilesystemMemWriter::new(eager_dir.to_path_buf())) as Box<dyn MemBackend>,
+            ),
+            (
+                ro_mount,
+                Box::new(FilesystemMemWriter::new(lazy_dir.to_path_buf())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let mut settings = crate::workspace::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            "eag".to_string(),
+            CrossLinkValue::List(vec!["laz".to_string()]),
+        );
+        engine.set_settings(settings);
+
+        let relate = |engine: &mut Engine, to: &str| {
+            let (actor, client) = cli_actor();
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: crate::EntityId::new("eag", "alpha"),
+                    expected_hash: None,
+                    rel_type: "SUPPORTS".to_string(),
+                    target: crate::EntityId::new("laz", to),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        relate(&mut engine, "omega").expect("present-in-storage RO target admits");
+        assert!(
+            engine.mem_is_deferred("laz"),
+            "the admit never loads the mem"
+        );
+
+        let err =
+            relate(&mut engine, "missing").expect_err("absent RO target keeps the typed refusal");
+        assert!(
+            matches!(err, EngineError::CrossMemTargetNotFound { .. }),
+            "expected CROSS_MEM_TARGET_NOT_FOUND, got {err:?}"
+        );
+        assert!(
+            engine.mem_is_deferred("laz"),
+            "the refusal never loads the mem either"
+        );
+    }
+
     /// A cross-mem body link from an eager mem into a lazy one is a
     /// stub until the target mem loads, and resolves to the real entity
     /// afterwards — never silently dropped, never a spurious permanent

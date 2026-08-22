@@ -1556,6 +1556,12 @@ fn apply_declare_relations(
             .get(&rel.to)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
+        // Deferred-mem target (flywheel W7/02): the real type comes
+        // from the one resolved blob, never from loading the mem.
+        let target_type = match target_type {
+            Some(t) => Some(t),
+            None => super::peek_deferred_target_type(engine, &rel.to)?,
+        };
         let _ = super::route_edge_validation(
             engine,
             &canonical,
@@ -1623,10 +1629,10 @@ fn apply_declare_relations(
         // both fall through here.
         let target_was_stubbed = !engine.store.contains(&rel.to);
         if target_was_stubbed && !exists {
-            engine.store.upsert(
-                rel.to.clone(),
-                make_stub(&rel.to, crate::entity::StubKind::ForwardReference),
-            );
+            let kind = super::deferred_verified_stub_kind(engine, &rel.to)?;
+            engine
+                .store
+                .upsert(rel.to.clone(), make_stub(&rel.to, kind));
         }
 
         declared.push(RelationDeclared {

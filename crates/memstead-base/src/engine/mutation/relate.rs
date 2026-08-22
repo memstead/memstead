@@ -44,6 +44,11 @@ pub(super) struct PreparedRelate {
     /// step upserts it — prepare itself never mutates the store, so a
     /// refused batch has nothing to undo from prepares alone.
     pub(super) stub_target: Option<EntityId>,
+    /// The planned stub's kind: `ForwardReference` for a genuinely
+    /// absent target, `LoadTime` for a storage-verified target in a
+    /// deferred mem (the stub is only the until-load representation —
+    /// flywheel W7/02). Meaningless when `stub_target` is `None`.
+    pub(super) stub_kind: crate::entity::StubKind,
     pub(super) type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
 }
 
@@ -94,7 +99,13 @@ impl Engine {
         // out of `prepare_relate` so `batch_relate` can probe every
         // touched mem exactly once up front instead of per entry.
         let mut drift_warnings = self.reload_if_stale(Some(&source_mem));
-        if target_mem != source_mem {
+        if target_mem != source_mem && !self.mem_is_deferred(&target_mem) {
+            // A DEFERRED target mem is deliberately not probed here:
+            // the funnel's phase-0 trigger would full-load it, and
+            // target verification must never cost a mem's load
+            // (flywheel W7/02 — the storage check below answers the
+            // existence and type questions against the branch tree /
+            // filesystem instead).
             drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
         }
         // An ACYCLIC rel-type's cycle guard walks the whole rel-type
@@ -419,6 +430,10 @@ impl Engine {
             if let Some(mount) = self.mount(&target_mem)
                 && mount.capability == MountCapability::ReadOnly
                 && !self.store.contains(&args.target)
+                && !matches!(
+                    super::probe_deferred_target(self, &args.target)?,
+                    super::DeferredTargetProbe::Exists
+                )
             {
                 return Err(EngineError::CrossMemTargetNotFound {
                     target_id: args.target.to_string(),
@@ -540,6 +555,26 @@ impl Engine {
             .get(&args.target)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
+        // Storage verification for a target in a DEFERRED mem
+        // (flywheel W7/02): the store cannot answer for an unloaded
+        // mem, so existence comes from the cheap storage probe and —
+        // when the shape check will need it — the type from the one
+        // resolved blob. Neither triggers the mem's load.
+        let target_verified_in_storage = if target_type.is_none() && target_mem != source_mem {
+            matches!(
+                super::probe_deferred_target(self, &args.target)?,
+                super::DeferredTargetProbe::Exists
+            )
+        } else {
+            false
+        };
+        let target_type = match target_type {
+            Some(t) => Some(t),
+            None if target_verified_in_storage && !args.remove => {
+                super::peek_deferred_target_type(self, &args.target)?
+            }
+            None => None,
+        };
         // Shape validation is add-only. Edges that violated the
         // schema's shape before constraints landed must remain
         // removable through `memstead_relate remove=true` — otherwise the
@@ -776,20 +811,34 @@ impl Engine {
         // been removed, so every diagnostic now follows the uniform
         // `{ code, message, details }` warning shape.
         let mut stub_target: Option<EntityId> = None;
+        let mut stub_kind = crate::entity::StubKind::ForwardReference;
         if matches!(action, RelateAction::Added) && !self.store.contains(&args.target) {
             stub_target = Some(args.target.clone());
-            // Rehearsal honesty: on the dry-run path nothing is
-            // written, so the warning's `pending` flag branches the
-            // message to the would-be form — the code stays
-            // AUTO_STUB_CREATED either way.
-            warnings.push(WarningHint::AutoStubCreated {
-                stub_id: args.target.clone(),
-                pending: args.dry_run,
-            });
+            if target_verified_in_storage {
+                // The target EXISTS — storage said so. The in-store
+                // stub is only plan 01's until-load representation of
+                // a cross-mem link into a deferred mem (it resolves
+                // when the mem loads), so it carries the load-time
+                // kind and no AUTO_STUB_CREATED warning: that warning
+                // tells an agent the target awaits creation, which
+                // would be false here.
+                stub_kind = crate::entity::StubKind::LoadTime;
+            } else {
+                // Rehearsal honesty: on the dry-run path nothing is
+                // written, so the warning's `pending` flag branches the
+                // message to the would-be form — the code stays
+                // AUTO_STUB_CREATED either way.
+                warnings.push(WarningHint::AutoStubCreated {
+                    stub_id: args.target.clone(),
+                    pending: args.dry_run,
+                });
+            }
             // If the target mem is unmounted, the
             // auto-stub above has no `_mem_schema` resolution. Layer
             // the typed mem-uncreated warning alongside the
             // `AutoStubCreated` so the operator sees both signals.
+            // (Never true on the verified branch — a deferred mem is
+            // mounted by definition.)
             if target_mem_uncreated {
                 warnings.push(WarningHint::CrossMemTargetMemUncreated {
                     from_mem: source_mem.clone(),
@@ -864,6 +913,7 @@ impl Engine {
             markdown,
             warnings,
             stub_target,
+            stub_kind,
             type_def,
         }))
     }
@@ -875,10 +925,8 @@ impl Engine {
     /// rolls back with a store snapshot + `discard_all_pending`.
     fn stage_prepared_relate(&mut self, p: &PreparedRelate) -> Result<(), EngineError> {
         if let Some(stub_id) = &p.stub_target {
-            self.store.upsert(
-                stub_id.clone(),
-                make_stub(stub_id, crate::entity::StubKind::ForwardReference),
-            );
+            self.store
+                .upsert(stub_id.clone(), make_stub(stub_id, p.stub_kind.clone()));
         }
         self.mounts[p.mount_idx]
             .backend
@@ -978,6 +1026,14 @@ impl Engine {
             .collect();
         touched_mems.sort();
         touched_mems.dedup();
+        // A mem that is only ever a TARGET in this batch and is
+        // deferred stays unloaded: target verification runs against
+        // storage (flywheel W7/02), and the funnel's phase-0 trigger
+        // would otherwise convert verification into a full load.
+        // Source mems always reload — a write into a mem needs the mem.
+        let source_mems: std::collections::HashSet<&str> =
+            relates.iter().map(|(a, _)| a.source.mem()).collect();
+        touched_mems.retain(|m| source_mems.contains(m.as_str()) || !self.mem_is_deferred(m));
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
         }
