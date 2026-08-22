@@ -2928,3 +2928,73 @@ fn mem_init_succeeds_without_a_configured_git_identity() {
     let listed = String::from_utf8(listed).unwrap();
     assert!(listed.contains("alpha"), "mem not listed: {listed}");
 }
+
+/// Lazy-mount observability (flywheel W7/01, fifth grade): `mem list`
+/// reports a lazy mem's TRUE entity count — the `full_engine` seam
+/// loads every deferred mem up front, so an unloaded lazy mem is never
+/// rendered as a bare zero indistinguishable from a genuinely empty
+/// one. Fault-injecting the `ensure_mems_loaded` call out of
+/// `full_engine` flips this test (count 0).
+#[test]
+fn mem_list_counts_entities_in_lazy_mems() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let store = root.join(".memstead");
+    fs::create_dir_all(store.join("state")).unwrap();
+    fs::write(
+        store.join("workspace.toml"),
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    )
+    .unwrap();
+    fs::write(
+        store.join("state").join("mounts.json"),
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"ma","schema":"default@1.0.0","storage":{"type":"folder","path":"ma-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false},{"mem":"mb","schema":"default@1.0.0","storage":{"type":"folder","path":"mb-mem"},"capability":"write","lifecycle":"lazy","cross_linkable":false}]}"#,
+    )
+    .unwrap();
+    // `mem list` routes through the mem-repo-only `full_engine` seam;
+    // the shape check only probes for `mem-repo/.git` — an empty
+    // freshly-initialised repo satisfies it (the folder mounts never
+    // touch it).
+    Command::new("git")
+        .args(["init", "-q"])
+        .arg(root.join("mem-repo"))
+        .assert()
+        .success();
+    for m in ["ma-mem", "mb-mem"] {
+        let mem_dir = root.join(m);
+        fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        let body = format!(
+            "---\ntype: spec\ncreated_date: 2026-02-03\nlast_modified: 2026-02-03\nlevel: M0\n---\n# Epsilon {m}\n\n## Identity\n\n{DELTA_IDENTITY}\n\n## Purpose\n\n{DELTA_PURPOSE}\n"
+        );
+        fs::write(mem_dir.join("epsilon.md"), &body).unwrap();
+    }
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "mem", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let mems = json["mems"].as_array().expect("mems array");
+    let count_of = |name: &str| -> i64 {
+        mems.iter()
+            .find(|r| r["name"] == name)
+            .unwrap_or_else(|| panic!("mem {name} missing from roster"))["entity_count"]
+            .as_i64()
+            .unwrap()
+    };
+    assert_eq!(count_of("ma"), 1, "eager mem counts its entity");
+    assert_eq!(
+        count_of("mb"),
+        1,
+        "lazy mem must report its TRUE count, never a partial-store zero"
+    );
+}

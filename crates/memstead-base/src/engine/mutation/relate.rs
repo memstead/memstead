@@ -981,6 +981,27 @@ impl Engine {
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
         }
+        // Same acyclic-guard rule as the single-item path: any added
+        // edge on an ACYCLIC rel-type walks the whole rel-type
+        // subgraph, so the walk must see every mem — deferred (lazy,
+        // unloaded) ones included — or a cycle through an unloaded
+        // mem is admitted (the fifth lazy-mount grade demonstrated
+        // exactly that through this path).
+        // Same acyclic-guard rule as the single-item path: any added
+        // edge on an ACYCLIC rel-type walks the whole rel-type
+        // subgraph, so the walk must see every mem — deferred (lazy,
+        // unloaded) ones included — or a cycle through an unloaded
+        // mem is admitted (the fifth lazy-mount grade demonstrated
+        // exactly that through this path).
+        if relates.iter().any(|(a, _)| {
+            !a.remove
+                && self
+                    .schemas
+                    .get(a.source.mem())
+                    .is_some_and(|s| s.relationship_acyclic(&a.rel_type))
+        }) {
+            self.ensure_mems_loaded(None);
+        }
 
         // Snapshot for the all-or-nothing rollback: staged entries
         // mutate the store as they apply (in-order semantics), so a

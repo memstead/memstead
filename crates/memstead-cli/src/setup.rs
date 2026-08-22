@@ -727,6 +727,21 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
 
     let mut engine = engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
     engine.set_role(_ctx.role);
+    // Same CLI lazy-mount posture as `cli_engine_at`/`engine()`: load
+    // every deferred mem up front, so no consumer of this seam (`mem
+    // list` counts, `recover`, the batch commands, install/uninstall)
+    // computes an answer over a partial store. `full_engine` names the
+    // FullEngine flavour, not this posture — without this call an
+    // unloaded lazy mem rendered as entity count 0 (fifth lazy-mount
+    // grade).
+    // Same CLI lazy-mount posture as `cli_engine_at`/`engine()`: load
+    // every deferred mem up front, so no consumer of this seam (`mem
+    // list` counts, `recover`, the batch commands, install/uninstall)
+    // computes an answer over a partial store. `full_engine` names the
+    // FullEngine flavour, not this posture — without this call an
+    // unloaded lazy mem rendered as entity count 0 (fifth lazy-mount
+    // grade).
+    engine.ensure_mems_loaded(None);
     Ok(engine)
 }
 

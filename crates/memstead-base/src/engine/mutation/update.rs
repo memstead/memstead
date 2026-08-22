@@ -1147,6 +1147,19 @@ impl Engine {
         for v in &touched_mems {
             self.reload_if_stale(Some(v));
         }
+        // Same acyclic-guard rule as the single-item path: declared
+        // relations on an ACYCLIC rel-type walk the whole rel-type
+        // subgraph, so the walk must see every mem — deferred ones
+        // included (see the batch_relate comment).
+        if updates.iter().any(|(a, _)| {
+            a.declare_relations.iter().any(|r| {
+                self.schemas
+                    .get(a.id.mem())
+                    .is_some_and(|s| s.relationship_acyclic(&r.rel_type))
+            })
+        }) {
+            self.ensure_mems_loaded(None);
+        }
 
         // Snapshot the in-memory store so a refused batch (or a
         // commit-time backend failure) can roll back any auto-stubs

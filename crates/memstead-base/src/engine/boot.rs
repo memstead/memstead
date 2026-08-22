@@ -3842,6 +3842,126 @@ write_rules: []
         );
     }
 
+    /// The BATCH relate path runs the same acyclicity guard over the
+    /// same full store: a two-entry batch (the shape MCP routes to
+    /// `batch_relate`) whose first entry closes a cycle through a
+    /// deferred mid-path mem is refused whole, exactly as an eager
+    /// boot refuses it. The fifth lazy-mount grade demonstrated the
+    /// complement live: without the batch-path full load the cycle
+    /// committed silently.
+    #[test]
+    fn batch_acyclicity_guard_sees_edges_in_deferred_mems() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let dirs: Vec<std::path::PathBuf> = ["ma", "mb", "mc"]
+            .iter()
+            .map(|m| {
+                let d = tmp.path().join(m);
+                std::fs::create_dir_all(&d).unwrap();
+                d
+            })
+            .collect();
+        write_spec(&dirs[0], "node", "Node A", "");
+        write_spec(&dirs[1], "node", "Node B", "");
+        write_spec(&dirs[2], "node", "Node C", "");
+        // A second entity in mc so the batch's second entry can be an
+        // intra-mem edge that touches ONLY mc — a target in any other
+        // mem would put that mem on the batch's touched-mems reload
+        // list and load it by that route, masking the guard under test.
+        write_spec(&dirs[2], "node2", "Node C2", "");
+
+        let mounts = |lazy_mid: bool| -> Vec<(Mount, Box<dyn MemBackend>)> {
+            ["ma", "mb", "mc"]
+                .iter()
+                .zip(dirs.iter())
+                .map(|(m, d)| {
+                    let mut mount = folder_mount(m, d.clone());
+                    if lazy_mid && *m == "ma" {
+                        mount.lifecycle = MountLifecycle::Lazy;
+                    }
+                    (
+                        mount,
+                        Box::new(FilesystemMemWriter::new(d.clone())) as Box<dyn MemBackend>,
+                    )
+                })
+                .collect()
+        };
+        let grants = || {
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            for (from, to) in [("mb", "ma"), ("ma", "mc"), ("mc", "mb")] {
+                settings
+                    .cross_mem_links
+                    .insert(from.to_string(), CrossLinkValue::List(vec![to.to_string()]));
+            }
+            settings
+        };
+        let relate_args = |from: &str, to: &str| RelateEntityArgs {
+            source: crate::EntityId::new(from, "node"),
+            expected_hash: None,
+            rel_type: "DEPENDS_ON".to_string(),
+            target: crate::EntityId::new(to, "node"),
+            remove: false,
+            description: None,
+            dry_run: false,
+        };
+
+        // Author the chain mb→ma→mc while everything is eager.
+        {
+            let (actor, client) = cli_actor();
+            let mut authoring = Engine::from_mounts(mounts(false)).unwrap();
+            authoring.set_settings(grants());
+            authoring
+                .relate_entity(relate_args("mb", "ma"), actor, Some(&client), None)
+                .expect("mb→ma lands");
+            let (actor2, client2) = cli_actor();
+            authoring
+                .relate_entity(relate_args("ma", "mc"), actor2, Some(&client2), None)
+                .expect("ma→mc lands");
+        }
+
+        // Fresh boot with the MID-PATH mem lazy; a two-entry batch
+        // whose first edge mc→mb completes the cycle mb→ma→mc→mb
+        // through the unloaded mem must refuse whole.
+        let mut engine = Engine::from_mounts(mounts(true)).unwrap();
+        engine.set_settings(grants());
+        assert!(engine.mem_is_deferred("ma"), "the mid-path mem is deferred");
+        let (actor, client) = cli_actor();
+        let result = engine
+            .batch_relate(
+                vec![
+                    (relate_args("mc", "mb"), None),
+                    // The second entry makes the batch two entries —
+                    // the shape MCP routes to `batch_relate` — and is
+                    // an intra-mem edge inside mc: it touches no other
+                    // mem (so it cannot load ma via the touched-mems
+                    // reload) and closes no cycle of its own.
+                    (
+                        RelateEntityArgs {
+                            source: crate::EntityId::new("mc", "node2"),
+                            expected_hash: None,
+                            rel_type: "DEPENDS_ON".to_string(),
+                            target: crate::EntityId::new("mc", "node"),
+                            remove: false,
+                            description: None,
+                            dry_run: false,
+                        },
+                        None,
+                    ),
+                ],
+                actor,
+                Some(&client),
+                false,
+            )
+            .expect("the batch call itself returns a report-all envelope");
+        assert!(
+            !result.applied,
+            "a batch closing a cycle through a deferred mem must refuse, as eager refuses; got applied with {} succeeded",
+            result.succeeded
+        );
+    }
+
     /// A cross-mem body link from an eager mem into a lazy one is a
     /// stub until the target mem loads, and resolves to the real entity
     /// afterwards — never silently dropped, never a spurious permanent

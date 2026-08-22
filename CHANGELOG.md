@@ -32,7 +32,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (whose community partition is workspace-global even under a mem
   filter), health without a filter, and `memstead_entity`'s
   `include_relations` / `include_context` forms (incoming edges and
-  community context can originate anywhere) all take the full load, so
+  community context can originate anywhere) all take the full load; the
+  destructive-delete guards, the write-time acyclicity guard (single
+  and batch mutation paths alike), the mem-rename reference sweep, and
+  parse recovery load fully before adjudicating — so
   no answer is computed over a partial store — and a
   lazy mem is never silently absent: the roster carries it with its pin,
   and load state is observable. The lazy load runs the same validation

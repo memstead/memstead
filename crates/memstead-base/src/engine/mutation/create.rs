@@ -996,6 +996,19 @@ impl Engine {
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
         }
+        // Same acyclic-guard rule as the single-item path: declared
+        // relations on an ACYCLIC rel-type walk the whole rel-type
+        // subgraph, so the walk must see every mem — deferred ones
+        // included (see the batch_relate comment).
+        if creates.iter().any(|(a, _)| {
+            a.relations.iter().any(|r| {
+                self.schemas
+                    .get(&a.mem)
+                    .is_some_and(|s| s.relationship_acyclic(&r.rel_type))
+            })
+        }) {
+            self.ensure_mems_loaded(None);
+        }
 
         let store_snapshot = self.store.clone();
 

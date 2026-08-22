@@ -63,6 +63,12 @@ impl Engine {
         new_mem: &str,
         note: Option<&str>,
     ) -> Result<MemSweepOutcome, EngineError> {
+        // The sweep's answer scope is the whole workspace — every mem
+        // that references `old_mem` must be rewritten — so its load
+        // scope must match: a reference inside a deferred (lazy,
+        // unloaded) mem would otherwise survive the rename unrewritten
+        // (load-scope/answer-scope rule, flywheel W7/01).
+        self.ensure_mems_loaded(None);
         let logical_op_id = crate::provenance::mint_logical_operation_id();
 
         // Plan first, commit after: collect per-mem rewrite lists
