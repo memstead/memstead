@@ -11,9 +11,9 @@ The engine's MCP instructions describe a mem as "designed for 1,000–5,000
 entities". Until this document, that span was advertised, not measured
 (plenum channel, finding 10). This page states what the four everyday
 operations actually cost across workspace sizes, so the deferred redesigns
-that wait for numbers (incremental derived-structure maintenance, deferred
-cross-mem targets — and lazy mounts, since landed and measured below) can
-be argued from data.
+that wait for numbers (incremental derived-structure maintenance — and
+lazy mounts plus deferred cross-mem targets, since landed and recorded
+below) can be argued from data.
 
 ## Reproducing
 
@@ -121,16 +121,16 @@ where boot is already paid and the rebuild is the marginal cost) — which
 this harness deliberately does not measure. A warm-path measurement is
 the missing number for that decision.
 
-**Deferred cross-mem target resolution (plenum 8).** Writing an edge into
-a non-mounted mem today refuses, forcing the target mem to be mounted —
-and the curve prices that forced mount: each additionally mounted mem
-adds its entities × 0.6–0.75 ms to **every** cold command in the
-workspace, permanently, not just during the write. A dossier citing 20
-small mems of 350 entities each pays ~7k entities of load (~5+ s
-per command on this hardware) for edges that needed only target-existence
-checks. The curve quantifies the federation tax; whether the fix is
-branch-tree existence checks or deferred stubs is the design decision the
-backlog holds.
+**Deferred cross-mem target resolution (plenum 8) — landed 2026-08-22.**
+The curve priced the forced mount this redesign removes: each
+additionally mounted mem added its entities × 0.6–0.75 ms to **every**
+cold command, permanently — a dossier citing 20 small mems of 350
+entities each paid ~7k entities of load (~5+ s per command on this
+hardware) for edges that needed only target-existence checks. Write-time
+verification now asks storage directly (branch-tree existence check plus
+one blob read for the type; the SPEC rejected the deferred-stub
+direction), so the same dossier pays 20 tree lookups, zero mounts, zero
+loads, and no change to any subsequent cold command.
 
 ## Relation to the advertised range
 
