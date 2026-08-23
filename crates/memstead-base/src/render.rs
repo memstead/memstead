@@ -1752,6 +1752,15 @@ pub fn build_schema_payload_scoped(
                 "required_outgoing": required_outgoing,
                 "constraints": constraints,
             });
+            // Reachability obligations — like `required_outgoing`, a
+            // health condition the schema response must not hide; the
+            // declaration is echoed in its YAML shape. Emitted only
+            // when declared so undeclared schemas keep their payload
+            // bytes unchanged.
+            if !td.must_reach.is_empty() {
+                obj["must_reach"] = serde_json::to_value(&td.must_reach)
+                    .expect("must_reach declarations serialize");
+            }
             // Leaf declaration — a legality-relevant fact an agent
             // planning writes must see; emitted only when true so
             // undeclared schemas keep their payload bytes unchanged.
@@ -2153,6 +2162,12 @@ fn lite_types_projection(types_full: &[serde_json::Value]) -> Vec<serde_json::Va
             // a legality-relevant per-type fact.
             if t.get("leaf") == Some(&serde_json::json!(true)) {
                 o["leaf"] = serde_json::json!(true);
+            }
+            // Reachability obligations ride whole — a health condition
+            // the skeleton must not hide; key present only when the
+            // full payload carries it.
+            if let Some(mr) = t.get("must_reach") {
+                o["must_reach"] = mr.clone();
             }
             o
         })
@@ -2629,6 +2644,7 @@ mod tests {
             staleness_threshold_days: 90,
             write_rules: vec![],
             required_outgoing: vec![],
+            must_reach: vec![],
             constraints: vec![],
             declared_metadata_keys: vec![],
         };
@@ -4233,6 +4249,81 @@ community:
             );
             assert_eq!(ro[1]["when_field"], "status");
             assert_eq!(ro[1]["when_value"], "checked");
+        }
+    }
+
+    /// A declared `must_reach` obligation is visible at BOTH verbosity
+    /// levels with the declaration echoed (relation set, direction,
+    /// terminal types, depth); a type declaring none carries no
+    /// `must_reach` key at all (undeclared schemas keep their payload
+    /// bytes unchanged).
+    #[test]
+    fn must_reach_visible_at_both_levels_and_absent_when_undeclared() {
+        let manifest = r#"name: mustreach-render
+version: 0.1.0
+description: must_reach render fixture
+when_to_use: tests
+types:
+  - claim
+  - evidence
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let claim = format!(
+            "name: claim\ndescription: t\nwhen_to_use: tests\n{body}must_reach:\n  - relationships: [GROUNDS]\n    direction: out\n    terminal_types: [evidence]\n    max_depth: 12\n"
+        );
+        let evidence = format!("name: evidence\ndescription: t\nwhen_to_use: tests\n{body}");
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[
+                    ("claim".to_string(), claim),
+                    ("evidence".to_string(), evidence),
+                ],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let types = payload[types_key].as_array().expect("types array");
+            let claim = types
+                .iter()
+                .find(|t| t["name"] == "claim")
+                .expect("claim type present");
+            let mr = claim["must_reach"].as_array().expect("obligations array");
+            assert_eq!(mr.len(), 1);
+            assert_eq!(mr[0]["relationships"], serde_json::json!(["GROUNDS"]));
+            assert_eq!(mr[0]["direction"], "out");
+            assert_eq!(mr[0]["terminal_types"], serde_json::json!(["evidence"]));
+            assert_eq!(mr[0]["max_depth"], 12);
+            let evidence = types
+                .iter()
+                .find(|t| t["name"] == "evidence")
+                .expect("evidence type present");
+            assert!(
+                evidence.get("must_reach").is_none(),
+                "undeclared type carries no must_reach key: {evidence:?}"
+            );
         }
     }
 

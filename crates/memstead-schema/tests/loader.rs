@@ -1785,6 +1785,152 @@ fn constraint_requires_when_value_outside_enum_rejected() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Reachability obligations (`must_reach`)
+// ---------------------------------------------------------------------------
+
+/// A valid obligation loads and round-trips; severity defaults to
+/// warn; `max_depth` is optional.
+#[test]
+fn must_reach_accepted_round_trips() {
+    use memstead_schema::{ConstraintSeverity, ReachDirection};
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF, REFERENCES]
+    direction: out
+    terminal_types: [sample]
+    max_depth: 3
+  - relationships: [REFERENCES]
+    direction: in
+    terminal_types: [sample]
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.must_reach.len(), 2);
+    assert_eq!(
+        td.must_reach[0].relationships,
+        vec!["PART_OF", "REFERENCES"]
+    );
+    assert_eq!(td.must_reach[0].direction, ReachDirection::Out);
+    assert_eq!(td.must_reach[0].terminal_types, vec!["sample"]);
+    assert_eq!(td.must_reach[0].max_depth, Some(3));
+    assert_eq!(td.must_reach[0].severity, ConstraintSeverity::Warn);
+    assert_eq!(td.must_reach[1].direction, ReachDirection::In);
+    assert_eq!(td.must_reach[1].max_depth, None);
+}
+
+/// `block` is a promise the engine will not keep on a transitive
+/// property — the loader refuses it.
+#[test]
+fn must_reach_block_severity_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: [sample]
+    severity: block
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "must_reach", ref offender, .. } if offender == "block"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn must_reach_undeclared_relationship_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [FLOATS]
+    direction: out
+    terminal_types: [sample]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(format!("{err}").contains("FLOATS"), "got: {err}");
+}
+
+#[test]
+fn must_reach_unknown_terminal_type_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: [ghost]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "must_reach", ref offender, .. } if offender == "ghost"),
+        "got: {err}"
+    );
+}
+
+/// The direction vocabulary is closed (`out` / `in`) — anything else
+/// fails deserialization, so no declaration loads half-understood.
+#[test]
+fn must_reach_unknown_direction_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: sideways
+    terminal_types: [sample]
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown direction must fail");
+}
+
+#[test]
+fn must_reach_zero_depth_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: [sample]
+    max_depth: 0
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "must_reach", ref offender, .. } if offender == "0"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn must_reach_empty_lists_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: []
+    direction: out
+    terminal_types: [sample]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "must_reach",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: []
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "must_reach",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
 /// The `kind` tag is closed: a constraint form the engine does not
 /// evaluate fails deserialization — no declaration can load and be
 /// silently ignored (the `no_self_loop_relationships` lesson).

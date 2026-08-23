@@ -20,6 +20,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Reachability obligations: `must_reach` on type definitions.** A type can
+  now declare that its entities must reach at least one non-stub entity of a
+  named set of terminal types (`terminal_types`), following edges of an
+  inline relation set (`relationships`) in a named `direction` (`out` / `in`,
+  the vocabulary search already speaks), within an optional `max_depth`.
+  Evaluated on the health sweep only (the `constraints` axis), never on the
+  write path: a transitive gap is created by writes on other entities, so
+  the loader refuses `severity: block` (same posture as
+  `status_propagation`). Findings echo the whole declaration; a satisfied
+  obligation is silent; cycles terminate via visited-set discipline;
+  cross-mem edges are followed like any edge; the incoming direction with
+  `max_depth: 1` covers the required-incoming-edge case. The loader refuses
+  undeclared rel-types, unknown terminal types, unknown directions, empty
+  sets, and a zero depth. The `memstead_schema` response shows the
+  obligation at both verbosity levels; schemas without the form keep
+  byte-identical responses and health output.
+
 - **Conditional edge requirements: `when_field` / `when_value` on
   `required_outgoing` blocks.** A type definition can now declare that an
   outgoing-edge obligation applies only while a named metadata field of the

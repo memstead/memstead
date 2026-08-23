@@ -69,6 +69,13 @@
         "$ref": "#/$defs/MetadataFieldDef"
       }
     },
+    "must_reach": {
+      "description": "Declared reachability obligations (see [`MustReach`]): entities\nof this type must reach at least one entity of a named terminal\ntype, following edges of a named relation set in a named\ndirection, within an optional maximum depth. Health-path only,\nalways warn-tier (the loader refuses `block`: a transitive\nproperty is established by writes on OTHER entities, so a\nwrite-time refusal would punish the wrong mutation). Empty\ndefault keeps current behaviour.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MustReach"
+      }
+    },
     "name": {
       "type": "string"
     },
@@ -469,12 +476,64 @@
         "field_type"
       ]
     },
+    "MustReach": {
+      "description": "One reachability obligation on a type definition. The obligated\nentity must reach at least one non-stub entity whose type is in\n`terminal_types`, walking edges whose rel-type is in\n`relationships` (an inline relation set), in `direction`, within\n`max_depth` hops when bounded. Evaluated on the health sweep only\n(`constraints` axis), never on the write path — no single write\ncompletes a transitive absence. The incoming direction with\n`max_depth: 1` covers the required-incoming-edge case.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "`out` follows edges pointing away from the walked entity, `in`\nfollows edges pointing at it — the same vocabulary the store\nand `memstead_search` speak.",
+          "$ref": "#/$defs/ReachDirection"
+        },
+        "max_depth": {
+          "description": "Maximum number of hops a conforming path may take. Absent =\nunbounded. Zero refuses at load (nothing is reachable in zero\nhops).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "relationships": {
+          "description": "Edge names the walk follows — any name in the set continues the\npath. Loader validates each against the schema's relationship\nvocabulary.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "description": "Always `warn` — the loader refuses `block` on this form.",
+          "$ref": "#/$defs/ConstraintSeverity",
+          "default": "warn"
+        },
+        "terminal_types": {
+          "description": "Type names that satisfy the obligation when reached. Loader\nvalidates each against the schema's declared types.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relationships",
+        "direction",
+        "terminal_types"
+      ]
+    },
     "PropagationDirection": {
       "description": "Traversal direction for [`ConstraintDef::StatusPropagation`].",
       "type": "string",
       "enum": [
         "incoming",
         "outgoing"
+      ]
+    },
+    "ReachDirection": {
+      "description": "Walk direction for [`MustReach`] — wire literals `out` / `in`,\nmatching the store's relationship rendering and `memstead_search`'s\n`direction` parameter.",
+      "type": "string",
+      "enum": [
+        "out",
+        "in"
       ]
     },
     "RequiredCardinality": {

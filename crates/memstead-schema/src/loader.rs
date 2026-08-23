@@ -1083,6 +1083,21 @@ fn load_with_context(
                     });
                 }
             }
+            // `must_reach.terminal_types` name types of this schema —
+            // checkable only once every type is loaded.
+            for ob in &td.must_reach {
+                for t in &ob.terminal_types {
+                    if !types_map.contains_key(t.as_str()) {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "must_reach",
+                            offender: t.clone(),
+                            reason: "`terminal_types` entry names no type of this schema"
+                                .to_string(),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -1391,6 +1406,55 @@ fn validate_type(
                     Some(_) => {}
                 },
             },
+        }
+    }
+
+    // Reachability obligations. Per-type checks here; `terminal_types`
+    // needs every type loaded and is checked in the schema-level pass.
+    for ob in &td.must_reach {
+        if ob.relationships.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "(empty)".to_string(),
+                reason: "`relationships` must name at least one relationship".to_string(),
+            });
+        }
+        for r in &ob.relationships {
+            if let Err(e) = check_rel(&td.name, "must_reach", r, rel_names, available_rels) {
+                errors.push(e);
+            }
+        }
+        if ob.terminal_types.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "(empty)".to_string(),
+                reason: "`terminal_types` must name at least one type".to_string(),
+            });
+        }
+        if ob.max_depth == Some(0) {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "0".to_string(),
+                reason: "`max_depth` must be at least 1 — nothing is reachable in zero hops"
+                    .to_string(),
+            });
+        }
+        if ob.severity == crate::types::ConstraintSeverity::Block {
+            // A transitive property is established by writes on OTHER
+            // entities, so a write-time refusal would punish the wrong
+            // mutation — refuse the promise rather than load-and-
+            // downgrade (same posture as status_propagation).
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "block".to_string(),
+                reason: "must_reach is always warn-tier — a reachability gap is created by \
+                         writes on other entities, so no single write can be refused for it"
+                    .to_string(),
+            });
         }
     }
 

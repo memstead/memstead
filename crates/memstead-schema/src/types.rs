@@ -93,6 +93,16 @@ pub struct TypeDefinition {
     /// keep current behaviour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_outgoing: Vec<RequiredOutgoing>,
+    /// Declared reachability obligations (see [`MustReach`]): entities
+    /// of this type must reach at least one entity of a named terminal
+    /// type, following edges of a named relation set in a named
+    /// direction, within an optional maximum depth. Health-path only,
+    /// always warn-tier (the loader refuses `block`: a transitive
+    /// property is established by writes on OTHER entities, so a
+    /// write-time refusal would punish the wrong mutation). Empty
+    /// default keeps current behaviour.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub must_reach: Vec<MustReach>,
     /// Declared keep-health constraints (the constraint vocabulary —
     /// see [`ConstraintDef`]). Empty default: a schema declaring no
     /// constraints behaves byte-identically to before the vocabulary
@@ -157,6 +167,57 @@ pub struct RequiredOutgoing {
     /// The triggering value (see `when_field`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when_value: Option<String>,
+}
+
+/// One reachability obligation on a type definition. The obligated
+/// entity must reach at least one non-stub entity whose type is in
+/// `terminal_types`, walking edges whose rel-type is in
+/// `relationships` (an inline relation set), in `direction`, within
+/// `max_depth` hops when bounded. Evaluated on the health sweep only
+/// (`constraints` axis), never on the write path — no single write
+/// completes a transitive absence. The incoming direction with
+/// `max_depth: 1` covers the required-incoming-edge case.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MustReach {
+    /// Edge names the walk follows — any name in the set continues the
+    /// path. Loader validates each against the schema's relationship
+    /// vocabulary.
+    pub relationships: Vec<String>,
+    /// `out` follows edges pointing away from the walked entity, `in`
+    /// follows edges pointing at it — the same vocabulary the store
+    /// and `memstead_search` speak.
+    pub direction: ReachDirection,
+    /// Type names that satisfy the obligation when reached. Loader
+    /// validates each against the schema's declared types.
+    pub terminal_types: Vec<String>,
+    /// Maximum number of hops a conforming path may take. Absent =
+    /// unbounded. Zero refuses at load (nothing is reachable in zero
+    /// hops).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_depth: Option<u32>,
+    /// Always `warn` — the loader refuses `block` on this form.
+    #[serde(default)]
+    pub severity: ConstraintSeverity,
+}
+
+/// Walk direction for [`MustReach`] — wire literals `out` / `in`,
+/// matching the store's relationship rendering and `memstead_search`'s
+/// `direction` parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReachDirection {
+    Out,
+    In,
+}
+
+impl std::fmt::Display for ReachDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ReachDirection::Out => "out",
+            ReachDirection::In => "in",
+        })
+    }
 }
 
 /// Uniform severity for the constraint vocabulary — one model across
