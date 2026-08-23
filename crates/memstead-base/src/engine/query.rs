@@ -468,7 +468,12 @@ impl Engine {
         }
         let root = self.workspace_root.as_deref()?;
         let source_pointer = join.map(|j| j.pointer.as_str());
-        observe_path_anchor(root, anchor, source_pointer)
+        observe_path_anchor(
+            root,
+            anchor,
+            source_pointer,
+            join.and_then(|j| j.preparation.as_deref()),
+        )
     }
 
     /// Observe an `entity`-grain anchor against the live graph — the entity-
@@ -2490,15 +2495,20 @@ pub(crate) struct AnchorSourceJoin {
 /// The computed hash is what lets [`crate::anchor::resolve_anchor`]
 /// adjudicate `drifted` vs `resolves` deterministically against the recorded
 /// hash. A `span` anchor hashes its whole containing file (the span locator
-/// selects within it; the file is the hashed unit); a `tree` grain has no
-/// prepared form this cycle and observes no hash; a read failure likewise
-/// observes no hash — those resolve `recheck`, never a fabricated `drifted`.
-/// Non-hash classes (`authored` / `informed-by`) skip the read entirely, so
-/// an anchor-less or hash-free mem pays no observation cost.
+/// selects within it; the file is the hashed unit) — except under a
+/// **delivery preparation** on the anchor's source (touchpoint B of
+/// [`crate::preparation`]), where a `<path>#<key>` span names one delivery
+/// unit: the unit's own text is the hashed unit, and a key the file no
+/// longer yields is an absent artifact (the anchor orphans). A `tree` grain
+/// has no prepared form this cycle and observes no hash; a read failure
+/// likewise observes no hash — those resolve `recheck`, never a fabricated
+/// `drifted`. Non-hash classes (`authored` / `informed-by`) skip the read
+/// entirely, so an anchor-less or hash-free mem pays no observation cost.
 fn observe_path_anchor(
     root: &Path,
     anchor: &crate::anchor::Anchor,
     source_pointer: Option<&str>,
+    preparation: Option<&str>,
 ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
     use crate::anchor::AnchorGrain;
     match anchor.grain {
@@ -2526,9 +2536,33 @@ fn observe_path_anchor(
         && matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span)
         && path.is_file()
     {
-        std::fs::read(&path)
-            .ok()
-            .map(|bytes| crate::anchor::prepared_content_hash(&bytes))
+        let bytes = std::fs::read(&path).ok();
+        let unit_key = anchor.artifact.split_once('#').map(|(_, key)| key);
+        match (
+            bytes,
+            unit_key,
+            crate::preparation::delivery_preparation(preparation),
+        ) {
+            (Some(bytes), Some(key), Some(prep)) if anchor.grain == AnchorGrain::Span => {
+                let text = String::from_utf8_lossy(&bytes);
+                match crate::preparation::unitize(prep.id, &text)
+                    .and_then(|units| units.into_iter().find(|u| u.key == key))
+                {
+                    Some(unit) => Some(unit.hash),
+                    None => {
+                        return Some((
+                            crate::anchor::resolve_anchor(
+                                anchor,
+                                &crate::anchor::ArtifactObservation::Absent,
+                            ),
+                            None,
+                        ));
+                    }
+                }
+            }
+            (Some(bytes), _, _) => Some(crate::anchor::prepared_content_hash(&bytes)),
+            (None, _, _) => None,
+        }
     } else {
         None
     };

@@ -15,9 +15,12 @@
 //!   and the binding-backed verify share that site, so both inherit every
 //!   registered preparation without redesign.
 //! - **Touchpoint B — delivery units.** The ingest delivery path asks the
-//!   registry for a source's unit sequence. No delivery preparation is
-//!   registered yet; the touchpoint is named here ([`Touchpoint::DeliveryUnits`])
-//!   so the registry's shape carries it from the start.
+//!   registry for a source's unit sequence ([`unitize`]): one file can carry
+//!   many delivery units, addressed `<path>#<key>`, and the units of a whole
+//!   source form one deterministic total order derived from the units' own
+//!   keys ([`Touchpoint::DeliveryUnits`], first entry [`DATED_ENTRIES`]).
+//!   A source declaring no delivery preparation keeps file-granularity
+//!   delivery unchanged.
 //!
 //! **Identity.** [`crate::binding::PREPARATION_IMPL_VERSION`] is hashed into
 //! every binding's `hash(D)` next to the declared identifier. Landing or
@@ -54,8 +57,7 @@ pub enum Touchpoint {
     /// form an artifact hashes as (content and code-map flavours).
     PreparedForm,
     /// Touchpoint B: the ingest delivery path asks the registry for a
-    /// source's unit sequence (the delivery flavour). Reserved — no
-    /// delivery preparation is registered yet.
+    /// source's unit sequence (the delivery flavour).
     DeliveryUnits,
 }
 
@@ -80,16 +82,49 @@ pub struct Preparation {
 /// load-bearing sentence changes and holds when a comma lands in the notes.
 pub const ENTITY_LOAD_BEARING: &str = "entity-load-bearing";
 
+/// Delivery preparation on path-shaped sources: a file is a sequence of
+/// **dated entries**. A unit begins at every line that opens with an ISO
+/// date or date-time (`2026-08-24`, `2026-08-24 10:05`, `2026-08-24T10:05:00Z`,
+/// after any leading markdown markers such as `## `, `- `, `> `, `[`); it
+/// runs to the next such line. Text before the first entry folds into the
+/// first unit; a file with no dated line is one unit keyed
+/// [`WHOLE_FILE_UNIT`]. The unit key is the stamp normalized to
+/// `YYYY-MM-DDTHH:MM:SS` (missing time parts read `00`), with `.2`, `.3`, …
+/// appended to the second, third, … entry carrying the same stamp in one
+/// file, in file order — so appending entries never renames an existing
+/// unit. The order key is the normalized stamp; across a whole source, units
+/// sort by stamp, then path, then key, which is what makes a chronological
+/// corpus deliver in its own order regardless of how files were discovered.
+/// Undated files (order key empty) come first, in path order. Fractional
+/// seconds and zone designators are accepted and ignored for ordering.
+pub const DATED_ENTRIES: &str = "dated-entries";
+
+/// The key of the single unit a file yields when a delivery preparation finds
+/// no unit boundary in it — the whole file, still addressable as
+/// `<path>#whole`.
+pub const WHOLE_FILE_UNIT: &str = "whole";
+
 /// The registry — every preparation this engine implements. The refusal in
 /// [`crate::binding::validate_binding`] is exactly "not in this list".
-pub const REGISTRY: &[Preparation] = &[Preparation {
-    id: ENTITY_LOAD_BEARING,
-    touchpoint: Touchpoint::PreparedForm,
-    grains: &[AnchorGrain::Entity],
-    description: "an entity's prepared form is the stable serialization of its type's \
-                  load-bearing sections (explicitly declared, else the required sections, \
-                  else every section) — notes-only edits keep dependents' anchors resolving",
-}];
+pub const REGISTRY: &[Preparation] = &[
+    Preparation {
+        id: ENTITY_LOAD_BEARING,
+        touchpoint: Touchpoint::PreparedForm,
+        grains: &[AnchorGrain::Entity],
+        description: "an entity's prepared form is the stable serialization of its type's \
+                      load-bearing sections (explicitly declared, else the required sections, \
+                      else every section) — notes-only edits keep dependents' anchors resolving",
+    },
+    Preparation {
+        id: DATED_ENTRIES,
+        touchpoint: Touchpoint::DeliveryUnits,
+        grains: &[AnchorGrain::Span],
+        description: "a file is a sequence of entries opening with an ISO date or date-time; \
+                      each entry is one delivery unit `<path>#<stamp>`, and a source's units \
+                      deliver in stamp order, identical on every pass — a chronological corpus \
+                      (logs, transcripts, journals, mail threads) is never shuffled",
+    },
+];
 
 /// Every registered preparation.
 pub fn registry() -> &'static [Preparation] {
@@ -110,6 +145,13 @@ pub fn is_registered(id: &str) -> bool {
 /// the unknown-identifier refusal.
 pub fn registered_identifiers() -> Vec<&'static str> {
     REGISTRY.iter().map(|p| p.id).collect()
+}
+
+/// The delivery preparation a source declares, if its declared identifier
+/// is a registered touchpoint-B entry — `None` for no declaration, an
+/// unregistered identifier, or a prepared-form (touchpoint A) flavour.
+pub fn delivery_preparation(declared: Option<&str>) -> Option<&'static Preparation> {
+    lookup(declared?).filter(|p| p.touchpoint == Touchpoint::DeliveryUnits)
 }
 
 /// Whether a registered preparation can apply over a medium whose anchor
@@ -256,6 +298,180 @@ pub fn entity_prepared_hash(
     Some(prepared_content_hash(form.as_bytes()))
 }
 
+// ---------------------------------------------------------------------------
+// Touchpoint B: delivery units
+// ---------------------------------------------------------------------------
+
+/// One delivery unit of a file under a delivery preparation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryUnit {
+    /// The unit's key, unique within its file; the addressed form is
+    /// `<path>#<key>` ([`unit_id`]).
+    pub key: String,
+    /// The intrinsic key the source's units sort by (a normalized stamp for
+    /// [`DATED_ENTRIES`]); empty for a [`WHOLE_FILE_UNIT`].
+    pub order_key: String,
+    /// First line of the unit, 1-based.
+    pub start_line: usize,
+    /// Last line of the unit, 1-based, inclusive.
+    pub end_line: usize,
+    /// The prepared-content hash of the unit's text — what a span anchor
+    /// over the unit records, and what a change run compares.
+    pub hash: String,
+}
+
+/// How a unit changed between two states of its file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UnitChange {
+    /// The key is new.
+    Added,
+    /// The key existed; the unit's text changed.
+    Modified,
+    /// The key is gone.
+    Deleted,
+}
+
+/// The addressed form of a unit: `<path>#<key>`.
+pub fn unit_id(path: &str, key: &str) -> String {
+    format!("{path}#{key}")
+}
+
+/// Split an artifact id into its path and, when it addresses a unit, the
+/// unit key after the first `#`.
+pub fn split_unit_id(id: &str) -> (&str, Option<&str>) {
+    match id.find('#') {
+        Some(cut) => (&id[..cut], Some(&id[cut + 1..])),
+        None => (id, None),
+    }
+}
+
+/// Touchpoint B: the delivery units of one file's content under a delivery
+/// preparation, in file order. `None` when `preparation` is not a registered
+/// delivery preparation (the caller keeps file-granularity delivery).
+pub fn unitize(preparation: &str, content: &str) -> Option<Vec<DeliveryUnit>> {
+    match preparation {
+        DATED_ENTRIES => Some(dated_entries(content)),
+        _ => None,
+    }
+}
+
+/// The text of one unit, lines `start_line..=end_line` of `content`.
+pub fn unit_text(content: &str, unit: &DeliveryUnit) -> String {
+    content
+        .lines()
+        .skip(unit.start_line.saturating_sub(1))
+        .take(unit.end_line + 1 - unit.start_line.max(1))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The units that differ between two states of one file, keyed by unit key:
+/// a key only in `after` is [`UnitChange::Added`], a key in both whose hash
+/// differs is [`UnitChange::Modified`] (the `after` unit), a key only in
+/// `before` is [`UnitChange::Deleted`] (the `before` unit, so its order key
+/// still places it). Unchanged units are not delivered again.
+pub fn diff_units(
+    before: &[DeliveryUnit],
+    after: &[DeliveryUnit],
+) -> Vec<(DeliveryUnit, UnitChange)> {
+    let old: std::collections::BTreeMap<&str, &DeliveryUnit> =
+        before.iter().map(|u| (u.key.as_str(), u)).collect();
+    let new: std::collections::BTreeMap<&str, &DeliveryUnit> =
+        after.iter().map(|u| (u.key.as_str(), u)).collect();
+    let mut out = Vec::new();
+    for u in after {
+        match old.get(u.key.as_str()) {
+            None => out.push((u.clone(), UnitChange::Added)),
+            Some(prev) if prev.hash != u.hash => out.push((u.clone(), UnitChange::Modified)),
+            Some(_) => {}
+        }
+    }
+    for u in before {
+        if !new.contains_key(u.key.as_str()) {
+            out.push((u.clone(), UnitChange::Deleted));
+        }
+    }
+    out
+}
+
+fn dated_entries(content: &str) -> Vec<DeliveryUnit> {
+    let lines: Vec<&str> = content.lines().collect();
+    let starts: Vec<(usize, String)> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| leading_stamp(line).map(|stamp| (i, stamp)))
+        .collect();
+    if starts.is_empty() {
+        return vec![DeliveryUnit {
+            key: WHOLE_FILE_UNIT.to_string(),
+            order_key: String::new(),
+            start_line: 1,
+            end_line: lines.len().max(1),
+            hash: prepared_content_hash(content.as_bytes()),
+        }];
+    }
+    let mut seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut units = Vec::with_capacity(starts.len());
+    for (n, (start, stamp)) in starts.iter().enumerate() {
+        // The preamble (anything before the first stamp) folds into the
+        // first unit: it is context for the entries, never a unit of its own.
+        let from = if n == 0 { 0 } else { *start };
+        let to = starts.get(n + 1).map_or(lines.len(), |(next, _)| *next);
+        let text = lines[from..to].join("\n");
+        let count = seen
+            .entry(stamp.clone())
+            .and_modify(|c| *c += 1)
+            .or_insert(1);
+        let key = if *count == 1 {
+            stamp.clone()
+        } else {
+            format!("{stamp}.{count}")
+        };
+        units.push(DeliveryUnit {
+            key,
+            order_key: stamp.clone(),
+            start_line: from + 1,
+            end_line: to,
+            hash: prepared_content_hash(text.as_bytes()),
+        });
+    }
+    units
+}
+
+/// The ISO stamp a line opens with (after leading markdown markers),
+/// normalized to `YYYY-MM-DDTHH:MM:SS`; `None` when the line opens with
+/// anything else or the stamp is out of range.
+fn leading_stamp(line: &str) -> Option<String> {
+    static STAMP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = STAMP.get_or_init(|| {
+        regex::Regex::new(
+            r"^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b",
+        )
+        .expect("the stamp regex compiles")
+    });
+    let s = line.trim_start_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '#' | '-' | '*' | '>' | '[' | '(' | '|' | '`' | '+')
+    });
+    let caps = re.captures(s)?;
+    let num = |i: usize| -> u32 {
+        caps.get(i)
+            .map(|m| m.as_str().parse().unwrap_or(0))
+            .unwrap_or(0)
+    };
+    let (y, mo, d, h, mi, sec) = (num(1), num(2), num(3), num(4), num(5), num(6));
+    let days_in_month = match mo {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => 29,
+        _ => return None,
+    };
+    if !(1..=days_in_month).contains(&d) || h > 23 || mi > 59 || sec > 59 {
+        return None;
+    }
+    Some(format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{sec:02}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,16 +525,139 @@ mod tests {
     }
 
     #[test]
-    fn registry_knows_its_one_content_flavour_and_nothing_else() {
+    fn registry_knows_its_two_flavours_and_nothing_else() {
         assert!(is_registered(ENTITY_LOAD_BEARING));
+        assert!(is_registered(DATED_ENTRIES));
         assert!(!is_registered("pdf-to-markdown"));
         assert!(!is_registered(""));
-        assert_eq!(registered_identifiers(), vec![ENTITY_LOAD_BEARING]);
+        assert_eq!(
+            registered_identifiers(),
+            vec![ENTITY_LOAD_BEARING, DATED_ENTRIES]
+        );
         let p = lookup(ENTITY_LOAD_BEARING).unwrap();
         assert_eq!(p.touchpoint, Touchpoint::PreparedForm);
         assert!(applies_to_namespace(p, "entity"));
         assert!(!applies_to_namespace(p, "path"));
         assert!(!applies_to_namespace(p, "url"));
+        let d = lookup(DATED_ENTRIES).unwrap();
+        assert_eq!(d.touchpoint, Touchpoint::DeliveryUnits);
+        assert!(applies_to_namespace(d, "path"));
+        assert!(applies_to_namespace(d, "path+commit"));
+        assert!(!applies_to_namespace(d, "entity"));
+        assert!(!applies_to_namespace(d, "url"));
+        // Touchpoint B lookup: only a delivery flavour answers.
+        assert_eq!(
+            delivery_preparation(Some(DATED_ENTRIES)).map(|p| p.id),
+            Some(DATED_ENTRIES)
+        );
+        assert!(delivery_preparation(Some(ENTITY_LOAD_BEARING)).is_none());
+        assert!(delivery_preparation(Some("pdf-to-markdown")).is_none());
+        assert!(delivery_preparation(None).is_none());
+        assert!(unitize(ENTITY_LOAD_BEARING, "x").is_none());
+        assert!(unitize("pdf-to-markdown", "x").is_none());
+    }
+
+    const LOG: &str = "# Ops log\n\nPreamble text.\n\n## 2026-08-24 10:05 boot\nline a\n\n\
+                       - 2026-08-24T10:05:00Z boot again\nline b\n2026-08-25 shutdown\nline c\n";
+
+    /// Unitization: entries open at dated lines, the preamble folds into the
+    /// first unit, same-stamp entries get an ordinal, an undated file is one
+    /// `whole` unit, and the stamp normalizes across the accepted spellings.
+    #[test]
+    fn dated_entries_unitize_deterministically() {
+        let units = unitize(DATED_ENTRIES, LOG).unwrap();
+        let keys: Vec<&str> = units.iter().map(|u| u.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "2026-08-24T10:05:00",
+                "2026-08-24T10:05:00.2",
+                "2026-08-25T00:00:00"
+            ]
+        );
+        assert_eq!(
+            units[0].start_line, 1,
+            "the preamble folds into the first unit"
+        );
+        assert_eq!((units[0].end_line, units[1].start_line), (7, 8));
+        assert_eq!(units[2].end_line, 11);
+        assert_eq!(units[1].order_key, "2026-08-24T10:05:00");
+        assert!(unit_text(LOG, &units[2]).starts_with("2026-08-25 shutdown"));
+        assert_eq!(
+            units[2].hash,
+            prepared_content_hash(unit_text(LOG, &units[2]).as_bytes())
+        );
+
+        let whole = unitize(DATED_ENTRIES, "no stamps here\njust prose\n").unwrap();
+        assert_eq!(whole.len(), 1);
+        assert_eq!(whole[0].key, WHOLE_FILE_UNIT);
+        assert_eq!(whole[0].order_key, "");
+
+        assert_eq!(
+            leading_stamp("[2026-02-30] bad day"),
+            None,
+            "day out of range"
+        );
+        assert_eq!(
+            leading_stamp("2026-08-24T25:00 x"),
+            None,
+            "hour out of range"
+        );
+        assert_eq!(leading_stamp("v2026-08-24"), None, "not at the line start");
+        assert_eq!(leading_stamp("2026-08-2400"), None, "digits run on");
+        assert_eq!(
+            leading_stamp("> **2026-08-24T10:05:00.250+02:00** note").as_deref(),
+            Some("2026-08-24T10:05:00")
+        );
+        assert_eq!(
+            unit_id("logs/ops.md", "2026-08-25T00:00:00"),
+            "logs/ops.md#2026-08-25T00:00:00"
+        );
+        assert_eq!(
+            split_unit_id("logs/ops.md#2026-08-25T00:00:00"),
+            ("logs/ops.md", Some("2026-08-25T00:00:00"))
+        );
+        assert_eq!(split_unit_id("logs/ops.md"), ("logs/ops.md", None));
+    }
+
+    /// Keys are stable under growth: appending entries leaves every existing
+    /// unit's key and hash untouched, so a change run delivers only the new
+    /// unit; an edited entry delivers as modified, a removed one as deleted.
+    #[test]
+    fn unit_keys_survive_growth_and_diff_delivers_only_what_changed() {
+        let before = unitize(DATED_ENTRIES, LOG).unwrap();
+        let grown = format!("{LOG}2026-08-26 09:00 restart\nline d\n");
+        let after = unitize(DATED_ENTRIES, &grown).unwrap();
+        assert_eq!(
+            &after[..3],
+            &before[..],
+            "existing units are byte-identical"
+        );
+        let delta = diff_units(&before, &after);
+        assert_eq!(delta.len(), 1);
+        assert_eq!(delta[0].0.key, "2026-08-26T09:00:00");
+        assert_eq!(delta[0].1, UnitChange::Added);
+
+        let edited = LOG.replace("line c", "line c, revised");
+        let delta = diff_units(&before, &unitize(DATED_ENTRIES, &edited).unwrap());
+        assert_eq!(
+            delta
+                .iter()
+                .map(|(u, c)| (u.key.as_str(), *c))
+                .collect::<Vec<_>>(),
+            vec![("2026-08-25T00:00:00", UnitChange::Modified)]
+        );
+
+        let shrunk = LOG.replace("2026-08-25 shutdown\nline c\n", "");
+        let delta = diff_units(&before, &unitize(DATED_ENTRIES, &shrunk).unwrap());
+        assert_eq!(
+            delta
+                .iter()
+                .map(|(u, c)| (u.key.as_str(), *c))
+                .collect::<Vec<_>>(),
+            vec![("2026-08-25T00:00:00", UnitChange::Deleted)]
+        );
+        assert!(diff_units(&before, &before).is_empty());
     }
 
     #[test]

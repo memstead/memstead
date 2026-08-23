@@ -108,11 +108,14 @@ guide](../../guides/verify-in-ci/)), these are the edges of what the gate can se
   refuses outright; and a record that carries one anyway is refused at validation.
   Asking a web binding to sync therefore names the capability gap itself, never a
   remedy no medium can honour.
-- **Preparation is a registry, and it ships one flavour.** A source's
-  `preparation` names a preparation the engine registers; today that is
-  `entity-load-bearing` for graph sources (an entity anchor hashes its type's
-  load-bearing sections, so a notes-only edit does not drift a dependent).
-  Delivery preparation and codebase-to-code-map are designed, not shipped.
+- **Preparation is a registry, and it ships two flavours.** A source's
+  `preparation` names a preparation the engine registers: `entity-load-bearing`
+  for graph sources (an entity anchor hashes its type's load-bearing sections,
+  so a notes-only edit does not drift a dependent) and `dated-entries` for
+  path-shaped sources (a file of dated entries is delivered as units
+  `<path>#<stamp>` in stamp order, identical on every pass, and a unit anchor
+  drifts only when its own entry changes). Codebase-to-code-map is designed,
+  not shipped.
   Non-text media conversion (PDF, DOCX, audio) is a non-goal: an agent with a
   capable read tool extracts, and the prepared-content hash already falls back
   to a raw-byte digest for a binary artifact, so drift over a PDF is detected

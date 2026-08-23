@@ -1711,10 +1711,10 @@ mod tests {
         })
         .binding;
         assert!(binding.sources[0].preparation.is_none());
-        assert_eq!(
-            PREPARATION_IMPL_VERSION, 1,
-            "the first landed implementation"
-        );
+        // The live constant is whatever the latest landed implementation set
+        // it to; the pin is that the version-0 hash (the pre-registry
+        // generation) is not the live one.
+        let _ = PREPARATION_IMPL_VERSION;
         let old = key(&hash_binding_at_impl_version(&binding, 0), "head1");
         let live = key(&hash_binding(&binding), "head1");
         assert_ne!(old.binding_hash, live.binding_hash);

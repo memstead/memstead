@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T22:05:01Z
-last_modified: 2026-08-23T22:30:54Z
+last_modified: 2026-08-23T23:01:44Z
 status: accepted
 decided_on: 2026-08-24
 deciders: implementing agent, executing the operator-authored preparation plan bundle
@@ -29,6 +29,7 @@ The graded design `engineering--one-preparation-slot-three-flavours-two-engine-t
 ## Relationships
 - **REFERENCES**: [[engine:anchor-primitive]]
 - **REFERENCES**: [[engine:pipeline]]
+- **REFERENCES**: [[delivery-preparation-delivers-dated-entries-as-units-in-one-stamp-ordered-sequence]]
 
 ## Options
 
@@ -41,3 +42,6 @@ The graded design `engineering--one-preparation-slot-three-flavours-two-engine-t
 ## Notes
 
 Landed in `memstead-base::preparation` with tests pinning: registry membership, the per-grain stability default, the url canonicalization identity, explicit-then-required-then-all resolution, the notes-versus-claim metric, the end-to-end drift contract over a folder mem with a graph binding (including the unregistered-identifier complement), the hash-identity change, and the findings-store invalidation.
+
+
+2026-08-24, later the same day: touchpoint B's first entry landed; "reserved, no entry yet" above describes the state at this decision, not the current one. See [[engineering--delivery-preparation-delivers-dated-entries-as-units-in-one-stamp-ordered-sequence]]; `PREPARATION_IMPL_VERSION` is 2 since.

@@ -8,6 +8,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Delivery preparation: one file, many units, one order.** The
+  preparation registry's second touchpoint is live: a source declaring a
+  delivery preparation is delivered as units, addressed `<path>#<key>`,
+  in a total order derived from the units' own keys (never discovery or
+  directory order), identical on every pass. First flavour,
+  `dated-entries`, for path-shaped sources: a unit begins at every line
+  opening with an ISO date or date-time (after markdown markers), its key
+  is the normalized stamp (an ordinal disambiguates same-stamp entries in
+  one file), and a source's units deliver in stamp order across files, so
+  a chronological corpus (logs, transcripts, journals, mail threads) is
+  never shuffled and unit N assumes only the units before it. A first run
+  delivers every unit; a change run delivers only the added, changed and
+  removed units at their ordered positions, diffed against the git
+  baseline content (without one, every unit of a changed file, flagged as
+  coarser). The brief presents the sequence numbered by position, capped
+  at the build operation's `batch_size` with the remainder counted and
+  re-presented in order as units are disposed; `projection advance`
+  accepts unit ids, and an anchor over exactly a unit auto-disposes it (a
+  file-level anchor never disposes units). A span anchor `<path>#<key>`
+  on such a source hashes the unit, not the file: an unchanged unit in a
+  changed file still resolves, a removed unit orphans, an edited one
+  drifts. Sources declaring no delivery preparation keep file-granularity
+  delivery byte-for-byte. `PREPARATION_IMPL_VERSION` is 2.
 - **The preparation slot has a registry, and its first flavour.** A
   source's `preparation` names a preparation the engine registers
   (`memstead-base::preparation`); the engine refuses only an identifier

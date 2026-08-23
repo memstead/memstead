@@ -43,8 +43,9 @@ pub const BINDING_VERSION: u32 = 2;
 /// The engine's current preparation-implementation version — the single
 /// source of truth for "which preparation implementation is live".
 ///
-/// `1` since the first registered preparation (`entity-load-bearing`, see
-/// [`crate::preparation`]) landed; `0` meant "none". It participates in
+/// `2` since the delivery flavour (`dated-entries`, touchpoint B) landed;
+/// `1` was the first registered preparation (`entity-load-bearing`, see
+/// [`crate::preparation`]); `0` meant "none". It participates in
 /// [`hash_binding`] for every source: because the declared identifier and
 /// this version are both hashed, landing or changing an implementation
 /// invalidates every prior finding keyed on the old `hash(D)` by
@@ -54,7 +55,7 @@ pub const BINDING_VERSION: u32 = 2;
 /// `impl_version_bump_invalidates_findings_by_construction`). Bump it once
 /// per landed or changed implementation, never per registry entry that
 /// merely exists.
-pub const PREPARATION_IMPL_VERSION: u32 = 1;
+pub const PREPARATION_IMPL_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // The v2 record

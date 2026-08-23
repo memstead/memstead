@@ -129,7 +129,9 @@ fn render(schema: &Value) -> String {
          consults the registry at two touchpoints: anchor observation (the prepared form an \
          artifact hashes as — shared by the binding-backed verify and the standalone \
          `verify-anchors`, so both inherit every entry) and ingest delivery (a source's unit \
-         sequence; reserved, no entry yet). Non-text media conversion (PDF, DOCX, audio) is a \
+         sequence: one file can carry many units addressed `<path>#<key>`, delivered in a total \
+         order derived from the units' own keys, identical on every pass; the build operation's \
+         `batch_size` bounds how many not-yet-disposed units a pass presents). Non-text media conversion (PDF, DOCX, audio) is a \
          non-goal: an agent's read tool extracts, and the prepared-content hash already \
          drift-detects binary artifacts by raw bytes.\n\n",
     );

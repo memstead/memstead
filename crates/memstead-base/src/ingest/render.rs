@@ -629,7 +629,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             msg,
-            "> **[ingest] Ingest \"ing\" is unsupported: source \"manuals\" declares preparation \"pdf-to-markdown\", which is not in this engine's preparation registry (registered: entity-load-bearing). Skipping.**\n"
+            "> **[ingest] Ingest \"ing\" is unsupported: source \"manuals\" declares preparation \"pdf-to-markdown\", which is not in this engine's preparation registry (registered: entity-load-bearing, dated-entries). Skipping.**\n"
         );
         assert!(!msg.contains("facet"));
     }

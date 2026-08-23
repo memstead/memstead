@@ -67,7 +67,7 @@
 //! `set_mem_sync_state` writer when `projection advance` completes a full pass
 //! (D7). The driver never writes it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -76,7 +76,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use crate::Engine;
 use crate::pipeline::{MediumType, PatternMode};
 
-use super::brief::{NoSignalNote, SourceCursor, SyncCommand};
+use super::brief::{DeliveredUnit, DeliverySequence, NoSignalNote, SourceCursor, SyncCommand};
 use super::change_detection::{
     StatMap, compute_stat_map, digest_stat_map, parse_digest_token, serialize_digest_token,
 };
@@ -1158,7 +1158,26 @@ pub fn compute_source_cursor(
     let mut write_commands: Vec<SyncCommand> = Vec::new();
     let mut reseed: Vec<SyncCommand> = Vec::new();
     let mut no_signal: Vec<NoSignalNote> = Vec::new();
+    let mut delivery: Vec<DeliverySequence> = Vec::new();
     let mut degraded = false;
+    // Units already disposed in an in-progress pass (touchpoint B): the
+    // sequence counts them and presents the next ones in order. Read once,
+    // lazily — a binding without a delivery source never touches the store.
+    let disposed_units: std::cell::OnceCell<BTreeSet<String>> = std::cell::OnceCell::new();
+    let disposed_units = || {
+        disposed_units.get_or_init(|| {
+            resolved
+                .name
+                .split_once('/')
+                .and_then(|(mem, name)| {
+                    super::advance::read_advance_store(workspace_root, mem, name)
+                        .ok()
+                        .flatten()
+                })
+                .map(|state| state.dispositions.keys().cloned().collect())
+                .unwrap_or_default()
+        })
+    };
 
     for source in &resolved.sources {
         // Key: "<ingest>/<facet_ref>" for primaries, "<ingest>/<mem>" for
@@ -1200,6 +1219,33 @@ pub fn compute_source_cursor(
                         reason: NoSignalReason::DetectionNone,
                     },
                 };
+                // Touchpoint B: a source declaring a delivery preparation
+                // delivers units in its own total order instead of files. A
+                // source declaring none keeps the file-granularity outcome
+                // computed above, byte-for-byte.
+                let outcome =
+                    match crate::preparation::delivery_preparation(p.preparation.as_deref()) {
+                        Some(prep)
+                            if matches!(
+                                p.medium_type,
+                                MediumType::Codebase | MediumType::Filesystem | MediumType::Git
+                            ) =>
+                        {
+                            let (outcome, sequence) = deliver_units(
+                                p,
+                                prep.id,
+                                &resolved.deny_paths,
+                                workspace_root,
+                                baseline,
+                                resolved.batch_size as usize,
+                                disposed_units(),
+                                outcome,
+                            );
+                            delivery.extend(sequence);
+                            outcome
+                        }
+                        _ => outcome,
+                    };
                 (p.name.clone(), outcome)
             }
             ResolvedSource::Reference { mem } => {
@@ -1253,6 +1299,7 @@ pub fn compute_source_cursor(
         any_changes,
         degraded,
         dead_denies: dead_deny_entries(resolved, workspace_root),
+        delivery,
         dest_mem: dest.clone(),
         // The resolved ingest's `name` is the canonical binding id `<mem>/<stem>`
         // (via `resolve_binding_run`) — the id the `projection advance` line the
@@ -1264,6 +1311,199 @@ pub fn compute_source_cursor(
 fn dedupe_sort(v: &mut Vec<String>) {
     v.sort();
     v.dedup();
+}
+
+/// A workspace-relative source file's text (lossy for non-UTF-8 bytes).
+fn read_workspace_file(workspace_root: &Path, ws_rel: &str) -> Option<String> {
+    std::fs::read(workspace_root.join(ws_rel))
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The text of a source file as it stood at the git baseline commit —
+/// `git show <baseline>:<repo-relative path>` — when the source resolves to
+/// the git strategy and the baseline is a commit of its repo. `None`
+/// otherwise: the caller then has no old state to diff units against and
+/// degrades to whole-file units, saying so.
+fn git_baseline_content(
+    source: &Source,
+    workspace_root: &Path,
+    baseline: Option<&str>,
+    ws_rel: &str,
+) -> Option<String> {
+    let baseline = baseline.filter(|b| is_git_token(b))?;
+    if !matches!(
+        resolve_change_strategy(source, workspace_root),
+        ChangeStrategy::Git
+    ) {
+        return None;
+    }
+    let git_root = find_git_root(&medium_base(&source.pointer, workspace_root))?;
+    let abs = normalize_lexical(&workspace_root.join(ws_rel));
+    let rel = relative_path(&git_root, &abs);
+    let spec = format!("{baseline}:{}", rel.to_string_lossy().replace('\\', "/"));
+    let out = Command::new("git")
+        .args(["show", &spec])
+        .current_dir(&git_root)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The total order of a delivery sequence: the units' own order keys first,
+/// then the path, then the same-stamp ordinal NUMERICALLY (`.2` before
+/// `.10`: an unpadded ordinal compared as text would deliver the tenth entry
+/// of a day before the second), then the key as text — never the order the
+/// files were discovered in. The same set of units sorts identically however
+/// it was collected.
+pub(crate) fn sequence_units(units: &mut Vec<DeliveredUnit>) {
+    fn rank(id: &str) -> (&str, u64, &str) {
+        let (path, key) = crate::preparation::split_unit_id(id);
+        let key = key.unwrap_or("");
+        let ordinal = key
+            .rsplit_once('.')
+            .and_then(|(_, n)| n.parse::<u64>().ok())
+            .unwrap_or(1);
+        (path, ordinal, key)
+    }
+    units.sort_by(|a, b| (&a.order_key, rank(&a.id)).cmp(&(&b.order_key, rank(&b.id))));
+    units.dedup_by(|a, b| a.id == b.id);
+}
+
+/// Touchpoint B: turn a delivery-prepared source's file-level outcome into
+/// its unit sequence. A first run (`Reseed`) delivers every unit of every
+/// in-scope file; a change run (`Changed`) delivers the units of added files,
+/// the units that differ in modified files (diffed against the git baseline
+/// content; without one, every unit of the file, flagged degraded), and the
+/// baseline's units of deleted files (a deleted file with no retrievable
+/// baseline stays a file-level deletion). The units sort into the total
+/// order `(order key, id)`, the same on every pass; units already disposed in
+/// the in-progress advance store are marked so the brief presents the next
+/// ones. The unit ids replace the file ids in the outcome's slice, so the
+/// advance gate accepts every unit of the sequence (the brief lists the next
+/// batch of them). Every other outcome passes through untouched.
+#[allow(clippy::too_many_arguments)]
+fn deliver_units(
+    source: &Source,
+    preparation: &str,
+    deny_paths: &[String],
+    workspace_root: &Path,
+    baseline: Option<&str>,
+    batch: usize,
+    disposed: &BTreeSet<String>,
+    outcome: SliceOutcome,
+) -> (SliceOutcome, Option<DeliverySequence>) {
+    use crate::preparation::{DeliveryUnit, UnitChange, diff_units, unit_id, unitize};
+
+    let units_of =
+        |text: &str| -> Vec<DeliveryUnit> { unitize(preparation, text).unwrap_or_default() };
+    let delivered = |path: &str, u: &DeliveryUnit, change: UnitChange| DeliveredUnit {
+        id: unit_id(path, &u.key),
+        order_key: u.order_key.clone(),
+        change,
+        disposed: false,
+    };
+
+    let mut units: Vec<DeliveredUnit> = Vec::new();
+    let mut file_level_deleted: Vec<String> = Vec::new();
+    let mut degraded_units = false;
+    let (token, first_run, degraded) = match outcome {
+        SliceOutcome::Reseed { token } => {
+            for f in enumerate_facet_files(source, deny_paths, workspace_root) {
+                if let Some(text) = read_workspace_file(workspace_root, &f) {
+                    for u in units_of(&text) {
+                        units.push(delivered(&f, &u, UnitChange::Added));
+                    }
+                }
+            }
+            if units.is_empty() {
+                // Nothing in scope: the plain reseed, exactly as before.
+                return (SliceOutcome::Reseed { token }, None);
+            }
+            (token, true, false)
+        }
+        SliceOutcome::Changed {
+            token,
+            slice,
+            degraded,
+        } => {
+            for f in &slice.added {
+                if let Some(text) = read_workspace_file(workspace_root, f) {
+                    for u in units_of(&text) {
+                        units.push(delivered(f, &u, UnitChange::Added));
+                    }
+                }
+            }
+            for f in &slice.modified {
+                let Some(now) = read_workspace_file(workspace_root, f) else {
+                    continue;
+                };
+                let new_units = units_of(&now);
+                match git_baseline_content(source, workspace_root, baseline, f) {
+                    Some(old) => {
+                        for (u, change) in diff_units(&units_of(&old), &new_units) {
+                            units.push(delivered(f, &u, change));
+                        }
+                    }
+                    None => {
+                        degraded_units = true;
+                        for u in new_units {
+                            units.push(delivered(f, &u, UnitChange::Modified));
+                        }
+                    }
+                }
+            }
+            for f in &slice.deleted {
+                match git_baseline_content(source, workspace_root, baseline, f) {
+                    Some(old) => {
+                        for u in units_of(&old) {
+                            units.push(delivered(f, &u, UnitChange::Deleted));
+                        }
+                    }
+                    None => file_level_deleted.push(f.clone()),
+                }
+            }
+            (token, false, degraded)
+        }
+        other => return (other, None),
+    };
+
+    sequence_units(&mut units);
+    for u in &mut units {
+        u.disposed = disposed.contains(&u.id);
+    }
+
+    let mut slice = Slice::default();
+    for u in &units {
+        match u.change {
+            UnitChange::Added => slice.added.push(u.id.clone()),
+            UnitChange::Modified => slice.modified.push(u.id.clone()),
+            UnitChange::Deleted => slice.deleted.push(u.id.clone()),
+        }
+    }
+    slice.deleted.extend(file_level_deleted);
+    dedupe_sort(&mut slice.added);
+    dedupe_sort(&mut slice.modified);
+    dedupe_sort(&mut slice.deleted);
+
+    let sequence = DeliverySequence {
+        source: source.name.clone(),
+        preparation: preparation.to_string(),
+        first_run,
+        degraded: degraded_units,
+        batch,
+        units,
+    };
+    (
+        SliceOutcome::Changed {
+            token,
+            slice,
+            degraded,
+        },
+        Some(sequence),
+    )
 }
 
 #[cfg(test)]
@@ -2191,6 +2431,440 @@ mod tests {
         );
         assert_eq!(plain, Some(AnchorState::Drifted));
         assert_eq!((report.unresolvable, report.drifted), (1, 1));
+    }
+
+    /// Touchpoint B's order is a property of the units, not of discovery: a
+    /// shuffled collection sorts into the identical sequence.
+    #[test]
+    fn shuffled_discovery_sequences_identically() {
+        use crate::preparation::UnitChange;
+        let unit = |id: &str, order: &str| DeliveredUnit {
+            id: id.to_string(),
+            order_key: order.to_string(),
+            change: UnitChange::Added,
+            disposed: false,
+        };
+        let ordered = vec![
+            unit("corpus/notes.md#whole", ""),
+            unit("corpus/b.md#2026-08-20T00:00:00", "2026-08-20T00:00:00"),
+            unit("corpus/a.md#2026-08-21T00:00:00", "2026-08-21T00:00:00"),
+            unit("corpus/a.md#2026-08-21T00:00:00.2", "2026-08-21T00:00:00"),
+            unit("corpus/c.md#2026-08-21T00:00:00", "2026-08-21T00:00:00"),
+            unit("corpus/b.md#2026-08-22T00:00:00", "2026-08-22T00:00:00"),
+        ];
+        for shuffle in [
+            vec![5, 3, 0, 4, 1, 2],
+            vec![2, 1, 0, 5, 4, 3],
+            vec![4, 0, 5, 2, 3, 1],
+        ] {
+            let mut units: Vec<DeliveredUnit> =
+                shuffle.iter().map(|i| ordered[*i].clone()).collect();
+            sequence_units(&mut units);
+            assert_eq!(units, ordered, "discovery order {shuffle:?} must not leak");
+        }
+
+        // A date-only day with twelve entries: the same-stamp ordinal orders
+        // numerically, never as text (`.10` after `.9`, not before `.2`).
+        let day = "2026-08-24T00:00:00";
+        let expected: Vec<String> = (1..=12)
+            .map(|n| {
+                if n == 1 {
+                    format!("journal.md#{day}")
+                } else {
+                    format!("journal.md#{day}.{n}")
+                }
+            })
+            .collect();
+        let mut units: Vec<DeliveredUnit> = expected.iter().rev().map(|id| unit(id, day)).collect();
+        sequence_units(&mut units);
+        assert_eq!(
+            units.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    /// Touchpoint B end to end over a git corpus whose path order is not its
+    /// chronological order: the first run delivers every unit in stamp order
+    /// interleaved across files; the sibling source without a preparation
+    /// keeps file-granularity delivery; disposing advances through the
+    /// sequence, an anchor over exactly a unit auto-disposes it while a
+    /// file-level anchor does not; the change run delivers only the new,
+    /// changed and removed units at their ordered positions (keys stable
+    /// under growth); and a span anchor over a unit observes the unit, not
+    /// the file.
+    #[test]
+    fn dated_entries_deliver_in_a_total_order_across_first_and_change_runs() {
+        use crate::anchor::{
+            Anchor, AnchorGrain, AnchorProvenanceClass, AnchorSidecar, AnchorState,
+        };
+        use crate::binding::{
+            BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, VerifyOperation,
+        };
+        use crate::entity::EntityId;
+        use crate::ingest::advance::{DispositionInput, advance_baseline};
+        use crate::ingest::brief::render_changed_slice;
+        use crate::ingest::resolve::resolve_binding_run;
+        use crate::pipeline::{IngestTrigger, PatternMode};
+        use crate::preparation::{DATED_ENTRIES, UnitChange, unitize};
+        use crate::workspace::{
+            Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // Destination: a folder mem `home` with one holder entity for anchors.
+        let mem_dir = root.join("home");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("holder.md"),
+            "---\ntype: assertion\n---\n\n# Holder\n\n## Claim\n\nHolds anchors.\n\n\
+             ## Evidence\n\nSee corpus.\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "home".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // Source: a git corpus whose lexical path order (a, b, notes) is not
+        // its chronological order.
+        let corpus = root.join("corpus");
+        std::fs::create_dir_all(corpus.join("plain")).unwrap();
+        git(&corpus, &["init", "-q"]);
+        let write = |name: &str, text: &str| std::fs::write(corpus.join(name), text).unwrap();
+        write(
+            "a.md",
+            "2026-08-21 alpha one\nbody a1\n2026-08-23 alpha two\nbody a2\n",
+        );
+        write(
+            "b.md",
+            "2026-08-20 beta one\nbody b1\n2026-08-22 beta two\nbody b2\n",
+        );
+        write("notes.md", "undated notes\n");
+        write("plain/readme.txt", "plain source, file granularity\n");
+        git(&corpus, &["add", "."]);
+        git(&corpus, &["commit", "-q", "-m", "corpus"]);
+
+        let source = |name: &str, scope: &str, preparation: Option<&str>| Source {
+            name: name.to_string(),
+            medium_type: MediumType::Filesystem,
+            pointer: "corpus".to_string(),
+            change_detection: Some("git".to_string()),
+            scope: vec![PatternEntry {
+                path: scope.to_string(),
+                mode: PatternMode::Allow,
+            }],
+            engagement: None,
+            preparation: preparation.map(str::to_string),
+        };
+        let binding = Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![
+                source("logs", "corpus/*.md", Some(DATED_ENTRIES)),
+                source("plain", "corpus/plain/**", None),
+            ],
+            reference_mems: vec![],
+            destination_mem: "home".to_string(),
+            deny_paths: vec![],
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: Some(BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 3,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: Some(VerifyOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 5,
+                    adjudication_cap: 0,
+                    full_resync_every: 0,
+                }),
+            },
+        };
+        assert!(
+            crate::binding::validate_binding(&binding).is_ok(),
+            "{:?}",
+            crate::binding::validate_binding(&binding)
+        );
+        crate::pipeline_store::write_binding(root, "home", "corpus", &binding).unwrap();
+        let resolved = resolve_binding_run("home/corpus", &binding).unwrap();
+
+        // ---- First run: every unit, in stamp order, interleaved across files.
+        let mut engine = crate::Engine::from_workspace_root(root).unwrap();
+        let cursor = compute_source_cursor(&engine, &resolved, root);
+        let expected: Vec<&str> = vec![
+            "corpus/notes.md#whole",
+            "corpus/b.md#2026-08-20T00:00:00",
+            "corpus/a.md#2026-08-21T00:00:00",
+            "corpus/b.md#2026-08-22T00:00:00",
+            "corpus/a.md#2026-08-23T00:00:00",
+        ];
+        assert_eq!(
+            cursor.delivery.len(),
+            1,
+            "one sequence, for the prepared source only"
+        );
+        let seq = &cursor.delivery[0];
+        assert_eq!(
+            (seq.source.as_str(), seq.preparation.as_str()),
+            ("logs", DATED_ENTRIES)
+        );
+        assert!(seq.first_run && !seq.degraded && seq.batch == 3);
+        assert_eq!(
+            seq.units.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            seq.units
+                .iter()
+                .all(|u| u.change == UnitChange::Added && !u.disposed)
+        );
+        let mut expected_sorted: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+        expected_sorted.sort();
+        assert_eq!(
+            cursor.union.added, expected_sorted,
+            "the advance gate accepts the unit ids"
+        );
+        // The sibling source without a preparation keeps file granularity:
+        // a plain first-run reseed, no units, no sequence.
+        assert!(
+            cursor
+                .reseed
+                .iter()
+                .any(|c| c.key == "home/corpus/plain#synced")
+        );
+        assert!(
+            cursor
+                .write_commands
+                .iter()
+                .any(|c| c.key == "home/corpus/logs#synced")
+        );
+        assert!(
+            !cursor
+                .union
+                .added
+                .iter()
+                .any(|a| a.starts_with("corpus/plain"))
+        );
+        // Recomputing yields the identical sequence.
+        assert_eq!(compute_source_cursor(&engine, &resolved, root), cursor);
+
+        let brief = render_changed_slice(&cursor);
+        assert!(
+            brief.contains("### Delivery sequence: `logs` (`dated-entries`)"),
+            "{brief}"
+        );
+        assert!(brief.contains("First delivery of this source"));
+        let listed: Vec<&str> = brief
+            .lines()
+            .filter(|l| l.starts_with(|c: char| c.is_ascii_digit()) && l.contains("`corpus/"))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                "1. `corpus/notes.md#whole` (new)",
+                "2. `corpus/b.md#2026-08-20T00:00:00` (new)",
+                "3. `corpus/a.md#2026-08-21T00:00:00` (new)",
+            ],
+            "the batch presents the first three in order"
+        );
+        assert!(brief.contains("…and 2 more, presented in order once these are disposed"));
+        assert!(
+            !brief.contains("**Added:**"),
+            "unit ids never repeat in a class list: {brief}"
+        );
+
+        // ---- Advance through the sequence.
+        let dispositions: BTreeMap<String, DispositionInput> =
+            [(expected[0], "skipped"), (expected[1], "worked")]
+                .into_iter()
+                .map(|(a, d)| (a.to_string(), DispositionInput::Verdict(d.to_string())))
+                .collect();
+        let outcome = advance_baseline(&mut engine, root, &resolved, &dispositions).unwrap();
+        assert_eq!((outcome.pending, outcome.completed), (3, false));
+        let cursor = compute_source_cursor(&engine, &resolved, root);
+        assert!(cursor.delivery[0].units[0].disposed && cursor.delivery[0].units[1].disposed);
+        let brief = render_changed_slice(&cursor);
+        assert!(
+            brief.contains("3. `corpus/a.md#2026-08-21T00:00:00` (new)"),
+            "{brief}"
+        );
+        assert!(
+            !brief.contains("1. `corpus/notes.md#whole`"),
+            "disposed units are not re-presented"
+        );
+        assert!(brief.contains("2 units of this sequence already disposed"));
+
+        // An anchor over exactly a unit disposes it; a file-level anchor over
+        // `b.md` disposes none of b's units.
+        let a21_text = std::fs::read_to_string(corpus.join("a.md")).unwrap();
+        let a21_unit = unitize(DATED_ENTRIES, &a21_text)
+            .unwrap()
+            .into_iter()
+            .find(|u| u.key == "2026-08-21T00:00:00")
+            .unwrap();
+        let anchor = |artifact: &str, grain: AnchorGrain, hash: &str| Anchor {
+            artifact: artifact.to_string(),
+            grain,
+            class: AnchorProvenanceClass::Anchored,
+            hash: Some(hash.to_string()),
+            source: Some("logs".to_string()),
+            binding: None,
+            at_version: None,
+            derived_from: Vec::new(),
+            hash_stability: crate::anchor::AnchorHashStability::Stable,
+        };
+        let b_file_hash =
+            crate::anchor::prepared_content_hash(&std::fs::read(corpus.join("b.md")).unwrap());
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "home--holder",
+            vec![
+                anchor(expected[2], AnchorGrain::Span, &a21_unit.hash),
+                anchor("corpus/b.md", AnchorGrain::File, &b_file_hash),
+            ],
+        );
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        let mut engine = crate::Engine::from_workspace_root(root).unwrap();
+        let outcome = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            outcome.pending, 2,
+            "the unit anchor auto-disposed its unit, the file anchor nothing"
+        );
+        assert!(outcome.remainder.added.contains(&expected[3].to_string()));
+        assert!(outcome.remainder.added.contains(&expected[4].to_string()));
+        let rest: BTreeMap<String, DispositionInput> = [expected[3], expected[4]]
+            .into_iter()
+            .map(|a| {
+                (
+                    a.to_string(),
+                    DispositionInput::Verdict("worked".to_string()),
+                )
+            })
+            .collect();
+        let outcome = advance_baseline(&mut engine, root, &resolved, &rest).unwrap();
+        assert!(outcome.completed, "{outcome:?}");
+        assert!(
+            outcome
+                .tokens_written
+                .contains(&"home/corpus/logs#synced".to_string())
+        );
+
+        // ---- Change run: one earlier entry appended to a.md, b's second
+        // entry edited, b's first entry removed. Only those three units are
+        // delivered, at their ordered positions; every other key survives.
+        write(
+            "a.md",
+            "2026-08-21 alpha one\nbody a1\n2026-08-23 alpha two\nbody a2\n2026-08-19 alpha zero\nbody a0\n",
+        );
+        write("b.md", "2026-08-22 beta two\nbody b2, revised\n");
+        git(&corpus, &["add", "."]);
+        git(&corpus, &["commit", "-q", "-m", "grow, edit, remove"]);
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let cursor = compute_source_cursor(&engine, &resolved, root);
+        let seq = &cursor.delivery[0];
+        assert!(!seq.first_run && !seq.degraded);
+        assert_eq!(
+            seq.units
+                .iter()
+                .map(|u| (u.id.as_str(), u.change))
+                .collect::<Vec<_>>(),
+            vec![
+                ("corpus/a.md#2026-08-19T00:00:00", UnitChange::Added),
+                ("corpus/b.md#2026-08-20T00:00:00", UnitChange::Deleted),
+                ("corpus/b.md#2026-08-22T00:00:00", UnitChange::Modified),
+            ]
+        );
+        let brief = render_changed_slice(&cursor);
+        assert!(brief.contains("The units that changed since the last pass"));
+        assert!(
+            brief.contains("1. `corpus/a.md#2026-08-19T00:00:00` (new)"),
+            "{brief}"
+        );
+        assert!(brief.contains("3. `corpus/b.md#2026-08-22T00:00:00` (changed)"));
+
+        // ---- Touchpoint A over units: the span anchor on a.md's unchanged
+        // unit still resolves although its file changed; an anchor on the
+        // removed unit orphans; one on the edited unit drifts.
+        let b22_old_text = "2026-08-22 beta two\nbody b2\n";
+        let b22_old = unitize(DATED_ENTRIES, b22_old_text).unwrap()[0]
+            .hash
+            .clone();
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "home--holder",
+            vec![
+                anchor(expected[2], AnchorGrain::Span, &a21_unit.hash),
+                anchor(expected[1], AnchorGrain::Span, "deadbeefdeadbeef"),
+                anchor(expected[3], AnchorGrain::Span, &b22_old),
+            ],
+        );
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let resolved_anchors = engine.entity_anchors_resolved(&EntityId::canonical("home--holder"));
+        let state_of = |artifact: &str| {
+            resolved_anchors
+                .iter()
+                .find(|r| r.anchor.artifact == artifact)
+                .unwrap()
+                .state
+        };
+        assert_eq!(
+            state_of(expected[2]),
+            Some(AnchorState::Resolves),
+            "unit unchanged, file changed"
+        );
+        assert_eq!(
+            state_of(expected[1]),
+            Some(AnchorState::Orphaned),
+            "unit removed"
+        );
+        assert_eq!(
+            state_of(expected[3]),
+            Some(AnchorState::Drifted),
+            "unit edited"
+        );
     }
 
     /// Criterion 6's regression pin: the graph change-detection half is
