@@ -980,6 +980,46 @@ mod adversarial {
         }
     }
 
+    /// Full replay of the committed shared corpus
+    /// (`fuzz/corpus/content_expr`, seeds for the coverage-guided long
+    /// tier) as ordinary tests; `seed-*` members must parse, keeping
+    /// the corpus alive. Skips loudly when the corpus is absent (a
+    /// packaged crate has no fuzz tree).
+    #[test]
+    fn committed_content_expr_corpus_replays() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/content_expr");
+        if !dir.is_dir() {
+            eprintln!("SKIP: shared fuzz corpus not present at {}", dir.display());
+            return;
+        }
+        let mut rng = Xorshift(0x5eed_e0c0);
+        let mut replayed = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue; // non-UTF-8 corpus members are for the byte-level fuzzer
+            };
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if name.starts_with("seed-") {
+                assert!(
+                    ContentExpr::parse(&source).is_ok(),
+                    "materialized seed expression {name} must parse: {source:?}"
+                );
+            }
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| exercise(&mut rng, &source))) {
+                let msg = payload
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("<non-string panic payload>");
+                panic!("corpus file {name}: {msg}\nexpression: {source:?}");
+            }
+            replayed += 1;
+        }
+        assert!(replayed > 0, "corpus dir exists but replayed nothing");
+    }
+
     #[test]
     fn content_expr_survives_adversarial_inputs() {
         // The seed corpus is alive: every seed parses.

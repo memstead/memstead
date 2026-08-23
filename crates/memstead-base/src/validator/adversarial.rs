@@ -304,6 +304,50 @@ fn exercise(bytes: &[u8]) {
     }
 }
 
+/// Full replay of the committed shared corpus (`fuzz/corpus/archive`,
+/// seeds for the coverage-guided long tier) as ordinary tests: every
+/// member is exercised (no panic; canonical fixpoint when accepted),
+/// and the `seed-*` members — the materialized builder shapes — must
+/// validate outright, keeping the corpus alive. `harvest-*` members
+/// are real tracked archives joining as-is; they are exercised, not
+/// forced through validation, so a format evolution refusing an old
+/// artifact is not misread as a parser defect. Skips loudly when the
+/// corpus is absent (a packaged crate has no fuzz tree).
+#[test]
+fn committed_archive_corpus_replays() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/archive");
+    if !dir.is_dir() {
+        eprintln!("SKIP: shared fuzz corpus not present at {}", dir.display());
+        return;
+    }
+    let mut replayed = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let bytes = std::fs::read(&path).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if name.starts_with("seed-") {
+            assert!(
+                validate_and_normalize_archive(&bytes).is_ok(),
+                "materialized seed archive {name} must validate"
+            );
+        } else if let Err(e) = validate_and_normalize_archive(&bytes) {
+            // Not a failure — a harvested artifact may age out of the
+            // format — but say so, loudly, so drift is visible.
+            eprintln!("corpus note: harvested archive {name} is refused: {e}");
+        }
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| exercise(&bytes))) {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("<non-string panic payload>");
+            panic!("corpus file {name}: {msg} ({} bytes)", bytes.len());
+        }
+        replayed += 1;
+    }
+    assert!(replayed > 0, "corpus dir exists but replayed nothing");
+}
+
 #[test]
 fn archive_boundary_survives_adversarial_bytes() {
     let seeds = seed_archives();

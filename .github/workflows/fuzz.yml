@@ -1,0 +1,70 @@
+# The coverage-guided long tier of the trust-boundary hardening: never
+# PR-blocking, never a required check — manual dispatch only. The
+# bounded smoke tier runs inside run-tests.sh on stable as ordinary
+# tests; this workflow is where nightly, the fuzz runner, and the
+# excluded fuzz crate's fmt/clippy gate live (the explicit decision:
+# the crate IS lint-covered, here, so the one-gate script stays
+# offline-clean).
+
+name: Fuzz (long tier)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Fuzz target to run"
+        type: choice
+        default: all
+        options: [all, frontmatter, archive, content_expr]
+      minutes:
+        description: "Minutes per target"
+        type: number
+        default: 15
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: cargo-fuzz (${{ inputs.target }}, ${{ inputs.minutes }}m per target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: nightly
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: fuzz -> fuzz/target
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2
+        with:
+          tool: cargo-fuzz
+      - name: fmt + clippy over the excluded fuzz crate
+        working-directory: fuzz
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+      - name: Run fuzz target(s)
+        working-directory: fuzz
+        run: |
+          secs=$(( ${{ inputs.minutes }} * 60 ))
+          if [ "${{ inputs.target }}" = "all" ]; then
+            targets="frontmatter archive content_expr"
+          else
+            targets="${{ inputs.target }}"
+          fi
+          for t in $targets; do
+            echo "::group::fuzz $t (${secs}s)"
+            cargo +nightly fuzz run "$t" "corpus/$t" -- -max_total_time="$secs"
+            echo "::endgroup::"
+          done
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

@@ -257,6 +257,36 @@ fn exercise(input: &str) {
     );
 }
 
+/// Full replay of the committed shared corpus (`fuzz/corpus/frontmatter`,
+/// seeds for the coverage-guided long tier) as ordinary tests. Skips
+/// loudly when the corpus is absent (a packaged crate has no fuzz tree).
+#[test]
+fn committed_frontmatter_corpus_replays() {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/frontmatter");
+    if !dir.is_dir() {
+        eprintln!("SKIP: shared fuzz corpus not present at {}", dir.display());
+        return;
+    }
+    let mut replayed = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let Ok(input) = std::fs::read_to_string(&path) else {
+            continue; // non-UTF-8 corpus members are for the byte-level fuzzer
+        };
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| exercise(&input))) {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("<non-string panic payload>");
+            panic!("corpus file {}: {msg}", path.display());
+        }
+        replayed += 1;
+    }
+    assert!(replayed > 0, "corpus dir exists but replayed nothing");
+}
+
 #[test]
 fn frontmatter_family_survives_adversarial_inputs() {
     for seed in [0x5eed_f001_u64, 0x5eed_f002, 0x5eed_f003] {

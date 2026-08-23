@@ -35,6 +35,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **A coverage-guided fuzzing tier and a committed shared seed corpus for
+  the three trust-boundary parsers.** A workspace-excluded `fuzz/` crate
+  (cargo-fuzz/libFuzzer) carries three targets: raw bytes through the
+  archive validator (nested parsers covered transitively, canonical
+  fixpoint asserted), the frontmatter/markdown family through its public
+  entry points (mask and idempotence invariants asserted), and the
+  content-expression parser and matcher (parse-source-parse stability,
+  deterministic matching, coherent failure payloads). A manual-dispatch
+  workflow runs the targets on nightly with a stated per-target budget
+  and uploads crash artifacts; it is never a required check, and no
+  nightly toolchain or fuzz dependency enters the PR-blocking path. The
+  seed corpus is materialized to committed files under `fuzz/corpus/`
+  (the seeded smoke harnesses' documents, expressions, and archive
+  shapes, plus five real tracked `.mem` artifacts harvested as-is) and
+  is shared with the smoke tier: the normal suite replays every corpus
+  member and asserts the materialized seeds stay valid.
 - **A seeded adversarial smoke over the content-expression parser and
   matcher.** Foreign expression strings reach this parser through the
   schema tree published archives embed. The harness generates
