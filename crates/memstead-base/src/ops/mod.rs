@@ -21,6 +21,7 @@ pub mod diff;
 pub mod export;
 pub mod health;
 pub mod integrity;
+pub mod labelling;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
 pub mod signals;

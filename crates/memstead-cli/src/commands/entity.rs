@@ -79,52 +79,68 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Err(e) => serde_json::json!({ "unavailable": e.to_string() }),
         })
     };
-    let (entity, output, outgoing_snapshot, incoming_snapshot, origin, provenance, signals) =
-        match ctx.cli_engine()? {
-            #[cfg(feature = "mem-repo")]
-            CliEngine::MemRepo(engine) => {
-                let entity = engine
-                    .get_entity(&id)
-                    .cloned()
-                    .ok_or_else(|| miss(&engine))?;
-                let signals = engine.computed_signals(&entity);
-                let md = render_with_optional_relations(
-                    &entity,
-                    &id,
-                    engine.store(),
-                    &args,
-                    signals.as_deref(),
-                );
-                let outgoing = engine.store().outgoing(&id).to_vec();
-                let incoming = args
-                    .include_relations
-                    .then(|| engine.store().incoming(&id).to_vec());
-                let origin = engine.mem_origin_class(id.mem());
-                let prov = provenance_block(&engine);
-                (entity, md, outgoing, incoming, origin, prov, signals)
-            }
-            CliEngine::Filesystem(engine) => {
-                let entity = engine
-                    .get_entity(&id)
-                    .cloned()
-                    .ok_or_else(|| miss(&engine))?;
-                let signals = engine.computed_signals(&entity);
-                let md = render_with_optional_relations(
-                    &entity,
-                    &id,
-                    engine.store(),
-                    &args,
-                    signals.as_deref(),
-                );
-                let outgoing = engine.store().outgoing(&id).to_vec();
-                let incoming = args
-                    .include_relations
-                    .then(|| engine.store().incoming(&id).to_vec());
-                let origin = engine.mem_origin_class(id.mem());
-                let prov = provenance_block(&engine);
-                (entity, md, outgoing, incoming, origin, prov, signals)
-            }
-        };
+    let (
+        entity,
+        output,
+        outgoing_snapshot,
+        incoming_snapshot,
+        origin,
+        provenance,
+        signals,
+        labelling,
+    ) = match ctx.cli_engine()? {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => {
+            let entity = engine
+                .get_entity(&id)
+                .cloned()
+                .ok_or_else(|| miss(&engine))?;
+            let signals = engine.computed_signals(&entity);
+            let labelling = engine.computed_labelling(&entity);
+            let md = render_with_optional_relations(
+                &entity,
+                &id,
+                engine.store(),
+                &args,
+                signals.as_deref(),
+                labelling.as_ref(),
+            );
+            let outgoing = engine.store().outgoing(&id).to_vec();
+            let incoming = args
+                .include_relations
+                .then(|| engine.store().incoming(&id).to_vec());
+            let origin = engine.mem_origin_class(id.mem());
+            let prov = provenance_block(&engine);
+            (
+                entity, md, outgoing, incoming, origin, prov, signals, labelling,
+            )
+        }
+        CliEngine::Filesystem(engine) => {
+            let entity = engine
+                .get_entity(&id)
+                .cloned()
+                .ok_or_else(|| miss(&engine))?;
+            let signals = engine.computed_signals(&entity);
+            let labelling = engine.computed_labelling(&entity);
+            let md = render_with_optional_relations(
+                &entity,
+                &id,
+                engine.store(),
+                &args,
+                signals.as_deref(),
+                labelling.as_ref(),
+            );
+            let outgoing = engine.store().outgoing(&id).to_vec();
+            let incoming = args
+                .include_relations
+                .then(|| engine.store().incoming(&id).to_vec());
+            let origin = engine.mem_origin_class(id.mem());
+            let prov = provenance_block(&engine);
+            (
+                entity, md, outgoing, incoming, origin, prov, signals, labelling,
+            )
+        }
+    };
 
     let chunked = match args.token_budget {
         Some(budget) => apply_chunking(
@@ -167,6 +183,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             &outgoing_snapshot,
             incoming_snapshot.as_deref(),
             signals.as_deref(),
+            labelling.as_ref(),
         );
         if let (Some(prov), Some(obj)) = (&provenance, envelope.as_object_mut()) {
             obj.insert("mutation_provenance".into(), prov.clone());
@@ -233,13 +250,15 @@ fn render_with_optional_relations(
     store: &Store,
     args: &Args,
     signals: Option<&[memstead_base::ops::signals::ComputedSignal]>,
+    labelling: Option<&memstead_base::ops::labelling::LabellingView>,
 ) -> String {
     let sections_filter = if args.sections.is_empty() {
         None
     } else {
         Some(args.sections.as_slice())
     };
-    let mut md = render::render_entity_markdown_with_signals(entity, sections_filter, signals);
+    let mut md =
+        render::render_entity_markdown_with_signals(entity, sections_filter, signals, labelling);
     if args.include_relations {
         let outgoing = store.outgoing(id).to_vec();
         let incoming = store.incoming(id).to_vec();

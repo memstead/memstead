@@ -142,6 +142,34 @@
       },
       "additionalProperties": false
     },
+    "LabellingDef": {
+      "description": "The schema's attack vocabulary for the grounded labelling — the\none argumentation-semantics computation that is parameter-free,\nunique, polynomial, and explainable by construction. The engine\nserves the labelling as a reported observation with its evidence:\nnever a stored value, never a write gate, never a status. The\nlabelling is deliberately support-blind (it walks attack edges\nonly); a defeated supporter never flips what it supports — the\nreader sees that defeat through the shape block's counts instead.",
+      "type": "object",
+      "properties": {
+        "attack": {
+          "description": "Declared rel-types constituting attack — inline relation set,\nat least one name, each declared in the vocabulary.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "support": {
+          "description": "Optional support walk enabling the chain-shape statistics\n(depth, branching, terminal share, defeated/undecided counts\non the support subtree). Absent = no shape block served.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SupportWalk"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "attack"
+      ]
+    },
     "ManualAuthoring": {
       "description": "Manual-authoring posture declared per `RelationshipDef`.\n\n`Allow` (default) is the no-op posture for every rel-type a user\nor agent may author explicitly via `memstead_relate`. `Warn` lands the\nrelation but surfaces a warning so the audit trail records the\ndrift. `Forbidden` refuses with a typed code — used for rel-types\nthe engine emits via the body-link → relation alias machinery\n(e.g. REFERENCES), where explicit authoring duplicates work and\noften masks the author's intent. The schema's `when_to_use` text\nrides on the wire as recovery guidance.",
       "type": "string",
@@ -158,6 +186,14 @@
         "forbidden",
         "optional",
         "required"
+      ]
+    },
+    "ReachDirection": {
+      "description": "Walk direction for [`MustReach`] — wire literals `out` / `in`,\nmatching the store's relationship rendering and `memstead_search`'s\n`direction` parameter.",
+      "type": "string",
+      "enum": [
+        "out",
+        "in"
       ]
     },
     "RelationshipDef": {
@@ -259,6 +295,17 @@
             "$ref": "#/$defs/RelationshipDef"
           }
         },
+        "labelling": {
+          "description": "Grounded-labelling declaration (see [`LabellingDef`]): which of\nthis schema's rel-types constitute the attack relation, and\noptionally a support walk enabling chain-shape statistics.\nAbsent = no computation, byte-identical responses.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LabellingDef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "mode": {
           "$ref": "#/$defs/RelationshipMode"
         }
@@ -267,6 +314,34 @@
       "required": [
         "mode",
         "definitions"
+      ]
+    },
+    "SupportWalk": {
+      "description": "The support walk of a labelling declaration — same grammar as a\n`must_reach` block: an inline relation set, a walk direction, and\nthe terminal types that count as ground.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "`out` follows edges pointing away from the walked entity, `in`\nfollows edges pointing at it — the `must_reach` vocabulary.",
+          "$ref": "#/$defs/ReachDirection"
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "terminal_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relationships",
+        "direction",
+        "terminal_types"
       ]
     }
   }

@@ -2553,6 +2553,425 @@ write_rules: []
     /// (in-REBUTS count, notice at 1, warn at 3) and
     /// `open_objections` (same set, counterpart `state: open` only,
     /// notice at 1); `objection` declares the `state` enum.
+    /// Fixture for the grounded labelling: `arglab` declares
+    /// `labelling.attack: [REBUTS]` and a support walk over GROUNDS
+    /// (direction out, terminal `evidence`); mem `arg` (and, when the
+    /// test mounts it, mem `other`) pin it.
+    fn engine_with_labelling_schema(tmp: &TempDir, with_other_mem: bool) -> Engine {
+        engine_with_labelling_schema_support(tmp, with_other_mem, true)
+    }
+
+    fn engine_with_labelling_schema_support(
+        tmp: &TempDir,
+        with_other_mem: bool,
+        with_support: bool,
+    ) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("arglab");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            format!(
+                r#"name: arglab
+version: 0.1.0
+description: grounded-labelling fixture
+when_to_use: tests
+types:
+  - claim
+  - evidence
+relationships:
+  mode: strict
+  labelling:
+    attack: [REBUTS]
+{support}  definitions:
+    - name: REBUTS
+      description: attack
+      default_weight: 3.0
+    - name: GROUNDS
+      description: support
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+cross_mem_relationships:
+  - to_schema: arglab
+    definitions:
+      - name: REBUTS
+        description: cross-mem attack
+        default_weight: 3.0
+"#,
+                support = if with_support {
+                    "    support:\n      relationships: [GROUNDS]\n      direction: out\n      terminal_types: [evidence]\n"
+                } else {
+                    ""
+                },
+            ),
+        )
+        .unwrap();
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        for t in ["claim", "evidence"] {
+            std::fs::write(
+                pkg.join("types").join(format!("{t}.yaml")),
+                format!("name: {t}\ndescription: t\nwhen_to_use: tests\n{body}"),
+            )
+            .unwrap();
+        }
+        let mut mounts: Vec<(crate::workspace::Mount, Box<dyn MemBackend>)> = Vec::new();
+        for mem in std::iter::once("arg").chain(with_other_mem.then_some("other")) {
+            let mem_dir = tmp.path().join(format!("mem-{mem}"));
+            std::fs::create_dir_all(&mem_dir).unwrap();
+            let writer = FilesystemMemWriter::new(mem_dir.clone());
+            mounts.push((
+                crate::workspace::Mount {
+                    mem: mem.to_string(),
+                    schema: Some(memstead_schema::SchemaRef::new(
+                        "arglab",
+                        semver::Version::new(0, 1, 0),
+                    )),
+                    storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+                    capability: crate::workspace::MountCapability::Write,
+                    lifecycle: crate::workspace::MountLifecycle::Eager,
+                    cross_linkable: true,
+                    migration_target: None,
+                },
+                Box::new(writer) as Box<dyn MemBackend>,
+            ));
+        }
+        Engine::from_mounts_with_schemas_dir(mounts, Some(&schemas_dir)).unwrap()
+    }
+
+    fn lab_create(engine: &mut Engine, mem: &str, title: &str, entity_type: &str) {
+        let (actor, client) = cli_actor();
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "a body.".to_string());
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: mem.to_string(),
+                    title: title.to_string(),
+                    entity_type: entity_type.to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: vec![],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+    }
+
+    fn lab_relate(engine: &mut Engine, from: &str, rel: &str, to: &str) {
+        let (actor, client) = cli_actor();
+        engine
+            .relate_entity(
+                crate::engine::RelateEntityArgs {
+                    source: crate::entity::EntityId(from.to_string()),
+                    target: crate::entity::EntityId(to.to_string()),
+                    rel_type: rel.to_string(),
+                    description: None,
+                    remove: false,
+                    expected_hash: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+    }
+
+    fn label_of(engine: &Engine, id: &str) -> (String, Vec<String>, Vec<String>) {
+        let entity = engine
+            .get_entity(&crate::entity::EntityId(id.to_string()))
+            .unwrap()
+            .clone();
+        let view = engine.computed_labelling(&entity).unwrap();
+        (
+            view.label.wire().to_string(),
+            view.defeated_by.clone(),
+            view.undecided_by.clone(),
+        )
+    }
+
+    /// The hand-computed grounded extension: an unattacked claim is
+    /// accepted, a chain defeats, a defeated attacker reinstates, a
+    /// cycle stays undecided (and keeps its victims undecided); the
+    /// evidence names the accepted / undecided direct attackers; two
+    /// instances serve identical labels; the memo invalidates on the
+    /// in-process mutation path AND the reload path; labels never
+    /// gate writes; the health axis serves counts with evidence.
+    #[test]
+    fn grounded_labelling_extension_evidence_and_invalidation() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_labelling_schema(&tmp, false);
+        for t in ["A", "B", "C", "D", "E", "F"] {
+            lab_create(&mut engine, "arg", t, "claim");
+        }
+        lab_relate(&mut engine, "arg--a", "REBUTS", "arg--b");
+        lab_relate(&mut engine, "arg--b", "REBUTS", "arg--c");
+        lab_relate(&mut engine, "arg--d", "REBUTS", "arg--e");
+        lab_relate(&mut engine, "arg--e", "REBUTS", "arg--d");
+        lab_relate(&mut engine, "arg--d", "REBUTS", "arg--f");
+
+        assert_eq!(label_of(&engine, "arg--a").0, "accepted", "unattacked");
+        let (label, defeated_by, _) = label_of(&engine, "arg--b");
+        assert_eq!(label, "defeated");
+        assert_eq!(defeated_by, vec!["arg--a".to_string()], "evidence ships");
+        assert_eq!(
+            label_of(&engine, "arg--c").0,
+            "accepted",
+            "reinstatement: the only attacker is itself defeated"
+        );
+        let (label, _, undecided_by) = label_of(&engine, "arg--d");
+        assert_eq!(label, "undecided", "cycle member");
+        assert_eq!(undecided_by, vec!["arg--e".to_string()]);
+        let (label, _, undecided_by) = label_of(&engine, "arg--f");
+        assert_eq!(label, "undecided", "victim of an undecided attacker");
+        assert_eq!(undecided_by, vec!["arg--d".to_string()]);
+
+        // Determinism: a second instance over the same on-disk state.
+        let engine_b = engine_with_labelling_schema(&tmp, false);
+        for id in ["arg--a", "arg--b", "arg--c", "arg--d", "arg--e", "arg--f"] {
+            assert_eq!(label_of(&engine, id), label_of(&engine_b, id));
+        }
+
+        // Health axis: counts per label, evidence on the lists.
+        let axis = engine.health_labelling_axis(None);
+        assert_eq!(axis["arg"]["counts"]["accepted"], 2);
+        assert_eq!(axis["arg"]["counts"]["defeated"], 1);
+        assert_eq!(axis["arg"]["counts"]["undecided"], 3);
+        assert_eq!(axis["arg"]["defeated"][0]["id"], "arg--b");
+        assert_eq!(axis["arg"]["defeated"][0]["defeated_by"][0], "arg--a");
+
+        // Labels never gate writes: updating a defeated entity and
+        // adding an edge into it both succeed with the normal shapes.
+        let (actor, client) = cli_actor();
+        let b_id = crate::entity::EntityId("arg--b".to_string());
+        let current = engine.get_entity(&b_id).unwrap().content_hash.clone();
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "updated body.".to_string());
+        let outcome = engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: b_id,
+                    expected_hash: Some(current),
+                    sections,
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("updating a defeated entity succeeds");
+        assert!(!outcome.commit_sha.is_empty());
+        lab_relate(&mut engine, "arg--f", "REBUTS", "arg--b");
+
+        // In-process invalidation: a fresh unattacked attacker flips
+        // A on the next read.
+        lab_create(&mut engine, "arg", "H", "claim");
+        lab_relate(&mut engine, "arg--h", "REBUTS", "arg--a");
+        let (label, defeated_by, _) = label_of(&engine, "arg--a");
+        assert_eq!(
+            label, "defeated",
+            "memo invalidated by the in-process mutation"
+        );
+        assert_eq!(defeated_by, vec!["arg--h".to_string()]);
+
+        // Reload-path invalidation: an out-of-band file change plus an
+        // explicit mem reload serves the new labelling.
+        let g_path = tmp.path().join("mem-arg").join("g.md");
+        std::fs::write(
+            &g_path,
+            "---\ntype: claim\n---\n# G\n\n## Body\n\nout of band.\n\n## Relationships\n\n- **REBUTS**: [[arg--c]]\n",
+        )
+        .unwrap();
+        engine.reload_one_mem("arg").expect("reload succeeds");
+        let (label, defeated_by, _) = label_of(&engine, "arg--c");
+        assert_eq!(label, "defeated", "reload invalidated the memo");
+        assert!(defeated_by.contains(&"arg--g".to_string()));
+    }
+
+    /// Support-blindness, chain shape, cross-mem exclusion, and the
+    /// no-declaration complement.
+    #[test]
+    fn labelling_support_blindness_shape_and_cross_mem() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_labelling_schema(&tmp, true);
+        // Support chain: conclusion → inference → evidence; an
+        // undercutter defeats the inference.
+        for (t, ty) in [
+            ("Conclusion", "claim"),
+            ("Inference", "claim"),
+            ("Undercutter", "claim"),
+        ] {
+            lab_create(&mut engine, "arg", t, ty);
+        }
+        lab_create(&mut engine, "arg", "Ev One", "evidence");
+        lab_relate(&mut engine, "arg--conclusion", "GROUNDS", "arg--inference");
+        lab_relate(&mut engine, "arg--inference", "GROUNDS", "arg--ev-one");
+        lab_relate(&mut engine, "arg--undercutter", "REBUTS", "arg--inference");
+
+        // Support-blindness: the defeated inference leaves its
+        // conclusion accepted; the defeat shows in the shape count.
+        let conclusion = engine
+            .get_entity(&crate::entity::EntityId("arg--conclusion".to_string()))
+            .unwrap()
+            .clone();
+        let view = engine.computed_labelling(&conclusion).unwrap();
+        assert_eq!(view.label.wire(), "accepted", "support-blind by design");
+        let shape = view.shape.expect("support declared, shape served");
+        assert_eq!(shape.depth, 2);
+        assert!((shape.branching - 1.0).abs() < 1e-9);
+        assert_eq!(shape.terminal_share, Some(1.0));
+        assert_eq!(shape.defeated_in_support, 1, "the defeated inference");
+        assert_eq!(shape.undecided_in_support, 0);
+
+        // Isolated entity: zeros and a null share.
+        lab_create(&mut engine, "arg", "Loner", "claim");
+        let loner = engine
+            .get_entity(&crate::entity::EntityId("arg--loner".to_string()))
+            .unwrap()
+            .clone();
+        let view = engine.computed_labelling(&loner).unwrap();
+        let shape = view.shape.unwrap();
+        assert_eq!(
+            (shape.depth, shape.branching, shape.terminal_share),
+            (0, 0.0, None)
+        );
+        assert_eq!(
+            (shape.defeated_in_support, shape.undecided_in_support),
+            (0, 0)
+        );
+
+        // Cross-mem: an attack edge from `other` into `arg` (granted
+        // by workspace policy) is excluded from the computation and
+        // counted; the target stays accepted.
+        let mut settings = engine.settings().clone();
+        settings.cross_mem_links.insert(
+            "other".to_string(),
+            memstead_schema::workspace_config::CrossLinkValue::Wildcard,
+        );
+        engine.set_settings(settings);
+        lab_create(&mut engine, "other", "Foreign", "claim");
+        lab_relate(&mut engine, "other--foreign", "REBUTS", "arg--conclusion");
+        let conclusion = engine
+            .get_entity(&crate::entity::EntityId("arg--conclusion".to_string()))
+            .unwrap()
+            .clone();
+        let view = engine.computed_labelling(&conclusion).unwrap();
+        assert_eq!(
+            view.label.wire(),
+            "accepted",
+            "the cross-mem attack is excluded, never guessed"
+        );
+        let axis = engine.health_labelling_axis(Some("arg"));
+        assert_eq!(axis["arg"]["cross_mem_edges_excluded"], 1);
+        assert!(axis.get("other").is_none(), "mem filter narrows");
+
+        // Serving channels: envelope `_labelling` and the text
+        // channel's `_label` + `## Labelling`; the canonical form
+        // stays projection-free.
+        let inference = engine
+            .get_entity(&crate::entity::EntityId("arg--inference".to_string()))
+            .unwrap()
+            .clone();
+        let view = engine.computed_labelling(&inference).unwrap();
+        let md =
+            crate::render::render_entity_markdown_with_signals(&inference, None, None, Some(&view));
+        assert!(md.contains("_label: defeated"), "{md}");
+        assert!(md.contains("## Labelling"), "{md}");
+        assert!(md.contains("defeated_by: arg--undercutter"), "{md}");
+        let env = crate::render::build_entity_envelope(
+            &inference,
+            0,
+            None,
+            None,
+            None,
+            crate::render::OriginClass::FirstParty,
+            engine
+                .store()
+                .outgoing(&crate::entity::EntityId("arg--inference".to_string())),
+            None,
+            None,
+            Some(&view),
+        );
+        assert_eq!(env["_labelling"]["label"], "defeated");
+        assert_eq!(env["_labelling"]["defeated_by"][0], "arg--undercutter");
+        assert!(env["_labelling"]["shape"].is_object());
+        let canonical = crate::render::render_entity_markdown(&inference, None);
+        assert!(
+            !canonical.contains("_label") && !canonical.contains("## Labelling"),
+            "canonical form is projection-free"
+        );
+
+        // No-declaration complement: a signals-fixture entity (schema
+        // without labelling) serves no labelling view at all.
+        let tmp2 = TempDir::new().unwrap();
+        let mut plain = engine_with_signals_schema(&tmp2);
+        let (actor, client) = cli_actor();
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "a claim body.".to_string());
+        plain
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "arg".to_string(),
+                    title: "Plain".to_string(),
+                    entity_type: "claim".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: vec![],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let plain_entity = plain
+            .get_entity(&crate::entity::EntityId("arg--plain".to_string()))
+            .unwrap()
+            .clone();
+        assert!(plain.computed_labelling(&plain_entity).is_none());
+    }
+
+    /// An attack-only declaration (no `support` walk) serves labels
+    /// but nothing shape-shaped on any channel.
+    #[test]
+    fn labelling_without_support_serves_no_shape() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_labelling_schema_support(&tmp, false, false);
+        lab_create(&mut engine, "arg", "Solo", "claim");
+        let entity = engine
+            .get_entity(&crate::entity::EntityId("arg--solo".to_string()))
+            .unwrap()
+            .clone();
+        let view = engine.computed_labelling(&entity).expect("labels served");
+        assert_eq!(view.label.wire(), "accepted");
+        assert!(view.shape.is_none(), "no support declaration, no shape");
+        assert!(view.to_json().get("shape").is_none());
+        let md =
+            crate::render::render_entity_markdown_with_signals(&entity, None, None, Some(&view));
+        assert!(!md.contains("- shape:"), "{md}");
+    }
+
     fn engine_with_signals_schema(tmp: &TempDir) -> Engine {
         let schemas_dir = tmp.path().join("schemas");
         let pkg = schemas_dir.join("argsig");
@@ -2774,7 +3193,8 @@ community:
         // contributors on the text channel; `_signals` on the envelope.
         let entity = engine.get_entity(&claim_id).unwrap().clone();
         let signals = engine.computed_signals(&entity).unwrap();
-        let md = crate::render::render_entity_markdown_with_signals(&entity, None, Some(&signals));
+        let md =
+            crate::render::render_entity_markdown_with_signals(&entity, None, Some(&signals), None);
         assert!(
             md.contains("_signals: [attack_load: 3 (warn), open_objections: 1 (notice)]"),
             "frontmatter headline: {md}"
@@ -2791,6 +3211,7 @@ community:
             engine.store().outgoing(&claim_id),
             None,
             Some(&signals),
+            None,
         );
         assert_eq!(env["_signals"][0]["name"], "attack_load");
         assert_eq!(env["_signals"][0]["value"], 3);

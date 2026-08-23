@@ -157,6 +157,9 @@ pub enum SchemaLoadError {
     #[error("relationships.acyclic_sets is invalid: {reason} — offending entry: '{offender}'")]
     InvalidAcyclicSet { offender: String, reason: String },
 
+    #[error("relationships.labelling is invalid: {reason} — offending name: '{offender}'")]
+    InvalidLabelling { offender: String, reason: String },
+
     #[error(
         "type '{type_name}' section '{section}' format declaration is invalid: {}",
         problems.join("; ")
@@ -817,6 +820,46 @@ fn load_with_context(
         }
     }
 
+    // Labelling declaration: `attack` names at least one declared
+    // rel-type; a `support` block names declared rel-types too (its
+    // `terminal_types` need every type loaded and are checked in the
+    // schema-level pass; its `direction` is a closed enum).
+    if let Some(lab) = &manifest.relationships.labelling {
+        if lab.attack.is_empty() {
+            errors.push(SchemaLoadError::InvalidLabelling {
+                offender: "(empty)".to_string(),
+                reason: "`labelling.attack` must name at least one rel-type".to_string(),
+            });
+        }
+        for name in &lab.attack {
+            if !rel_names.contains(name.as_str()) {
+                errors.push(SchemaLoadError::InvalidLabelling {
+                    offender: name.clone(),
+                    reason: "`labelling.attack` entry names no declared relationship".to_string(),
+                });
+            }
+        }
+        if let Some(sup) = &lab.support {
+            if sup.relationships.is_empty() {
+                errors.push(SchemaLoadError::InvalidLabelling {
+                    offender: "(empty)".to_string(),
+                    reason: "`labelling.support.relationships` must name at least one rel-type"
+                        .to_string(),
+                });
+            }
+            for name in &sup.relationships {
+                if !rel_names.contains(name.as_str()) {
+                    errors.push(SchemaLoadError::InvalidLabelling {
+                        offender: name.clone(),
+                        reason: "`labelling.support.relationships` entry names no declared \
+                                 relationship"
+                            .to_string(),
+                    });
+                }
+            }
+        }
+    }
+
     // Option C coupling — auto-force `manual_authoring: forbidden` on
     // the rel-type named by `alias_target_rel_type`. Schemas setting
     // the pointer opt the named rel-type out of explicit authoring;
@@ -1169,6 +1212,26 @@ fn load_with_context(
                         });
                     }
                 }
+            }
+        }
+    }
+
+    // `labelling.support.terminal_types` name types of this schema —
+    // checkable only once every type is loaded (mirrors the
+    // `must_reach` pass; skipped on type-parse failure like the rest
+    // of the schema-level pass).
+    if !had_type_parse_failure
+        && let Some(lab) = &manifest.relationships.labelling
+        && let Some(sup) = &lab.support
+    {
+        for t in &sup.terminal_types {
+            if !types_map.contains_key(t.as_str()) {
+                errors.push(SchemaLoadError::InvalidLabelling {
+                    offender: t.clone(),
+                    reason: "`labelling.support.terminal_types` entry names no type of this \
+                             schema"
+                        .to_string(),
+                });
             }
         }
     }

@@ -572,6 +572,12 @@ pub fn compose_health(
         // flavour serve.
         obj.insert("signals".into(), engine.health_signals_axis(args.mem));
     }
+    if include.iter().any(|s| s == "labelling") {
+        // Grounded labelling per declaring mem — counts per label,
+        // defeated/undecided lists with their attacker evidence, and
+        // the excluded cross-mem attack-edge count.
+        obj.insert("labelling".into(), engine.health_labelling_axis(args.mem));
+    }
     if include.iter().any(|s| s == "open_questions") {
         obj.insert(
             "open_questions".into(),

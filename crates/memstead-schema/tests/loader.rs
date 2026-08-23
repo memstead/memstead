@@ -1786,6 +1786,75 @@ fn constraint_requires_when_value_outside_enum_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// Grounded labelling (`relationships.labelling`)
+// ---------------------------------------------------------------------------
+
+/// A valid labelling declaration loads and round-trips, support walk
+/// included.
+#[test]
+fn labelling_accepted_round_trips() {
+    use memstead_schema::ReachDirection;
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [PART_OF]\n      direction: out\n      terminal_types: [sample]\n",
+    );
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("must load");
+    let lab = schema
+        .manifest
+        .relationships
+        .labelling
+        .as_ref()
+        .expect("labelling present");
+    assert_eq!(lab.attack, vec!["REFERENCES"]);
+    let sup = lab.support.as_ref().expect("support present");
+    assert_eq!(sup.relationships, vec!["PART_OF"]);
+    assert_eq!(sup.direction, ReachDirection::Out);
+    assert_eq!(sup.terminal_types, vec!["sample"]);
+}
+
+/// Refusals, same rigour for attack and support: empty or undeclared
+/// attack sets; a support block with an undeclared rel-type, an
+/// unknown direction, or an unknown terminal type.
+#[test]
+fn labelling_malformed_declarations_rejected() {
+    let cases: &[(&str, &str)] = &[
+        ("  labelling:\n    attack: []\n", "(empty)"),
+        ("  labelling:\n    attack: [PHANTOM]\n", "PHANTOM"),
+        (
+            "  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [GHOSTLY]\n      direction: out\n      terminal_types: [sample]\n",
+            "GHOSTLY",
+        ),
+        (
+            "  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [PART_OF]\n      direction: out\n      terminal_types: [phantasm]\n",
+            "phantasm",
+        ),
+    ];
+    for (decl, offender) in cases {
+        let manifest = minimal_manifest().replace(
+            "relationships:\n  mode: strict\n",
+            &format!("relationships:\n  mode: strict\n{decl}"),
+        );
+        let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+        assert!(
+            matches!(err, SchemaLoadError::InvalidLabelling { offender: ref o, .. } if o == offender),
+            "case {offender}: got {err}"
+        );
+    }
+    // Unknown direction fails deserialization (closed enum).
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [PART_OF]\n      direction: sideways\n      terminal_types: [sample]\n",
+    );
+    load(&manifest, &[("sample", &minimal_type())]).expect_err("unknown direction must fail");
+    // Unknown keys refuse via the format's posture.
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  labelling:\n    attack: [REFERENCES]\n    semantics: preferred\n",
+    );
+    load(&manifest, &[("sample", &minimal_type())]).expect_err("unknown key must fail");
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate signals (`signals`)
 // ---------------------------------------------------------------------------
 

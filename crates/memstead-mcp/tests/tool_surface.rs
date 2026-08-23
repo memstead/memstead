@@ -1721,6 +1721,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // the below-first-threshold level literal.
             "signals",
             "none",
+            // Grounded labelling (include=labelling): the axis key.
+            "labelling",
         ],
         "memstead_diff" => &[
             // Response-shape fields the description names.

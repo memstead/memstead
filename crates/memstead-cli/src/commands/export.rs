@@ -212,6 +212,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     outgoing,
                     None,
                     None,
+                    None,
                 )
             })
             .collect();

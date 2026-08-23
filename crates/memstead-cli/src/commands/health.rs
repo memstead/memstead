@@ -44,7 +44,10 @@ pub struct Args {
     /// declared aggregate signals sit above `none`, each with value,
     /// level and contributing entity ids, plus per-level counts;
     /// `warn`-level signals participate in `--strict`, `notice`
-    /// never does).
+    /// never does), labelling (grounded labels per declaring mem:
+    /// accepted/defeated/undecided counts, the defeated and undecided
+    /// lists with their attacker evidence, and the excluded cross-mem
+    /// attack-edge count; an observation, never a strict violation).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -122,6 +125,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         stale_derivations_axis,
         checks_axis,
         signals_axis,
+        labelling_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -319,6 +323,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             strict_violations.push(("signals", warn as usize));
         }
         obj.insert("signals".to_string(), axis.clone());
+    }
+    // `--include labelling`: grounded labels per declaring mem — a
+    // reported observation with its evidence, never a strict
+    // violation.
+    if let Some(axis) = &labelling_axis {
+        obj.insert("labelling".to_string(), axis.clone());
     }
     // `--include friction`: the friction ledger's read surface
     // (agent-trust plan 08) — counts per refusal code / per verb,
@@ -741,6 +751,52 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
+    // Labelling axis — grounded labels with their evidence.
+    if let Some(axis) = obj.get("labelling").and_then(|a| a.as_object()) {
+        lines.push(format!("## Labelling ({} mems)", axis.len()));
+        for (mem, m) in axis {
+            let c = &m["counts"];
+            lines.push(format!(
+                "- `{mem}`: accepted {}, defeated {}, undecided {}; cross-mem attack edges excluded {}",
+                c["accepted"].as_u64().unwrap_or(0),
+                c["defeated"].as_u64().unwrap_or(0),
+                c["undecided"].as_u64().unwrap_or(0),
+                m["cross_mem_edges_excluded"].as_u64().unwrap_or(0),
+            ));
+            for d in m["defeated"].as_array().into_iter().flatten() {
+                let by = d["defeated_by"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "  - defeated: {} (by {by})",
+                    d["id"].as_str().unwrap_or("")
+                ));
+            }
+            for u in m["undecided"].as_array().into_iter().flatten() {
+                let by = u["undecided_by"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "  - undecided: {} (open attackers {by})",
+                    u["id"].as_str().unwrap_or("")
+                ));
+            }
+        }
+        lines.push(String::new());
+    }
+
     // Stale-derivations axis — same requested-vs-absent contract and
     // wording as the MCP text renderer.
     if let Some(axis) = stale_derivations_axis.as_ref().and_then(|a| a.as_object()) {
@@ -924,6 +980,10 @@ struct GatheredHealth {
     /// `--include signals` — the shared `health_signals_axis`
     /// payload (entities above `none` plus per-level counts).
     signals_axis: Option<serde_json::Value>,
+    /// `--include labelling` — the shared `health_labelling_axis`
+    /// payload (per declaring mem: label counts, defeated/undecided
+    /// lists with attacker evidence, excluded cross-mem edges).
+    labelling_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -994,6 +1054,7 @@ fn gather_mem_repo(
     fill_stale_derivations_axis(engine, include, &mut g);
     fill_checks_axis(engine, include, &mut g);
     fill_signals_axis(engine, include, &mut g);
+    fill_labelling_axis(engine, include, &mut g);
     g
 }
 
@@ -1021,6 +1082,7 @@ fn gather_filesystem(
     fill_stale_derivations_axis(engine, include, &mut g);
     fill_checks_axis(engine, include, &mut g);
     fill_signals_axis(engine, include, &mut g);
+    fill_labelling_axis(engine, include, &mut g);
     g
 }
 
@@ -1091,6 +1153,12 @@ fn fill_checks_axis(engine: &memstead_base::Engine, include: &[String], g: &mut 
 fn fill_signals_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
     if include.iter().any(|s| s == "signals") {
         g.signals_axis = Some(engine.health_signals_axis(None));
+    }
+}
+
+fn fill_labelling_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
+    if include.iter().any(|s| s == "labelling") {
+        g.labelling_axis = Some(engine.health_labelling_axis(None));
     }
 }
 
@@ -1194,6 +1262,7 @@ fn gather_from_store(
         stale_derivations_axis: None,
         checks_axis: None,
         signals_axis: None,
+        labelling_axis: None,
     }
 }
 

@@ -95,6 +95,46 @@ pub struct RelationshipVocabulary {
     /// behaviour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub acyclic_sets: Vec<Vec<String>>,
+    /// Grounded-labelling declaration (see [`LabellingDef`]): which of
+    /// this schema's rel-types constitute the attack relation, and
+    /// optionally a support walk enabling chain-shape statistics.
+    /// Absent = no computation, byte-identical responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labelling: Option<LabellingDef>,
+}
+
+/// The schema's attack vocabulary for the grounded labelling — the
+/// one argumentation-semantics computation that is parameter-free,
+/// unique, polynomial, and explainable by construction. The engine
+/// serves the labelling as a reported observation with its evidence:
+/// never a stored value, never a write gate, never a status. The
+/// labelling is deliberately support-blind (it walks attack edges
+/// only); a defeated supporter never flips what it supports — the
+/// reader sees that defeat through the shape block's counts instead.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LabellingDef {
+    /// Declared rel-types constituting attack — inline relation set,
+    /// at least one name, each declared in the vocabulary.
+    pub attack: Vec<String>,
+    /// Optional support walk enabling the chain-shape statistics
+    /// (depth, branching, terminal share, defeated/undecided counts
+    /// on the support subtree). Absent = no shape block served.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub support: Option<SupportWalk>,
+}
+
+/// The support walk of a labelling declaration — same grammar as a
+/// `must_reach` block: an inline relation set, a walk direction, and
+/// the terminal types that count as ground.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SupportWalk {
+    pub relationships: Vec<String>,
+    /// `out` follows edges pointing away from the walked entity, `in`
+    /// follows edges pointing at it — the `must_reach` vocabulary.
+    pub direction: crate::types::ReachDirection,
+    pub terminal_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

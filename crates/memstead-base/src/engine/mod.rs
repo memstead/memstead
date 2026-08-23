@@ -199,6 +199,13 @@ pub struct Engine {
     /// engine is `Send` (it is moved into a `Mutex` by every consumer)
     /// but not `Sync`.
     community_memo: OnceCell<LouvainOutput>,
+    /// Grounded-labelling memo — one `MemLabelling` per mem whose
+    /// schema declares `relationships.labelling`, computed on first
+    /// access and invalidated exactly where the community memo is
+    /// (the reset lives inside [`Self::invalidate_communities`], so
+    /// every mutation site, drift reload, quarantine attach/detach
+    /// and apply-commit invalidate both without a second call).
+    labelling_memo: OnceCell<HashMap<String, crate::ops::labelling::MemLabelling>>,
     /// Lazily-computed per-mem search index map. Built on first call
     /// to [`Self::search_indexes`] via [`build_all`]; invalidated by
     /// [`Self::invalidate_search_indexes`] alongside the community

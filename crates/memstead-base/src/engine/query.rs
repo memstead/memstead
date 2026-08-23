@@ -1265,9 +1265,133 @@ impl Engine {
         })
     }
 
-    /// Drop the cached community detection result.
+    /// Drop the cached community detection result — and the grounded
+    /// labelling memo with it. Coupling the resets here means every
+    /// site that already invalidates communities (all mutation paths,
+    /// drift reload, quarantine attach/detach, apply-commit)
+    /// invalidates the labelling too, so a stale label can never
+    /// outlive the state change that moved it.
     pub fn invalidate_communities(&mut self) {
         self.community_memo = OnceCell::new();
+        self.labelling_memo = OnceCell::new();
+    }
+
+    /// The grounded labelling of one mem — `None` when its pinned
+    /// schema declares no `relationships.labelling`. Computed on
+    /// first access for every declaring mem, memoised until the next
+    /// invalidation.
+    pub fn mem_labelling(&self, mem: &str) -> Option<&crate::ops::labelling::MemLabelling> {
+        let map = self.labelling_memo.get_or_init(|| {
+            let mut out = std::collections::HashMap::new();
+            for (mem_name, schema) in &self.schemas {
+                if let Some(lab) = crate::ops::labelling::labelling_of(schema) {
+                    out.insert(
+                        mem_name.clone(),
+                        crate::ops::labelling::compute_mem_labelling(
+                            &self.store,
+                            mem_name,
+                            &lab.attack,
+                        ),
+                    );
+                }
+            }
+            out
+        });
+        map.get(mem)
+    }
+
+    /// One entity's served labelling view — `None` when the entity is
+    /// a stub or its mem's schema declares no labelling; serving
+    /// surfaces then keep their byte-identical payloads. The shape
+    /// block is present exactly when the declaration carries a
+    /// `support` walk.
+    pub fn computed_labelling(
+        &self,
+        entity: &Entity,
+    ) -> Option<crate::ops::labelling::LabellingView> {
+        use crate::ops::labelling::{Label, compute_shape, labelling_of};
+        if entity.stub {
+            return None;
+        }
+        let schema = self.schemas.get(entity.mem.as_str())?;
+        let lab = labelling_of(schema)?;
+        let mem_lab = self.mem_labelling(entity.mem.as_str())?;
+        let label = *mem_lab.labels.get(entity.id.0.as_str())?;
+        let defeated_by = if label == Label::Defeated {
+            mem_lab.accepted_attackers_of(entity.id.0.as_str())
+        } else {
+            Vec::new()
+        };
+        let undecided_by = if label == Label::Undecided {
+            mem_lab.undecided_attackers_of(entity.id.0.as_str())
+        } else {
+            Vec::new()
+        };
+        let shape = lab.support.as_ref().map(|walk| {
+            let label_of = |id: &EntityId| -> Option<Label> {
+                self.mem_labelling(id.mem())
+                    .and_then(|ml| ml.labels.get(id.0.as_str()).copied())
+            };
+            compute_shape(&self.store, &entity.id, walk, &label_of)
+        });
+        Some(crate::ops::labelling::LabellingView {
+            label,
+            defeated_by,
+            undecided_by,
+            shape,
+        })
+    }
+
+    /// The `labelling` health axis payload — per declaring mem:
+    /// counts per label, the defeated list with its accepted
+    /// attackers, the undecided list with its open attacker set, and
+    /// the excluded cross-mem attack-edge count. One composer shared
+    /// by the CLI health command and both MCP flavours.
+    pub fn health_labelling_axis(&self, mem_filter: Option<&str>) -> serde_json::Value {
+        use crate::ops::labelling::Label;
+        let mut mems = serde_json::Map::new();
+        let mut mem_names: Vec<&String> = self.schemas.keys().collect();
+        mem_names.sort();
+        for mem in mem_names {
+            if let Some(v) = mem_filter
+                && mem != v
+            {
+                continue;
+            }
+            let Some(ml) = self.mem_labelling(mem) else {
+                continue;
+            };
+            let mut accepted = 0usize;
+            let mut defeated: Vec<serde_json::Value> = Vec::new();
+            let mut undecided: Vec<serde_json::Value> = Vec::new();
+            for (id, label) in &ml.labels {
+                match label {
+                    Label::Accepted => accepted += 1,
+                    Label::Defeated => defeated.push(serde_json::json!({
+                        "id": id,
+                        "defeated_by": ml.accepted_attackers_of(id),
+                    })),
+                    Label::Undecided => undecided.push(serde_json::json!({
+                        "id": id,
+                        "undecided_by": ml.undecided_attackers_of(id),
+                    })),
+                }
+            }
+            mems.insert(
+                mem.clone(),
+                serde_json::json!({
+                    "counts": {
+                        "accepted": accepted,
+                        "defeated": defeated.len(),
+                        "undecided": undecided.len(),
+                    },
+                    "defeated": defeated,
+                    "undecided": undecided,
+                    "cross_mem_edges_excluded": ml.cross_mem_edges_excluded,
+                }),
+            );
+        }
+        serde_json::Value::Object(mems)
     }
 
     /// Real entities with no incoming or outgoing edges — leaf-declared

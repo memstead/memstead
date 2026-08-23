@@ -20,6 +20,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Grounded labelling over a declared attack set:
+  `relationships.labelling`, plus chain-shape statistics.** A schema can
+  name which of its rel-types constitute `attack`; the engine serves the
+  grounded labelling (the one argumentation-semantics computation that is
+  parameter-free, unique, polynomial, and explainable by construction) as a
+  reported observation with its evidence: `accepted` / `defeated` /
+  `undecided` per non-stub entity of a declaring mem, a defeated label
+  always naming its accepted direct attackers, an undecided one the open
+  attacker set that keeps it open. Served on entity reads (`_labelling` on
+  the structured envelope; `_label` in the rendered frontmatter plus a
+  `## Labelling` evidence section) and on the include-gated `labelling`
+  health axis (counts per label, defeated/undecided lists with evidence,
+  and `cross_mem_edges_excluded` — a cross-mem attack edge is excluded and
+  counted, never guessed). The labelling is deliberately support-blind: a
+  defeated supporter never flips what it supports. An optional `support`
+  walk (the `must_reach` grammar: `relationships`, `direction`,
+  `terminal_types`) adds chain-shape statistics to the read (`depth`,
+  `branching`, `terminal_share`, `defeated_in_support`,
+  `undecided_in_support`); the engine serves numbers, the reader judges.
+  Labels are never stored, never gate writes, and the memo invalidates
+  wherever the community memo does (every mutation, drift reload,
+  quarantine transitions, apply-commit). The loader refuses empty or
+  undeclared attack sets and malformed support blocks; schemas without the
+  declaration keep byte-identical responses everywhere.
+
 - **Aggregate signals: `signals` on type definitions, served with their
   evidence.** A type can declare exact, parameter-free counts with declared
   thresholds: this wave ships one `kind`, `edge_load` (count the edges of an

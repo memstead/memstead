@@ -476,6 +476,7 @@ impl Engine {
             builtin_schemas: builtin_schemas_only,
             load_errors,
             community_memo: OnceCell::new(),
+            labelling_memo: OnceCell::new(),
             #[cfg(not(target_arch = "wasm32"))]
             search_indexes_memo: OnceCell::new(),
             settings: WorkspaceSettings::default(),

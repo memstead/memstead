@@ -40,6 +40,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "missing_required_outgoing",
     "constraints",
     "signals",
+    "labelling",
     "conformance",
     "integrity",
     "config",

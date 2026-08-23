@@ -1078,10 +1078,12 @@ impl FilesystemMcpServer {
         // channels; `None` for types declaring none keeps both
         // channels byte-identical.
         let computed_signals = engine.computed_signals(&entity);
+        let computed_labelling = engine.computed_labelling(&entity);
         let mut md = memstead_base::render::render_entity_markdown_with_signals(
             &entity,
             sections_filter,
             computed_signals.as_deref(),
+            computed_labelling.as_ref(),
         );
         // Inject `_hash` as the first frontmatter field so callers
         // can pin it to `expected_hash` on the next mutation.
@@ -1148,6 +1150,7 @@ impl FilesystemMcpServer {
             engine.store().outgoing(&entity.id),
             incoming_for_envelope.as_deref(),
             computed_signals.as_deref(),
+            computed_labelling.as_ref(),
         );
         // Mutation provenance (agent-trust plan 13), opt-in — same
         // block and key the full flavour serves; default responses
@@ -1808,6 +1811,7 @@ impl FilesystemMcpServer {
         let wants_stale_derivations = include.iter().any(|s| s == "stale_derivations");
         let wants_checks = include.iter().any(|s| s == "checks");
         let wants_signals = include.iter().any(|s| s == "signals");
+        let wants_labelling = include.iter().any(|s| s == "labelling");
         if wants_anchors
             || wants_constraints
             || wants_friction
@@ -1815,6 +1819,7 @@ impl FilesystemMcpServer {
             || wants_stale_derivations
             || wants_checks
             || wants_signals
+            || wants_labelling
         {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
@@ -1851,6 +1856,9 @@ impl FilesystemMcpServer {
             }
             if wants_signals {
                 value["signals"] = engine.health_signals_axis(mem_scope);
+            }
+            if wants_labelling {
+                value["labelling"] = engine.health_labelling_axis(mem_scope);
             }
             return json_response(&value);
         }

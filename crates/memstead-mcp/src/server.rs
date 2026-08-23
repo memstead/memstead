@@ -1982,10 +1982,12 @@ impl McpServer {
         // text channel, `_signals` on the envelope). `None` for types
         // declaring none keeps both channels byte-identical.
         let computed_signals = engine.computed_signals(&entity);
+        let computed_labelling = engine.computed_labelling(&entity);
         let mut md = render::render_entity_markdown_with_signals(
             &entity,
             sections_filter,
             computed_signals.as_deref(),
+            computed_labelling.as_ref(),
         );
 
         if p.include_relations.unwrap_or(false) {
@@ -2054,6 +2056,7 @@ impl McpServer {
             engine.store().outgoing(&id),
             incoming_for_envelope.as_deref(),
             computed_signals.as_deref(),
+            computed_labelling.as_ref(),
         );
         if let Some(obj) = structured.as_object_mut() {
             // Authoring provenance carried in the installed archive. Emitted
@@ -3377,7 +3380,7 @@ impl McpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return graph health metrics. Typed payload on `structured_content`; text chunkable past `token_budget` via `chunk`. Default: summary counts (`orphans_by_schema`/`communities_by_schema`), node/edge totals, distributions, `writable_mems`/`read_mems`, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `constraints`, `conformance`, `integrity`, `config`, `anchors`, `friction` (refusal-ledger counts), `open_questions` (per-mem worklist of unknowns; negative findings separated as already-searched; capped with explicit `more`), `stale_derivations` (derivation edges whose target changed since baseline), `checks` (check-state counts + gate: `unconfirmable` until caller identity; `self_checked`/`confirmed_independent` empty), `signals` (declared signals above `none`: value, level, contributors, per-level counts). `missing_fields` adds `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH`) beside `missing`. `config` = the `include_config` projection. `conformance` lints entities against `target_schema` or each pin into `findings` `{id, axis, code, detail}`; `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body refs lacking files. `tags` aggregates into `tag_distribution` (`limit`-capped), `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied blocks. `constraints` lists standing declared-constraint violations. `anchors` adds per-mem counts of `resolved`/`drifted`/`recheck`/`unresolvable`. Unknown keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).",
+        description = "Return graph health metrics. Typed payload on `structured_content`; text chunkable past `token_budget` via `chunk`. Default: summary counts (`orphans_by_schema`/`communities_by_schema`), node/edge totals, distributions, `writable_mems`/`read_mems`, `default_writable_mem` (omitted-`mem` target), `mem_schemas`. `include` drills in — keys: `orphans`, `stubs`, `most_connected`, `missing_fields`, `stale`, `dangling_links`, `tags`, `missing_required_outgoing`, `constraints`, `conformance`, `integrity`, `config`, `anchors`, `friction` (refusal-ledger counts), `open_questions` (per-mem worklist of unknowns; negative findings separated as already-searched; capped with explicit `more`), `stale_derivations` (derivation edges whose target changed since baseline), `checks` (check-state counts + author-independence gate), `signals` (declared signals above `none`: value, level, contributors, per-level counts), `labelling` (grounded labels with attacker evidence). `missing_fields` adds `issues[]` with `code` (`MISSING` / `SECTION_HEADING_MISMATCH`) beside `missing`. `config` = the `include_config` projection. `conformance` lints entities against `target_schema` or each pin into `findings` `{id, axis, code, detail}`; `integrity` adds `DANGLING_LINK`/`ORPHAN_STUB`. `dangling_links` lists body refs lacking files. `tags` aggregates into `tag_distribution` (`limit`-capped), `tag_distribution_folded`, `untagged_entities`. `missing_required_outgoing` lists unsatisfied blocks. `constraints` lists standing declared-constraint violations. `anchors` adds per-mem counts of `resolved`/`drifted`/`recheck`/`unresolvable`. Unknown keys emit `UNKNOWN_INCLUDE_KEY`; `limit` caps at 10 (>100 clamps: `LIMIT_CLAMPED`). Warnings — see server instructions. Pass `mem` to scope to one writable mem (rosters stay global; `dangling_links`/`warnings` filter too). `include_config: true` adds `mutations` (`require_notes`), the opaque `plugin` map, and per-mem `mems` entries (`origin`, `vcs` `gitdir`/`worktree`/`head`, `write_guidance`, `extra`).",
         annotations(
             read_only_hint = true,
             destructive_hint = false,

@@ -27,13 +27,13 @@ use crate::{
 
 /// Render a single entity as markdown with frontmatter metadata.
 ///
-/// Signal-free by contract: this is the canonical form (anchor
+/// Projection-free by contract: this is the canonical form (anchor
 /// hashing, export, parser round-trips). Serving surfaces that
-/// present declared signals call
+/// present declared signals or the grounded labelling call
 /// [`render_entity_markdown_with_signals`] instead — computed values
 /// are a projection and must never enter the canonical bytes.
 pub fn render_entity_markdown(entity: &Entity, sections_filter: Option<&[String]>) -> String {
-    render_entity_markdown_with_signals(entity, sections_filter, None)
+    render_entity_markdown_with_signals(entity, sections_filter, None, None)
 }
 
 /// Serving-surface variant of [`render_entity_markdown`]: when the
@@ -41,12 +41,15 @@ pub fn render_entity_markdown(entity: &Entity, sections_filter: Option<&[String]
 /// `level` per signal) rides in the frontmatter block — the one
 /// pre-body slot the format has — and the contributors in a
 /// `## Signals` section appended after the body, in the style of
-/// `## Relations`. `None` renders byte-identically to the canonical
-/// form.
+/// `## Relations`. When the mem's schema declares labelling, the
+/// grounded label rides as `_label` in the frontmatter and the
+/// evidence in a `## Labelling` section. `None`/`None` renders
+/// byte-identically to the canonical form.
 pub fn render_entity_markdown_with_signals(
     entity: &Entity,
     sections_filter: Option<&[String]>,
     signals: Option<&[crate::ops::signals::ComputedSignal]>,
+    labelling: Option<&crate::ops::labelling::LabellingView>,
 ) -> String {
     let body_text = render_entity_body(entity, sections_filter);
 
@@ -94,6 +97,11 @@ pub fn render_entity_markdown_with_signals(
             .map(|s| format!("{}: {} ({})", s.name, s.value, s.level_wire()))
             .collect();
         lines.push(format!("_signals: [{}]", headline.join(", ")));
+    }
+    // Grounded-label headline; the evidence rides in the appended
+    // `## Labelling` section below.
+    if let Some(lab) = labelling {
+        lines.push(format!("_label: {}", lab.label.wire()));
     }
     let tokens = estimate_tokens(&body_text);
     lines.push(format!("_tokens: {tokens}"));
@@ -145,6 +153,36 @@ pub fn render_entity_markdown_with_signals(
                     ids.join(", ")
                 ));
             }
+        }
+    }
+    // Labelling evidence — a defeated label always carries its
+    // accepted direct attackers (one unanswered counter-claim
+    // flipping a well-supported claim is visible as exactly that);
+    // an undecided label the open attacker set that keeps it open.
+    if let Some(lab) = labelling {
+        lines.push(String::new());
+        lines.push("## Labelling".to_string());
+        lines.push(String::new());
+        lines.push(format!("- label: {}", lab.label.wire()));
+        if !lab.defeated_by.is_empty() {
+            lines.push(format!("- defeated_by: {}", lab.defeated_by.join(", ")));
+        }
+        if !lab.undecided_by.is_empty() {
+            lines.push(format!("- undecided_by: {}", lab.undecided_by.join(", ")));
+        }
+        if let Some(shape) = &lab.shape {
+            let share = match shape.terminal_share {
+                Some(s) => format!("{s:.2}"),
+                None => "null".to_string(),
+            };
+            lines.push(format!(
+                "- shape: depth {}, branching {:.2}, terminal_share {}, defeated_in_support {}, undecided_in_support {}",
+                shape.depth,
+                shape.branching,
+                share,
+                shape.defeated_in_support,
+                shape.undecided_in_support,
+            ));
         }
     }
     lines.join("\n")
@@ -768,6 +806,7 @@ pub fn build_entity_envelope(
     outgoing_edges: &[crate::store::Edge],
     incoming_edges: Option<&[crate::store::InEdge]>,
     signals: Option<&[crate::ops::signals::ComputedSignal]>,
+    labelling: Option<&crate::ops::labelling::LabellingView>,
 ) -> serde_json::Value {
     let mut envelope = serde_json::Map::new();
     // Declared aggregate signals — present exactly when the entity's
@@ -781,6 +820,13 @@ pub fn build_entity_envelope(
             "_signals".to_string(),
             crate::ops::signals::signals_json(sigs),
         );
+    }
+    // Grounded labelling — present exactly when the mem's schema
+    // declares `relationships.labelling`; the label ships with its
+    // evidence, and the shape block exactly when `support` is
+    // declared.
+    if let Some(lab) = labelling {
+        envelope.insert("_labelling".to_string(), lab.to_json());
     }
     envelope.insert(
         "_hash".to_string(),
@@ -1931,6 +1977,16 @@ pub fn build_schema_payload_scoped(
             "acyclic_sets".into(),
             serde_json::to_value(&manifest.relationships.acyclic_sets)
                 .expect("acyclic_sets serialize"),
+        );
+    }
+    // Grounded-labelling declaration — served behaviour (the
+    // `_labelling` read insert and the `labelling` health axis) an
+    // agent must see at introspection time; echoed in its YAML shape,
+    // in BOTH modes, only when declared.
+    if let Some(lab) = &manifest.relationships.labelling {
+        obj.insert(
+            "labelling".into(),
+            serde_json::to_value(lab).expect("labelling declaration serializes"),
         );
     }
 
@@ -3303,6 +3359,7 @@ mod tests {
             &edges,
             None,
             None,
+            None,
         );
         let relationships = env["relationships"].as_array().expect("array");
         let refs = relationships
@@ -3359,6 +3416,7 @@ mod tests {
             &edges,
             None,
             None,
+            None,
         );
         assert_eq!(env["origin"], "third-party", "origin is envelope-level");
         let rels = env["relationships"].as_array().expect("array");
@@ -3376,6 +3434,7 @@ mod tests {
             OriginClass::FirstParty,
             &edges,
             Some(&incoming),
+            None,
             None,
         );
         assert_eq!(env["origin"], "first-party");
@@ -3411,6 +3470,7 @@ mod tests {
             None,
             OriginClass::FirstParty,
             &edges,
+            None,
             None,
             None,
         );
@@ -3465,6 +3525,7 @@ mod tests {
             None,
             OriginClass::FirstParty,
             &[],
+            None,
             None,
             None,
         );
@@ -3533,6 +3594,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
         );
         let metadata = env["metadata"]
             .as_object()
@@ -3570,6 +3632,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
         );
         // Top-level structured slots stay structured.
         assert!(
@@ -3603,6 +3666,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
         );
         assert_eq!(env_filtered["_tokens_unfiltered_body"], 42);
         assert!(
@@ -3618,6 +3682,7 @@ mod tests {
             None,
             OriginClass::FirstParty,
             &[],
+            None,
             None,
             None,
         );
@@ -4455,6 +4520,75 @@ community:
             assert!(
                 payload.get("acyclic_sets").is_none(),
                 "undeclared schema carries no acyclic_sets key"
+            );
+        }
+    }
+
+    /// The labelling declaration is visible at BOTH verbosity levels
+    /// with attack set and support walk echoed whole; a schema
+    /// declaring none carries no `labelling` key at all.
+    #[test]
+    fn labelling_declaration_visible_at_both_levels_and_absent_when_undeclared() {
+        let manifest = r#"name: labelling-render
+version: 0.1.0
+description: labelling render fixture
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  labelling:
+    attack: [REBUTS]
+    support:
+      relationships: [GROUNDS]
+      direction: out
+      terminal_types: [claim]
+  definitions:
+    - name: REBUTS
+      description: attack
+      default_weight: 3.0
+    - name: GROUNDS
+      description: support
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let claim = "name: claim\ndescription: t\nwhen_to_use: tests\nmetadata_fields: []\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("claim".to_string(), claim.to_string())],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            assert_eq!(
+                payload["labelling"]["attack"],
+                serde_json::json!(["REBUTS"]),
+                "attack set present at {verbosity:?}"
+            );
+            assert_eq!(
+                payload["labelling"]["support"]["relationships"],
+                serde_json::json!(["GROUNDS"])
+            );
+            assert_eq!(payload["labelling"]["support"]["direction"], "out");
+        }
+
+        let plain = software_schema();
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&plain, vec![], verbosity, OriginClass::FirstParty);
+            assert!(
+                payload.get("labelling").is_none(),
+                "undeclared schema carries no labelling key"
             );
         }
     }
