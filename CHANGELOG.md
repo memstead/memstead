@@ -66,6 +66,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on a workspace with three pin mismatches, two rotted schema packages,
   two unbacked mounts, seven stubs and fourteen dangling-link findings.
 
+- **`memstead export --format mem --self-contained`.** A mem that
+  references its sibling mems exported with `DANGLING_CROSS_MEM_EDGE_IN_EXPORT`
+  warnings and then could not be installed anywhere, not even back into
+  the workspace it came from: `install` refuses cross-mem relationship
+  rows by design. The flag drops every `## Relationships` row whose
+  target lives in another mem, re-packs canonically and proves the
+  result with the strict validator `install` runs; each dropped edge is
+  reported as `CROSS_MEM_EDGE_DROPPED`. Section text, body wiki-links
+  included, is never touched, so an alias row synthesised from a body
+  link loses nothing the body does not still say. The dogfood
+  workspace's retired `features` mem (fifty such rows, all alias rows)
+  is the first archive to round-trip this way.
+
+### Fixed
+- **`mem set-schema` repairs a `SCHEMA_PIN_MISMATCH` instead of
+  declaring a noop.** The noop check compared the target with the mount's
+  expectation in `mounts.json`; with the mount ahead of the mem's own
+  config (the mismatch the warning names) a target equal to the mount
+  answered "noop" and the authoritative config stayed on the old
+  generation forever. The check now asks the pin the engine actually
+  serves; when the served pin already equals the target and only the
+  mount expectation lags, the expectation is aligned and reported as
+  switched. An in-flight dual-pin migration still completes through the
+  conformance gate.
+
 ### Changed
 - **`SUSPICIOUS_NESTED_PREFIX` says what it can tell.** When the link's
   prefix is itself a mounted mem the message reads "target missing in

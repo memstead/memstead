@@ -294,6 +294,77 @@ pub fn validate_and_normalize_archive_lenient(
     validate_impl(bytes, &ValidatorLimits::DEFAULT, false)
 }
 
+/// The output of [`make_archive_self_contained`]: the canonical bytes of
+/// an archive that now passes strict validation, and every cross-mem
+/// edge that was dropped to get there.
+#[derive(Debug)]
+pub struct SelfContainedArchive {
+    /// Strictly validated, canonically packed bytes, ready for `install`.
+    pub bytes: Vec<u8>,
+    /// The relationship rows removed: each named the entity that carried
+    /// it and the target in the other mem. Empty when the input was
+    /// already self-contained (then `bytes` is its canonical form).
+    pub dropped: Vec<graph::DanglingCrossMemEdge>,
+}
+
+/// Make an archive self-contained: drop every `## Relationships` row
+/// whose target lives in another mem, re-pack canonically, and prove the
+/// result with the strict validator (the same pass `install` runs).
+///
+/// WHY: `export --format mem` admits cross-mem edges (it warns
+/// `DANGLING_CROSS_MEM_EDGE_IN_EXPORT` and still produces the archive),
+/// while `install` refuses them, so a mem that references its sibling
+/// mems could be exported but never installed anywhere, not even back
+/// into the workspace it came from. The dogfood workspace's retired
+/// `features` mem carried fifty such rows, every one an alias row
+/// synthesised from a body wiki-link, so dropping the rows loses
+/// nothing the body does not still say. Rows that are NOT backed by a
+/// body link are dropped too; the caller reports every dropped edge so
+/// the author can see what the package no longer carries as a typed
+/// edge. Section text (body wiki-links included) is never touched.
+pub fn make_archive_self_contained(bytes: &[u8]) -> Result<SelfContainedArchive, ValidationError> {
+    let lenient = validate_impl(bytes, &ValidatorLimits::DEFAULT, false)?;
+    if lenient.dangling_cross_mem_edges.is_empty() {
+        return Ok(SelfContainedArchive {
+            bytes: lenient.canonical_bytes,
+            dropped: Vec::new(),
+        });
+    }
+    let mem_name = lenient.config.name.clone();
+    let mut dropped = Vec::new();
+    let mut entities = lenient.entities;
+    for entity in &mut entities {
+        let path = entity.file_path.clone();
+        entity.relationships.retain(|rel| {
+            let keep = rel.target.mem() == mem_name;
+            if !keep {
+                dropped.push(graph::DanglingCrossMemEdge {
+                    entity_path: path.clone(),
+                    target_id: rel.target.as_ref().to_string(),
+                    target_mem: rel.target.mem().to_string(),
+                });
+            }
+            keep
+        });
+    }
+    let embedded_schema = check_embedded_schema(&lenient.schema_files, &lenient.config)?;
+    let repacked = canonical::canonical_bytes(
+        &lenient.config,
+        &entities,
+        &lenient.schema_files,
+        embedded_schema.as_ref(),
+        lenient.provenance_bytes.as_deref(),
+        lenient.anchors_bytes.as_deref(),
+    )?;
+    // The strict pass is the proof: what comes out is exactly what
+    // `install` accepts, or this returns the typed refusal.
+    let strict = validate_impl(&repacked, &ValidatorLimits::DEFAULT, true)?;
+    Ok(SelfContainedArchive {
+        bytes: strict.canonical_bytes,
+        dropped,
+    })
+}
+
 /// Cross-mem-only scan over an archive's bytes: extract + tolerant
 /// parse + the shared cross-mem predicate
 /// ([`graph::dangling_cross_mem_edges_in`]), with **no** strict
