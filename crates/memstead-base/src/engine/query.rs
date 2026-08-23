@@ -1319,6 +1319,62 @@ impl Engine {
         crate::ops::health::collect_constraint_findings(&self.store, mem_filter, &self.schemas)
     }
 
+    /// The evaluated aggregate signals for one entity — `None` when
+    /// the mem has no schema, the type is unknown or a stub, or the
+    /// type declares no signals; serving surfaces then keep their
+    /// byte-identical payloads.
+    pub fn computed_signals(
+        &self,
+        entity: &Entity,
+    ) -> Option<Vec<crate::ops::signals::ComputedSignal>> {
+        if entity.stub {
+            return None;
+        }
+        let schema = self.schemas.get(entity.mem.as_str())?;
+        let td = schema.types.get(entity.entity_type.as_str())?;
+        if td.signals.is_empty() {
+            return None;
+        }
+        Some(crate::ops::signals::compute_signals(
+            &self.store,
+            td,
+            &entity.id,
+        ))
+    }
+
+    /// Every entity carrying at least one signal above `none` — the
+    /// include-gated `signals` health axis.
+    pub fn signal_reports(
+        &self,
+        mem_filter: Option<&str>,
+    ) -> Vec<crate::ops::health::SignalReport> {
+        crate::ops::health::collect_signal_reports(&self.store, mem_filter, &self.schemas)
+    }
+
+    /// The `signals` health axis payload — the entity roster plus
+    /// per-level counts. One composer shared by the CLI health
+    /// command and both MCP flavours so the axis cannot drift
+    /// between surfaces.
+    pub fn health_signals_axis(&self, mem_filter: Option<&str>) -> serde_json::Value {
+        use memstead_schema::SignalLevel;
+        let reports = self.signal_reports(mem_filter);
+        let mut notice = 0usize;
+        let mut warn = 0usize;
+        for r in &reports {
+            for s in &r.signals {
+                match s.level {
+                    Some(SignalLevel::Notice) => notice += 1,
+                    Some(SignalLevel::Warn) => warn += 1,
+                    None => {}
+                }
+            }
+        }
+        serde_json::json!({
+            "entities": reports,
+            "counts": { "notice": notice, "warn": warn },
+        })
+    }
+
     /// Defective section-format declarations the loaded schemas carry
     /// (lenient boot recorded them; install would have refused).
     pub fn schema_format_defects(&self) -> Vec<crate::ops::health::SchemaFormatDefect> {

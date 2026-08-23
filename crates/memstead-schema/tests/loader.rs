@@ -1786,6 +1786,160 @@ fn constraint_requires_when_value_outside_enum_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// Aggregate signals (`signals`)
+// ---------------------------------------------------------------------------
+
+/// A valid `edge_load` signal loads; thresholds map counts to levels
+/// with `none` below the first threshold and boundary values landing
+/// on their step.
+#[test]
+fn signals_accepted_and_thresholds_map_counts() {
+    use memstead_schema::SignalLevel;
+    let t = minimal_type()
+        + r#"signals:
+  - name: attack_load
+    kind: edge_load
+    relationships: [REFERENCES]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: notice
+      - at_least: 3
+        level: warn
+  - name: open_refs
+    kind: edge_load
+    relationships: [REFERENCES]
+    direction: in
+    neighbour_field: status
+    neighbour_value: closed
+    thresholds:
+      - at_least: 1
+        level: notice
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.signals.len(), 2);
+    let sig = &td.signals[0];
+    assert_eq!(sig.level_for(0), None);
+    assert_eq!(sig.level_for(1), Some(SignalLevel::Notice));
+    assert_eq!(sig.level_for(2), Some(SignalLevel::Notice));
+    assert_eq!(sig.level_for(3), Some(SignalLevel::Warn));
+    assert_eq!(sig.level_for(100), Some(SignalLevel::Warn));
+    assert_eq!(td.signals[1].neighbour_field.as_deref(), Some("status"));
+}
+
+/// The refusal set is the design: bad names, duplicates, undeclared
+/// rel-types, empty sets, non-increasing or empty thresholds, and
+/// half-declared or undeclared neighbour pairs all refuse at load.
+#[test]
+fn signals_malformed_declarations_rejected() {
+    let cases: &[(&str, &str)] = &[
+        // name outside [a-z][a-z0-9_]*
+        (
+            "  - name: Attack\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "Attack",
+        ),
+        // undeclared rel-type
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [GHOSTLY]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "GHOSTLY",
+        ),
+        // empty relationships
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: []\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "a",
+        ),
+        // empty thresholds
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds: []\n",
+            "a",
+        ),
+        // non-increasing thresholds
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds:\n      - at_least: 3\n        level: notice\n      - at_least: 3\n        level: warn\n",
+            "3",
+        ),
+        // neighbour_field without neighbour_value
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    neighbour_field: status\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "status",
+        ),
+        // undeclared neighbour_field
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    neighbour_field: phase\n    neighbour_value: closed\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "phase",
+        ),
+        // neighbour_value outside every declaring type's enum
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    neighbour_field: status\n    neighbour_value: archived\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "archived",
+        ),
+    ];
+    for (decl, offender) in cases {
+        let t = minimal_type() + &format!("signals:\n{decl}");
+        let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+        // Undeclared rel-types refuse through the shared `check_rel`
+        // (UndeclaredRelationship); every signal-specific defect
+        // through InvalidConstraint kind "signal" — both name the
+        // offender.
+        assert!(
+            format!("{err}").contains(offender),
+            "case {offender}: got {err}"
+        );
+        if *offender != "GHOSTLY" {
+            assert!(
+                matches!(
+                    err,
+                    SchemaLoadError::InvalidConstraint { kind: "signal", .. }
+                ),
+                "case {offender}: got {err}"
+            );
+        }
+    }
+    // duplicate name on one type
+    let dup = "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n";
+    let t = minimal_type() + &format!("signals:\n{dup}{dup}");
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(format!("{err}").contains("duplicate signal name"), "{err}");
+}
+
+/// The level and kind enums are closed: `level: block`, an unknown
+/// `kind`, and a `notice` in a constraint `severity` slot all fail
+/// deserialization (SignalLevel is not ConstraintSeverity).
+#[test]
+fn signals_closed_enums_reject_cross_contamination() {
+    let t = minimal_type()
+        + r#"signals:
+  - name: a
+    kind: edge_load
+    relationships: [REFERENCES]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: block
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("level block must fail");
+    let t = minimal_type()
+        + r#"signals:
+  - name: a
+    kind: edge_ratio
+    relationships: [REFERENCES]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: notice
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown kind must fail");
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: notice
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("notice in a severity slot must fail");
+}
+
+// ---------------------------------------------------------------------------
 // Acyclicity sets (`relationships.acyclic_sets`)
 // ---------------------------------------------------------------------------
 

@@ -788,6 +788,16 @@ impl Engine {
             type_def,
         } = prepared;
 
+        // Aggregate signals: the entities a create can move are the
+        // new entity itself (baseline all-`none`) and the targets of
+        // its inline relations. Captured before the store mutates,
+        // diffed after the push below.
+        let signal_snapshot = {
+            let mut candidates: Vec<&EntityId> = vec![&id];
+            candidates.extend(relation_targets.iter());
+            crate::ops::signals::snapshot_levels(&self.store, &self.schemas, candidates)
+        };
+
         // 8. Write + commit through the backend. The commit subject
         //    is `memstead: create <id>` so the git-branch backend's
         //    `read_provenance` recovers the kind via the verb. The
@@ -902,6 +912,14 @@ impl Engine {
         // when a pre-existing stub at this id had referrers.
         let incoming = project_incoming(self.store.incoming(&id));
         let incoming_count = (!incoming.is_empty()).then_some(incoming.len());
+
+        // Signal crossings — out-of-band beside the success payload,
+        // never error-shaped.
+        warnings.extend(crate::ops::signals::crossing_warnings(
+            &self.store,
+            &self.schemas,
+            &signal_snapshot,
+        ));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point (see `Engine::note_missing_warning`). Only
@@ -2528,6 +2546,435 @@ write_rules: []
             cycle_warnings.len(),
             1,
             "exactly one cycle warning fires: {cycle_warnings:?}"
+        );
+    }
+
+    /// Fixture for aggregate signals: `claim` declares `attack_load`
+    /// (in-REBUTS count, notice at 1, warn at 3) and
+    /// `open_objections` (same set, counterpart `state: open` only,
+    /// notice at 1); `objection` declares the `state` enum.
+    fn engine_with_signals_schema(tmp: &TempDir) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("argsig");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: argsig
+version: 0.1.0
+description: aggregate-signal fixture
+when_to_use: tests
+types:
+  - claim
+  - objection
+relationships:
+  mode: strict
+  definitions:
+    - name: REBUTS
+      description: r
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        std::fs::write(
+            pkg.join("types").join("claim.yaml"),
+            format!(
+                "name: claim\ndescription: t\nwhen_to_use: tests\nmetadata_fields: []\nupdatable_fields:\n  - title\n  - body\n{body}signals:\n  - name: attack_load\n    kind: edge_load\n    relationships: [REBUTS]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n      - at_least: 3\n        level: warn\n  - name: open_objections\n    kind: edge_load\n    relationships: [REBUTS]\n    direction: in\n    neighbour_field: state\n    neighbour_value: open\n    thresholds:\n      - at_least: 1\n        level: notice\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("objection.yaml"),
+            format!(
+                "name: objection\ndescription: t\nwhen_to_use: tests\nmetadata_fields:\n  - key: state\n    description: objection lifecycle\n    field_type: string\n    enum_values: [open, closed]\nupdatable_fields:\n  - title\n  - body\n  - state\n{body}"
+            ),
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "arg".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "argsig",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap()
+    }
+
+    fn objection_args(title: &str, state: Option<&str>, rebuts: Option<&str>) -> CreateEntityArgs {
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "an objection body.".to_string());
+        let mut metadata = IndexMap::new();
+        if let Some(s) = state {
+            metadata.insert("state".to_string(), s.to_string());
+        }
+        let relations = rebuts
+            .map(|to| {
+                vec![crate::ops::RelateArg {
+                    to: crate::entity::EntityId(to.to_string()),
+                    rel_type: "REBUTS".to_string(),
+                    description: None,
+                }]
+            })
+            .unwrap_or_default();
+        CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "arg".to_string(),
+            title: title.to_string(),
+            entity_type: "objection".to_string(),
+            sections,
+            metadata,
+            relations,
+            dry_run: false,
+        }
+    }
+
+    fn crossing_warnings_of(
+        warnings: &[WarningHint],
+    ) -> Vec<(String, String, u64, String, String)> {
+        warnings
+            .iter()
+            .filter_map(|w| match w {
+                WarningHint::SignalThresholdCrossed {
+                    entity_id,
+                    signal,
+                    value,
+                    old_level,
+                    new_level,
+                } => Some((
+                    entity_id.to_string(),
+                    signal.clone(),
+                    *value,
+                    old_level.clone(),
+                    new_level.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Signals on reads: thresholds map boundary counts to levels, the
+    /// neighbour filter counts only qualifying counterparts, the two
+    /// serving channels carry headline + contributors, a flip of the
+    /// counterpart's field changes the count on the next read, and two
+    /// engine instances over the same on-disk state serve identical
+    /// payloads.
+    #[test]
+    fn signals_reads_thresholds_neighbour_filter_and_determinism() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_signals_schema(&tmp);
+        let (actor, client) = cli_actor();
+
+        let mut claim_sections = IndexMap::new();
+        claim_sections.insert("body".to_string(), "a claim body.".to_string());
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "arg".to_string(),
+                    title: "Claim".to_string(),
+                    entity_type: "claim".to_string(),
+                    sections: claim_sections,
+                    metadata: IndexMap::new(),
+                    relations: vec![],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let claim_id = crate::entity::EntityId("arg--claim".to_string());
+        let sig_of = |engine: &Engine, name: &str| {
+            let entity = engine.get_entity(&claim_id).unwrap().clone();
+            engine
+                .computed_signals(&entity)
+                .unwrap()
+                .into_iter()
+                .find(|s| s.name == name)
+                .unwrap()
+        };
+
+        // Below the first threshold: value 0, level none.
+        let s = sig_of(&engine, "attack_load");
+        assert_eq!((s.value, s.level_wire()), (0, "none"));
+
+        // First objection (open, inline REBUTS): the create's crossing
+        // warnings name BOTH signals moving none → notice on the claim.
+        let outcome = engine
+            .create_entity(
+                objection_args("Obj One", Some("open"), Some("arg--claim")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let crossings = crossing_warnings_of(&outcome.warnings);
+        assert!(
+            crossings.contains(&(
+                "arg--claim".to_string(),
+                "attack_load".to_string(),
+                1,
+                "none".to_string(),
+                "notice".to_string()
+            )),
+            "create with inline relation crosses attack_load: {crossings:?}"
+        );
+        assert!(
+            crossings.iter().any(|c| c.1 == "open_objections"),
+            "open counterpart crosses open_objections too: {crossings:?}"
+        );
+
+        // Closed and field-less counterparts count for attack_load,
+        // never for open_objections.
+        engine
+            .create_entity(
+                objection_args("Obj Two", Some("closed"), Some("arg--claim")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        engine
+            .create_entity(
+                objection_args("Obj Three", None, Some("arg--claim")),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let attack = sig_of(&engine, "attack_load");
+        assert_eq!((attack.value, attack.level_wire()), (3, "warn"));
+        assert_eq!(attack.contributors.len(), 3);
+        let open = sig_of(&engine, "open_objections");
+        assert_eq!((open.value, open.level_wire()), (1, "notice"));
+        assert_eq!(open.contributors[0].0, "arg--obj-one");
+
+        // Both serving channels: frontmatter headline + `## Signals`
+        // contributors on the text channel; `_signals` on the envelope.
+        let entity = engine.get_entity(&claim_id).unwrap().clone();
+        let signals = engine.computed_signals(&entity).unwrap();
+        let md = crate::render::render_entity_markdown_with_signals(&entity, None, Some(&signals));
+        assert!(
+            md.contains("_signals: [attack_load: 3 (warn), open_objections: 1 (notice)]"),
+            "frontmatter headline: {md}"
+        );
+        assert!(md.contains("## Signals"), "contributors section: {md}");
+        assert!(md.contains("arg--obj-one"), "evidence ships: {md}");
+        let env = crate::render::build_entity_envelope(
+            &entity,
+            0,
+            None,
+            None,
+            None,
+            crate::render::OriginClass::FirstParty,
+            engine.store().outgoing(&claim_id),
+            None,
+            Some(&signals),
+        );
+        assert_eq!(env["_signals"][0]["name"], "attack_load");
+        assert_eq!(env["_signals"][0]["value"], 3);
+        assert_eq!(env["_signals"][0]["level"], "warn");
+        assert_eq!(
+            env["_signals"][0]["contributors"].as_array().unwrap().len(),
+            3
+        );
+        // The canonical form stays signal-free.
+        let canonical = crate::render::render_entity_markdown(&entity, None);
+        assert!(
+            !canonical.contains("_signals"),
+            "canonical form is signal-free"
+        );
+
+        // Flipping the counterpart's field changes the count on the
+        // next read, and the update carries the crossing for the CLAIM.
+        let obj_one = crate::entity::EntityId("arg--obj-one".to_string());
+        let current = engine.get_entity(&obj_one).unwrap().content_hash.clone();
+        let mut metadata = IndexMap::new();
+        metadata.insert("state".to_string(), "closed".to_string());
+        let outcome = engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: obj_one,
+                    expected_hash: Some(current),
+                    sections: IndexMap::new(),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata,
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(!outcome.commit_sha.is_empty(), "success shape kept");
+        let crossings = crossing_warnings_of(&outcome.warnings);
+        assert!(
+            crossings.contains(&(
+                "arg--claim".to_string(),
+                "open_objections".to_string(),
+                0,
+                "notice".to_string(),
+                "none".to_string()
+            )),
+            "the neighbour flip crosses the claim's filtered signal: {crossings:?}"
+        );
+        let open = sig_of(&engine, "open_objections");
+        assert_eq!((open.value, open.level_wire()), (0, "none"));
+
+        // Determinism: a second instance over the same on-disk state
+        // serves an identical payload.
+        let engine_b = engine_with_signals_schema(&tmp);
+        let entity_b = engine_b.get_entity(&claim_id).unwrap().clone();
+        let signals_b = engine_b.computed_signals(&entity_b).unwrap();
+        let entity_a = engine.get_entity(&claim_id).unwrap().clone();
+        let signals_a = engine.computed_signals(&entity_a).unwrap();
+        assert_eq!(
+            crate::ops::signals::signals_json(&signals_a),
+            crate::ops::signals::signals_json(&signals_b),
+            "two instances over the same mem state serve identical signals"
+        );
+    }
+
+    /// Crossings on the relate surface: upward and downward crossings
+    /// warn with the full detail set; a write that crosses nothing
+    /// carries nothing signal-shaped; the mutation stays the success
+    /// shape throughout. The `signals` health axis serves only
+    /// above-`none` entities, with per-level counts and a mem filter.
+    #[test]
+    fn signal_crossings_on_relate_and_health_axis() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_signals_schema(&tmp);
+        let (actor, client) = cli_actor();
+
+        let mut claim_sections = IndexMap::new();
+        claim_sections.insert("body".to_string(), "a claim body.".to_string());
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "arg".to_string(),
+                    title: "Claim".to_string(),
+                    entity_type: "claim".to_string(),
+                    sections: claim_sections,
+                    metadata: IndexMap::new(),
+                    relations: vec![],
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        for (t, s) in [("Obj A", "open"), ("Obj B", "closed"), ("Obj C", "closed")] {
+            engine
+                .create_entity(objection_args(t, Some(s), None), actor, Some(&client), None)
+                .unwrap();
+        }
+        let relate = |engine: &mut Engine, from: &str, remove: bool| {
+            engine
+                .relate_entity(
+                    crate::engine::RelateEntityArgs {
+                        source: crate::entity::EntityId(from.to_string()),
+                        target: crate::entity::EntityId("arg--claim".to_string()),
+                        rel_type: "REBUTS".to_string(),
+                        description: None,
+                        remove,
+                        expected_hash: None,
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .unwrap()
+        };
+
+        // 0 → 1: none → notice (upward), on the TARGET of the edge.
+        let outcome = relate(&mut engine, "arg--obj-a", false);
+        assert!(!outcome.commit_sha.is_empty());
+        let crossings = crossing_warnings_of(&outcome.warnings);
+        assert!(
+            crossings.contains(&(
+                "arg--claim".to_string(),
+                "attack_load".to_string(),
+                1,
+                "none".to_string(),
+                "notice".to_string()
+            )),
+            "{crossings:?}"
+        );
+
+        // 1 → 2: notice → notice — nothing signal-shaped rides.
+        let outcome = relate(&mut engine, "arg--obj-b", false);
+        assert!(
+            crossing_warnings_of(&outcome.warnings).is_empty(),
+            "no threshold crossed, no warning: {:?}",
+            outcome.warnings
+        );
+
+        // 2 → 3: notice → warn.
+        let outcome = relate(&mut engine, "arg--obj-c", false);
+        let crossings = crossing_warnings_of(&outcome.warnings);
+        assert!(
+            crossings.contains(&(
+                "arg--claim".to_string(),
+                "attack_load".to_string(),
+                3,
+                "notice".to_string(),
+                "warn".to_string()
+            )),
+            "{crossings:?}"
+        );
+
+        // Health axis at warn: the claim is the one above-`none`
+        // entity; counts split per level; a mem filter narrows.
+        let axis = engine.health_signals_axis(None);
+        assert_eq!(axis["entities"].as_array().unwrap().len(), 1);
+        assert_eq!(axis["entities"][0]["id"], "arg--claim");
+        assert_eq!(axis["counts"]["warn"], 1, "attack_load at warn: {axis}");
+        assert_eq!(axis["counts"]["notice"], 1, "open_objections at notice");
+        let filtered = engine.health_signals_axis(Some("other"));
+        assert!(filtered["entities"].as_array().unwrap().is_empty());
+
+        // 3 → 2: warn → notice (downward crossing warns too).
+        let outcome = relate(&mut engine, "arg--obj-c", true);
+        let crossings = crossing_warnings_of(&outcome.warnings);
+        assert!(
+            crossings.contains(&(
+                "arg--claim".to_string(),
+                "attack_load".to_string(),
+                2,
+                "warn".to_string(),
+                "notice".to_string()
+            )),
+            "{crossings:?}"
         );
     }
 

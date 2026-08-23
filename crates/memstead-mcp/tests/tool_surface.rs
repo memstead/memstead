@@ -1717,6 +1717,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Standing declared-constraint violations (include=constraints).
             "constraints",
             "severity",
+            // Aggregate signals (include=signals): the axis key and
+            // the below-first-threshold level literal.
+            "signals",
+            "none",
         ],
         "memstead_diff" => &[
             // Response-shape fields the description names.

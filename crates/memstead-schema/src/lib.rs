@@ -50,7 +50,8 @@ pub use source::{
 pub use types::{
     ConstraintDef, ConstraintSeverity, DueAxis, FieldType, Filterable, MetadataFieldDef, MustReach,
     PropagationDirection, ReachDirection, RequiredCardinality, RequiredOutgoing, SectionDef,
-    Serialization, TableFormat, TypeDefinition, derive_section_key,
+    Serialization, SignalDef, SignalKind, SignalLevel, SignalThreshold, TableFormat,
+    TypeDefinition, derive_section_key,
 };
 
 /// Name constants for the 10 built-in knowledge types shipped in the

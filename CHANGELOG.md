@@ -20,6 +20,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Aggregate signals: `signals` on type definitions, served with their
+  evidence.** A type can declare exact, parameter-free counts with declared
+  thresholds: this wave ships one `kind`, `edge_load` (count the edges of an
+  inline relation set in a named `direction`, optionally restricted via
+  `neighbour_field` / `neighbour_value` to edges whose counterpart holds a
+  named enum value). `thresholds` map counts to levels of the new two-member
+  `SignalLevel` enum (`notice` / `warn`, deliberately not
+  `ConstraintSeverity`); below the first threshold the served level is
+  `none`. Values are computed at read time, never stored, never part of
+  `_hash`, and nothing multiplies, averages, or decays. Served on every
+  entity read of a declaring type (`_signals` on the structured envelope;
+  headline in the rendered frontmatter plus a `## Signals` contributors
+  section), on the new include-gated `signals` health axis (above-`none`
+  entities with per-level counts; `warn` participates in `--strict`,
+  `notice` never does), and as the new out-of-band warning
+  `SIGNAL_THRESHOLD_CROSSED` on mutations that move a signal across a
+  threshold in either direction (entity, signal, value, old and new level;
+  never error-shaped). The loader refuses bad names, duplicate names,
+  undeclared rel-types, empty or non-increasing thresholds, and
+  half-declared or undeclared neighbour pairs. Declarations render in the
+  `memstead_schema` response at both verbosity levels; schemas without
+  signals keep byte-identical responses everywhere.
+
 - **Relation sets for acyclicity and propagation: `relationships.acyclic_sets`
   and `status_propagation.rel_types`.** A schema manifest can now declare
   acyclicity over a SET of rel-types: a write that closes a cycle in the

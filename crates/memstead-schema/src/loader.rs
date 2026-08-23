@@ -1132,6 +1132,44 @@ fn load_with_context(
                     }
                 }
             }
+            // A signal's neighbour pair reads the COUNTERPART entity,
+            // whose type this schema cannot pin statically: the field
+            // must be declared with `enum_values` on at least one type
+            // of the schema, and the value must be a member on at
+            // least one such declaring type.
+            for sig in &td.signals {
+                if let (Some(field), Some(value)) = (&sig.neighbour_field, &sig.neighbour_value) {
+                    let declaring: Vec<&crate::types::MetadataFieldDef> = types_map
+                        .values()
+                        .flat_map(|t| t.metadata_fields.iter())
+                        .filter(|f| f.key == *field && f.enum_values.is_some())
+                        .collect();
+                    if declaring.is_empty() {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "signal",
+                            offender: field.clone(),
+                            reason: "`neighbour_field` is declared with `enum_values` on no \
+                                     type of this schema"
+                                .to_string(),
+                        });
+                    } else if !declaring.iter().any(|f| {
+                        f.enum_values
+                            .as_ref()
+                            .is_some_and(|allowed| allowed.contains(value))
+                    }) {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "signal",
+                            offender: value.clone(),
+                            reason: format!(
+                                "`neighbour_value` is outside `{field}`'s enum_values on every \
+                                 declaring type"
+                            ),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -1489,6 +1527,89 @@ fn validate_type(
                          writes on other entities, so no single write can be refused for it"
                     .to_string(),
             });
+        }
+    }
+
+    // Aggregate signals. Per-type checks here; the neighbour pair's
+    // cross-type validation needs every type loaded and runs in the
+    // schema-level pass.
+    let mut signal_names_seen: HashSet<&str> = HashSet::new();
+    for sig in &td.signals {
+        let name_ok = sig
+            .name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
+            && sig
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !name_ok {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "`name` must match [a-z][a-z0-9_]*".to_string(),
+            });
+        }
+        if !signal_names_seen.insert(sig.name.as_str()) {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "duplicate signal name on this type".to_string(),
+            });
+        }
+        if sig.relationships.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "`relationships` must name at least one relationship".to_string(),
+            });
+        }
+        for r in &sig.relationships {
+            if let Err(e) = check_rel(&td.name, "signals", r, rel_names, available_rels) {
+                errors.push(e);
+            }
+        }
+        if sig.thresholds.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "`thresholds` must declare at least one step".to_string(),
+            });
+        }
+        for pair in sig.thresholds.windows(2) {
+            if pair[1].at_least <= pair[0].at_least {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "signal",
+                    offender: pair[1].at_least.to_string(),
+                    reason: "`thresholds` must have strictly increasing `at_least` values"
+                        .to_string(),
+                });
+            }
+        }
+        match (&sig.neighbour_field, &sig.neighbour_value) {
+            (None, None) | (Some(_), Some(_)) => {}
+            (Some(f), None) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "signal",
+                    offender: f.clone(),
+                    reason: "`neighbour_field` requires `neighbour_value` alongside it".to_string(),
+                });
+            }
+            (None, Some(v)) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "signal",
+                    offender: v.clone(),
+                    reason: "`neighbour_value` requires `neighbour_field` alongside it".to_string(),
+                });
+            }
         }
     }
 

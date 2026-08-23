@@ -138,6 +138,38 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<UpdateEntityOutcome, EngineError> {
+        // Aggregate signals: the entities an update can move are the
+        // updated entity itself, the endpoints of every edge it adds
+        // or removes (pre-write counterparts in both directions plus
+        // the post-write markdown's targets), and — through the
+        // neighbour filter — the counterparts of an entity whose
+        // `neighbour_field` value the write changes (covered by the
+        // same pre-write counterpart set). Captured before disk or
+        // store mutate, diffed after the store applies.
+        let signal_snapshot = {
+            let mut candidates: Vec<EntityId> = vec![prepared.id.clone()];
+            candidates.extend(
+                self.store
+                    .outgoing(&prepared.id)
+                    .iter()
+                    .map(|e| e.target.clone()),
+            );
+            candidates.extend(
+                self.store
+                    .incoming(&prepared.id)
+                    .iter()
+                    .map(|e| e.from.clone()),
+            );
+            if let Ok(parsed) = parse_markdown(
+                &prepared.markdown,
+                &prepared.file_path,
+                prepared.type_def.as_ref(),
+                &prepared.mem,
+            ) {
+                candidates.extend(parsed.entity.relationships.iter().map(|r| r.target.clone()));
+            }
+            crate::ops::signals::snapshot_levels(&self.store, &self.schemas, candidates.iter())
+        };
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&prepared.file_path), prepared.markdown.as_bytes())?;
         // Stage the anchors sidecar into the same commit as the entity
@@ -215,6 +247,13 @@ impl Engine {
         // enforcement point. Only reached on the real-commit path; the
         // no-op and dry-run prepare outcomes never demand a note.
         let mut warnings = prepared.warnings;
+        // Signal crossings — out-of-band beside the success payload,
+        // never error-shaped.
+        warnings.extend(crate::ops::signals::crossing_warnings(
+            &self.store,
+            &self.schemas,
+            &signal_snapshot,
+        ));
         if let Some(w) = self.note_missing_warning("update_entity", note) {
             warnings.push(w);
         }

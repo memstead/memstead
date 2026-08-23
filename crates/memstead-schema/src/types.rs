@@ -103,6 +103,13 @@ pub struct TypeDefinition {
     /// default keeps current behaviour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub must_reach: Vec<MustReach>,
+    /// Declared aggregate signals (see [`SignalDef`]): exact,
+    /// parameter-free counts with declared thresholds, computed at
+    /// read time and served with their evidence — never scored,
+    /// never blocking, never stored. Empty default keeps every
+    /// response byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<SignalDef>,
     /// Declared keep-health constraints (the constraint vocabulary —
     /// see [`ConstraintDef`]). Empty default: a schema declaring no
     /// constraints behaves byte-identically to before the vocabulary
@@ -199,6 +206,91 @@ pub struct MustReach {
     /// Always `warn` — the loader refuses `block` on this form.
     #[serde(default)]
     pub severity: ConstraintSeverity,
+}
+
+/// One declared aggregate signal on a type definition. This wave
+/// ships one kind, `edge_load`: count the edges of a named rel-type
+/// set, in a named direction, on entities of this type, optionally
+/// restricted to edges whose counterpart entity holds a named enum
+/// value. Thresholds map counts to levels; below the first threshold
+/// the served level is `none`. Values are computed at read time in
+/// O(degree), never stored, never part of `_hash`; a signal may not
+/// reference another signal, and nothing multiplies, averages, or
+/// decays — a count and a threshold are the whole vocabulary.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignalDef {
+    /// Unique per type, `[a-z][a-z0-9_]*` — the stable name prose
+    /// and consumers bind guidance to.
+    pub name: String,
+    /// Closed kind enum — one member in this wave.
+    pub kind: SignalKind,
+    /// Edge names the count covers (inline relation set; loader
+    /// validates each against the vocabulary).
+    pub relationships: Vec<String>,
+    /// `in` counts edges pointing at the entity, `out` edges pointing
+    /// away — the same vocabulary the store and search speak.
+    pub direction: ReachDirection,
+    /// Optional counterpart filter, whole or not at all: count only
+    /// edges whose counterpart entity holds `neighbour_value` in
+    /// `neighbour_field`. A counterpart lacking the field or holding
+    /// another value simply does not count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neighbour_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neighbour_value: Option<String>,
+    /// Non-empty, strictly increasing `at_least` values.
+    pub thresholds: Vec<SignalThreshold>,
+}
+
+impl SignalDef {
+    /// The served level for a count: the highest threshold whose
+    /// `at_least` the count meets, `None` below the first (wire level
+    /// `none`).
+    pub fn level_for(&self, count: u64) -> Option<SignalLevel> {
+        self.thresholds
+            .iter()
+            .rev()
+            .find(|t| count >= t.at_least)
+            .map(|t| t.level)
+    }
+}
+
+/// Closed signal-kind vocabulary. Adding a member is a
+/// format-generation event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalKind {
+    EdgeLoad,
+}
+
+/// One threshold step of a signal declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignalThreshold {
+    pub at_least: u64,
+    pub level: SignalLevel,
+}
+
+/// Signal levels — deliberately NOT [`ConstraintSeverity`]: a signal
+/// level is the output of a threshold, not the severity of a
+/// violation. `warn` participates in `health --strict` like a
+/// warn-tier constraint finding; `notice` never does — that is the
+/// whole difference between the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalLevel {
+    Notice,
+    Warn,
+}
+
+impl std::fmt::Display for SignalLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SignalLevel::Notice => "notice",
+            SignalLevel::Warn => "warn",
+        })
+    }
 }
 
 /// Walk direction for [`MustReach`] — wire literals `out` / `in`,

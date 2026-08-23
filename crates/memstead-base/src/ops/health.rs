@@ -39,6 +39,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "tags",
     "missing_required_outgoing",
     "constraints",
+    "signals",
     "conformance",
     "integrity",
     "config",
@@ -1638,6 +1639,78 @@ fn reaches_terminal(
         frontier = next_frontier;
     }
     false
+}
+
+/// One entity's above-`none` signals, surfaced from the include-gated
+/// `signals` health axis. Mirrors [`ConstraintFindingReport`]'s
+/// envelope shape; the `signals` entries carry value, level, and
+/// contributors (the evidence ships with the number, always).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SignalReport {
+    pub id: crate::entity::EntityId,
+    pub title: String,
+    pub entity_type: String,
+    pub mem: String,
+    /// Only signals whose level is not `none`, in declaration order.
+    pub signals: Vec<super::signals::ComputedSignal>,
+}
+
+impl SignalReport {
+    /// Whether any entry is `warn`-level — the `--strict`
+    /// participation test (a `notice` never participates; that is the
+    /// whole difference between the two levels).
+    pub fn has_warn(&self) -> bool {
+        self.signals
+            .iter()
+            .any(|s| s.level == Some(memstead_schema::SignalLevel::Warn))
+    }
+}
+
+/// Collect every non-stub entity carrying at least one declared
+/// signal above `none`. Deterministic — sorted by `(mem, id)`;
+/// signals in declaration order, contributors sorted.
+pub fn collect_signal_reports(
+    store: &Store,
+    mem_filter: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
+) -> Vec<SignalReport> {
+    let mut out = Vec::new();
+    for entity in store.all_entities() {
+        if entity.stub {
+            continue;
+        }
+        if let Some(v) = mem_filter
+            && entity.mem != v
+        {
+            continue;
+        }
+        let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) else {
+            continue;
+        };
+        let Some(td) = mem_schema.types.get(entity.entity_type.as_str()) else {
+            continue;
+        };
+        if td.signals.is_empty() {
+            continue;
+        }
+        let above: Vec<super::signals::ComputedSignal> =
+            super::signals::compute_signals(store, td, &entity.id)
+                .into_iter()
+                .filter(|s| s.level.is_some())
+                .collect();
+        if above.is_empty() {
+            continue;
+        }
+        out.push(SignalReport {
+            id: entity.id.clone(),
+            title: entity.title.clone(),
+            entity_type: entity.entity_type.clone(),
+            mem: entity.mem.clone(),
+            signals: above,
+        });
+    }
+    out.sort_by(|a, b| a.mem.cmp(&b.mem).then_with(|| a.id.0.cmp(&b.id.0)));
+    out
 }
 
 /// A defective section-format declaration a loaded schema carries

@@ -200,6 +200,8 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 let body = memstead_base::render::render_entity_markdown(entity, None);
                 let tokens = memstead_base::chunking::estimate_tokens(&body);
                 let outgoing = engine.store().outgoing(&entity.id);
+                // Export is a canonical-form surface — computed
+                // signals are a serving projection and stay out.
                 memstead_base::render::build_entity_envelope(
                     entity,
                     tokens,
@@ -208,6 +210,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     None,
                     engine.mem_origin_class(entity.id.mem()),
                     outgoing,
+                    None,
                     None,
                 )
             })

@@ -650,6 +650,112 @@ A decision entity authored without any CHOSEN edge — exercises the
     init_real_mem_repo_from_disk(root, &[(&mem_dir, "strictmem")]);
 }
 
+/// Seed a workspace whose `claim` type declares an `edge_load` signal
+/// (in-REBUTS, notice at 1, warn at 2) and author `rebutters` many
+/// objections rebutting one claim — the `--include signals` /
+/// `--strict` fixture.
+fn seed_signals_workspace(root: &Path, rebutters: usize) {
+    let schema_dir = root.join(".memstead").join("schemas").join("sigschema");
+    fs::create_dir_all(schema_dir.join("types")).unwrap();
+    fs::write(
+        schema_dir.join("schema.yaml"),
+        r#"name: sigschema
+version: 0.1.0
+description: Minimal schema declaring an edge_load signal for the CLI tests.
+when_to_use: Used only by memstead-cli signals integration tests.
+types:
+  - claim
+  - objection
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hierarchy
+      default_weight: 3.0
+    - name: REBUTS
+      description: attack
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+    )
+    .unwrap();
+    let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+    fs::write(
+        schema_dir.join("types").join("claim.yaml"),
+        format!(
+            "name: claim\ndescription: t\nwhen_to_use: tests\n{body}signals:\n  - name: attack_load\n    kind: edge_load\n    relationships: [REBUTS]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n      - at_least: 2\n        level: warn\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        schema_dir.join("types").join("objection.yaml"),
+        format!("name: objection\ndescription: t\nwhen_to_use: tests\n{body}"),
+    )
+    .unwrap();
+
+    let mem_dir = root.join("sigmem");
+    fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+    fs::write(
+        mem_dir.join(".memstead").join("config.json"),
+        r#"{ "schema": "sigschema@0.1.0" }"#,
+    )
+    .unwrap();
+    fs::write(
+        mem_dir.join("claim.md"),
+        "---\ntype: claim\n---\n# Claim\n\n## Body\n\nthe attacked claim.\n",
+    )
+    .unwrap();
+    for i in 0..rebutters {
+        fs::write(
+            mem_dir.join(format!("obj-{i}.md")),
+            format!(
+                "---\ntype: objection\n---\n# Obj {i}\n\n## Body\n\nan objection.\n\n## Relationships\n\n- **REBUTS**: [[sigmem--claim]]\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    init_real_mem_repo_from_disk(root, &[(&mem_dir, "sigmem")]);
+}
+
+/// `--include signals`: a `warn`-level signal fails `--strict` (exit 1
+/// naming the axis); a `notice`-level signal never does; the axis
+/// renders the entity with value, level, and contributors.
+#[test]
+fn health_strict_signals_warn_fails_notice_passes() {
+    let tmp = TempDir::new().unwrap();
+    seed_signals_workspace(tmp.path(), 2);
+    let assert = memstead()
+        .current_dir(tmp.path())
+        .args(["health", "--include", "signals", "--strict"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(contains("signals: 1"));
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("attack_load") && stdout.contains("warn"),
+        "axis rendered before the exit: {stdout}"
+    );
+    assert!(
+        stdout.contains("sigmem--obj-0"),
+        "contributors ship with the number: {stdout}"
+    );
+
+    let tmp = TempDir::new().unwrap();
+    seed_signals_workspace(tmp.path(), 1);
+    memstead()
+        .current_dir(tmp.path())
+        .args(["health", "--include", "signals", "--strict"])
+        .assert()
+        .success();
+}
+
 /// Seed a workspace pinned to a heading-round-trip-violating schema
 /// (sealed posture: it loads; new installs would be refused) with one
 /// entity whose content sits under the non-deriving heading and one

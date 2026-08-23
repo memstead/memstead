@@ -566,6 +566,12 @@ pub fn compose_health(
             memstead_base::ops::health::health_checks_axis(engine, args.mem),
         );
     }
+    if include.iter().any(|s| s == "signals") {
+        // Declared aggregate signals above `none`, with per-level
+        // counts — the same composer the CLI and the filesystem
+        // flavour serve.
+        obj.insert("signals".into(), engine.health_signals_axis(args.mem));
+    }
     if include.iter().any(|s| s == "open_questions") {
         obj.insert(
             "open_questions".into(),

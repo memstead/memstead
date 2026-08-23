@@ -99,6 +99,13 @@
         "$ref": "#/$defs/SectionDef"
       }
     },
+    "signals": {
+      "description": "Declared aggregate signals (see [`SignalDef`]): exact,\nparameter-free counts with declared thresholds, computed at\nread time and served with their evidence — never scored,\nnever blocking, never stored. Empty default keeps every\nresponse byte-identical.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SignalDef"
+      }
+    },
     "staleness_threshold_days": {
       "type": "integer",
       "format": "uint32",
@@ -682,6 +689,93 @@
         "default",
         "csv_array",
         "omit_when_falsy"
+      ]
+    },
+    "SignalDef": {
+      "description": "One declared aggregate signal on a type definition. This wave\nships one kind, `edge_load`: count the edges of a named rel-type\nset, in a named direction, on entities of this type, optionally\nrestricted to edges whose counterpart entity holds a named enum\nvalue. Thresholds map counts to levels; below the first threshold\nthe served level is `none`. Values are computed at read time in\nO(degree), never stored, never part of `_hash`; a signal may not\nreference another signal, and nothing multiplies, averages, or\ndecays — a count and a threshold are the whole vocabulary.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "`in` counts edges pointing at the entity, `out` edges pointing\naway — the same vocabulary the store and search speak.",
+          "$ref": "#/$defs/ReachDirection"
+        },
+        "kind": {
+          "description": "Closed kind enum — one member in this wave.",
+          "$ref": "#/$defs/SignalKind"
+        },
+        "name": {
+          "description": "Unique per type, `[a-z][a-z0-9_]*` — the stable name prose\nand consumers bind guidance to.",
+          "type": "string"
+        },
+        "neighbour_field": {
+          "description": "Optional counterpart filter, whole or not at all: count only\nedges whose counterpart entity holds `neighbour_value` in\n`neighbour_field`. A counterpart lacking the field or holding\nanother value simply does not count.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neighbour_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relationships": {
+          "description": "Edge names the count covers (inline relation set; loader\nvalidates each against the vocabulary).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "thresholds": {
+          "description": "Non-empty, strictly increasing `at_least` values.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SignalThreshold"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "relationships",
+        "direction",
+        "thresholds"
+      ]
+    },
+    "SignalKind": {
+      "description": "Closed signal-kind vocabulary. Adding a member is a\nformat-generation event.",
+      "type": "string",
+      "enum": [
+        "edge_load"
+      ]
+    },
+    "SignalLevel": {
+      "description": "Signal levels — deliberately NOT [`ConstraintSeverity`]: a signal\nlevel is the output of a threshold, not the severity of a\nviolation. `warn` participates in `health --strict` like a\nwarn-tier constraint finding; `notice` never does — that is the\nwhole difference between the two.",
+      "type": "string",
+      "enum": [
+        "notice",
+        "warn"
+      ]
+    },
+    "SignalThreshold": {
+      "description": "One threshold step of a signal declaration.",
+      "type": "object",
+      "properties": {
+        "at_least": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "level": {
+          "$ref": "#/$defs/SignalLevel"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at_least",
+        "level"
       ]
     },
     "TableFormat": {

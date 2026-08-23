@@ -158,6 +158,15 @@ impl Engine {
             });
         }
 
+        // Aggregate signals: capture both endpoints' levels before the
+        // store mutates — the entities a relate can move are exactly
+        // the edge's endpoints. Diffed after the write below.
+        let signal_snapshot = crate::ops::signals::snapshot_levels(
+            &self.store,
+            &self.schemas,
+            [&prepared.from, &prepared.to],
+        );
+
         self.stage_prepared_relate(&prepared)?;
 
         // Derivation baseline (agent-trust plan 12): an explicit add
@@ -251,6 +260,15 @@ impl Engine {
             mut warnings,
             ..
         } = prepared;
+
+        // Signal crossings ride the out-of-band warning channel beside
+        // the success payload — never error-shaped, never changing the
+        // mutation's success semantics.
+        warnings.extend(crate::ops::signals::crossing_warnings(
+            &self.store,
+            &self.schemas,
+            &signal_snapshot,
+        ));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-commit path

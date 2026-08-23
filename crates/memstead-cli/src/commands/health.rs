@@ -40,7 +40,11 @@ pub struct Args {
     /// confirmed_independent / unconfirmable — transport is not
     /// identity, so until a caller-declared identity exists every
     /// ok-checked entity reports unconfirmable; the other two
-    /// categories are explicit empties).
+    /// categories are explicit empties), signals (entities whose
+    /// declared aggregate signals sit above `none`, each with value,
+    /// level and contributing entity ids, plus per-level counts;
+    /// `warn`-level signals participate in `--strict`, `notice`
+    /// never does).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -117,6 +121,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         open_questions_axis,
         stale_derivations_axis,
         checks_axis,
+        signals_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -299,6 +304,21 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &checks_axis {
         obj.insert("checks".to_string(), axis.clone());
+    }
+    // `--include signals`: entities carrying above-`none` declared
+    // signals, with per-level counts. A `warn`-level signal
+    // participates in `--strict` like a warn-tier constraint finding;
+    // a `notice` never does.
+    if let Some(axis) = &signals_axis {
+        if let Some(warn) = axis
+            .get("counts")
+            .and_then(|c| c.get("warn"))
+            .and_then(|w| w.as_u64())
+            && warn > 0
+        {
+            strict_violations.push(("signals", warn as usize));
+        }
+        obj.insert("signals".to_string(), axis.clone());
     }
     // `--include friction`: the friction ledger's read surface
     // (agent-trust plan 08) — counts per refusal code / per verb,
@@ -690,6 +710,37 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
+    // Signals axis — every above-`none` signal with its evidence.
+    if let Some(axis) = obj.get("signals") {
+        lines.push(format!(
+            "## Signals (notice {}, warn {})",
+            axis["counts"]["notice"].as_u64().unwrap_or(0),
+            axis["counts"]["warn"].as_u64().unwrap_or(0),
+        ));
+        for e in axis["entities"].as_array().into_iter().flatten() {
+            for s in e["signals"].as_array().into_iter().flatten() {
+                let contributors = s["contributors"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|c| c.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "- {} — {}: {} ({}) [{}]",
+                    e["id"].as_str().unwrap_or(""),
+                    s["name"].as_str().unwrap_or(""),
+                    s["value"].as_u64().unwrap_or(0),
+                    s["level"].as_str().unwrap_or(""),
+                    contributors,
+                ));
+            }
+        }
+        lines.push(String::new());
+    }
+
     // Stale-derivations axis — same requested-vs-absent contract and
     // wording as the MCP text renderer.
     if let Some(axis) = stale_derivations_axis.as_ref().and_then(|a| a.as_object()) {
@@ -870,6 +921,9 @@ struct GatheredHealth {
     /// author≠checker independence gate, via the shared
     /// `health_checks_axis` helper.
     checks_axis: Option<serde_json::Value>,
+    /// `--include signals` — the shared `health_signals_axis`
+    /// payload (entities above `none` plus per-level counts).
+    signals_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -939,6 +993,7 @@ fn gather_mem_repo(
     fill_open_questions_axis(engine, include, &mut g);
     fill_stale_derivations_axis(engine, include, &mut g);
     fill_checks_axis(engine, include, &mut g);
+    fill_signals_axis(engine, include, &mut g);
     g
 }
 
@@ -965,6 +1020,7 @@ fn gather_filesystem(
     fill_open_questions_axis(engine, include, &mut g);
     fill_stale_derivations_axis(engine, include, &mut g);
     fill_checks_axis(engine, include, &mut g);
+    fill_signals_axis(engine, include, &mut g);
     g
 }
 
@@ -1029,6 +1085,12 @@ fn fill_stale_derivations_axis(
 fn fill_checks_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
     if include.iter().any(|s| s == "checks") {
         g.checks_axis = Some(memstead_base::ops::health::health_checks_axis(engine, None));
+    }
+}
+
+fn fill_signals_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
+    if include.iter().any(|s| s == "signals") {
+        g.signals_axis = Some(engine.health_signals_axis(None));
     }
 }
 
@@ -1131,6 +1193,7 @@ fn gather_from_store(
         open_questions_axis: None,
         stale_derivations_axis: None,
         checks_axis: None,
+        signals_axis: None,
     }
 }
 

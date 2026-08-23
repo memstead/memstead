@@ -1074,7 +1074,15 @@ impl FilesystemMcpServer {
             }
         };
         let sections_filter = p.sections.as_deref();
-        let mut md = render_entity_markdown(&entity, sections_filter);
+        // Declared aggregate signals — computed once, served on both
+        // channels; `None` for types declaring none keeps both
+        // channels byte-identical.
+        let computed_signals = engine.computed_signals(&entity);
+        let mut md = memstead_base::render::render_entity_markdown_with_signals(
+            &entity,
+            sections_filter,
+            computed_signals.as_deref(),
+        );
         // Inject `_hash` as the first frontmatter field so callers
         // can pin it to `expected_hash` on the next mutation.
         if let Some(idx) = md.find("---\n") {
@@ -1139,6 +1147,7 @@ impl FilesystemMcpServer {
             engine.mem_origin_class(id.mem()),
             engine.store().outgoing(&entity.id),
             incoming_for_envelope.as_deref(),
+            computed_signals.as_deref(),
         );
         // Mutation provenance (agent-trust plan 13), opt-in — same
         // block and key the full flavour serves; default responses
@@ -1798,12 +1807,14 @@ impl FilesystemMcpServer {
         let wants_open_questions = include.iter().any(|s| s == "open_questions");
         let wants_stale_derivations = include.iter().any(|s| s == "stale_derivations");
         let wants_checks = include.iter().any(|s| s == "checks");
+        let wants_signals = include.iter().any(|s| s == "signals");
         if wants_anchors
             || wants_constraints
             || wants_friction
             || wants_open_questions
             || wants_stale_derivations
             || wants_checks
+            || wants_signals
         {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
@@ -1837,6 +1848,9 @@ impl FilesystemMcpServer {
             if wants_checks {
                 value["checks"] =
                     memstead_base::ops::health::health_checks_axis(&engine, mem_scope);
+            }
+            if wants_signals {
+                value["signals"] = engine.health_signals_axis(mem_scope);
             }
             return json_response(&value);
         }

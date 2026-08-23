@@ -23,6 +23,7 @@ pub mod health;
 pub mod integrity;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
+pub mod signals;
 pub mod transport;
 
 pub use agent_notes::{AgentNotesReport, CommitNote};
@@ -543,6 +544,19 @@ pub enum WarningHint {
         /// the alternative relationship names plus the rendered
         /// cardinality literal (`"at_least_one"`).
         missing: Vec<MissingRequiredOutgoingBlock>,
+    },
+    /// A successful write moved a declared aggregate signal across a
+    /// threshold, in either direction. Out-of-band diagnostics beside
+    /// the success payload — never error-shaped, never changing the
+    /// mutation's success semantics (a signal crossing on a
+    /// successful write must not read as a failed write). Levels are
+    /// the wire literals `none` / `notice` / `warn`.
+    SignalThresholdCrossed {
+        entity_id: EntityId,
+        signal: String,
+        value: u64,
+        old_level: String,
+        new_level: String,
     },
     /// The written entity violates warn-tier declared `constraints`
     /// of its type (e.g. `requires_when`: a field required under the
@@ -1403,6 +1417,17 @@ impl fmt::Display for WarningHint {
                  workspace-relative equivalent) to the outer repo's \
                  .gitignore to keep mem-repo-git out of the outer index."
             ),
+            WarningHint::SignalThresholdCrossed {
+                entity_id,
+                signal,
+                value,
+                old_level,
+                new_level,
+            } => write!(
+                f,
+                "signal '{signal}' on {entity_id} crossed a declared threshold: \
+                 {old_level} → {new_level} (value {value})"
+            ),
             WarningHint::MissingRequiredOutgoing {
                 entity_type,
                 entity_id,
@@ -1779,6 +1804,7 @@ impl WarningHint {
             Self::IgnoredReadonlyField { .. } => "IGNORED_READONLY_FIELD",
             Self::OuterRepoNotIgnoringMemRepo { .. } => "OUTER_REPO_NOT_IGNORING_MEM_REPO",
             Self::MissingRequiredOutgoing { .. } => "MISSING_REQUIRED_OUTGOING",
+            Self::SignalThresholdCrossed { .. } => "SIGNAL_THRESHOLD_CROSSED",
             Self::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
@@ -1833,6 +1859,7 @@ impl WarningHint {
             Self::SchemaGenerationsBehind { mem, .. } => Some(mem.as_str()),
             Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
+            Self::SignalThresholdCrossed { entity_id, .. } => Some(entity_id.mem()),
             Self::ConstraintUnsatisfied { entity_id, .. } => Some(entity_id.mem()),
             Self::DuplicateRelationship { from, .. } => Some(from.mem()),
             Self::NoSuchRelationship { from, .. } => Some(from.mem()),
@@ -2253,6 +2280,19 @@ impl WarningHint {
                 "entity_type": entity_type,
                 "entity_id": entity_id,
                 "missing": missing,
+            }),
+            Self::SignalThresholdCrossed {
+                entity_id,
+                signal,
+                value,
+                old_level,
+                new_level,
+            } => serde_json::json!({
+                "entity": entity_id,
+                "signal": signal,
+                "value": value,
+                "old_level": old_level,
+                "new_level": new_level,
             }),
             Self::ConstraintUnsatisfied {
                 entity_type,
