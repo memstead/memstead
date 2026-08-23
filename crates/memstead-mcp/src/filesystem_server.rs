@@ -704,23 +704,34 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             to,
             existing_path,
             path_truncated,
+            acyclic_set,
+            existing_path_rel_types,
         } => {
             let existing_path_json: Vec<String> =
                 existing_path.iter().map(|id| id.to_string()).collect();
+            let subgraph = match &acyclic_set {
+                Some(set) => format!("[{}] acyclicity-set", set.join(", ")),
+                None => rel_type.clone(),
+            };
             let message = format!(
-                "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {rel_type} subgraph"
+                "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {subgraph} subgraph"
             );
-            tool_error_with_details(
-                "RELATIONSHIP_CYCLE",
-                &message,
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from": from.to_string(),
-                    "to": to.to_string(),
-                    "existing_path": existing_path_json,
-                    "path_truncated": path_truncated,
-                })),
-            )
+            let mut details = serde_json::json!({
+                "rel_type": rel_type,
+                "from": from.to_string(),
+                "to": to.to_string(),
+                "existing_path": existing_path_json,
+                "path_truncated": path_truncated,
+            });
+            // Additive set-refusal extras; single-rel-type refusals
+            // keep their byte-identical payload.
+            if let Some(set) = &acyclic_set {
+                details["acyclic_set"] = serde_json::json!(set);
+            }
+            if let Some(rels) = &existing_path_rel_types {
+                details["existing_path_rel_types"] = serde_json::json!(rels);
+            }
+            tool_error_with_details("RELATIONSHIP_CYCLE", &message, Some(details))
         }
         EngineError::SetAndUnsetConflict { keys } => {
             let message = format!("metadata keys appear in both set and unset: {keys:?}");

@@ -1060,7 +1060,14 @@ pub enum UnsatisfiedConstraint {
         field: String,
         /// The terminal value the ancestor holds.
         value: String,
-        rel_type: String,
+        /// Echo of a single-rel-type declaration — present exactly
+        /// when the schema declared `rel_type`, keeping the
+        /// long-standing payload byte-identical.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rel_type: Option<String>,
+        /// Echo of a relation-set declaration (`rel_types`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rel_types: Option<Vec<String>>,
         /// The tainting ancestor — the entity holding the terminal
         /// value that this entity (transitively) reaches.
         tainted_by: String,
@@ -1123,7 +1130,9 @@ impl UnsatisfiedConstraint {
                 value,
                 tainted_by,
                 ..
-            } => format!("status_propagation: tainted by '{tainted_by}' ({field}={value})"),
+            } => {
+                format!("status_propagation: tainted by '{tainted_by}' ({field}={value})")
+            }
             Self::MustReach {
                 relationships,
                 direction,
@@ -1431,12 +1440,15 @@ pub fn collect_constraint_findings(
         }
 
         // Pass 2 — this entity as a taint source: it holds a declared
-        // terminal value, so sweep its dependents.
+        // terminal value, so sweep its dependents. The taint walks
+        // the declared relation set's union subgraph — a single
+        // `rel_type` is a one-element set.
         for c in &td.constraints {
             let ConstraintDef::StatusPropagation {
                 field,
                 value,
                 rel_type,
+                rel_types,
                 direction,
                 severity,
             } = c
@@ -1450,7 +1462,10 @@ pub fn collect_constraint_findings(
             if !terminal {
                 continue;
             }
-            for tainted in reach_transitively(store, &entity.id, rel_type, *direction) {
+            let set = c
+                .propagation_rel_types()
+                .expect("StatusPropagation always yields a set");
+            for tainted in reach_transitively(store, &entity.id, &set, *direction) {
                 if let Some(v) = mem_filter
                     && tainted.mem() != v
                 {
@@ -1461,6 +1476,7 @@ pub fn collect_constraint_findings(
                         field: field.clone(),
                         value: value.clone(),
                         rel_type: rel_type.clone(),
+                        rel_types: rel_types.clone(),
                         tainted_by: entity.id.to_string(),
                         severity: *severity,
                     },
@@ -1497,7 +1513,7 @@ pub fn collect_constraint_findings(
 fn reach_transitively(
     store: &Store,
     start: &crate::entity::EntityId,
-    rel_type: &str,
+    rel_types: &[String],
     direction: memstead_schema::PropagationDirection,
 ) -> Vec<crate::entity::EntityId> {
     use memstead_schema::PropagationDirection;
@@ -1512,7 +1528,7 @@ fn reach_transitively(
                 .filter(|e| {
                     e.relationships
                         .iter()
-                        .any(|r| r.rel_type == rel_type && r.target == current)
+                        .any(|r| rel_types.iter().any(|n| n == &r.rel_type) && r.target == current)
                 })
                 .map(|e| e.id.clone())
                 .collect(),
@@ -1521,7 +1537,7 @@ fn reach_transitively(
                 .map(|e| {
                     e.relationships
                         .iter()
-                        .filter(|r| r.rel_type == rel_type)
+                        .filter(|r| rel_types.iter().any(|n| n == &r.rel_type))
                         .map(|r| r.target.clone())
                         .collect()
                 })
@@ -3465,6 +3481,88 @@ community:
             panic!("expected must_reach finding");
         };
         assert_eq!(relationships, &vec!["CONCLUDES".to_string()]);
+    }
+
+    /// `status_propagation` with `rel_types`: the taint crosses
+    /// rel-type boundaries along the union subgraph (the experiment's
+    /// withdrawn-evidence chain in the two-rel-type modelling), and
+    /// the finding echoes the set (`rel_types` present, `rel_type`
+    /// absent).
+    #[test]
+    fn status_propagation_rel_types_taints_across_type_boundaries() {
+        use crate::entity::MetadataValue;
+        let manifest = r#"name: tests-prop-set
+version: 0.1.0
+description: propagation relation-set test schema
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: CONCLUDES
+      description: c
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let claim_yaml = "name: claim\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: dialectical standing\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_types: [GROUNDS, CONCLUDES]\n    direction: incoming\n";
+        let schema = std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("claim".to_string(), claim_yaml.to_string())],
+            )
+            .expect("propagation-set fixture schema must parse"),
+        );
+
+        let mut store = Store::new();
+        let mut withdrawn = make_typed_entity("arg", "withdrawn-ev", "claim");
+        withdrawn
+            .metadata
+            .insert("standing".into(), MetadataValue::String("withdrawn".into()));
+        let mut inference = make_typed_entity("arg", "inference", "claim");
+        link(&mut inference, "GROUNDS", &withdrawn.id);
+        let mut conclusion = make_typed_entity("arg", "conclusion", "claim");
+        link(&mut conclusion, "CONCLUDES", &inference.id);
+        let bystander = make_typed_entity("arg", "bystander", "claim");
+        for e in [withdrawn, inference.clone(), conclusion.clone(), bystander] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema);
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![conclusion.id.0.as_str(), inference.id.0.as_str()],
+            "the taint crosses the CONCLUDES/GROUNDS boundary, nothing else"
+        );
+        let UnsatisfiedConstraint::StatusPropagation {
+            rel_type,
+            rel_types,
+            tainted_by,
+            ..
+        } = &reports[0].violations[0]
+        else {
+            panic!("expected status_propagation finding");
+        };
+        assert_eq!(*rel_type, None, "set declarations echo no single name");
+        assert_eq!(
+            rel_types.as_deref(),
+            Some(&["GROUNDS".to_string(), "CONCLUDES".to_string()][..])
+        );
+        assert_eq!(tainted_by, "arg--withdrawn-ev");
     }
 
     /// Cross-mem edges satisfy an obligation like any edge; a mem

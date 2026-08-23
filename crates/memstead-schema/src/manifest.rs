@@ -84,6 +84,17 @@ pub struct DefaultWritingGuidance {
 pub struct RelationshipVocabulary {
     pub mode: RelationshipMode,
     pub definitions: Vec<RelationshipDef>,
+    /// Acyclicity over SETS of rel-types: a write that closes a cycle
+    /// in the union subgraph of a set refuses, with a path that may
+    /// mix the set's rel-types. Each inner list names two or more
+    /// declared rel-types; a name may appear in at most one set
+    /// (overlapping sets have no coherent refusal), and a single-name
+    /// set refuses at load (that is the per-definition `acyclic`
+    /// flag). Per-relationship `acyclic: true` keeps its exact
+    /// meaning and may coexist. Empty default keeps current
+    /// behaviour.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acyclic_sets: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

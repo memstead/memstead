@@ -865,8 +865,13 @@ pub(super) fn route_edge_validation(
 /// - **Cycle on an acyclic rel-type.** An add closing a back-path
 ///   `to → … → from` (via [`crate::graph::query::would_cycle`]) refuses
 ///   with the existing path, capped at [`RELATIONSHIP_CYCLE_PATH_CAP`].
+/// - **Cycle in a declared acyclicity set.** When the rel-type belongs
+///   to a `relationships.acyclic_sets` set, an add closing a back-path
+///   in the set's UNION subgraph (via
+///   [`crate::graph::query::would_cycle_in_set`]) refuses; the payload
+///   additionally echoes the set and the path's per-hop rel-types.
 ///
-/// Both refuse [`EngineError::RelationshipCycle`] (`RELATIONSHIP_CYCLE`)
+/// All refuse [`EngineError::RelationshipCycle`] (`RELATIONSHIP_CYCLE`)
 /// with identical recovery detail on every path. Callers skip this on
 /// remove paths — removal can only break cycles, never close one.
 pub(super) fn validate_edge_acyclicity(
@@ -884,6 +889,8 @@ pub(super) fn validate_edge_acyclicity(
             to: to.clone(),
             existing_path: vec![from.clone()],
             path_truncated: false,
+            acyclic_set: None,
+            existing_path_rel_types: None,
         });
     }
     if schema.relationship_acyclic(rel_type)
@@ -900,6 +907,33 @@ pub(super) fn validate_edge_acyclicity(
             to: to.clone(),
             existing_path,
             path_truncated: truncated,
+            acyclic_set: None,
+            existing_path_rel_types: None,
+        });
+    }
+    // Cycle in a declared acyclicity SET: the union subgraph of the
+    // set must stay acyclic, so the back-path may mix rel-types. The
+    // refusal is additive — it echoes the declared set and one
+    // rel-type per hop of the path.
+    if let Some(set) = schema.acyclic_set_containing(rel_type)
+        && let Some((path, path_rels)) =
+            crate::graph::query::would_cycle_in_set(store, from, to, set)
+    {
+        let truncated = path.len() > RELATIONSHIP_CYCLE_PATH_CAP;
+        let mut existing_path = path;
+        let mut existing_path_rel_types = path_rels;
+        if truncated {
+            existing_path.truncate(RELATIONSHIP_CYCLE_PATH_CAP);
+            existing_path_rel_types.truncate(existing_path.len().saturating_sub(1));
+        }
+        return Err(EngineError::RelationshipCycle {
+            rel_type: rel_type.to_string(),
+            from: from.clone(),
+            to: to.clone(),
+            existing_path,
+            path_truncated: truncated,
+            acyclic_set: Some(set.to_vec()),
+            existing_path_rel_types: Some(existing_path_rel_types),
         });
     }
     Ok(())

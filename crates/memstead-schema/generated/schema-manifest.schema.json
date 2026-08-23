@@ -243,6 +243,16 @@
     "RelationshipVocabulary": {
       "type": "object",
       "properties": {
+        "acyclic_sets": {
+          "description": "Acyclicity over SETS of rel-types: a write that closes a cycle\nin the union subgraph of a set refuses, with a path that may\nmix the set's rel-types. Each inner list names two or more\ndeclared rel-types; a name may appear in at most one set\n(overlapping sets have no coherent refusal), and a single-name\nset refuses at load (that is the per-definition `acyclic`\nflag). Per-relationship `acyclic: true` keeps its exact\nmeaning and may coexist. Empty default keeps current\nbehaviour.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
         "definitions": {
           "type": "array",
           "items": {

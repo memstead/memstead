@@ -567,6 +567,17 @@ pub fn validate_loaded_relations(
     // either way the cycle is broken and the agent sees a typed
     // warning naming the dropped relation.
 
+    // A cycle space is either one acyclic-flagged rel-type's subgraph
+    // (the long-standing sweep) or the UNION subgraph of a declared
+    // `relationships.acyclic_sets` set, whose cycles may mix
+    // rel-types. Both sweep identically; the set space's adjacency
+    // remembers each edge's rel-type so the dropped edge is named
+    // precisely.
+    enum CycleSpace<'a> {
+        Single(&'a String),
+        Set(&'a Vec<String>),
+    }
+
     // Collect the union of acyclic rel-types declared by any schema
     // in this workspace.
     let mut acyclic_rel_types: Vec<String> = Vec::new();
@@ -577,28 +588,53 @@ pub fn validate_loaded_relations(
             }
         }
     }
+    // Collect the distinct declared acyclicity sets — iterated in
+    // sorted mem order so the sweep order (and therefore which
+    // back-edge drops) is stable across HashMap iteration orders.
+    let mut acyclic_set_spaces: Vec<Vec<String>> = Vec::new();
+    let mut schema_mems: Vec<&String> = schemas.keys().collect();
+    schema_mems.sort();
+    for mem in schema_mems {
+        for set in &schemas[mem.as_str()].manifest.relationships.acyclic_sets {
+            if !acyclic_set_spaces.contains(set) {
+                acyclic_set_spaces.push(set.clone());
+            }
+        }
+    }
 
     let mut cycle_drops: Vec<(EntityId, EntityId, String)> = Vec::new();
-    for rel_type in &acyclic_rel_types {
-        // Adjacency list scoped to this rel-type. Includes edges
-        // whose source mem's schema declares the rel-type as
-        // acyclic — a mem whose schema doesn't declare the type
-        // acyclic shouldn't have its edges dropped just because a
-        // sibling mem does.
-        let mut adj: std::collections::HashMap<EntityId, Vec<EntityId>> =
+    for space in acyclic_rel_types
+        .iter()
+        .map(CycleSpace::Single)
+        .chain(acyclic_set_spaces.iter().map(CycleSpace::Set))
+    {
+        // Adjacency list scoped to this cycle space. Includes edges
+        // whose source mem's schema declares the space (the acyclic
+        // flag, or the set) — a mem whose schema doesn't declare it
+        // shouldn't have its edges dropped just because a sibling mem
+        // does. Each edge carries its rel-type for the drop record.
+        let mut adj: std::collections::HashMap<EntityId, Vec<(EntityId, String)>> =
             std::collections::HashMap::new();
         for entity in store.all_entities() {
             let Some(schema) = schemas.get(entity.mem.as_str()) else {
                 continue;
             };
-            if !schema.relationship_acyclic(rel_type) {
+            let member = match &space {
+                CycleSpace::Single(r) => schema.relationship_acyclic(r),
+                CycleSpace::Set(s) => schema.has_acyclic_set(s),
+            };
+            if !member {
                 continue;
             }
             for edge in store.outgoing(&entity.id) {
-                if &edge.rel_type == rel_type {
+                let in_space = match &space {
+                    CycleSpace::Single(r) => edge.rel_type == **r,
+                    CycleSpace::Set(s) => s.iter().any(|n| n == &edge.rel_type),
+                };
+                if in_space {
                     adj.entry(entity.id.clone())
                         .or_default()
-                        .push(edge.target.clone());
+                        .push((edge.target.clone(), edge.rel_type.clone()));
                 }
             }
         }
@@ -619,15 +655,20 @@ pub fn validate_loaded_relations(
         // iteration order.
         let mut seeds: Vec<EntityId> = adj.keys().cloned().collect();
         seeds.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        let sort_targets = |v: &mut Vec<(EntityId, String)>| {
+            v.sort_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()).then_with(|| a.1.cmp(&b.1)));
+        };
         for seed in seeds {
             if color.get(&seed).copied() != Some(Color::White) {
                 continue;
             }
             // Iterative DFS to avoid stack blow-ups on deep graphs.
             // Stack entry: (node, sorted-adjacency-index, sorted-adjacency-snapshot).
-            let mut stack: Vec<(EntityId, usize, Vec<EntityId>)> = Vec::new();
-            let mut start_targets: Vec<EntityId> = adj.get(&seed).cloned().unwrap_or_default();
-            start_targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+            type DfsFrame = (EntityId, usize, Vec<(EntityId, String)>);
+            let mut stack: Vec<DfsFrame> = Vec::new();
+            let mut start_targets: Vec<(EntityId, String)> =
+                adj.get(&seed).cloned().unwrap_or_default();
+            sort_targets(&mut start_targets);
             color.insert(seed.clone(), Color::Gray);
             stack.push((seed.clone(), 0, start_targets));
             while let Some((node, idx, targets)) = stack.last_mut() {
@@ -637,20 +678,20 @@ pub fn validate_loaded_relations(
                     stack.pop();
                     continue;
                 }
-                let target = targets[*idx].clone();
+                let (target, edge_rel) = targets[*idx].clone();
                 *idx += 1;
                 let node_id = node.clone();
                 match color.get(&target).copied() {
                     Some(Color::White) => {
-                        let mut next_targets: Vec<EntityId> =
+                        let mut next_targets: Vec<(EntityId, String)> =
                             adj.get(&target).cloned().unwrap_or_default();
-                        next_targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+                        sort_targets(&mut next_targets);
                         color.insert(target.clone(), Color::Gray);
                         stack.push((target, 0, next_targets));
                     }
                     Some(Color::Gray) => {
                         // Back-edge — closes a cycle. Drop it.
-                        cycle_drops.push((node_id, target, rel_type.clone()));
+                        cycle_drops.push((node_id, target, edge_rel));
                     }
                     Some(Color::Black) | None => {
                         // Already fully explored or not in the
@@ -659,6 +700,14 @@ pub fn validate_loaded_relations(
                 }
             }
         }
+    }
+    // An edge can sit in two spaces at once (its rel-type flagged
+    // acyclic AND inside a set) — dedupe so it is dropped and warned
+    // once.
+    {
+        let mut seen: std::collections::HashSet<(EntityId, EntityId, String)> =
+            std::collections::HashSet::new();
+        cycle_drops.retain(|d| seen.insert(d.clone()));
     }
 
     for (from_id, target, rel_type) in cycle_drops {

@@ -154,6 +154,9 @@ pub enum SchemaLoadError {
         reason: String,
     },
 
+    #[error("relationships.acyclic_sets is invalid: {reason} — offending entry: '{offender}'")]
+    InvalidAcyclicSet { offender: String, reason: String },
+
     #[error(
         "type '{type_name}' section '{section}' format declaration is invalid: {}",
         problems.join("; ")
@@ -781,6 +784,37 @@ fn load_with_context(
             target: target.clone(),
             declared,
         });
+    }
+
+    // Acyclicity sets: each set names two or more DECLARED rel-types,
+    // and a rel-type appears in at most one set across all sets
+    // (overlapping sets have no coherent refusal message; a duplicate
+    // inside one set is the same defect). A single-member set is the
+    // per-definition `acyclic` flag's job and refuses here.
+    let mut acyclic_set_member_seen: HashSet<&str> = HashSet::new();
+    for set in &manifest.relationships.acyclic_sets {
+        if set.len() < 2 {
+            errors.push(SchemaLoadError::InvalidAcyclicSet {
+                offender: set.join(", "),
+                reason: "a set needs at least two rel-types (a single member is the \
+                         per-definition `acyclic` flag)"
+                    .to_string(),
+            });
+        }
+        for name in set {
+            if !rel_names.contains(name.as_str()) {
+                errors.push(SchemaLoadError::InvalidAcyclicSet {
+                    offender: name.clone(),
+                    reason: "names no declared relationship".to_string(),
+                });
+            }
+            if !acyclic_set_member_seen.insert(name.as_str()) {
+                errors.push(SchemaLoadError::InvalidAcyclicSet {
+                    offender: name.clone(),
+                    reason: "a rel-type may appear in at most one acyclicity set".to_string(),
+                });
+            }
+        }
     }
 
     // Option C coupling — auto-force `manual_authoring: forbidden` on
@@ -1555,6 +1589,7 @@ fn validate_type(
                 field,
                 value,
                 rel_type,
+                rel_types,
                 severity,
                 ..
             } => {
@@ -1583,14 +1618,59 @@ fn validate_type(
                         }
                     }
                 }
-                if !rel_names.contains(rel_type) {
-                    errors.push(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "status_propagation",
-                        offender: rel_type.clone(),
-                        reason: "`rel_type` is not in the schema's relationship vocabulary"
-                            .to_string(),
-                    });
+                // Exactly one of `rel_type` / `rel_types`; every named
+                // member must be declared; an empty set is a defect.
+                match (rel_type, rel_types) {
+                    (Some(_), Some(_)) => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "status_propagation",
+                            offender: "rel_type".to_string(),
+                            reason: "declare `rel_type` or `rel_types`, not both".to_string(),
+                        });
+                    }
+                    (None, None) => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "status_propagation",
+                            offender: "(missing)".to_string(),
+                            reason: "one of `rel_type` / `rel_types` is required".to_string(),
+                        });
+                    }
+                    (Some(single), None) => {
+                        if !rel_names.contains(single) {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "status_propagation",
+                                offender: single.clone(),
+                                reason: "`rel_type` is not in the schema's relationship vocabulary"
+                                    .to_string(),
+                            });
+                        }
+                    }
+                    (None, Some(set)) => {
+                        if set.is_empty() {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "status_propagation",
+                                offender: "(empty)".to_string(),
+                                reason: "`rel_types` must name at least one relationship"
+                                    .to_string(),
+                            });
+                        }
+                        for name in set {
+                            if !rel_names.contains(name) {
+                                errors.push(SchemaLoadError::InvalidConstraint {
+                                    type_name: td.name.clone(),
+                                    kind: "status_propagation",
+                                    offender: name.clone(),
+                                    reason: "`rel_types` entry is not in the schema's \
+                                             relationship vocabulary"
+                                        .to_string(),
+                                });
+                            }
+                        }
+                    }
                 }
                 if *severity == crate::types::ConstraintSeverity::Block {
                     // Propagation can never refuse a write (the taint

@@ -316,16 +316,46 @@ pub enum ConstraintDef {
         /// The terminal value that starts the taint (validated
         /// against `field`'s enum, when it declares one).
         value: String,
-        /// The rel-type the taint travels along.
-        rel_type: String,
+        /// The single rel-type the taint travels along. Exactly one
+        /// of `rel_type` / `rel_types` per declaration — the loader
+        /// refuses both-present and neither-present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rel_type: Option<String>,
+        /// The relation SET the taint travels along — the union
+        /// subgraph, so a taint crosses rel-type boundaries. Inline
+        /// list of declared names, per the bundle-wide convention.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rel_types: Option<Vec<String>>,
         /// Which direction reaches the dependents: `incoming` taints
-        /// the entities whose `rel_type` edges point at the terminal
-        /// entity (and their dependents, transitively); `outgoing`
-        /// the entities the terminal entity points at.
+        /// the entities whose edges point at the terminal entity (and
+        /// their dependents, transitively); `outgoing` the entities
+        /// the terminal entity points at.
         direction: PropagationDirection,
         #[serde(default)]
         severity: ConstraintSeverity,
     },
+}
+
+impl ConstraintDef {
+    /// The effective relation set of a `status_propagation`
+    /// declaration: the single `rel_type` as a one-element list, or
+    /// the declared `rel_types`. The loader guarantees exactly one of
+    /// the two is present. Returns `None` for other constraint forms.
+    pub fn propagation_rel_types(&self) -> Option<Vec<String>> {
+        match self {
+            ConstraintDef::StatusPropagation {
+                rel_type,
+                rel_types,
+                ..
+            } => match (rel_type, rel_types) {
+                (Some(single), None) => Some(vec![single.clone()]),
+                (None, Some(set)) => Some(set.clone()),
+                // Loader-refused shapes; empty keeps callers total.
+                _ => Some(Vec::new()),
+            },
+            _ => None,
+        }
+    }
 }
 
 /// Traversal direction for [`ConstraintDef::StatusPropagation`].

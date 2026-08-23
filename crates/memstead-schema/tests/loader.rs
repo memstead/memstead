@@ -1786,6 +1786,194 @@ fn constraint_requires_when_value_outside_enum_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// Acyclicity sets (`relationships.acyclic_sets`)
+// ---------------------------------------------------------------------------
+
+/// A valid two-member set loads and round-trips; the per-definition
+/// `acyclic` flag may coexist.
+#[test]
+fn acyclic_sets_accepted_round_trips() {
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  acyclic_sets:\n    - [PART_OF, REFERENCES]\n",
+    );
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("must load");
+    assert_eq!(
+        schema.manifest.relationships.acyclic_sets,
+        vec![vec!["PART_OF".to_string(), "REFERENCES".to_string()]]
+    );
+    assert_eq!(
+        schema.acyclic_set_containing("REFERENCES"),
+        Some(&["PART_OF".to_string(), "REFERENCES".to_string()][..])
+    );
+    assert_eq!(schema.acyclic_set_containing("_default"), None);
+}
+
+#[test]
+fn acyclic_sets_undeclared_name_rejected() {
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  acyclic_sets:\n    - [PART_OF, FLYING]\n",
+    );
+    let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidAcyclicSet { ref offender, .. } if offender == "FLYING"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn acyclic_sets_overlap_rejected() {
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  acyclic_sets:\n    - [PART_OF, REFERENCES]\n    - [REFERENCES, PART_OF]\n",
+    );
+    let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+    assert!(
+        format!("{err}").contains("at most one acyclicity set"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn acyclic_sets_single_member_and_empty_rejected() {
+    for sets in [
+        "  acyclic_sets:\n    - [PART_OF]\n",
+        "  acyclic_sets:\n    - []\n",
+    ] {
+        let manifest = minimal_manifest().replace(
+            "relationships:\n  mode: strict\n",
+            &format!("relationships:\n  mode: strict\n{sets}"),
+        );
+        let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+        assert!(
+            matches!(err, SchemaLoadError::InvalidAcyclicSet { .. }),
+            "got: {err}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// status_propagation relation sets (`rel_types`)
+// ---------------------------------------------------------------------------
+
+/// The set form parses; the single-name form keeps parsing; the
+/// effective set accessor normalises both.
+#[test]
+fn constraint_status_propagation_rel_types_accepted() {
+    use memstead_schema::ConstraintDef;
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_types: [PART_OF, REFERENCES]
+    direction: incoming
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_type: PART_OF
+    direction: outgoing
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(
+        td.constraints[0].propagation_rel_types(),
+        Some(vec!["PART_OF".to_string(), "REFERENCES".to_string()])
+    );
+    assert_eq!(
+        td.constraints[1].propagation_rel_types(),
+        Some(vec!["PART_OF".to_string()])
+    );
+    let ConstraintDef::StatusPropagation {
+        rel_type,
+        rel_types,
+        ..
+    } = &td.constraints[1]
+    else {
+        panic!("expected status_propagation");
+    };
+    assert_eq!(rel_type.as_deref(), Some("PART_OF"));
+    assert_eq!(*rel_types, None);
+}
+
+#[test]
+fn constraint_status_propagation_both_keys_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_type: PART_OF
+    rel_types: [REFERENCES]
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "status_propagation", ref offender, .. } if offender == "rel_type"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_status_propagation_neither_key_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "status_propagation",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_status_propagation_empty_or_undeclared_rel_types_rejected() {
+    let empty = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_types: []
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &empty)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "status_propagation",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+    let undeclared = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_types: [PART_OF, GHOSTLY]
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &undeclared)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "status_propagation", ref offender, .. } if offender == "GHOSTLY"),
+        "got: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Reachability obligations (`must_reach`)
 // ---------------------------------------------------------------------------
 

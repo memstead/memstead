@@ -20,6 +20,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Relation sets for acyclicity and propagation: `relationships.acyclic_sets`
+  and `status_propagation.rel_types`.** A schema manifest can now declare
+  acyclicity over a SET of rel-types: a write that closes a cycle in the
+  union subgraph refuses with the existing `RELATIONSHIP_CYCLE` error, whose
+  payload additively gains `acyclic_set` (the declared set) and
+  `existing_path_rel_types` (one rel-type per hop, so the path may mix
+  rel-types); single-rel-type refusals and the per-definition `acyclic` flag
+  stay byte-identical. The boot-time sweep drops on-disk cycle-closing edges
+  in a set's union subgraph exactly as it does per rel-type. The
+  `status_propagation` constraint accepts `rel_types` (an inline relation
+  set) where it accepts `rel_type` today; the single-name key keeps parsing,
+  exactly one of the two per declaration, and taint walks the union so it
+  crosses rel-type boundaries. The loader refuses undeclared names, a
+  rel-type in two sets, sets with fewer than two members, `rel_type` and
+  `rel_types` together, and an empty `rel_types`. Both shapes are visible in
+  the `memstead_schema` response at both verbosity levels; schemas without
+  the declarations keep byte-identical responses.
+
 - **Reachability obligations: `must_reach` on type definitions.** A type can
   now declare that its entities must reach at least one non-stub entity of a
   named set of terminal types (`terminal_types`), following edges of an

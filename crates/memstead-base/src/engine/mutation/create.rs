@@ -2204,6 +2204,333 @@ write_rules: []
         );
     }
 
+    /// Fixture for declared acyclicity sets: one `claim` type over
+    /// GROUNDS / CONCLUDES, with `acyclic_sets: [[GROUNDS, CONCLUDES]]`
+    /// when `with_set` (neither rel-type carries the per-definition
+    /// `acyclic` flag, so without the set every cycle is legal).
+    fn engine_with_acyclic_set_schema(tmp: &TempDir, with_set: bool) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("argchain");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        let sets = if with_set {
+            "  acyclic_sets:\n    - [GROUNDS, CONCLUDES]\n"
+        } else {
+            ""
+        };
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            format!(
+                r#"name: argchain
+version: 0.1.0
+description: acyclicity-set fixture
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+{sets}  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: CONCLUDES
+      description: c
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("claim.yaml"),
+            r#"name: claim
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#,
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "arg".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "argchain",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap()
+    }
+
+    fn claim_args(title: &str, relations: Vec<crate::ops::RelateArg>) -> CreateEntityArgs {
+        let mut sections = IndexMap::new();
+        sections.insert("body".to_string(), "a claim body.".to_string());
+        CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: "arg".to_string(),
+            title: title.to_string(),
+            entity_type: "claim".to_string(),
+            sections,
+            metadata: IndexMap::new(),
+            relations,
+            dry_run: false,
+        }
+    }
+
+    fn relate(
+        engine: &mut Engine,
+        from: &str,
+        rel: &str,
+        to: &str,
+    ) -> Result<crate::engine::RelateEntityOutcome, crate::engine::EngineError> {
+        let (actor, client) = cli_actor();
+        engine.relate_entity(
+            crate::engine::RelateEntityArgs {
+                source: crate::entity::EntityId(from.to_string()),
+                target: crate::entity::EntityId(to.to_string()),
+                rel_type: rel.to_string(),
+                description: None,
+                remove: false,
+                expected_hash: None,
+                dry_run: false,
+            },
+            actor,
+            Some(&client),
+            None,
+        )
+    }
+
+    /// The experiment's alternating cycle: with `[GROUNDS, CONCLUDES]`
+    /// declared as one acyclicity set, the relate that closes a cycle
+    /// mixing both rel-types refuses with `RELATIONSHIP_CYCLE`; the
+    /// payload echoes the set and names each hop's rel-type. The same
+    /// graph WITHOUT the set declaration accepts the cycle (no
+    /// implicit derivation from anything else).
+    #[test]
+    fn relate_refuses_mixed_type_cycle_in_declared_set() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_acyclic_set_schema(&tmp, true);
+        let (actor, client) = cli_actor();
+        for t in ["A", "B", "C"] {
+            engine
+                .create_entity(claim_args(t, vec![]), actor, Some(&client), None)
+                .unwrap();
+        }
+        relate(&mut engine, "arg--a", "GROUNDS", "arg--b").unwrap();
+        relate(&mut engine, "arg--b", "CONCLUDES", "arg--c").unwrap();
+
+        let err = relate(&mut engine, "arg--c", "GROUNDS", "arg--a").unwrap_err();
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+        let details = err.details();
+        assert_eq!(
+            details["acyclic_set"],
+            serde_json::json!(["GROUNDS", "CONCLUDES"])
+        );
+        assert_eq!(
+            details["existing_path"],
+            serde_json::json!(["arg--a", "arg--b", "arg--c"])
+        );
+        assert_eq!(
+            details["existing_path_rel_types"],
+            serde_json::json!(["GROUNDS", "CONCLUDES"]),
+            "one rel-type per hop, mixing both members"
+        );
+
+        // Complement: the identical graph without the declaration
+        // accepts the cycle.
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_acyclic_set_schema(&tmp, false);
+        for t in ["A", "B", "C"] {
+            engine
+                .create_entity(claim_args(t, vec![]), actor, Some(&client), None)
+                .unwrap();
+        }
+        relate(&mut engine, "arg--a", "GROUNDS", "arg--b").unwrap();
+        relate(&mut engine, "arg--b", "CONCLUDES", "arg--c").unwrap();
+        relate(&mut engine, "arg--c", "GROUNDS", "arg--a")
+            .expect("without the set declaration the cycle is legal");
+    }
+
+    /// The set refusal fires identically for inline relations on
+    /// create (through a promoted stub) and declared relations on
+    /// update.
+    #[test]
+    fn create_inline_and_update_declared_refuse_set_cycle() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_acyclic_set_schema(&tmp, true);
+        let (actor, client) = cli_actor();
+
+        // create.relations[]: A → GROUNDS → ghost auto-stubs `ghost`;
+        // promoting the stub with a CONCLUDES back-edge closes a
+        // mixed-type cycle.
+        engine
+            .create_entity(
+                claim_args(
+                    "Alpha",
+                    vec![crate::ops::RelateArg {
+                        to: crate::entity::EntityId("arg--ghost".to_string()),
+                        rel_type: "GROUNDS".to_string(),
+                        description: None,
+                    }],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let err = engine
+            .create_entity(
+                claim_args(
+                    "Ghost",
+                    vec![crate::ops::RelateArg {
+                        to: crate::entity::EntityId("arg--alpha".to_string()),
+                        rel_type: "CONCLUDES".to_string(),
+                        description: None,
+                    }],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("cycle-closing create.relations[] must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+        assert_eq!(
+            err.details()["acyclic_set"],
+            serde_json::json!(["GROUNDS", "CONCLUDES"])
+        );
+
+        // update.declare_relations: D → GROUNDS → E exists; updating E
+        // with CONCLUDES → D closes the mixed cycle.
+        for t in ["D", "E"] {
+            engine
+                .create_entity(claim_args(t, vec![]), actor, Some(&client), None)
+                .unwrap();
+        }
+        relate(&mut engine, "arg--d", "GROUNDS", "arg--e").unwrap();
+        let e_id = crate::entity::EntityId("arg--e".to_string());
+        let current = engine.get_entity(&e_id).unwrap().content_hash.clone();
+        let err = engine
+            .update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: e_id,
+                    expected_hash: Some(current),
+                    sections: IndexMap::new(),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![crate::ops::RelateArg {
+                        to: crate::entity::EntityId("arg--d".to_string()),
+                        rel_type: "CONCLUDES".to_string(),
+                        description: None,
+                    }],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("cycle-closing declare_relations must refuse");
+        assert_eq!(err.code(), "RELATIONSHIP_CYCLE", "{err:?}");
+        assert_eq!(
+            err.details()["acyclic_set"],
+            serde_json::json!(["GROUNDS", "CONCLUDES"])
+        );
+    }
+
+    /// A package whose on-disk edges already close a mixed-type cycle
+    /// boots with one cycle-closing edge dropped and warned, exactly
+    /// as the single-type sweep does.
+    #[test]
+    fn boot_drops_cycle_closing_edge_in_declared_acyclic_set() {
+        let tmp = TempDir::new().unwrap();
+        // Write the schema and two claim files closing a GROUNDS /
+        // CONCLUDES cycle BEFORE boot, then reuse the fixture builder
+        // (same schemas dir and mem dir layout).
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        std::fs::write(
+            mem_dir.join("a.md"),
+            "---\ntype: claim\n---\n# A\n\n## Body\n\nfirst.\n\n## Relationships\n\n- **GROUNDS**: [[arg--b]]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("b.md"),
+            "---\ntype: claim\n---\n# B\n\n## Body\n\nsecond.\n\n## Relationships\n\n- **CONCLUDES**: [[arg--a]]\n",
+        )
+        .unwrap();
+        let engine = engine_with_acyclic_set_schema(&tmp, true);
+
+        let surviving: usize = engine
+            .store()
+            .all_entities()
+            .map(|e| {
+                engine
+                    .store()
+                    .outgoing(&e.id)
+                    .iter()
+                    .filter(|edge| edge.rel_type == "GROUNDS" || edge.rel_type == "CONCLUDES")
+                    .count()
+            })
+            .sum();
+        assert_eq!(surviving, 1, "exactly one edge survives the cycle break");
+        let cycle_warnings: Vec<_> = engine
+            .load_warnings()
+            .iter()
+            .filter(|w| {
+                matches!(
+                    w,
+                    WarningHint::ParsedRelationInvalid { reason, .. } if reason == "cycle"
+                )
+            })
+            .cloned()
+            .collect();
+        assert_eq!(
+            cycle_warnings.len(),
+            1,
+            "exactly one cycle warning fires: {cycle_warnings:?}"
+        );
+    }
+
     /// Regression pin for `no_self_loop_relationships`' single
     /// functional behavior: a self-loop (`from == to`) on a rel-type
     /// the source type lists there refuses with `RELATIONSHIP_CYCLE`.

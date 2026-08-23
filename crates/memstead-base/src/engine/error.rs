@@ -623,16 +623,23 @@ pub enum EngineError {
     /// `[from, …, current, target's intermediates, … from]` so MCP
     /// envelopes ship the cycle's shape without a follow-up
     /// `memstead_search`. Truncated at
-    /// [`RELATIONSHIP_CYCLE_PATH_CAP`] entries.
-    #[error(
-        "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {rel_type} subgraph"
-    )]
+    /// [`RELATIONSHIP_CYCLE_PATH_CAP`] entries. A refusal from a
+    /// declared acyclicity SET additionally carries the set and one
+    /// rel-type per hop of the path (the path may mix the set's
+    /// rel-types); single-rel-type refusals keep their byte-identical
+    /// payload (both extras absent).
+    #[error("{}", _relationship_cycle_msg(rel_type, from, to, acyclic_set.as_deref()))]
     RelationshipCycle {
         rel_type: String,
         from: EntityId,
         to: EntityId,
         existing_path: Vec<EntityId>,
         path_truncated: bool,
+        /// The declared acyclicity set, on set refusals only.
+        acyclic_set: Option<Vec<String>>,
+        /// One rel-type per hop of `existing_path`, on set refusals
+        /// only (truncated alongside the path).
+        existing_path_rel_types: Option<Vec<String>>,
     },
     /// `memstead_update` received the same metadata key in both `metadata`
     /// (set) and `metadata_unset` lists. The request is ambiguous and
@@ -1546,15 +1553,27 @@ impl EngineError {
                 to,
                 existing_path,
                 path_truncated,
+                acyclic_set,
+                existing_path_rel_types,
             } => {
                 let path_json: Vec<_> = existing_path.iter().map(|id| id.to_string()).collect();
-                serde_json::json!({
+                let mut d = serde_json::json!({
                     "rel_type": rel_type,
                     "from": from.to_string(),
                     "to": to.to_string(),
                     "existing_path": path_json,
                     "path_truncated": path_truncated,
-                })
+                });
+                // Additive: only set refusals carry the set echo and
+                // the per-hop rel-types; single-rel-type refusals stay
+                // byte-identical.
+                if let Some(set) = acyclic_set {
+                    d["acyclic_set"] = serde_json::json!(set);
+                }
+                if let Some(rels) = existing_path_rel_types {
+                    d["existing_path_rel_types"] = serde_json::json!(rels);
+                }
+                d
             }
             EngineError::CrossMemLinkNotAllowed { from_mem, to_mem } => {
                 serde_json::json!({ "from_mem": from_mem, "to_mem": to_mem })
@@ -1752,6 +1771,8 @@ impl EngineError {
                 to,
                 existing_path,
                 path_truncated,
+                acyclic_set,
+                ..
             } => {
                 let path_inline = if existing_path.is_empty() {
                     String::from("(unavailable)")
@@ -1767,8 +1788,12 @@ impl EngineError {
                 } else {
                     ""
                 };
+                let subgraph = match acyclic_set {
+                    Some(set) => format!("[{}] acyclicity-set", set.join(", ")),
+                    None => rel_type.to_string(),
+                };
                 format!(
-                    "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {rel_type} subgraph — existing path: {path_inline}{trunc}; remove an edge along this path to break the cycle, then retry"
+                    "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {subgraph} subgraph — existing path: {path_inline}{trunc}; remove an edge along this path to break the cycle, then retry"
                 )
             }
             EngineError::RequiredFieldUnset {
@@ -1905,6 +1930,23 @@ fn render_referrers_inline(referrers: &[ReferrerInfo]) -> String {
 ///
 /// Both paths share recovery (provide the field); the typed code
 /// stays `REQUIRED_FIELD_UNSET` for code-key branching consumers.
+fn _relationship_cycle_msg(
+    rel_type: &str,
+    from: &EntityId,
+    to: &EntityId,
+    acyclic_set: Option<&[String]>,
+) -> String {
+    match acyclic_set {
+        Some(set) => format!(
+            "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the [{}] acyclicity-set subgraph",
+            set.join(", ")
+        ),
+        None => format!(
+            "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {rel_type} subgraph"
+        ),
+    }
+}
+
 fn _required_field_unset_msg(field: &str, entity_type: &str, on_create: bool) -> String {
     if on_create {
         format!(
@@ -2802,6 +2844,8 @@ mod inline_list_tests {
             to: EntityId::canonical("specs--c"),
             existing_path: path,
             path_truncated: false,
+            acyclic_set: None,
+            existing_path_rel_types: None,
         };
         let prose = err.prose_render();
         assert!(

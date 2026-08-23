@@ -217,6 +217,59 @@ pub fn would_cycle(
     None
 }
 
+/// Set variant of [`would_cycle`]: walks the UNION subgraph of the
+/// declared acyclicity set, so the returned back-path may mix
+/// rel-types. Returns the path (same shape as `would_cycle`) plus one
+/// rel-type per hop of the path (`len == path.len() - 1`; empty for
+/// the self-loop case).
+pub fn would_cycle_in_set(
+    store: &Store,
+    from: &EntityId,
+    to: &EntityId,
+    set: &[String],
+) -> Option<(Vec<EntityId>, Vec<String>)> {
+    if from == to {
+        return Some((vec![from.clone()], Vec::new()));
+    }
+
+    // child -> (parent, rel-type of the parent -> child edge)
+    let mut parent: std::collections::HashMap<EntityId, (EntityId, String)> =
+        std::collections::HashMap::new();
+    let mut visited: HashSet<EntityId> = HashSet::new();
+    visited.insert(to.clone());
+
+    let mut queue: VecDeque<EntityId> = VecDeque::new();
+    queue.push_back(to.clone());
+
+    while let Some(current) = queue.pop_front() {
+        for edge in store.outgoing(&current) {
+            if !set.iter().any(|n| n == &edge.rel_type) {
+                continue;
+            }
+            let next = &edge.target;
+            if *next == *from {
+                let mut ids = vec![current.clone()];
+                let mut rels = vec![edge.rel_type.clone()];
+                let mut cursor = current.clone();
+                while let Some((p, r)) = parent.get(&cursor) {
+                    ids.push(p.clone());
+                    rels.push(r.clone());
+                    cursor = p.clone();
+                }
+                ids.reverse();
+                rels.reverse();
+                ids.push(from.clone());
+                return Some((ids, rels));
+            }
+            if visited.insert(next.clone()) {
+                parent.insert(next.clone(), (current.clone(), edge.rel_type.clone()));
+                queue.push_back(next.clone());
+            }
+        }
+    }
+    None
+}
+
 /// Find orphan entities — non-stub entities with no edges at all (completely isolated).
 pub fn find_orphans(store: &Store) -> Vec<EntityId> {
     find_orphans_with_schemas(store, &std::collections::HashMap::new())

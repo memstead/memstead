@@ -1727,16 +1727,28 @@ pub fn build_schema_payload_scoped(
                         field,
                         value,
                         rel_type,
+                        rel_types,
                         direction,
                         severity,
-                    } => serde_json::json!({
-                        "kind": "status_propagation",
-                        "field": field,
-                        "value": value,
-                        "rel_type": rel_type,
-                        "direction": direction,
-                        "severity": severity,
-                    }),
+                    } => {
+                        let mut c = serde_json::json!({
+                            "kind": "status_propagation",
+                            "field": field,
+                            "value": value,
+                            "direction": direction,
+                            "severity": severity,
+                        });
+                        // Echo the declaration's own shape: the
+                        // single-name key stays byte-identical, a
+                        // relation set rides under `rel_types`.
+                        if let Some(single) = rel_type {
+                            c["rel_type"] = serde_json::json!(single);
+                        }
+                        if let Some(set) = rel_types {
+                            c["rel_types"] = serde_json::json!(set);
+                        }
+                        c
+                    }
                 })
                 .collect();
             let mut obj = serde_json::json!({
@@ -1825,6 +1837,18 @@ pub fn build_schema_payload_scoped(
         "origin": origin.as_wire(),
     });
     let obj = payload.as_object_mut().unwrap();
+
+    // Declared acyclicity sets — a legality condition on the relate
+    // path (a cycle in a set's union subgraph refuses), so it ships in
+    // BOTH modes; emitted only when declared so undeclared schemas
+    // keep their payload bytes unchanged.
+    if !manifest.relationships.acyclic_sets.is_empty() {
+        obj.insert(
+            "acyclic_sets".into(),
+            serde_json::to_value(&manifest.relationships.acyclic_sets)
+                .expect("acyclic_sets serialize"),
+        );
+    }
 
     // Schema-level prose — FULL mode only. An agent that asked for the
     // lite skeleton is orienting on structure; the human-readable
@@ -4249,6 +4273,91 @@ community:
             );
             assert_eq!(ro[1]["when_field"], "status");
             assert_eq!(ro[1]["when_value"], "checked");
+        }
+    }
+
+    /// Declared `acyclic_sets` and a `status_propagation` relation
+    /// set are visible at BOTH verbosity levels; a single-name
+    /// propagation declaration keeps its `rel_type` key with no
+    /// `rel_types`, and a schema without sets carries no
+    /// `acyclic_sets` key at all.
+    #[test]
+    fn acyclic_sets_and_propagation_rel_types_visible_at_both_levels() {
+        let manifest = r#"name: relsets-render
+version: 0.1.0
+description: relation-set render fixture
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  acyclic_sets:
+    - [GROUNDS, CONCLUDES]
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: CONCLUDES
+      description: c
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let claim = "name: claim\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: s\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_types: [GROUNDS, CONCLUDES]\n    direction: incoming\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_type: PART_OF\n    direction: outgoing\n";
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("claim".to_string(), claim.to_string())],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            assert_eq!(
+                payload["acyclic_sets"],
+                serde_json::json!([["GROUNDS", "CONCLUDES"]]),
+                "acyclic_sets present at {verbosity:?}"
+            );
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let claim = &payload[types_key].as_array().expect("types array")[0];
+            let constraints = claim["constraints"].as_array().expect("constraints array");
+            assert_eq!(
+                constraints[0]["rel_types"],
+                serde_json::json!(["GROUNDS", "CONCLUDES"])
+            );
+            assert!(
+                constraints[0].get("rel_type").is_none(),
+                "set declaration carries no single-name key: {:?}",
+                constraints[0]
+            );
+            assert_eq!(constraints[1]["rel_type"], "PART_OF");
+            assert!(
+                constraints[1].get("rel_types").is_none(),
+                "single-name declaration stays byte-identical: {:?}",
+                constraints[1]
+            );
+        }
+
+        // A schema without sets carries no `acyclic_sets` key.
+        let plain = software_schema();
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&plain, vec![], verbosity, OriginClass::FirstParty);
+            assert!(
+                payload.get("acyclic_sets").is_none(),
+                "undeclared schema carries no acyclic_sets key"
+            );
         }
     }
 
