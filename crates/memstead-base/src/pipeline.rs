@@ -82,11 +82,14 @@ pub struct Source {
     /// not interpret it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engagement: Option<serde_json::Value>,
-    /// Optional deterministic preparation step (string identifier, e.g.
-    /// `pdf-to-markdown`). Unset for every text source today. A source that
-    /// names a preparation the engine has no implementation for is accepted
-    /// at rest and reported unsupported at run time (the run prints
-    /// "Skipping." and exits 0) — not refused at declaration.
+    /// Optional deterministic preparation — the identifier of a
+    /// preparation registered in the engine's [`crate::preparation`]
+    /// registry (today: `entity-load-bearing`). At most one per source.
+    /// The edit/validate paths refuse an identifier the registry does not
+    /// know ([`crate::binding::CapabilityError::PreparationUnsupported`]);
+    /// a record that acquired an unknown one by hand is accepted at rest and
+    /// reported unsupported at run time (the brief prints "Skipping." and
+    /// exits 0) — both paths apply the one registry rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preparation: Option<String>,
 }
@@ -155,9 +158,10 @@ pub struct Facet {
     /// side; the engine does not interpret it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engagement: Option<serde_json::Value>,
-    /// Optional deterministic preparation step (string identifier, e.g.
-    /// `pdf-to-markdown`). Unset for every text medium today. A facet that
-    /// names a preparation the engine has no implementation for is accepted at
+    /// Optional preparation identifier, carried verbatim into the folded
+    /// [`Source::preparation`] by migration (never dropped, so the registry
+    /// refusal surfaces on the migrated record). A facet that
+    /// names a preparation the engine's registry does not know is accepted at
     /// rest but reported unsupported at run time — no silent skip, no crash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preparation: Option<String>,
@@ -328,7 +332,8 @@ mod tests {
     }
 
     /// A facet declaring a preparation identifier round-trips with the value
-    /// present — the slot is reserved even though no implementation exists.
+    /// present, verbatim: whether the identifier is registered is the
+    /// validator's business (`validate_binding`), never the record's.
     #[test]
     fn facet_preparation_slot_round_trips_when_set() {
         let f = Facet {

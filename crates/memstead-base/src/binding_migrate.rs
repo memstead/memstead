@@ -885,8 +885,11 @@ mod tests {
         assert!(check_all_consumed(&configs, &consumed_all).is_ok());
     }
 
-    /// A migrated binding whose facet declares a preparation surfaces the
-    /// capability refusal at validation of the folded record.
+    /// A migrated binding whose facet declares a preparation the engine's
+    /// registry does not know surfaces the (narrowed) capability refusal at
+    /// validation of the folded record — migration preserves the identifier
+    /// verbatim so the refusal surfaces instead of the field being dropped.
+    /// A registered identifier migrates and validates clean.
     #[test]
     fn migrated_binding_with_preparation_surfaces_capability_refusal() {
         let configs = PipelineConfigs {
@@ -909,6 +912,40 @@ mod tests {
                     if preparation == "pdf-to-markdown"
             )),
             "expected PreparationUnsupported, got {errs:?}"
+        );
+
+        let registered = PipelineConfigs {
+            mediums: vec![medium("home", "graph", MediumType::Graph, "home")],
+            facets: vec![facet(
+                "home",
+                "claims",
+                "graph",
+                Some(crate::preparation::ENTITY_LOAD_BEARING),
+            )],
+            projections: vec![projection("home", "claims", &["claims"], &[], "home")],
+            ingests: vec![ingest(
+                "home-claims",
+                "home/claims",
+                LegacyIngestMode::Discovery,
+                &[],
+            )],
+        };
+        let migrated = migrate_gen2_bindings(&registered).unwrap();
+        assert_eq!(
+            migrated[0].binding.sources[0].preparation.as_deref(),
+            Some(crate::preparation::ENTITY_LOAD_BEARING)
+        );
+        let verdict = validate_binding(&migrated[0].binding);
+        assert!(
+            !verdict
+                .as_ref()
+                .is_err_and(|errs| errs.iter().any(|e| matches!(
+                    e,
+                    CapabilityError::PreparationUnsupported { .. }
+                        | CapabilityError::PreparationGrainMismatch { .. }
+                ))),
+            "a registered preparation over its namespace migrates without a preparation \
+             refusal, got {verdict:?}"
         );
     }
 }

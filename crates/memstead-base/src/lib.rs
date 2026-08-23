@@ -37,6 +37,7 @@ pub mod pipeline;
 pub mod pipeline_edit;
 pub mod pipeline_migrate;
 pub mod pipeline_store;
+pub mod preparation;
 pub mod provenance;
 pub mod render;
 pub mod runtime_validator;

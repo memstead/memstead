@@ -1956,6 +1956,243 @@ mod tests {
         );
     }
 
+    /// Touchpoint A of the preparation registry, end to end: a graph source
+    /// declaring `entity-load-bearing` makes its entity anchors hash the
+    /// type's load-bearing sections. A notes-only edit (an optional section)
+    /// keeps the prepared anchor resolving while an anchor over the default
+    /// form (no source, hence no preparation) drifts — today's behaviour,
+    /// untouched for it; a load-bearing edit drifts both. The standalone
+    /// `verify_mem_anchors` walks the same observation and inherits the
+    /// preparation unchanged. An unregistered identifier reaching a record
+    /// by hand computes no form: its anchors stay unobserved, never scored.
+    #[test]
+    fn entity_load_bearing_preparation_ignores_notes_edits_and_catches_claim_edits() {
+        use crate::anchor::{
+            Anchor, AnchorGrain, AnchorProvenanceClass, AnchorSidecar, AnchorState,
+        };
+        use crate::binding::{
+            BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, VerifyOperation,
+        };
+        use crate::entity::EntityId;
+        use crate::pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode, Source};
+        use crate::workspace::{
+            Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("home");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        // `assertion` in default@1.0.0: `claim` and `evidence` are required
+        // (the load-bearing set), `conditions` is optional (notes-class).
+        let write_pinned = |claim: &str, conditions: &str| {
+            std::fs::write(
+                mem_dir.join("pinned.md"),
+                format!(
+                    "---\ntype: assertion\n---\n\n# Pinned\n\n## Claim\n\n{claim}\n\n\
+                     ## Evidence\n\nMeasured.\n\n## Conditions\n\n{conditions}\n"
+                ),
+            )
+            .unwrap();
+        };
+        write_pinned("The sky is blue.", "daylight");
+        std::fs::write(
+            mem_dir.join("holder.md"),
+            "---\ntype: assertion\n---\n\n# Holder\n\n## Claim\n\nDepends on pinned.\n\n\
+             ## Evidence\n\nSee pinned.\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "home".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // The binding: one graph source named `claims`, declaring the
+        // registered preparation. Written straight to the store — the shape
+        // every edit path validates (`validate_binding`) accepts it.
+        let binding_with = |preparation: Option<&str>| Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![Source {
+                name: "claims".to_string(),
+                medium_type: MediumType::Graph,
+                pointer: "home".to_string(),
+                change_detection: None,
+                scope: vec![PatternEntry {
+                    path: "*".to_string(),
+                    mode: PatternMode::Allow,
+                }],
+                engagement: None,
+                preparation: preparation.map(str::to_string),
+            }],
+            reference_mems: vec![],
+            destination_mem: "home".to_string(),
+            deny_paths: vec![],
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: Some(BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 5,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: Some(VerifyOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 5,
+                    adjudication_cap: 0,
+                    full_resync_every: 0,
+                }),
+            },
+        };
+        let prepared_binding = binding_with(Some(crate::preparation::ENTITY_LOAD_BEARING));
+        assert!(crate::binding::validate_binding(&prepared_binding).is_ok());
+        crate::pipeline_store::write_binding(root, "home", "claims", &prepared_binding).unwrap();
+
+        // Record both anchors honestly against the entity as it stands: one
+        // produced by the `claims` source (prepared form), one hand-authored
+        // (no source: the default form, the canonical rendered markdown).
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let pinned = engine
+            .store()
+            .get(&EntityId::canonical("home--pinned"))
+            .unwrap();
+        let type_def = engine
+            .schema_for("home")
+            .and_then(|s| s.get_type("assertion"))
+            .expect("default@1.0.0 declares assertion");
+        assert!(
+            crate::preparation::load_bearing_sections(&type_def)
+                .iter()
+                .map(|s| s.key.as_str())
+                .eq(["claim", "evidence"]),
+            "the required sections are the load-bearing set"
+        );
+        let prepared_hash = crate::preparation::entity_prepared_hash(
+            pinned,
+            Some(&type_def),
+            Some(crate::preparation::ENTITY_LOAD_BEARING),
+        )
+        .unwrap();
+        let default_hash =
+            crate::preparation::entity_prepared_hash(pinned, Some(&type_def), None).unwrap();
+        assert_ne!(prepared_hash, default_hash);
+
+        let anchor = |source: Option<&str>, hash: &str| Anchor {
+            artifact: "home--pinned".to_string(),
+            grain: AnchorGrain::Entity,
+            class: AnchorProvenanceClass::Anchored,
+            hash: Some(hash.to_string()),
+            source: source.map(str::to_string),
+            binding: None,
+            at_version: None,
+            derived_from: Vec::new(),
+            hash_stability: crate::anchor::AnchorHashStability::Stable,
+        };
+        // Two holders so the two anchors over one artifact stay distinct rows.
+        std::fs::write(
+            mem_dir.join("holder2.md"),
+            "---\ntype: assertion\n---\n\n# Holder2\n\n## Claim\n\nAlso depends.\n\n\
+             ## Evidence\n\nSee pinned.\n",
+        )
+        .unwrap();
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set("home--holder", vec![anchor(Some("claims"), &prepared_hash)]);
+        sidecar.set("home--holder2", vec![anchor(None, &default_hash)]);
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        let states = |root: &std::path::Path| {
+            let engine = crate::Engine::from_workspace_root(root).unwrap();
+            let state_of = |holder: &str| {
+                engine.entity_anchors_resolved(&EntityId::canonical(holder))[0].state
+            };
+            let standalone = engine.verify_mem_anchors("home").unwrap();
+            (
+                state_of("home--holder"),
+                state_of("home--holder2"),
+                standalone,
+            )
+        };
+
+        // Unchanged: both resolve.
+        let (prepared, plain, report) = states(root);
+        assert_eq!(prepared, Some(AnchorState::Resolves));
+        assert_eq!(plain, Some(AnchorState::Resolves));
+        assert_eq!((report.resolved, report.drifted), (2, 0));
+
+        // A notes-only edit (`conditions` is not load-bearing): the prepared
+        // anchor holds, the default-form anchor drifts — today's behaviour,
+        // byte-for-byte, for a source that declares nothing.
+        write_pinned("The sky is blue.", "daylight, clear weather");
+        let (prepared, plain, report) = states(root);
+        assert_eq!(
+            prepared,
+            Some(AnchorState::Resolves),
+            "a comma in the notes must not break a load-bearing anchor"
+        );
+        assert_eq!(plain, Some(AnchorState::Drifted));
+        assert_eq!((report.resolved, report.drifted), (1, 1));
+
+        // A load-bearing edit: both drift.
+        write_pinned("The sky is green.", "daylight, clear weather");
+        let (prepared, plain, report) = states(root);
+        assert_eq!(prepared, Some(AnchorState::Drifted));
+        assert_eq!(plain, Some(AnchorState::Drifted));
+        assert_eq!((report.resolved, report.drifted), (0, 2));
+
+        // Complement: a hand-edited record naming an identifier the registry
+        // does not know computes no form — its anchors are unobserved, never
+        // scored as drift or resolution; the source-less anchor is unaffected.
+        crate::pipeline_store::write_binding(
+            root,
+            "home",
+            "claims",
+            &binding_with(Some("pdf-to-markdown")),
+        )
+        .unwrap();
+        let (prepared, plain, report) = states(root);
+        assert_eq!(
+            prepared, None,
+            "an unknown preparation yields no observation"
+        );
+        assert_eq!(plain, Some(AnchorState::Drifted));
+        assert_eq!((report.unresolvable, report.drifted), (1, 1));
+    }
+
     /// Criterion 6's regression pin: the graph change-detection half is
     /// untouched except for the deliberate unscoped gate. A SCOPED graph
     /// facet still routes to the graph strategy and reports the same

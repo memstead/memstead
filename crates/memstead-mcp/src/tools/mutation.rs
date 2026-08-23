@@ -90,7 +90,12 @@ pub struct AnchorInputParam {
     #[serde(default)]
     pub hash: Option<String>,
     #[schemars(
-        description = "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`."
+        description = "The observed artifact CONTENT (UTF-8 text), for the engine to compute `hash` from through its preparation registry — the write-time observation for a grain the engine cannot observe itself: a `url` anchor (the engine never fetches; what you read is canonicalized exactly as a path grain's bytes are). Also accepted for `span`/`file`. Mutually exclusive with `hash` (both refuses INVALID_ANCHOR); refused on `authored`/`informed-by`, and on the `entity`/`tree` grains, whose prepared form is never computed from supplied bytes."
+    )]
+    #[serde(default)]
+    pub content: Option<String>,
+    #[schemars(
+        description = "Medium's declared hash stability: `stable` | `unstable` (defaults per grain: `url` to `unstable`, every other grain to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`."
     )]
     #[serde(default)]
     pub hash_stability: Option<String>,
@@ -143,6 +148,7 @@ impl AnchorInputParam {
             class: self.class,
             at_version,
             hash: self.hash,
+            content: self.content,
             hash_stability: self.hash_stability,
             derived_from: self.derived_from,
             binding: self.binding,

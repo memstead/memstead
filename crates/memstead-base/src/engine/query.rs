@@ -395,10 +395,13 @@ impl Engine {
     /// rendered markdown.
     ///
     /// `state` is `None` (unobserved — never a fabricated state) when there is
-    /// no workspace root, when the grain is `url` (whose observation stays
-    /// deferred), or when an `entity` anchor's mem is **not mounted** — an
-    /// unmounted mem is not a mem of deleted entities, and saying so would
-    /// route a deletion proposal to prune.
+    /// no workspace root, when the grain is `url` (the engine never fetches;
+    /// a url anchor's hash is the registry's prepared form of the content
+    /// its observer supplied at write time), when an `entity` anchor's
+    /// source declares a preparation the registry does not know (the form
+    /// cannot be computed), or when an `entity` anchor's mem is **not
+    /// mounted** — an unmounted mem is not a mem of deleted entities, and
+    /// saying so would route a deletion proposal to prune.
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
         let source_roots = self.anchor_source_roots(id.mem());
@@ -433,19 +436,27 @@ impl Engine {
     /// joins is decided by that priority, deterministically. An anchor
     /// without a `source` (a hand-authored mem, a binding-less write)
     /// observes workspace-relative exactly as before. A `url`
-    /// grain has no observation and returns `None` (the report vocabulary's
-    /// `unresolvable`), as does a workspace-root-less engine. An `entity`
+    /// grain has no engine-side observation and returns `None` (the report
+    /// vocabulary's `unresolvable`) — the engine never fetches; its hash is
+    /// recorded from observation-supplied content at write time — as does a
+    /// workspace-root-less engine. An `entity`
     /// grain is not a filesystem path but is not unobservable either — it
     /// resolves against the live graph via
-    /// [`Self::observe_entity_anchor`]. This replaces the retired `single_path_medium_root` gate,
+    /// [`Self::observe_entity_anchor`], under the preparation its source
+    /// declares (touchpoint A of [`crate::preparation`]: the registry
+    /// decides the prepared form the artifact hashes as). This replaces the retired `single_path_medium_root` gate,
     /// whose single-source assumption nulled every anchor of a mem with
     /// zero or several bindings — the honest per-anchor answer supersedes
     /// the all-or-nothing mem-level one.
     fn observe_anchor(
         &self,
         anchor: &crate::anchor::Anchor,
-        source_roots: &std::collections::BTreeMap<String, String>,
+        source_roots: &std::collections::BTreeMap<String, AnchorSourceJoin>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
+        let join = anchor
+            .source
+            .as_deref()
+            .and_then(|name| source_roots.get(name));
         // An `entity`-grain anchor points into a mem's graph, not a file
         // tree. It has always returned `None` here — "unobserved this pass" —
         // which meant it could never be drifted, never be orphaned, and always
@@ -453,14 +464,10 @@ impl Engine {
         // deliberately stale anchor over a changed source entity went unflagged
         // while the capability matrix claimed full parity.
         if anchor.grain == crate::anchor::AnchorGrain::Entity {
-            return self.observe_entity_anchor(anchor);
+            return self.observe_entity_anchor(anchor, join.and_then(|j| j.preparation.as_deref()));
         }
         let root = self.workspace_root.as_deref()?;
-        let source_pointer = anchor
-            .source
-            .as_deref()
-            .and_then(|name| source_roots.get(name))
-            .map(String::as_str);
+        let source_pointer = join.map(|j| j.pointer.as_str());
         observe_path_anchor(root, anchor, source_pointer)
     }
 
@@ -471,10 +478,16 @@ impl Engine {
     /// The artifact is an entity id. Present/absent comes from the store, so
     /// this works uniformly across backends — a git-branch mem has no
     /// working-tree file to stat, which is exactly why observation cannot go
-    /// through the filesystem here. The compared form is the **canonical
-    /// rendered markdown**, hashed with the same `prepared_content_hash` the
-    /// path arm uses, so an anchor's recorded hash means the same thing in
-    /// both namespaces.
+    /// through the filesystem here. The compared form is the preparation
+    /// registry's **prepared form** for `preparation` (the anchor's source's
+    /// declared preparation, [`crate::preparation::entity_prepared_hash`]):
+    /// the **canonical rendered markdown** when the source declares none —
+    /// byte-for-byte today's form — or the load-bearing serialization under
+    /// `entity-load-bearing`; hashed with the same `prepared_content_hash`
+    /// the path arm uses, so an anchor's recorded hash means the same thing
+    /// in both namespaces. An identifier the registry does not know cannot
+    /// be prepared: the anchor is reported unobserved (`None`), never hashed
+    /// under a fabricated form.
     ///
     /// A stub is treated as absent: a stub is the engine's placeholder for an
     /// unresolved reference, not the entity the anchor claims to pin. Scoring
@@ -482,6 +495,7 @@ impl Engine {
     fn observe_entity_anchor(
         &self,
         anchor: &crate::anchor::Anchor,
+        preparation: Option<&str>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
         let id = EntityId::canonical(&anchor.artifact);
 
@@ -510,8 +524,14 @@ impl Engine {
             ));
         };
         let current_hash = if anchor.class.is_hash_bearing() {
-            let rendered = crate::render::render_entity_markdown(entity, None);
-            Some(crate::anchor::prepared_content_hash(rendered.as_bytes()))
+            let type_def = self
+                .schema_for(id.mem())
+                .and_then(|schema| schema.get_type(&entity.entity_type));
+            Some(crate::preparation::entity_prepared_hash(
+                entity,
+                type_def.as_deref(),
+                preparation,
+            )?)
         } else {
             None
         };
@@ -524,16 +544,19 @@ impl Engine {
         ))
     }
 
-    /// The `source name → pointer` map for `mem`'s bindings — the filesystem
+    /// The `source name → join` map for `mem`'s bindings: the filesystem
     /// roots that anchors written in the source dialect join onto (decision
-    /// 26: anchor artifact paths are source-relative first). Empty when the
-    /// workspace has no root, the pipeline store does not load, or `mem` has
-    /// no bindings — resolution then degrades to the workspace-relative
-    /// dialect alone, which is exactly the hand-authored-mem posture.
+    /// 26: anchor artifact paths are source-relative first) and the
+    /// preparation each source declares (touchpoint A: what the registry
+    /// prepares the artifact as before hashing). Empty when the workspace
+    /// has no root, the pipeline store does not load, or `mem` has no
+    /// bindings — resolution then degrades to the workspace-relative dialect
+    /// alone with no preparation, which is exactly the hand-authored-mem
+    /// posture.
     pub(crate) fn anchor_source_roots(
         &self,
         mem: &str,
-    ) -> std::collections::BTreeMap<String, String> {
+    ) -> std::collections::BTreeMap<String, AnchorSourceJoin> {
         let mut roots = std::collections::BTreeMap::new();
         let Some(root) = self.workspace_root.as_deref() else {
             return roots;
@@ -545,7 +568,10 @@ impl Engine {
             for source in &record.config.sources {
                 roots
                     .entry(source.name.clone())
-                    .or_insert_with(|| source.pointer.clone());
+                    .or_insert_with(|| AnchorSourceJoin {
+                        pointer: source.pointer.clone(),
+                        preparation: source.preparation.clone(),
+                    });
             }
         }
         roots
@@ -580,7 +606,7 @@ impl Engine {
                         .source
                         .as_deref()
                         .and_then(|name| source_roots.get(name))
-                        .map(|pointer| join_pointer(pointer, anchor_base_path(&a.artifact)));
+                        .map(|join| join_pointer(&join.pointer, anchor_base_path(&a.artifact)));
                     if anchor_references_path(a, artifact_path)
                         || joined.is_some_and(|j| {
                             path_references(
@@ -2439,6 +2465,19 @@ pub struct ResolvedAnchor {
     /// the stored anchor plus `state`.
     #[serde(skip)]
     pub observed_hash: Option<String>,
+}
+
+/// What an anchor's `source` name resolves to in its mem's bindings: the
+/// declared pointer (the filesystem root a source-dialect artifact path
+/// joins onto, decision 26) and the declared preparation (what the
+/// preparation registry prepares the artifact as before hashing —
+/// touchpoint A of [`crate::preparation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnchorSourceJoin {
+    /// The source's declared `pointer`.
+    pub(crate) pointer: String,
+    /// The source's declared `preparation`, if any.
+    pub(crate) preparation: Option<String>,
 }
 
 /// Observe a single path-namespace anchor against `root` (its medium's

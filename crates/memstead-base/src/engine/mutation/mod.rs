@@ -208,9 +208,9 @@ impl super::Engine {
                 let base = crate::engine::query::anchor_base_path(&a.artifact);
                 let mut candidates: Vec<String> = Vec::new();
                 if let Some(source) = &a.source
-                    && let Some(pointer) = source_roots.get(source)
+                    && let Some(join) = source_roots.get(source)
                 {
-                    candidates.push(crate::engine::query::join_pointer(pointer, base));
+                    candidates.push(crate::engine::query::join_pointer(&join.pointer, base));
                 }
                 candidates.push(base.to_string());
                 if !candidates.iter().any(|c| root.join(c).exists()) {

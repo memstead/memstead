@@ -345,6 +345,16 @@ pub struct AnchorInput {
     pub at_version: Option<AnchorVersion>,
     #[serde(default)]
     pub hash: Option<String>,
+    /// The observed artifact CONTENT (UTF-8 text), for the engine to compute
+    /// `hash` from through its preparation registry
+    /// ([`crate::preparation::supplied_content_hash`]) — the write-time
+    /// observation for a grain the engine cannot observe itself: a `url`
+    /// anchor, because the engine never fetches. Accepted for the `span` /
+    /// `file` / `url` grains; mutually exclusive with `hash`; refused on a
+    /// non-hash class and on the `entity` / `tree` grains, whose prepared
+    /// form is never computed from supplied bytes.
+    #[serde(default)]
+    pub content: Option<String>,
     #[serde(default)]
     pub hash_stability: Option<String>,
     #[serde(default)]
@@ -460,10 +470,24 @@ pub enum AnchorValidationError {
     /// The artifact reference is missing or empty.
     #[error("anchor is missing its artifact reference")]
     MissingArtifact,
-    /// A content hash was supplied on a class that carries no hash
-    /// semantics (`authored` / `informed-by`).
+    /// A content hash (or content to hash) was supplied on a class that
+    /// carries no hash semantics (`authored` / `informed-by`).
     #[error("anchor class '{class}' carries no hash semantics — a content hash is not permitted")]
     HashOnNonHashClass { class: &'static str },
+    /// Both `hash` and `content` were supplied — the engine computes the
+    /// hash from content, so a supplied hash beside it is ambiguous.
+    #[error(
+        "anchor supplies both `hash` and `content`; supply one — the engine computes the hash from `content`"
+    )]
+    ContentAndHash,
+    /// `content` was supplied for a grain whose prepared form is never
+    /// computed from supplied bytes: `entity` (computed from the live graph)
+    /// or `tree` (no prepared form).
+    #[error(
+        "anchor grain '{grain}' does not accept `content`: its prepared form is not computed \
+         from supplied bytes (accepted for span / file / url)"
+    )]
+    ContentNotAcceptedForGrain { grain: &'static str },
     /// A `source` was supplied but is empty after trimming — a source
     /// name, when present, must be one of the producing binding's
     /// declared names, and an empty string can never be one.
@@ -553,6 +577,21 @@ impl AnchorValidationError {
                 d.insert("field".into(), "hash".into());
                 d.insert("class".into(), serde_json::json!(class));
             }
+            AnchorValidationError::ContentAndHash => {
+                d.insert("field".into(), "content".into());
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!("either `hash` or `content`, never both"),
+                );
+            }
+            AnchorValidationError::ContentNotAcceptedForGrain { grain } => {
+                d.insert("field".into(), "content".into());
+                d.insert("grain".into(), serde_json::json!(grain));
+                d.insert(
+                    "accepted_grains".into(),
+                    serde_json::json!(["span", "file", "url"]),
+                );
+            }
             AnchorValidationError::ArtifactUnresolvable {
                 artifact,
                 candidates,
@@ -601,9 +640,13 @@ impl AnchorInput {
     /// - class present and known;
     /// - grain present and known;
     /// - artifact reference present and non-empty;
-    /// - a hash is supplied only on a hash-bearing class;
+    /// - a hash (or content to hash) is supplied only on a hash-bearing
+    ///   class; `content` and `hash` are mutually exclusive; `content` is
+    ///   accepted only for the grains whose prepared form the registry
+    ///   computes from supplied bytes (`span` / `file` / `url`), and then
+    ///   `hash` is the registry's prepared hash of it;
     /// - hash stability, when supplied, is a known wire string (defaults
-    ///   to `stable` when absent);
+    ///   per grain when absent — `url` unstable, every other grain stable);
     /// - grain supported by the medium's namespace (when `medium` given).
     pub fn validate(&self, medium: Option<(&str, &str)>) -> Result<Anchor, AnchorValidationError> {
         let class = match self
@@ -637,10 +680,10 @@ impl AnchorInput {
             .map(str::to_string)
             .ok_or(AnchorValidationError::MissingArtifact)?;
 
-        // Hash stability: default `stable` when absent; refuse an unknown
-        // supplied value.
+        // Hash stability: default per grain when absent (`url` unstable,
+        // every other grain stable); refuse an unknown supplied value.
         let hash_stability = match self.hash_stability.as_deref() {
-            None => AnchorHashStability::Stable,
+            None => crate::preparation::default_hash_stability(grain),
             Some(s) => AnchorHashStability::from_wire(s).ok_or_else(|| {
                 AnchorValidationError::UnknownHashStability {
                     got: s.to_string(),
@@ -656,11 +699,28 @@ impl AnchorInput {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        if hash.is_some() && !class.is_hash_bearing() {
+        if (hash.is_some() || self.content.is_some()) && !class.is_hash_bearing() {
             return Err(AnchorValidationError::HashOnNonHashClass {
                 class: class.as_wire(),
             });
         }
+        // Supplied content: the engine computes the prepared hash through the
+        // preparation registry (touchpoint A at write time) — the one way a
+        // `url` anchor's recorded hash is ever the engine's prepared form.
+        let hash = match self.content.as_deref() {
+            None => hash,
+            Some(_) if hash.is_some() => return Err(AnchorValidationError::ContentAndHash),
+            Some(content) => {
+                match crate::preparation::supplied_content_hash(grain, content.as_bytes()) {
+                    Some(h) => Some(h),
+                    None => {
+                        return Err(AnchorValidationError::ContentNotAcceptedForGrain {
+                            grain: grain.as_wire(),
+                        });
+                    }
+                }
+            }
+        };
 
         // Grain must be expressible in the medium's namespace.
         if let Some((medium_type, namespace)) = medium
@@ -1250,12 +1310,112 @@ mod tests {
         assert_eq!(a.hash_stability, AnchorHashStability::Stable);
     }
 
+    /// Path grains keep their `stable` default — pinned, because the
+    /// per-grain default that gives `url` its `unstable` must not leak.
     #[test]
     fn validate_defaults_hash_stability_to_stable() {
+        for grain in ["span", "file", "tree"] {
+            let mut i = valid_input();
+            i.grain = Some(grain.into());
+            i.hash_stability = None;
+            let a = i.validate(None).unwrap();
+            assert_eq!(a.hash_stability, AnchorHashStability::Stable, "{grain}");
+        }
+        let mut e = valid_input();
+        e.grain = Some("entity".into());
+        e.artifact = Some("m--e".into());
+        e.hash_stability = None;
+        assert_eq!(
+            e.validate(None).unwrap().hash_stability,
+            AnchorHashStability::Stable
+        );
+    }
+
+    /// A `url` anchor defaults to `unstable` (a served page is a moving
+    /// target — a hash break resolves `recheck`, never `drifted`) unless the
+    /// author asserts `stable`.
+    #[test]
+    fn validate_defaults_url_grain_to_unstable_unless_declared() {
         let mut i = valid_input();
+        i.grain = Some("url".into());
+        i.artifact = Some("https://example.invalid/doc".into());
         i.hash_stability = None;
-        let a = i.validate(None).unwrap();
-        assert_eq!(a.hash_stability, AnchorHashStability::Stable);
+        assert_eq!(
+            i.validate(None).unwrap().hash_stability,
+            AnchorHashStability::Unstable
+        );
+        i.hash_stability = Some("stable".into());
+        assert_eq!(
+            i.validate(None).unwrap().hash_stability,
+            AnchorHashStability::Stable
+        );
+    }
+
+    /// Supplied `content` becomes the registry's prepared hash: for a `url`
+    /// anchor the same canonicalization the path grains use over what the
+    /// observer read; for `file`/`span` the hash the engine would compute
+    /// from the file itself. `hash` beside it is refused, as is content on
+    /// a grain the registry never prepares from bytes, or on a non-hash
+    /// class.
+    #[test]
+    fn content_yields_the_prepared_hash_through_the_registry() {
+        let mut u = valid_input();
+        u.grain = Some("url".into());
+        u.artifact = Some("https://example.invalid/doc".into());
+        u.hash = None;
+        u.hash_stability = None;
+        u.content = Some("<p>hello</p>\r\n".into());
+        let a = u.validate(None).unwrap();
+        assert_eq!(
+            a.hash.as_deref(),
+            Some(crate::preparation::url_prepared_hash(b"<p>hello</p>\n").as_str())
+        );
+        assert_eq!(a.hash_stability, AnchorHashStability::Unstable);
+
+        let mut f = valid_input();
+        f.hash = None;
+        f.content = Some("fn a() {}\n".into());
+        assert_eq!(
+            f.validate(None).unwrap().hash.as_deref(),
+            Some(prepared_content_hash(b"fn a() {}").as_str())
+        );
+
+        let mut both = valid_input();
+        both.content = Some("x".into());
+        assert_eq!(
+            both.validate(None).unwrap_err(),
+            AnchorValidationError::ContentAndHash
+        );
+
+        let mut ent = valid_input();
+        ent.grain = Some("entity".into());
+        ent.artifact = Some("m--e".into());
+        ent.hash = None;
+        ent.content = Some("x".into());
+        let err = ent.validate(None).unwrap_err();
+        assert_eq!(
+            err,
+            AnchorValidationError::ContentNotAcceptedForGrain { grain: "entity" }
+        );
+        assert_eq!(err.detail()["field"], "content");
+
+        let mut tree = valid_input();
+        tree.grain = Some("tree".into());
+        tree.hash = None;
+        tree.content = Some("x".into());
+        assert!(matches!(
+            tree.validate(None).unwrap_err(),
+            AnchorValidationError::ContentNotAcceptedForGrain { grain: "tree" }
+        ));
+
+        let mut informed = valid_input();
+        informed.class = Some("informed-by".into());
+        informed.hash = None;
+        informed.content = Some("x".into());
+        assert!(matches!(
+            informed.validate(None).unwrap_err(),
+            AnchorValidationError::HashOnNonHashClass { .. }
+        ));
     }
 
     #[test]

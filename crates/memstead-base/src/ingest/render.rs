@@ -59,19 +59,30 @@ pub enum RenderBriefError {
     },
 }
 
-/// If any source facet declares an (unimplemented) preparation step, return the
-/// unsupported-and-skipped message the plugin's preparation guard emits; `None`
-/// when every source is directly ingestable. No preparation implementation
-/// exists, so *any* declared preparation is unsupported.
+/// If any primary source declares a preparation the engine's registry
+/// ([`crate::preparation`]) does not know, return the unsupported-and-skipped
+/// message; `None` when every declared preparation is registered (or none
+/// is declared). Mirrors [`crate::binding::validate_binding`]'s registry
+/// rule for a record that acquired an unknown identifier by hand — accepted
+/// at rest, refused here rather than run over content the engine cannot
+/// prepare — so the two refusal paths carry one semantics.
 fn preparation_refusal(resolved: &ResolvedIngest) -> Option<String> {
     resolved.sources.iter().find_map(|s| match s {
-        ResolvedSource::Primary(p) => p.preparation.as_deref().map(|prep| {
-            format!(
-                "> **[ingest] Ingest \"{}\" is unsupported: facet \"{}\" declares preparation \
-                 \"{}\", which has no implementation. Skipping.**\n",
-                resolved.name, p.name, prep
-            )
-        }),
+        ResolvedSource::Primary(p) => p
+            .preparation
+            .as_deref()
+            .filter(|prep| !crate::preparation::is_registered(prep))
+            .map(|prep| {
+                format!(
+                    "> **[ingest] Ingest \"{}\" is unsupported: source \"{}\" declares \
+                     preparation \"{}\", which is not in this engine's preparation registry \
+                     (registered: {}). Skipping.**\n",
+                    resolved.name,
+                    p.name,
+                    prep,
+                    crate::preparation::registered_identifiers().join(", ")
+                )
+            }),
         ResolvedSource::Reference { .. } => None,
     })
 }
@@ -166,10 +177,10 @@ pub fn render_ingest_brief(
         write_active_binding_file(workspace_root, &binding_id);
     }
 
-    // Refuse an ingest whose source facet declares a deterministic preparation
-    // step (e.g. `pdf-to-markdown`) — no preparation implementation exists, so
-    // the ingest is reported unsupported and skipped rather than run against
-    // raw, unprepared content. Mirrors the plugin's preparation guard.
+    // Refuse an ingest whose source declares a preparation the registry does
+    // not know (a hand-edited record — every edit path refuses it earlier):
+    // reported unsupported and skipped rather than run against content the
+    // engine cannot prepare. A registered preparation passes.
     if let Some(message) = preparation_refusal(&resolved) {
         return Ok(message);
     }
@@ -586,11 +597,13 @@ mod tests {
         })
     }
 
-    /// An ingest whose source facet declares an unimplemented preparation step
-    /// is refused (unsupported / skip) rather than rendered — the plugin's
-    /// preparation guard, ported.
+    /// An ingest whose source declares a preparation the registry does not
+    /// know is refused (unsupported / skip) rather than rendered — the same
+    /// rule `validate_binding` applies, mirrored for a hand-edited record.
+    /// A registered preparation passes, and the message speaks of sources,
+    /// never of the retired facet noun.
     #[test]
-    fn preparation_step_is_refused() {
+    fn unregistered_preparation_is_refused_registered_passes() {
         assert_eq!(
             preparation_refusal(&ingest_with(vec![primary("f", None)])),
             None
@@ -601,6 +614,14 @@ mod tests {
             }])),
             None
         );
+        assert_eq!(
+            preparation_refusal(&ingest_with(vec![primary(
+                "claims",
+                Some(crate::preparation::ENTITY_LOAD_BEARING),
+            )])),
+            None,
+            "a registered preparation is not refused at render"
+        );
         let msg = preparation_refusal(&ingest_with(vec![primary(
             "manuals",
             Some("pdf-to-markdown"),
@@ -608,7 +629,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             msg,
-            "> **[ingest] Ingest \"ing\" is unsupported: facet \"manuals\" declares preparation \"pdf-to-markdown\", which has no implementation. Skipping.**\n"
+            "> **[ingest] Ingest \"ing\" is unsupported: source \"manuals\" declares preparation \"pdf-to-markdown\", which is not in this engine's preparation registry (registered: entity-load-bearing). Skipping.**\n"
         );
+        assert!(!msg.contains("facet"));
     }
 }

@@ -215,7 +215,7 @@ fn migrate_legal_codebase_binding_validates_clean() {
 fn migrate_surfaces_preparation_capability_warning() {
     let tmp = fixture("discovery", "");
     let root = tmp.path();
-    // Overwrite the facet to declare an (unimplemented) preparation step.
+    // Overwrite the facet to declare a preparation the registry does not know.
     write_store(
         root,
         "facets/engine/source-tree.json",

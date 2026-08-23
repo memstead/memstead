@@ -2785,6 +2785,7 @@ mod tests {
                 key: "note".to_string(),
                 heading: "Note".to_string(),
                 required: false,
+                load_bearing: None,
                 search_weight: 1.0,
                 catch_all: false,
                 write_rules: vec![],

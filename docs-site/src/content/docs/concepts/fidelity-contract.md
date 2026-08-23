@@ -108,13 +108,19 @@ guide](../../guides/verify-in-ci/)), these are the edges of what the gate can se
   refuses outright; and a record that carries one anyway is refused at validation.
   Asking a web binding to sync therefore names the capability gap itself, never a
   remedy no medium can honour.
-- **Preparation of non-text media (e.g. PDF).** A facet may declare a preparation
-  step (PDF→markdown, audio→transcript), but no preparation implementation ships
-  today. A source that declares one is **skipped at run time**: the record is
-  accepted at declaration, and the run that would consume it reports the
-  unsupported preparation and exits without doing work. The gap is named when
-  you hit it, not when you declare it — which is the honest description of
-  where the edge currently sits.
+- **Preparation is a registry, and it ships one flavour.** A source's
+  `preparation` names a preparation the engine registers; today that is
+  `entity-load-bearing` for graph sources (an entity anchor hashes its type's
+  load-bearing sections, so a notes-only edit does not drift a dependent).
+  Delivery preparation and codebase-to-code-map are designed, not shipped.
+  Non-text media conversion (PDF, DOCX, audio) is a non-goal: an agent with a
+  capable read tool extracts, and the prepared-content hash already falls back
+  to a raw-byte digest for a binary artifact, so drift over a PDF is detected
+  without any preparation. An identifier the registry does not know is refused
+  at declaration on every edit path; a hand-edited record carrying one is
+  skipped at run time with the registered set named, never run over content the
+  engine cannot prepare. The registered set is listed in the
+  [binding reference](../../reference/binding/).
 
 - **The mtime `#synced` baseline does not survive a fresh checkout.** A binding using
   mtime change-detection compares modification times against a recorded baseline, and a

@@ -21,6 +21,28 @@ A **binding** (stored as a `projection` file at `.memstead/projections/<mem>/<na
 | `operations` | object | yes | — | The operations this binding declares. Every operation is optional; an absent mutating operation (build/sync) refuses at run time with a remedy, an absent verify means engine defaults. |
 | `sources` | array | no | — | The inline sources the binding consumes, in declaration order. Each `name` is unique within the record. |
 
+## Per-source fields
+
+One inline source — the full description of a body of information the pipeline reads: the medium half (`type` / `pointer` / `change_detection`) and the facet half (`scope` / `engagement` / `preparation`).
+
+| Field | Type | Required | Allowed values | Description |
+| --- | --- | --- | --- | --- |
+| `name` | string | yes | — | Stable name — keys per-source sync/verify state (`<mem>/<binding>/<source>#synced`). |
+| `type` | string | yes | `codebase`, `filesystem`, `graph`, `git`, `web` | What kind of surface this source references. |
+| `pointer` | string | yes | — | Where the body of information lives — a path, URL, or mem id, interpreted per `type`. |
+| `change_detection` | string | no | `none`, `git`, `mtime`, `auto` | Optional declared change-detection strategy: `none` / `git` / `mtime` / `auto`. Unset means `auto` (the engine probes for a git work tree). A graph-typed source always uses the graph snapshot signal. |
+| `scope` | array | no | — | Allow/deny selection over the source. A source with no allow patterns is unscoped — a typed refusal at run time, not "everything"; a source that truly wants everything writes `**/*`. |
+| `engagement` | object | no | — | Engagement contract — verbs, tools, terminology, discipline. Free-form; the engine does not interpret it. |
+| `preparation` | string | no | — | Optional preparation identifier: one registered in the engine's preparation registry (today `entity-load-bearing`, for graph sources: an entity anchor's prepared form is the type's load-bearing sections). At most one per source. An identifier the registry does not know is refused at validation time; a registered one over a medium whose anchor namespace admits none of its grains is refused too. |
+
+### Registered preparations
+
+`preparation` names a preparation the engine registers; an identifier outside this table is refused at binding validation (and a hand-edited record carrying one is skipped at run time, the registered set named). A registered preparation is legal only over a medium whose anchor namespace admits one of its grains. The engine consults the registry at two touchpoints: anchor observation (the prepared form an artifact hashes as — shared by the binding-backed verify and the standalone `verify-anchors`, so both inherit every entry) and ingest delivery (a source's unit sequence; reserved, no entry yet). Non-text media conversion (PDF, DOCX, audio) is a non-goal: an agent's read tool extracts, and the prepared-content hash already drift-detects binary artifacts by raw bytes.
+
+| Identifier | Touchpoint | Grains | What it prepares |
+| --- | --- | --- | --- |
+| `entity-load-bearing` | anchor observation (prepared form) | `entity` | an entity's prepared form is the stable serialization of its type's load-bearing sections (explicitly declared, else the required sections, else every section) — notes-only edits keep dependents' anchors resolving |
+
 ## Operations
 
 Each operation under `operations` is optional. An absent **build** or **sync** makes that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an absent **verify** means engine defaults (verify never refuses on an absent operation block). Verify mutates no entity, but it is not a pure read: a completed run records its findings store, backfills observed hashes onto hash-less anchors, and records a `#verified` baseline.

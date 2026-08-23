@@ -172,6 +172,14 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
             "null"
           ]
         },
+        "content": {
+          "default": null,
+          "description": "The observed artifact CONTENT (UTF-8 text), for the engine to compute `hash` from through its preparation registry — the write-time observation for a grain the engine cannot observe itself: a `url` anchor (the engine never fetches; what you read is canonicalized exactly as a path grain's bytes are). Also accepted for `span`/`file`. Mutually exclusive with `hash` (both refuses INVALID_ANCHOR); refused on `authored`/`informed-by`, and on the `entity`/`tree` grains, whose prepared form is never computed from supplied bytes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "derived_from": {
           "default": null,
           "description": "For a `derived` class: the input artifact refs the entity was derived from. Empty/omitted for every other class.",
@@ -201,7 +209,7 @@ Create a new entity. Read the target mem's schema first via `memstead_schema` (s
         },
         "hash_stability": {
           "default": null,
-          "description": "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
+          "description": "Medium's declared hash stability: `stable` | `unstable` (defaults per grain: `url` to `unstable`, every other grain to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
           "type": [
             "string",
             "null"
@@ -1566,6 +1574,14 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
             "null"
           ]
         },
+        "content": {
+          "default": null,
+          "description": "The observed artifact CONTENT (UTF-8 text), for the engine to compute `hash` from through its preparation registry — the write-time observation for a grain the engine cannot observe itself: a `url` anchor (the engine never fetches; what you read is canonicalized exactly as a path grain's bytes are). Also accepted for `span`/`file`. Mutually exclusive with `hash` (both refuses INVALID_ANCHOR); refused on `authored`/`informed-by`, and on the `entity`/`tree` grains, whose prepared form is never computed from supplied bytes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "derived_from": {
           "default": null,
           "description": "For a `derived` class: the input artifact refs the entity was derived from. Empty/omitted for every other class.",
@@ -1595,7 +1611,7 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
         },
         "hash_stability": {
           "default": null,
-          "description": "Medium's declared hash stability: `stable` | `unstable` (defaults to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
+          "description": "Medium's declared hash stability: `stable` | `unstable` (defaults per grain: `url` to `unstable`, every other grain to `stable`). An unstable-source hash break resolves `recheck`, not `drifted`.",
           "type": [
             "string",
             "null"

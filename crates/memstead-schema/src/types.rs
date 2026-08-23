@@ -614,6 +614,21 @@ pub struct SectionDef {
     /// (`MISSING_REQUIRED_SECTION`).
     #[serde(default)]
     pub required: bool,
+    /// Whether this section is **load-bearing** for the entity's claim:
+    /// the part of the entity a dependent conclusion rests on, as
+    /// opposed to notes, context, or bookkeeping. Consumed by the
+    /// `entity-load-bearing` preparation (`memstead-base::preparation`):
+    /// an entity-grain anchor's prepared form is the stable
+    /// serialization of the type's load-bearing sections, so a notes-only
+    /// edit never breaks a dependent's prepared hash while a load-bearing
+    /// edit always does. **Absence means undeclared**: when NO section of
+    /// a type declares this flag, the type's required sections are its
+    /// load-bearing set (and a type with no required sections falls back
+    /// to every section). Declaring `load_bearing: false` on a required
+    /// section is legal and excludes it once any section of the type
+    /// declares the flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_bearing: Option<bool>,
     pub search_weight: f32,
     #[serde(default)]
     pub catch_all: bool,

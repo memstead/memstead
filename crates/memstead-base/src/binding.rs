@@ -23,8 +23,10 @@
 //!    record — changes the hash.
 //! 3. [`medium_capabilities`] + [`validate_binding`] — the medium-capability
 //!    matrix (the medium *half* of a source description keeps the medium
-//!    vocabulary) and the validation entry point: capability refusals plus
-//!    in-record source validation (empty / duplicate source names).
+//!    vocabulary) and the validation entry point: capability refusals,
+//!    in-record source validation (empty / duplicate source names), and the
+//!    preparation-registry check (a declared `preparation` must be one
+//!    [`crate::preparation`] knows, over a medium it can apply to).
 //!
 //! The findings store ([`crate::ingest::findings`]) keys on `hash(D)`, so the
 //! consolidation's shape change invalidates prior findings by construction —
@@ -41,12 +43,18 @@ pub const BINDING_VERSION: u32 = 2;
 /// The engine's current preparation-implementation version — the single
 /// source of truth for "which preparation implementation is live".
 ///
-/// No preparation implementation exists yet, so this is `0` ("none"). It
-/// nonetheless participates in [`hash_binding`]: a future preparation
-/// implementation bumps this constant, which — because the preparation
-/// identifier + this version are both hashed — invalidates every prior
-/// finding keyed on the old `hash(D)` by construction.
-pub const PREPARATION_IMPL_VERSION: u32 = 0;
+/// `1` since the first registered preparation (`entity-load-bearing`, see
+/// [`crate::preparation`]) landed; `0` meant "none". It participates in
+/// [`hash_binding`] for every source: because the declared identifier and
+/// this version are both hashed, landing or changing an implementation
+/// invalidates every prior finding keyed on the old `hash(D)` by
+/// construction — the findings store keys on `hash(D)` alone, so the old
+/// batch is segregated as superseded and never mixed into the current view
+/// (pinned by `ingest::findings`'s
+/// `impl_version_bump_invalidates_findings_by_construction`). Bump it once
+/// per landed or changed implementation, never per registry entry that
+/// merely exists.
+pub const PREPARATION_IMPL_VERSION: u32 = 1;
 
 // ---------------------------------------------------------------------------
 // The v2 record
@@ -402,6 +410,15 @@ fn canonical_json(value: &serde_json::Value) -> String {
 /// input lives inside the one record, so a selection or pointer edit
 /// invalidates the hash — and thus any findings keyed on it — directly.
 pub fn hash_binding(binding: &Binding) -> String {
+    hash_binding_at_impl_version(binding, PREPARATION_IMPL_VERSION)
+}
+
+/// [`hash_binding`] under an explicit preparation-implementation version.
+/// The live hash is always [`PREPARATION_IMPL_VERSION`]'s; this exists so a
+/// caller can name the hash a prior engine generation keyed its findings on
+/// (the invalidation-by-construction pin, a migration report) without
+/// re-deriving the canonical projection.
+pub fn hash_binding_at_impl_version(binding: &Binding, preparation_impl_version: u32) -> String {
     let sources: Vec<HashSource<'_>> = binding
         .sources
         .iter()
@@ -409,7 +426,7 @@ pub fn hash_binding(binding: &Binding) -> String {
             source: &s.name,
             patterns: &s.scope,
             preparation: &s.preparation,
-            preparation_impl_version: PREPARATION_IMPL_VERSION,
+            preparation_impl_version,
             medium_type: s.medium_type,
             pointer: &s.pointer,
             change_detection: &s.change_detection,
@@ -660,28 +677,51 @@ pub enum CapabilityError {
         /// That medium's anchor namespace.
         anchor_namespace: &'static str,
     },
-    /// A source declares a deterministic preparation step. No preparation
-    /// implementation exists ([`PREPARATION_IMPL_VERSION`] is `0`), so any
-    /// declared preparation is unsupported.
+    /// A source declares a preparation identifier the engine's preparation
+    /// registry ([`crate::preparation`]) does not know. The refusal is
+    /// exactly "not in this engine's registry": a registered identifier
+    /// validates clean, an unknown one refuses, and the message names the
+    /// registered set.
     ///
     /// Raised by [`validate_binding`], which the edit/validate paths call —
-    /// NOT `projection init` (which has no `--preparation` flag) and not the
-    /// brief renderer. A record that acquires a preparation some other way is
-    /// therefore accepted at rest and skipped at run time with exit 0; see
-    /// `GLOSSARY.md` and `crate::pipeline::Source::preparation`. "Refused at
-    /// validation" is true of this error's own call sites, not of every path
-    /// by which a preparation can reach a record.
+    /// NOT `projection init` (which has no `--preparation` flag). The brief
+    /// renderer mirrors the same rule for a record that acquired an unknown
+    /// identifier by hand (accepted at rest, reported unsupported and
+    /// skipped at run time with exit 0; see `GLOSSARY.md` and
+    /// `crate::pipeline::Source::preparation`), so both refusal paths carry
+    /// one semantics and move together.
     #[error(
-        "source '{source_name}' declares preparation '{preparation}', which has no implementation \
-         (preparation impl version {impl_version})"
+        "source '{source_name}' declares preparation '{preparation}', which is not in this \
+         engine's preparation registry (registered: {}; preparation impl version {impl_version})",
+        crate::preparation::registered_identifiers().join(", ")
     )]
     PreparationUnsupported {
         /// The offending source.
         source_name: String,
         /// The declared preparation identifier.
         preparation: String,
-        /// The current preparation-implementation version (`0` = none).
+        /// The current preparation-implementation version.
         impl_version: u32,
+    },
+    /// A registered preparation is declared over a medium whose anchor
+    /// namespace admits none of the grains it prepares (`entity-load-bearing`
+    /// over a `codebase` source). It would never meet an anchor it applies
+    /// to, so the declaration is refused at validation rather than accepted
+    /// and silently never applying.
+    #[error(
+        "source '{source_name}' declares preparation '{preparation}' over a '{medium_type}' \
+         medium whose '{anchor_namespace}' anchor namespace admits none of the grains it \
+         prepares"
+    )]
+    PreparationGrainMismatch {
+        /// The offending source.
+        source_name: String,
+        /// The declared (registered) preparation identifier.
+        preparation: String,
+        /// The medium type it was declared over.
+        medium_type: String,
+        /// That medium's anchor namespace.
+        anchor_namespace: &'static str,
     },
     /// The binding declares `coverage_semantics: exhaustive` while at least
     /// one source sits on a medium whose scope the engine cannot enumerate
@@ -736,8 +776,10 @@ pub enum CapabilityError {
 ///   ([`CapabilityError::OperationOutOfScope`]);
 /// - a glob `deny_paths` list over a non-path-namespace medium
 ///   ([`CapabilityError::GlobDenyIllegal`]);
-/// - any declared source preparation
-///   ([`CapabilityError::PreparationUnsupported`]);
+/// - a source preparation the engine's registry does not know
+///   ([`CapabilityError::PreparationUnsupported`]), or a registered one
+///   over a medium whose anchor namespace admits none of its grains
+///   ([`CapabilityError::PreparationGrainMismatch`]);
 /// - a declared `coverage_semantics: exhaustive` over a non-enumerable
 ///   medium ([`CapabilityError::CoverageExhaustiveUnsupported`]);
 /// - a `prune` block requesting `never-clobber` over a non-base-retrievable
@@ -773,13 +815,32 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
             .and_then(|v| v.as_str().map(str::to_string))
             .unwrap_or_default();
 
-        // A declared preparation is always unsupported (no implementation).
+        // A declared preparation must be one the registry knows — the
+        // touchpoints consult the registry by identifier, so an unknown one
+        // could never be applied — and one that can apply over this medium's
+        // anchor namespace.
         if let Some(prep) = &source.preparation {
-            refusals.push(CapabilityError::PreparationUnsupported {
-                source_name: source.name.clone(),
-                preparation: prep.clone(),
-                impl_version: PREPARATION_IMPL_VERSION,
-            });
+            match crate::preparation::lookup(prep) {
+                None => refusals.push(CapabilityError::PreparationUnsupported {
+                    source_name: source.name.clone(),
+                    preparation: prep.clone(),
+                    impl_version: PREPARATION_IMPL_VERSION,
+                }),
+                Some(registered)
+                    if !crate::preparation::applies_to_namespace(
+                        registered,
+                        caps.anchor_namespace,
+                    ) =>
+                {
+                    refusals.push(CapabilityError::PreparationGrainMismatch {
+                        source_name: source.name.clone(),
+                        preparation: prep.clone(),
+                        medium_type: medium_type.clone(),
+                        anchor_namespace: caps.anchor_namespace,
+                    });
+                }
+                Some(_) => {}
+            }
         }
 
         // sync / verify over a medium with no change signal (web) is out of scope.
@@ -1593,9 +1654,11 @@ mod tests {
         );
     }
 
-    /// A declared source preparation refuses at validation time.
+    /// A source preparation the registry does not know refuses at
+    /// validation time — the narrowed refusal: same error shape, "not in
+    /// this engine's registry" semantics, the registered set named.
     #[test]
-    fn declared_preparation_refuses() {
+    fn unregistered_preparation_refuses() {
         let mut b = binding();
         b.operations.sync = None;
         b.operations.verify = None;
@@ -1609,12 +1672,106 @@ mod tests {
             None,
         )];
         let errs = validate_binding(&b).unwrap_err();
+        let refusal = errs
+            .iter()
+            .find(|e| matches!(
+                e,
+                CapabilityError::PreparationUnsupported { preparation, impl_version, .. }
+                    if preparation == "pdf-to-markdown" && *impl_version == PREPARATION_IMPL_VERSION
+            ))
+            .unwrap_or_else(|| panic!("expected PreparationUnsupported, got {errs:?}"));
+        let msg = refusal.to_string();
+        assert!(
+            msg.contains("not in this engine's preparation registry"),
+            "{msg}"
+        );
+        assert!(
+            msg.contains("entity-load-bearing"),
+            "names the registered set: {msg}"
+        );
+        assert!(
+            !msg.contains("facet"),
+            "the retired noun stays retired: {msg}"
+        );
+    }
+
+    /// A registered preparation validates clean over a medium whose anchor
+    /// namespace admits its grain (`entity-load-bearing` over `graph`), and
+    /// refuses over one that does not (the same identifier over `codebase`,
+    /// where no entity-grain anchor could ever meet it).
+    #[test]
+    fn registered_preparation_validates_over_its_namespace_only() {
+        let mut ok = binding();
+        ok.deny_paths.clear();
+        ok.sources = vec![source(
+            "claims",
+            MediumType::Graph,
+            "home",
+            vec![allow("*")],
+            Some(crate::preparation::ENTITY_LOAD_BEARING),
+            None,
+        )];
+        assert!(
+            validate_binding(&ok).is_ok(),
+            "registered preparation over its namespace validates clean: {:?}",
+            validate_binding(&ok)
+        );
+
+        let mut mismatch = binding();
+        mismatch.sources = vec![source(
+            "source-tree",
+            MediumType::Codebase,
+            "../public",
+            vec![allow("**/*.rs")],
+            Some(crate::preparation::ENTITY_LOAD_BEARING),
+            None,
+        )];
+        let errs = validate_binding(&mismatch).unwrap_err();
         assert!(
             errs.iter().any(|e| matches!(
                 e,
-                CapabilityError::PreparationUnsupported { preparation, .. } if preparation == "pdf-to-markdown"
+                CapabilityError::PreparationGrainMismatch { preparation, anchor_namespace, .. }
+                    if preparation == crate::preparation::ENTITY_LOAD_BEARING && *anchor_namespace == "path"
             )),
-            "expected PreparationUnsupported, got {errs:?}"
+            "expected PreparationGrainMismatch, got {errs:?}"
+        );
+        assert!(
+            !errs
+                .iter()
+                .any(|e| matches!(e, CapabilityError::PreparationUnsupported { .. })),
+            "a registered identifier is never reported as unregistered"
+        );
+    }
+
+    /// The impl version is hashed for EVERY source, with or without a
+    /// declared preparation: the hash a prior engine generation computed
+    /// (impl version 0) differs from the live one, so every finding keyed on
+    /// it is invalidated by construction when the constant bumps.
+    #[test]
+    fn impl_version_is_hashed_into_every_binding() {
+        let plain = binding();
+        assert!(plain.sources.iter().all(|s| s.preparation.is_none()));
+        let live = hash_binding(&plain);
+        assert_eq!(
+            live,
+            hash_binding_at_impl_version(&plain, PREPARATION_IMPL_VERSION)
+        );
+        assert_ne!(
+            live,
+            hash_binding_at_impl_version(&plain, 0),
+            "the pre-registry generation's hash differs from the live one"
+        );
+        assert_ne!(
+            live,
+            hash_binding_at_impl_version(&plain, PREPARATION_IMPL_VERSION + 1)
+        );
+
+        let mut prepared = plain.clone();
+        prepared.sources[0].preparation = Some(crate::preparation::ENTITY_LOAD_BEARING.to_string());
+        assert_ne!(
+            hash_binding(&prepared),
+            live,
+            "the identifier is hashed too"
         );
     }
 

@@ -648,6 +648,13 @@
         "key": {
           "type": "string"
         },
+        "load_bearing": {
+          "description": "Whether this section is **load-bearing** for the entity's claim:\nthe part of the entity a dependent conclusion rests on, as\nopposed to notes, context, or bookkeeping. Consumed by the\n`entity-load-bearing` preparation (`memstead-base::preparation`):\nan entity-grain anchor's prepared form is the stable\nserialization of the type's load-bearing sections, so a notes-only\nedit never breaks a dependent's prepared hash while a load-bearing\nedit always does. **Absence means undeclared**: when NO section of\na type declares this flag, the type's required sections are its\nload-bearing set (and a type with no required sections falls back\nto every section). Declaring `load_bearing: false` on a required\nsection is legal and excludes it once any section of the type\ndeclares the flag.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "required": {
           "description": "Whether an entity must carry this section — **absence means\noptional**, the same rule metadata fields follow. `required:\ntrue` refuses a create without the section\n(`MISSING_REQUIRED_SECTION`).",
           "type": "boolean",

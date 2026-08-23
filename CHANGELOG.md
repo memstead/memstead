@@ -8,6 +8,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **The preparation slot has a registry, and its first flavour.** A
+  source's `preparation` names a preparation the engine registers
+  (`memstead-base::preparation`); the engine refuses only an identifier
+  the registry does not know (the same `PreparationUnsupported` shape,
+  now naming the registered set) on the edit paths and, for a hand-edited
+  record, on the brief-render path, whose message no longer speaks of
+  facets. A registered identifier over a medium whose anchor namespace
+  admits none of its grains refuses too (`PreparationGrainMismatch`). The
+  registry is consulted at anchor observation (the prepared form an
+  artifact hashes as; the standalone `verify-anchors` and the
+  binding-backed verify share that one site and inherit every entry) and
+  is reserved at ingest delivery. First flavour, `entity-load-bearing`
+  for graph sources: an entity-grain anchor's prepared form is the stable
+  serialization of the type's load-bearing sections (the new optional
+  `load_bearing` flag on a schema section; else the required sections;
+  else every section), so a notes-only edit keeps a dependent's anchor
+  resolving while a load-bearing edit drifts it. A source declaring no
+  preparation observes byte-for-byte as before. The `url` grain acquires
+  its prepared form the way path grains do, over the content its observer
+  supplies: anchors accept `content` beside `hash` (the engine computes the
+  prepared hash; mutually exclusive with `hash`, refused for the
+  `entity`/`tree` grains and non-hash classes), and a url anchor defaults
+  to `hash_stability: unstable`. `PREPARATION_IMPL_VERSION` is 1: every
+  binding's `hash(D)` changed, so every prior finding is superseded by
+  construction and re-derived by the next verify (findings are
+  measurements, never content).
 - **An untagged release is now a machine-visible state.** 0.9.0 was cut,
   committed and pushed and never tagged; every channel kept serving 0.8.1
   for four days while the tree said otherwise, and nothing noticed.
