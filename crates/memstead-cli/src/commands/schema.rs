@@ -43,9 +43,24 @@ use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::{CliContext, WorkspaceShape};
 
 #[derive(ClapArgs, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct Args {
     #[command(subcommand)]
-    pub command: SchemaCommand,
+    pub command: Option<SchemaCommand>,
+
+    /// Render a built-in schema package's README as the package it
+    /// ships in. `<REF>` is a bare built-in name (`planning`, resolved
+    /// to its newest generation) or a pin (`planning@0.4.0`). Every
+    /// `<name>@<x.y.z>` reference to the package's own name is
+    /// rewritten to the resolved pin: sibling generations of a built-in
+    /// carry the README of their first generation verbatim (sealed
+    /// bytes, never edited), so the resolved manifest is the one source
+    /// of the identity the reader sees. Markdown by default; `--json`
+    /// carries `schema`, `name`, `version`, `origin` and the rendered
+    /// `readme` (`null` when the package ships none). Unknown names
+    /// refuse with `SCHEMA_NOT_FOUND`.
+    #[arg(value_name = "REF")]
+    pub reference: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -107,11 +122,96 @@ pub struct InstallArgs {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    match args.command {
-        SchemaCommand::New(a) => scaffold_new(ctx, a),
-        SchemaCommand::Validate(a) => validate(ctx, a),
-        SchemaCommand::Install(a) => install(ctx, a),
+    match (args.command, args.reference) {
+        (Some(SchemaCommand::New(a)), _) => scaffold_new(ctx, a),
+        (Some(SchemaCommand::Validate(a)), _) => validate(ctx, a),
+        (Some(SchemaCommand::Install(a)), _) => install(ctx, a),
+        (None, Some(reference)) => show_builtin(ctx, &reference),
+        (None, None) => Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "memstead schema needs a built-in reference to render (`memstead schema \
+             planning@0.4.0`) or a subcommand (`new`, `validate`, `install`); \
+             `memstead schema --help` lists them"
+                .to_string(),
+        )
+        .into()),
     }
+}
+
+/// `memstead schema <REF>`: the built-in package's README rendered for
+/// the package it ships in (see [`Args::reference`]).
+fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
+    let schema_ref = resolve_builtin_read_ref(reference)?;
+    let version = schema_ref.version.to_string();
+    let pkg = memstead_schema::builtins::builtin_package(&schema_ref.name, &version).ok_or_else(
+        || {
+            CliError::new(
+                ExitKind::Validation,
+                "SCHEMA_NOT_FOUND",
+                format!("no built-in schema {}", schema_ref.as_display()),
+            )
+        },
+    )?;
+    let readme = pkg
+        .files
+        .iter()
+        .find(|(path, _)| path == memstead_schema::builtins::PACKAGE_README_FILE)
+        .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
+        .map(|text| {
+            memstead_schema::builtins::render_package_readme(&pkg.name, &pkg.version, text)
+        });
+    let pin = format!("{}@{}", pkg.name, pkg.version);
+    if ctx.json {
+        print_json(&json!({
+            "schema": pin,
+            "name": pkg.name,
+            "version": pkg.version,
+            "origin": "builtin",
+            "readme": readme,
+        }))?;
+        return Ok(());
+    }
+    match readme {
+        Some(text) => print_markdown(&format!(
+            "<!-- {pin}: built-in package README, rendered for this generation -->\n{text}"
+        )),
+        None => print_markdown(&format!(
+            "`{pin}` is a built-in package that ships no README.\n"
+        )),
+    }
+    Ok(())
+}
+
+/// Resolve a reference for a READ: a pin as given, a bare name to its
+/// newest built-in generation (a read is safe to default; `install`
+/// keeps refusing bare names so a pin is always explicit).
+fn resolve_builtin_read_ref(reference: &str) -> anyhow::Result<SchemaRef> {
+    if reference.contains('@') {
+        return resolve_builtin_ref(reference);
+    }
+    let reg = memstead_schema::SchemaRegistry::builtin();
+    let mut versions = reg.available_versions(reference);
+    versions.sort();
+    match versions.pop() {
+        Some(v) => Ok(SchemaRef::new(reference.to_string(), v)),
+        None => Err(CliError::new(
+            ExitKind::Validation,
+            "SCHEMA_NOT_FOUND",
+            format!(
+                "no built-in schema named {reference:?}; built-ins: {}",
+                builtin_names_joined(&reg)
+            ),
+        )
+        .into()),
+    }
+}
+
+fn builtin_names_joined(reg: &memstead_schema::SchemaRegistry) -> String {
+    let mut names: Vec<String> = reg.identities().into_iter().map(|(n, _)| n).collect();
+    names.sort();
+    names.dedup();
+    names.join(", ")
 }
 
 /// Version every scaffolded package starts at.
@@ -1145,6 +1245,26 @@ mod tests {
             cli.details.as_ref().unwrap()["path"],
             json!(dir.path()),
             "details echoes the offending path",
+        );
+    }
+
+    /// A read resolves a bare name to the newest generation and a pin
+    /// as given; an unknown name refuses typed with the roster.
+    #[test]
+    fn resolve_builtin_read_ref_defaults_bare_names_to_newest() {
+        let newest = resolve_builtin_read_ref("planning").expect("bare planning reads");
+        let mut all = memstead_schema::SchemaRegistry::builtin().available_versions("planning");
+        all.sort();
+        assert_eq!(Some(&newest.version), all.last());
+        let pinned = resolve_builtin_read_ref("planning@0.1.0").expect("pin reads");
+        assert_eq!(pinned.version.to_string(), "0.1.0");
+        let err = resolve_builtin_read_ref("not-a-builtin").expect_err("unknown refuses");
+        let cli = err.downcast_ref::<CliError>().unwrap();
+        assert_eq!(cli.code, "SCHEMA_NOT_FOUND");
+        assert!(
+            cli.message.contains("planning"),
+            "names the roster: {}",
+            cli.message
         );
     }
 

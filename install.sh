@@ -15,11 +15,8 @@
 # This wrapper fetches and runs both in sequence, delivering the single
 # `curl -sSf <url> | sh` install path the docs advertise.
 #
-# Operator-side setup:
-#   1. Host this file at `https://memstead.io/install.sh` (Vercel/Cloudflare
-#      static asset, or rewrite to the raw GitHub URL).
-#   2. Verify with `curl -sSf https://memstead.io/install.sh | sh` on a
-#      clean macOS / Linux host.
+# The served copy lives at `https://memstead.io/install.sh`; this file is
+# its source.
 #
 # Usage:
 #

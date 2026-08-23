@@ -120,6 +120,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   needs; at or above the minimum the flag passes silently; a missing or
   unparseable record degrades the same way. `--fail-on-findings` and
   `--redact-anchors` sit on no skill path and stay ungated.
+- **`memstead schema <ref>` renders a built-in package's README for the
+  generation it ships in.** Sibling generations of a built-in carry the
+  README of their first generation verbatim (the bytes are sealed by the
+  retention guard, so no in-place edit may fix them), and 17 of 25 packages
+  stated a version that was not theirs. The render substitutes every
+  `<name>@<x.y.z>` reference to the package's own name with the resolved
+  pin and leaves everything else alone; `<ref>` is a pin (`planning@0.4.0`)
+  or a bare name, resolved to its newest generation for a read (`install`
+  keeps refusing bare names, so a pin stays explicit). `--json` carries
+  `schema`, `name`, `version`, `origin` and the rendered `readme`. The
+  `new` / `validate` / `install` subcommands are unchanged. Exercised for
+  every built-in in the binary, so a new generation is covered the day it
+  ships; `MANIFEST.toml` and the sealed bytes are untouched.
 
 ### Fixed
 - **`mem set-schema` repairs a `SCHEMA_PIN_MISMATCH` instead of
@@ -791,7 +804,7 @@ engine 0.10.0 or later; older engines refuse them at parse
   section, and `install.sh`'s next-step line now name
   `memstead quickstart --repo .` beside it.
 
-## [0.9.0] - 2026-08-19 (cut, never published)
+## [0.9.0] - 2026-08-19 (cut 2026-08-19, never published; its content ships in 0.10.0)
 
 ### Added
 - **A pilot-grade GitHub-issues mirror** (`scripts/mirror-issues.mjs`):
@@ -2879,8 +2892,7 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   `memstead-mcp` MCP server.
 
 [Unreleased]: https://github.com/memstead/memstead/compare/v0.10.0...HEAD
-[0.10.0]: https://github.com/memstead/memstead/compare/79be749...v0.10.0
-[0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...79be749
+[0.10.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.10.0
 [0.8.1]: https://github.com/memstead/memstead/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/memstead/memstead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/memstead/memstead/compare/v0.6.0...v0.7.0

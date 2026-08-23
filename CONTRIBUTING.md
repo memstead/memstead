@@ -51,12 +51,16 @@ Run the full suite before opening a PR:
 Or, while iterating on the engine, one flavour at a time:
 
 ```bash
-cargo nextest run --workspace --features mem-repo      # full (git-backed)
-cargo nextest run --workspace --no-default-features      # lean (folder-only)
+cargo nextest run --workspace --features mem-repo                            # full (git-backed)
+cargo nextest run --workspace --no-default-features --target-dir target/lean  # lean (folder-only)
 ```
 
 The engine builds in two flavours from one set of crates — the default
 `mem-repo` build and a lean `--no-default-features` build — and CI runs both.
+The lean run gets its own target directory: sharing `target/` leaves a
+degraded lean binary at `target/debug/memstead` after every lean run (a binary
+that is not what its path says it is), and the separate directory keeps the
+lean artifacts cached across runs.
 If your change touches a generated reference doc, regenerate it rather than
 editing it by hand (CI fails on drift); the generator is `xtask` — see
 [docs/build.md](docs/build.md).

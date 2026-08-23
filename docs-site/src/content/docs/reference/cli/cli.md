@@ -1596,13 +1596,18 @@ Set a `[mutations]` field. Today exposes `--require-notes` only; additional keys
 
 Author-time schema tooling. `memstead schema validate <path>` checks a schema package directory against the engine's loader without touching a workspace
 
-**Usage:** `memstead schema <COMMAND>`
+**Usage:** `memstead schema [REF]
+       schema &lt;COMMAND>`
 
 ###### **Subcommands:**
 
 * `new` — Scaffold a new schema package at `./<name>/` — a manifest plus one commented example type — that `memstead schema validate` passes unmodified. Prints the follow-up commands that take the package from folder to pinned mem
 * `validate` — Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader, as the package you are AUTHORING — always read in the current schema language, so retired keys (`optional:`, `propagating_relationships`) refuse here by design. A package already sealed under an older language can therefore be refused by this command and still load: sealed content is read under the generation it was sealed in, and that is the point of sealing. Validate what you write, not what you installed. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
 * `install` — Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a mem can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
+
+###### **Arguments:**
+
+* `<REF>` — Render a built-in schema package's README as the package it ships in. `<REF>` is a bare built-in name (`planning`, resolved to its newest generation) or a pin (`planning@0.4.0`). Every `<name>@<x.y.z>` reference to the package's own name is rewritten to the resolved pin: sibling generations of a built-in carry the README of their first generation verbatim (sealed bytes, never edited), so the resolved manifest is the one source of the identity the reader sees. Markdown by default; `--json` carries `schema`, `name`, `version`, `origin` and the rendered `readme` (`null` when the package ships none). Unknown names refuse with `SCHEMA_NOT_FOUND`
 
 
 
