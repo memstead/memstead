@@ -147,6 +147,98 @@ test("exit 3: no network is a named skip, never a verdict", () => {
   assert.match(down.out, /SKIPPED: no network \(api\.github\.com unreachable\)/);
 });
 
+// ── --prose and the changelog check ─────────────────────────────────────────
+//
+// The published binary is a stub in a pre-populated cache (the download
+// never happens); the tags come from MEMSTEAD_VERIFY_TAGS; the prose set
+// and the changelog are fixtures in the scratch tree.
+
+function proseScratch({ treeVersion, changelog }) {
+  const dir = scratch({ treeVersion, fx: fixtures({ v: treeVersion, jobs: ALL_SUCCESS }) });
+  mkdirSync(join(dir, "ci"), { recursive: true });
+  cpSync(join(dirname(SCRIPTS), "ci", "check_prose.py"), join(dir, "ci", "check_prose.py"));
+  mkdirSync(join(dir, "xtask"), { recursive: true });
+  writeFileSync(join(dir, "xtask", "docs-guard-allow.txt"), "# none\n");
+  // The "published" binary: accepts `health --strict` only.
+  const cache = join(dir, "cache", treeVersion);
+  mkdirSync(cache, { recursive: true });
+  writeFileSync(join(cache, "memstead"), `#!/bin/bash
+if [ "$1" = "--version" ]; then echo "memstead ${treeVersion}+gpublished"; exit 0; fi
+args="$*"
+case "$args" in
+  "--help") echo "Options:"; echo "      --json"; echo "      --quiet"; exit 0 ;;
+  "health --help") echo "Options:"; echo "      --strict"; echo "      --json"; exit 0 ;;
+  *) exit 2 ;;
+esac
+`);
+  chmodSync(join(cache, "memstead"), 0o755);
+  if (changelog !== undefined) writeFileSync(join(dir, "CHANGELOG.md"), changelog);
+  return dir;
+}
+
+test("--prose: a prose set ahead of the published binary is reported (exit 2); one at the tag is not (exit 0)", () => {
+  const dir = proseScratch({ treeVersion: "0.10.0" });
+  const ahead = join(dir, "prose-ahead");
+  mkdirSync(ahead);
+  writeFileSync(join(ahead, "guide.md"), "# Guide\n\n```bash\nmemstead health --strict --consume\nmemstead frobnicate\n```\n");
+  const at = join(dir, "prose-at");
+  mkdirSync(at);
+  writeFileSync(join(at, "guide.md"), "# Guide\n\n```bash\nmemstead health --strict\n```\n");
+  const seams = { MEMSTEAD_VERIFY_TAGS: "0.8.1 0.9.0 0.10.0", MEMSTEAD_VERIFY_CACHE: join(dir, "cache") };
+
+  const r = run(dir, ["--prose", "--prose-set", ahead], seams);
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /prose report against the published v0\.10\.0 binary \(0\.10\.0\+gpublished\)/);
+  assert.match(r.out, /REPORT: prose ahead of v0\.10\.0: .*guide\.md:4: flag: `--consume` is not a flag of `memstead health`/);
+  assert.match(r.out, /REPORT: prose ahead of v0\.10\.0: .*guide\.md:5: command: `memstead frobnicate`/);
+
+  const ok = run(dir, ["--prose", "--prose-set", at], seams);
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /prose at v0\.10\.0: every documented command and flag resolves/);
+  assert.doesNotMatch(ok.out, /REPORT: prose/);
+
+  // Offline: the named skip, before anything is reported.
+  const offline = Object.assign({}, seams, { MEMSTEAD_VERIFY_OFFLINE: "1" });
+  const off = run(dir, ["--prose", "--prose-set", at], offline);
+  assert.equal(off.status, 3, off.out);
+  assert.match(off.out, /^SKIPPED: no network/m);
+});
+
+test("the changelog check reports a header without tag or note and a non-resolving compare link, and is silent on a fixed one", () => {
+  const broken = `# Changelog
+
+## [Unreleased]
+
+## [0.10.0] - 2026-08-23
+
+- x
+
+## [0.9.0] - 2026-08-19
+
+- y
+
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/memstead/memstead/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.9.0
+`;
+  const dir = proseScratch({ treeVersion: "0.10.0", changelog: broken });
+  const seams = { MEMSTEAD_VERIFY_TAGS: "0.8.1 0.10.0" };
+  const r = run(dir, ["0.10.0"], seams);
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /REPORT: changelog: `## \[0\.9\.0\]` has no tag on origin and no "never published" note/);
+  assert.match(r.out, /REPORT: changelog: compare link for \[0\.10\.0\] names v0\.9\.0, which is neither a tag/);
+  assert.match(r.out, /REPORT: changelog: compare link for \[0\.9\.0\] names v0\.9\.0/);
+
+  const fixed = broken
+    .replace("## [0.9.0] - 2026-08-19", "## [0.9.0] - 2026-08-19 (cut, never published)")
+    .replace("compare/v0.9.0...v0.10.0", "compare/v0.8.1...v0.10.0")
+    .replace("[0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.9.0\n", "");
+  writeFileSync(join(dir, "CHANGELOG.md"), fixed);
+  const ok = run(dir, ["0.10.0"], seams);
+  assert.equal(ok.status, 0, ok.out);
+  assert.doesNotMatch(ok.out, /REPORT: changelog/);
+});
+
 test("an unknown option refuses with exit 2", () => {
   const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
   const r = run(dir, ["--bogus"]);

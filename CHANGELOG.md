@@ -78,6 +78,48 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   link loses nothing the body does not still say. The dogfood
   workspace's retired `features` mem (fifty such rows, all alias rows)
   is the first archive to round-trip this way.
+- **The prose is checked against the binary it describes.**
+  `ci/check_prose.py` (built-ins only) runs every `memstead` invocation
+  in fenced `bash`/`sh`/`console` blocks and in the `run:` lines of fenced
+  `yaml`, every flag attached to one, and every relative link against a
+  given binary's `--help` tree; a `--scope whole-file` switch extends the
+  sweep to inline code and prose for the documents that want it; a
+  docs-site content tree named with `--routes-root` resolves its links
+  by route (`../../glossary/`, `/reference/cli/cli/`); placeholders and
+  prose phrases are allowlisted by the `xtask/docs-guard-allow.txt`
+  format, now with `flag:` and `re:` entries; a directory argument
+  stands for every Markdown file below it. `run-tests.sh` gained the leg
+  "the public prose describes the binary" over the README, CONTRIBUTING,
+  GLOSSARY, VISION, the examples README, `docs/**` (minus the divergence
+  corpus), the docs-site guides and concepts and the plugin's Markdown,
+  after the checker's own fixture self-test. `xtask release`'s
+  docs-vs-binary guard is the same checker at whole-file scope over the
+  flagship (the Rust extractor is gone); it still refuses an unknown
+  command and still honours `--allow-missing-flagship` and
+  `--allow-large-body`. First catch: `docs/proof/reconstruction/README.md`
+  documented a `memstead stats` that does not exist.
+- **`release-verify.sh --prose` reports the gap between the prose and the
+  published tag.** It resolves the highest tag on `origin`
+  (`untagged-release.sh --highest-tag`), downloads that release's CLI
+  archive once into a cache (`MEMSTEAD_VERIFY_CACHE`), runs the checker's
+  user-facing subset (README, guides, plugin; `--prose-set` overrides)
+  against the published binary, and prints file and flag per gap as a
+  report-only finding (exit 2), never trusting a local binary's version
+  string; exit 3 `SKIPPED: no network` when the archive cannot be
+  fetched. The same script now checks the changelog: every `## [X.Y.Z]`
+  header other than `[Unreleased]` must have a tag on `origin` or a
+  "never published" note, and every compare link must name refs that
+  exist (`MEMSTEAD_VERIFY_TAGS` seeds the tag list for tests).
+- **The plugin gates `--repo` and `--consume` on the recorded binary.**
+  Beside the anchors gate, `binary-version.mjs` carries `REPO_MIN` and
+  `CONSUME_MIN` (both 0.10.0) in a `CAPABILITIES` table and a
+  `capabilityGate(root, name)` (CLI: `gate <dir> [capability]`). Setup
+  drops `--repo` from `quickstart` and the ingest router drops
+  `--consume` from `projection brief --all` when the recorded binary
+  predates the flag, each saying which version it found and which it
+  needs; at or above the minimum the flag passes silently; a missing or
+  unparseable record degrades the same way. `--fail-on-findings` and
+  `--redact-anchors` sit on no skill path and stay ungated.
 
 ### Fixed
 - **`mem set-schema` repairs a `SCHEMA_PIN_MISMATCH` instead of

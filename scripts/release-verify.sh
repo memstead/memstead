@@ -33,16 +33,33 @@
 #   --run-id <id>     the Release workflow run whose publish jobs are read
 #                     (defaults to the newest run of release.yml for the tag)
 #   --repo <o/n>      GitHub repository (default: derived from origin, else memstead/memstead)
+#   --prose           the published-tag prose report: download the newest
+#                     tag's release archive (cached under
+#                     $MEMSTEAD_VERIFY_CACHE, default ~/.cache/memstead/release-verify),
+#                     run ci/check_prose.py over the user-facing prose (README,
+#                     the docs-site guides, the plugin's markdown) against THAT
+#                     binary, never a local one, and print one REPORT line per
+#                     documented command or flag the published binary lacks
+#   --prose-set <p>   a file or directory of the prose set (repeatable;
+#                     replaces the default user-facing subset)
 #
 # Exit codes:
 #   0  every channel serves the version and nothing is reported
 #   1  fatal: a channel disagrees or cannot be read, or a publish job skipped
 #      on a non-prerelease
 #   2  green, with report-only findings printed (lines prefixed REPORT:)
-#   3  skipped: no network (also forced by MEMSTEAD_VERIFY_OFFLINE=1)
+#   3  skipped: no network (also forced by MEMSTEAD_VERIFY_OFFLINE=1), or the
+#      release archive cannot be fetched for --prose
 #
 # Report-only lines today: the tree-vs-tag gap (the local workspace version
-# is ahead of the verified tag, i.e. unreleased changes exist).
+# is ahead of the verified tag, i.e. unreleased changes exist); the changelog
+# check (every `## [X.Y.Z]` header has a tag on origin or a "never published"
+# note, every compare link names tags that exist); and, with --prose, the
+# documented commands and flags the published binary does not accept.
+#
+# Test seams: MEMSTEAD_VERIFY_TAGS (space-separated bare versions) replaces
+# the `git ls-remote` tag read; MEMSTEAD_VERIFY_CACHE points the archive
+# cache somewhere a fixture can pre-populate.
 
 set -uo pipefail
 
@@ -53,12 +70,16 @@ REPORTS=0
 WANT=""
 RUN_ID=""
 REPO=""
+PROSE=0
+PROSE_SET=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --run-id) RUN_ID="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --prose) PROSE=1; shift ;;
+    --prose-set) PROSE_SET+=("${2:?--prose-set needs a path}"); shift 2 ;;
+    -h|--help) sed -n '2,62p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --*) echo "release-verify: unknown option '$1'" >&2; exit 2 ;;
     *) WANT="${1#v}"; shift ;;
   esac
@@ -86,6 +107,89 @@ fi
 if ! curl -sS -o /dev/null --max-time 20 "https://api.github.com" 2>/dev/null; then
   echo "SKIPPED: no network (api.github.com unreachable)"
   exit 3
+fi
+
+# ── the tags origin carries (bare versions), read once ──────────────────────
+remote_tags() {
+  if [ -n "${MEMSTEAD_VERIFY_TAGS:-}" ]; then
+    printf '%s\n' $MEMSTEAD_VERIFY_TAGS
+    return 0
+  fi
+  git -C "$ROOT" ls-remote --tags --refs origin 2>/dev/null \
+    | awk '{ print $2 }' | sed 's#^refs/tags/##; s/^v//' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+}
+TAGS="$(remote_tags)"
+has_tag() { printf '%s\n' "$TAGS" | grep -qx "$1"; }
+
+# ── --prose: the published-tag prose report ──────────────────────────────────
+# The report-only question the channel reads cannot answer: does the prose a
+# user reads TODAY describe the binary a user installs TODAY? The newest tag's
+# own archive is downloaded (once, cached) and the prose checker runs against
+# that binary; a local binary's version string is never consulted, because
+# the local binary is exactly what was 33 commits ahead of the tag when the
+# README described flags no published binary accepted.
+if [ "$PROSE" -eq 1 ]; then
+  if [ -n "$WANT" ]; then
+    tag="$WANT"
+  elif [ -n "${MEMSTEAD_VERIFY_TAGS:-}" ]; then
+    tag="$(printf '%s\n' "$TAGS" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  else
+    tag="$("$ROOT/scripts/untagged-release.sh" --highest-tag 2>/dev/null || true)"
+  fi
+  if [ -z "$tag" ]; then
+    echo "SKIPPED: no network (the newest tag could not be read from origin)"
+    exit 3
+  fi
+  cache="${MEMSTEAD_VERIFY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/memstead/release-verify}/$tag"
+  bin="$cache/memstead"
+  if [ ! -x "$bin" ]; then
+    triple="$(rustc -vV 2>/dev/null | sed -n 's/^host: //p')"
+    if [ -z "$triple" ]; then
+      case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) triple=aarch64-apple-darwin ;;
+        Darwin-x86_64) triple=x86_64-apple-darwin ;;
+        Linux-aarch64) triple=aarch64-unknown-linux-gnu ;;
+        Linux-x86_64) triple=x86_64-unknown-linux-gnu ;;
+        *) echo "release-verify: no release archive for $(uname -s)-$(uname -m)"; exit 3 ;;
+      esac
+    fi
+    mkdir -p "$cache"
+    asset="memstead-cli-$triple.tar.xz"
+    url="https://github.com/$REPO/releases/download/v$tag/$asset"
+    if ! curl -sSfL --max-time 120 -o "$cache/$asset" "$url" 2>/dev/null; then
+      rm -f "$cache/$asset"
+      echo "SKIPPED: no network (could not fetch $url)"
+      exit 3
+    fi
+    if ! tar -xJf "$cache/$asset" -C "$cache" 2>/dev/null; then
+      echo "release-verify: could not extract $cache/$asset"; exit 1
+    fi
+    found="$(find "$cache" -type f -name memstead -perm -u+x | head -1)"
+    if [ -z "$found" ]; then echo "release-verify: no memstead binary inside $asset"; exit 1; fi
+    [ "$found" != "$bin" ] && cp "$found" "$bin"
+    chmod +x "$bin"
+  fi
+  echo "→ prose report against the published v$tag binary ($("$bin" --version 2>/dev/null | awk '{print $2}'))"
+  if [ "${#PROSE_SET[@]}" -eq 0 ]; then
+    PROSE_SET=("$ROOT/README.md" "$ROOT/docs-site/src/content/docs/guides" "$ROOT/plugins/claude-code")
+  fi
+  files="$(for p in "${PROSE_SET[@]}"; do
+    if [ -d "$p" ]; then find "$p" \( -name '*.md' -o -name '*.mdx' \); elif [ -f "$p" ]; then echo "$p"; fi
+  done | sort -u)"
+  report_out="$(echo "$files" | xargs python3 "$ROOT/ci/check_prose.py" --memstead "$bin" --scope fenced \
+    --allow "$ROOT/xtask/docs-guard-allow.txt" --routes-root "$ROOT/docs-site/src/content/docs" 2>&1 || true)"
+  gaps="$(printf '%s\n' "$report_out" | grep -E ': (command|flag|link): ' || true)"
+  if [ -n "$gaps" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      report "prose ahead of v$tag: ${line#    }"
+    done <<GAPS
+$gaps
+GAPS
+  else
+    echo "  prose at v$tag: every documented command and flag resolves against the published binary"
+  fi
 fi
 
 # ── what are we verifying against ────────────────────────────────────────────
@@ -240,6 +344,39 @@ else
     say "this machine (not a channel)" "${local_v:-unreadable}, BEHIND $WANT"
     say "" "→ curl -sSf https://memstead.io/install.sh | sh"
   fi
+fi
+
+# ── 8a. report-only: the changelog against the tags ──────────────────────────
+# Every versioned header is a published release or says it is not; every
+# compare link names tags that exist. 0.9.0 sat as a plain `## [0.9.0]` with
+# a compare link to a tag that never existed for four days.
+changelog="$ROOT/CHANGELOG.md"
+if [ -f "$changelog" ] && [ -n "$TAGS" ]; then
+  while IFS= read -r header; do
+    v="$(printf '%s' "$header" | sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p')"
+    [ -z "$v" ] && continue
+    if ! has_tag "$v" && ! printf '%s' "$header" | grep -qi "never published"; then
+      report "changelog: \`## [$v]\` has no tag on origin and no \"never published\" note"
+    fi
+  done <<HEADERS
+$(grep -E '^## \[[0-9]' "$changelog")
+HEADERS
+  while IFS= read -r link; do
+    [ -z "$link" ] && continue
+    name="$(printf '%s' "$link" | sed -n 's/^\[\([^]]*\)\]:.*/\1/p')"
+    for ref in $(printf '%s' "$link" | sed -n 's#.*/compare/\([^/ ]*\)\.\.\.\([^/ ]*\).*#\1 \2#p'); do
+      [ "$ref" = "HEAD" ] && continue
+      has_tag "${ref#v}" && continue
+      # A bare commit (the real cut of a release that was never tagged)
+      # resolves when the repository knows it.
+      if printf '%s' "$ref" | grep -qE '^[0-9a-f]{7,40}$' && git -C "$ROOT" cat-file -e "$ref^{commit}" 2>/dev/null; then
+        continue
+      fi
+      report "changelog: compare link for [$name] names $ref, which is neither a tag on origin nor a known commit"
+    done
+  done <<LINKS
+$(grep -E '^\[[^]]+\]: https?://.*/compare/' "$changelog")
+LINKS
 fi
 
 # ── 8. report-only: the tree against the tag ─────────────────────────────────

@@ -75,6 +75,14 @@ Same artifacts, plus a scaffolded `codebase` binding over the repository — the
 
 Decide which form to run **before** invoking: if the current directory is inside a git repository with content of its own (`git rev-parse --show-toplevel` succeeds and the folder is not empty), use `--repo .`; otherwise use the plain form. Say which you picked and why in one line.
 
+The `--repo` form is version-gated on the recorded binary (a binary older than 0.10.0 does not accept the flag). When a record exists from an earlier `/setup`, check it first and never probe by sending the flag and catching a refusal:
+
+```sh
+node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)" repo
+```
+
+**capable** → use `--repo .` as decided above; **not capable** (no record, or a recorded version below 0.10.0) → run the plain form and say the gate's `reason` sentence verbatim (it names the recorded version and the version the flag needs). On a first-ever `/setup` there is no record yet; the plain form is the safe one until step 2.5 records the binary, after which the next `/setup` in a repository can use `--repo .`.
+
 Handle its outcomes:
 
 - **Success** — the summary names the workspace, mem, schema pin (the current built-in `default` generation), and seed entity; with `--repo` it also names the binding and prints the "What this mem holds" brief. Relay the brief to the user verbatim — it is the honest statement of what they now have. Go to step 3.

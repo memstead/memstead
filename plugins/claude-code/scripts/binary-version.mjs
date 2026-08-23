@@ -24,6 +24,25 @@ import {
 
 /** First `memstead` release whose mutation tools accept the `anchors[]` param. */
 export const ANCHORS_MIN = { major: 0, minor: 3, patch: 0 };
+/** First release whose `quickstart` accepts `--repo <PATH>` (the setup skill's
+ * point-at-your-repository form). */
+export const REPO_MIN = { major: 0, minor: 10, patch: 0 };
+/** First release whose `projection brief --all` accepts `--consume` (taking
+ * the rotation slot; the sync skill and the ingest router pass it). Cut in
+ * 0.9.0, which was never published, so 0.10.0 is the first binary a user
+ * can hold that accepts it. */
+export const CONSUME_MIN = { major: 0, minor: 10, patch: 0 };
+
+/**
+ * Every version-gated capability, by name: the threshold, how the flag or
+ * parameter is written, and what "proceeding without it" means. A new gate
+ * is a new row; the gate logic below is shared.
+ */
+export const CAPABILITIES = {
+  anchors: { min: ANCHORS_MIN, what: 'anchors', without: 'proceeding without anchors' },
+  repo: { min: REPO_MIN, what: '`--repo`', without: 'proceeding with the plain `quickstart` form' },
+  consume: { min: CONSUME_MIN, what: '`--consume`', without: 'rendering the brief as a pure read' },
+};
 
 const RECORD_REL = '.memstead.cache/plugin/binary-version.json';
 
@@ -91,28 +110,39 @@ export function readRecordedVersion(workspaceRoot) {
 }
 
 /**
- * The anchors capability gate. Returns `{capable, version, reason}`:
- * `capable: true` only when a recorded version is present AND >= ANCHORS_MIN.
- * Any other state (no record, unparseable, older) → `capable: false` with a
- * one-line reason a router can print — never a probe-by-error.
+ * One capability gate by name (`anchors` | `repo` | `consume`). Returns
+ * `{capable, version, reason}`: `capable: true` only when a recorded version
+ * is present AND >= the capability's threshold. Any other state (no record,
+ * unparseable, older) → `capable: false` with a one-line reason that names
+ * the recorded version and the threshold, which the caller prints — never a
+ * probe-by-error. An unknown capability name is a programming error and
+ * throws.
  */
-export function anchorsGate(workspaceRoot) {
+export function capabilityGate(workspaceRoot, name) {
+  const cap = CAPABILITIES[name];
+  if (!cap) throw new Error(`unknown capability '${name}' (known: ${Object.keys(CAPABILITIES).join(', ')})`);
   const version = readRecordedVersion(workspaceRoot);
+  const min = `${cap.min.major}.${cap.min.minor}.${cap.min.patch}`;
   if (!version) {
-    return { capable: false, version: null, reason: 'no recorded binary version — run /setup to record it; proceeding without anchors' };
+    return { capable: false, version: null, reason: `no recorded binary version — run /setup to record it; ${cap.without}` };
   }
   const v = `${version.major}.${version.minor}.${version.patch}`;
-  if (!isAtLeast(version, ANCHORS_MIN)) {
-    const min = `${ANCHORS_MIN.major}.${ANCHORS_MIN.minor}.${ANCHORS_MIN.patch}`;
-    return { capable: false, version, reason: `recorded binary ${v} predates anchors support (needs ${min}); proceeding without anchors` };
+  if (!isAtLeast(version, cap.min)) {
+    return { capable: false, version, reason: `recorded binary ${v} predates ${cap.what} support (needs ${min}); ${cap.without}` };
   }
-  return { capable: true, version, reason: `recorded binary ${v} supports anchors` };
+  return { capable: true, version, reason: `recorded binary ${v} supports ${cap.what}` };
 }
 
-// CLI: `record <dir>` (used by /setup) writes the record; `gate <dir>`
-// (used by capability-gated routers) prints the `{capable, version, reason}`
-// gate as JSON on stdout and always exits 0 — the caller branches on
-// `capable`, never on the exit code. `root <dir>` prints the resolved
+/** The anchors capability gate: `capabilityGate(root, 'anchors')`. */
+export function anchorsGate(workspaceRoot) {
+  return capabilityGate(workspaceRoot, 'anchors');
+}
+
+// CLI: `record <dir>` (used by /setup) writes the record; `gate <dir>
+// [capability]` (used by capability-gated routers and skills) prints the
+// `{capable, version, reason}` gate as JSON on stdout and always exits 0 —
+// the caller branches on `capable`, never on the exit code; the capability
+// defaults to `anchors`. `root <dir>` prints the resolved
 // workspace root path — skills use it to pass `--workspace` explicitly on
 // every `memstead` CLI call instead of inheriting cwd (the CLI's own upward
 // walk cannot find a workspace that lives *below* the session cwd, the
@@ -121,7 +151,7 @@ export function anchorsGate(workspaceRoot) {
 // + `.mcp.json` cd-target probe), so `$(pwd)` is safe even when the
 // workspace lives in a subdirectory.
 function main() {
-  const [cmd, dir] = process.argv.slice(2);
+  const [cmd, dir, capability] = process.argv.slice(2);
   const root = dir ? resolveWorkspaceRootFrom(dir) : null;
   if (cmd === 'root' && root) {
     console.log(root);
@@ -137,10 +167,15 @@ function main() {
     process.exit(1);
   }
   if (cmd === 'gate' && root) {
-    console.log(JSON.stringify(anchorsGate(root)));
+    const name = capability || 'anchors';
+    if (!CAPABILITIES[name]) {
+      console.error(`binary-version: unknown capability '${name}' (known: ${Object.keys(CAPABILITIES).join(', ')})`);
+      process.exit(2);
+    }
+    console.log(JSON.stringify(capabilityGate(root, name)));
     process.exit(0);
   }
-  console.error('usage: binary-version.mjs (record|gate|root) <dir-anywhere-in-project>');
+  console.error('usage: binary-version.mjs (record|gate [anchors|repo|consume]|root) <dir-anywhere-in-project>');
   process.exit(2);
 }
 

@@ -17,10 +17,9 @@
 //! Invocation (from `public/`):
 //!     cargo run -p xtask -- release <new-version> [--skip-tests]
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
@@ -439,84 +438,59 @@ fn cut_changelog(changelog: &str, old: &str, new: &str, date: &str) -> Result<St
     Ok(out)
 }
 
-/// Every `memstead <cmd> [<sub>]` phrase the flagship documents must
-/// resolve via `--help` in the freshly built full binary. Prose phrases
-/// that merely start with "memstead" ("memstead binaries run …") live in
-/// `xtask/docs-guard-allow.txt` — an explicit, reviewed list, never a
-/// silent skip.
+/// Every `memstead <cmd> [<sub>]` phrase and flag the flagship documents
+/// must resolve in a freshly built full binary. Since 2026-08-23 the
+/// check is `ci/check_prose.py`, the one prose checker the public
+/// `run-tests.sh` leg and the workspace's hygiene lane also run; here it
+/// runs at whole-file scope (the flagship's historical polarity: a prose
+/// mention of `memstead quickstart` is a documented command) over the
+/// flagship's top-level markdown, with the allowlist in
+/// `xtask/docs-guard-allow.txt` (an explicit, reviewed list, never a
+/// silencer for a missing command).
 fn docs_vs_binary_guard(root: &Path, flagship: &Path) -> Result<()> {
-    let bin = root.join("target/debug/memstead");
-    let allow = fs::read_to_string(root.join("xtask/docs-guard-allow.txt")).unwrap_or_default();
-    let allowed: Vec<&str> = allow
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    // The binary step 7 just built, wherever cargo put it.
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("target"));
+    let bin = target_dir.join("debug").join("memstead");
+    let mut files: Vec<PathBuf> = fs::read_dir(flagship)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
         .collect();
-
-    // candidate phrase → one file it appears in (for the error message)
-    let mut candidates: BTreeMap<(String, Option<String>), String> = BTreeMap::new();
-    for entry in fs::read_dir(flagship)? {
-        let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let text = fs::read_to_string(&path)?;
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        for (cmd, sub) in extract_doc_commands(&text) {
-            candidates.entry((cmd, sub)).or_insert_with(|| name.clone());
-        }
-    }
-
-    let resolves = |args: &[&str]| -> bool {
-        Command::new(&bin)
-            .args(args)
-            .arg("--help")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    };
-
-    let mut violations = Vec::new();
-    let mut checked = 0usize;
-    for ((cmd, sub), file) in &candidates {
-        let phrase = match sub {
-            Some(s) => format!("{cmd} {s}"),
-            None => cmd.clone(),
-        };
-        if allowed.contains(&cmd.as_str()) || allowed.contains(&phrase.as_str()) {
-            continue;
-        }
-        checked += 1;
-        let ok = match sub {
-            Some(s) => resolves(&[cmd, s]) || resolves(&[cmd]),
-            None => resolves(&[cmd]),
-        };
-        if !ok {
-            violations.push(format!("  memstead {phrase}   (documented in {file})"));
-        }
-    }
-    if !violations.is_empty() {
+    files.sort();
+    ensure!(
+        !files.is_empty(),
+        "docs-vs-binary guard: no markdown under {}",
+        flagship.display()
+    );
+    let mut cmd = Command::new("python3");
+    cmd.current_dir(root)
+        .arg("ci/check_prose.py")
+        .arg("--memstead")
+        .arg(&bin)
+        .arg("--scope")
+        .arg("whole-file")
+        .arg("--allow")
+        .arg(root.join("xtask/docs-guard-allow.txt"))
+        .args(&files);
+    let out = cmd
+        .output()
+        .context("running ci/check_prose.py (python3 is required at release time)")?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if !out.status.success() {
         bail!(
-            "docs-vs-binary guard FAILED — the flagship documents commands the \
-             binary being tagged does not have (the v0.1.0 failure class):\n{}\n\
-             Fix the binary, or — if a phrase is prose, not a command — add it \
-             to xtask/docs-guard-allow.txt with a comment.",
-            violations.join("\n")
+            "docs-vs-binary guard FAILED — the flagship documents commands, flags or \
+             links the binary being tagged does not have (the v0.1.0 failure class):\n\
+             {stdout}{stderr}\nFix the binary, or — if a phrase is prose, not a command — add it \
+             to xtask/docs-guard-allow.txt with a comment."
         );
     }
-    println!("release: docs-vs-binary guard OK ({checked} documented invocations resolve)");
+    println!(
+        "release: docs-vs-binary guard OK ({} flagship file(s) resolve at whole-file scope)",
+        files.len()
+    );
     Ok(())
-}
-
-/// `memstead <token> [<token>]` phrases in documentation prose/code spans.
-fn extract_doc_commands(md: &str) -> Vec<(String, Option<String>)> {
-    let re = Regex::new(r"(?:^|[\s`(>*])memstead ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?")
-        .expect("static regex");
-    re.captures_iter(md)
-        .map(|c| (c[1].to_owned(), c.get(2).map(|m| m.as_str().to_owned())))
-        .collect()
 }
 
 /// The refusal text for an oversized release body, or `None` when the
@@ -673,14 +647,5 @@ memstead-base = { path = "crates/memstead-base", version = "0.2.0" }
         assert!(unreleased_section(log).unwrap().trim().is_empty());
         let log2 = "# Changelog\n\n## [Unreleased]\n\n- something\n\n## [0.3.0] - 2026-07-11\n";
         assert!(!unreleased_section(log2).unwrap().trim().is_empty());
-    }
-
-    #[test]
-    fn doc_command_extraction_finds_one_and_two_token_forms() {
-        let md = "Run: memstead install <scope>/<name>\nthe memstead binaries run fine\n`memstead mem set-schema x y`\n";
-        let cmds = extract_doc_commands(md);
-        assert!(cmds.contains(&("install".into(), None)));
-        assert!(cmds.contains(&("binaries".into(), Some("run".into()))));
-        assert!(cmds.contains(&("mem".into(), Some("set-schema".into()))));
     }
 }

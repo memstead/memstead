@@ -22,7 +22,8 @@
 # commit on <remote>/main whose diff touched the line-anchored `version = "X"`
 # in Cargo.toml; its committer date is the best proxy for when it landed.
 #
-# Usage:  scripts/untagged-release.sh [--remote <name>] [--max-age-hours <n>]
+# Usage:  scripts/untagged-release.sh [--remote <name>] [--max-age-hours <n>] [--highest-tag]
+# `--highest-tag` prints the newest remote tag (bare version) and exits 0.
 # Exit 0 when the workspace version is tagged or the cut is still within
 # the grace period, 1 when an untagged release is overdue (the sha and date
 # are named), 3 when the remote cannot be read (SKIPPED: this check fails
@@ -38,10 +39,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE="origin"
 MAX_AGE_HOURS=24
 
+HIGHEST_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --remote) REMOTE="${2:-}"; shift 2 ;;
     --max-age-hours) MAX_AGE_HOURS="${2:-}"; shift 2 ;;
+    --highest-tag) HIGHEST_ONLY=1; shift ;;
     -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "untagged-release: unknown argument '$1'" >&2; exit 2 ;;
   esac
@@ -90,6 +93,12 @@ if [ -z "$tags" ]; then
   exit 3
 fi
 highest=$(printf '%s\n' "$tags" | semver_max)
+# `--highest-tag`: print the newest remote tag (bare version) and stop;
+# release-verify.sh's prose report anchors to it.
+if [ "$HIGHEST_ONLY" -eq 1 ]; then
+  echo "$highest"
+  exit 0
+fi
 
 ahead=$(printf '%s\n%s\n' "$version" "$highest" | semver_max)
 if [ "$highest" = "$version" ]; then

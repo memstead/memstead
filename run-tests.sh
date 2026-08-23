@@ -249,6 +249,40 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Gate: the public prose describes the binary"
+echo "══════════════════════════════════"
+# Every `memstead <cmd>` and long flag in a fenced shell block or a `run:`
+# line of the public prose set (README, CONTRIBUTING, GLOSSARY, VISION,
+# the examples README, docs/ minus the divergence corpus, the docs-site
+# guides and concepts, the plugin's markdown) must resolve against the
+# binary the engine leg built, and every relative link must exist. The
+# generated reference was the only machine-gated prose for weeks while
+# the README, the guides and the plugin described flags no published
+# binary accepted. The checker (ci/check_prose.py) hard-codes no path:
+# the file set is computed here, the binary is an argument, and
+# xtask release runs the same checker over the flagship at whole-file
+# scope. Its own fixtures run first, so a checker that stopped seeing
+# defects would fail here before it could pass anything.
+if [ -x "$ROOT/target/debug/memstead" ]; then
+  PROSE_SET="$( { cd "$ROOT" && ls README.md CONTRIBUTING.md GLOSSARY.md VISION.md examples/README.md 2>/dev/null; \
+      find docs -name '*.md' -not -path 'docs/proof/divergence/*'; \
+      find docs-site/src/content/docs/guides docs-site/src/content/docs/concepts \( -name '*.md' -o -name '*.mdx' \) 2>/dev/null; \
+      find plugins/claude-code -name '*.md'; } | sort -u )"
+  if (cd "$ROOT" && python3 ci/check_prose.py --self-test ci/fixtures/prose >/dev/null \
+      && echo "$PROSE_SET" | xargs python3 ci/check_prose.py --memstead target/debug/memstead \
+           --scope fenced --allow xtask/docs-guard-allow.txt --routes-root docs-site/src/content/docs); then
+    echo "  ✓ public prose resolves against the binary"
+  else
+    FAILED+=("prose-vs-binary")
+    echo "  ✗ public prose does NOT resolve against the binary (or the checker's fixtures failed)"
+  fi
+else
+  FAILED+=("prose-vs-binary")
+  echo "  ✗ no target/debug/memstead — the prose-vs-binary gate could not run"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Gate: the documented verify-in-CI example still works"
 echo "══════════════════════════════════"
 # The guide prints a GitHub Actions job strangers copy. A printed example
