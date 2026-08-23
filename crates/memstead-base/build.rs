@@ -47,6 +47,20 @@ fn main() {
                 println!("cargo:rerun-if-changed={git_dir}/{head_ref}");
             }
         }
+        // The dirty flag must follow the working tree, not only the refs:
+        // with the refs alone, editing a crate and building recompiled
+        // the crate without re-running this script, so the stamp kept
+        // the clean form it had computed at the last commit and the
+        // `-dirty` suffix could only ever appear after HEAD moved, when
+        // the tree was clean again. Watch the build inputs the probe
+        // scopes to (a directory entry re-runs on any change beneath it);
+        // the cost is one `git status` per build that would rebuild
+        // anyway.
+        if let Some(top) = git(&["rev-parse", "--show-toplevel"]) {
+            for input in ["crates", "Cargo.toml", "Cargo.lock"] {
+                println!("cargo:rerun-if-changed={top}/{input}");
+            }
+        }
     }
     let sha = git(&["rev-parse", "--short", "HEAD"])
         .map(|sha| {
@@ -59,14 +73,18 @@ fn main() {
             // fail the staleness check that compares the stamp with
             // the committed tree. A failed probe reads as clean —
             // best-effort throughout.
+            // `:/` anchors each pathspec to the repository top: the
+            // script runs in the crate directory, where a bare
+            // `crates` would name a path that does not exist and match
+            // nothing (which read as "clean").
             let dirty = git(&[
                 "status",
                 "--porcelain",
                 "--untracked-files=no",
                 "--",
-                "crates",
-                "Cargo.toml",
-                "Cargo.lock",
+                ":/crates",
+                ":/Cargo.toml",
+                ":/Cargo.lock",
             ])
             .is_some();
             if dirty { format!("{sha}-dirty") } else { sha }

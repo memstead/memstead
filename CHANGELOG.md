@@ -108,7 +108,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   binary-staleness check needs to know. The stamp's `-dirty` suffix now
   reflects modified build inputs only (`crates/`, `Cargo.toml`,
   `Cargo.lock`): a modified doc, workflow or folder-mem file elsewhere in
-  the repository changes no byte of the binary.
+  the repository changes no byte of the binary. The build script now
+  re-runs when those inputs change, not only when a ref moves; before, an
+  edit-then-build kept the clean stamp computed at the last commit and the
+  `-dirty` suffix could not appear in the ordinary flow.
 
 ## [0.10.0] - 2026-08-23
 
