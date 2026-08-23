@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-07-13T16:44:05Z
+last_modified: 2026-08-23T14:48:19Z
 status: accepted
 decided_on: 2026-06-17
 deciders: dasboe
@@ -27,6 +27,7 @@ The pre-rebuild ingest skill authored the agent's full procedure in prompt prose
 - **REFERENCES**: [[plugin:ingest-skill]]
 - **REFERENCES**: [[plugin:ingest-situation-brief-assembler]]
 - **MOTIVATED_BY**: [[plugin-prompts-carry-situation-not-procedure-and-the-engine-agent-surface-is-the-source-of-truth]]
+- **INFORMED_BY**: [[negative-findings-are-first-class-process-entities-recording-searched-and-empty-as-a-done-result]]
 
 ## Options
 

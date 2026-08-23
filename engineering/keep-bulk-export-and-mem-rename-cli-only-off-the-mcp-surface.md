@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-07T09:09:29Z
-last_modified: 2026-08-07T09:09:29Z
+last_modified: 2026-08-23T14:48:15Z
 status: accepted
 decided_on: 2026-08-06
 deciders: operator (agent-toolbox bundle decision 3), implementing agent
@@ -28,6 +28,7 @@ The 2026-08-06 agent-toolbox bundle fixed the MCP surface contract (operator dec
 - **REFERENCES**: [[engine:cli-command-surface]]
 - **REFERENCES**: [[engine:mcp-tool-surface]]
 - **REFERENCES**: [[mcp-tool-surface-stays-small]]
+- **MOTIVATED_BY**: [[an-agent-does-not-hold-the-keys-to-its-own-constraints]]
 
 ## Options
 

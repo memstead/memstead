@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-18T11:37:35Z
-last_modified: 2026-08-18T20:17:53Z
+last_modified: 2026-08-23T14:48:17Z
 status: accepted
 decided_on: 2026-07-18
 deciders: operator
@@ -25,6 +25,7 @@ The cross-record reference error class is gone with the references; in-record so
 - **SUPERSEDES**: [[collapse-the-pipeline-into-one-versioned-binding-per-source-to-mem-obligation]]
 - **REFERENCES**: [[collapse-the-pipeline-into-one-versioned-binding-per-source-to-mem-obligation]]
 - **REFERENCES**: [[engine:pipeline]]
+- **INFORMED_BY**: [[a-binding-records-folder-is-its-identity-and-destinationmem-can-disagree]]
 
 ## Options
 

@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-08-18T20:17:48Z
+last_modified: 2026-08-23T14:48:20Z
 authority: established
 universality: domain-wide
 tags: invariant, mcp, tools, agent-ergonomics, engine
@@ -18,6 +18,7 @@ Governs the MCP tool surface of `memstead-mcp` (both build configs). Applies to 
 ## Relationships
 - **GOVERNS**: [[engine:memstead-mcp-crate]]
 - **GOVERNS**: [[engine:mcp-tool-surface]]
+- **GOVERNS**: [[the-mcp-instructions-are-the-complete-registry-tested-capability-announcement]]
 
 ## Justification
 
