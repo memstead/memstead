@@ -11,8 +11,9 @@ The engine's MCP instructions describe a mem as "designed for 1,000–5,000
 entities". Until this document, that span was advertised, not measured
 (plenum channel, finding 10). This page states what the four everyday
 operations actually cost across workspace sizes, so the deferred redesigns
-that wait for numbers (lazy mounts, incremental derived-structure
-maintenance, deferred cross-mem targets) can be argued from data.
+that wait for numbers (incremental derived-structure maintenance — and
+lazy mounts plus deferred cross-mem targets, since landed and recorded
+below) can be argued from data.
 
 ## Reproducing
 
@@ -94,36 +95,45 @@ per-entity creation scale to hours (plenum finding 1).
 Data, not decisions — each paragraph states what the curve says, the
 backlog items decide.
 
-**Real lazy mounts (plenum 7).** The curve says load is the only cold-path
-cost and it grows super-linearly with loaded entities. Every mounted mem
-adds its full entity count to every cold command, needed or not — a
-workspace of dozens of small mems pays the whole inventory each time. A
-lazy mount that defers a mem's load until first read would cut cold-path
-cost proportionally to the unread share; at the measured 0.6–0.75
-ms/entity above 5k, splitting a 7.5k workspace into five mems of 1.5k and
-touching one would turn a ~5.6 s command into roughly a ~0.8 s one. This
-is the largest lever the curve can see.
+**Real lazy mounts (plenum 7) — landed 2026-08-21, measured.** The curve
+says load is the only cold-path cost and it grows super-linearly with
+loaded entities. Every mounted mem used to add its full entity count to
+every cold command, needed or not. `"lifecycle": "lazy"` now defers a
+mem's entity load to first read, cutting cold-path cost proportionally to
+the unread share. Measured on the dogfood workspace (9 mounts, 687
+entities, release build, median of 10 cold runs): a single-mem read
+(`memstead entity`, target mem eager, the other 8 mounts lazy) dropped
+from 237 ms to 106 ms — the remaining cost is the process spawn plus the
+one mem actually read — while a deliberately workspace-scoped command
+(`search --mem` under the CLI's full-load default) stayed at ~300 ms,
+unchanged by design. The original projection stands for larger
+workspaces: at 0.6–0.75 ms/entity above 5k, splitting a 7.5k workspace
+into five mems and touching one turns a ~5.6 s command into roughly a
+~0.8 s one.
 
-**Incremental maintenance of derived structures (plenum 9).** The cold
-path cannot see this cost: search-after-mutation equals boot within noise
-at every size, because the full index rebuild is dwarfed by the full
-workspace load that precedes it. The rebuild cost is real but it hides
-inside load's shadow. The case for incremental maintenance therefore
-rests on the **warm path** (a long-lived MCP server absorbing mutations,
-where boot is already paid and the rebuild is the marginal cost) — which
-this harness deliberately does not measure. A warm-path measurement is
-the missing number for that decision.
+**Incremental maintenance of derived structures (plenum 9) — landed
+2026-08-22.** The cold path cannot see this cost: search-after-mutation
+equals boot within noise at every size, because the full index rebuild
+is dwarfed by the full workspace load that precedes it. The decision
+therefore ran on the **warm path** (a long-lived engine absorbing
+mutations, boot excluded), measured release-build with the same binary
+in maintained vs simulated whole-drop modes: search-share speedup 1.8x
+at 500 entities, 1.4x at 2000, 1.3x at 5000. Single mutations now
+maintain the index in place under a generation-keyed memo; the honest
+finding alongside: the per-query cost grows with store size in BOTH
+modes, so query-side work (not the rebuild) is the warm path's next
+lever.
 
-**Deferred cross-mem target resolution (plenum 8).** Writing an edge into
-a non-mounted mem today refuses, forcing the target mem to be mounted —
-and the curve prices that forced mount: each additionally mounted mem
-adds its entities × 0.6–0.75 ms to **every** cold command in the
-workspace, permanently, not just during the write. A dossier citing 20
-small mems of 350 entities each pays ~7k entities of load (~5+ s
-per command on this hardware) for edges that needed only target-existence
-checks. The curve quantifies the federation tax; whether the fix is
-branch-tree existence checks or deferred stubs is the design decision the
-backlog holds.
+**Deferred cross-mem target resolution (plenum 8) — landed 2026-08-22.**
+The curve priced the forced mount this redesign removes: each
+additionally mounted mem added its entities × 0.6–0.75 ms to **every**
+cold command, permanently — a dossier citing 20 small mems of 350
+entities each paid ~7k entities of load (~5+ s per command on this
+hardware) for edges that needed only target-existence checks. Write-time
+verification now asks storage directly (branch-tree existence check plus
+one blob read for the type; the SPEC rejected the deferred-stub
+direction), so the same dossier pays 20 tree lookups, zero mounts, zero
+loads, and no change to any subsequent cold command.
 
 ## Relation to the advertised range
 

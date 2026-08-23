@@ -2137,3 +2137,164 @@ fn explicit_and_rule_derived_cross_links_project_as_distinct_entries() {
         "rule-derived grant must project as its own entry: {entries:?}",
     );
 }
+
+/// Lazy-mount companion to the incoming-edges refusal above (flywheel
+/// W7/01, third final grade): the `MEM_HAS_INCOMING_REFS` guard walks
+/// incoming edges that can originate in ANY mem — so a referrer living
+/// in a DEFERRED (lazy, not-yet-loaded) mem must still block the
+/// delete. The grade demonstrated the counterexample live: with the
+/// referrer's mem lazy, `delete_mem` destroyed the mem an eager boot
+/// refuses to. The guard now takes the full load first.
+#[test]
+fn delete_mem_guard_sees_referrers_in_deferred_mems() {
+    use memstead_base::ops::RelateArg;
+    use memstead_base::vcs::Actor;
+    use memstead_base::{CreateEntityArgs, MountLifecycle};
+    use memstead_schema::workspace_config::CrossLinkValue;
+
+    let tmp = TempDir::new().unwrap();
+    let a_dir = tmp.path().join("mem-a");
+    let b_dir = tmp.path().join("mem-b");
+    std::fs::create_dir_all(&a_dir).unwrap();
+    std::fs::create_dir_all(&b_dir).unwrap();
+
+    let seed_sections = || {
+        let mut sample = CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: String::new(),
+            title: String::new(),
+            entity_type: String::new(),
+            sections: Default::default(),
+            metadata: Default::default(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        sample
+            .sections
+            .insert("identity".to_string(), "seed identity".to_string());
+        sample
+            .sections
+            .insert("purpose".to_string(), "seed purpose".to_string());
+        sample.sections
+    };
+
+    // Author the cross-mem edge while both mems are eager, under the
+    // grant — then drop the engine so the state lives only on disk.
+    {
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("a", a_dir.clone()),
+                Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("b", b_dir.clone()),
+                Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let mut cross_links: std::collections::BTreeMap<String, CrossLinkValue> =
+            Default::default();
+        cross_links.insert("a".to_string(), CrossLinkValue::List(vec!["b".to_string()]));
+        engine.set_settings(WorkspaceSettings {
+            mem_create_rules: Vec::new(),
+            mem_delete_rules: vec![DeleteRuleSetting {
+                pattern: "b".to_string(),
+            }],
+            cross_mem_links: cross_links,
+            ..Default::default()
+        });
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "b".to_string(),
+                    title: "Target".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: seed_sections(),
+                    metadata: Default::default(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .expect("seed b--target");
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "a".to_string(),
+                    title: "Source".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: seed_sections(),
+                    metadata: Default::default(),
+                    relations: vec![RelateArg {
+                        to: memstead_base::EntityId::canonical("b--target"),
+                        rel_type: "DEPENDS_ON".to_string(),
+                        description: None,
+                    }],
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .expect("seed a--source with DEPENDS_ON edge");
+    }
+
+    // Fresh boot: the REFERRER's mem is lazy and unloaded; no cross-mem
+    // grant (the policy axis passes), delete rule allows `b`. The edge
+    // graph must still block the delete.
+    let lazy_a = Mount {
+        lifecycle: MountLifecycle::Lazy,
+        ..folder_mount("a", a_dir.clone())
+    };
+    let mut engine = Engine::from_mounts(vec![
+        (
+            lazy_a,
+            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("b", b_dir.clone()),
+            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+    engine.set_settings(WorkspaceSettings {
+        mem_create_rules: Vec::new(),
+        mem_delete_rules: vec![DeleteRuleSetting {
+            pattern: "b".to_string(),
+        }],
+        cross_mem_links: Default::default(),
+        ..Default::default()
+    });
+    assert!(
+        engine.mem_is_deferred("a"),
+        "the referrer's mem is deferred"
+    );
+
+    let err = mem_management::delete_mem(
+        &mut engine,
+        mem_management::MemDeleteParams {
+            name: "b".to_string(),
+            delete_files: true,
+            note: None,
+            detach_incoming: false,
+            operator_mode: false,
+        },
+    )
+    .unwrap_err();
+    match err {
+        FullEngineError::Lean(EngineError::MemHasIncomingRefs { mem, referrers }) => {
+            assert_eq!(mem, "b");
+            assert_eq!(referrers.len(), 1, "the deferred mem's referrer is seen");
+            assert_eq!(referrers[0].from_id, "a--source");
+        }
+        other => panic!("expected MemHasIncomingRefs, got {other:?}"),
+    }
+    assert!(
+        engine.mem_router().is_writable("b"),
+        "mem b survives — refusal is pre-unregister"
+    );
+}

@@ -136,6 +136,58 @@ pub fn mask_code_blocks_and_spans(text: &str) -> String {
     mask_ranges(text, &code_ranges(text, true))
 }
 
+/// When `text` — a section body — ends inside an unterminated fenced
+/// code block that would swallow whatever the caller writes after it,
+/// return the closing fence that terminates it. `None` when the text is
+/// safely self-delimiting: balanced fences, indented code (a column-0
+/// heading line ends it), or a fence inside a container a following
+/// column-0 line closes implicitly (blockquote, list item).
+///
+/// The referee itself is the oracle — no second fence model exists here
+/// to drift from the parser's. A probe line is appended and the mask
+/// consulted: if the probe comes back masked, the open block would
+/// swallow following content; the candidate closer (same char, the
+/// opening fence's length) is then verified the same way.
+///
+/// The caller that needs this is the entity generator: a section whose
+/// stored content ends inside an open fence would otherwise absorb every
+/// section heading the generator writes after it on the next parse — a
+/// document that grows and shifts content between sections on every
+/// parse→generate round.
+pub fn closing_fence_if_unterminated(text: &str) -> Option<String> {
+    // Fast path: no run of three fence characters, nothing to leave open.
+    if !text.contains("```") && !text.contains("~~~") {
+        return None;
+    }
+    const PROBE: &str = "memstead-fence-probe";
+    // `ends_with`, not `contains`: the probe is appended as the last
+    // line, so only its own (un)masked state is consulted — a prose
+    // occurrence of the probe string elsewhere cannot fake a pass.
+    let survives = |t: &str| mask_code_blocks(&format!("{t}\n{PROBE}")).ends_with(PROBE);
+    if survives(text) {
+        return None;
+    }
+    // The open block is the one whose range reaches end of text; its
+    // first line is the opening fence. Containers (blockquote, list)
+    // never reach here — their fences close implicitly at the probe's
+    // column-0 line, so the probe survives above.
+    let ranges = code_ranges(text, false);
+    let open = ranges.iter().rfind(|r| r.end >= text.len())?;
+    let first_line = text[open.start..].lines().next().unwrap_or("");
+    let fence = first_line.trim_start();
+    let ch = fence.chars().next()?;
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let count = fence.chars().take_while(|c| *c == ch).count().max(3);
+    let cand = ch.to_string().repeat(count);
+    if survives(&format!("{text}\n{cand}")) {
+        Some(cand)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +349,36 @@ mod tests {
         let masked = mask_all(input);
         assert!(!masked.contains('`'));
         assert!(masked.contains("[[real-link]]"));
+    }
+
+    // --- open-fence termination helper -----------------------------
+
+    #[test]
+    fn unterminated_backtick_fence_yields_matching_closer() {
+        assert_eq!(
+            closing_fence_if_unterminated("```\ncode with no closer"),
+            Some("```".to_string())
+        );
+        // The closer must honour the opening fence's length (class 6).
+        assert_eq!(
+            closing_fence_if_unterminated("````\n```\nstill inside"),
+            Some("````".to_string())
+        );
+        assert_eq!(
+            closing_fence_if_unterminated("~~~\ntilde block"),
+            Some("~~~".to_string())
+        );
+    }
+
+    #[test]
+    fn balanced_and_container_fences_need_no_closer() {
+        assert_eq!(closing_fence_if_unterminated("```\ncode\n```"), None);
+        assert_eq!(closing_fence_if_unterminated("no fences at all"), None);
+        // A blockquote fence closes implicitly when the quote ends at the
+        // next column-0 line — nothing bleeds, nothing to terminate.
+        assert_eq!(closing_fence_if_unterminated("> ```\n> quoted"), None);
+        // Indented code ends at any column-0 line.
+        assert_eq!(closing_fence_if_unterminated("text:\n\n    code"), None);
     }
 
     #[test]

@@ -391,7 +391,10 @@ pub enum EngineError {
     /// Any add-shaped cross-mem edge write (`memstead_relate`,
     /// `memstead_create.relations[]`, `memstead_update.declare_relations`,
     /// or a body wiki-link) to a target whose mem is mounted
-    /// `MountCapability::ReadOnly` and the target is absent. Auto-stub
+    /// `MountCapability::ReadOnly` and the target is absent —
+    /// judged against the mem's real storage, so an unloaded (lazy)
+    /// read-only mem answers without loading and the refusal never
+    /// fires for an entity storage actually contains. Auto-stub
     /// is unavailable across the engine/ReadOnly-mem boundary (the
     /// engine cannot persist a stub in a mem it has no write access
     /// to), and a read-only mem never gains the entity later — the

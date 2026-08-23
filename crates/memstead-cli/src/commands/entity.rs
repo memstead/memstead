@@ -79,6 +79,37 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             Err(e) => serde_json::json!({ "unavailable": e.to_string() }),
         })
     };
+    // Load scope: everything this command renders lives in the target
+    // mem's slice of the store — the entity, its sections, and its
+    // OUTGOING edges (carried by its own source record) — plus mount
+    // metadata. So a lazy workspace pays only the target mem's load,
+    // the cold-path cut the plan names. Three forms are cross-mem and
+    // take the full load, never a partial answer:
+    // `--include-relations` (INCOMING edges can originate in any mem),
+    // declared signals (an `in`-direction signal reads incoming edges,
+    // and a neighbour pair reads the counterpart record either side of
+    // the edge), and the labelling view (it counts the cross-mem edges
+    // it excludes, and the support walk may cross mems). The scoped
+    // cold path stays for every mem whose schema declares neither.
+    let declares_cross_mem_serving = |schema: Option<std::sync::Arc<memstead_schema::Schema>>| {
+        schema.is_some_and(|s| {
+            s.manifest.relationships.labelling.is_some()
+                || s.types.values().any(|td| !td.signals.is_empty())
+        })
+    };
+    let engine_handle = if args.include_relations {
+        ctx.cli_engine()?
+    } else {
+        let scoped = ctx.cli_engine_scoped(id.mem())?;
+        let escalate = match &scoped {
+            #[cfg(feature = "mem-repo")]
+            CliEngine::MemRepo(engine) => declares_cross_mem_serving(engine.schema_for(id.mem())),
+            CliEngine::Filesystem(engine) => {
+                declares_cross_mem_serving(engine.schema_for(id.mem()))
+            }
+        };
+        if escalate { ctx.cli_engine()? } else { scoped }
+    };
     let (
         entity,
         output,
@@ -88,7 +119,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         provenance,
         signals,
         labelling,
-    ) = match ctx.cli_engine()? {
+    ) = match engine_handle {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             let entity = engine

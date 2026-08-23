@@ -45,7 +45,7 @@ fn strip_bom(s: &str) -> &str {
 /// Verify the frontmatter opens with `---` on the first line and
 /// closes with `\n---`. Returns (metadata block text, body text).
 /// Body excludes the closing `\n---` line and the newline after it.
-fn split_frontmatter_strict<'a>(
+pub(crate) fn split_frontmatter_strict<'a>(
     raw: &'a str,
     path: &str,
 ) -> Result<(&'a str, &'a str), ValidationError> {

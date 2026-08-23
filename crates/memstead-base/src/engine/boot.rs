@@ -489,6 +489,8 @@ impl Engine {
             pipeline_configs: crate::pipeline_store::BindingConfigs::default(),
             mem_router: Arc::new(mem_router),
             backend_factory: crate::workspace_store::instantiate_lean_backend,
+            unmounted_storage_prober: None,
+            schemas_epoch: 0,
             git_branch_ops: None,
             event_subscribers: Arc::new(std::sync::Mutex::new(
                 crate::engine::events::SubscriberRegistry::new(),
@@ -3629,6 +3631,95 @@ write_rules: []
         assert!(engine.deferred_mems().is_empty());
     }
 
+    /// Quarantine-ENTRY invalidation pin (flywheel W8/01, first
+    /// grade's refutation): entering quarantine from a failed deferred
+    /// load removes the mem's schema (epoch bump) — a search memo
+    /// filled beforehand is then stale-keyed and MUST clear, or the
+    /// next search trips the memo-key debug_assert (the grade's live
+    /// repro). Same rule pinned for the reattach-failure branch by
+    /// re-failing the reattach.
+    #[test]
+    fn quarantine_entry_invalidates_both_memos() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        // Fill both memos while the lazy mem is still deferred.
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        assert!(engine.search_indexes_memo.get().is_some());
+
+        // Destroy the backend; the first read quarantines the mem.
+        std::fs::remove_dir_all(&lazy_dir).unwrap();
+        std::fs::write(&lazy_dir, b"not a directory").unwrap();
+        engine.reload_if_stale(Some("laz"));
+        assert!(engine.quarantine_reason("laz").is_some());
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "quarantine entry bumps the schemas epoch — the search memo must clear"
+        );
+        assert!(
+            engine.community_memo.get().is_none(),
+            "quarantine entry must clear the community memo too"
+        );
+        // The next search must not trip the memo-key assert.
+        let _ = engine.search_indexes();
+
+        // Reattach FAILURE (backend still broken): same rule.
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        let _ = engine.reload_one_mem("laz");
+        assert!(engine.quarantine_reason("laz").is_some());
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "a failed reattach bumps the epoch — the search memo must clear"
+        );
+        let _ = engine.search_indexes();
+    }
+
+    /// Quarantine-reattach regression pin (flywheel W8/01, criterion
+    /// 2's complement): the reattach path routes through the one-mem
+    /// reload, which invalidates BOTH derived memos — pinned so
+    /// incremental maintenance can never silently degrade it.
+    #[test]
+    fn quarantine_reattach_invalidates_both_memos() {
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+
+        // Quarantine the lazy mem: destroy its backend, trigger load.
+        std::fs::remove_dir_all(&lazy_dir).unwrap();
+        std::fs::write(&lazy_dir, b"not a directory").unwrap();
+        engine.reload_if_stale(Some("laz"));
+        assert!(engine.quarantine_reason("laz").is_some());
+
+        // Fill both memos while the mem sits quarantined.
+        let _ = engine.communities();
+        let _ = engine.search_indexes();
+        assert!(engine.community_memo.get().is_some());
+        assert!(engine.search_indexes_memo.get().is_some());
+
+        // Restore the backend and reattach via the reload path.
+        std::fs::remove_file(&lazy_dir).unwrap();
+        std::fs::create_dir_all(&lazy_dir).unwrap();
+        write_spec(&lazy_dir, "omega", "Omega", "");
+        engine
+            .reload_one_mem("laz")
+            .expect("reattach succeeds once the backend is back");
+        assert!(engine.quarantine_reason("laz").is_none());
+
+        // Both memos cleared — the reattached mem's entities must be
+        // visible to the next partition and the next search.
+        assert!(
+            engine.community_memo.get().is_none(),
+            "reattach must invalidate the community memo"
+        );
+        assert!(
+            engine.search_indexes_memo.get().is_none(),
+            "reattach must invalidate the search memo"
+        );
+    }
+
     /// The lazy load runs the same validation gauntlet an eager boot
     /// runs: content an eager boot warns about produces the SAME
     /// warning when its mem loads lazily — deferral changes when, not
@@ -3665,6 +3756,456 @@ write_rules: []
             .get_entity(&crate::EntityId::new("laz", "bad"))
             .unwrap();
         assert!(bad.relationships.is_empty());
+    }
+
+    /// The destructive guard sees referrers living in DEFERRED mems:
+    /// deleting an entity whose incoming references originate in a lazy,
+    /// not-yet-loaded mem refuses `HAS_INCOMING_REFS` exactly as an
+    /// eager boot refuses it. The third final grade demonstrated the
+    /// counterexample live — the scoped reload left the referrer's mem
+    /// unloaded and the delete destroyed the entity an eager boot
+    /// protects. The guard now takes the full load first.
+    #[test]
+    fn delete_guard_sees_referrers_in_deferred_mems() {
+        use crate::engine::{DeleteEntityArgs, RelateEntityArgs};
+
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let (actor, client) = cli_actor();
+
+        // Author the cross-mem referrer through the mutation surface
+        // while both mems are eager (with the cross-link grant), so the
+        // persisted relation is exactly what a real workspace carries.
+        {
+            let mut authoring = Engine::from_mounts(vec![
+                (
+                    folder_mount("eag", eager_dir.to_path_buf()),
+                    Box::new(FilesystemMemWriter::new(eager_dir.to_path_buf()))
+                        as Box<dyn MemBackend>,
+                ),
+                (
+                    folder_mount("laz", lazy_dir.to_path_buf()),
+                    Box::new(FilesystemMemWriter::new(lazy_dir.to_path_buf()))
+                        as Box<dyn MemBackend>,
+                ),
+            ])
+            .unwrap();
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            settings.cross_mem_links.insert(
+                "laz".to_string(),
+                memstead_schema::workspace_config::CrossLinkValue::List(vec!["eag".to_string()]),
+            );
+            authoring.set_settings(settings);
+            authoring
+                .relate_entity(
+                    RelateEntityArgs {
+                        source: crate::EntityId::new("laz", "omega"),
+                        expected_hash: None,
+                        rel_type: "USES".to_string(),
+                        target: crate::EntityId::new("eag", "alpha"),
+                        remove: false,
+                        description: None,
+                        dry_run: false,
+                    },
+                    actor,
+                    Some(&client),
+                    None,
+                )
+                .expect("cross-mem relate lands under the grant");
+        }
+
+        // Fresh boot with the REFERRER's mem lazy: the incoming edge
+        // into `eag--alpha` lives in an unloaded mem. The guard must
+        // still see it — full load before destructive adjudication.
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+        assert!(engine.mem_is_deferred("laz"));
+        let err = engine
+            .delete_entity(
+                DeleteEntityArgs {
+                    id: crate::EntityId::new("eag", "alpha"),
+                    expected_hash: None,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("a referenced entity must refuse deletion, lazy referrer or not");
+        assert!(
+            matches!(err, EngineError::HasIncomingRefs { .. }),
+            "expected HAS_INCOMING_REFS, got {err:?}"
+        );
+        assert!(
+            engine
+                .get_entity(&crate::EntityId::new("eag", "alpha"))
+                .is_some(),
+            "the entity survives"
+        );
+    }
+
+    /// The write-time acyclicity guard sees edges living in DEFERRED
+    /// mems: an add that closes a cycle THROUGH a lazy, not-yet-loaded
+    /// mem refuses `RELATIONSHIP_CYCLE` exactly as an eager boot
+    /// refuses it. The fourth final grade demonstrated the
+    /// counterexample on a three-mem chain — the mid-path edge lived on
+    /// the lazy mem's entity, the walk over the endpoint mems missed
+    /// it, the cycle landed, and the next eager boot dropped an
+    /// INNOCENT pre-existing edge to break it. A two-mem fixture would
+    /// pass vacuously (relate loads both endpoint mems); three mems
+    /// with the middle one lazy is the discriminating shape.
+    #[test]
+    fn acyclicity_guard_sees_edges_in_deferred_mems() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let dirs: Vec<std::path::PathBuf> = ["ma", "mb", "mc"]
+            .iter()
+            .map(|m| {
+                let d = tmp.path().join(m);
+                std::fs::create_dir_all(&d).unwrap();
+                d
+            })
+            .collect();
+        write_spec(&dirs[0], "node", "Node A", "");
+        write_spec(&dirs[1], "node", "Node B", "");
+        write_spec(&dirs[2], "node", "Node C", "");
+
+        let mounts = |lazy_mid: bool| -> Vec<(Mount, Box<dyn MemBackend>)> {
+            ["ma", "mb", "mc"]
+                .iter()
+                .zip(dirs.iter())
+                .map(|(m, d)| {
+                    let mut mount = folder_mount(m, d.clone());
+                    if lazy_mid && *m == "ma" {
+                        mount.lifecycle = MountLifecycle::Lazy;
+                    }
+                    (
+                        mount,
+                        Box::new(FilesystemMemWriter::new(d.clone())) as Box<dyn MemBackend>,
+                    )
+                })
+                .collect()
+        };
+        let grants = || {
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            for (from, to) in [("mb", "ma"), ("ma", "mc"), ("mc", "mb")] {
+                settings
+                    .cross_mem_links
+                    .insert(from.to_string(), CrossLinkValue::List(vec![to.to_string()]));
+            }
+            settings
+        };
+        let relate = |engine: &mut Engine, from: &str, to: &str| {
+            let (actor, client) = cli_actor();
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: crate::EntityId::new(from, "node"),
+                    expected_hash: None,
+                    rel_type: "DEPENDS_ON".to_string(),
+                    target: crate::EntityId::new(to, "node"),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        // Author the chain mb→ma→mc while everything is eager.
+        {
+            let mut authoring = Engine::from_mounts(mounts(false)).unwrap();
+            authoring.set_settings(grants());
+            relate(&mut authoring, "mb", "ma").expect("mb→ma lands");
+            relate(&mut authoring, "ma", "mc").expect("ma→mc lands");
+        }
+
+        // Fresh boot with the MID-PATH mem lazy: closing mc→mb would
+        // complete the cycle mb→ma→mc→mb through the unloaded mem.
+        let mut engine = Engine::from_mounts(mounts(true)).unwrap();
+        engine.set_settings(grants());
+        assert!(engine.mem_is_deferred("ma"), "the mid-path mem is deferred");
+        let err = relate(&mut engine, "mc", "mb")
+            .expect_err("a cycle through a deferred mem must refuse, as eager refuses");
+        assert!(
+            matches!(err, EngineError::RelationshipCycle { .. }),
+            "expected RELATIONSHIP_CYCLE, got {err:?}"
+        );
+    }
+
+    /// The BATCH relate path runs the same acyclicity guard over the
+    /// same full store: a two-entry batch (the shape MCP routes to
+    /// `batch_relate`) whose first entry closes a cycle through a
+    /// deferred mid-path mem is refused whole, exactly as an eager
+    /// boot refuses it. The fifth lazy-mount grade demonstrated the
+    /// complement live: without the batch-path full load the cycle
+    /// committed silently.
+    #[test]
+    fn batch_acyclicity_guard_sees_edges_in_deferred_mems() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let dirs: Vec<std::path::PathBuf> = ["ma", "mb", "mc"]
+            .iter()
+            .map(|m| {
+                let d = tmp.path().join(m);
+                std::fs::create_dir_all(&d).unwrap();
+                d
+            })
+            .collect();
+        write_spec(&dirs[0], "node", "Node A", "");
+        write_spec(&dirs[1], "node", "Node B", "");
+        write_spec(&dirs[2], "node", "Node C", "");
+        // A second entity in mc so the batch's second entry can be an
+        // intra-mem edge that touches ONLY mc — a target in any other
+        // mem would put that mem on the batch's touched-mems reload
+        // list and load it by that route, masking the guard under test.
+        write_spec(&dirs[2], "node2", "Node C2", "");
+
+        let mounts = |lazy_mid: bool| -> Vec<(Mount, Box<dyn MemBackend>)> {
+            ["ma", "mb", "mc"]
+                .iter()
+                .zip(dirs.iter())
+                .map(|(m, d)| {
+                    let mut mount = folder_mount(m, d.clone());
+                    if lazy_mid && *m == "ma" {
+                        mount.lifecycle = MountLifecycle::Lazy;
+                    }
+                    (
+                        mount,
+                        Box::new(FilesystemMemWriter::new(d.clone())) as Box<dyn MemBackend>,
+                    )
+                })
+                .collect()
+        };
+        let grants = || {
+            let mut settings = crate::workspace::WorkspaceSettings::default();
+            for (from, to) in [("mb", "ma"), ("ma", "mc"), ("mc", "mb")] {
+                settings
+                    .cross_mem_links
+                    .insert(from.to_string(), CrossLinkValue::List(vec![to.to_string()]));
+            }
+            settings
+        };
+        let relate_args = |from: &str, to: &str| RelateEntityArgs {
+            source: crate::EntityId::new(from, "node"),
+            expected_hash: None,
+            rel_type: "DEPENDS_ON".to_string(),
+            target: crate::EntityId::new(to, "node"),
+            remove: false,
+            description: None,
+            dry_run: false,
+        };
+
+        // Author the chain mb→ma→mc while everything is eager.
+        {
+            let (actor, client) = cli_actor();
+            let mut authoring = Engine::from_mounts(mounts(false)).unwrap();
+            authoring.set_settings(grants());
+            authoring
+                .relate_entity(relate_args("mb", "ma"), actor, Some(&client), None)
+                .expect("mb→ma lands");
+            let (actor2, client2) = cli_actor();
+            authoring
+                .relate_entity(relate_args("ma", "mc"), actor2, Some(&client2), None)
+                .expect("ma→mc lands");
+        }
+
+        // Fresh boot with the MID-PATH mem lazy; a two-entry batch
+        // whose first edge mc→mb completes the cycle mb→ma→mc→mb
+        // through the unloaded mem must refuse whole.
+        let mut engine = Engine::from_mounts(mounts(true)).unwrap();
+        engine.set_settings(grants());
+        assert!(engine.mem_is_deferred("ma"), "the mid-path mem is deferred");
+        let (actor, client) = cli_actor();
+        let result = engine
+            .batch_relate(
+                vec![
+                    (relate_args("mc", "mb"), None),
+                    // The second entry makes the batch two entries —
+                    // the shape MCP routes to `batch_relate` — and is
+                    // an intra-mem edge inside mc: it touches no other
+                    // mem (so it cannot load ma via the touched-mems
+                    // reload) and closes no cycle of its own.
+                    (
+                        RelateEntityArgs {
+                            source: crate::EntityId::new("mc", "node2"),
+                            expected_hash: None,
+                            rel_type: "DEPENDS_ON".to_string(),
+                            target: crate::EntityId::new("mc", "node"),
+                            remove: false,
+                            description: None,
+                            dry_run: false,
+                        },
+                        None,
+                    ),
+                ],
+                actor,
+                Some(&client),
+                false,
+            )
+            .expect("the batch call itself returns a report-all envelope");
+        assert!(
+            !result.applied,
+            "a batch closing a cycle through a deferred mem must refuse, as eager refuses; got applied with {} succeeded",
+            result.succeeded
+        );
+    }
+
+    /// Write-time cross-mem target verification (flywheel W7/02): a
+    /// relate into a DEFERRED Write mem verifies the target against
+    /// storage without loading the mem. A storage-verified target is
+    /// admitted with a LoadTime stub and NO auto-stub warning (the
+    /// entity exists — it resolves when the mem loads); a genuinely
+    /// absent target keeps today's forward-reference mechanic, warning
+    /// included. Either way the target mem stays deferred.
+    #[test]
+    fn relate_into_deferred_mem_verifies_against_storage_without_load() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut engine = mixed_engine(&eager_dir, &lazy_dir);
+        let mut settings = crate::workspace::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            "eag".to_string(),
+            CrossLinkValue::List(vec!["laz".to_string()]),
+        );
+        engine.set_settings(settings);
+
+        let relate = |engine: &mut Engine, to: &str| {
+            let (actor, client) = cli_actor();
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: crate::EntityId::new("eag", "alpha"),
+                    expected_hash: None,
+                    rel_type: "SUPPORTS".to_string(),
+                    target: crate::EntityId::new("laz", to),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        // Storage-verified target: laz--omega exists on disk.
+        let outcome = relate(&mut engine, "omega").expect("verified target admits");
+        assert!(
+            engine.mem_is_deferred("laz"),
+            "verification never loads the mem"
+        );
+        assert!(
+            !outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::AutoStubCreated { .. })),
+            "a storage-verified target is not an auto-stub case: {:?}",
+            outcome.warnings
+        );
+        let stub = engine
+            .store()
+            .get(&crate::EntityId::new("laz", "omega"))
+            .expect("until-load stub present");
+        assert!(stub.stub);
+        assert_eq!(
+            stub.stub_kind,
+            Some(crate::entity::StubKind::LoadTime),
+            "verified-in-storage stub carries the load-time kind"
+        );
+
+        // Genuinely absent target: forward-reference mechanic intact.
+        let outcome = relate(&mut engine, "missing").expect("absent Write-mem target auto-stubs");
+        assert!(engine.mem_is_deferred("laz"), "still no load");
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::AutoStubCreated { .. })),
+            "absent target keeps the auto-stub warning: {:?}",
+            outcome.warnings
+        );
+        let stub = engine
+            .store()
+            .get(&crate::EntityId::new("laz", "missing"))
+            .expect("forward-reference stub present");
+        assert_eq!(
+            stub.stub_kind,
+            Some(crate::entity::StubKind::ForwardReference)
+        );
+    }
+
+    /// The read-only contract, now answerable without load (flywheel
+    /// W7/02): an entity PRESENT in a deferred read-only mem's storage
+    /// is admitted — the refusal never fires merely because the mem is
+    /// unloaded — and an ABSENT one refuses with the existing typed
+    /// error. The mem stays deferred through both.
+    #[test]
+    fn readonly_deferred_target_answers_from_storage() {
+        use crate::engine::RelateEntityArgs;
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let (eager_dir, lazy_dir) = two_mem_dirs(&tmp);
+        let mut ro_mount = lazy_folder_mount("laz", lazy_dir.to_path_buf());
+        ro_mount.capability = crate::workspace::MountCapability::ReadOnly;
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("eag", eager_dir.to_path_buf()),
+                Box::new(FilesystemMemWriter::new(eager_dir.to_path_buf())) as Box<dyn MemBackend>,
+            ),
+            (
+                ro_mount,
+                Box::new(FilesystemMemWriter::new(lazy_dir.to_path_buf())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let mut settings = crate::workspace::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            "eag".to_string(),
+            CrossLinkValue::List(vec!["laz".to_string()]),
+        );
+        engine.set_settings(settings);
+
+        let relate = |engine: &mut Engine, to: &str| {
+            let (actor, client) = cli_actor();
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: crate::EntityId::new("eag", "alpha"),
+                    expected_hash: None,
+                    rel_type: "SUPPORTS".to_string(),
+                    target: crate::EntityId::new("laz", to),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        relate(&mut engine, "omega").expect("present-in-storage RO target admits");
+        assert!(
+            engine.mem_is_deferred("laz"),
+            "the admit never loads the mem"
+        );
+
+        let err =
+            relate(&mut engine, "missing").expect_err("absent RO target keeps the typed refusal");
+        assert!(
+            matches!(err, EngineError::CrossMemTargetNotFound { .. }),
+            "expected CROSS_MEM_TARGET_NOT_FOUND, got {err:?}"
+        );
+        assert!(
+            engine.mem_is_deferred("laz"),
+            "the refusal never loads the mem either"
+        );
     }
 
     /// A cross-mem body link from an eager mem into a lazy one is a

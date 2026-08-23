@@ -340,6 +340,14 @@ pub fn delete_mem(
     // Populated only under `detach_incoming: true` — see Step 3a.
     let mut detached_referrers: Vec<memstead_base::ReferrerInfo> = Vec::new();
 
+    // The `MEM_HAS_INCOMING_REFS` guard (Step 3a) walks incoming edges
+    // that can originate in ANY mem — a deferred (lazy, unloaded)
+    // sibling's referrers would be invisible over a partial store, and
+    // the delete would destroy a mem an eager boot refuses to (the
+    // third lazy-mount grade demonstrated exactly that). Full load
+    // before any destructive adjudication.
+    engine.ensure_mems_loaded(None);
+
     // ---- Step 1: resolve name ----
     if !engine.mem_router().is_writable(&params.name) {
         return Err(memstead_base::EngineError::UnknownMem(params.name.clone()).into());

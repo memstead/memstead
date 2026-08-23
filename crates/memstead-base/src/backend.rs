@@ -52,6 +52,25 @@ pub trait MemBackend: Send + Sync {
     /// (idempotent reads); `Err` for IO or backend-specific failures.
     fn read_entity(&self, rel_path: &Path) -> Result<Option<Vec<u8>>, BackendError>;
 
+    /// Does storage hold an entity at `rel_path`? A pure existence
+    /// probe — the write-time cross-mem target check's primitive
+    /// (flywheel W7/02): callers verifying a reference into a mem that
+    /// is not loaded ask storage directly instead of forcing the mem's
+    /// full load. The answer observes the same pending-buffer
+    /// precedence as [`Self::read_entity`] (a staged upsert exists, a
+    /// staged delete does not).
+    ///
+    /// The default reads the bytes and drops them — correct
+    /// everywhere, cheap nowhere. Backends with a cheaper metadata
+    /// answer override it: the folder backend asks the filesystem
+    /// (`symlink_metadata`, no open), the git-branch backend stops at
+    /// the tree entry (`lookup_entry_by_path`, never the blob read —
+    /// the public listing walk reads every blob and is the wrong
+    /// primitive for this question).
+    fn entity_exists(&self, rel_path: &Path) -> Result<bool, BackendError> {
+        Ok(self.read_entity(rel_path)?.is_some())
+    }
+
     /// Upsert `content` at `rel_path`. Pending until [`Self::commit`].
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError>;
 

@@ -465,6 +465,38 @@ impl CliContext {
         }
     }
 
+    /// [`Self::cli_engine`] with the lazy-mount load scoped to ONE mem:
+    /// deferred (lazy, not-yet-loaded) mems other than `mem` stay
+    /// unloaded, so a cold command that touches only this mem pays only
+    /// its load — the cold-path cut the sizing curve names. Only for
+    /// commands whose ENTIRE answer is computable from the named mem's
+    /// slice of the store (plus mount metadata): anything that renders
+    /// cross-mem state — incoming edges, workspace-wide counts, search
+    /// without a mem filter — must use [`Self::cli_engine`], whose
+    /// full load keeps every answer computed over a complete store.
+    /// Engine mutations need no caller-side scoping either way: each
+    /// runs the `reload_if_stale` funnel for its target mem itself, and
+    /// the ones whose guards read cross-mem state take the full load
+    /// themselves (delete's incoming-refs guards, relate's two
+    /// endpoints).
+    pub fn cli_engine_scoped(&self, mem: &str) -> anyhow::Result<CliEngine> {
+        match self.workspace_shape() {
+            Some((_, root)) => {
+                let mut engine = self.cli_engine_at_unloaded(&root)?;
+                match &mut engine {
+                    #[cfg(feature = "mem-repo")]
+                    CliEngine::MemRepo(e) => e.ensure_mems_loaded(Some(mem)),
+                    CliEngine::Filesystem(e) => e.ensure_mems_loaded(Some(mem)),
+                }
+                Ok(engine)
+            }
+            None => Err(workspace_not_initialised_error(
+                "No workspace found. Run from a directory containing `.memstead/workspace.toml` (run `memstead init` for a folder-mount workspace, or `memstead mem-repo init` for a mem-repo workspace).",
+            )
+            .into()),
+        }
+    }
+
     /// Build a [`CliEngine`] rooted at an explicit workspace directory,
     /// skipping the cwd walk-up. The flavour is still derived from
     /// whether `<root>/mem-repo/.git/` is present, so callers that
@@ -472,20 +504,31 @@ impl CliContext {
     /// the same factory selection as [`Self::cli_engine`]. The split
     /// also gives subcommands a chdir-free, unit-testable engine seam.
     pub fn cli_engine_at(&self, root: &Path) -> anyhow::Result<CliEngine> {
+        let mut engine = self.cli_engine_at_unloaded(root)?;
+        // Default lazy-mount posture (flywheel W7/01): the CLI loads
+        // every deferred mem up front, so a one-shot command behaves
+        // byte-identically to the all-eager world — no answer computes
+        // over a partial store. Commands whose whole answer lives in one
+        // mem opt into [`Self::cli_engine_scoped`] instead.
+        match &mut engine {
+            #[cfg(feature = "mem-repo")]
+            CliEngine::MemRepo(e) => e.ensure_mems_loaded(None),
+            CliEngine::Filesystem(e) => e.ensure_mems_loaded(None),
+        }
+        Ok(engine)
+    }
+
+    /// The boot half of [`Self::cli_engine_at`]: flavour detection and
+    /// engine construction, with NO deferred-mem load — every caller
+    /// decides the load scope explicitly (full for the correct-by-
+    /// default path, one mem for the scoped path).
+    fn cli_engine_at_unloaded(&self, root: &Path) -> anyhow::Result<CliEngine> {
         if memstead_base::is_mem_repo_shaped(root) {
             #[cfg(feature = "mem-repo")]
             {
                 let mut engine =
                     engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
                 engine.set_role(self.role);
-                // Interim lazy-mount posture (flywheel W7/01): the CLI
-                // loads every deferred mem up front, so its one-shot
-                // commands behave byte-identically to the all-eager
-                // world. The per-command scoped trigger (loading only
-                // the mems a command touches — the cold-path win the
-                // sizing curve names) is the follow-up cut; until it
-                // lands, correctness beats speed here.
-                engine.ensure_mems_loaded(None);
                 return Ok(CliEngine::MemRepo(engine));
             }
             #[cfg(not(feature = "mem-repo"))]
@@ -504,8 +547,6 @@ impl CliContext {
         let mut engine =
             BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
         engine.set_role(self.role);
-        // Same interim posture as the mem-repo branch above.
-        engine.ensure_mems_loaded(None);
         Ok(CliEngine::Filesystem(engine))
     }
 
@@ -686,6 +727,14 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
 
     let mut engine = engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
     engine.set_role(_ctx.role);
+    // Same CLI lazy-mount posture as `cli_engine_at`/`engine()`: load
+    // every deferred mem up front, so no consumer of this seam (`mem
+    // list` counts, `recover`, the batch commands, install/uninstall)
+    // computes an answer over a partial store. `full_engine` names the
+    // FullEngine flavour, not this posture — without this call an
+    // unloaded lazy mem rendered as entity count 0 (fifth lazy-mount
+    // grade).
+    engine.ensure_mems_loaded(None);
     Ok(engine)
 }
 

@@ -121,6 +121,15 @@ impl Engine {
             return Err(EngineError::ReadOnlyMount(mem));
         }
 
+        // Delete's race guard is `HAS_INCOMING_REFS`, and incoming
+        // edges can originate in ANY mem — so the check is only
+        // truthful over a complete store. A deferred (lazy, unloaded)
+        // mem's referrers would otherwise be invisible and the delete
+        // would silently admit what an eager boot refuses (the third
+        // lazy-mount grade demonstrated exactly that). Full load first;
+        // the drift reload below stays scoped to the target mem.
+        self.ensure_mems_loaded(None);
+
         // Reload-before-operation: reload if a sibling advanced the
         // mem ref, so the `expected_hash` compare and the
         // referrer classification below see current truth. Notice
@@ -270,7 +279,11 @@ impl Engine {
         };
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): the deleted id is removed from
+        // its index whether it left the store or demoted to a Residual
+        // stub (stubs are excluded either way); GC'd orphan stubs were
+        // never indexed.
+        self.maintain_search_indexes(std::slice::from_ref(id));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Gated on a landed commit: a stub delete

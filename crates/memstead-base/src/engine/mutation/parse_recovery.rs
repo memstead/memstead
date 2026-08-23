@@ -51,6 +51,11 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<ParseRecoveryReport, EngineError> {
+        // Recovery's answer scope is every mem's parse drops, and a
+        // deferred (lazy, unloaded) mem records no load warnings until
+        // it loads — full load first, or its drops are invisible to
+        // this pass (load-scope/answer-scope rule, flywheel W7/01).
+        self.ensure_mems_loaded(None);
         // Snapshot every `PARSED_RELATION_INVALID` warning. We
         // iterate the snapshot, not `self.load_warnings`, so the
         // mid-loop `update_entity` calls (which do not touch

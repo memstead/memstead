@@ -282,6 +282,42 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     engine.set_workspace_root(workspace_root.to_path_buf());
     engine.set_backend_factory(crate::storage::instantiate_full_backend);
     engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+    // Unmounted-mem storage discovery (flywheel W7/02): a write that
+    // references a mem with NO mount record can still be verified
+    // against the mem-repo's branch tree — the workspace layer owns
+    // the branch convention memstead-base cannot see. The prober
+    // resolves the mem's content branch (hierarchical paths included,
+    // `main`/`__*` registry refs filtered), hands back a transient
+    // git-tree backend over it, and reads the stored config's schema
+    // pin so cross-schema edge routing keeps its authority without a
+    // mount. Silent `None` on any miss — the forward-reference
+    // mechanic then governs, unchanged.
+    {
+        let gitdir = workspace_root.join("mem-repo").join(".git");
+        let gitdir = gitdir.canonicalize().unwrap_or(gitdir);
+        engine.set_unmounted_storage_prober(Box::new(move |mem: &str| {
+            if !gitdir.is_dir() {
+                return None;
+            }
+            let branch_path =
+                crate::mem_repo_config::resolve_full_path_at_gitdir(&gitdir, mem).ok()??;
+            let backend = crate::storage::git_tree::GitTreeMemWriter::new(
+                gitdir.clone(),
+                format!("refs/heads/{branch_path}"),
+            );
+            let schema = memstead_base::MemBackend::read_mem_config(&backend)
+                .ok()
+                .flatten()
+                .and_then(|bytes| {
+                    serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes).ok()
+                })
+                .and_then(|cfg| cfg.schema);
+            Some(memstead_base::engine::UnmountedMemStorage {
+                backend: Box::new(backend),
+                schema,
+            })
+        }));
+    }
     // Load the workspace store's pipeline configs — the v2 single-record
     // binding store — into the read-only queryable surface, matching the
     // lean boot path. A malformed config surfaces a typed parse error; a
@@ -310,6 +346,175 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let err = engine_from_workspace_root(tmp.path()).unwrap_err();
         assert!(matches!(err, BootError::NotInitialised(_)));
+    }
+
+    /// Unmounted-mem storage discovery (flywheel W7/02): a relate into
+    /// a mem with NO mount record but a real content branch in the
+    /// mem-repo is verified against the branch tree — admitted with a
+    /// LoadTime stub and no auto-stub/mem-uncreated warnings when the
+    /// entity exists, and falling back to today's forward-reference
+    /// mechanic (stub + both warnings) when it does not or when no
+    /// branch exists at all.
+    #[test]
+    fn relate_into_unmounted_mem_verifies_against_branch_tree() {
+        use memstead_base::engine::RelateEntityArgs;
+        use memstead_base::ops::WarningHint;
+        use memstead_base::storage::MemWriter;
+        use memstead_base::vcs::{Actor, ClientId, CommitContext};
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead").join("state")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            concat!(
+                "format = \"memstead-git-branch-2\"\n\n",
+                "[persistence_adapter]\nname = \"file-two-layer\"\n\n",
+                "[cross_mem_links]\nsrc = [\"far\", \"nowhere\"]\n",
+            ),
+        )
+        .unwrap();
+        let gitdir = root.join("mem-repo").join(".git");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        gix::init_bare(&gitdir).unwrap();
+        let gitdir = std::fs::canonicalize(&gitdir).unwrap();
+
+        // Mounted source mem: a folder mount with one entity.
+        let src_dir = root.join("src-mem");
+        std::fs::create_dir_all(src_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            src_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            src_dir.join("alpha.md"),
+            "---
+type: spec
+---
+# Alpha
+
+## Identity
+
+Body.
+",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".memstead").join("state").join("mounts.json"),
+            format!(
+                r#"{{"format":"memstead-mounts-3","mounts":[{{"mem":"src","schema":"default@1.0.0","storage":{{"type":"folder","path":{}}},"capability":"write","lifecycle":"eager","cross_linkable":true}}]}}"#,
+                serde_json::to_string(&src_dir).unwrap()
+            ),
+        )
+        .unwrap();
+
+        // UNMOUNTED mem "far": a real content branch, no mounts row.
+        let far = crate::storage::git_tree::GitTreeMemWriter::new(
+            gitdir.clone(),
+            "refs/heads/far".to_string(),
+        );
+        MemWriter::write_entity(
+            &far,
+            std::path::Path::new("topic.md"),
+            b"---
+type: spec
+---
+# Topic
+
+## Identity
+
+Body.
+",
+        )
+        .unwrap();
+        MemWriter::commit(
+            &far,
+            "seed far",
+            &CommitContext {
+                actor: Actor::Cli,
+                client: Some(ClientId {
+                    name: "test".to_string(),
+                    version: "0".to_string(),
+                }),
+                tool: Some("test"),
+                note: None,
+                role: Default::default(),
+                logical_operation_id: None,
+                entity_ids: None,
+            },
+        )
+        .unwrap();
+
+        let mut engine = engine_from_workspace_root(root).unwrap();
+        let relate = |engine: &mut Engine, mem: &str, to: &str| {
+            engine.relate_entity(
+                RelateEntityArgs {
+                    source: memstead_base::EntityId::new("src", "alpha"),
+                    expected_hash: None,
+                    rel_type: "SUPPORTS".to_string(),
+                    target: memstead_base::EntityId::new(mem, to),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+        };
+
+        // Verified: the branch tree holds topic.md.
+        let outcome =
+            relate(&mut engine, "far", "topic").expect("verified unmounted target admits");
+        assert!(
+            !outcome.warnings.iter().any(|w| matches!(
+                w,
+                WarningHint::AutoStubCreated { .. }
+                    | WarningHint::CrossMemTargetMemUncreated { .. }
+            )),
+            "a branch-verified target is neither an auto-stub case nor an uncreated mem: {:?}",
+            outcome.warnings
+        );
+        let stub = engine
+            .store()
+            .get(&memstead_base::EntityId::new("far", "topic"))
+            .expect("until-load stub present");
+        assert_eq!(
+            stub.stub_kind,
+            Some(memstead_base::entity::StubKind::LoadTime)
+        );
+        assert!(
+            engine.mount("far").is_none(),
+            "verification never adds a mount — the twenty-mems case pays a tree lookup, not a workspace-shape change"
+        );
+
+        // Absent from the branch: forward-reference mechanic, both warnings.
+        let outcome = relate(&mut engine, "far", "missing").expect("absent target auto-stubs");
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::AutoStubCreated { .. })),
+            "absent target keeps the auto-stub warning: {:?}",
+            outcome.warnings
+        );
+
+        // No branch at all: mechanic untouched, both warnings.
+        let outcome =
+            relate(&mut engine, "nowhere", "thing").expect("undiscoverable mem auto-stubs");
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::AutoStubCreated { .. }))
+                && outcome
+                    .warnings
+                    .iter()
+                    .any(|w| matches!(w, WarningHint::CrossMemTargetMemUncreated { .. })),
+            "no discoverable storage keeps today's stub + warnings: {:?}",
+            outcome.warnings
+        );
     }
 
     /// A schema installed onto the `__MEMSTEAD:schemas/` ref overlays

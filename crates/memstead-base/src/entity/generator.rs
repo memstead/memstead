@@ -39,7 +39,10 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             .get(s.key.as_str())
             .map(|v| v.as_str())
             .unwrap_or("");
-        parts.push(format!("## {}\n{content}", s.heading));
+        parts.push(close_open_fence(
+            format!("## {}\n{content}", s.heading),
+            content,
+        ));
     }
 
     // Relationships section (between required and optional).
@@ -89,10 +92,30 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             .map(|v| v.as_str())
             .unwrap_or("");
         // All sections get the same spacing for roundtrip stability
-        parts.push(format!("## {}\n\n{content}", s.heading));
+        parts.push(close_open_fence(
+            format!("## {}\n\n{content}", s.heading),
+            content,
+        ));
     }
 
     parts.join("\n\n") + "\n"
+}
+
+/// Terminate a section block whose content ends inside an open code
+/// fence. Without this, everything the generator writes after the block
+/// — the following section headings included — is inside that fence on
+/// the next parse: sections are absorbed, and the document grows on
+/// every parse→generate round. The fix is at generation, not by
+/// mutating the stored content: one round normalises (the reparsed
+/// section content then carries the closing fence), after which
+/// parse→generate is a fixpoint. Balanced content is untouched, so
+/// canonical bytes of well-formed entities do not change.
+fn close_open_fence(mut part: String, content: &str) -> String {
+    if let Some(closer) = crate::markdown::closing_fence_if_unterminated(content) {
+        part.push('\n');
+        part.push_str(&closer);
+    }
+    part
 }
 
 /// Build YAML frontmatter metadata string.

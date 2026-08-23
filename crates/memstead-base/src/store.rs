@@ -38,16 +38,28 @@ pub struct InEdge {
     pub source: EdgeSource,
 }
 
-/// The graph store. Three maps: nodes, outgoing edges, incoming edges.
+/// The graph store. Three maps: nodes, outgoing edges, incoming edges —
+/// plus the store GENERATION, a monotonic counter every mutating method
+/// bumps (flywheel W8/01). Derived-structure memos key on it: a memo
+/// computed at generation N is current exactly while the store still
+/// reports N.
 ///
 /// `Clone` backs the atomic-batch rollback: `batch_update` snapshots
 /// the store before preparing items so a refused batch can restore the
-/// pre-call graph wholesale.
+/// pre-call graph wholesale. The generation travels WITH the clone —
+/// that is what makes generation-keyed memos rollback-aware: a restored
+/// snapshot restores the generation its state was numbered with, so a
+/// memo computed from that exact state is correctly current again,
+/// while any state the rollback discarded carried higher numbers no
+/// memo can be tricked into matching (every mutation bumps, so a given
+/// number never names two different states along one engine's
+/// timeline).
 #[derive(Debug, Clone)]
 pub struct Store {
     nodes: HashMap<EntityId, Entity>,
     out_edges: HashMap<EntityId, Vec<Edge>>,
     in_edges: HashMap<EntityId, Vec<InEdge>>,
+    generation: u64,
 }
 
 impl Store {
@@ -56,11 +68,19 @@ impl Store {
             nodes: HashMap::new(),
             out_edges: HashMap::new(),
             in_edges: HashMap::new(),
+            generation: 0,
         }
+    }
+
+    /// The store's current generation. Bumped by every mutating
+    /// method; memos over derived structures key their validity on it.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Insert or update a node. If the node already exists, replace it.
     pub fn upsert(&mut self, id: EntityId, entity: Entity) {
+        self.generation += 1;
         if !self.out_edges.contains_key(&id) {
             self.out_edges.insert(id.clone(), Vec::new());
         }
@@ -72,6 +92,7 @@ impl Store {
 
     /// Remove a node and cascade-delete all its edges.
     pub fn remove(&mut self, id: &EntityId) -> Option<Entity> {
+        self.generation += 1;
         // Remove outgoing edges and their mirrors in in_edges
         if let Some(out) = self.out_edges.remove(id) {
             for edge in &out {
@@ -96,6 +117,9 @@ impl Store {
     }
 
     pub fn get_mut(&mut self, id: &EntityId) -> Option<&mut Entity> {
+        // A handed-out `&mut Entity` may be edited; count the access
+        // as a mutation (over-invalidation is safe, staleness is not).
+        self.generation += 1;
         self.nodes.get_mut(id)
     }
 
@@ -125,6 +149,7 @@ impl Store {
     /// 10k entities the loop can switch to a mem-keyed bucket on
     /// `Store` without changing this signature.
     pub fn remove_entities_by_mem(&mut self, mem: &str) -> usize {
+        self.generation += 1;
         let to_remove: Vec<EntityId> = self
             .nodes
             .keys()
@@ -149,6 +174,7 @@ impl Store {
     /// Add an edge. Idempotent: if (from, to, type) exists, update source; else append.
     /// Stores in both out_edges and in_edges for bidirectional traversal.
     pub fn add_edge(&mut self, from: EntityId, edge: Edge) {
+        self.generation += 1;
         let target = edge.target.clone();
         let rel_type = edge.rel_type.clone();
         let source = edge.source.clone();
@@ -184,6 +210,7 @@ impl Store {
 
     /// Remove a specific edge by (from, to, type).
     pub fn remove_edge(&mut self, from: &EntityId, to: &EntityId, rel_type: &str) {
+        self.generation += 1;
         if let Some(out_list) = self.out_edges.get_mut(from) {
             out_list.retain(|e| !(e.target == *to && e.rel_type == rel_type));
         }
@@ -194,6 +221,7 @@ impl Store {
 
     /// Remove all outgoing edges from a node (and their mirrors).
     pub fn remove_edges_from(&mut self, id: &EntityId) {
+        self.generation += 1;
         if let Some(out) = self.out_edges.get_mut(id) {
             let edges = std::mem::take(out);
             for edge in edges {
@@ -216,6 +244,7 @@ impl Store {
 
     /// Rename a node. Updates all edge references.
     pub fn rename_node(&mut self, old_id: &EntityId, new_id: EntityId) -> bool {
+        self.generation += 1;
         if old_id == &new_id {
             return false;
         }
@@ -271,6 +300,7 @@ impl Store {
 
     /// Clear all nodes and edges.
     pub fn clear(&mut self) {
+        self.generation += 1;
         self.nodes.clear();
         self.out_edges.clear();
         self.in_edges.clear();

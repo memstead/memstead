@@ -631,6 +631,15 @@ impl Engine {
         }
 
         let fallback = engine_fallback_type();
+        // Incremental (flywheel W8/01): the touched set is the OLD id
+        // (its document must leave the index) plus every re-parsed
+        // entity — the renamed entity at its new id and each rewritten
+        // referrer.
+        let mut touched: Vec<crate::EntityId> = parse_results
+            .iter()
+            .map(|pr| pr.entity.id.clone())
+            .collect();
+        touched.push(id.clone());
         push_entities_into_store(&mut self.store, parse_results, fallback.as_ref(), None);
         crate::entity::store_builder::remap_alias_target_edge_sources(
             &mut self.store,
@@ -638,7 +647,7 @@ impl Engine {
         );
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        self.maintain_search_indexes(&touched);
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-rename path; the

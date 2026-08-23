@@ -44,6 +44,11 @@ pub(super) struct PreparedRelate {
     /// step upserts it — prepare itself never mutates the store, so a
     /// refused batch has nothing to undo from prepares alone.
     pub(super) stub_target: Option<EntityId>,
+    /// The planned stub's kind: `ForwardReference` for a genuinely
+    /// absent target, `LoadTime` for a storage-verified target in a
+    /// deferred mem (the stub is only the until-load representation —
+    /// flywheel W7/02). Meaningless when `stub_target` is `None`.
+    pub(super) stub_kind: crate::entity::StubKind,
     pub(super) type_def: std::sync::Arc<memstead_schema::TypeDefinition>,
 }
 
@@ -94,8 +99,41 @@ impl Engine {
         // out of `prepare_relate` so `batch_relate` can probe every
         // touched mem exactly once up front instead of per entry.
         let mut drift_warnings = self.reload_if_stale(Some(&source_mem));
-        if target_mem != source_mem {
+        if target_mem != source_mem && !self.mem_is_deferred(&target_mem) {
+            // A DEFERRED target mem is deliberately not probed here:
+            // the funnel's phase-0 trigger would full-load it, and
+            // target verification must never cost a mem's load
+            // (flywheel W7/02 — the storage check below answers the
+            // existence and type questions against the branch tree /
+            // filesystem instead).
             drift_warnings.append(&mut self.reload_if_stale(Some(&target_mem)));
+        }
+        // An ACYCLIC rel-type's cycle guard walks the whole rel-type
+        // subgraph (`would_cycle`), and a cycle can pass through any
+        // mem — an edge on a deferred (lazy, unloaded) mem's entity is
+        // invisible to a walk over the endpoint mems alone, so an add
+        // an eager boot refuses would land silently and corrupt an
+        // innocent edge on the next full load (the fourth lazy-mount
+        // grade demonstrated exactly that on a three-mem chain). The
+        // same holds for a rel-type in an `acyclic_sets` set, whose
+        // guard walks the set's UNION subgraph, and for declared
+        // aggregate signals on either endpoint's schema: the
+        // threshold-crossing diff counts edges that can originate in
+        // any mem, so a partial store silently mis-levels it. Full
+        // load before the guard; writes touching neither skip the
+        // cost.
+        let cycle_guard_needs_full = !args.remove
+            && self.schemas.get(&source_mem).is_some_and(|s| {
+                s.relationship_acyclic(&args.rel_type)
+                    || s.acyclic_set_containing(&args.rel_type).is_some()
+            });
+        let signal_diff_needs_full = [source_mem.as_str(), args.target.mem()].iter().any(|m| {
+            self.schemas
+                .get(*m)
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        });
+        if cycle_guard_needs_full || signal_diff_needs_full {
+            self.ensure_mems_loaded(None);
         }
 
         let dry_run = args.dry_run;
@@ -250,7 +288,10 @@ impl Engine {
             };
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): only the SOURCE entity's file
+        // was rewritten; stub targets and GC'd orphan stubs were never
+        // indexed.
+        self.maintain_search_indexes(std::slice::from_ref(&prepared.from));
 
         let PreparedRelate {
             from,
@@ -421,6 +462,10 @@ impl Engine {
             if let Some(mount) = self.mount(&target_mem)
                 && mount.capability == MountCapability::ReadOnly
                 && !self.store.contains(&args.target)
+                && !matches!(
+                    super::probe_deferred_target(self, &args.target)?,
+                    super::DeferredTargetProbe::Exists
+                )
             {
                 return Err(EngineError::CrossMemTargetNotFound {
                     target_id: args.target.to_string(),
@@ -480,15 +525,15 @@ impl Engine {
         // schema to consult and the validation falls back to the
         // intra-mem path. Real workspaces always mount the target
         // mem before relating.
-        let target_schema = if source_mem == target_mem {
+        let target_schema_ref: Option<SchemaRef> = if source_mem == target_mem {
             None
         } else {
-            self.schemas.get(&target_mem).cloned()
+            // Loaded mems answer from the schema catalogue; an
+            // unmounted mem with discoverable storage answers from
+            // its stored config's pin (flywheel W7/02) — see
+            // `target_schema_ref_for_routing`.
+            super::target_schema_ref_for_routing(self, &target_mem)
         };
-        let target_schema_ref: Option<SchemaRef> = target_schema.as_ref().map(|s| {
-            let (name, version) = s.id();
-            SchemaRef::new(name, version)
-        });
         let cross_mem_different = match (&target_schema_ref, schema.id()) {
             (Some(target), (src_name, _)) => target.name != src_name,
             (None, _) => false,
@@ -542,6 +587,33 @@ impl Engine {
             .get(&args.target)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
+        // Storage verification for a target in a DEFERRED mem
+        // (flywheel W7/02): the store cannot answer for an unloaded
+        // mem, so existence comes from the cheap storage probe and —
+        // when the shape check will need it — the type from the one
+        // resolved blob. Neither triggers the mem's load.
+        let target_verified_in_storage = if target_type.is_none() && target_mem != source_mem {
+            matches!(
+                super::probe_deferred_target(self, &args.target)?,
+                super::DeferredTargetProbe::Exists
+            )
+        } else {
+            false
+        };
+        let target_type = match target_type {
+            Some(t) => Some(t),
+            None if target_verified_in_storage && !args.remove => {
+                super::peek_deferred_target_type(self, &args.target)?
+            }
+            None => None,
+        };
+        if target_verified_in_storage {
+            // A verified target's mem is not "uncreated" — for an
+            // unmounted mem the discovery hook just found its storage
+            // and the entity in it; the layered warning would claim
+            // the opposite.
+            target_mem_uncreated = false;
+        }
         // Shape validation is add-only. Edges that violated the
         // schema's shape before constraints landed must remain
         // removable through `memstead_relate remove=true` — otherwise the
@@ -778,20 +850,34 @@ impl Engine {
         // been removed, so every diagnostic now follows the uniform
         // `{ code, message, details }` warning shape.
         let mut stub_target: Option<EntityId> = None;
+        let mut stub_kind = crate::entity::StubKind::ForwardReference;
         if matches!(action, RelateAction::Added) && !self.store.contains(&args.target) {
             stub_target = Some(args.target.clone());
-            // Rehearsal honesty: on the dry-run path nothing is
-            // written, so the warning's `pending` flag branches the
-            // message to the would-be form — the code stays
-            // AUTO_STUB_CREATED either way.
-            warnings.push(WarningHint::AutoStubCreated {
-                stub_id: args.target.clone(),
-                pending: args.dry_run,
-            });
+            if target_verified_in_storage {
+                // The target EXISTS — storage said so. The in-store
+                // stub is only plan 01's until-load representation of
+                // a cross-mem link into a deferred mem (it resolves
+                // when the mem loads), so it carries the load-time
+                // kind and no AUTO_STUB_CREATED warning: that warning
+                // tells an agent the target awaits creation, which
+                // would be false here.
+                stub_kind = crate::entity::StubKind::LoadTime;
+            } else {
+                // Rehearsal honesty: on the dry-run path nothing is
+                // written, so the warning's `pending` flag branches the
+                // message to the would-be form — the code stays
+                // AUTO_STUB_CREATED either way.
+                warnings.push(WarningHint::AutoStubCreated {
+                    stub_id: args.target.clone(),
+                    pending: args.dry_run,
+                });
+            }
             // If the target mem is unmounted, the
             // auto-stub above has no `_mem_schema` resolution. Layer
             // the typed mem-uncreated warning alongside the
             // `AutoStubCreated` so the operator sees both signals.
+            // (Never true on the verified branch — a deferred mem is
+            // mounted by definition.)
             if target_mem_uncreated {
                 warnings.push(WarningHint::CrossMemTargetMemUncreated {
                     from_mem: source_mem.clone(),
@@ -866,6 +952,7 @@ impl Engine {
             markdown,
             warnings,
             stub_target,
+            stub_kind,
             type_def,
         }))
     }
@@ -877,10 +964,8 @@ impl Engine {
     /// rolls back with a store snapshot + `discard_all_pending`.
     fn stage_prepared_relate(&mut self, p: &PreparedRelate) -> Result<(), EngineError> {
         if let Some(stub_id) = &p.stub_target {
-            self.store.upsert(
-                stub_id.clone(),
-                make_stub(stub_id, crate::entity::StubKind::ForwardReference),
-            );
+            self.store
+                .upsert(stub_id.clone(), make_stub(stub_id, p.stub_kind.clone()));
         }
         self.mounts[p.mount_idx]
             .backend
@@ -980,8 +1065,39 @@ impl Engine {
             .collect();
         touched_mems.sort();
         touched_mems.dedup();
+        // A mem that is only ever a TARGET in this batch and is
+        // deferred stays unloaded: target verification runs against
+        // storage (flywheel W7/02), and the funnel's phase-0 trigger
+        // would otherwise convert verification into a full load.
+        // Source mems always reload — a write into a mem needs the mem.
+        let source_mems: std::collections::HashSet<&str> =
+            relates.iter().map(|(a, _)| a.source.mem()).collect();
+        touched_mems.retain(|m| source_mems.contains(m.as_str()) || !self.mem_is_deferred(m));
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
+        }
+        // Same acyclic-guard rule as the single-item path: any added
+        // edge on an ACYCLIC rel-type (or a rel-type in an
+        // `acyclic_sets` set, whose guard walks the set's UNION
+        // subgraph) walks the whole subgraph, so the walk must see
+        // every mem — deferred (lazy, unloaded) ones included — or a
+        // cycle through an unloaded mem is admitted (the fifth
+        // lazy-mount grade demonstrated exactly that through this
+        // path). Declared signals on either endpoint's schema need
+        // the full load for the same reason as the single-item path.
+        if relates.iter().any(|(a, _)| {
+            (!a.remove
+                && self.schemas.get(a.source.mem()).is_some_and(|s| {
+                    s.relationship_acyclic(&a.rel_type)
+                        || s.acyclic_set_containing(&a.rel_type).is_some()
+                }))
+                || [a.source.mem(), a.target.mem()].iter().any(|m| {
+                    self.schemas
+                        .get(*m)
+                        .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+                })
+        }) {
+            self.ensure_mems_loaded(None);
         }
 
         // Snapshot for the all-or-nothing rollback: staged entries

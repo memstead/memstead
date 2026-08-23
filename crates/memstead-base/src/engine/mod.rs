@@ -198,14 +198,25 @@ pub struct Engine {
     /// calls after a successful write. `OnceCell` is `!Sync`; the
     /// engine is `Send` (it is moved into a `Mutex` by every consumer)
     /// but not `Sync`.
-    community_memo: OnceCell<LouvainOutput>,
+    /// Generation-keyed (flywheel W8/01): the memo carries the store
+    /// generation it was computed at; the invalidation hook clears it
+    /// only when the store has actually moved past that generation —
+    /// which is what makes a rolled-back batch (store snapshot
+    /// restored, generation restored with it) keep serving the memo
+    /// its state was computed from, and makes it impossible for the
+    /// rolled-back interim state to be served as fresh.
+    community_memo: OnceCell<(DerivedKey, LouvainOutput)>,
     /// Grounded-labelling memo — one `MemLabelling` per mem whose
     /// schema declares `relationships.labelling`, computed on first
     /// access and invalidated exactly where the community memo is
     /// (the reset lives inside [`Self::invalidate_communities`], so
     /// every mutation site, drift reload, quarantine attach/detach
     /// and apply-commit invalidate both without a second call).
-    labelling_memo: OnceCell<HashMap<String, crate::ops::labelling::MemLabelling>>,
+    /// Generation-keyed like `community_memo`.
+    labelling_memo: OnceCell<(
+        DerivedKey,
+        HashMap<String, crate::ops::labelling::MemLabelling>,
+    )>,
     /// Lazily-computed per-mem search index map. Built on first call
     /// to [`Self::search_indexes`] via [`build_all`]; invalidated by
     /// [`Self::invalidate_search_indexes`] alongside the community
@@ -213,7 +224,16 @@ pub struct Engine {
     /// search. Absent on `wasm32` targets — search lives behind the
     /// bridge (see `EngineError::SearchUnavailable`).
     #[cfg(not(target_arch = "wasm32"))]
-    search_indexes_memo: OnceCell<HashMap<String, MemIndex>>,
+    /// Generation-keyed like `community_memo`.
+    search_indexes_memo: OnceCell<(DerivedKey, HashMap<String, MemIndex>)>,
+    /// The second half of [`DerivedKey`]: bumped whenever the
+    /// `schemas` map changes (schema switch, mount register/remove).
+    /// Both derived structures depend on schemas as well as the store
+    /// — community weights and the index field set come from the
+    /// pinned schema — so a schema change must invalidate them even
+    /// though the STORE generation did not move (the schema-switch
+    /// staleness the whole-map drop used to mask).
+    schemas_epoch: u64,
     /// Workspace-level operator policy — mem create/delete rules,
     /// cross-mem link permissions. Defaults to empty; populated via
     /// [`Self::set_settings`] when [`Self::from_workspace_root`] (or
@@ -315,6 +335,10 @@ pub struct Engine {
     /// hot path matters for the multi-mem pattern this engine is
     /// designed around.
     backend_factory: BackendFactory,
+    /// Storage discovery for UNMOUNTED mems (flywheel W7/02) — set by
+    /// full boot, `None` in lean/embedded engines (which keep the
+    /// forward-reference mechanic unchanged for unmounted targets).
+    pub(crate) unmounted_storage_prober: Option<UnmountedStorageProber>,
     /// Git-branch ops bundle — function pointers for the per-mount
     /// operations whose implementations live in `memstead-git-branch`
     /// (and therefore can't sit on the `MemBackend` trait without
@@ -379,6 +403,41 @@ pub type MutationClock = Arc<dyn Fn() -> std::time::SystemTime + Send + Sync>;
 /// Stateless, `Send + Sync + Copy`.
 pub type BackendFactory =
     fn(&Mount) -> Result<Box<dyn MemBackend>, crate::workspace_store::InstantiateError>;
+
+/// Discovered storage for a mem that has NO mount record — the
+/// unmounted half of flywheel W7/02's write-time cross-mem target
+/// verification. The workspace layer owns the discovery convention
+/// (the mem-repo's branch registry, which memstead-base cannot see
+/// without inverting the crate dependency) and hands back a transient
+/// backend to ask plus the mem's schema pin when its config declares
+/// one, so the cross-schema edge routing can keep its authority
+/// without a mount.
+/// The validity key for derived-structure memos (flywheel W8/01):
+/// the store generation (bumped by every store mutation, carried by
+/// `Store::clone` so batch rollback restores it) plus the schemas
+/// epoch (bumped by every change to the engine's schema map). A memo
+/// is current exactly while both halves still match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedKey {
+    pub store_generation: u64,
+    pub schemas_epoch: u64,
+}
+
+pub struct UnmountedMemStorage {
+    /// Transient backend over the discovered storage. Used for the
+    /// cheap [`MemBackend::entity_exists`] probe and the one-blob
+    /// type read — never registered, never loaded.
+    pub backend: Box<dyn MemBackend>,
+    /// The mem's pinned schema, when its stored config declares one.
+    pub schema: Option<memstead_schema::SchemaRef>,
+}
+
+/// Discovery hook: mem name → its storage, when the workspace layer
+/// can find any (`None` = no discoverable storage; the
+/// forward-reference mechanic governs, exactly as before). Boxed
+/// closure rather than a function pointer because discovery needs the
+/// workspace root and gitdir captured at boot.
+pub type UnmountedStorageProber = Box<dyn Fn(&str) -> Option<UnmountedMemStorage> + Send + Sync>;
 
 /// `Engine::changes_since` dispatch for git-branch mounts.
 ///

@@ -10,6 +10,12 @@ members = [
     "crates/memstead-wasm",
     "xtask",
 ]
+# The coverage-guided fuzz tier (cargo-fuzz/libFuzzer) lives outside the
+# workspace: its dependencies stay out of the flat-dependency discipline
+# and its nightly toolchain never enters the PR-blocking path. The CI
+# smoke tier is the in-crate seeded adversarial tests; both tiers share
+# the committed corpus under fuzz/corpus/.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.9.0"

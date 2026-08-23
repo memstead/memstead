@@ -1,11 +1,15 @@
 //! Per-mem tantivy search indexes.
 //!
-//! The engine holds `search_indexes: HashMap<String, MemIndex>` for
-//! its writable mems, each with a long-lived `IndexWriter`, lazily
-//! built on first search and rebuilt from the store after any mutation
-//! or reload invalidates the map (whole-map invalidation, not
-//! incremental upkeep). [`execute_on_mem`] serves queries against the
-//! built indexes.
+//! The engine holds `search_indexes: HashMap<String, MemIndex>`, one
+//! per mem in its schema map, each with a long-lived `IndexWriter`,
+//! lazily built on first search behind a generation-keyed memo.
+//! Maintenance is INCREMENTAL on the single-mutation paths (flywheel
+//! W8/01): `Engine::maintain_search_indexes` replaces or removes
+//! exactly the touched documents and advances the memo key; batch,
+//! reload, and lifecycle paths — plus the named fallbacks (a
+//! schema-shape change, any index error) — drop the whole map for a
+//! full rebuild on the next search. [`execute_on_mem`] serves queries
+//! against the built indexes.
 
 pub mod query;
 pub mod schema;

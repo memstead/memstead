@@ -116,6 +116,30 @@ impl Engine {
         // unrelated concurrent write leaves this entity's hash intact
         // and the update proceeds. The drift notice rides the outcome.
         let mut drift_warnings = self.reload_if_stale(Some(args.id.mem()));
+        // Declared relations on an ACYCLIC rel-type (or one in an
+        // `acyclic_sets` set, whose guard walks the set's UNION
+        // subgraph) run the same whole-subgraph cycle guard relate
+        // runs — full load first, or a cycle through a deferred mem's
+        // edge is invisible (see the relate path's comment for the
+        // demonstrated failure). Declared signals on the entity's
+        // schema or any relation target's schema need the full load
+        // too: the threshold-crossing diff counts edges that can
+        // originate in any mem.
+        if args.declare_relations.iter().any(|r| {
+            self.schemas.get(args.id.mem()).is_some_and(|s| {
+                s.relationship_acyclic(&r.rel_type)
+                    || s.acyclic_set_containing(&r.rel_type).is_some()
+            }) || self
+                .schemas
+                .get(r.to.mem())
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        }) || self
+            .schemas
+            .get(args.id.mem())
+            .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        {
+            self.ensure_mems_loaded(None);
+        }
         let mut outcome = match self.prepare_update(args)? {
             PrepareOutcome::Done(outcome) => outcome,
             PrepareOutcome::Prepared(prepared) => {
@@ -241,7 +265,10 @@ impl Engine {
         let applied = self.apply_prepared_to_store(&prepared)?;
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): the updated entity is the
+        // whole touched set — declared-relation stubs are never
+        // indexed.
+        self.maintain_search_indexes(std::slice::from_ref(&prepared.id));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-commit path; the
@@ -1175,6 +1202,28 @@ impl Engine {
         for v in &touched_mems {
             self.reload_if_stale(Some(v));
         }
+        // Same acyclic-guard rule as the single-item path: declared
+        // relations on an ACYCLIC rel-type (or one in an
+        // `acyclic_sets` set) walk the whole subgraph, so the walk
+        // must see every mem — deferred ones included (see the
+        // batch_relate comment). Declared signals on any involved
+        // schema need the full load too (see the single-item path).
+        if updates.iter().any(|(a, _)| {
+            a.declare_relations.iter().any(|r| {
+                self.schemas.get(a.id.mem()).is_some_and(|s| {
+                    s.relationship_acyclic(&r.rel_type)
+                        || s.acyclic_set_containing(&r.rel_type).is_some()
+                }) || self
+                    .schemas
+                    .get(r.to.mem())
+                    .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+            }) || self
+                .schemas
+                .get(a.id.mem())
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        }) {
+            self.ensure_mems_loaded(None);
+        }
 
         // Snapshot the in-memory store so a refused batch (or a
         // commit-time backend failure) can roll back any auto-stubs
@@ -1571,6 +1620,12 @@ fn apply_declare_relations(
             .get(&rel.to)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
+        // Deferred-mem target (flywheel W7/02): the real type comes
+        // from the one resolved blob, never from loading the mem.
+        let target_type = match target_type {
+            Some(t) => Some(t),
+            None => super::peek_deferred_target_type(engine, &rel.to)?,
+        };
         let _ = super::route_edge_validation(
             engine,
             &canonical,
@@ -1638,10 +1693,10 @@ fn apply_declare_relations(
         // both fall through here.
         let target_was_stubbed = !engine.store.contains(&rel.to);
         if target_was_stubbed && !exists {
-            engine.store.upsert(
-                rel.to.clone(),
-                make_stub(&rel.to, crate::entity::StubKind::ForwardReference),
-            );
+            let kind = super::deferred_verified_stub_kind(engine, &rel.to)?;
+            engine
+                .store
+                .upsert(rel.to.clone(), make_stub(&rel.to, kind));
         }
 
         declared.push(RelationDeclared {

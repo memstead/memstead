@@ -15,6 +15,21 @@ engine 0.10.0 or later; older engines refuse them at parse
 (`deny_unknown_fields`), never load-and-ignore.
 
 ### Fixed
+- **Three parser defects found by the new adversarial harness, each fixed
+  at the parser.** A BOM-prefixed local file silently parsed as all-body
+  and lost its entire frontmatter, while the strict validator and the
+  archive path strip the BOM; the tolerant parser family (`parse_markdown`,
+  `body_after_frontmatter`, `peek_type_from_frontmatter`) now lands on the
+  same boundary. A document carrying multiple non-schema sections
+  reconstructed its catch-all in hash-random order, so canonical bytes
+  differed from parse to parse of the same input; non-schema sections now
+  re-emit in document order. A section whose content ends inside an open
+  code fence absorbed every section the generator wrote after it on the
+  next parse: content shifted between sections and the document grew on
+  every parse-generate round. The generator now terminates the open fence
+  (balanced content is byte-identical to before), making parse-generate a
+  fixpoint after one normalising round. Each fix is pinned by a fixture
+  regression test carrying its triggering input.
 - **Four README/SECURITY doc-vs-code drifts, reported by an external review of
   the public repository.** The repository table no longer claims the serve and
   bridge crates live here (they are in the private commercial repository; the
@@ -128,6 +143,118 @@ engine 0.10.0 or later; older engines refuse them at parse
   `enum_values`, whose value is outside the enum, or that carries one key
   without the other, with a typed error naming the offender.
 
+- **A coverage-guided fuzzing tier and a committed shared seed corpus for
+  the three trust-boundary parsers.** A workspace-excluded `fuzz/` crate
+  (cargo-fuzz/libFuzzer) carries three targets: raw bytes through the
+  archive validator (nested parsers covered transitively, canonical
+  fixpoint asserted), the frontmatter/markdown family through its public
+  entry points (mask and idempotence invariants asserted), and the
+  content-expression parser and matcher (parse-source-parse stability,
+  deterministic matching, coherent failure payloads). A manual-dispatch
+  workflow runs the targets on nightly with a stated per-target budget
+  and uploads crash artifacts; it is never a required check, and no
+  nightly toolchain or fuzz dependency enters the PR-blocking path. The
+  seed corpus is materialized to committed files under `fuzz/corpus/`
+  (the seeded smoke harnesses' documents, expressions, and archive
+  shapes, plus five real tracked `.mem` artifacts harvested as-is) and
+  is shared with the smoke tier: the normal suite replays every corpus
+  member and asserts the materialized seeds stay valid.
+- **A seeded adversarial smoke over the content-expression parser and
+  matcher.** Foreign expression strings reach this parser through the
+  schema tree published archives embed. The harness generates
+  adversarial expressions (fragment assemblies, splices and truncations
+  of valid seeds) and asserts: parsing never panics (typed refusals
+  only); an accepted expression's verbatim source re-parses to a
+  structurally identical expression; the compiled NFA stays linear in
+  the expression's terminal count (no adversarial state blowup); and
+  matching arbitrary block sequences never panics, is deterministic,
+  and reports coherent failure payloads. 9000 cases, under a second; no
+  defect found.
+- **A seeded adversarial smoke over the archive trust boundary.** Foreign
+  bytes through the validating entry point, covering the nested parsers
+  (config, strict entity checks, schema loader, id and graph validation,
+  the canonical re-pack) transitively: zip-level bit flips, truncations,
+  splices, inner-content mutations, and hostile extra entries (traversal
+  paths, meta-dir payloads, duplicates) over a seed corpus of valid
+  archives. Asserts no input panics the validator, every accepted
+  archive's canonical bytes re-validate to the same canonical bytes, and
+  the deliberate forward-compat tolerance (unrecognised `.memstead/`
+  members) never influences canonical output. Deterministic and bounded
+  (4500 cases, well under a second).
+- **A seeded adversarial smoke over the frontmatter/markdown parser
+  family.** A deterministic, bounded harness (hand-rolled xorshift64, no
+  fuzz dependency, about 1s) assembles adversarial inputs from a fragment
+  alphabet and mutated realistic documents, asserting on every case: no
+  entry point panics; the three frontmatter implementations (tolerant,
+  peek, strict) agree on where frontmatter ends and the body begins;
+  masking preserves byte length and newline positions; and parse-generate
+  is idempotent. Failures reproduce from the seed and case index in the
+  panic message.
+- **Derived structures are maintained, not discarded.** The search
+  index and the community-partition memo key on a rollback-aware
+  `DerivedKey` (store generation + schemas epoch): repeated reads
+  serve the memo, a refused batch stays recompute-free, a rolled-back
+  interim state can never be served as fresh, and a schema switch
+  correctly invalidates both (closing a previously masked staleness:
+  the index field set and community weights derive from the pinned
+  schema). Single mutations maintain the search index in place —
+  exactly the touched documents are replaced or removed — with named,
+  scoped fallbacks (schema-shape change, index error) that rebuild
+  rather than serve stale results; batch and reload paths keep the
+  amortized whole-map rebuild. A seeded property test pins identity
+  with a from-scratch rebuild across arbitrary mutation sequences,
+  refused batches, schema switches, and reloads. Embedders gain
+  `Engine::drop_search_indexes` as an explicit memory-release /
+  forced-rebuild hook.
+- **Cross-mem targets verify against storage — no mount, no load.** A
+  write referencing an entity in a mounted-but-unloaded (lazy) mem, or
+  in a mem with no mount record at all whose content branch lives in
+  the mem-repo, is verified against real storage at write time: a
+  tree-lookup-class existence probe (`MemBackend::entity_exists` —
+  metadata-class on folder backends, stop-at-entry tree lookup on
+  git-branch, never the blob-reading listing walk) plus one resolved
+  blob read for the target's entity type when the cross-schema shape
+  check needs it. A verified target admits as an ordinary reference
+  (its in-store stub carries the load-time kind and no
+  `AUTO_STUB_CREATED` / mem-uncreated warning); an absent target keeps
+  the exact semantics it had — the typed read-only refusal (now
+  answerable without the mem loaded, and never firing for an entity
+  storage actually contains), or the forward-reference auto-stub with
+  its warnings. Verification never loads a lazy mem and never adds a
+  mount — a dossier citing twenty unmounted topic mems pays twenty
+  tree lookups, not twenty permanent eager loads. Unmounted-mem
+  discovery (branch resolution plus the stored schema pin, so
+  cross-schema edge routing keeps its authority) is installed by the
+  full workspace boot; lean and embedded engines keep the
+  forward-reference mechanic unchanged. No new trust class exists:
+  every admitted cross-mem edge is either storage-verified at write
+  time or a forward-reference stub with today's semantics, and stub
+  kinds remain annotation, not state.
+- **Lazy mounts are real: `"lifecycle": "lazy"` defers a mem's entity
+  load to first read.** The slot existed since V1, persisted but inert;
+  a mount that declares it now resolves only its metadata half at boot
+  (config, provenance, schema pin — a broken pin quarantines exactly as
+  an eager mount's would) and loads its entities when the first
+  operation touches the mem, through the same per-operation funnel every
+  MCP call already passes. A scoped operation loads exactly its mem; a
+  workspace-scoped or cross-mem one loads every deferred mem first —
+  search's graph-walking forms (`related_to`, `expand_via`), overview
+  (whose community partition is workspace-global even under a mem
+  filter), health (always, mem filter included), and `memstead_entity`'s
+  `include_relations` / `include_context` forms (incoming edges and
+  community context can originate anywhere) all take the full load; the
+  destructive-delete guards, the write-time acyclicity guard (single
+  and batch mutation paths alike), the mem-rename reference sweep, and
+  parse recovery load fully before adjudicating — so
+  no answer is computed over a partial store — and a
+  lazy mem is never silently absent: the roster carries it with its pin,
+  and load state is observable. The lazy load runs the same validation
+  gauntlet an eager boot runs, and a failed deferred load quarantines at
+  first read with the same typed reporting. Opt-in per mount; a
+  workspace with no lazy mounts boots and serves byte-identically to
+  before. On the CLI, `memstead entity` pays only the target mem's load
+  (its `--include-relations` form, whose incoming edges can originate
+  anywhere, still loads fully); other commands load fully for now.
 - **`memstead publish --redact-anchors` — trust metadata without the
   source's identity.** Every artifact reference in the packaged anchors
   sidecar — the `artifact` field and each `derived_from` entry — becomes the
@@ -514,7 +641,7 @@ engine 0.10.0 or later; older engines refuse them at parse
   section, and `install.sh`'s next-step line now name
   `memstead quickstart --repo .` beside it.
 
-## [0.9.0] - 2026-08-19
+## [0.9.0] - 2026-08-19 (cut, never published)
 
 ### Added
 - **A pilot-grade GitHub-issues mirror** (`scripts/mirror-issues.mjs`):
@@ -2602,7 +2729,7 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   `memstead-mcp` MCP server.
 
 [Unreleased]: https://github.com/memstead/memstead/compare/v0.9.0...HEAD
-[0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.9.0
+[0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...79be749
 [0.8.1]: https://github.com/memstead/memstead/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/memstead/memstead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/memstead/memstead/compare/v0.6.0...v0.7.0

@@ -6,6 +6,8 @@
 //! `memstead-git-branch::entity::git_tree_source` and shares the same parse
 //! pipeline via [`loader::parse_entries`].
 
+#[cfg(test)]
+mod adversarial;
 pub mod generator;
 pub mod id;
 pub mod loader;

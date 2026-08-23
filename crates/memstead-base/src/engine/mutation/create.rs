@@ -113,6 +113,30 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<CreateEntityOutcome, EngineError> {
         let drift_warnings = self.reload_if_stale(Some(&args.mem));
+        // Declared relations on an ACYCLIC rel-type (or one in an
+        // `acyclic_sets` set, whose guard walks the set's UNION
+        // subgraph) run the same whole-subgraph cycle guard relate
+        // runs — full load first, or a cycle through a deferred mem's
+        // edge is invisible (see the relate path's comment for the
+        // demonstrated failure). Declared signals on the new entity's
+        // schema or any relation target's schema need the full load
+        // too: the threshold-crossing diff counts edges that can
+        // originate in any mem.
+        if args.relations.iter().any(|r| {
+            self.schemas.get(&args.mem).is_some_and(|s| {
+                s.relationship_acyclic(&r.rel_type)
+                    || s.acyclic_set_containing(&r.rel_type).is_some()
+            }) || self
+                .schemas
+                .get(r.to.mem())
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        }) || self
+            .schemas
+            .get(&args.mem)
+            .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        {
+            self.ensure_mems_loaded(None);
+        }
         match self.prepare_create(args, None, drift_warnings)? {
             CreatePrepareOutcome::Done(outcome) => Ok(outcome),
             CreatePrepareOutcome::Prepared(prepared) => {
@@ -440,6 +464,14 @@ impl Engine {
                 .get(&rel.to)
                 .map(|e| e.entity_type.clone())
                 .filter(|t| !t.is_empty());
+            // Deferred-mem target (flywheel W7/02): the store cannot
+            // answer for an unloaded mem — the real type comes from
+            // the one resolved blob, without loading the mem. `None`
+            // for non-deferred or absent targets, unchanged posture.
+            let target_type = match target_type {
+                Some(t) => Some(t),
+                None => super::peek_deferred_target_type(self, &rel.to)?,
+            };
             match route_edge_validation(
                 self,
                 &rel.rel_type,
@@ -897,15 +929,15 @@ impl Engine {
         // (the args.relations vec is empty).
         for target in &relation_targets {
             if !self.store.contains(target) {
-                self.store.upsert(
-                    target.clone(),
-                    make_stub(target, crate::entity::StubKind::ForwardReference),
-                );
+                let kind = super::deferred_verified_stub_kind(self, target)?;
+                self.store.upsert(target.clone(), make_stub(target, kind));
             }
         }
 
         self.invalidate_communities();
-        self.invalidate_search_indexes();
+        // Incremental (flywheel W8/01): the new entity is the whole
+        // touched set — its stub targets are never indexed.
+        self.maintain_search_indexes(std::slice::from_ref(&id));
 
         // Stub-adoption visibility: project the incoming edges that
         // survived the upsert. Empty for a fresh create; populated
@@ -1002,6 +1034,28 @@ impl Engine {
         touched_mems.dedup();
         for m in &touched_mems {
             self.reload_if_stale(Some(m));
+        }
+        // Same acyclic-guard rule as the single-item path: declared
+        // relations on an ACYCLIC rel-type (or one in an
+        // `acyclic_sets` set) walk the whole subgraph, so the walk
+        // must see every mem — deferred ones included (see the
+        // batch_relate comment). Declared signals on any involved
+        // schema need the full load too (see the single-item path).
+        if creates.iter().any(|(a, _)| {
+            a.relations.iter().any(|r| {
+                self.schemas.get(&a.mem).is_some_and(|s| {
+                    s.relationship_acyclic(&r.rel_type)
+                        || s.acyclic_set_containing(&r.rel_type).is_some()
+                }) || self
+                    .schemas
+                    .get(r.to.mem())
+                    .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+            }) || self
+                .schemas
+                .get(&a.mem)
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        }) {
+            self.ensure_mems_loaded(None);
         }
 
         let store_snapshot = self.store.clone();
@@ -1336,15 +1390,17 @@ impl Engine {
         );
         // Forward-reference stubs for OUT-OF-BATCH targets only —
         // in-batch targets are real entities now.
+        let mut out_of_batch_stubs: Vec<(EntityId, crate::entity::StubKind)> = Vec::new();
         for p in &prepared {
             for target in &p.relation_targets {
                 if !self.store.contains(target) {
-                    self.store.upsert(
-                        target.clone(),
-                        make_stub(target, crate::entity::StubKind::ForwardReference),
-                    );
+                    let kind = super::deferred_verified_stub_kind(self, target)?;
+                    out_of_batch_stubs.push((target.clone(), kind));
                 }
             }
+        }
+        for (target, kind) in out_of_batch_stubs {
+            self.store.upsert(target.clone(), make_stub(&target, kind));
         }
         self.invalidate_communities();
         self.invalidate_search_indexes();

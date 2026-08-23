@@ -1,0 +1,46 @@
+# The coverage-guided long tier of the trust-boundary hardening work
+# (dev plan W10). Workspace-excluded on purpose: libfuzzer-sys and the
+# nightly toolchain it runs under never enter the PR-blocking path; the
+# CI smoke tier is the in-crate seeded adversarial tests. Run manually
+# or via the Fuzz dispatch workflow — see README.md here.
+#
+# fmt/clippy coverage (explicit decision, 2026-08-22): this crate IS
+# covered by rustfmt and clippy, but the gate runs inside the fuzz
+# dispatch workflow, not run-tests.sh — the one-gate script stays
+# offline-clean and never builds this crate.
+
+[package]
+name = "memstead-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+memstead-base = { path = "../crates/memstead-base" }
+memstead-schema = { path = "../crates/memstead-schema" }
+
+[[bin]]
+name = "frontmatter"
+path = "fuzz_targets/frontmatter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive"
+path = "fuzz_targets/archive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "content_expr"
+path = "fuzz_targets/content_expr.rs"
+test = false
+doc = false
+bench = false
