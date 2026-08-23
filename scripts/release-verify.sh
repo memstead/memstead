@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# release-verify.sh — does every distribution channel actually serve the
+# release-verify.sh: does every distribution channel actually serve the
 # version we think we released?
 #
 # A release is not "the tag was pushed". A release is "everywhere a user can
@@ -12,34 +12,88 @@
 #
 # So this script asks the channels themselves, over the network, from outside:
 # it reads what a *user* would get, never what the local tree believes. It
-# changes nothing and needs no credentials beyond a plain HTTPS fetch.
+# changes nothing and needs no credentials beyond a plain HTTPS fetch; the
+# publish-job readout uses `gh` when it is on the machine.
+#
+# Since 2026-08-23 it also runs inside the release workflow itself, as the
+# post-announce job `custom-release-verify` (declared in dist-workspace.toml,
+# rendered into release.yml by `dist generate`), and on dispatch against any
+# tag (.github/workflows/release-verify.yml). There it adds the question a
+# channel read cannot answer: did every publish job in the run actually run?
+# dist's `announce` accepts a *skipped* publish job by design (prereleases
+# skip theirs), so a non-prerelease whose publish job skipped announces a
+# release that one channel never received. That is a failure here.
 #
 # Usage:
-#   scripts/release-verify.sh            # verify the latest published release
-#   scripts/release-verify.sh 0.6.0      # verify a specific version
+#   scripts/release-verify.sh                     # verify the latest published release
+#   scripts/release-verify.sh 0.6.0               # verify a specific version (v-prefix optional)
+#   scripts/release-verify.sh v0.10.0 --run-id N  # also read the publish jobs of release run N
 #
-# Exit 0 when every channel agrees, 1 when any channel disagrees or cannot be
-# read. A channel that is deliberately not published (crates.io, npm) is
-# reported as a stated skip, never as a failure — see the release chapter of
-# the handbook for why those two run on their own track.
+# Options:
+#   --run-id <id>     the Release workflow run whose publish jobs are read
+#                     (defaults to the newest run of release.yml for the tag)
+#   --repo <o/n>      GitHub repository (default: derived from origin, else memstead/memstead)
+#
+# Exit codes:
+#   0  every channel serves the version and nothing is reported
+#   1  fatal: a channel disagrees or cannot be read, or a publish job skipped
+#      on a non-prerelease
+#   2  green, with report-only findings printed (lines prefixed REPORT:)
+#   3  skipped: no network (also forced by MEMSTEAD_VERIFY_OFFLINE=1)
+#
+# Report-only lines today: the tree-vs-tag gap (the local workspace version
+# is ahead of the verified tag, i.e. unreleased changes exist).
 
 set -uo pipefail
 
-REPO="memstead/memstead"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAP_RAW="https://raw.githubusercontent.com/memstead/homebrew-memstead/main/Formula"
 DISAGREE=0
+REPORTS=0
+WANT=""
+RUN_ID=""
+REPO=""
 
-say()  { printf '  %-34s %s\n' "$1" "$2"; }
-fail() { printf '  %-34s \033[31m%s\033[0m\n' "$1" "$2"; DISAGREE=$((DISAGREE + 1)); }
-ok()   { printf '  %-34s \033[32m%s\033[0m\n' "$1" "$2"; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --run-id) RUN_ID="${2:-}"; shift 2 ;;
+    --repo) REPO="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --*) echo "release-verify: unknown option '$1'" >&2; exit 2 ;;
+    *) WANT="${1#v}"; shift ;;
+  esac
+done
+
+if [ -z "$REPO" ]; then
+  remote_url=$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)
+  REPO=$(printf '%s' "$remote_url" | sed -n 's#.*github\.com[:/]\([^/]*/[^/]*\)$#\1#p' | sed 's/\.git$//')
+  REPO="${REPO:-memstead/memstead}"
+fi
+
+say()    { printf '  %-34s %s\n' "$1" "$2"; }
+fail()   { printf '  %-34s \033[31m%s\033[0m\n' "$1" "$2"; DISAGREE=$((DISAGREE + 1)); }
+ok()     { printf '  %-34s \033[32m%s\033[0m\n' "$1" "$2"; }
+report() { printf '  REPORT: %s\n' "$1"; REPORTS=$((REPORTS + 1)); }
+
+# ── is there a network at all ────────────────────────────────────────────────
+# No network is not a red release; it is no verdict. Exit 3 says so, and the
+# callers (the release chapter, the hygiene lane later) treat it as a named
+# skip rather than a failure or a silent green.
+if [ "${MEMSTEAD_VERIFY_OFFLINE:-0}" = "1" ]; then
+  echo "SKIPPED: no network (MEMSTEAD_VERIFY_OFFLINE=1)"
+  exit 3
+fi
+if ! curl -sS -o /dev/null --max-time 20 "https://api.github.com" 2>/dev/null; then
+  echo "SKIPPED: no network (api.github.com unreachable)"
+  exit 3
+fi
 
 # ── what are we verifying against ────────────────────────────────────────────
-WANT="${1:-}"
 if [ -z "$WANT" ]; then
   WANT=$(curl -sS "https://api.github.com/repos/$REPO/releases/latest" \
     | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)
   if [ -z "$WANT" ]; then
-    echo "could not read the latest release from GitHub — is the network up?" >&2
+    echo "could not read the latest release from GitHub" >&2
     exit 1
   fi
   echo "→ verifying the latest published release: $WANT"
@@ -55,10 +109,10 @@ latest=$(curl -sS "https://api.github.com/repos/$REPO/releases/latest" \
 if [ "$latest" = "$WANT" ]; then
   ok "GitHub Release (Latest)" "$latest"
 else
-  fail "GitHub Release (Latest)" "${latest:-unreadable} — expected $WANT"
+  fail "GitHub Release (Latest)" "${latest:-unreadable} (expected $WANT)"
 fi
 
-# ── 2. install.sh — the primary channel ──────────────────────────────────────
+# ── 2. install.sh, the primary channel ───────────────────────────────────────
 # install.sh resolves "latest" through the same API, so what matters is that
 # the release carries the installers a user's shell will actually fetch.
 assets=$(curl -sS "https://api.github.com/repos/$REPO/releases/tags/v$WANT" \
@@ -66,7 +120,7 @@ assets=$(curl -sS "https://api.github.com/repos/$REPO/releases/tags/v$WANT" \
 if [ "${assets:-0}" -ge 2 ]; then
   ok "install.sh installers" "$assets present"
 else
-  fail "install.sh installers" "${assets:-0} found — expected 2 (cli + mcp)"
+  fail "install.sh installers" "${assets:-0} found (expected 2: cli + mcp)"
 fi
 
 # ── 3. Homebrew tap ──────────────────────────────────────────────────────────
@@ -76,14 +130,13 @@ for f in memstead-cli memstead-mcp; do
   if [ "$v" = "$WANT" ]; then
     ok "Homebrew $f" "$v"
   else
-    fail "Homebrew $f" "${v:-unreadable} — expected $WANT"
+    fail "Homebrew $f" "${v:-unreadable} (expected $WANT)"
   fi
 done
 
 # ── 4. the Claude Code plugin + its marketplace entry ────────────────────────
-# Lockstep with the engine is a standing decision, and xtask does NOT bump
-# these — they are hand-edited into the release commit, so they are exactly
-# the pair most likely to be forgotten.
+# Lockstep with the engine is a standing decision; xtask bumps these with
+# the release commit, and this is where a forgotten bump would show.
 for pair in "plugins/claude-code/.claude-plugin/plugin.json:plugin" \
             ".claude-plugin/marketplace.json:marketplace"; do
   path="${pair%%:*}"; label="${pair##*:}"
@@ -92,11 +145,11 @@ for pair in "plugins/claude-code/.claude-plugin/plugin.json:plugin" \
   if [ "$v" = "$WANT" ]; then
     ok "Claude Code $label" "$v"
   else
-    fail "Claude Code $label" "${v:-unreadable} — expected $WANT"
+    fail "Claude Code $label" "${v:-unreadable} (expected $WANT)"
   fi
 done
 
-# ── 5. registries — compared, since the tag now publishes them ───────────────
+# ── 5. registries, compared, since the tag publishes them ────────────────────
 # Until 2026-08-15 these were stated skips: binaries were the primary channel
 # and the registries followed by hand when someone remembered. They stopped
 # being remembered, which is how crates.io sat two minor versions back and npm
@@ -107,9 +160,6 @@ crates=$(curl -sS -H "User-Agent: memstead-release-verify (ci@memstead.com)" \
   | sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' | head -1)
 npmv=$(curl -sS "https://registry.npmjs.org/@memstead/wasm" \
   | sed -n 's/.*"latest": *"\([^"]*\)".*/\1/p' | head -1)
-# crates.io stopped being a deliberate skip on 2026-08-15: the tag publishes
-# it, so it is compared like every other channel. A label saying "skip" for a
-# channel that no longer skips is the same drift this script exists to catch.
 if [ "$crates" = "$WANT" ]; then
   ok   "crates.io" "$crates"
 elif [ -z "$crates" ]; then
@@ -117,10 +167,9 @@ elif [ -z "$crates" ]; then
 else
   fail "crates.io" "$crates (want $WANT)"
 fi
-# npm joined the release line: the package is version-matched to the engine
-# now, so it is compared like any other channel rather than reported as a
-# bare number on a track of its own. Its own line is exactly how it came to
-# sit at 0.1.2 against a 0.7.0 CLI with nothing anywhere saying so.
+# npm rides the engine's version line (engineering decision, 2026-08-15), so
+# it is compared like any other channel. Its own line is exactly how it came
+# to sit at 0.1.2 against a 0.7.0 CLI with nothing anywhere saying so.
 if [ "$npmv" = "$WANT" ]; then
   ok   "npm @memstead/wasm" "$npmv"
 elif [ -z "$npmv" ]; then
@@ -129,16 +178,56 @@ else
   fail "npm @memstead/wasm" "$npmv (want $WANT)"
 fi
 
-# ── 6. this machine — informational, never a failure ─────────────────────────
+# ── 6. the publish jobs of the release run ───────────────────────────────────
+# dist's `announce` runs when every publish job is `success` OR `skipped`;
+# skipping is how prereleases opt out. On a non-prerelease a skipped publish
+# job is a channel that was never fed while the release announced itself as
+# complete. A *failed* publish job never reaches this point (announce is
+# skipped, and so is this job), which is why the skipped case is the one
+# worth asking about.
+echo ""
+case "$WANT" in *-*) prerelease=1 ;; *) prerelease=0 ;; esac
+if ! command -v gh >/dev/null 2>&1; then
+  say "publish jobs" "not read (gh is not installed)"
+else
+  if [ -z "$RUN_ID" ]; then
+    RUN_ID=$(gh run list --repo "$REPO" --workflow release.yml --branch "v$WANT" \
+      --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+  fi
+  if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+    say "publish jobs" "not read (no release.yml run found for v$WANT)"
+  else
+    jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate \
+      --jq '.jobs[] | "\(.name)\t\(.conclusion // .status)"' 2>/dev/null || true)
+    publish_jobs=$(printf '%s\n' "$jobs" | grep -E '^(custom-)?publish-' || true)
+    if [ -z "$publish_jobs" ]; then
+      say "publish jobs (run $RUN_ID)" "none listed"
+    else
+      while IFS=$'\t' read -r name conclusion; do
+        [ -z "$name" ] && continue
+        case "$conclusion" in
+          success) ok "publish job $name" "success" ;;
+          skipped)
+            if [ "$prerelease" = 1 ]; then
+              say "publish job $name" "skipped (prerelease: by design)"
+            else
+              fail "publish job $name" "SKIPPED on a non-prerelease: that channel was never fed"
+            fi ;;
+          *) fail "publish job $name" "$conclusion" ;;
+        esac
+      done <<EOF
+$publish_jobs
+EOF
+    fi
+  fi
+fi
+
+# ── 7. this machine, informational, never a failure ──────────────────────────
 # Not a channel a user receives, so it cannot make the release wrong. But a
 # maintainer's own install is the version they EXPERIENCE as the product, and
-# nothing keeps it in step: neither a release nor CI touches ~/.cargo/bin, and
-# updating it is a separate act nobody is prompted to perform. On 2026-08-15
-# that had left this machine on 0.4.0 for six days across two releases, so the
-# operator's dogfooding — including a run measuring whether a newcomer copes —
-# ran against pre-0.6.0 behaviour without anyone noticing. Reported here
-# because this script's whole job is answering "what does someone actually
-# get", and the maintainer is a someone.
+# nothing keeps it in step. The workspace's own binary check
+# (scripts/check-local-binaries.sh in the private repo) is the hard gate;
+# this line is the reminder.
 echo ""
 local_bin="$(command -v memstead 2>/dev/null || true)"
 if [ -z "$local_bin" ]; then
@@ -146,19 +235,33 @@ if [ -z "$local_bin" ]; then
 else
   local_v="$("$local_bin" --version 2>/dev/null | awk '{print $2}' | cut -d'+' -f1)"
   if [ "$local_v" = "$WANT" ]; then
-    say "this machine (not a channel)" "$local_v — in step"
+    say "this machine (not a channel)" "$local_v, in step"
   else
-    say "this machine (not a channel)" "${local_v:-unreadable} — BEHIND $WANT"
+    say "this machine (not a channel)" "${local_v:-unreadable}, BEHIND $WANT"
     say "" "→ curl -sSf https://memstead.io/install.sh | sh"
   fi
 fi
 
+# ── 8. report-only: the tree against the tag ─────────────────────────────────
+# The workspace version in Cargo.toml ahead of the verified tag means the
+# tree carries a cut (or work) no user has. Not a channel defect, so it does
+# not fail the release; it is printed so the gap is never silent (0.9.0 sat
+# one version ahead of every channel for four days).
+echo ""
+tree_version=$(sed -n '/^\[workspace\.package\]/,/^\[/{ s/^version *= *"\([^"]*\)".*/\1/p; }' "$ROOT/Cargo.toml" 2>/dev/null | head -1)
+if [ -n "$tree_version" ] && [ "$tree_version" != "$WANT" ]; then
+  report "tree is at $tree_version, verified tag is v$WANT: the tree carries what no channel serves"
+fi
+
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo ""
-if [ "$DISAGREE" -eq 0 ]; then
+if [ "$DISAGREE" -gt 0 ]; then
+  echo "✗ $DISAGREE channel(s) or publish job(s) disagree: a user's version depends on how they installed"
+  exit 1
+elif [ "$REPORTS" -gt 0 ]; then
+  echo "✓ every channel serves $WANT ($REPORTS report-only finding(s) above)"
+  exit 2
+else
   echo "✓ every channel serves $WANT"
   exit 0
-else
-  echo "✗ $DISAGREE channel(s) disagree — a user's version depends on how they installed"
-  exit 1
 fi

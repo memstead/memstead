@@ -11,7 +11,8 @@
 //! the overview's `_engine_version`, and the per-mem mutation stamp.
 
 /// The short git sha of the commit this binary was built from, with a
-/// `-dirty` suffix when tracked files were modified at build time.
+/// `-dirty` suffix when tracked build inputs (`crates/`, `Cargo.toml`,
+/// `Cargo.lock`) were modified at build time.
 /// Empty for builds outside a git checkout (crates.io, vendored
 /// trees) — emptiness, not absence, is the sha-less signal.
 pub const BUILD_SHA: &str = env!("MEMSTEAD_BUILD_SHA");

@@ -5,8 +5,8 @@
 //! use, where every build otherwise reports the same crate semver).
 //!
 //! `MEMSTEAD_BUILD_SHA` is ALWAYS emitted — the short HEAD sha (plus
-//! a `-dirty` suffix when tracked files are modified) inside a git
-//! checkout, the empty string everywhere else (crates.io builds,
+//! a `-dirty` suffix when tracked build inputs are modified) inside a
+//! git checkout, the empty string everywhere else (crates.io builds,
 //! vendored trees): a failing git probe must never break the build.
 //! `crate::build_info` turns the value into the full build version.
 
@@ -52,8 +52,23 @@ fn main() {
         .map(|sha| {
             // `--untracked-files=no`: only modified TRACKED files
             // mark the build dirty; a stray scratch file does not.
-            // A failed probe reads as clean — best-effort throughout.
-            let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
+            // Scoped to the build inputs (the crates and the two
+            // manifests): a modified doc, workflow or folder-mem file
+            // elsewhere in the repository changes no byte of the
+            // binary, and a `-dirty` stamp it did not earn would
+            // fail the staleness check that compares the stamp with
+            // the committed tree. A failed probe reads as clean —
+            // best-effort throughout.
+            let dirty = git(&[
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+                "--",
+                "crates",
+                "Cargo.toml",
+                "Cargo.lock",
+            ])
+            .is_some();
             if dirty { format!("{sha}-dirty") } else { sha }
         })
         .unwrap_or_default();

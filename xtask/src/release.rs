@@ -39,11 +39,30 @@ pub struct ReleaseArgs {
     allow_dirty: bool,
     /// Flagship docs directory for the docs-vs-binary guard. Defaults to
     /// `../websites/memstead.ai/flagship` next to the engine checkout
-    /// (the private-workspace layout); when absent the guard is skipped
-    /// with a warning, never silently.
+    /// (the private-workspace layout). An absent directory is a refusal
+    /// unless `--allow-missing-flagship` says the guard may be skipped.
     #[arg(long)]
     flagship_dir: Option<PathBuf>,
+    /// Cut without the docs-vs-binary guard when the flagship directory
+    /// is absent (a public-only checkout). The guard then runs nowhere,
+    /// so say so explicitly rather than letting a warning scroll past:
+    /// a skipped guard is a decision, and decisions are flagged.
+    #[arg(long)]
+    allow_missing_flagship: bool,
+    /// Cut even when the `[Unreleased]` section exceeds the release-body
+    /// limit (`MAX_RELEASE_BODY_BYTES`). cargo-dist lifts the section
+    /// verbatim into the GitHub Release body and hands it to the
+    /// Homebrew publish job through the environment; 0.6.0's 81 KB body
+    /// killed that job with `Argument list too long`.
+    #[arg(long)]
+    allow_large_body: bool,
 }
+
+/// The largest `[Unreleased]` section a release may cut without
+/// `--allow-large-body`. The 0.6.0 body (81 KB) broke the Homebrew job;
+/// the 0.10.0 body (34 KB) passed. 64 KB sits between them with room
+/// for the environment the publish job also carries.
+pub const MAX_RELEASE_BODY_BYTES: usize = 64 * 1024;
 
 pub fn run(args: ReleaseArgs) -> Result<()> {
     let root = workspace_root();
@@ -86,6 +105,32 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
         "CHANGELOG.md `[Unreleased]` is empty — author the release notes first \
          (what changed since v{old}, Keep-a-Changelog sections), then re-run"
     );
+
+    // 3b. The section is about to become the GitHub Release body. Refuse
+    //     an oversized one before anything is edited: the Homebrew publish
+    //     job receives the body through the environment and dies on
+    //     `Argument list too long` (0.6.0, 81 KB), and a dead publish job
+    //     is exactly the silent channel failure release-verify exists for.
+    let body_bytes = unreleased_section(&changelog)?.len();
+    if let Some(reason) = release_body_refusal(body_bytes, args.allow_large_body) {
+        bail!("{reason}");
+    }
+
+    // 3c. The docs-vs-binary guard needs the flagship directory. Decide
+    //     now, before the tree is touched, whether its absence is a
+    //     refusal or an explicit, flagged skip.
+    let flagship = args
+        .flagship_dir
+        .clone()
+        .unwrap_or_else(|| root.join("../websites/memstead.ai/flagship"));
+    if !flagship.is_dir() && !args.allow_missing_flagship {
+        bail!(
+            "flagship dir {} is absent, so the docs-vs-binary guard cannot run: \
+             cut from the private workspace (where the flagship lives), pass \
+             --flagship-dir, or pass --allow-missing-flagship to cut without the guard",
+            flagship.display()
+        );
+    }
 
     // 4. Version bump: [workspace.package] plus every inter-crate pin.
     let (bumped, replaced) = bump_versions(&cargo_toml, &old, &args.version)?;
@@ -134,16 +179,15 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
 
     // 7. Docs-vs-binary guard against a freshly built full binary.
     run_streamed(&root, "cargo", &["build", "-p", "memstead-cli"])?;
-    let flagship = args
-        .flagship_dir
-        .unwrap_or_else(|| root.join("../websites/memstead.ai/flagship"));
     if flagship.is_dir() {
         docs_vs_binary_guard(&root, &flagship)?;
     } else {
+        // Reachable only with --allow-missing-flagship (step 3c refused
+        // otherwise): the skip is explicit and named, never a warning
+        // that scrolls past.
         eprintln!(
-            "release: WARNING — flagship dir {} absent, docs-vs-binary guard \
-             SKIPPED (fine on a public-only checkout; run it from the private \
-             workspace before tagging)",
+            "release: --allow-missing-flagship: flagship dir {} absent, docs-vs-binary \
+             guard SKIPPED; run it from the private workspace before tagging",
             flagship.display()
         );
     }
@@ -475,6 +519,22 @@ fn extract_doc_commands(md: &str) -> Vec<(String, Option<String>)> {
         .collect()
 }
 
+/// The refusal text for an oversized release body, or `None` when the
+/// body fits or the override is set. Pure, so the limit has a unit test.
+fn release_body_refusal(body_bytes: usize, allow_large_body: bool) -> Option<String> {
+    if body_bytes <= MAX_RELEASE_BODY_BYTES || allow_large_body {
+        return None;
+    }
+    Some(format!(
+        "CHANGELOG.md `[Unreleased]` is {body_bytes} bytes ({} KB), above the \
+         {} KB release-body limit: cargo-dist lifts the section verbatim into the \
+         GitHub Release body and the Homebrew publish job dies on an oversized one \
+         (0.6.0, 81 KB). Trim the section, or pass --allow-large-body to cut anyway.",
+        body_bytes / 1024,
+        MAX_RELEASE_BODY_BYTES / 1024
+    ))
+}
+
 /// Today (UTC) as `YYYY-MM-DD`, no date dependency: Howard Hinnant's
 /// `civil_from_days` over the Unix epoch.
 fn today_utc() -> String {
@@ -590,6 +650,21 @@ memstead-base = { path = "crates/memstead-base", version = "0.2.0" }
         assert!(
             out.contains("[0.3.0]: https://github.com/memstead/memstead/compare/v0.2.0...v0.3.0")
         );
+    }
+
+    #[test]
+    fn release_body_limit_refuses_above_and_admits_at_or_below() {
+        assert!(release_body_refusal(0, false).is_none());
+        assert!(release_body_refusal(MAX_RELEASE_BODY_BYTES, false).is_none());
+        let refused = release_body_refusal(MAX_RELEASE_BODY_BYTES + 1, false)
+            .expect("one byte over the limit refuses");
+        assert!(refused.contains(&format!("{} bytes", MAX_RELEASE_BODY_BYTES + 1)));
+        assert!(refused.contains("--allow-large-body"));
+        // 0.6.0's body (81 KB) refuses; 0.10.0's (34 KB) passes.
+        assert!(release_body_refusal(81 * 1024, false).is_some());
+        assert!(release_body_refusal(34 * 1024, false).is_none());
+        // The override admits any size and names nothing.
+        assert!(release_body_refusal(10 * MAX_RELEASE_BODY_BYTES, true).is_none());
     }
 
     #[test]

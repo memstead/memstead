@@ -7,6 +7,54 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **An untagged release is now a machine-visible state.** 0.9.0 was cut,
+  committed and pushed and never tagged; every channel kept serving 0.8.1
+  for four days while the tree said otherwise, and nothing noticed.
+  `scripts/untagged-release.sh` compares the workspace version against the
+  newest tag the remote actually carries (`git ls-remote`, SemVer
+  precedence, so `v0.9.0` never outranks `v0.10.0`) and refuses once the
+  release commit has sat on `origin/main` for more than a day, naming the
+  commit and its date; `scripts/ci-status.sh` runs it before its CI
+  readout, derives the repository from `origin` instead of a hard-coded
+  name, and counts only the checks of workflows this repository defines
+  (GitHub's own Dependabot updater run had painted a green `main` red).
+  The `untagged-release` workflow runs the same check daily and on
+  dispatch, keeping exactly one issue in step with it (filed when it trips,
+  updated while it holds, closed when it clears, nothing on a tagged
+  state) through `scripts/untagged-release-issue.sh`.
+- **`release-verify.sh` runs inside the release itself.** Declared as
+  cargo-dist's post-announce job (`custom-release-verify`, rendered into
+  `release.yml` by `dist generate`), it asks every channel from outside
+  after `announce` and fails the run when one disagrees with the tag; the
+  same workflow runs on dispatch with a tag input, so any past release can
+  be re-verified from CI. It also reads the run's own publish jobs and
+  fails on one that concluded `skipped` on a non-prerelease (dist's
+  `announce` accepts that by design; it is how a channel stays unfed
+  behind a green release). The script now has four exit codes: 0 green, 1
+  fatal, 2 green with report-only findings (today: the local tree standing
+  ahead of the verified tag), 3 skipped for lack of network
+  (`MEMSTEAD_VERIFY_OFFLINE=1` simulates it), plus explicit option
+  parsing (`--run-id`, `--repo`) beside the positional version.
+- **`xtask release` refuses two more states that shipped.** A missing
+  flagship directory is a refusal, not a warning, unless
+  `--allow-missing-flagship` names the skip (the docs-vs-binary guard then
+  runs nowhere, and the cut says so). An `[Unreleased]` section above 64
+  KB is refused naming its size unless `--allow-large-body` is passed:
+  cargo-dist lifts the section into the GitHub Release body and the
+  Homebrew publish job died on 0.6.0's 81 KB of it.
+
+### Changed
+- **`memstead-mcp --version` prints the stamped build version**
+  (`<semver>+g<sha>[-dirty]` inside a git checkout), the same string the
+  server hands out as `serverInfo.version` and the CLI already printed.
+  The bare crate version could not tell a day-stale release binary from a
+  fresh build of the same version line, which is exactly what a
+  binary-staleness check needs to know. The stamp's `-dirty` suffix now
+  reflects modified build inputs only (`crates/`, `Cargo.toml`,
+  `Cargo.lock`): a modified doc, workflow or folder-mem file elsewhere in
+  the repository changes no byte of the binary.
+
 ## [0.10.0] - 2026-08-23
 
 Forward compatibility: this release is one schema-language generation. Schema

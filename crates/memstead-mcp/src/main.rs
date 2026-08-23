@@ -23,8 +23,15 @@ use rmcp::transport::stdio;
 use clap::ArgAction;
 
 /// memstead-mcp — serves the Memstead graph engine over MCP on stdio.
+///
+/// `--version` prints the same stamped build version the server hands
+/// out as `serverInfo.version` (`<semver>+g<sha>[-dirty]` inside a git
+/// checkout, the bare semver elsewhere). The bare crate version it used
+/// to print could not tell a day-stale release binary from a fresh
+/// build of the same version line, which is exactly the question the
+/// workspace's binary-staleness check asks of this binary.
 #[derive(Parser, Debug)]
-#[command(name = "memstead-mcp", version, about, long_about = None)]
+#[command(name = "memstead-mcp", version = memstead_base::build_info::full_version(), about, long_about = None)]
 struct Args {
     /// Attach a sealed `.mem` mem as a read-only reference. Repeatable —
     /// `--read-mem a.mem --read-mem b.mem` attaches both. Each path
