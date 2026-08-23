@@ -4,7 +4,7 @@ title: "Registry HTTP"
 
 # Registry HTTP
 
-Every route registered on the axum router in `memstead-registry`. The route inventory is lifted by static scan of the router declaration (`memstead-registry/src/lib.rs`); each per-route section also surfaces the handler's live signature and the `ApiError` variants its body emits. A machine-readable OpenAPI 3.1.0 document covering the same paths is published at [`/openapi.json`](/openapi.json). Full request / response JSON schemas would require `utoipa` annotations on every handler; today the contract is the signature, the path inventory, and the per-route error variants.
+Every route registered on the axum router in `memstead-registry`. The route inventory is lifted by static scan of the router declaration (`memstead-registry/src/lib.rs`); each per-route section also surfaces the handler's live signature and the `ApiError` variants its body emits. A machine-readable OpenAPI 3.1.0 document covering the same paths is published at [`openapi.json`](../../openapi.json). Full request / response JSON schemas would require `utoipa` annotations on every handler; today the contract is the signature, the path inventory, and the per-route error variants.
 
 **Routes:** 9
 

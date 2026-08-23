@@ -1,0 +1,14 @@
+<!-- The memory-fingerprint favicon (com forest-sage), identical to the
+     data-URI icon in src/layouts/Layout.astro. Served at /favicon.svg for
+     clients that request the conventional path without reading <head>. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="7" y="7" width="86" height="86" rx="3" fill="none" stroke="#2C3A56" stroke-width="6.5"/>
+  <rect x="24" y="13" width="28" height="39" fill="#4F7A52"/>
+  <rect x="13" y="26" width="11" height="26" fill="#4F7A52"/>
+  <rect x="52" y="23" width="18" height="14" fill="#4F7A52"/>
+  <rect x="52" y="76" width="21" height="13" fill="#4F7A52"/>
+  <rect x="13" y="52" width="11" height="24" fill="none" stroke="#2C3A56" stroke-width="4" stroke-opacity="0.55"/>
+  <rect x="24" y="52" width="28" height="17" fill="none" stroke="#2C3A56" stroke-width="4" stroke-opacity="0.55"/>
+  <rect x="70" y="13" width="19" height="24" fill="none" stroke="#2C3A56" stroke-width="4" stroke-opacity="0.55"/>
+  <rect x="66" y="45" width="23" height="24" fill="none" stroke="#2C3A56" stroke-width="4" stroke-opacity="0.55"/>
+</svg>

@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-A [projection](/glossary/#pipeline-medium--facet--projection) binds a source — a
+A [projection](../../glossary/#pipeline-medium--facet--projection) binds a source — a
 codebase, a filesystem, another mem — to a destination mem and populates it. The
 **fidelity contract** is the promise the engine makes about that mem afterward:
 it will tell you, deterministically and without inventing numbers, how faithfully
@@ -98,7 +98,7 @@ the contract would rather admit a blind spot than paper over one.
 Three caps bound what the contract can currently claim — positioning decisions and
 known gaps, stated plainly rather than left silent or dressed up as imminent
 features. If you are gating a pull request on verify ([the CI
-guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
+guide](../../guides/verify-in-ci/)), these are the edges of what the gate can see:
 
 - **Web-medium sync and enumeration.** A `web` medium can be named and read, but the
   engine does not enumerate or maintain it. Because its capability row advertises no
