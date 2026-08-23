@@ -228,11 +228,18 @@ fn scan_nested_prefix_drift(
                 if target_mem == suffix {
                     let candidate_target =
                         resolve_two_pass(target_id.path(), current_mem, ctx.mem_names, store);
+                    // A prefix that IS a roster member reached here only
+                    // because its target is missing (the existing-target
+                    // case returned above): say "target missing", not
+                    // "rename drift". A prefix that merely matches a
+                    // member's last segment is the rename pattern.
+                    let prefix_mounted = ctx.mem_names.iter().any(|v| v.as_str() == target_mem);
                     ctx.warnings.push(WarningHint::SuspiciousNestedPrefix {
                         from: from.clone(),
                         resolved_id: target_id.clone(),
                         candidate_target,
                         section: section.clone(),
+                        prefix_mounted,
                     });
                     break;
                 }
@@ -892,6 +899,7 @@ mod tests {
                 resolved_id,
                 candidate_target,
                 section,
+                prefix_mounted,
             } => {
                 assert_eq!(from.as_ref(), "test-mem-plugin--author");
                 // Tier-0 resolves `[[plugin--foo]]` to `plugin--foo`
@@ -903,6 +911,18 @@ mod tests {
                     Some("test-mem-plugin--foo")
                 );
                 assert_eq!(section, "constraints");
+                // `plugin` is no roster member, only `test-mem-plugin`'s
+                // last segment: the rename-drift class.
+                assert!(!prefix_mounted, "a suffix-only prefix is not a mounted mem");
+                let msg = warnings[0].message();
+                assert!(
+                    msg.contains("prefix 'plugin' is not a mounted mem"),
+                    "the message names the class: {msg}"
+                );
+                assert!(
+                    !msg.contains("almost certainly"),
+                    "no guessed diagnosis: {msg}"
+                );
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1053,6 +1073,91 @@ mod tests {
             }
             other => panic!("unexpected variant: {other:?}"),
         }
+    }
+
+    /// A link whose prefix IS a mounted mem, with the target missing
+    /// there: the warning still fires (nothing resolves) but names the
+    /// class honestly, "target missing in mem engine", instead of
+    /// calling a well-formed cross-mem reference rename drift. This is
+    /// every one of the eight hits the dogfood graph carried. The
+    /// complement: the same link with the target present is silent.
+    #[test]
+    fn mounted_prefix_with_missing_target_is_classed_target_missing() {
+        let fallback = default_fallback();
+        let author = || {
+            real_entity(
+                "plugin--author",
+                &[("purpose", "Depends on [[engine--health]].")],
+            )
+        };
+        let mem_names = vec!["engine".to_string(), "plugin".to_string()];
+        let known_suffixes = vec!["engine".to_string(), "plugin".to_string()];
+
+        let mut store = Store::new();
+        let mut warnings = Vec::new();
+        push_entities_into_store(
+            &mut store,
+            vec![author()],
+            &fallback,
+            Some(LoadCollector {
+                warnings: &mut warnings,
+                known_suffixes: &known_suffixes,
+                mem_names: &mem_names,
+            }),
+        );
+        assert_eq!(warnings.len(), 1, "a missing cross-mem target fires once");
+        match &warnings[0] {
+            WarningHint::SuspiciousNestedPrefix {
+                resolved_id,
+                prefix_mounted,
+                candidate_target,
+                ..
+            } => {
+                assert_eq!(resolved_id.as_ref(), "engine--health");
+                assert!(*prefix_mounted, "`engine` is a roster member");
+                assert!(
+                    candidate_target.is_none(),
+                    "nothing to suggest: the target is absent"
+                );
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        let msg = warnings[0].message();
+        assert!(
+            msg.contains("target missing in mem engine"),
+            "the message says what it can tell: {msg}"
+        );
+        assert!(
+            !msg.contains("rename"),
+            "a mounted prefix is never called rename drift: {msg}"
+        );
+        let json = serde_json::to_value(&warnings[0]).unwrap();
+        assert_eq!(json["details"]["target_mem"], "engine");
+        assert_eq!(json["details"]["prefix_mounted"], true);
+
+        // Complement: target present, no warning at all.
+        let mut store2 = Store::new();
+        push_entities_into_store(
+            &mut store2,
+            vec![real_entity("engine--health", &[])],
+            &fallback,
+            None,
+        );
+        let mut warnings2 = Vec::new();
+        push_entities_into_store(
+            &mut store2,
+            vec![author()],
+            &fallback,
+            Some(LoadCollector {
+                warnings: &mut warnings2,
+                known_suffixes: &known_suffixes,
+                mem_names: &mem_names,
+            }),
+        );
+        assert!(
+            warnings2.is_empty(),
+            "a well-formed link to an existing target is silent: {warnings2:?}"
+        );
     }
 
     /// Two mems sharing a last-segment suffix: both contribute to the

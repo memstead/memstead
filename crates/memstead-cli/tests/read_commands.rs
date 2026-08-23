@@ -645,6 +645,19 @@ A decision entity authored without any CHOSEN edge — exercises the
 "#,
         )
         .unwrap();
+    } else {
+        // "No violations" is not "no content": an entity-less mount is
+        // itself a strict finding (`MOUNT_UNBACKED` / `empty`), so the
+        // clean fixture carries two decisions choosing each other.
+        for (name, other) in [("first", "second"), ("second", "first")] {
+            fs::write(
+                mem_dir.join(format!("{name}.md")),
+                format!(
+                    "---\ntype: decision\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\n---\n# {name}\n\n## Body\n\nA compliant decision.\n\n## Relationships\n\n- **CHOSEN**: [[strictmem--{other}]]\n"
+                ),
+            )
+            .unwrap();
+        }
     }
 
     init_real_mem_repo_from_disk(root, &[(&mem_dir, "strictmem")]);

@@ -3383,7 +3383,15 @@ community:
             engine.workspace_root().is_none(),
             "from_mounts has no workspace path",
         );
-        assert!(engine.load_warnings().is_empty());
+        // An entity-less mount reports itself empty; nothing else.
+        assert!(
+            engine
+                .load_warnings()
+                .iter()
+                .all(|w| w.code() == "MOUNT_UNBACKED"),
+            "{:?}",
+            engine.load_warnings()
+        );
     }
 
     #[test]

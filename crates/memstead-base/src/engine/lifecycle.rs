@@ -749,6 +749,11 @@ impl Engine {
         // targeting the new mem resolve correctly during this
         // load.
         let (entries, read_errors) = collect_source_entries(backend.as_ref())?;
+        if let Some(w) =
+            super::boot::unbacked_mount_warning(&mount, backend.as_ref(), Some(entries.len()))
+        {
+            self.load_warnings.push(w);
+        }
         let load_result = parse_entries(entries, read_errors, &mount.mem, schema.as_ref());
 
         let mut mem_names: Vec<String> = self.mounts.iter().map(|m| m.mount.mem.clone()).collect();
@@ -2275,6 +2280,15 @@ impl Engine {
         // mutating the store on a failed reload.
         let backend = self.mounts[mount_idx].backend.as_ref();
         let (entries, read_errors) = collect_source_entries(backend)?;
+        // The unbacked-mount probe rides the reload like the other
+        // load-time warnings: a branch that appeared (or vanished) since
+        // boot changes the answer, and the sink's per-mem replace below
+        // drops the boot-time one.
+        let unbacked = super::boot::unbacked_mount_warning(
+            &self.mounts[mount_idx].mount,
+            backend,
+            Some(entries.len()),
+        );
         let load_result = parse_entries(entries, read_errors, mem, schema.as_ref());
 
         // Build the LoadCollector inputs — mem roster + last-
@@ -2288,6 +2302,9 @@ impl Engine {
 
         // Failure fence above; below this point the store is mutated.
         self.store.remove_entities_by_mem(mem);
+        if let Some(w) = unbacked {
+            warnings_sink.push(w);
+        }
         let fallback = engine_fallback_type();
         push_entities_into_store(
             &mut self.store,
@@ -3039,9 +3056,15 @@ write_rules: []
         mount.schema = Some("default@1.3.0".parse().unwrap());
         let mut engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
+        // The only thing a clean, entity-less mount says about itself
+        // is that it is empty (`MOUNT_UNBACKED` / `empty`).
         assert!(
-            engine.load_warnings().is_empty(),
-            "clean boot has no warnings"
+            engine
+                .load_warnings()
+                .iter()
+                .all(|w| w.code() == "MOUNT_UNBACKED"),
+            "clean boot has no warnings beyond the empty-mount one: {:?}",
+            engine.load_warnings()
         );
 
         // Drop a markdown file with two `## Identity` headings.

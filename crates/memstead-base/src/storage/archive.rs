@@ -126,6 +126,15 @@ trait ReadSeek: std::io::Read + Seek {}
 impl<T: std::io::Read + Seek + ?Sized> ReadSeek for T {}
 
 impl crate::backend::MemBackend for ArchiveBackend {
+    /// The archive file exists on disk (an in-memory archive is always
+    /// present).
+    fn storage_present(&self) -> Result<bool, crate::backend::BackendError> {
+        Ok(match &self.source {
+            ArchiveSource::Path(p) => p.is_file(),
+            ArchiveSource::Bytes(_) => true,
+        })
+    }
+
     fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
         let mut out = Vec::new();
         self.with_archive_reader(|reader| {

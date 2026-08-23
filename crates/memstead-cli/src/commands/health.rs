@@ -70,12 +70,19 @@ pub struct Args {
     pub limit: usize,
 
     /// Exit non-zero (1) when any included Tier-2 warning kind has
-    /// present violations, or when the always-on authoring-drift axis
-    /// reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` /
-    /// `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in).
-    /// The output is rendered first, then the non-zero exit fires.
-    /// Include-gated participation today: `missing_required_outgoing`, `constraints`;
-    /// new Tier-2 codes opt in additively without breaking the flag's
+    /// present violations, or when an always-on configuration axis
+    /// reports findings. Always-on (no `--include` opt-in): the
+    /// authoring-drift axis (`SCHEMA_AUTHORING_SOURCE_MISSING` /
+    /// `SCHEMA_AUTHORING_SOURCE_DIVERGED`) and the configuration
+    /// defects `SCHEMA_PIN_MISMATCH`, `SCHEMA_UNSTAMPED_SOURCE_ROT`
+    /// and `MOUNT_UNBACKED` (a mount whose branch or folder does not
+    /// exist, or holds no entity). Include-gated participation:
+    /// `missing_required_outgoing`, `constraints`, `signals` (warn
+    /// level), and with `integrity` the consistency findings
+    /// `DANGLING_LINK` and `ORPHAN_STUB`. Stale entities, drifted
+    /// anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The
+    /// output is rendered first, then the non-zero exit fires; new
+    /// Tier-2 codes opt in additively without breaking the flag's
     /// semantics.
     #[arg(long)]
     pub strict: bool,
@@ -280,6 +287,24 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .iter()
         .any(|s| s == "conformance" || s == "integrity")
     {
+        // The consistency axis participates in `--strict` when asked
+        // for: a dangling link or an orphan stub is a graph that says
+        // something it cannot show, and a referee that ignored both
+        // exited 0 on a workspace with ten of one and seven of the
+        // other. Conformance findings keep their own reporting.
+        if include.iter().any(|s| s == "integrity") {
+            let dangling = findings
+                .iter()
+                .filter(|f| f.code == "DANGLING_LINK")
+                .count();
+            if dangling > 0 {
+                strict_violations.push(("dangling_links", dangling));
+            }
+            let orphan_stubs = findings.iter().filter(|f| f.code == "ORPHAN_STUB").count();
+            if orphan_stubs > 0 {
+                strict_violations.push(("orphan_stubs", orphan_stubs));
+            }
+        }
         obj.insert("findings".into(), serde_json::to_value(&findings)?);
     }
     if include.iter().any(|s| s == "tags")
@@ -427,6 +452,23 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .count();
     if authoring_drift > 0 {
         strict_violations.push(("schema_authoring_drift", authoring_drift));
+    }
+    // Configuration defects participate unconditionally too: a mount
+    // whose pin disagrees with its mem's config, a pinned schema whose
+    // sealed package has rotted, a mount that resolves to nothing.
+    // None of them is about an entity; each is the workspace
+    // describing itself wrongly, and `--strict` exited 0 on three pin
+    // mismatches, two rotted schemas and two unbacked mounts until
+    // 2026-08-23. Generations-behind pins stay advisory: the pin works.
+    for (label, code) in [
+        ("schema_pin_mismatch", "SCHEMA_PIN_MISMATCH"),
+        ("schema_unstamped_source_rot", "SCHEMA_UNSTAMPED_SOURCE_ROT"),
+        ("mount_unbacked", "MOUNT_UNBACKED"),
+    ] {
+        let n = health.warnings.iter().filter(|w| w.code() == code).count();
+        if n > 0 {
+            strict_violations.push((label, n));
+        }
     }
 
     if ctx.json {

@@ -352,6 +352,9 @@ impl Engine {
             // A lazy mount with a broken pin still quarantined above —
             // deferral never converts a metadata failure into silence.
             if m.mount.lifecycle == crate::workspace::MountLifecycle::Lazy {
+                if let Some(w) = unbacked_mount_warning(&m.mount, m.backend.as_ref(), None) {
+                    load_warnings.push(w);
+                }
                 deferred_idx.insert(m_idx);
                 continue;
             }
@@ -371,6 +374,14 @@ impl Engine {
                     continue;
                 }
             };
+            // A mount that resolves to nothing says so: a missing branch
+            // or folder lists as empty exactly like an empty one, and
+            // until 2026-08-23 both sat in the writable roster silently.
+            if let Some(w) =
+                unbacked_mount_warning(&m.mount, m.backend.as_ref(), Some(entries.len()))
+            {
+                load_warnings.push(w);
+            }
             let load_result = parse_entries(entries, read_errors, &m.mount.mem, schema.as_ref());
             // Wire the LoadCollector so the parser/store-builder
             // pipeline forwards typed drift warnings
@@ -827,6 +838,47 @@ pub(super) fn resolve_builtin_schema_pin(
         .cloned()
 }
 
+/// The `MOUNT_UNBACKED` probe for one mount: `Some(warning)` when the
+/// storage the mount names does not exist (`missing_ref` /
+/// `missing_path`, from [`MemBackend::storage_present`]) or, when
+/// `entity_count` is known and zero, holds no entity (`empty`). A
+/// probe failure reads as present — best-effort, never a boot failure.
+/// Lazy mounts pass `None` for the count: their walk is deferred, so
+/// only the storage half is judged at boot.
+pub(super) fn unbacked_mount_warning(
+    mount: &crate::workspace::Mount,
+    backend: &dyn MemBackend,
+    entity_count: Option<usize>,
+) -> Option<WarningHint> {
+    use crate::ops::MountUnbackedReason;
+    use crate::workspace::MountStorage;
+    let (location, missing_reason) = match &mount.storage {
+        MountStorage::GitBranch { branch, .. } => (branch.clone(), MountUnbackedReason::MissingRef),
+        MountStorage::Folder { path } => {
+            (path.display().to_string(), MountUnbackedReason::MissingPath)
+        }
+        MountStorage::Archive { path } => {
+            (path.display().to_string(), MountUnbackedReason::MissingPath)
+        }
+        MountStorage::InMemory => return None,
+    };
+    if !backend.storage_present().unwrap_or(true) {
+        return Some(WarningHint::MountUnbacked {
+            mem: mount.mem.clone(),
+            reason: missing_reason,
+            location,
+        });
+    }
+    if entity_count == Some(0) {
+        return Some(WarningHint::MountUnbacked {
+            mem: mount.mem.clone(),
+            reason: MountUnbackedReason::Empty,
+            location,
+        });
+    }
+    None
+}
+
 pub(super) fn collect_source_entries(
     backend: &dyn MemBackend,
 ) -> Result<(Vec<SourceEntry>, Vec<SourceReadError>), EngineError> {
@@ -873,6 +925,62 @@ mod tests {
     use crate::storage::{ArchiveBackend, FilesystemMemWriter, MemWriter};
     use crate::vcs::CommitContext;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+
+    /// The unbacked-mount probe on the folder backend: a path that does
+    /// not exist is `missing_path`, an existing directory with no
+    /// entity is `empty`, a directory holding one entity is silent, and
+    /// a lazy mount (count unknown) is judged on storage presence only.
+    #[test]
+    fn unbacked_mount_probe_classes_missing_path_empty_and_present() {
+        use crate::engine::boot::unbacked_mount_warning;
+        use crate::ops::MountUnbackedReason;
+        let tmp = TempDir::new().unwrap();
+        let mount = |path: std::path::PathBuf| Mount {
+            mem: "probe".into(),
+            schema: None,
+            storage: MountStorage::Folder { path },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+
+        let gone = tmp.path().join("gone");
+        let backend = FilesystemMemWriter::new(gone.clone());
+        let w = unbacked_mount_warning(&mount(gone.clone()), &backend, Some(0))
+            .expect("a missing folder is unbacked");
+        match &w {
+            WarningHint::MountUnbacked {
+                mem,
+                reason,
+                location,
+            } => {
+                assert_eq!(mem, "probe");
+                assert_eq!(*reason, MountUnbackedReason::MissingPath);
+                assert_eq!(location, &gone.display().to_string());
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        assert_eq!(w.code(), "MOUNT_UNBACKED");
+        let json = serde_json::to_value(&w).unwrap();
+        assert_eq!(json["details"]["reason"], "missing_path");
+        // Lazy: storage presence alone decides, and the folder is gone.
+        assert!(unbacked_mount_warning(&mount(gone), &backend, None).is_some());
+
+        let hollow = tmp.path().join("hollow");
+        std::fs::create_dir_all(&hollow).unwrap();
+        let backend = FilesystemMemWriter::new(hollow.clone());
+        let w = unbacked_mount_warning(&mount(hollow.clone()), &backend, Some(0))
+            .expect("an entity-less folder is unbacked");
+        assert_eq!(
+            serde_json::to_value(&w).unwrap()["details"]["reason"],
+            "empty"
+        );
+        // Lazy with the folder present: nothing to say at boot.
+        assert!(unbacked_mount_warning(&mount(hollow.clone()), &backend, None).is_none());
+        // One entity: silent.
+        assert!(unbacked_mount_warning(&mount(hollow), &backend, Some(1)).is_none());
+    }
 
     /// The `SchemaResolver` resolves a pin against the catalogue and, on
     /// a miss, yields the fixed-order (`local_storage` → `builtin` →

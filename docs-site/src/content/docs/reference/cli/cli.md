@@ -396,7 +396,7 @@ Health summary (orphans, stubs, stale entities, missing fields)
 * `--limit <LIMIT>` — Max rows for `most_connected` and `tag_distribution` (default: 10)
 
   Default value: `10`
-* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations, or when the always-on authoring-drift axis reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` / `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in). The output is rendered first, then the non-zero exit fires. Include-gated participation today: `missing_required_outgoing`, `constraints`; new Tier-2 codes opt in additively without breaking the flag's semantics
+* `--strict` — Exit non-zero (1) when any included Tier-2 warning kind has present violations, or when an always-on configuration axis reports findings. Always-on (no `--include` opt-in): the authoring-drift axis (`SCHEMA_AUTHORING_SOURCE_MISSING` / `SCHEMA_AUTHORING_SOURCE_DIVERGED`) and the configuration defects `SCHEMA_PIN_MISMATCH`, `SCHEMA_UNSTAMPED_SOURCE_ROT` and `MOUNT_UNBACKED` (a mount whose branch or folder does not exist, or holds no entity). Include-gated participation: `missing_required_outgoing`, `constraints`, `signals` (warn level), and with `integrity` the consistency findings `DANGLING_LINK` and `ORPHAN_STUB`. Stale entities, drifted anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The output is rendered first, then the non-zero exit fires; new Tier-2 codes opt in additively without breaking the flag's semantics
 
 
 

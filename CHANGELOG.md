@@ -44,7 +44,37 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   cargo-dist lifts the section into the GitHub Release body and the
   Homebrew publish job died on 0.6.0's 81 KB of it.
 
+- **`MOUNT_UNBACKED`: a mount that resolves to nothing says so.** A
+  git-branch mount whose branch was never created (or was deleted), a
+  folder or archive mount whose path is gone, and a mount whose storage
+  holds no entity all listed as "zero entities" and sat in the writable
+  roster without a word; the dogfood workspace carried two such mounts
+  for weeks. Boot and reload now raise `MOUNT_UNBACKED` with
+  `details.reason` in `missing_ref | missing_path | empty` and the
+  location named; a mount serving at least one entity is silent. The
+  backend trait gained `storage_present()` (the branch ref, the folder,
+  the archive file) so the probe can tell "never created" from "empty".
+  The overview, the cold-start surface, carries it too: an unbacked mem's
+  roster entry names the reason and location under `Unbacked:` (the
+  structured `mems[].unbacked` field) and the warning rides
+  `## Warnings`, so `Entities: 0` is never mistaken for an empty mem.
+- **`health --strict` refuses configuration defects.** Always on, no
+  include needed: `SCHEMA_PIN_MISMATCH`, `SCHEMA_UNSTAMPED_SOURCE_ROT` and
+  `MOUNT_UNBACKED`. With `integrity` included: `DANGLING_LINK` and
+  `ORPHAN_STUB`. Stale entities, drifted anchors and
+  `SCHEMA_GENERATIONS_BEHIND` stay advisory. A strict run used to exit 0
+  on a workspace with three pin mismatches, two rotted schema packages,
+  two unbacked mounts, seven stubs and fourteen dangling-link findings.
+
 ### Changed
+- **`SUSPICIOUS_NESTED_PREFIX` says what it can tell.** When the link's
+  prefix is itself a mounted mem the message reads "target missing in
+  mem X" (a well-formed cross-mem reference whose target is absent; every
+  one of the eight hits on the dogfood graph); when the prefix only
+  matches a mem name's last segment it reads "prefix 'X' is not a mounted
+  mem" (the rename-drift pattern). `details` gains `target_mem` and
+  `prefix_mounted`. The old wording called every case "almost certainly
+  mem-rename drift", which was wrong eight times out of eight.
 - **`memstead-mcp --version` prints the stamped build version**
   (`<semver>+g<sha>[-dirty]` inside a git checkout), the same string the
   server hands out as `serverInfo.version` and the CLI already printed.
