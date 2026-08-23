@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-23
+
 Forward compatibility: this release is one schema-language generation. Schema
 packages declaring any of the wave's new keys (`when_field` / `when_value` on
 `required_outgoing` blocks, `must_reach`, `relationships.acyclic_sets`,
@@ -2728,7 +2730,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/memstead/memstead/compare/79be749...v0.10.0
 [0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...79be749
 [0.8.1]: https://github.com/memstead/memstead/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/memstead/memstead/compare/v0.7.0...v0.8.0
