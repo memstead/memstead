@@ -21,15 +21,45 @@
 # Usage:
 #
 #   curl -sSf https://memstead.io/install.sh | sh
-#   curl -sSf https://memstead.io/install.sh | sh -s -- --version v0.1.0
+#   curl -sSf https://memstead.io/install.sh | sh -s -- --version v0.10.0
+#   MEMSTEAD_VERSION=v0.10.0 sh -c 'curl -sSf https://memstead.io/install.sh | sh'
 #
 # Defaults: latest tag, ~/.cargo/bin install dir (cargo-dist's default).
-# All flags are forwarded to both child installers; consult
+# `--version <tag>` (or `--version=<tag>`, or the MEMSTEAD_VERSION
+# variable) picks the release; this script consumes it, because the
+# cargo-dist child installers do not know the flag and refuse it. Every
+# other flag is forwarded to both child installers; consult
 # `memstead-cli-installer.sh --help` for the full list.
 set -eu
 
 REPO="${MEMSTEAD_REPO:-memstead/memstead}"
 RELEASE="${MEMSTEAD_VERSION:-latest}"
+
+# Consume `--version <tag>` / `--version=<tag>`; keep everything else
+# for the child installers (rebuilt positionally, POSIX sh has no arrays).
+forward=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)
+            if [ $# -lt 2 ]; then
+                echo "--version needs a tag, e.g. --version v0.10.0" >&2
+                exit 1
+            fi
+            RELEASE="$2"
+            shift 2
+            ;;
+        --version=*)
+            RELEASE="${1#--version=}"
+            shift
+            ;;
+        *)
+            forward="$forward $1"
+            shift
+            ;;
+    esac
+done
+# shellcheck disable=SC2086
+set -- $forward
 
 # Resolve "latest" to the actual tag once so both child installers
 # pull from the same release. Avoids a race window where a new release
