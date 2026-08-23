@@ -993,6 +993,19 @@ pub fn unsatisfied_required_outgoing(
     td.required_outgoing
         .iter()
         .filter(|block| {
+            // A conditional block applies only while `when_field`
+            // holds `when_value` (same comparison the `requires_when`
+            // constraint uses). Unset field or any other value = the
+            // block is unarmed and never unsatisfied.
+            if let (Some(when_field), Some(when_value)) = (&block.when_field, &block.when_value) {
+                let armed = entity
+                    .metadata
+                    .get(when_field.as_str())
+                    .is_some_and(|v| v.to_frontmatter_string() == *when_value);
+                if !armed {
+                    return false;
+                }
+            }
             let count = entity
                 .relationships
                 .iter()
@@ -1004,6 +1017,8 @@ pub fn unsatisfied_required_outgoing(
             relationships: block.relationships.clone(),
             cardinality: block.cardinality.to_string(),
             severity: block.severity,
+            when_field: block.when_field.clone(),
+            when_value: block.when_value.clone(),
         })
         .collect()
 }
@@ -2945,5 +2960,80 @@ community:
             reports.is_empty(),
             "stub (no schema lookup) and unschemaed mem must be skipped; got {reports:?}",
         );
+    }
+
+    /// A conditional block arms only on the trigger value: the sweep
+    /// reports the armed violator (with the trigger named in the
+    /// block entry), and skips both the other-value and the
+    /// edge-satisfied entities.
+    #[test]
+    fn missing_required_outgoing_conditional_blocks_arm_on_trigger() {
+        use crate::entity::MetadataValue;
+        let manifest = r#"name: tests-ro-cond
+version: 0.1.0
+description: conditional required_outgoing health test schema
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: Hier
+      default_weight: 3.0
+    - name: _default
+      description: Fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let task_yaml = "name: task\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: status\n    description: workflow state\n    field_type: string\n    enum_values: [open, checked]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - status\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nrequired_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    when_field: status\n    when_value: checked\n";
+        let schema = std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("task".to_string(), task_yaml.to_string())],
+            )
+            .expect("conditional ro fixture schema must parse"),
+        );
+
+        let mut store = Store::new();
+        let mut armed = make_typed_entity("plan", "armed", "task");
+        armed
+            .metadata
+            .insert("status".into(), MetadataValue::String("checked".into()));
+        let mut other_value = make_typed_entity("plan", "quiet", "task");
+        other_value
+            .metadata
+            .insert("status".into(), MetadataValue::String("open".into()));
+        let unset = make_typed_entity("plan", "blank", "task");
+        let parent = make_typed_entity("plan", "parent", "task");
+        let mut satisfied = make_typed_entity("plan", "wired", "task");
+        satisfied
+            .metadata
+            .insert("status".into(), MetadataValue::String("checked".into()));
+        satisfied.relationships.push(crate::entity::Relationship {
+            rel_type: "PART_OF".into(),
+            target: parent.id.clone(),
+            description: None,
+        });
+        for e in [armed.clone(), other_value, unset, parent, satisfied] {
+            store.upsert(e.id.clone(), e);
+        }
+
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("plan".to_string(), schema);
+
+        let reports = collect_missing_required_outgoing(&store, None, &mem_schemas);
+        assert_eq!(
+            reports.len(),
+            1,
+            "only the armed edge-less entity is reported; got {reports:?}"
+        );
+        let r = &reports[0];
+        assert_eq!(r.id, armed.id);
+        assert_eq!(r.missing.len(), 1);
+        assert_eq!(r.missing[0].when_field.as_deref(), Some("status"));
+        assert_eq!(r.missing[0].when_value.as_deref(), Some("checked"));
     }
 }

@@ -502,6 +502,20 @@
           "description": "Constraint severity (form 4 of the constraint vocabulary):\n`warn` (the historical default — health finding +\n`MISSING_REQUIRED_OUTGOING` write-time warning) or `block`\n(write-time refusal when a create/update would land, or a\nrelate-remove would leave, the entity below cardinality).",
           "$ref": "#/$defs/ConstraintSeverity",
           "default": "warn"
+        },
+        "when_field": {
+          "description": "Optional condition: the block applies only when this metadata\nfield of the entity holds `when_value`. The same two keys\n`requires_when` uses — one vocabulary for one idea. The loader\nrequires the pair to appear together, `when_field` to name a\ndeclared metadata field of this type carrying `enum_values`,\nand `when_value` to be a member. Absent pair = unconditional\nblock = long-standing behaviour.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when_value": {
+          "description": "The triggering value (see `when_field`).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,

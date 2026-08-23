@@ -943,6 +943,15 @@ pub struct MissingRequiredOutgoingBlock {
     /// cardinality }` shape.
     #[serde(skip_serializing_if = "severity_is_warn")]
     pub severity: memstead_schema::ConstraintSeverity,
+    /// The condition that armed a conditional block (`when_field` /
+    /// `when_value` on the declaration). Serialized only when present,
+    /// so unconditional blocks keep their byte-identical shape — and
+    /// the reader of a refusal, warning, or health finding sees which
+    /// trigger armed the obligation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_value: Option<String>,
 }
 
 fn severity_is_warn(s: &memstead_schema::ConstraintSeverity) -> bool {
@@ -2001,11 +2010,15 @@ impl WarningHint {
                         relationships: vec!["CHOSEN".into()],
                         cardinality: "at_least_one".into(),
                         severity: memstead_schema::ConstraintSeverity::Warn,
+                        when_field: None,
+                        when_value: None,
                     },
                     MissingRequiredOutgoingBlock {
                         relationships: vec!["REJECTED".into()],
                         cardinality: "at_least_one".into(),
                         severity: memstead_schema::ConstraintSeverity::Warn,
+                        when_field: None,
+                        when_value: None,
                     },
                 ],
             },

@@ -145,6 +145,18 @@ pub struct RequiredOutgoing {
     /// relate-remove would leave, the entity below cardinality).
     #[serde(default)]
     pub severity: ConstraintSeverity,
+    /// Optional condition: the block applies only when this metadata
+    /// field of the entity holds `when_value`. The same two keys
+    /// `requires_when` uses — one vocabulary for one idea. The loader
+    /// requires the pair to appear together, `when_field` to name a
+    /// declared metadata field of this type carrying `enum_values`,
+    /// and `when_value` to be a member. Absent pair = unconditional
+    /// block = long-standing behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_field: Option<String>,
+    /// The triggering value (see `when_field`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_value: Option<String>,
 }
 
 /// Uniform severity for the constraint vocabulary — one model across

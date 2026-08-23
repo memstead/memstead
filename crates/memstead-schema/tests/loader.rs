@@ -1824,6 +1824,123 @@ fn required_outgoing_severity_parses_and_rejects_unknown() {
     load(&minimal_manifest(), &[("sample", &bad)]).expect_err("unknown severity must fail");
 }
 
+// ---------------------------------------------------------------------------
+// Conditional required_outgoing (`when_field` / `when_value`)
+// ---------------------------------------------------------------------------
+
+/// A conditional block loads alongside an unconditional one; the
+/// condition pair round-trips, and the unconditional block keeps
+/// `None` for both keys.
+#[test]
+fn required_outgoing_conditional_block_accepted() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [REFERENCES]
+    cardinality: at_least_one
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: block
+    when_field: status
+    when_value: closed
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.required_outgoing.len(), 2);
+    assert_eq!(td.required_outgoing[0].when_field, None);
+    assert_eq!(td.required_outgoing[0].when_value, None);
+    assert_eq!(
+        td.required_outgoing[1].when_field.as_deref(),
+        Some("status")
+    );
+    assert_eq!(
+        td.required_outgoing[1].when_value.as_deref(),
+        Some("closed")
+    );
+}
+
+#[test]
+fn required_outgoing_when_field_without_when_value_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: status
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "status"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn required_outgoing_when_value_without_when_field_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_value: closed
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "closed"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn required_outgoing_when_field_undeclared_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: phase
+    when_value: closed
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "phase"),
+        "got: {err}"
+    );
+}
+
+/// Stricter than `requires_when`: a trigger field without
+/// `enum_values` refuses — a free-text-armed edge obligation would
+/// never fire predictably.
+#[test]
+fn required_outgoing_when_field_non_enum_rejected() {
+    let t = minimal_type().replace(
+        "metadata_fields:\n",
+        "metadata_fields:\n  - key: owner\n    description: Free-text owner\n    field_type: string\n",
+    ) + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: owner
+    when_value: someone
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "owner"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn required_outgoing_when_value_outside_enum_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: status
+    when_value: archived
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "archived"),
+        "got: {err}"
+    );
+}
+
 /// Forms 2/3/5 accept valid declarations; uniqueness defaults to
 /// block (its whole point is preventing the duplicate).
 #[test]

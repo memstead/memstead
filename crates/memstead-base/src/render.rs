@@ -1663,11 +1663,20 @@ pub fn build_schema_payload_scoped(
                 .required_outgoing
                 .iter()
                 .map(|block| {
-                    serde_json::json!({
+                    let mut b = serde_json::json!({
                         "relationships": block.relationships,
                         "cardinality": block.cardinality.to_string(),
                         "severity": block.severity,
-                    })
+                    });
+                    // Conditional blocks carry their trigger at both
+                    // verbosity levels (the lite skeleton projects this
+                    // object unchanged); unconditional blocks keep
+                    // their byte-identical three-key shape.
+                    if let (Some(wf), Some(wv)) = (&block.when_field, &block.when_value) {
+                        b["when_field"] = serde_json::json!(wf);
+                        b["when_value"] = serde_json::json!(wv);
+                    }
+                    b
                 })
                 .collect();
 
@@ -4169,6 +4178,61 @@ write_rules: []
                 note.contains("status_propagation"),
                 "deprecation pointer names the real propagation declaration"
             );
+        }
+    }
+
+    /// A conditional `required_outgoing` block's trigger (`when_field`
+    /// / `when_value`) is visible at BOTH verbosity levels — no
+    /// legality condition the schema response omits — while an
+    /// unconditional block keeps its byte-identical three-key shape
+    /// (no `when_*` keys at all).
+    #[test]
+    fn conditional_required_outgoing_trigger_visible_at_both_levels() {
+        let manifest = r#"name: condro-render
+version: 0.1.0
+description: conditional required_outgoing render fixture
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let task_yaml = "name: task\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: status\n    description: workflow state\n    field_type: string\n    enum_values: [open, checked]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - status\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nrequired_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    severity: block\n    when_field: status\n    when_value: checked\n";
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("task".to_string(), task_yaml.to_string())],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let task = &payload[types_key].as_array().expect("types array")[0];
+            let ro = task["required_outgoing"].as_array().expect("blocks array");
+            assert_eq!(ro.len(), 2);
+            assert!(
+                ro[0].get("when_field").is_none() && ro[0].get("when_value").is_none(),
+                "unconditional block carries no when_* keys: {:?}",
+                ro[0]
+            );
+            assert_eq!(ro[1]["when_field"], "status");
+            assert_eq!(ro[1]["when_value"], "checked");
         }
     }
 

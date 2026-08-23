@@ -1332,6 +1332,66 @@ fn validate_type(
                 errors.push(e);
             }
         }
+        // Conditional blocks: `when_field` / `when_value` travel as a
+        // pair, the field must be a declared metadata field carrying
+        // `enum_values`, and the value must be a member. Stricter than
+        // `requires_when` (which tolerates non-enum trigger fields):
+        // an edge obligation armed by a free-text value would never
+        // fire predictably, so the loader refuses instead of loading a
+        // dead condition.
+        match (&block.when_field, &block.when_value) {
+            (None, None) => {}
+            (Some(f), None) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "required_outgoing",
+                    offender: f.clone(),
+                    reason: "`when_field` requires `when_value` alongside it".to_string(),
+                });
+            }
+            (None, Some(v)) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "required_outgoing",
+                    offender: v.clone(),
+                    reason: "`when_value` requires `when_field` alongside it".to_string(),
+                });
+            }
+            (Some(f), Some(v)) => match td.metadata_fields.iter().find(|mf| mf.key == *f) {
+                None => {
+                    errors.push(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "required_outgoing",
+                        offender: f.clone(),
+                        reason: "`when_field` names no metadata field of this type".to_string(),
+                    });
+                }
+                Some(when_def) => match &when_def.enum_values {
+                    None => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "required_outgoing",
+                            offender: f.clone(),
+                            reason: format!(
+                                "`when_field` must name a metadata field with `enum_values`; `{f}` declares none"
+                            ),
+                        });
+                    }
+                    Some(allowed) if !allowed.contains(v) => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "required_outgoing",
+                            offender: v.clone(),
+                            reason: format!(
+                                "`when_value` is not in `{f}`'s enum_values [{}]",
+                                allowed.join(", ")
+                            ),
+                        });
+                    }
+                    Some(_) => {}
+                },
+            },
+        }
     }
 
     // Constraint vocabulary (loader honesty: a malformed declaration

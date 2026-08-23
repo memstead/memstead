@@ -1924,6 +1924,286 @@ write_rules: []
         );
     }
 
+    /// Fixture for the conditional `required_outgoing` form: type
+    /// `task` requires a PART_OF edge only while `status` holds
+    /// `checked`, at the given severity. No unconditional blocks, no
+    /// `constraints` — the conditional block is the only obligation.
+    fn engine_with_conditional_ro_schema(tmp: &TempDir, severity: &str) -> Engine {
+        let schemas_dir = tmp.path().join("schemas");
+        let pkg = schemas_dir.join("condro");
+        std::fs::create_dir_all(pkg.join("types")).unwrap();
+        std::fs::write(
+            pkg.join("schema.yaml"),
+            r#"name: condro
+version: 0.1.0
+description: conditional required_outgoing fixture
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg.join("types").join("task.yaml"),
+            format!(
+                r#"name: task
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: status
+    description: workflow state
+    field_type: string
+    enum_values: [open, checked]
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+  - status
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: {severity}
+    when_field: status
+    when_value: checked
+write_rules: []
+"#
+            ),
+        )
+        .unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mount = crate::workspace::Mount {
+            mem: "tasks".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "condro",
+                semver::Version::new(0, 1, 0),
+            )),
+            storage: crate::workspace::MountStorage::Folder { path: mem_dir },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        Engine::from_mounts_with_schemas_dir(
+            vec![(mount, Box::new(writer) as Box<dyn MemBackend>)],
+            Some(&schemas_dir),
+        )
+        .unwrap()
+    }
+
+    /// An unarmed conditional block never fires: entities whose
+    /// trigger field is unset or holds another enum value create
+    /// cleanly without the edge, with no `MISSING_REQUIRED_OUTGOING`
+    /// warning, even at block tier.
+    #[test]
+    fn create_ignores_conditional_required_outgoing_when_unarmed() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_conditional_ro_schema(&tmp, "block");
+        let (actor, client) = cli_actor();
+
+        let unset = engine
+            .create_entity(
+                task_create_args("Unset Status", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("unset trigger field must create");
+        let mut open_args = task_create_args("Open Task", vec![]);
+        open_args
+            .metadata
+            .insert("status".to_string(), "open".to_string());
+        let open = engine
+            .create_entity(open_args, actor, Some(&client), None)
+            .expect("non-trigger value must create");
+        for outcome in [&unset, &open] {
+            assert!(
+                !outcome
+                    .warnings
+                    .iter()
+                    .any(|w| matches!(w, WarningHint::MissingRequiredOutgoing { .. })),
+                "unarmed block emits no warning: {:?}",
+                outcome.warnings
+            );
+        }
+    }
+
+    /// Armed at block tier: a create whose trigger field holds the
+    /// trigger value and lacks the edge refuses with
+    /// `MISSING_REQUIRED_OUTGOING`, and the payload names the trigger
+    /// (`when_field` / `when_value`); an inline relation satisfying
+    /// the armed block lets the same create pass.
+    #[test]
+    fn create_refuses_block_tier_conditional_required_outgoing() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_conditional_ro_schema(&tmp, "block");
+        let (actor, client) = cli_actor();
+
+        let err = engine
+            .create_entity(
+                checked_task_args("Checked Orphan", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "MISSING_REQUIRED_OUTGOING");
+        let details = err.details();
+        assert_eq!(details["missing"][0]["relationships"][0], "PART_OF");
+        assert_eq!(details["missing"][0]["when_field"], "status");
+        assert_eq!(details["missing"][0]["when_value"], "checked");
+        assert_eq!(engine.store().all_entities().count(), 0);
+
+        let outcome = engine.create_entity(
+            checked_task_args(
+                "Checked Child",
+                vec![crate::ops::RelateArg {
+                    to: crate::entity::EntityId("tasks--parent".to_string()),
+                    rel_type: "PART_OF".to_string(),
+                    description: None,
+                }],
+            ),
+            actor,
+            Some(&client),
+            None,
+        );
+        assert!(
+            outcome.is_ok(),
+            "satisfied armed block passes: {:?}",
+            outcome.err()
+        );
+    }
+
+    /// Armed at warn tier: the create lands and carries the
+    /// `MISSING_REQUIRED_OUTGOING` warning whose block entry names
+    /// the trigger.
+    #[test]
+    fn create_warns_conditional_required_outgoing_at_warn_tier() {
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_conditional_ro_schema(&tmp, "warn");
+        let (actor, client) = cli_actor();
+
+        let outcome = engine
+            .create_entity(
+                checked_task_args("Checked Orphan", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("warn tier lands the write");
+        assert!(!outcome.commit_sha.is_empty());
+        let block = outcome
+            .warnings
+            .iter()
+            .find_map(|w| match w {
+                WarningHint::MissingRequiredOutgoing { missing, .. } => missing.first(),
+                _ => None,
+            })
+            .expect("warning carries the unsatisfied block");
+        assert_eq!(block.relationships, vec!["PART_OF".to_string()]);
+        assert_eq!(block.when_field.as_deref(), Some("status"));
+        assert_eq!(block.when_value.as_deref(), Some("checked"));
+    }
+
+    /// The metadata flip that arms the block is caught on update: at
+    /// block tier the update refuses and the entity keeps its prior
+    /// value; at warn tier the same flip commits with the warning.
+    #[test]
+    fn update_flip_to_trigger_value_enforces_conditional_block() {
+        let (actor, client) = cli_actor();
+        let flip_to_checked = |engine: &mut Engine, id: &crate::entity::EntityId| {
+            let current = engine.get_entity(id).unwrap().content_hash.clone();
+            let mut metadata = IndexMap::new();
+            metadata.insert("status".to_string(), "checked".to_string());
+            engine.update_entity(
+                crate::engine::UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: id.clone(),
+                    expected_hash: Some(current),
+                    sections: IndexMap::new(),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata,
+                    metadata_unset: Vec::new(),
+                    declare_relations: vec![],
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+        };
+
+        // Block tier: the flip refuses; the entity keeps `open`.
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_conditional_ro_schema(&tmp, "block");
+        let mut open_args = task_create_args("Task A", vec![]);
+        open_args
+            .metadata
+            .insert("status".to_string(), "open".to_string());
+        let a = engine
+            .create_entity(open_args, actor, Some(&client), None)
+            .unwrap();
+        let err = flip_to_checked(&mut engine, &a.id).unwrap_err();
+        assert_eq!(err.code(), "MISSING_REQUIRED_OUTGOING");
+        assert_eq!(
+            engine.get_entity(&a.id).unwrap().metadata["status"].to_frontmatter_string(),
+            "open",
+            "refused update leaves the entity unchanged"
+        );
+
+        // Warn tier: the same flip commits with the typed warning.
+        let tmp = TempDir::new().unwrap();
+        let mut engine = engine_with_conditional_ro_schema(&tmp, "warn");
+        let b = engine
+            .create_entity(
+                task_create_args("Task B", vec![]),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let outcome = flip_to_checked(&mut engine, &b.id).unwrap();
+        assert!(!outcome.commit_sha.is_empty());
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| matches!(w, WarningHint::MissingRequiredOutgoing { .. })),
+            "warn-tier flip carries the warning: {:?}",
+            outcome.warnings
+        );
+    }
+
     /// Regression pin for `no_self_loop_relationships`' single
     /// functional behavior: a self-loop (`from == to`) on a rel-type
     /// the source type lists there refuses with `RELATIONSHIP_CYCLE`.

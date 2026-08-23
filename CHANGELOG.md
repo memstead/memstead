@@ -20,6 +20,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Conditional edge requirements: `when_field` / `when_value` on
+  `required_outgoing` blocks.** A type definition can now declare that an
+  outgoing-edge obligation applies only while a named metadata field of the
+  entity holds a named enum value (the same two keys `requires_when` already
+  uses; absent pair = unconditional block = unchanged behaviour). Semantics
+  are identical to unconditional blocks in every other respect: same
+  cardinality vocabulary, same warn/block severity model, evaluated on
+  create, on update (a metadata flip that arms a block on an entity lacking
+  the edge is caught), and on the relate remove path, and surfaced on the
+  `missing_required_outgoing` health axis. Wherever the engine names an
+  unsatisfied block (the `MISSING_REQUIRED_OUTGOING` refusal payload, the
+  write-time warning, the health finding, and the `memstead_schema`
+  response at both verbosity levels), a conditional block carries its
+  `when_field` and `when_value`, so the reader sees which trigger armed it.
+  The loader refuses a condition whose field is undeclared or lacks
+  `enum_values`, whose value is outside the enum, or that carries one key
+  without the other, with a typed error naming the offender.
+
 - **`memstead publish --redact-anchors` — trust metadata without the
   source's identity.** Every artifact reference in the packaged anchors
   sidecar — the `artifact` field and each `derived_from` entry — becomes the
