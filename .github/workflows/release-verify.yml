@@ -45,10 +45,13 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # On a tag push the run already stands on the tag; on dispatch
-          # the input names it, so the tree-vs-tag line compares the tag's
-          # own Cargo.toml, never a later main.
-          ref: ${{ inputs.tag || github.ref }}
+          # Always the triggering ref: the tag on a tag push, the branch on
+          # dispatch. Never check out the tag on dispatch: that would run
+          # the TAG'S OWN copy of release-verify.sh (observed 2026-08-23:
+          # v0.10.0's pre-consolidation script, no v-prefix strip, every
+          # channel falsely red). The tag under test is a parameter; the
+          # tree-vs-tag report line compares this tree against it, which
+          # is that line's whole point.
           persist-credentials: false
 
       - name: Every channel serves the tag
