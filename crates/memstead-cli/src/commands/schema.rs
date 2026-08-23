@@ -448,6 +448,15 @@ relationships:
   # strict: only the definitions below are legal edge types.
   # open: any UPPER_SNAKE_CASE name is accepted; definitions add weights.
   mode: strict
+  # Optional relationships-level declarations (engine 0.10.0+):
+  #   acyclic_sets — acyclicity over the UNION of a rel-type set, for
+  #                  cycles no single rel-type contains:
+  #                    acyclic_sets:
+  #                      - [GROUNDS, CONCLUDES]
+  #   labelling    — name the attack rel-types and the engine serves
+  #                  the grounded labelling (accepted/defeated/
+  #                  undecided) with evidence; optional support walk
+  #                  adds chain-shape statistics.
   definitions:
     - name: PART_OF
       description: Hierarchical containment — the source is structurally part of the target.
@@ -576,6 +585,19 @@ updatable_fields: [title, summary, details, status, tags]
 health_required_fields: [summary]
 # Days without modification before health flags the entity stale.
 staleness_threshold_days: 180
+# Further optional type-level declarations (engine 0.10.0+), shapes in
+# the authoring guide and the generated type-definition.schema.json:
+#   required_outgoing  — edge obligations (cardinality, warn/block
+#                        severity, optional when_field/when_value pair
+#                        arming a block on a metadata enum value)
+#   must_reach         — reachability obligations over a relation set
+#                        (direction out/in, terminal_types, max_depth);
+#                        health-sweep only, always warn
+#   constraints        — the five-form vocabulary (requires_when,
+#                        unique, enum_from_neighbour, status_propagation
+#                        with rel_type or rel_types)
+#   signals            — edge_load counts with notice/warn thresholds,
+#                        served with contributors on every read
 # Prose guidance served to agents writing entities of this type.
 write_rules:
   - "Notes are placeholders — split recurring shapes into dedicated types."

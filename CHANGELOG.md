@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+Forward compatibility: this release is one schema-language generation. Schema
+packages declaring any of the wave's new keys (`when_field` / `when_value` on
+`required_outgoing` blocks, `must_reach`, `relationships.acyclic_sets`,
+`status_propagation.rel_types`, `signals`, `relationships.labelling`) need
+engine 0.10.0 or later; older engines refuse them at parse
+(`deny_unknown_fields`), never load-and-ignore.
+
 ### Fixed
 - **Four README/SECURITY doc-vs-code drifts, reported by an external review of
   the public repository.** The repository table no longer claims the serve and

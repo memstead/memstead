@@ -104,6 +104,15 @@ edge_weight_overrides:
   uses: 1.5
   governed_by: 2.5
 no_self_loop_relationships: [uses, governed_by]
+required_outgoing:
+  # Conditional edge requirement (engine 0.10.0+): the block applies
+  # only while `kind` holds `decision` — a decision node that branches
+  # nowhere is a dead end. Warn-tier: health flags it, writes land.
+  - relationships: [branches_to]
+    cardinality: at_least_one
+    severity: warn
+    when_field: kind
+    when_value: decision
 updatable_fields: [title, intent, success_check, transitions, error_handling, notes_for_agent, notes, kind, terminal_outcome, idempotent, max_retries, tags]
 health_required_fields: [intent, success_check, transitions]
 staleness_threshold_days: 90

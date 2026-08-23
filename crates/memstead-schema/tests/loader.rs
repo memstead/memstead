@@ -1785,6 +1785,36 @@ fn constraint_requires_when_value_outside_enum_rejected() {
     );
 }
 
+/// Wave-close polarity check: `ConstraintSeverity` has exactly two
+/// members (a `notice` in ANY severity slot refuses at load via the
+/// closed enum) — exercised per severity-bearing form present at wave
+/// close: requires_when, unique, enum_from_neighbour,
+/// status_propagation, required_outgoing, and format_severity.
+/// `SignalLevel` is its own enum; `signals` thresholds are where
+/// `notice` lives.
+#[test]
+fn notice_refuses_in_every_constraint_severity_slot() {
+    let cases: &[&str] = &[
+        "constraints:\n  - kind: requires_when\n    field: body\n    when_field: status\n    when_value: closed\n    severity: notice\n",
+        "constraints:\n  - kind: unique\n    fields: [status]\n    severity: notice\n",
+        "constraints:\n  - kind: enum_from_neighbour\n    field: status\n    rel_type: REFERENCES\n    section: body\n    severity: notice\n",
+        "constraints:\n  - kind: status_propagation\n    field: status\n    value: closed\n    rel_type: PART_OF\n    direction: incoming\n    severity: notice\n",
+        "required_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    severity: notice\n",
+    ];
+    for case in cases {
+        let t = minimal_type() + case;
+        load(&minimal_manifest(), &[("sample", &t)])
+            .expect_err(&format!("notice must refuse in: {case}"));
+    }
+    // format_severity shares the same closed enum.
+    let t = minimal_type().replace(
+        "    catch_all: true\n",
+        "    catch_all: true\n    content: \"paragraph\"\n    format_severity: notice\n",
+    );
+    load(&minimal_manifest(), &[("sample", &t)])
+        .expect_err("notice must refuse in format_severity");
+}
+
 // ---------------------------------------------------------------------------
 // Grounded labelling (`relationships.labelling`)
 // ---------------------------------------------------------------------------
