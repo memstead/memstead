@@ -8,6 +8,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **An indented heading-lookalike on a section's first content line no
+  longer becomes structure (fuzz finding, long tier, second dispatch).**
+  The section splitter's full content trim promoted a first line like
+  ` ## Specifies` to column 0 inside stored content; after the
+  catch-all re-emit, the next parse read it as a real duplicate section
+  heading and the duplicate rule dropped the content, breaking the
+  parse-generate fixpoint and losing body text on the tolerant path.
+  Leading blank lines still drop, but the first visible line now keeps
+  its indentation, so the lookalike stays content forever. The mutation
+  path's embedded-heading refusal keeps its own full trim and refuses
+  exactly what it refused. Triggering input pinned in the shared corpus.
 - **Lenient wiki-link ids are stable under parse-generate (fuzz finding,
   long tier, first dispatch).** The alias and anchor cuts inside the
   decoration strip run after its whitespace trim, so `[[foo |label]]` or
