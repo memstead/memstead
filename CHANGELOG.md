@@ -8,6 +8,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Lenient wiki-link ids are stable under parse-generate (fuzz finding,
+  long tier, first dispatch).** The alias and anchor cuts inside the
+  decoration strip run after its whitespace trim, so `[[foo |label]]` or
+  an anchor following a line break left trailing whitespace inside the
+  lenient id; the generated relationship row then re-parsed to a
+  different id on the next round, breaking the one-round fixpoint. The
+  lenient decoder now trims what the cuts expose. The strict gate is
+  untouched and still refuses those shapes; the triggering input is
+  pinned in the shared fuzz corpus and replayed by the normal suite.
 - **The fuzz workflow builds for the runner's real host triple.** Its first
   dispatch failed before fuzzing: the prebuilt cargo-fuzz binary is
   musl-linked and defaults to its own compile-time target, where

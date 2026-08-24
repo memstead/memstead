@@ -528,6 +528,14 @@ pub fn wiki_link_to_id(link: &str, current_mem: &str) -> Result<EntityId, WikiLi
 /// the typed refusal.
 pub fn wiki_link_to_id_lenient(link: &str, current_mem: &str) -> EntityId {
     let stripped = strip_wiki_link_decorations(link);
+    // The alias and anchor cuts inside the decoration strip run after
+    // the whitespace trim, so they can expose fresh trailing whitespace
+    // (`foo |label` → `foo `, `foo\r\n#anchor` → `foo\r\n`). The tolerant
+    // path must land on ids the generator round-trips (parse→generate is
+    // a fixpoint after one round), so trim again here. Deliberately NOT
+    // in the shared helper: the strict decoder keeps the exposed
+    // whitespace so its grammar gate still refuses those shapes.
+    let stripped = stripped.trim_end();
 
     if !stripped.contains("::")
         && let Some(colon_idx) = stripped.find(':')
@@ -563,9 +571,9 @@ pub fn wiki_link_to_id_lenient(link: &str, current_mem: &str) -> EntityId {
         let self_prefix = format!("{current_mem}--");
         stripped
             .strip_prefix(self_prefix.as_str())
-            .unwrap_or(&stripped)
+            .unwrap_or(stripped)
     } else {
-        &stripped
+        stripped
     };
     EntityId::new(current_mem, slug)
 }
@@ -1481,6 +1489,33 @@ mod tests {
             wiki_link_to_id_lenient("engine::health", "plugin").0,
             "plugin--engine::health"
         );
+    }
+
+    /// Fuzz finding (long tier, frontmatter target, 2026-08-24; corpus
+    /// member `crash-ac181b5d…`): the alias/anchor cuts inside the
+    /// decoration strip run after its whitespace trim, so they exposed
+    /// trailing whitespace that reached the lenient id, and the
+    /// generated row re-parsed to a different id on the next round.
+    /// The lenient decoder now trims what the cuts expose; the strict
+    /// gate still refuses those shapes (no widening).
+    #[test]
+    fn wiki_link_to_id_lenient_trims_whitespace_exposed_by_alias_and_anchor_cuts() {
+        assert_eq!(
+            wiki_link_to_id_lenient("foo |label", "specs").0,
+            "specs--foo"
+        );
+        assert_eq!(
+            wiki_link_to_id_lenient("foo\r\n#anchor", "specs").0,
+            "specs--foo"
+        );
+        // The idempotence shape itself: a second decode of the first
+        // decode's output is byte-identical.
+        let once = wiki_link_to_id_lenient("parent: x\r\n#tail", "specs");
+        let twice = wiki_link_to_id_lenient(&format!("{}:{}", once.mem(), once.path()), "specs");
+        assert_eq!(once, twice);
+        // Strict is untouched: whitespace exposed by an anchor cut
+        // still fails the grammar gate.
+        assert!(wiki_link_to_id("foo #anchor", "specs").is_err());
     }
 
     #[test]
