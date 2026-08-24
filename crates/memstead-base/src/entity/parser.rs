@@ -58,7 +58,7 @@ pub fn parse_markdown(
     let (relationships, rel_parse_warnings) = parse_relationships_with_warnings(
         sections_map
             .get(rel_heading_key)
-            .map(|s| s.as_str())
+            .map(|(_, content)| content.as_str())
             .unwrap_or(""),
         mem,
         Some(&entity_id_for_rel_warnings),
@@ -70,14 +70,22 @@ pub fn parse_markdown(
     // Extract schema-defined section values.
     // IndexMap + this loop order is what guarantees sections iterate in the
     // schema's declared order downstream. Do not change to a HashMap.
+    // No re-trim here: `split_sections` already normalised each value
+    // (leading blank lines dropped, first visible line's bytes kept,
+    // trailing trimmed), and `build_catch_all` joins such values. A
+    // second full trim silently promoted a whitespace-prefixed first
+    // line (`\u{b}` + backticks) to column 0, where the CommonMark
+    // referee suddenly saw a fence opener that the stored form did not
+    // have — the section structure then shifted between rounds (fuzz
+    // finding, long tier, corpus member `crash-fd71330e…`).
     let mut result_sections = IndexMap::new();
     for s in &schema.sections {
         if s.catch_all {
-            result_sections.insert(s.key.clone(), catch_all_content.trim().to_string());
+            result_sections.insert(s.key.clone(), catch_all_content.clone());
         } else {
             let val = sections_map
                 .get(s.key.as_str())
-                .map(|v| v.trim().to_string())
+                .map(|(_, content)| content.clone())
                 .unwrap_or_default();
             result_sections.insert(s.key.clone(), val);
         }
@@ -497,6 +505,10 @@ pub fn has_merge_conflict_markers(text: &str) -> bool {
 /// Tracks one schema-declared section key seen more than once on parse.
 /// `key` is the slugified storage key (e.g. `realization`); `heading` is
 /// the original literal text from the first occurrence (e.g. `Realization`).
+/// Sections keyed by derived key; each value is the heading line
+/// VERBATIM from the original body plus the section's content.
+pub(crate) type SplitSections = IndexMap<String, (String, String)>;
+
 /// `occurrences` counts every header line for that key — first plus
 /// duplicates.
 pub(crate) struct DuplicateSection {
@@ -505,20 +517,27 @@ pub(crate) struct DuplicateSection {
     pub occurrences: usize,
 }
 
-/// Split body into named sections. Returns `Map<lowercase_key, content>`
-/// plus a list of duplicate-heading occurrences. Duplicate headings keep
-/// the first occurrence's body; subsequent occurrences are dropped from
-/// the storage value entirely (no embedded `## Heading` separator). The
-/// caller decides whether each duplicate becomes a `WarningHint`
-/// (schema-declared keys only — catch-all repetition stays silent).
-/// The third element is every literal heading text in document order
-/// (duplicates included) — the raw material for the health check that
-/// distinguishes "section absent" from "content under a non-deriving
-/// heading".
+/// Split body into named sections. Returns `Map<lowercase_key,
+/// (heading_line, content)>` — the heading line VERBATIM from the
+/// original body, because the catch-all re-emits it and a heading
+/// rebuilt from the derived key changes what the CommonMark referee
+/// sees (a CR inside a heading is a line ending of its own, so its
+/// tail can be a live fence opener; the derived key lost the CRs, the
+/// re-parse un-masked the section's content, and a promoted empty
+/// heading then vanished — fuzz finding, corpus member
+/// `crash-9fd95247…`) — plus a list of duplicate-heading occurrences.
+/// Duplicate headings keep the first occurrence's body; subsequent
+/// occurrences are dropped from the storage value entirely (no
+/// embedded `## Heading` separator). The caller decides whether each
+/// duplicate becomes a `WarningHint` (schema-declared keys only —
+/// catch-all repetition stays silent). The third element is every
+/// literal heading text in document order (duplicates included) — the
+/// raw material for the health check that distinguishes "section
+/// absent" from "content under a non-deriving heading".
 pub(crate) fn split_sections(
     body: &str,
     masked_body: &str,
-) -> (IndexMap<String, String>, Vec<DuplicateSection>, Vec<String>) {
+) -> (SplitSections, Vec<DuplicateSection>, Vec<String>) {
     // IndexMap, not HashMap: the catch-all builder re-emits non-schema
     // sections in this map's iteration order, so the order must be the
     // document's — hash-random order made canonical bytes unstable
@@ -575,7 +594,7 @@ pub(crate) fn split_sections(
 
         match sections.entry(key.clone()) {
             indexmap::map::Entry::Vacant(slot) => {
-                slot.insert(content);
+                slot.insert((heading_line.to_string(), content));
                 duplicates.insert(
                     key.clone(),
                     DuplicateSection {
@@ -692,7 +711,7 @@ fn extract_heading_spans(sections: &IndexMap<String, String>) -> HashMap<String,
 // ---------------------------------------------------------------------------
 
 /// Build catch-all section content from its own section + non-schema sections.
-fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition) -> String {
+fn build_catch_all(sections: &SplitSections, schema: &TypeDefinition) -> String {
     let catch_all = match schema.catch_all_section() {
         Some(s) => s,
         None => return String::new(),
@@ -707,52 +726,59 @@ fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition)
 
     let mut parts = Vec::new();
 
-    // Every merged piece must stay fence-balanced on its own: a piece
-    // ending inside an open code fence inverts the mask parity of every
-    // piece after it, so lines that were masked content in this parse
-    // become structure on the next one (a fenced `## Specifies` was
-    // promoted to a real duplicate heading and first-wins dropped the
-    // body — fuzz finding, long tier, 2026-08-24, corpus member
-    // `crash-07c152bb…`). Same referee-as-oracle helper as the
-    // generator's section closer.
-    let fence_closed = |content: &str| -> String {
-        match crate::markdown::closing_fence_if_unterminated(content) {
-            Some(closer) => format!("{content}\n{closer}"),
-            None => content.to_string(),
-        }
-    };
-
     // First, add the explicit catch-all section content
-    if let Some(content) = sections.get(catch_all.key.as_str())
+    if let Some((_, content)) = sections.get(catch_all.key.as_str())
         && !content.is_empty()
     {
-        parts.push(fence_closed(content));
+        parts.push(content.clone());
     }
 
-    // Then add all non-schema sections (with headings reconstructed),
-    // in document order — `sections` is an IndexMap for exactly this
+    // Then add all non-schema sections, each re-emitted under its
+    // ORIGINAL heading line, byte-verbatim — never a heading rebuilt
+    // from the derived key: the rebuilt form changed what the referee
+    // sees (a CR inside a heading is a CommonMark line ending of its
+    // own, so its tail can be a live fence opener the derived key
+    // lost), and the re-parse then promoted masked content to
+    // structure (fuzz finding, corpus member `crash-9fd95247…`).
+    // Document order — `sections` is an IndexMap for exactly this
     // loop: with more than one non-schema section (reachable on the
     // tolerant local-read path, which refuses nothing) a hash-random
     // order made the reconstructed catch-all differ from parse to parse.
-    for (key, content) in sections {
+    for (key, (heading_line, content)) in sections {
         if !known_sections.contains(key.as_str()) && !content.is_empty() {
-            let heading = format!(
-                "## {}{}",
-                key.chars().next().unwrap_or_default().to_uppercase(),
-                &key[key.chars().next().map_or(0, |c| c.len_utf8())..]
-            );
-            // The piece's fence state is judged over exactly the bytes
-            // emitted, heading line INCLUDED: a key can carry a live
-            // fence opener (CR line endings inside the original heading
-            // line make its tail a CommonMark line of its own), so
-            // closing the content alone read an in-piece closer as a
-            // fresh opener and the document grew by one fence line per
-            // round (fuzz finding, corpus member `crash-eca0fc99…`).
-            parts.push(fence_closed(&format!("{heading}\n{content}")));
+            parts.push(format!("{heading_line}\n{content}"));
         }
     }
 
-    parts.join("\n\n")
+    // Incremental context close: every close decision is judged over
+    // the RUNNING string after each append — never over a piece in
+    // isolation. Isolation misjudges in both directions (lazy
+    // continuation and CR line endings make the same bytes a fence in
+    // one context and prose in another): an isolation close injected a
+    // spurious closer that the generator's part-level close then paired
+    // into an empty fence block, growing the document every round
+    // (corpus candidate `crash-619fe90c`), while skipping the close
+    // entirely let a piece's dangling fence swallow the next piece's
+    // heading (corpus member `crash-07c152bb`). Closing in context
+    // after each piece keeps both: a dangling fence closes before the
+    // next piece, and no closer is ever added for a construct the
+    // document context does not read as a fence. The oracle verifies
+    // its closer against the mask, so the appended line is a real
+    // closer wherever it lands.
+    let mut joined = String::new();
+    for piece in parts {
+        if joined.is_empty() {
+            joined = piece;
+        } else {
+            joined.push_str("\n\n");
+            joined.push_str(&piece);
+        }
+        if let Some(closer) = crate::markdown::closing_fence_if_unterminated(&joined) {
+            joined.push('\n');
+            joined.push_str(&closer);
+        }
+    }
+    joined
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +834,17 @@ pub(crate) fn parse_relationships_with_warnings(
         // pipeline (`memstead_relate`, declare_relations) gates strictly
         // via `validate_relation_target_grammar`.
         let target = wiki_link_to_id_lenient(&text[cap.get(2).unwrap().range()], mem);
+        // A raw target that decodes to an EMPTY path (`[[specs--]]`
+        // after the self-prefix strip, `[[../]]` after decoration
+        // stripping) is not a relationship: the generator would render
+        // it as `[[]]`, which the row pattern cannot re-capture, so the
+        // row silently vanished one round later (fuzz finding, corpus
+        // member `crash-0c7207a1…`). Skipping it here mirrors how rows
+        // that never match the pattern behave; both strict gates refuse
+        // such targets outright.
+        if target.path().is_empty() {
+            continue;
+        }
         let tail = cap.name("tail").map(|m| &text[m.range()]).unwrap_or("");
         let description = match classify_description_tail(tail) {
             DescriptionTail::None => None,
@@ -1491,6 +1528,29 @@ Third unknown.
             m1, m2,
             "parse→generate is idempotent over multi-unknown-section input"
         );
+    }
+
+    // Fixture pinned by the coverage-guided long tier (local run,
+    // 2026-08-24; corpus member `crash-fd71330e…`): parse_markdown
+    // re-trimmed every section value after split_sections had already
+    // normalised it, silently promoting a whitespace-prefixed first
+    // line (vertical tab + backticks) to column 0 — where the
+    // CommonMark referee saw a fence opener the stored form did not
+    // have, so the section structure shifted between rounds. The
+    // splitter's trim is the only content trim.
+    #[test]
+    fn first_line_whitespace_prefix_survives_storage_and_round_trips() {
+        let schema = spec_schema();
+        let md = "---\ntype: spec\n---\n# T\n\n## Identity\n\u{b}```\nx\n\n## Purpose\np\n";
+        let e1 = parse_markdown(md, "vt.md", &schema, "specs").unwrap();
+        assert_eq!(
+            e1.entity.sections["identity"], "\u{b}```\nx",
+            "the first visible line keeps its whitespace prefix byte-exactly"
+        );
+        let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
+        let e2 = parse_markdown(&m1, "vt.md", &schema, "specs").unwrap();
+        let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
+        assert_eq!(m1, m2, "parse→generate is a fixpoint");
     }
 
     // Fixture pinned by the coverage-guided long tier (first dispatch,

@@ -8,6 +8,47 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **The catch-all merge closes fences in context, never per piece in
+  isolation (fuzz finding, long tier, local runs).** The same bytes can
+  be a fence in one context and prose in another (CR line endings, lazy
+  continuation), so a per-piece close judged in isolation injected a
+  spurious closer that the generator's part-level close paired into an
+  empty fence block, growing the document by two fence lines per round;
+  skipping closes entirely instead let a dangling piece fence swallow
+  the next piece's heading. The merge now appends pieces raw and makes
+  every close decision over the running string after each append, so a
+  dangling fence still closes before the next piece and no closer is
+  added for a construct the document does not read as a fence. The
+  whole ten-crash corpus passes under this design; four earlier
+  variants are disproven in the plan's log. Triggering input pinned in
+  the shared corpus.
+- **A relationship row whose target decodes to an empty path is not a
+  relationship (fuzz finding, long tier, local run).** A degenerate raw
+  target like `[[specs--]]` survived the row pattern but decoded to an
+  empty-path id on the tolerant path; the generator then rendered
+  `[[]]`, which the row pattern cannot re-capture, so the row silently
+  vanished one round later. Such rows are now skipped at parse, exactly
+  as rows that never match the pattern are; both strict gates already
+  refuse such targets. Triggering input pinned in the shared corpus.
+- **The catch-all re-emits each unknown section under its original
+  heading line, byte-verbatim (fuzz finding, long tier, local run).**
+  It previously rebuilt the heading from the derived section key, and
+  the rebuilt form can mean something else to the CommonMark referee: a
+  CR inside a heading is a line ending of its own, so its tail can be a
+  live fence opener that the derived key lost; the re-parse then read
+  formerly-fenced content as structure and dropped a promoted empty
+  heading entirely. Verbatim re-emission makes the reconstruction
+  byte-faithful; ordinary single-word unknown headings render exactly
+  as before. Triggering input pinned in the shared corpus.
+- **Section values are trimmed exactly once (fuzz finding, long tier,
+  local run).** `parse_markdown` re-trimmed every section value after
+  the splitter had already normalised it, silently promoting a
+  whitespace-prefixed first line (a vertical tab before backticks) to
+  column 0, where the CommonMark referee saw a fence opener the stored
+  form did not have; the section structure then shifted between
+  parse-generate rounds. The splitter's trim (leading blank lines
+  dropped, first visible line byte-exact, trailing trimmed) is now the
+  only content trim. Triggering input pinned in the shared corpus.
 - **Every generated part is fence-checked, the title and relationships
   block included (fuzz finding, long tier, local run).** The generator
   fence-terminated only section content, but a TITLE can itself carry a
