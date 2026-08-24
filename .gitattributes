@@ -1,0 +1,4 @@
+# The engineering mem's change log is append-only JSONL; when two machines
+# both append, a textual merge conflicts every time. Union keeps both sides'
+# lines, which is exactly the append-only semantics.
+engineering/.memstead/changes.jsonl merge=union
