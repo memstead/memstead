@@ -726,14 +726,20 @@ fn build_catch_all(sections: &SplitSections, schema: &TypeDefinition) -> String 
 
     let mut parts = Vec::new();
 
-    // Every merged piece must stay fence-balanced on its own: a piece
-    // ending inside an open code fence inverts the mask parity of every
-    // piece after it, so lines that were masked content in this parse
-    // become structure on the next one (a fenced `## Specifies` was
-    // promoted to a real duplicate heading and first-wins dropped the
-    // body — fuzz finding, long tier, 2026-08-24, corpus member
-    // `crash-07c152bb…`). Same referee-as-oracle helper as the
-    // generator's section closer.
+    // Every merged piece closes its own unterminated fence, judged over
+    // exactly the bytes emitted (heading line included): a piece ending
+    // inside an open fence inverts the mask parity of every piece after
+    // it (corpus members `crash-07c152bb…`, `crash-eca0fc99…`). Known
+    // residual, deliberately open: piece-local balance still does not
+    // fully compose across the join (container fences close implicitly
+    // depending on what FOLLOWS), so a join can re-open what each
+    // piece's own probe declared closed — corpus candidate
+    // `crash-619fe90c` in fuzz/artifacts. A global-close-only design
+    // was tried and REGRESSED `crash-07c152bb` (the corpus replay
+    // caught it); the real fix is the incremental verified merge:
+    // append piece by piece, verify each re-emitted heading is unmasked
+    // at its final offset in the RUNNING string, close in context when
+    // it is not.
     let fence_closed = |content: &str| -> String {
         match crate::markdown::closing_fence_if_unterminated(content) {
             Some(closer) => format!("{content}\n{closer}"),
@@ -761,12 +767,6 @@ fn build_catch_all(sections: &SplitSections, schema: &TypeDefinition) -> String 
     // order made the reconstructed catch-all differ from parse to parse.
     for (key, (heading_line, content)) in sections {
         if !known_sections.contains(key.as_str()) && !content.is_empty() {
-            // The piece's fence state is judged over exactly the bytes
-            // emitted, heading line INCLUDED: a heading can carry a
-            // live fence opener (see above), so closing the content
-            // alone read an in-piece closer as a fresh opener and the
-            // document grew by one fence line per round (fuzz finding,
-            // corpus member `crash-eca0fc99…`).
             parts.push(fence_closed(&format!("{heading_line}\n{content}")));
         }
     }
