@@ -472,11 +472,11 @@ fn resolve_mem_name(
 }
 
 /// Filesystem-mem `memstead export --format mem` builds the `.mem`
-/// archive bytes via [`memstead_base::filesystem::publish::assemble_archive`]
-/// (the same path `memstead publish` uses on a filesystem-mem workspace)
-/// and writes them to `--output` (defaulting to `<name>-<version>.mem`
-/// in cwd). `--mem` is accepted for shape parity but only the
-/// workspace's pinned mem matches.
+/// archive bytes via [`memstead_base::Engine::export_mem_to_bytes`]
+/// (the same primitive the mem-repo path and `memstead publish --mem`
+/// use) and writes them to `--output` (defaulting to `<name>.mem` in
+/// cwd). `--mem` is accepted for shape parity but only the workspace's
+/// pinned mem matches.
 fn run_mem_filesystem(
     ctx: &CliContext,
     engine: &memstead_base::Engine,
@@ -501,42 +501,20 @@ fn run_mem_filesystem(
             .into());
     }
 
-    // assemble_archive is engine-agnostic now — pass the discovered
-    // workspace root directly.
-    let workspace_root =
-        crate::setup::find_filesystem_workspace_root(&std::env::current_dir().map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                crate::INTERNAL_CODE,
-                format!("current_dir: {e}"),
-            )
-        })?)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "WORKSPACE_NOT_INITIALISED",
-                "no filesystem-mem workspace found from cwd",
-            )
-        })?;
-    let bytes =
-        memstead_base::filesystem::publish::assemble_archive(&workspace_root).map_err(|e| {
-            // F1: backend-symmetric typed envelope for the missing-
-            // version case — the mem-repo path surfaces the same
-            // MEM_CONFIG_INCOMPLETE via Engine::export_mem.
-            if matches!(
-                &e,
-                memstead_base::filesystem::publish::AssembleError::Config(
-                    memstead_schema::PublishConversionError::MissingVersion
-                )
-            ) {
-                CliError::from_engine_op(memstead_base::EngineError::MemConfigIncomplete {
-                    mem: workspace_mem.clone(),
-                    missing_fields: vec!["version".to_string()],
-                })
-            } else {
-                CliError::new(ExitKind::Generic, "ARCHIVE_ASSEMBLY_FAILED", e.to_string())
-            }
-        })?;
+    // Export through the ENGINE, which reads whatever layout it
+    // booted: the mount roster locates the mem's folder and its
+    // `.memstead/config.json` inside it. The legacy assemble path
+    // resolved the config against the WORKSPACE root instead — in the
+    // legacy single-mem layout the two coincide, but in the current
+    // (`workspace.toml` + `state/mounts.json`) layout they do not, so
+    // `export --format mem` failed on every workspace `quickstart`
+    // produces while the rest of the CLI worked (sealed-gate finding
+    // F6). One exporter for every backend also keeps the typed
+    // refusals backend-symmetric (MEM_CONFIG_INCOMPLETE on a missing
+    // version, F1) without a special-cased mapping.
+    let bytes = engine
+        .export_mem_to_bytes(&workspace_mem)
+        .map_err(CliError::from_engine_op)?;
 
     let output = match args.output {
         Some(p) => p,

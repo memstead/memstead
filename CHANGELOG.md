@@ -8,6 +8,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **`export --format mem` and bare `publish` work on every workspace
+  `quickstart` and `init` produce (sealed-gate finding F6).** The
+  archive assembly resolved the mem's `.memstead/config.json` against
+  the WORKSPACE root, which only coincides with the mem folder in the
+  legacy single-mem layout, so the README's own sharing example failed
+  on the front door's output with `ARCHIVE_ASSEMBLY_FAILED`. Both
+  callers now export through the engine, which reads whatever layout it
+  booted (the mount roster locates the mem folder and its config), so
+  the typed refusals stay backend-symmetric; the legacy folder assembly
+  remains only as bare publish's fallback where no engine boots. The
+  full quickstart → export → install round trip is pinned in the suite.
 - **A relationship row's target never crosses a line (fuzz finding,
   long tier, CI dispatch).** The row pattern captured `[[…]]` across
   newlines, but a generated multi-line token re-enters the mask with

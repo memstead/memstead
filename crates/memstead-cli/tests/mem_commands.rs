@@ -2998,3 +2998,98 @@ fn mem_list_counts_entities_in_lazy_mems() {
         "lazy mem must report its TRUE count, never a partial-store zero"
     );
 }
+
+/// Sealed-gate finding F6 (flywheel 10-first-session-residue/01): the
+/// README's own sharing example, `memstead export --format mem`, failed
+/// on every workspace `quickstart` produces — the legacy assembly
+/// resolved the mem config against the WORKSPACE root, which only
+/// coincides with the mem folder in the legacy single-mem layout. The
+/// front door and the hand-off format must not diverge again: the full
+/// quickstart → export → install round trip is pinned here.
+#[test]
+fn quickstart_workspace_exports_a_mem_archive_that_installs() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let ws = root.join("repo");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart", "--repo", "."])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "create",
+            "--title",
+            "Front Door Probe",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Exported from a quickstart workspace.",
+            "--section",
+            "context=F6 round-trip pin.",
+        ])
+        .assert()
+        .success();
+
+    // The exact README command, from the workspace root.
+    memstead()
+        .current_dir(&ws)
+        .args(["export", "--format", "mem", "-o", "out.mem"])
+        .assert()
+        .success();
+    let archive = ws.join("out.mem");
+    assert!(archive.exists(), "export must write the archive");
+
+    // The archive is a real one: it passes the install-side validator
+    // and lands with entities intact in a fresh workspace.
+    let scratch = root.join("scratch");
+    fs::create_dir_all(&scratch).unwrap();
+    memstead()
+        .current_dir(&scratch)
+        .args(["mem-repo", "init", "."])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&scratch)
+        .args(["install", archive.to_str().unwrap()])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(&scratch)
+        .args(["--json", "entity", "repo--front-door-probe"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(
+        text.contains("Front Door Probe"),
+        "installed archive must carry the entity intact: {text}"
+    );
+}
+
+/// The same seam serves `memstead publish`'s bare shape: assembling
+/// from a quickstart workspace root must resolve the mem through the
+/// engine, not the legacy workspace-root config. `--dry-run` exercises
+/// the full assembly with no auth and no network.
+#[test]
+fn quickstart_workspace_bare_publish_dry_run_assembles() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("repo");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart", "--repo", "."])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["publish", "--dry-run"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(
+        text.contains("Nothing was published"),
+        "dry run must assemble and stop: {text}"
+    );
+}

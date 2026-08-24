@@ -1296,9 +1296,9 @@ fn changes_works_on_filesystem_mem_workspace() {
 }
 
 /// `memstead export --format mem` on a filesystem-mem workspace
-/// invokes the `assemble_archive` path. Without a `version` field in
-/// `.memstead/config.json`, the archive shape projection refuses with a
-/// `MissingVersion` error — locks in that the CLI surfaces that
+/// exports through `Engine::export_mem_to_bytes`. Without a `version`
+/// field in the mem's `.memstead/config.json`, the engine refuses with
+/// `MEM_CONFIG_INCOMPLETE` — locks in that the CLI surfaces that
 /// failure cleanly instead of silently producing an unstamped `.mem`.
 /// F1: `memstead init` now seeds `version = 0.1.0` so the failure path
 /// only fires when the field is removed (simulating a pre-gate or

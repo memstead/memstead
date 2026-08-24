@@ -200,13 +200,65 @@ fn run_with_root(
             stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
         } else {
             let workspace_root = resolve_workspace_root(root_override.as_deref())?;
-            let bytes = assemble_archive(&workspace_root).map_err(|e| {
-                CliError::new(
-                    ExitKind::Validation,
-                    "ARCHIVE_ASSEMBLY_FAILED",
-                    format!("assemble archive: {e}"),
-                )
-            })?;
+            // Engine-first: the engine exports whatever layout it
+            // booted — the mount roster locates the mem folder and its
+            // config, so the bare shape works from the workspace root
+            // of a current-layout (`workspace.toml` + mounts) workspace
+            // exactly like `--mem` does (sealed-gate finding F6's seam;
+            // the legacy assembly resolved the config against the
+            // workspace root, which only coincides with the mem folder
+            // in the legacy single-mem layout). The legacy folder
+            // assembly stays as the fallback for exactly that layout,
+            // where no engine boots.
+            // Exactly one writable mem routes through the engine;
+            // multiple demand `--mem`; zero (an engine that boots but
+            // mounts nothing writable — some legacy-shaped test trees)
+            // falls through to the folder assembly like a failed boot.
+            let engine_mem: Option<(memstead_base::Engine, String)> =
+                match ctx.cli_engine_at(&workspace_root) {
+                    Ok(cli_engine) => {
+                        let engine = cli_engine.into_base();
+                        let writable: Vec<String> = engine
+                            .mem_configs_named()
+                            .filter(|(name, _)| engine.mem_router().is_writable(name))
+                            .map(|(name, _)| name.to_string())
+                            .collect();
+                        match writable.len() {
+                            1 => Some((engine, writable.into_iter().next().unwrap())),
+                            0 => None,
+                            _ => {
+                                return Err(CliError::new(
+                                    ExitKind::Validation,
+                                    "AMBIGUOUS_MEM",
+                                    format!(
+                                        "multiple writable mems loaded ({}); pass --mem <name>",
+                                        writable.join(", ")
+                                    ),
+                                )
+                                .into());
+                            }
+                        }
+                    }
+                    Err(_) => None,
+                };
+            let bytes = match engine_mem {
+                Some((engine, mem_name)) => {
+                    resolved_version = engine
+                        .mem_config_for(&mem_name)
+                        .and_then(|c| c.version.clone())
+                        .map(|v| v.to_string());
+                    engine
+                        .export_mem_to_bytes(&mem_name)
+                        .map_err(CliError::from_engine_op)?
+                }
+                None => assemble_archive(&workspace_root).map_err(|e| {
+                    CliError::new(
+                        ExitKind::Validation,
+                        "ARCHIVE_ASSEMBLY_FAILED",
+                        format!("assemble archive: {e}"),
+                    )
+                })?,
+            };
             stage_bytes_to_tempfile(&redact_if_requested(&args, bytes)?)?
         };
 
