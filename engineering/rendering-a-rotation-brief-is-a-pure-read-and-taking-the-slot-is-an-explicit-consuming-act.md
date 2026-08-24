@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-19T01:24:59Z
-last_modified: 2026-08-19T13:28:58Z
+last_modified: 2026-08-21T17:50:22Z
 status: accepted
 decided_on: 2026-08-19
 deciders: agent session (backlog-sweep plan 03) under the standing engine-change directive
@@ -30,3 +30,5 @@ Rejected: keeping consumption implicit in every render and documenting "don't re
 ## Notes
 
 Extended 2026-08-19 (backlog-sweep 09a): the peek's purity covers DERIVED caches, not just scheduler state. The plugin's deny-paths hook cache (`.memstead.cache/projection/active-deny-paths.json`) is now written only by consuming renders — a peek of binding A no longer points the hook at A while a consuming run of B is what actually acts. Any future cache derived from a render inherits the same rule: a read changes no state a later actor depends on.
+
+Carried forward 2026-08-21 (flywheel W6/02): the deny-list cache itself retired with the engine-answered check (`projection check-path`); the consuming render now publishes only the ACTIVE-BINDING pointer (`.memstead.cache/projection/active-binding.json`), and the deny list is read fresh from the binding record on every check. The peek/consume rule is unchanged and still pinned: only a consuming render moves the pointer.
