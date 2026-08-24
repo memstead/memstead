@@ -8,6 +8,39 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Every generated part is fence-checked, the title and relationships
+  block included (fuzz finding, long tier, local run).** The generator
+  fence-terminated only section content, but a TITLE can itself carry a
+  live fence opener (CR characters inside it are CommonMark line
+  endings of their own, so its tail after a CR is a line that can open
+  a fence); the opener then masked every following section heading on
+  the next parse and the document collapsed to empty required sections.
+  `close_open_fence` now runs over exactly the bytes of every emitted
+  part. Triggering input pinned in the shared corpus.
+- **The catch-all merge keeps every merged piece fence-balanced (fuzz
+  finding, long tier, first local run).** The catch-all reconstruction
+  concatenates section contents; a piece ending inside an open code
+  fence inverted the mask parity of every piece after it, so a
+  `## Specifies` that sat safely inside a fence in one parse surfaced
+  as a real duplicate heading in the next, and the duplicate rule
+  dropped the tail of the section. Each merged piece now closes its own
+  unterminated fence (same oracle helper the generator's section closer
+  uses), judged over exactly the bytes emitted, the re-emitted heading
+  line included: a heading can itself carry a live fence opener, since
+  CR characters inside it are CommonMark line endings of their own, and
+  judging the content alone read an in-piece closer as a fresh opener
+  and grew the document by one fence line per round. Both triggering
+  inputs pinned in the shared corpus.
+- **A same-mem relationship target whose path matches the cross-mem
+  dash form self-qualifies (fuzz finding, long tier, third dispatch).**
+  A same-mem target with a path like `nttype--ospity` rendered as a
+  bare wiki-link, which the decoder's tier 0 reads back as the
+  cross-mem `nttype:ospity` — a different id, so the edge drifted and
+  parse-generate was not a fixpoint. The generator now asks the decoder
+  itself whether the bare path re-decodes to the same id and renders
+  the colon-qualified form when it does not; unambiguous targets stay
+  bare and canonical bytes are unchanged for them. Triggering input
+  pinned in the shared corpus.
 - **An indented heading-lookalike on a section's first content line no
   longer becomes structure (fuzz finding, long tier, second dispatch).**
   The section splitter's full content trim promoted a first line like

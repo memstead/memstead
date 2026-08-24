@@ -707,11 +707,26 @@ fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition)
 
     let mut parts = Vec::new();
 
+    // Every merged piece must stay fence-balanced on its own: a piece
+    // ending inside an open code fence inverts the mask parity of every
+    // piece after it, so lines that were masked content in this parse
+    // become structure on the next one (a fenced `## Specifies` was
+    // promoted to a real duplicate heading and first-wins dropped the
+    // body — fuzz finding, long tier, 2026-08-24, corpus member
+    // `crash-07c152bb…`). Same referee-as-oracle helper as the
+    // generator's section closer.
+    let fence_closed = |content: &str| -> String {
+        match crate::markdown::closing_fence_if_unterminated(content) {
+            Some(closer) => format!("{content}\n{closer}"),
+            None => content.to_string(),
+        }
+    };
+
     // First, add the explicit catch-all section content
     if let Some(content) = sections.get(catch_all.key.as_str())
         && !content.is_empty()
     {
-        parts.push(content.clone());
+        parts.push(fence_closed(content));
     }
 
     // Then add all non-schema sections (with headings reconstructed),
@@ -726,7 +741,14 @@ fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition)
                 key.chars().next().unwrap_or_default().to_uppercase(),
                 &key[key.chars().next().map_or(0, |c| c.len_utf8())..]
             );
-            parts.push(format!("{heading}\n{content}"));
+            // The piece's fence state is judged over exactly the bytes
+            // emitted, heading line INCLUDED: a key can carry a live
+            // fence opener (CR line endings inside the original heading
+            // line make its tail a CommonMark line of its own), so
+            // closing the content alone read an in-piece closer as a
+            // fresh opener and the document grew by one fence line per
+            // round (fuzz finding, corpus member `crash-eca0fc99…`).
+            parts.push(fence_closed(&format!("{heading}\n{content}")));
         }
     }
 
