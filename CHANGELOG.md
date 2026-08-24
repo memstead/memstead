@@ -8,6 +8,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **A relationship row's target never crosses a line (fuzz finding,
+  long tier, CI dispatch).** The row pattern captured `[[…]]` across
+  newlines, but a generated multi-line token re-enters the mask with
+  different structure (a following dash-plus-tab line reads as
+  list-item indented code and swallows the closing `]]`), so such a row
+  silently vanished one round later. A row is a line: targets spanning
+  newlines, which can never exist as entity files, are consistently not
+  relationships in any round. Triggering input pinned in the shared
+  corpus.
 - **Lenient wiki-link decoration stripping runs to a fixpoint (fuzz
   finding, long tier, CI dispatch).** Each strip pass can expose work
   for another: an anchor or alias cut exposes trailing whitespace, and

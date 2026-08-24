@@ -812,9 +812,19 @@ pub(crate) fn parse_relationships_with_warnings(
     // Anchor on the canonical row prefix `- **TYPE**: [[<target>]]` and
     // capture everything that follows on the same line so the trailing
     // segment can be classified (simple, em-dash, or AMBIGUOUS).
+    //
+    // The target must not cross a line: a ROW is a line. A capture
+    // spanning a newline only ever came from degenerate drift, and it
+    // cannot round-trip — the generated multi-line token re-enters the
+    // mask with different structure (a following `-` + tab line reads
+    // as list-item indented code and swallows the closing `]]`), so
+    // the row silently vanished one round later (fuzz finding, corpus
+    // member `crash-93f0a4bd…`). Ids containing newlines can never
+    // exist as entity files, so such pseudo-rows are consistently not
+    // relationships in ANY round.
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        Regex::new(r"(?m)^\s*-\s*\*\*(\w+)\*\*:\s*\[\[([^\]]+)\]\](?P<tail>[^\n]*)").unwrap()
+        Regex::new(r"(?m)^\s*-\s*\*\*(\w+)\*\*:\s*\[\[([^\]\n]+)\]\](?P<tail>[^\n]*)").unwrap()
     });
     let mut relationships = Vec::new();
     let mut warnings = Vec::new();
