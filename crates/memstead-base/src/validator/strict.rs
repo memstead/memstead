@@ -291,7 +291,7 @@ fn check_relationships_syntax(body: &str, path: &str) -> Result<(), ValidationEr
     // where splitter and validator judged differently shaped input.
     let (sections, _, _) = split_sections(body, &mask_code_blocks(body));
     let section = match sections.get("relationships") {
-        Some(s) if !s.trim().is_empty() => s.clone(),
+        Some((_, s)) if !s.trim().is_empty() => s.clone(),
         _ => return Ok(()),
     };
     if let Some(v) =
