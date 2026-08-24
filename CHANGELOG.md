@@ -7,6 +7,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **Every surface that teaches an install now states the restart wall
+  (sealed-gate finding F7).** A running agent session does not attach an
+  MCP server added while it runs, and picks up a freshly installed
+  plugin's skills only after `/reload-plugins` or a restart. Neither is a
+  Memstead defect and neither was stated where the install is taught, so
+  the documented next step (`/setup` right after installing) answered
+  `Unknown skill`. The README, the plugin README and marketplace entry,
+  `install.sh`, both published crate readmes, the setup skill,
+  `quickstart --help`, the docs-site getting-started guide and the skills
+  page each now carry the disclosure that applies to what they teach, in
+  one shared phrasing, and `scripts/check-restart-disclosure.sh` (wired
+  into `run-tests.sh`) fails the suite when a surface it holds loses its
+  sentence. It holds every file that quotes an install command, plus a
+  named few that teach without quoting one. The README and
+  getting-started additionally name the non-interactive path for a
+  session that cannot restart: wire it before launch (`quickstart` writes
+  `.mcp.json` first; `--mcp-config` and `--plugin-dir` load both at
+  startup).
+
 ### Fixed
 - **`export --format mem` and bare `publish` work on every workspace
   `quickstart` and `init` produce (sealed-gate finding F6).** The

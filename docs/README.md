@@ -25,8 +25,9 @@ You know what you want; these get you there.
   suite, output paths, troubleshooting.
 - **Connect an AI agent** — `memstead quickstart` writes the MCP wiring;
   for Claude Code the [plugin](../plugins/claude-code/README.md)'s `/setup`
-  skill is the paved path. Then drive the graph with the `memstead_*` MCP
-  tools — the [agent recipes](../docs-site/src/content/docs/guides/agent-recipes.md)
+  skill is the paved path. Restart the agent session afterwards: a session
+  that is already running does not attach an MCP server added while it
+  runs. Then drive the graph with the `memstead_*` MCP tools — the [agent recipes](../docs-site/src/content/docs/guides/agent-recipes.md)
   show worked tool-call sequences with real payloads.
 - **[Author a schema](../docs-site/src/content/docs/guides/author-a-schema.md)**
   — scaffold with `memstead schema new`, validate, install, and pin a mem

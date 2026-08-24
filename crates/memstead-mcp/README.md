@@ -37,6 +37,11 @@ with `memstead init --name <name> --schema default@1.3.0`.)
 Manual wiring is one entry in your agent's MCP config pointing at the
 `memstead-mcp` binary, run from inside a Memstead workspace.
 
+Restart the agent session afterwards: a session that is already running
+does not attach an MCP server added while it runs. A session you cannot
+restart (a headless or long-running one) needs the entry in place before
+it launches.
+
 Full documentation and the generated MCP tool reference live at the
 [Memstead repository](https://github.com/memstead/memstead).
 

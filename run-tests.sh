@@ -49,7 +49,8 @@ echo "  Guards: nothing private or internal leaks to the public tree"
 echo "══════════════════════════════════"
 if "$ROOT/scripts/leak-scan.sh" "$ROOT" \
   && "$ROOT/scripts/check-no-plan-refs.sh" \
-  && "$ROOT/scripts/check-no-mechanism-leak.sh"; then
+  && "$ROOT/scripts/check-no-mechanism-leak.sh" \
+  && "$ROOT/scripts/check-restart-disclosure.sh"; then
   echo "  ✓ publication guards passed"
 else
   FAILED+=("guards")

@@ -174,7 +174,9 @@ Entities created this way go through the same validated write path as the ones y
 
 ## 6. Connect your AI agent
 
-`quickstart` already wrote the MCP config for the agent targets you selected — for Claude Code that's a project `.mcp.json` pointing at `memstead-mcp`. Restart the agent inside the workspace and it's connected: the same graph is now readable and writable through the `memstead_*` MCP tools, with the same schema validation on every write.
+`quickstart` already wrote the MCP config for the agent targets you selected — for Claude Code that's a project `.mcp.json` pointing at `memstead-mcp`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs. Once it is back, the same graph is readable and writable through the `memstead_*` MCP tools, with the same schema validation on every write.
+
+An agent session you cannot restart (a headless or long-running one) needs its wiring in place *before* it launches: `quickstart` writes `.mcp.json` before the agent starts, and Claude Code's `--mcp-config` (plus `--plugin-dir` for the plugin) loads both at startup.
 
 Ask your agent to call `memstead_overview` — that's the agent's cold-start entry point, returning the schema catalogue, mem inventory, and community clusters. From there, [Agent recipes](../../guides/agent-recipes/) shows the worked tool-call sequences (orientation, search → read, create with recovery) with real request and response payloads.
 

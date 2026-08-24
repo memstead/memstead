@@ -148,7 +148,9 @@ pub enum Command {
     /// entity + MCP wiring for your agent(s), in the current (or named)
     /// folder. Tolerates dotfiles and README-grade files; derives the
     /// mem name from the folder. For the strict, script-safe variant
-    /// use `memstead init`.
+    /// use `memstead init`. Restart the agent session afterwards: a
+    /// session that is already running does not attach an MCP server
+    /// added while it runs.
     Quickstart(commands::quickstart::Args),
 
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`

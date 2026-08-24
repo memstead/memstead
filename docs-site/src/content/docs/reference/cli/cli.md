@@ -150,7 +150,7 @@ Exit codes:
 * `due` — Render the due-brief: open entities whose schema-declared due date falls inside the window (default 90d), overdue first
 * `export` — Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`)
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
-* `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
+* `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
 * `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it. MEM-REPO WORKSPACES ONLY (see `install`)
 * `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Mutates no entity, but records its findings store like any verify run
@@ -465,7 +465,7 @@ Initialise a filesystem mem in the current (or named) folder. Strict: errors out
 
 ## `memstead quickstart`
 
-One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`
+One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs
 
 **Usage:** `memstead quickstart [OPTIONS] [PATH]`
 

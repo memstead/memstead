@@ -19,8 +19,9 @@ claude plugin install memstead@memstead
 ```
 
 Or from inside a Claude Code session: `/plugin marketplace add
-memstead/memstead`, then `/plugin install memstead@memstead`. Restart Claude
-Code (or run `/reload-plugins`) and the commands below are available.
+memstead/memstead`, then `/plugin install memstead@memstead`. A session that is
+already running picks the new skills up only after `/reload-plugins` or a
+restart.
 
 ## Start here: `/setup`
 
@@ -32,8 +33,9 @@ after the folder, pins it to the built-in `default` schema, seeds one
 entity, and writes `.mcp.json`. Started in a repository you already have?
 The skill runs `memstead quickstart --repo .` instead, which additionally
 scaffolds a source binding over that repository — the mem takes a folder
-of its own inside it, and none of your files are adopted as entities. Finally it tells you to restart Claude Code
-so the MCP server registers. After the restart, the `memstead_*` tools and
+of its own inside it, and none of your files are adopted as entities. Restart
+the agent session afterwards: a session that is already running does not attach
+an MCP server added while it runs. After the restart, the `memstead_*` tools and
 the commands below are available. (Want a different schema? Pins can be
 changed after setup — the skill points the way.)
 
@@ -52,9 +54,10 @@ Every command below is one you type. Pick by the job:
 | measure how faithfully a mem still matches its source | **`/sync --verify`** |
 | take a full stock-take — measure a binding completely, repair until clean | **`/sync --inventory`** |
 
-**Everyday graph work has no command — just talk to Claude.** The `memstead_*`
-MCP tools are always live, and Claude reaches for them on its own whenever you
-describe what you want. Ask in plain language:
+**Everyday graph work has no command — just talk to Claude.** In a session that
+started with the server attached, the `memstead_*` MCP tools need no slash
+command: Claude reaches for them on its own whenever you describe what you want.
+Ask in plain language:
 
 - *"Show me every entity that references the auth module"* (a read).
 - *"Add a note that the parser now handles UTF-16, and link it to the parser entity"* (a mutation).

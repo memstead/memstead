@@ -91,7 +91,7 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
 
 **4. (Optional) Let an AI agent read and write it.** `quickstart` already wrote the MCP config for the agent targets you selected — restart your agent inside the workspace and it's connected. To wire an agent up later or by hand:
 
-- **Claude Code:** install the [plugin](plugins/claude-code/) and run its `/setup` skill — it resolves the binary path, initialises the workspace, writes `.mcp.json`, and tells you to reconnect. This is the paved path:
+- **Claude Code:** install the [plugin](plugins/claude-code/) and run its `/setup` skill — it resolves the binary path, initialises the workspace, writes `.mcp.json`, and tells you to restart. This is the paved path:
 
   ```bash
   claude plugin marketplace add memstead/memstead
@@ -99,6 +99,8 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
   ```
 
   (or `/plugin marketplace add memstead/memstead` + `/plugin install memstead@memstead` inside a session), then `/setup`.
+
+  A session that is already running picks the new skills up only after `/reload-plugins` or a restart. `/setup` then wires the MCP server, and for that half a reload is not enough. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs.
 - **Any other MCP agent (Codex, Gemini, …):** point it at the `memstead-mcp` binary. Resolve the absolute path with `command -v memstead-mcp`, then add it to your agent's MCP config:
 
   ```json
@@ -111,7 +113,9 @@ The `default` schema ships ten general-purpose types (`concept`, `assertion`, `m
   }
   ```
 
-  `memstead-mcp` walks up from its working directory looking for `.memstead/workspace.toml`, so spawn it from anywhere inside (or under) the workspace — no extra arguments needed. Restart the agent so it picks up the new server.
+  `memstead-mcp` walks up from its working directory looking for `.memstead/workspace.toml`, so spawn it from anywhere inside (or under) the workspace — no extra arguments needed. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs.
+
+An agent session you cannot restart (a headless or long-running one) needs its wiring in place *before* it launches: `quickstart` writes `.mcp.json` before the agent starts, and Claude Code's `--mcp-config` (plus `--plugin-dir` for the plugin) loads both at startup.
 
 ## Growing a mem from a source
 

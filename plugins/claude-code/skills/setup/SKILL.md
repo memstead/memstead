@@ -1,6 +1,6 @@
 ---
 name: setup
-description: First-time Memstead setup in the current directory — resolves the binaries (installing if needed), creates the workspace and mem, and wires the MCP server. Run once per project. Afterwards there is no command for everyday graph work — just talk to Claude; the MCP tools are always live.
+description: First-time Memstead setup in the current directory — resolves the binaries (installing if needed), creates the workspace and mem, and wires the MCP server. Run once per project, then restart the session so the server attaches. Afterwards there is no command for everyday graph work — just talk to Claude; the MCP tools need no slash command.
 disable-model-invocation: true
 allowed-tools: AskUserQuestion, Bash, Read, Write
 ---
@@ -122,11 +122,11 @@ This writes `.memstead.cache/plugin/binary-version.json` — a **gitignored plug
 
 ## Step 4 — Tell the user to restart Claude Code
 
-The MCP server only registers on Claude Code startup. Tell the user explicitly:
+Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs. `/reload-plugins` is not a substitute here — it activates plugin skills, not a newly wired MCP server. Tell the user explicitly:
 
 > Setup complete. **Restart Claude Code** for the `memstead` MCP server to register.
 >
-> Once you're back: **there's no command for everyday graph work — just talk to me.** The `memstead_*` MCP tools are always live and I call them on my own. For example:
+> Once you're back: **there's no command for everyday graph work — just talk to me.** The `memstead_*` MCP tools need no slash command and I call them on my own. For example:
 > - *"Show me what my graph knows about the login flow"* — I'll search and read the matching entities.
 > - *"Add an entity for the new caching layer and link it to the request handler"* — I'll create and connect them for you.
 >

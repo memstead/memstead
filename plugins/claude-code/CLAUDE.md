@@ -3,7 +3,7 @@
 See the root `AGENTS.md` for full project documentation. This plugin provides MCP tools (prefix: `memstead_`) and slash commands for graph interaction.
 
 - Always mutate via MCP tools — never edit entity markdown directly
-- There is no command for everyday graph work — just talk to Claude; the `memstead_*` MCP tools are always live and Claude calls them directly
+- There is no command for everyday graph work — just talk to Claude; in a session that started with the server attached the `memstead_*` MCP tools need no slash command, and Claude calls them directly
 - Plugin code MUST NOT mutate mem-repo state directly — no `git` commands against mem-repo, no raw entity-file writes via `Write`/`Edit`, no `mem-repo/.git/` introspection. All mutations route through Memstead MCP tools, which carry the engine's schema validation, write rules, link-graph integrity, and commit provenance. Reads may use `memstead-cli` (subprocess) or `memstead-mcp` (MCP). Versioning of the user's own project repo is the user's business — the plugin never commits to it (the outer-repo auto-commit concept was retired 2026-07-11).
 
 ## Skill invocation-control frontmatter

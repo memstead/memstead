@@ -50,7 +50,9 @@ is ingested — the receipt names the command that starts the ingest loop.
 
 One run leaves a working graph: a workspace, a mem pinned to the built-in
 `default` schema, a seed entity, and MCP wiring for the agent targets you
-pick. Full documentation lives at the
+pick. Restart the agent session afterwards: a session that is already
+running does not attach an MCP server added while it runs. Full
+documentation lives at the
 [Memstead repository](https://github.com/memstead/memstead).
 
 ## License
