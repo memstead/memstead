@@ -527,14 +527,25 @@ pub fn wiki_link_to_id(link: &str, current_mem: &str) -> Result<EntityId, WikiLi
 /// NOT use this helper; they use [`wiki_link_to_id`] and propagate
 /// the typed refusal.
 pub fn wiki_link_to_id_lenient(link: &str, current_mem: &str) -> EntityId {
-    let stripped = strip_wiki_link_decorations(link);
-    // The alias and anchor cuts inside the decoration strip run after
-    // the whitespace trim, so they can expose fresh trailing whitespace
-    // (`foo |label` → `foo `, `foo\r\n#anchor` → `foo\r\n`). The tolerant
-    // path must land on ids the generator round-trips (parse→generate is
-    // a fixpoint after one round), so trim again here. Deliberately NOT
-    // in the shared helper: the strict decoder keeps the exposed
-    // whitespace so its grammar gate still refuses those shapes.
+    // Strip decorations and trim to a FIXPOINT: each pass can expose
+    // work for another — an alias/anchor cut exposes trailing
+    // whitespace (`foo |label` → `foo `), and trimming that whitespace
+    // can expose a `.md` suffix the pass could not see (`x.md\r` →
+    // `x.md` → `x`; fuzz finding, corpus member `crash-b256aad3…`).
+    // The tolerant path must land on ids the generator round-trips
+    // (parse→generate is a fixpoint after one round), so it normalises
+    // until nothing changes. The loop terminates because every pass
+    // only ever shortens the string. Deliberately NOT in the shared
+    // helper: the strict decoder runs one pass and its grammar gate
+    // still refuses the leftover shapes.
+    let mut stripped = strip_wiki_link_decorations(link);
+    loop {
+        let next = strip_wiki_link_decorations(stripped.trim_end());
+        if next == stripped {
+            break;
+        }
+        stripped = next;
+    }
     let stripped = stripped.trim_end();
 
     if !stripped.contains("::")

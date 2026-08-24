@@ -8,6 +8,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Lenient wiki-link decoration stripping runs to a fixpoint (fuzz
+  finding, long tier, CI dispatch).** Each strip pass can expose work
+  for another: an anchor or alias cut exposes trailing whitespace, and
+  trimming that whitespace can expose a `.md` suffix the same pass
+  could not see (`x.md` followed by a CR), so the decoded id changed
+  between rounds. The lenient decoder now strips and trims until
+  nothing changes; the strict decoder still runs one pass and refuses
+  the leftover shapes. Triggering input pinned in the shared corpus.
 - **The catch-all merge closes fences in context, never per piece in
   isolation (fuzz finding, long tier, local runs).** The same bytes can
   be a fence in one context and prose in another (CR line endings, lazy
