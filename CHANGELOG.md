@@ -8,6 +8,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **The fuzz workflow builds for the runner's real host triple.** Its first
+  dispatch failed before fuzzing: the prebuilt cargo-fuzz binary is
+  musl-linked and defaults to its own compile-time target, where
+  AddressSanitizer cannot link against static libc. The run step now passes
+  `--target` resolved from `rustc -vV`.
 - **The sync brief names the drift-clearing move.** Its drifted-findings
   guidance said "update the entity, then re-verify to advance the baseline",
   which leaves a drifted anchor drifted: neither an entity update nor the
