@@ -7,6 +7,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **The sync brief names the drift-clearing move.** Its drifted-findings
+  guidance said "update the entity, then re-verify to advance the baseline",
+  which leaves a drifted anchor drifted: neither an entity update nor the
+  baseline advance re-baselines the anchor hash. The missing two-step
+  (re-declare the anchor on the entity without a hash; the next
+  binding-backed verify backfills the freshly observed hash) cost a live
+  sync session the whole discovery loop on 2026-08-24. The brief states it
+  now, in the drifted group's own instruction.
+
 ## [0.11.0] - 2026-08-24
 
 ### Added

@@ -1140,7 +1140,11 @@ fn render_open_findings(findings: &[Finding]) -> String {
         &mut lines,
         "Drifted — the anchored content changed",
         "The source the entity describes moved. Update the affected section to match — \
-         only the part that changed. If the entity is still accurate, leave it.",
+         only the part that changed. If the entity is still accurate, leave it. Either \
+         way, re-declare the anchor on the entity (same artifact, grain, class and \
+         source, no hash): the next verify backfills the freshly observed hash and the \
+         drift clears. Updating the entity alone, or advancing the baseline, leaves \
+         the anchor drifted.",
         &group(FindingClass::Drifted),
     );
     render_findings_group(
