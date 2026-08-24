@@ -8,6 +8,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **The catch-all merge closes fences in context, never per piece in
+  isolation (fuzz finding, long tier, local runs).** The same bytes can
+  be a fence in one context and prose in another (CR line endings, lazy
+  continuation), so a per-piece close judged in isolation injected a
+  spurious closer that the generator's part-level close paired into an
+  empty fence block, growing the document by two fence lines per round;
+  skipping closes entirely instead let a dangling piece fence swallow
+  the next piece's heading. The merge now appends pieces raw and makes
+  every close decision over the running string after each append, so a
+  dangling fence still closes before the next piece and no closer is
+  added for a construct the document does not read as a fence. The
+  whole ten-crash corpus passes under this design; four earlier
+  variants are disproven in the plan's log. Triggering input pinned in
+  the shared corpus.
 - **A relationship row whose target decodes to an empty path is not a
   relationship (fuzz finding, long tier, local run).** A degenerate raw
   target like `[[specs--]]` survived the row pattern but decoded to an
