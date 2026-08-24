@@ -21,8 +21,10 @@ pub mod diff;
 pub mod export;
 pub mod health;
 pub mod integrity;
+pub mod labelling;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
+pub mod signals;
 pub mod transport;
 
 pub use agent_notes::{AgentNotesReport, CommitNote};
@@ -457,6 +459,15 @@ pub enum WarningHint {
         /// when no real entity was found — the author must disambiguate.
         candidate_target: Option<EntityId>,
         section: String,
+        /// Whether the link's prefix (`resolved_id.mem()`) is itself a
+        /// mounted mem. `true` means the link is a well-formed cross-mem
+        /// reference whose target is missing in that mem (no rename
+        /// happened); `false` means the prefix only resembles a mem
+        /// (it matches a roster member's last name segment), the
+        /// classic mem-rename drift. The message says which, instead
+        /// of calling every case rename drift: on the dogfood graph all
+        /// eight recorded hits were missing targets in mounted mems.
+        prefix_mounted: bool,
     },
     /// Inline `[[wiki-link]]` syntax in entity section bodies parsed to
     /// targets that did not yet resolve, so the engine auto-created stub
@@ -543,6 +554,19 @@ pub enum WarningHint {
         /// the alternative relationship names plus the rendered
         /// cardinality literal (`"at_least_one"`).
         missing: Vec<MissingRequiredOutgoingBlock>,
+    },
+    /// A successful write moved a declared aggregate signal across a
+    /// threshold, in either direction. Out-of-band diagnostics beside
+    /// the success payload — never error-shaped, never changing the
+    /// mutation's success semantics (a signal crossing on a
+    /// successful write must not read as a failed write). Levels are
+    /// the wire literals `none` / `notice` / `warn`.
+    SignalThresholdCrossed {
+        entity_id: EntityId,
+        signal: String,
+        value: u64,
+        old_level: String,
+        new_level: String,
     },
     /// The written entity violates warn-tier declared `constraints`
     /// of its type (e.g. `requires_when`: a field required under the
@@ -869,6 +893,26 @@ pub enum WarningHint {
         /// Expectation pin recorded on the workspace mount.
         mount_pin: String,
     },
+    /// A mount resolved to nothing: the storage it names does not
+    /// exist (`missing_ref` for a git-branch mount whose branch was
+    /// never created or was deleted, `missing_path` for a folder or
+    /// archive mount whose path is gone) or exists and holds no
+    /// entity (`empty`). Before this warning a mount pointing at a
+    /// nonexistent branch sat in the writable roster with zero
+    /// entities and nothing said so (the dogfood workspace carried two
+    /// such mounts for weeks). Emitted at boot and on reload; a mount
+    /// that resolves to at least one entity is silent. Lazy mounts are
+    /// probed for storage presence only (the entity walk is deferred),
+    /// so `empty` is reported for eager mounts.
+    MountUnbacked {
+        /// The mount's mem name.
+        mem: String,
+        /// Why it is unbacked.
+        reason: MountUnbackedReason,
+        /// What the mount names: the branch ref, the folder path or
+        /// the archive path, for the operator's repair.
+        location: String,
+    },
     /// A mutation wrote a section whose emitted heading differs from a
     /// heading already present in the file that derives to the same
     /// section key. The write still commits — refusing would strand
@@ -943,6 +987,15 @@ pub struct MissingRequiredOutgoingBlock {
     /// cardinality }` shape.
     #[serde(skip_serializing_if = "severity_is_warn")]
     pub severity: memstead_schema::ConstraintSeverity,
+    /// The condition that armed a conditional block (`when_field` /
+    /// `when_value` on the declaration). Serialized only when present,
+    /// so unconditional blocks keep their byte-identical shape — and
+    /// the reader of a refusal, warning, or health finding sees which
+    /// trigger armed the obligation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_value: Option<String>,
 }
 
 fn severity_is_warn(s: &memstead_schema::ConstraintSeverity) -> bool {
@@ -1077,6 +1130,28 @@ impl fmt::Display for WarningHint {
                  mem's own config pins '{config_pin}' — the config pin is authoritative and \
                  was used; align the mounts.json entry or the mem config to clear this"
             ),
+            WarningHint::MountUnbacked {
+                mem,
+                reason,
+                location,
+            } => match reason {
+                MountUnbackedReason::MissingRef => write!(
+                    f,
+                    "mount '{mem}' is unbacked: its branch {location} does not exist \
+                     (the mem was never created there, or the branch was deleted); create \
+                     it, point the mount at the right branch, or remove the mount"
+                ),
+                MountUnbackedReason::MissingPath => write!(
+                    f,
+                    "mount '{mem}' is unbacked: its path {location} does not exist; \
+                     restore the folder or remove the mount"
+                ),
+                MountUnbackedReason::Empty => write!(
+                    f,
+                    "mount '{mem}' is unbacked: {location} exists but holds no entity \
+                     (an empty mem serves nothing); author into it or remove the mount"
+                ),
+            },
             WarningHint::SectionHeadingDivergence {
                 entity_id,
                 section_key,
@@ -1327,12 +1402,24 @@ impl fmt::Display for WarningHint {
                 resolved_id,
                 candidate_target,
                 section,
+                prefix_mounted,
             } => {
-                write!(
-                    f,
-                    "wiki-link in {from}#{section} resolves to nested prefix \
-                     {resolved_id} — almost certainly mem-rename drift"
-                )?;
+                if *prefix_mounted {
+                    write!(
+                        f,
+                        "wiki-link in {from}#{section} resolves to {resolved_id}: \
+                         target missing in mem {}",
+                        resolved_id.mem()
+                    )?;
+                } else {
+                    write!(
+                        f,
+                        "wiki-link in {from}#{section} resolves to {resolved_id}: \
+                         prefix '{}' is not a mounted mem (it only matches a mem \
+                         name's last segment, the mem-rename drift pattern)",
+                        resolved_id.mem()
+                    )?;
+                }
                 if let Some(cand) = candidate_target {
                     write!(f, "; did you mean {cand}?")?;
                 }
@@ -1393,6 +1480,17 @@ impl fmt::Display for WarningHint {
                  does not list 'mem-repo/'. Add 'mem-repo/' (or the \
                  workspace-relative equivalent) to the outer repo's \
                  .gitignore to keep mem-repo-git out of the outer index."
+            ),
+            WarningHint::SignalThresholdCrossed {
+                entity_id,
+                signal,
+                value,
+                old_level,
+                new_level,
+            } => write!(
+                f,
+                "signal '{signal}' on {entity_id} crossed a declared threshold: \
+                 {old_level} → {new_level} (value {value})"
             ),
             WarningHint::MissingRequiredOutgoing {
                 entity_type,
@@ -1709,6 +1807,29 @@ impl fmt::Display for WarningHint {
     }
 }
 
+/// Closed vocabulary of [`WarningHint::MountUnbacked`] reasons, serialised
+/// as the lowercase `details.reason` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MountUnbackedReason {
+    /// Git-branch mount: the branch ref does not exist.
+    MissingRef,
+    /// Folder or archive mount: the path does not exist.
+    MissingPath,
+    /// The storage exists and holds no entity.
+    Empty,
+}
+
+impl MountUnbackedReason {
+    /// The wire value (`missing_ref` / `missing_path` / `empty`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingRef => "missing_ref",
+            Self::MissingPath => "missing_path",
+            Self::Empty => "empty",
+        }
+    }
+}
+
 impl WarningHint {
     /// Stable UPPER_SNAKE_CASE identifier. Wire-level contract — never rename
     /// an existing value; new variants add new codes. Agents branch on this,
@@ -1770,10 +1891,12 @@ impl WarningHint {
             Self::IgnoredReadonlyField { .. } => "IGNORED_READONLY_FIELD",
             Self::OuterRepoNotIgnoringMemRepo { .. } => "OUTER_REPO_NOT_IGNORING_MEM_REPO",
             Self::MissingRequiredOutgoing { .. } => "MISSING_REQUIRED_OUTGOING",
+            Self::SignalThresholdCrossed { .. } => "SIGNAL_THRESHOLD_CROSSED",
             Self::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
+            Self::MountUnbacked { .. } => "MOUNT_UNBACKED",
             Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
             Self::SchemaGenerationsBehind { .. } => "SCHEMA_GENERATIONS_BEHIND",
             Self::SchemaHeadingRoundtripViolation { .. } => "SCHEMA_HEADING_ROUNDTRIP_VIOLATION",
@@ -1814,6 +1937,7 @@ impl WarningHint {
             Self::SuspiciousNestedPrefix { from, .. } => Some(from.mem()),
             Self::DuplicateSectionHeading { entity_id, .. } => Some(entity_id.mem()),
             Self::SchemaPinMismatch { mem, .. } => Some(mem.as_str()),
+            Self::MountUnbacked { mem, .. } => Some(mem.as_str()),
             Self::SchemaHeadingRoundtripViolation { mem, .. } => Some(mem.as_str()),
             Self::SectionHeadingDivergence { entity_id, .. } => Some(entity_id.mem()),
             Self::MemReloaded { mem, .. } => Some(mem.as_str()),
@@ -1824,6 +1948,7 @@ impl WarningHint {
             Self::SchemaGenerationsBehind { mem, .. } => Some(mem.as_str()),
             Self::FolderMemProvenance { mem } => Some(mem.as_str()),
             Self::MissingRequiredOutgoing { entity_id, .. } => Some(entity_id.mem()),
+            Self::SignalThresholdCrossed { entity_id, .. } => Some(entity_id.mem()),
             Self::ConstraintUnsatisfied { entity_id, .. } => Some(entity_id.mem()),
             Self::DuplicateRelationship { from, .. } => Some(from.mem()),
             Self::NoSuchRelationship { from, .. } => Some(from.mem()),
@@ -1976,6 +2101,12 @@ impl WarningHint {
                     "test-mem-plugin--memstead-mcp-tool-surface".into(),
                 )),
                 section: "constraints".into(),
+                prefix_mounted: false,
+            },
+            WarningHint::MountUnbacked {
+                mem: "institute".into(),
+                reason: MountUnbackedReason::MissingRef,
+                location: "refs/heads/institute".into(),
             },
             WarningHint::InlineWikiLinkAutoStubbed {
                 from: EntityId("specs--demo".into()),
@@ -2001,11 +2132,15 @@ impl WarningHint {
                         relationships: vec!["CHOSEN".into()],
                         cardinality: "at_least_one".into(),
                         severity: memstead_schema::ConstraintSeverity::Warn,
+                        when_field: None,
+                        when_value: None,
                     },
                     MissingRequiredOutgoingBlock {
                         relationships: vec!["REJECTED".into()],
                         cardinality: "at_least_one".into(),
                         severity: memstead_schema::ConstraintSeverity::Warn,
+                        when_field: None,
+                        when_value: None,
                     },
                 ],
             },
@@ -2201,11 +2336,14 @@ impl WarningHint {
                 resolved_id,
                 candidate_target,
                 section,
+                prefix_mounted,
             } => serde_json::json!({
                 "from": from,
                 "resolved_id": resolved_id,
                 "candidate_target": candidate_target,
                 "section": section,
+                "target_mem": resolved_id.mem(),
+                "prefix_mounted": prefix_mounted,
             }),
             Self::InlineWikiLinkAutoStubbed { from, stubs } => serde_json::json!({
                 "from": from,
@@ -2240,6 +2378,19 @@ impl WarningHint {
                 "entity_type": entity_type,
                 "entity_id": entity_id,
                 "missing": missing,
+            }),
+            Self::SignalThresholdCrossed {
+                entity_id,
+                signal,
+                value,
+                old_level,
+                new_level,
+            } => serde_json::json!({
+                "entity": entity_id,
+                "signal": signal,
+                "value": value,
+                "old_level": old_level,
+                "new_level": new_level,
             }),
             Self::ConstraintUnsatisfied {
                 entity_type,
@@ -2417,6 +2568,15 @@ impl WarningHint {
                     "mount_pin": mount_pin,
                 })
             }
+            Self::MountUnbacked {
+                mem,
+                reason,
+                location,
+            } => serde_json::json!({
+                "mem": mem,
+                "reason": reason.as_str(),
+                "location": location,
+            }),
             Self::SchemaHeadingRoundtripViolation {
                 mem,
                 schema_ref,

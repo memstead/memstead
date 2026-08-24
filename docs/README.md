@@ -1,8 +1,12 @@
 # Documentation
 
-Memstead's docs are organized by [Diátaxis](https://diataxis.fr) — four modes,
-each answering a different need. Start with the mode that matches what you're
-trying to do.
+This page is the index to Memstead's documentation, organized by
+[Diátaxis](https://diataxis.fr): four modes, each answering a different need.
+The pages themselves live in two places: the published site under
+[`docs-site/`](../docs-site/src/content/docs/) (guides, concepts and the
+generated reference) and this folder (the pages that stay beside the code:
+build, sizing curve, the measured proofs). Start with the mode that matches
+what you're trying to do.
 
 ## 🚀 Tutorial — *learning by doing*
 

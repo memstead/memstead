@@ -206,6 +206,17 @@ pub struct Engine {
     /// its state was computed from, and makes it impossible for the
     /// rolled-back interim state to be served as fresh.
     community_memo: OnceCell<(DerivedKey, LouvainOutput)>,
+    /// Grounded-labelling memo — one `MemLabelling` per mem whose
+    /// schema declares `relationships.labelling`, computed on first
+    /// access and invalidated exactly where the community memo is
+    /// (the reset lives inside [`Self::invalidate_communities`], so
+    /// every mutation site, drift reload, quarantine attach/detach
+    /// and apply-commit invalidate both without a second call).
+    /// Generation-keyed like `community_memo`.
+    labelling_memo: OnceCell<(
+        DerivedKey,
+        HashMap<String, crate::ops::labelling::MemLabelling>,
+    )>,
     /// Lazily-computed per-mem search index map. Built on first call
     /// to [`Self::search_indexes`] via [`build_all`]; invalidated by
     /// [`Self::invalidate_search_indexes`] alongside the community

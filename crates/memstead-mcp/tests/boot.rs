@@ -329,3 +329,33 @@ fn full_binary_serves_boot_diagnosis_on_unbootable_workspace() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+/// `memstead-mcp --version` prints the stamped build version, the same
+/// string the server hands out as `serverInfo.version`. The bare crate
+/// version it printed until 0.10.0 could not tell a stale release
+/// binary from a fresh build of the same version line, which is the
+/// question the workspace's binary-staleness check asks of it.
+#[test]
+fn version_flag_prints_the_stamped_build_version() {
+    let output = Command::new(memstead_mcp_bin())
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn memstead-mcp --version");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected = format!("memstead-mcp {}", memstead_base::build_info::full_version());
+    assert_eq!(
+        stdout.trim(),
+        expected,
+        "`--version` must print the stamped build version, not the bare crate version"
+    );
+    if !memstead_base::build_info::BUILD_SHA.is_empty() {
+        assert!(
+            stdout.contains("+g"),
+            "inside a git checkout the stamp carries the build sha: {stdout}"
+        );
+    }
+}

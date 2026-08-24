@@ -40,7 +40,14 @@ pub struct Args {
     /// confirmed_independent / unconfirmable — transport is not
     /// identity, so until a caller-declared identity exists every
     /// ok-checked entity reports unconfirmable; the other two
-    /// categories are explicit empties).
+    /// categories are explicit empties), signals (entities whose
+    /// declared aggregate signals sit above `none`, each with value,
+    /// level and contributing entity ids, plus per-level counts;
+    /// `warn`-level signals participate in `--strict`, `notice`
+    /// never does), labelling (grounded labels per declaring mem:
+    /// accepted/defeated/undecided counts, the defeated and undecided
+    /// lists with their attacker evidence, and the excluded cross-mem
+    /// attack-edge count; an observation, never a strict violation).
     /// `conformance` lints every entity against the effective schema
     /// into a `findings` array (write-time typed codes); `integrity`
     /// adds the consistency axis (dangling links, stubs) to the same
@@ -63,12 +70,19 @@ pub struct Args {
     pub limit: usize,
 
     /// Exit non-zero (1) when any included Tier-2 warning kind has
-    /// present violations, or when the always-on authoring-drift axis
-    /// reports findings (`SCHEMA_AUTHORING_SOURCE_MISSING` /
-    /// `SCHEMA_AUTHORING_SOURCE_DIVERGED` — no `--include` opt-in).
-    /// The output is rendered first, then the non-zero exit fires.
-    /// Include-gated participation today: `missing_required_outgoing`, `constraints`;
-    /// new Tier-2 codes opt in additively without breaking the flag's
+    /// present violations, or when an always-on configuration axis
+    /// reports findings. Always-on (no `--include` opt-in): the
+    /// authoring-drift axis (`SCHEMA_AUTHORING_SOURCE_MISSING` /
+    /// `SCHEMA_AUTHORING_SOURCE_DIVERGED`) and the configuration
+    /// defects `SCHEMA_PIN_MISMATCH`, `SCHEMA_UNSTAMPED_SOURCE_ROT`
+    /// and `MOUNT_UNBACKED` (a mount whose branch or folder does not
+    /// exist, or holds no entity). Include-gated participation:
+    /// `missing_required_outgoing`, `constraints`, `signals` (warn
+    /// level), and with `integrity` the consistency findings
+    /// `DANGLING_LINK` and `ORPHAN_STUB`. Stale entities, drifted
+    /// anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The
+    /// output is rendered first, then the non-zero exit fires; new
+    /// Tier-2 codes opt in additively without breaking the flag's
     /// semantics.
     #[arg(long)]
     pub strict: bool,
@@ -117,6 +131,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         open_questions_axis,
         stale_derivations_axis,
         checks_axis,
+        signals_axis,
+        labelling_axis,
     } = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
@@ -271,6 +287,24 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .iter()
         .any(|s| s == "conformance" || s == "integrity")
     {
+        // The consistency axis participates in `--strict` when asked
+        // for: a dangling link or an orphan stub is a graph that says
+        // something it cannot show, and a referee that ignored both
+        // exited 0 on a workspace with ten of one and seven of the
+        // other. Conformance findings keep their own reporting.
+        if include.iter().any(|s| s == "integrity") {
+            let dangling = findings
+                .iter()
+                .filter(|f| f.code == "DANGLING_LINK")
+                .count();
+            if dangling > 0 {
+                strict_violations.push(("dangling_links", dangling));
+            }
+            let orphan_stubs = findings.iter().filter(|f| f.code == "ORPHAN_STUB").count();
+            if orphan_stubs > 0 {
+                strict_violations.push(("orphan_stubs", orphan_stubs));
+            }
+        }
         obj.insert("findings".into(), serde_json::to_value(&findings)?);
     }
     if include.iter().any(|s| s == "tags")
@@ -299,6 +333,27 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &checks_axis {
         obj.insert("checks".to_string(), axis.clone());
+    }
+    // `--include signals`: entities carrying above-`none` declared
+    // signals, with per-level counts. A `warn`-level signal
+    // participates in `--strict` like a warn-tier constraint finding;
+    // a `notice` never does.
+    if let Some(axis) = &signals_axis {
+        if let Some(warn) = axis
+            .get("counts")
+            .and_then(|c| c.get("warn"))
+            .and_then(|w| w.as_u64())
+            && warn > 0
+        {
+            strict_violations.push(("signals", warn as usize));
+        }
+        obj.insert("signals".to_string(), axis.clone());
+    }
+    // `--include labelling`: grounded labels per declaring mem — a
+    // reported observation with its evidence, never a strict
+    // violation.
+    if let Some(axis) = &labelling_axis {
+        obj.insert("labelling".to_string(), axis.clone());
     }
     // `--include friction`: the friction ledger's read surface
     // (agent-trust plan 08) — counts per refusal code / per verb,
@@ -397,6 +452,23 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .count();
     if authoring_drift > 0 {
         strict_violations.push(("schema_authoring_drift", authoring_drift));
+    }
+    // Configuration defects participate unconditionally too: a mount
+    // whose pin disagrees with its mem's config, a pinned schema whose
+    // sealed package has rotted, a mount that resolves to nothing.
+    // None of them is about an entity; each is the workspace
+    // describing itself wrongly, and `--strict` exited 0 on three pin
+    // mismatches, two rotted schemas and two unbacked mounts until
+    // 2026-08-23. Generations-behind pins stay advisory: the pin works.
+    for (label, code) in [
+        ("schema_pin_mismatch", "SCHEMA_PIN_MISMATCH"),
+        ("schema_unstamped_source_rot", "SCHEMA_UNSTAMPED_SOURCE_ROT"),
+        ("mount_unbacked", "MOUNT_UNBACKED"),
+    ] {
+        let n = health.warnings.iter().filter(|w| w.code() == code).count();
+        if n > 0 {
+            strict_violations.push((label, n));
+        }
     }
 
     if ctx.json {
@@ -690,6 +762,83 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
+    // Signals axis — every above-`none` signal with its evidence.
+    if let Some(axis) = obj.get("signals") {
+        lines.push(format!(
+            "## Signals (notice {}, warn {})",
+            axis["counts"]["notice"].as_u64().unwrap_or(0),
+            axis["counts"]["warn"].as_u64().unwrap_or(0),
+        ));
+        for e in axis["entities"].as_array().into_iter().flatten() {
+            for s in e["signals"].as_array().into_iter().flatten() {
+                let contributors = s["contributors"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|c| c.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "- {} — {}: {} ({}) [{}]",
+                    e["id"].as_str().unwrap_or(""),
+                    s["name"].as_str().unwrap_or(""),
+                    s["value"].as_u64().unwrap_or(0),
+                    s["level"].as_str().unwrap_or(""),
+                    contributors,
+                ));
+            }
+        }
+        lines.push(String::new());
+    }
+
+    // Labelling axis — grounded labels with their evidence.
+    if let Some(axis) = obj.get("labelling").and_then(|a| a.as_object()) {
+        lines.push(format!("## Labelling ({} mems)", axis.len()));
+        for (mem, m) in axis {
+            let c = &m["counts"];
+            lines.push(format!(
+                "- `{mem}`: accepted {}, defeated {}, undecided {}; cross-mem attack edges excluded {}",
+                c["accepted"].as_u64().unwrap_or(0),
+                c["defeated"].as_u64().unwrap_or(0),
+                c["undecided"].as_u64().unwrap_or(0),
+                m["cross_mem_edges_excluded"].as_u64().unwrap_or(0),
+            ));
+            for d in m["defeated"].as_array().into_iter().flatten() {
+                let by = d["defeated_by"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "  - defeated: {} (by {by})",
+                    d["id"].as_str().unwrap_or("")
+                ));
+            }
+            for u in m["undecided"].as_array().into_iter().flatten() {
+                let by = u["undecided_by"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "  - undecided: {} (open attackers {by})",
+                    u["id"].as_str().unwrap_or("")
+                ));
+            }
+        }
+        lines.push(String::new());
+    }
+
     // Stale-derivations axis — same requested-vs-absent contract and
     // wording as the MCP text renderer.
     if let Some(axis) = stale_derivations_axis.as_ref().and_then(|a| a.as_object()) {
@@ -870,6 +1019,13 @@ struct GatheredHealth {
     /// author≠checker independence gate, via the shared
     /// `health_checks_axis` helper.
     checks_axis: Option<serde_json::Value>,
+    /// `--include signals` — the shared `health_signals_axis`
+    /// payload (entities above `none` plus per-level counts).
+    signals_axis: Option<serde_json::Value>,
+    /// `--include labelling` — the shared `health_labelling_axis`
+    /// payload (per declaring mem: label counts, defeated/undecided
+    /// lists with attacker evidence, excluded cross-mem edges).
+    labelling_axis: Option<serde_json::Value>,
 }
 
 /// Conformance/integrity findings across every mounted mem, in
@@ -939,6 +1095,8 @@ fn gather_mem_repo(
     fill_open_questions_axis(engine, include, &mut g);
     fill_stale_derivations_axis(engine, include, &mut g);
     fill_checks_axis(engine, include, &mut g);
+    fill_signals_axis(engine, include, &mut g);
+    fill_labelling_axis(engine, include, &mut g);
     g
 }
 
@@ -965,6 +1123,8 @@ fn gather_filesystem(
     fill_open_questions_axis(engine, include, &mut g);
     fill_stale_derivations_axis(engine, include, &mut g);
     fill_checks_axis(engine, include, &mut g);
+    fill_signals_axis(engine, include, &mut g);
+    fill_labelling_axis(engine, include, &mut g);
     g
 }
 
@@ -1029,6 +1189,18 @@ fn fill_stale_derivations_axis(
 fn fill_checks_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
     if include.iter().any(|s| s == "checks") {
         g.checks_axis = Some(memstead_base::ops::health::health_checks_axis(engine, None));
+    }
+}
+
+fn fill_signals_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
+    if include.iter().any(|s| s == "signals") {
+        g.signals_axis = Some(engine.health_signals_axis(None));
+    }
+}
+
+fn fill_labelling_axis(engine: &memstead_base::Engine, include: &[String], g: &mut GatheredHealth) {
+    if include.iter().any(|s| s == "labelling") {
+        g.labelling_axis = Some(engine.health_labelling_axis(None));
     }
 }
 
@@ -1131,6 +1303,8 @@ fn gather_from_store(
         open_questions_axis: None,
         stale_derivations_axis: None,
         checks_axis: None,
+        signals_axis: None,
+        labelling_axis: None,
     }
 }
 

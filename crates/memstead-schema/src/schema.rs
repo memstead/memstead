@@ -44,6 +44,29 @@ impl Schema {
             .any(|d| d.name == name && d.acyclic)
     }
 
+    /// The declared acyclicity set containing `name`, if any. The
+    /// loader guarantees a rel-type appears in at most one set, so
+    /// the first hit is the only hit.
+    pub fn acyclic_set_containing(&self, name: &str) -> Option<&[String]> {
+        self.manifest
+            .relationships
+            .acyclic_sets
+            .iter()
+            .find(|set| set.iter().any(|n| n == name))
+            .map(|set| set.as_slice())
+    }
+
+    /// Whether this schema declares exactly this acyclicity set
+    /// (order-sensitive, as declared). Used by the boot sweep to
+    /// scope a set's union subgraph to mems whose schema declares it.
+    pub fn has_acyclic_set(&self, set: &[String]) -> bool {
+        self.manifest
+            .relationships
+            .acyclic_sets
+            .iter()
+            .any(|s| s.as_slice() == set)
+    }
+
     /// Returns `true` iff `source_type`'s `no_self_loop_relationships`
     /// list declares `rel_type` — the engine then refuses a SELF-LOOP
     /// (from == to) on that pair, independent of the rel-type's

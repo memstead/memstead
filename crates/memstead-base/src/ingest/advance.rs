@@ -510,10 +510,18 @@ pub fn advance_baseline(
         .iter()
         .filter(|art| !state.dispositions.contains_key(art.as_str()))
         .filter(|art| {
+            // A unit id (`<path>#<key>`, touchpoint B) is disposed by an
+            // anchor over exactly that unit; a file id by any anchor
+            // referencing the path. A file-level anchor never disposes a
+            // unit — reading the file is not reading every unit of it.
+            let (base, key) = crate::preparation::split_unit_id(art);
             engine
-                .anchors_referencing_artifact(art)
+                .anchors_referencing_artifact(base)
                 .iter()
-                .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str())
+                .any(|(eid, a)| {
+                    eid.mem() == resolved.destination_mem.as_str()
+                        && (key.is_none() || a.artifact == **art)
+                })
         })
         .cloned()
         .collect();

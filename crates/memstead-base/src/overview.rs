@@ -324,6 +324,29 @@ pub fn compose_overview(
 
     // --- include validation ---
     let mut warnings: Vec<crate::WarningHint> = Vec::new();
+    // A mount that resolved to nothing is a cold-start fact: an agent
+    // reading `Entities: 0` on the roster must not take it for an empty
+    // mem when the branch behind it does not exist. The boot warning
+    // rides the overview's warnings and the mem's own entry.
+    let unbacked_by_mem: BTreeMap<String, (String, String)> = engine
+        .load_warnings()
+        .iter()
+        .filter_map(|w| match w {
+            crate::WarningHint::MountUnbacked {
+                mem,
+                reason,
+                location,
+            } => Some((mem.clone(), (reason.as_str().to_string(), location.clone()))),
+            _ => None,
+        })
+        .collect();
+    warnings.extend(
+        engine
+            .load_warnings()
+            .iter()
+            .filter(|w| w.code() == "MOUNT_UNBACKED")
+            .cloned(),
+    );
     for key in args.include {
         if !ALLOWED_OVERVIEW_INCLUDE_KEYS.contains(&key.as_str()) {
             warnings.push(crate::WarningHint::UnknownIncludeKey {
@@ -542,7 +565,12 @@ pub fn compose_overview(
             .get(name.as_str())
             .cloned()
             .unwrap_or((None, false));
-        mems_lite.push(serde_json::json!({
+        // `unbacked` is present only on a mount that resolved to
+        // nothing (`{reason, location}`), absent on the ordinary entry.
+        let unbacked = unbacked_by_mem.get(name.as_str()).map(
+            |(reason, location)| serde_json::json!({ "reason": reason, "location": location }),
+        );
+        let mut lite = serde_json::json!({
             "name": name,
             "title": title,
             "description": description,
@@ -555,8 +583,8 @@ pub fn compose_overview(
             "durable": durable,
             "review_mark": review_mark,
             "unreviewed": unreviewed,
-        }));
-        mems_full.push(serde_json::json!({
+        });
+        let mut full = serde_json::json!({
             "name": name,
             "title": title,
             "description": description,
@@ -570,7 +598,13 @@ pub fn compose_overview(
             "durable": durable,
             "review_mark": review_mark,
             "unreviewed": unreviewed,
-        }));
+        });
+        if let Some(u) = unbacked {
+            lite["unbacked"] = u.clone();
+            full["unbacked"] = u;
+        }
+        mems_lite.push(lite);
+        mems_full.push(full);
     }
     let sort_by_name = |a: &serde_json::Value, b: &serde_json::Value| {
         a["name"]
@@ -1074,6 +1108,13 @@ pub fn compose_overview(
                 }
             }
             md.push_str(&format!("- **Entities:** {count}\n"));
+            if let Some(u) = v.get("unbacked") {
+                md.push_str(&format!(
+                    "- **Unbacked:** {} ({}); this mount serves nothing, see `MOUNT_UNBACKED` under Warnings\n",
+                    u["reason"].as_str().unwrap_or("?"),
+                    u["location"].as_str().unwrap_or("?")
+                ));
+            }
             if emit_mem_distribution
                 && let Some(td) = v["type_distribution"].as_object()
                 && !td.is_empty()

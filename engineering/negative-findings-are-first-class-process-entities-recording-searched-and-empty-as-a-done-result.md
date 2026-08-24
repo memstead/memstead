@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-08T20:58:37Z
-last_modified: 2026-08-08T20:58:37Z
+last_modified: 2026-08-23T14:48:19Z
 status: accepted
 decided_on: 2026-08-08
 deciders: operator (agent-trust plan 10)
@@ -19,6 +19,9 @@ The most valuable entities in a prior research holding were absence findings ("t
 
 ## Consequences
 Completed searches persist across sessions: a later run reads its own question in `sought`, judges coverage from `search_path`, and skips a search already walked — or deliberately reruns it when the source space has grown, superseding the entry (the type's write_rules state the expiry posture). Agents meeting `coverage_gap` and `negative_finding` side by side get the choosing rule at write time from either type's guidance, cutting the filing-confusion failure mode the plan named. Costs accepted: another type in the process vocabulary (the hard-cut test in the schema's system_message grew a fourth bucket), and negative findings can go stale silently if runs never re-examine them — the open-questions surface that would routinely re-serve them is later work.
+
+## Relationships
+- **ENABLES**: [[a-mem-enumerates-its-own-unknowns-through-a-composed-open-questions-axis-that-computes-nothing-new]]
 
 ## Options
 

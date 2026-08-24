@@ -39,18 +39,19 @@ pub use loader::{
     load_schema_from_memory, load_schema_from_memory_with_format, load_sealed_package,
 };
 pub use manifest::{
-    Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance,
+    Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance, LabellingDef,
     ManualAuthoring, PerEdgeDescription, RelationshipDef, RelationshipMode, RelationshipVocabulary,
-    SchemaManifest,
+    SchemaManifest, SupportWalk,
 };
 pub use schema::Schema;
 pub use source::{
     INSTALL_PROVENANCE_FILE, SchemaSourceError, SchemaSourceFile, collect_schema_source,
 };
 pub use types::{
-    ConstraintDef, ConstraintSeverity, DueAxis, FieldType, Filterable, MetadataFieldDef,
-    PropagationDirection, RequiredCardinality, RequiredOutgoing, SectionDef, Serialization,
-    TableFormat, TypeDefinition, derive_section_key,
+    ConstraintDef, ConstraintSeverity, DueAxis, FieldType, Filterable, MetadataFieldDef, MustReach,
+    PropagationDirection, ReachDirection, RequiredCardinality, RequiredOutgoing, SectionDef,
+    Serialization, SignalDef, SignalKind, SignalLevel, SignalThreshold, TableFormat,
+    TypeDefinition, derive_section_key,
 };
 
 /// Name constants for the 10 built-in knowledge types shipped in the

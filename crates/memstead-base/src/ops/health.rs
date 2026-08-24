@@ -39,6 +39,8 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "tags",
     "missing_required_outgoing",
     "constraints",
+    "signals",
+    "labelling",
     "conformance",
     "integrity",
     "config",
@@ -993,6 +995,19 @@ pub fn unsatisfied_required_outgoing(
     td.required_outgoing
         .iter()
         .filter(|block| {
+            // A conditional block applies only while `when_field`
+            // holds `when_value` (same comparison the `requires_when`
+            // constraint uses). Unset field or any other value = the
+            // block is unarmed and never unsatisfied.
+            if let (Some(when_field), Some(when_value)) = (&block.when_field, &block.when_value) {
+                let armed = entity
+                    .metadata
+                    .get(when_field.as_str())
+                    .is_some_and(|v| v.to_frontmatter_string() == *when_value);
+                if !armed {
+                    return false;
+                }
+            }
             let count = entity
                 .relationships
                 .iter()
@@ -1004,6 +1019,8 @@ pub fn unsatisfied_required_outgoing(
             relationships: block.relationships.clone(),
             cardinality: block.cardinality.to_string(),
             severity: block.severity,
+            when_field: block.when_field.clone(),
+            when_value: block.when_value.clone(),
         })
         .collect()
 }
@@ -1045,10 +1062,29 @@ pub enum UnsatisfiedConstraint {
         field: String,
         /// The terminal value the ancestor holds.
         value: String,
-        rel_type: String,
+        /// Echo of a single-rel-type declaration — present exactly
+        /// when the schema declared `rel_type`, keeping the
+        /// long-standing payload byte-identical.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rel_type: Option<String>,
+        /// Echo of a relation-set declaration (`rel_types`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rel_types: Option<Vec<String>>,
         /// The tainting ancestor — the entity holding the terminal
         /// value that this entity (transitively) reaches.
         tainted_by: String,
+        severity: memstead_schema::ConstraintSeverity,
+    },
+    /// The entity reaches no non-stub entity of a terminal type along
+    /// the declared relation set — the declaration is echoed whole so
+    /// the reader sees which obligation went unmet without re-fetching
+    /// the schema. Health-sweep only, always warn-tier.
+    MustReach {
+        relationships: Vec<String>,
+        direction: memstead_schema::ReachDirection,
+        terminal_types: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_depth: Option<u32>,
         severity: memstead_schema::ConstraintSeverity,
     },
 }
@@ -1059,7 +1095,8 @@ impl UnsatisfiedConstraint {
             Self::RequiresWhen { severity, .. }
             | Self::Unique { severity, .. }
             | Self::EnumFromNeighbour { severity, .. }
-            | Self::StatusPropagation { severity, .. } => *severity,
+            | Self::StatusPropagation { severity, .. }
+            | Self::MustReach { severity, .. } => *severity,
         }
     }
 
@@ -1095,7 +1132,26 @@ impl UnsatisfiedConstraint {
                 value,
                 tainted_by,
                 ..
-            } => format!("status_propagation: tainted by '{tainted_by}' ({field}={value})"),
+            } => {
+                format!("status_propagation: tainted by '{tainted_by}' ({field}={value})")
+            }
+            Self::MustReach {
+                relationships,
+                direction,
+                terminal_types,
+                max_depth,
+                ..
+            } => {
+                let depth = match max_depth {
+                    Some(d) => format!(" within {d} hop(s)"),
+                    None => String::new(),
+                };
+                format!(
+                    "must_reach: no path via [{}] ({direction}) reaches a [{}] entity{depth}",
+                    relationships.join(", "),
+                    terminal_types.join(", ")
+                )
+            }
         }
     }
 }
@@ -1300,6 +1356,22 @@ pub fn collect_constraint_findings(
     );
     let mut by_entity: std::collections::BTreeMap<String, Bucket> = Default::default();
 
+    // Reverse adjacency for `must_reach` incoming walks — built once
+    // per sweep, and only when some pinned schema declares one (a
+    // workspace without the form pays nothing).
+    let needs_reverse = mem_schemas.values().any(|s| {
+        s.types.values().any(|t| {
+            t.must_reach
+                .iter()
+                .any(|ob| ob.direction == memstead_schema::ReachDirection::In)
+        })
+    });
+    let reverse: ReverseIndex = if needs_reverse {
+        build_reverse_index(store)
+    } else {
+        ReverseIndex::default()
+    };
+
     for entity in store.all_entities() {
         if entity.stub {
             continue;
@@ -1337,6 +1409,24 @@ pub fn collect_constraint_findings(
             }
         }
 
+        // Reachability obligations — health-sweep only by design (no
+        // single write completes a transitive absence, so the write
+        // path never evaluates these). The finding echoes the whole
+        // declaration.
+        for ob in &td.must_reach {
+            if !reaches_terminal(store, &reverse, &entity.id, ob) {
+                by_entity.entry(entity.id.0.clone()).or_default().0.push(
+                    UnsatisfiedConstraint::MustReach {
+                        relationships: ob.relationships.clone(),
+                        direction: ob.direction,
+                        terminal_types: ob.terminal_types.clone(),
+                        max_depth: ob.max_depth,
+                        severity: ob.severity,
+                    },
+                );
+            }
+        }
+
         if td.constraints.is_empty() {
             continue;
         }
@@ -1352,12 +1442,15 @@ pub fn collect_constraint_findings(
         }
 
         // Pass 2 — this entity as a taint source: it holds a declared
-        // terminal value, so sweep its dependents.
+        // terminal value, so sweep its dependents. The taint walks
+        // the declared relation set's union subgraph — a single
+        // `rel_type` is a one-element set.
         for c in &td.constraints {
             let ConstraintDef::StatusPropagation {
                 field,
                 value,
                 rel_type,
+                rel_types,
                 direction,
                 severity,
             } = c
@@ -1371,7 +1464,10 @@ pub fn collect_constraint_findings(
             if !terminal {
                 continue;
             }
-            for tainted in reach_transitively(store, &entity.id, rel_type, *direction) {
+            let set = c
+                .propagation_rel_types()
+                .expect("StatusPropagation always yields a set");
+            for tainted in reach_transitively(store, &entity.id, &set, *direction) {
                 if let Some(v) = mem_filter
                     && tainted.mem() != v
                 {
@@ -1382,6 +1478,7 @@ pub fn collect_constraint_findings(
                         field: field.clone(),
                         value: value.clone(),
                         rel_type: rel_type.clone(),
+                        rel_types: rel_types.clone(),
                         tainted_by: entity.id.to_string(),
                         severity: *severity,
                     },
@@ -1418,7 +1515,7 @@ pub fn collect_constraint_findings(
 fn reach_transitively(
     store: &Store,
     start: &crate::entity::EntityId,
-    rel_type: &str,
+    rel_types: &[String],
     direction: memstead_schema::PropagationDirection,
 ) -> Vec<crate::entity::EntityId> {
     use memstead_schema::PropagationDirection;
@@ -1433,7 +1530,7 @@ fn reach_transitively(
                 .filter(|e| {
                     e.relationships
                         .iter()
-                        .any(|r| r.rel_type == rel_type && r.target == current)
+                        .any(|r| rel_types.iter().any(|n| n == &r.rel_type) && r.target == current)
                 })
                 .map(|e| e.id.clone())
                 .collect(),
@@ -1442,7 +1539,7 @@ fn reach_transitively(
                 .map(|e| {
                     e.relationships
                         .iter()
-                        .filter(|r| r.rel_type == rel_type)
+                        .filter(|r| rel_types.iter().any(|n| n == &r.rel_type))
                         .map(|r| r.target.clone())
                         .collect()
                 })
@@ -1458,6 +1555,163 @@ fn reach_transitively(
         }
     }
     reached
+}
+
+/// Reverse adjacency for `must_reach` incoming walks: target id →
+/// `(rel_type, source id)` pairs. Built once per sweep so the
+/// incoming direction stays O(edges) instead of re-scanning the store
+/// per frontier node.
+type ReverseIndex =
+    std::collections::HashMap<crate::entity::EntityId, Vec<(String, crate::entity::EntityId)>>;
+
+fn build_reverse_index(store: &Store) -> ReverseIndex {
+    let mut idx = ReverseIndex::default();
+    for entity in store.all_entities() {
+        for rel in &entity.relationships {
+            idx.entry(rel.target.clone())
+                .or_default()
+                .push((rel.rel_type.clone(), entity.id.clone()));
+        }
+    }
+    idx
+}
+
+/// Whether `start` reaches at least one non-stub entity of a terminal
+/// type along the obligation's relation set, direction, and depth
+/// bound. Breadth-first with visited-set discipline (cycles along the
+/// walked set terminate); stubs terminate no obligation — they carry
+/// no outgoing edges and never count as reached terminals. Cross-mem
+/// edges are followed like any edge, matching the propagation walk
+/// and the cycle check (the engine's established traversal posture);
+/// the start entity itself never satisfies its own obligation.
+fn reaches_terminal(
+    store: &Store,
+    reverse: &ReverseIndex,
+    start: &crate::entity::EntityId,
+    ob: &memstead_schema::MustReach,
+) -> bool {
+    use memstead_schema::ReachDirection;
+    let mut seen: std::collections::HashSet<crate::entity::EntityId> =
+        std::iter::once(start.clone()).collect();
+    let mut frontier = vec![start.clone()];
+    let mut depth: u32 = 0;
+    while !frontier.is_empty() {
+        if let Some(max) = ob.max_depth
+            && depth >= max
+        {
+            return false;
+        }
+        depth += 1;
+        let mut next_frontier = Vec::new();
+        for current in frontier {
+            let next: Vec<crate::entity::EntityId> = match ob.direction {
+                ReachDirection::Out => store
+                    .get(&current)
+                    .map(|e| {
+                        e.relationships
+                            .iter()
+                            .filter(|r| ob.relationships.iter().any(|n| n == &r.rel_type))
+                            .map(|r| r.target.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                ReachDirection::In => reverse
+                    .get(&current)
+                    .map(|sources| {
+                        sources
+                            .iter()
+                            .filter(|(rel, _)| ob.relationships.iter().any(|n| n == rel))
+                            .map(|(_, src)| src.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            };
+            for id in next {
+                if seen.insert(id.clone()) {
+                    if store.get(&id).is_some_and(|e| {
+                        !e.stub && ob.terminal_types.iter().any(|t| t == &e.entity_type)
+                    }) {
+                        return true;
+                    }
+                    next_frontier.push(id);
+                }
+            }
+        }
+        frontier = next_frontier;
+    }
+    false
+}
+
+/// One entity's above-`none` signals, surfaced from the include-gated
+/// `signals` health axis. Mirrors [`ConstraintFindingReport`]'s
+/// envelope shape; the `signals` entries carry value, level, and
+/// contributors (the evidence ships with the number, always).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SignalReport {
+    pub id: crate::entity::EntityId,
+    pub title: String,
+    pub entity_type: String,
+    pub mem: String,
+    /// Only signals whose level is not `none`, in declaration order.
+    pub signals: Vec<super::signals::ComputedSignal>,
+}
+
+impl SignalReport {
+    /// Whether any entry is `warn`-level — the `--strict`
+    /// participation test (a `notice` never participates; that is the
+    /// whole difference between the two levels).
+    pub fn has_warn(&self) -> bool {
+        self.signals
+            .iter()
+            .any(|s| s.level == Some(memstead_schema::SignalLevel::Warn))
+    }
+}
+
+/// Collect every non-stub entity carrying at least one declared
+/// signal above `none`. Deterministic — sorted by `(mem, id)`;
+/// signals in declaration order, contributors sorted.
+pub fn collect_signal_reports(
+    store: &Store,
+    mem_filter: Option<&str>,
+    mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
+) -> Vec<SignalReport> {
+    let mut out = Vec::new();
+    for entity in store.all_entities() {
+        if entity.stub {
+            continue;
+        }
+        if let Some(v) = mem_filter
+            && entity.mem != v
+        {
+            continue;
+        }
+        let Some(mem_schema) = mem_schemas.get(entity.mem.as_str()) else {
+            continue;
+        };
+        let Some(td) = mem_schema.types.get(entity.entity_type.as_str()) else {
+            continue;
+        };
+        if td.signals.is_empty() {
+            continue;
+        }
+        let above: Vec<super::signals::ComputedSignal> =
+            super::signals::compute_signals(store, td, &entity.id)
+                .into_iter()
+                .filter(|s| s.level.is_some())
+                .collect();
+        if above.is_empty() {
+            continue;
+        }
+        out.push(SignalReport {
+            id: entity.id.clone(),
+            title: entity.title.clone(),
+            entity_type: entity.entity_type.clone(),
+            mem: entity.mem.clone(),
+            signals: above,
+        });
+    }
+    out.sort_by(|a, b| a.mem.cmp(&b.mem).then_with(|| a.id.0.cmp(&b.id.0)));
+    out
 }
 
 /// A defective section-format declaration a loaded schema carries
@@ -2945,5 +3199,472 @@ community:
             reports.is_empty(),
             "stub (no schema lookup) and unschemaed mem must be skipped; got {reports:?}",
         );
+    }
+
+    /// A conditional block arms only on the trigger value: the sweep
+    /// reports the armed violator (with the trigger named in the
+    /// block entry), and skips both the other-value and the
+    /// edge-satisfied entities.
+    #[test]
+    fn missing_required_outgoing_conditional_blocks_arm_on_trigger() {
+        use crate::entity::MetadataValue;
+        let manifest = r#"name: tests-ro-cond
+version: 0.1.0
+description: conditional required_outgoing health test schema
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: Hier
+      default_weight: 3.0
+    - name: _default
+      description: Fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let task_yaml = "name: task\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: status\n    description: workflow state\n    field_type: string\n    enum_values: [open, checked]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - status\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nrequired_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    when_field: status\n    when_value: checked\n";
+        let schema = std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("task".to_string(), task_yaml.to_string())],
+            )
+            .expect("conditional ro fixture schema must parse"),
+        );
+
+        let mut store = Store::new();
+        let mut armed = make_typed_entity("plan", "armed", "task");
+        armed
+            .metadata
+            .insert("status".into(), MetadataValue::String("checked".into()));
+        let mut other_value = make_typed_entity("plan", "quiet", "task");
+        other_value
+            .metadata
+            .insert("status".into(), MetadataValue::String("open".into()));
+        let unset = make_typed_entity("plan", "blank", "task");
+        let parent = make_typed_entity("plan", "parent", "task");
+        let mut satisfied = make_typed_entity("plan", "wired", "task");
+        satisfied
+            .metadata
+            .insert("status".into(), MetadataValue::String("checked".into()));
+        satisfied.relationships.push(crate::entity::Relationship {
+            rel_type: "PART_OF".into(),
+            target: parent.id.clone(),
+            description: None,
+        });
+        for e in [armed.clone(), other_value, unset, parent, satisfied] {
+            store.upsert(e.id.clone(), e);
+        }
+
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("plan".to_string(), schema);
+
+        let reports = collect_missing_required_outgoing(&store, None, &mem_schemas);
+        assert_eq!(
+            reports.len(),
+            1,
+            "only the armed edge-less entity is reported; got {reports:?}"
+        );
+        let r = &reports[0];
+        assert_eq!(r.id, armed.id);
+        assert_eq!(r.missing.len(), 1);
+        assert_eq!(r.missing[0].when_field.as_deref(), Some("status"));
+        assert_eq!(r.missing[0].when_value.as_deref(), Some("checked"));
+    }
+
+    // ----------------------------------------------------------------------
+    // must_reach reachability obligations
+    // ----------------------------------------------------------------------
+
+    /// Three-type argument-shaped fixture: claim / inference /
+    /// evidence over GROUNDS / CONCLUDES. The per-type `must_reach`
+    /// blocks are injected by the caller (empty string = none).
+    fn must_reach_schema(
+        claim_extra: &str,
+        inference_extra: &str,
+    ) -> std::sync::Arc<memstead_schema::Schema> {
+        let manifest = r#"name: tests-must-reach
+version: 0.1.0
+description: must_reach health test schema
+when_to_use: tests
+types:
+  - claim
+  - inference
+  - evidence
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: CONCLUDES
+      description: c
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let claim = format!("name: claim\ndescription: t\nwhen_to_use: Here\n{body}{claim_extra}");
+        let inference =
+            format!("name: inference\ndescription: t\nwhen_to_use: Here\n{body}{inference_extra}");
+        let evidence = format!("name: evidence\ndescription: t\nwhen_to_use: Here\n{body}");
+        std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[
+                    ("claim".to_string(), claim),
+                    ("inference".to_string(), inference),
+                    ("evidence".to_string(), evidence),
+                ],
+            )
+            .expect("must_reach fixture schema must parse"),
+        )
+    }
+
+    fn link(from: &mut crate::entity::Entity, rel: &str, to: &crate::entity::EntityId) {
+        from.relationships.push(crate::entity::Relationship {
+            rel_type: rel.into(),
+            target: to.clone(),
+            description: None,
+        });
+    }
+
+    fn must_reach_violations(r: &ConstraintFindingReport) -> Vec<&UnsatisfiedConstraint> {
+        r.violations
+            .iter()
+            .filter(|v| matches!(v, UnsatisfiedConstraint::MustReach { .. }))
+            .collect()
+    }
+
+    const CLAIM_GROUNDS_EVIDENCE: &str = "must_reach:\n  - relationships: [GROUNDS]\n    direction: out\n    terminal_types: [evidence]\n";
+
+    /// A conforming path (direct or transitive through a non-terminal)
+    /// is silent; an entity without one carries a finding echoing the
+    /// whole declaration.
+    #[test]
+    fn must_reach_conforming_path_silent_gap_reported() {
+        let schema = must_reach_schema(CLAIM_GROUNDS_EVIDENCE, "");
+        let mut store = Store::new();
+        let ev = make_typed_entity("arg", "ev", "evidence");
+        let mut direct = make_typed_entity("arg", "direct", "claim");
+        link(&mut direct, "GROUNDS", &ev.id);
+        let mut mid = make_typed_entity("arg", "mid", "claim");
+        let mut chained = make_typed_entity("arg", "chained", "claim");
+        link(&mut chained, "GROUNDS", &mid.id);
+        link(&mut mid, "GROUNDS", &ev.id);
+        let floating = make_typed_entity("arg", "floating", "claim");
+        for e in [ev, direct, mid, chained, floating.clone()] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema);
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        assert_eq!(reports.len(), 1, "only the pathless claim: {reports:?}");
+        assert_eq!(reports[0].id, floating.id);
+        let v = must_reach_violations(&reports[0]);
+        assert_eq!(v.len(), 1);
+        let UnsatisfiedConstraint::MustReach {
+            relationships,
+            direction,
+            terminal_types,
+            max_depth,
+            ..
+        } = v[0]
+        else {
+            panic!("expected must_reach finding");
+        };
+        assert_eq!(relationships, &vec!["GROUNDS".to_string()]);
+        assert_eq!(*direction, memstead_schema::ReachDirection::Out);
+        assert_eq!(terminal_types, &vec!["evidence".to_string()]);
+        assert_eq!(*max_depth, None);
+    }
+
+    /// The floating leap: an inference no premise reaches (zero
+    /// incoming edges of the set) is a finding; one incoming premise
+    /// edge silences it. Incoming direction with depth 1 is the
+    /// required-incoming-edge case.
+    #[test]
+    fn must_reach_one_hop_incoming_floating_leap() {
+        let schema = must_reach_schema(
+            "",
+            "must_reach:\n  - relationships: [GROUNDS]\n    direction: in\n    terminal_types: [claim]\n    max_depth: 1\n",
+        );
+        let mut store = Store::new();
+        let leap = make_typed_entity("arg", "leap", "inference");
+        let grounded = make_typed_entity("arg", "grounded", "inference");
+        let mut premise = make_typed_entity("arg", "premise", "claim");
+        link(&mut premise, "GROUNDS", &grounded.id);
+        for e in [leap.clone(), grounded, premise] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema);
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        assert_eq!(reports.len(), 1, "only the floating leap: {reports:?}");
+        assert_eq!(reports[0].id, leap.id);
+    }
+
+    /// A chain ending in a stub or in non-terminal types is a finding;
+    /// adding one conforming path clears it on the next sweep.
+    #[test]
+    fn must_reach_stub_and_non_terminal_chains_then_cleared() {
+        let schema = must_reach_schema(CLAIM_GROUNDS_EVIDENCE, "");
+        let mut store = Store::new();
+        let mut stub_ev = make_typed_entity("arg", "ghost", "evidence");
+        stub_ev.stub = true;
+        let mut to_stub = make_typed_entity("arg", "to-stub", "claim");
+        link(&mut to_stub, "GROUNDS", &stub_ev.id);
+        let dead_end = make_typed_entity("arg", "dead-end", "claim");
+        let mut to_claim = make_typed_entity("arg", "to-claim", "claim");
+        link(&mut to_claim, "GROUNDS", &dead_end.id);
+        for e in [stub_ev, to_stub.clone(), dead_end, to_claim.clone()] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema.clone());
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
+        assert!(
+            ids.contains(&to_stub.id.0.as_str()),
+            "stub terminates no obligation: {ids:?}"
+        );
+        assert!(
+            ids.contains(&to_claim.id.0.as_str()),
+            "non-terminal chain is a finding: {ids:?}"
+        );
+
+        // One conforming edge clears the finding on the next call.
+        let ev = make_typed_entity("arg", "real-ev", "evidence");
+        let mut repaired = store.get(&to_stub.id).unwrap().clone();
+        link(&mut repaired, "GROUNDS", &ev.id);
+        store.upsert(ev.id.clone(), ev);
+        store.upsert(repaired.id.clone(), repaired);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
+        assert!(
+            !ids.contains(&to_stub.id.0.as_str()),
+            "conforming path clears the finding: {ids:?}"
+        );
+    }
+
+    /// A cycle along the walked set terminates (visited-set
+    /// discipline): the sweep returns findings for both cycle members
+    /// instead of hanging.
+    #[test]
+    fn must_reach_cycles_terminate() {
+        let schema = must_reach_schema(CLAIM_GROUNDS_EVIDENCE, "");
+        let mut store = Store::new();
+        let mut a = make_typed_entity("arg", "cyc-a", "claim");
+        let mut b = make_typed_entity("arg", "cyc-b", "claim");
+        link(&mut a, "GROUNDS", &b.id);
+        link(&mut b, "GROUNDS", &a.id);
+        for e in [a, b] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema);
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        assert_eq!(reports.len(), 2, "both cycle members lack evidence");
+    }
+
+    /// Depth bound: a conforming path within the bound is silent; a
+    /// graph whose only conforming path exceeds the bound is a
+    /// finding.
+    #[test]
+    fn must_reach_depth_bound() {
+        let two_hop_store = || {
+            let mut store = Store::new();
+            let ev = make_typed_entity("arg", "ev", "evidence");
+            let mut mid = make_typed_entity("arg", "mid", "claim");
+            let mut start = make_typed_entity("arg", "start", "claim");
+            link(&mut start, "GROUNDS", &mid.id);
+            link(&mut mid, "GROUNDS", &ev.id);
+            for e in [ev, mid, start] {
+                store.upsert(e.id.clone(), e);
+            }
+            store
+        };
+        let bounded = |depth: u32| {
+            must_reach_schema(
+                &format!(
+                    "must_reach:\n  - relationships: [GROUNDS]\n    direction: out\n    terminal_types: [evidence]\n    max_depth: {depth}\n"
+                ),
+                "",
+            )
+        };
+
+        let store = two_hop_store();
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), bounded(1));
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        assert_eq!(
+            reports.len(),
+            1,
+            "the two-hop path exceeds depth 1 for the start claim: {reports:?}"
+        );
+        assert_eq!(reports[0].id.0, "arg--start");
+
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), bounded(2));
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        assert!(
+            reports.is_empty(),
+            "the same path satisfies depth 2: {reports:?}"
+        );
+    }
+
+    /// Two obligations on one type: exactly one finding, naming the
+    /// unsatisfied block.
+    #[test]
+    fn must_reach_two_obligations_one_finding() {
+        let schema = must_reach_schema(
+            "must_reach:\n  - relationships: [GROUNDS]\n    direction: out\n    terminal_types: [evidence]\n  - relationships: [CONCLUDES]\n    direction: out\n    terminal_types: [inference]\n",
+            "",
+        );
+        let mut store = Store::new();
+        let ev = make_typed_entity("arg", "ev", "evidence");
+        let mut c = make_typed_entity("arg", "half", "claim");
+        link(&mut c, "GROUNDS", &ev.id);
+        for e in [ev, c.clone()] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema);
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].id, c.id);
+        let v = must_reach_violations(&reports[0]);
+        assert_eq!(v.len(), 1, "only the unsatisfied obligation: {v:?}");
+        let UnsatisfiedConstraint::MustReach { relationships, .. } = v[0] else {
+            panic!("expected must_reach finding");
+        };
+        assert_eq!(relationships, &vec!["CONCLUDES".to_string()]);
+    }
+
+    /// `status_propagation` with `rel_types`: the taint crosses
+    /// rel-type boundaries along the union subgraph (the experiment's
+    /// withdrawn-evidence chain in the two-rel-type modelling), and
+    /// the finding echoes the set (`rel_types` present, `rel_type`
+    /// absent).
+    #[test]
+    fn status_propagation_rel_types_taints_across_type_boundaries() {
+        use crate::entity::MetadataValue;
+        let manifest = r#"name: tests-prop-set
+version: 0.1.0
+description: propagation relation-set test schema
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: CONCLUDES
+      description: c
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let claim_yaml = "name: claim\ndescription: t\nwhen_to_use: Here\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: dialectical standing\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_types: [GROUNDS, CONCLUDES]\n    direction: incoming\n";
+        let schema = std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("claim".to_string(), claim_yaml.to_string())],
+            )
+            .expect("propagation-set fixture schema must parse"),
+        );
+
+        let mut store = Store::new();
+        let mut withdrawn = make_typed_entity("arg", "withdrawn-ev", "claim");
+        withdrawn
+            .metadata
+            .insert("standing".into(), MetadataValue::String("withdrawn".into()));
+        let mut inference = make_typed_entity("arg", "inference", "claim");
+        link(&mut inference, "GROUNDS", &withdrawn.id);
+        let mut conclusion = make_typed_entity("arg", "conclusion", "claim");
+        link(&mut conclusion, "CONCLUDES", &inference.id);
+        let bystander = make_typed_entity("arg", "bystander", "claim");
+        for e in [withdrawn, inference.clone(), conclusion.clone(), bystander] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema);
+
+        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![conclusion.id.0.as_str(), inference.id.0.as_str()],
+            "the taint crosses the CONCLUDES/GROUNDS boundary, nothing else"
+        );
+        let UnsatisfiedConstraint::StatusPropagation {
+            rel_type,
+            rel_types,
+            tainted_by,
+            ..
+        } = &reports[0].violations[0]
+        else {
+            panic!("expected status_propagation finding");
+        };
+        assert_eq!(*rel_type, None, "set declarations echo no single name");
+        assert_eq!(
+            rel_types.as_deref(),
+            Some(&["GROUNDS".to_string(), "CONCLUDES".to_string()][..])
+        );
+        assert_eq!(tainted_by, "arg--withdrawn-ev");
+    }
+
+    /// Cross-mem edges satisfy an obligation like any edge; a mem
+    /// filter reports findings only for entities of the filtered mem.
+    #[test]
+    fn must_reach_cross_mem_path_and_mem_filter() {
+        let schema = must_reach_schema(CLAIM_GROUNDS_EVIDENCE, "");
+        let mut store = Store::new();
+        let far_ev = make_typed_entity("ground", "far-ev", "evidence");
+        let mut crossing = make_typed_entity("arg", "crossing", "claim");
+        link(&mut crossing, "GROUNDS", &far_ev.id);
+        let floating_arg = make_typed_entity("arg", "floating", "claim");
+        let floating_ground = make_typed_entity("ground", "floating", "claim");
+        for e in [far_ev, crossing, floating_arg.clone(), floating_ground] {
+            store.upsert(e.id.clone(), e);
+        }
+        let mut mem_schemas = HashMap::new();
+        mem_schemas.insert("arg".to_string(), schema.clone());
+        mem_schemas.insert("ground".to_string(), schema);
+
+        let all = collect_constraint_findings(&store, None, &mem_schemas);
+        assert_eq!(
+            all.len(),
+            2,
+            "the crossing claim is satisfied via the cross-mem edge: {all:?}"
+        );
+        let filtered = collect_constraint_findings(&store, Some("arg"), &mem_schemas);
+        assert_eq!(filtered.len(), 1, "mem filter narrows: {filtered:?}");
+        assert_eq!(filtered[0].id, floating_arg.id);
     }
 }

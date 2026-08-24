@@ -109,7 +109,7 @@ memstead mem init notes --schema default@1.3.0
 unzip landing-page-design-0.1.0.mem '.memstead/schema/*' -d unpack
 memstead schema install ./unpack/.memstead/schema
 memstead install ./landing-page-design-0.1.0.mem
-memstead stats     # expect: 287 nodes, 681 edges
+memstead status    # expect: 287 nodes, 681 edges
 
 # 2. Give a fresh agent (no prior context) the task prompt below,
 #    scoped to CLI reads only.

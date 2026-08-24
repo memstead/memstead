@@ -1785,6 +1785,593 @@ fn constraint_requires_when_value_outside_enum_rejected() {
     );
 }
 
+/// Wave-close polarity check: `ConstraintSeverity` has exactly two
+/// members (a `notice` in ANY severity slot refuses at load via the
+/// closed enum) — exercised per severity-bearing form present at wave
+/// close: requires_when, unique, enum_from_neighbour,
+/// status_propagation, required_outgoing, and format_severity.
+/// `SignalLevel` is its own enum; `signals` thresholds are where
+/// `notice` lives.
+#[test]
+fn notice_refuses_in_every_constraint_severity_slot() {
+    let cases: &[&str] = &[
+        "constraints:\n  - kind: requires_when\n    field: body\n    when_field: status\n    when_value: closed\n    severity: notice\n",
+        "constraints:\n  - kind: unique\n    fields: [status]\n    severity: notice\n",
+        "constraints:\n  - kind: enum_from_neighbour\n    field: status\n    rel_type: REFERENCES\n    section: body\n    severity: notice\n",
+        "constraints:\n  - kind: status_propagation\n    field: status\n    value: closed\n    rel_type: PART_OF\n    direction: incoming\n    severity: notice\n",
+        "required_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    severity: notice\n",
+    ];
+    for case in cases {
+        let t = minimal_type() + case;
+        load(&minimal_manifest(), &[("sample", &t)])
+            .expect_err(&format!("notice must refuse in: {case}"));
+    }
+    // format_severity shares the same closed enum.
+    let t = minimal_type().replace(
+        "    catch_all: true\n",
+        "    catch_all: true\n    content: \"paragraph\"\n    format_severity: notice\n",
+    );
+    load(&minimal_manifest(), &[("sample", &t)])
+        .expect_err("notice must refuse in format_severity");
+}
+
+// ---------------------------------------------------------------------------
+// Grounded labelling (`relationships.labelling`)
+// ---------------------------------------------------------------------------
+
+/// A valid labelling declaration loads and round-trips, support walk
+/// included.
+#[test]
+fn labelling_accepted_round_trips() {
+    use memstead_schema::ReachDirection;
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [PART_OF]\n      direction: out\n      terminal_types: [sample]\n",
+    );
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("must load");
+    let lab = schema
+        .manifest
+        .relationships
+        .labelling
+        .as_ref()
+        .expect("labelling present");
+    assert_eq!(lab.attack, vec!["REFERENCES"]);
+    let sup = lab.support.as_ref().expect("support present");
+    assert_eq!(sup.relationships, vec!["PART_OF"]);
+    assert_eq!(sup.direction, ReachDirection::Out);
+    assert_eq!(sup.terminal_types, vec!["sample"]);
+}
+
+/// Refusals, same rigour for attack and support: empty or undeclared
+/// attack sets; a support block with an undeclared rel-type, an
+/// unknown direction, or an unknown terminal type.
+#[test]
+fn labelling_malformed_declarations_rejected() {
+    let cases: &[(&str, &str)] = &[
+        ("  labelling:\n    attack: []\n", "(empty)"),
+        ("  labelling:\n    attack: [PHANTOM]\n", "PHANTOM"),
+        (
+            "  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [GHOSTLY]\n      direction: out\n      terminal_types: [sample]\n",
+            "GHOSTLY",
+        ),
+        (
+            "  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [PART_OF]\n      direction: out\n      terminal_types: [phantasm]\n",
+            "phantasm",
+        ),
+    ];
+    for (decl, offender) in cases {
+        let manifest = minimal_manifest().replace(
+            "relationships:\n  mode: strict\n",
+            &format!("relationships:\n  mode: strict\n{decl}"),
+        );
+        let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+        assert!(
+            matches!(err, SchemaLoadError::InvalidLabelling { offender: ref o, .. } if o == offender),
+            "case {offender}: got {err}"
+        );
+    }
+    // Unknown direction fails deserialization (closed enum).
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  labelling:\n    attack: [REFERENCES]\n    support:\n      relationships: [PART_OF]\n      direction: sideways\n      terminal_types: [sample]\n",
+    );
+    load(&manifest, &[("sample", &minimal_type())]).expect_err("unknown direction must fail");
+    // Unknown keys refuse via the format's posture.
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  labelling:\n    attack: [REFERENCES]\n    semantics: preferred\n",
+    );
+    load(&manifest, &[("sample", &minimal_type())]).expect_err("unknown key must fail");
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate signals (`signals`)
+// ---------------------------------------------------------------------------
+
+/// A valid `edge_load` signal loads; thresholds map counts to levels
+/// with `none` below the first threshold and boundary values landing
+/// on their step.
+#[test]
+fn signals_accepted_and_thresholds_map_counts() {
+    use memstead_schema::SignalLevel;
+    let t = minimal_type()
+        + r#"signals:
+  - name: attack_load
+    kind: edge_load
+    relationships: [REFERENCES]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: notice
+      - at_least: 3
+        level: warn
+  - name: open_refs
+    kind: edge_load
+    relationships: [REFERENCES]
+    direction: in
+    neighbour_field: status
+    neighbour_value: closed
+    thresholds:
+      - at_least: 1
+        level: notice
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.signals.len(), 2);
+    let sig = &td.signals[0];
+    assert_eq!(sig.level_for(0), None);
+    assert_eq!(sig.level_for(1), Some(SignalLevel::Notice));
+    assert_eq!(sig.level_for(2), Some(SignalLevel::Notice));
+    assert_eq!(sig.level_for(3), Some(SignalLevel::Warn));
+    assert_eq!(sig.level_for(100), Some(SignalLevel::Warn));
+    assert_eq!(td.signals[1].neighbour_field.as_deref(), Some("status"));
+}
+
+/// The refusal set is the design: bad names, duplicates, undeclared
+/// rel-types, empty sets, non-increasing or empty thresholds, and
+/// half-declared or undeclared neighbour pairs all refuse at load.
+#[test]
+fn signals_malformed_declarations_rejected() {
+    let cases: &[(&str, &str)] = &[
+        // name outside [a-z][a-z0-9_]*
+        (
+            "  - name: Attack\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "Attack",
+        ),
+        // undeclared rel-type
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [GHOSTLY]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "GHOSTLY",
+        ),
+        // empty relationships
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: []\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "a",
+        ),
+        // empty thresholds
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds: []\n",
+            "a",
+        ),
+        // non-increasing thresholds
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds:\n      - at_least: 3\n        level: notice\n      - at_least: 3\n        level: warn\n",
+            "3",
+        ),
+        // neighbour_field without neighbour_value
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    neighbour_field: status\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "status",
+        ),
+        // undeclared neighbour_field
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    neighbour_field: phase\n    neighbour_value: closed\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "phase",
+        ),
+        // neighbour_value outside every declaring type's enum
+        (
+            "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    neighbour_field: status\n    neighbour_value: archived\n    thresholds:\n      - at_least: 1\n        level: notice\n",
+            "archived",
+        ),
+    ];
+    for (decl, offender) in cases {
+        let t = minimal_type() + &format!("signals:\n{decl}");
+        let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+        // Undeclared rel-types refuse through the shared `check_rel`
+        // (UndeclaredRelationship); every signal-specific defect
+        // through InvalidConstraint kind "signal" — both name the
+        // offender.
+        assert!(
+            format!("{err}").contains(offender),
+            "case {offender}: got {err}"
+        );
+        if *offender != "GHOSTLY" {
+            assert!(
+                matches!(
+                    err,
+                    SchemaLoadError::InvalidConstraint { kind: "signal", .. }
+                ),
+                "case {offender}: got {err}"
+            );
+        }
+    }
+    // duplicate name on one type
+    let dup = "  - name: a\n    kind: edge_load\n    relationships: [REFERENCES]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n";
+    let t = minimal_type() + &format!("signals:\n{dup}{dup}");
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(format!("{err}").contains("duplicate signal name"), "{err}");
+}
+
+/// The level and kind enums are closed: `level: block`, an unknown
+/// `kind`, and a `notice` in a constraint `severity` slot all fail
+/// deserialization (SignalLevel is not ConstraintSeverity).
+#[test]
+fn signals_closed_enums_reject_cross_contamination() {
+    let t = minimal_type()
+        + r#"signals:
+  - name: a
+    kind: edge_load
+    relationships: [REFERENCES]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: block
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("level block must fail");
+    let t = minimal_type()
+        + r#"signals:
+  - name: a
+    kind: edge_ratio
+    relationships: [REFERENCES]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: notice
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown kind must fail");
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: notice
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("notice in a severity slot must fail");
+}
+
+// ---------------------------------------------------------------------------
+// Acyclicity sets (`relationships.acyclic_sets`)
+// ---------------------------------------------------------------------------
+
+/// A valid two-member set loads and round-trips; the per-definition
+/// `acyclic` flag may coexist.
+#[test]
+fn acyclic_sets_accepted_round_trips() {
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  acyclic_sets:\n    - [PART_OF, REFERENCES]\n",
+    );
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("must load");
+    assert_eq!(
+        schema.manifest.relationships.acyclic_sets,
+        vec![vec!["PART_OF".to_string(), "REFERENCES".to_string()]]
+    );
+    assert_eq!(
+        schema.acyclic_set_containing("REFERENCES"),
+        Some(&["PART_OF".to_string(), "REFERENCES".to_string()][..])
+    );
+    assert_eq!(schema.acyclic_set_containing("_default"), None);
+}
+
+#[test]
+fn acyclic_sets_undeclared_name_rejected() {
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  acyclic_sets:\n    - [PART_OF, FLYING]\n",
+    );
+    let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidAcyclicSet { ref offender, .. } if offender == "FLYING"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn acyclic_sets_overlap_rejected() {
+    let manifest = minimal_manifest().replace(
+        "relationships:\n  mode: strict\n",
+        "relationships:\n  mode: strict\n  acyclic_sets:\n    - [PART_OF, REFERENCES]\n    - [REFERENCES, PART_OF]\n",
+    );
+    let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+    assert!(
+        format!("{err}").contains("at most one acyclicity set"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn acyclic_sets_single_member_and_empty_rejected() {
+    for sets in [
+        "  acyclic_sets:\n    - [PART_OF]\n",
+        "  acyclic_sets:\n    - []\n",
+    ] {
+        let manifest = minimal_manifest().replace(
+            "relationships:\n  mode: strict\n",
+            &format!("relationships:\n  mode: strict\n{sets}"),
+        );
+        let err = load(&manifest, &[("sample", &minimal_type())]).expect_err("must fail");
+        assert!(
+            matches!(err, SchemaLoadError::InvalidAcyclicSet { .. }),
+            "got: {err}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// status_propagation relation sets (`rel_types`)
+// ---------------------------------------------------------------------------
+
+/// The set form parses; the single-name form keeps parsing; the
+/// effective set accessor normalises both.
+#[test]
+fn constraint_status_propagation_rel_types_accepted() {
+    use memstead_schema::ConstraintDef;
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_types: [PART_OF, REFERENCES]
+    direction: incoming
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_type: PART_OF
+    direction: outgoing
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(
+        td.constraints[0].propagation_rel_types(),
+        Some(vec!["PART_OF".to_string(), "REFERENCES".to_string()])
+    );
+    assert_eq!(
+        td.constraints[1].propagation_rel_types(),
+        Some(vec!["PART_OF".to_string()])
+    );
+    let ConstraintDef::StatusPropagation {
+        rel_type,
+        rel_types,
+        ..
+    } = &td.constraints[1]
+    else {
+        panic!("expected status_propagation");
+    };
+    assert_eq!(rel_type.as_deref(), Some("PART_OF"));
+    assert_eq!(*rel_types, None);
+}
+
+#[test]
+fn constraint_status_propagation_both_keys_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_type: PART_OF
+    rel_types: [REFERENCES]
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "status_propagation", ref offender, .. } if offender == "rel_type"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_status_propagation_neither_key_rejected() {
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "status_propagation",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn constraint_status_propagation_empty_or_undeclared_rel_types_rejected() {
+    let empty = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_types: []
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &empty)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "status_propagation",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+    let undeclared = minimal_type()
+        + r#"constraints:
+  - kind: status_propagation
+    field: status
+    value: closed
+    rel_types: [PART_OF, GHOSTLY]
+    direction: incoming
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &undeclared)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "status_propagation", ref offender, .. } if offender == "GHOSTLY"),
+        "got: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reachability obligations (`must_reach`)
+// ---------------------------------------------------------------------------
+
+/// A valid obligation loads and round-trips; severity defaults to
+/// warn; `max_depth` is optional.
+#[test]
+fn must_reach_accepted_round_trips() {
+    use memstead_schema::{ConstraintSeverity, ReachDirection};
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF, REFERENCES]
+    direction: out
+    terminal_types: [sample]
+    max_depth: 3
+  - relationships: [REFERENCES]
+    direction: in
+    terminal_types: [sample]
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.must_reach.len(), 2);
+    assert_eq!(
+        td.must_reach[0].relationships,
+        vec!["PART_OF", "REFERENCES"]
+    );
+    assert_eq!(td.must_reach[0].direction, ReachDirection::Out);
+    assert_eq!(td.must_reach[0].terminal_types, vec!["sample"]);
+    assert_eq!(td.must_reach[0].max_depth, Some(3));
+    assert_eq!(td.must_reach[0].severity, ConstraintSeverity::Warn);
+    assert_eq!(td.must_reach[1].direction, ReachDirection::In);
+    assert_eq!(td.must_reach[1].max_depth, None);
+}
+
+/// `block` is a promise the engine will not keep on a transitive
+/// property — the loader refuses it.
+#[test]
+fn must_reach_block_severity_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: [sample]
+    severity: block
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "must_reach", ref offender, .. } if offender == "block"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn must_reach_undeclared_relationship_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [FLOATS]
+    direction: out
+    terminal_types: [sample]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(format!("{err}").contains("FLOATS"), "got: {err}");
+}
+
+#[test]
+fn must_reach_unknown_terminal_type_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: [ghost]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "must_reach", ref offender, .. } if offender == "ghost"),
+        "got: {err}"
+    );
+}
+
+/// The direction vocabulary is closed (`out` / `in`) — anything else
+/// fails deserialization, so no declaration loads half-understood.
+#[test]
+fn must_reach_unknown_direction_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: sideways
+    terminal_types: [sample]
+"#;
+    load(&minimal_manifest(), &[("sample", &t)]).expect_err("unknown direction must fail");
+}
+
+#[test]
+fn must_reach_zero_depth_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: [sample]
+    max_depth: 0
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "must_reach", ref offender, .. } if offender == "0"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn must_reach_empty_lists_rejected() {
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: []
+    direction: out
+    terminal_types: [sample]
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "must_reach",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+    let t = minimal_type()
+        + r#"must_reach:
+  - relationships: [PART_OF]
+    direction: out
+    terminal_types: []
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(
+            err,
+            SchemaLoadError::InvalidConstraint {
+                kind: "must_reach",
+                ..
+            }
+        ),
+        "got: {err}"
+    );
+}
+
 /// The `kind` tag is closed: a constraint form the engine does not
 /// evaluate fails deserialization — no declaration can load and be
 /// silently ignored (the `no_self_loop_relationships` lesson).
@@ -1822,6 +2409,123 @@ fn required_outgoing_severity_parses_and_rejects_unknown() {
     severity: fatal
 "#;
     load(&minimal_manifest(), &[("sample", &bad)]).expect_err("unknown severity must fail");
+}
+
+// ---------------------------------------------------------------------------
+// Conditional required_outgoing (`when_field` / `when_value`)
+// ---------------------------------------------------------------------------
+
+/// A conditional block loads alongside an unconditional one; the
+/// condition pair round-trips, and the unconditional block keeps
+/// `None` for both keys.
+#[test]
+fn required_outgoing_conditional_block_accepted() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [REFERENCES]
+    cardinality: at_least_one
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    severity: block
+    when_field: status
+    when_value: closed
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    assert_eq!(td.required_outgoing.len(), 2);
+    assert_eq!(td.required_outgoing[0].when_field, None);
+    assert_eq!(td.required_outgoing[0].when_value, None);
+    assert_eq!(
+        td.required_outgoing[1].when_field.as_deref(),
+        Some("status")
+    );
+    assert_eq!(
+        td.required_outgoing[1].when_value.as_deref(),
+        Some("closed")
+    );
+}
+
+#[test]
+fn required_outgoing_when_field_without_when_value_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: status
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "status"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn required_outgoing_when_value_without_when_field_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_value: closed
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "closed"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn required_outgoing_when_field_undeclared_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: phase
+    when_value: closed
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "phase"),
+        "got: {err}"
+    );
+}
+
+/// Stricter than `requires_when`: a trigger field without
+/// `enum_values` refuses — a free-text-armed edge obligation would
+/// never fire predictably.
+#[test]
+fn required_outgoing_when_field_non_enum_rejected() {
+    let t = minimal_type().replace(
+        "metadata_fields:\n",
+        "metadata_fields:\n  - key: owner\n    description: Free-text owner\n    field_type: string\n",
+    ) + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: owner
+    when_value: someone
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "owner"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn required_outgoing_when_value_outside_enum_rejected() {
+    let t = minimal_type()
+        + r#"required_outgoing:
+  - relationships: [PART_OF]
+    cardinality: at_least_one
+    when_field: status
+    when_value: archived
+"#;
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidConstraint { kind: "required_outgoing", ref offender, .. } if offender == "archived"),
+        "got: {err}"
+    );
 }
 
 /// Forms 2/3/5 accept valid declarations; uniqueness defaults to

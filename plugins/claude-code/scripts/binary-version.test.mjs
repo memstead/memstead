@@ -10,9 +10,13 @@ import {
   parseVersion,
   isAtLeast,
   ANCHORS_MIN,
+  REPO_MIN,
+  CONSUME_MIN,
+  CAPABILITIES,
   recordBinaryVersion,
   readRecordedVersion,
   anchorsGate,
+  capabilityGate,
   resolveWorkspaceRootFrom,
 } from './binary-version.mjs';
 
@@ -117,5 +121,52 @@ test('gate FAILS CLOSED for a below-threshold recorded version', () => {
   assert.equal(g.capable, false);
   assert.match(g.reason, /predates anchors support/);
   assert.match(g.reason, /without anchors/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+// ── the two flag gates on skill paths: --repo (setup) and --consume (sync, ingest router)
+
+test('repo and consume gates: a below-minimum record degrades with a sentence naming both versions', () => {
+  const root = ws();
+  recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.9.0' }) });
+  for (const [name, flag] of [['repo', '--repo'], ['consume', '--consume']]) {
+    const g = capabilityGate(root, name);
+    assert.equal(g.capable, false, name);
+    assert.deepEqual(g.version, { major: 0, minor: 9, patch: 0 });
+    assert.ok(g.reason.includes(`recorded binary 0.9.0 predates \`${flag}\` support (needs 0.10.0)`), g.reason);
+  }
+  assert.match(capabilityGate(root, 'repo').reason, /proceeding with the plain `quickstart` form/);
+  assert.match(capabilityGate(root, 'consume').reason, /rendering the brief as a pure read/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('repo and consume gates: an at-or-above record passes silently (capable, no degraded sentence)', () => {
+  const root = ws();
+  recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.10.0+gabc1234' }) });
+  for (const name of ['repo', 'consume']) {
+    const g = capabilityGate(root, name);
+    assert.equal(g.capable, true, name);
+    assert.doesNotMatch(g.reason, /predates|proceeding|pure read/);
+  }
+  recordBinaryVersion(root, { run: () => ({ status: 0, stdout: 'memstead 0.11.2' }) });
+  assert.equal(capabilityGate(root, 'repo').capable, true);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('repo and consume gates: a missing or unparseable record degrades like below-minimum', () => {
+  const root = ws();
+  for (const name of ['repo', 'consume']) {
+    const g = capabilityGate(root, name);
+    assert.equal(g.capable, false, name);
+    assert.equal(g.version, null);
+    assert.match(g.reason, /no recorded binary version/);
+  }
+  mkdirSync(join(root, '.memstead.cache', 'plugin'), { recursive: true });
+  writeFileSync(join(root, '.memstead.cache', 'plugin', 'binary-version.json'), '{not json');
+  assert.equal(capabilityGate(root, 'consume').capable, false);
+  assert.throws(() => capabilityGate(root, 'fail-on-findings'), /unknown capability/);
+  assert.deepEqual(Object.keys(CAPABILITIES), ['anchors', 'repo', 'consume']);
+  assert.deepEqual(REPO_MIN, { major: 0, minor: 10, patch: 0 });
+  assert.deepEqual(CONSUME_MIN, { major: 0, minor: 10, patch: 0 });
   rmSync(root, { recursive: true, force: true });
 });

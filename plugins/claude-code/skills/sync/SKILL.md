@@ -34,7 +34,7 @@ findings and a `#verified` baseline. Read-only on your source; refusals verbatim
    memstead --json --workspace "$WS" projection brief --all --operation any --consume
    ```
 
-   (`--consume` takes the slot you act on; without it a render is a pure read.)
+   (`--consume` takes the slot; gated like step 2's anchors via `gate "$(pwd)" consume`: not capable → drop it, say the `reason`.)
 
    No bindings configured → say so and stop. Nothing due → say so and stop —
    and under a recurring loop (a scheduler re-prompting this conversation), a

@@ -26,7 +26,31 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 /// Render a single entity as markdown with frontmatter metadata.
+///
+/// Projection-free by contract: this is the canonical form (anchor
+/// hashing, export, parser round-trips). Serving surfaces that
+/// present declared signals or the grounded labelling call
+/// [`render_entity_markdown_with_signals`] instead — computed values
+/// are a projection and must never enter the canonical bytes.
 pub fn render_entity_markdown(entity: &Entity, sections_filter: Option<&[String]>) -> String {
+    render_entity_markdown_with_signals(entity, sections_filter, None, None)
+}
+
+/// Serving-surface variant of [`render_entity_markdown`]: when the
+/// entity's type declares signals, the headline (`name`, `value`,
+/// `level` per signal) rides in the frontmatter block — the one
+/// pre-body slot the format has — and the contributors in a
+/// `## Signals` section appended after the body, in the style of
+/// `## Relations`. When the mem's schema declares labelling, the
+/// grounded label rides as `_label` in the frontmatter and the
+/// evidence in a `## Labelling` section. `None`/`None` renders
+/// byte-identically to the canonical form.
+pub fn render_entity_markdown_with_signals(
+    entity: &Entity,
+    sections_filter: Option<&[String]>,
+    signals: Option<&[crate::ops::signals::ComputedSignal]>,
+    labelling: Option<&crate::ops::labelling::LabellingView>,
+) -> String {
     let body_text = render_entity_body(entity, sections_filter);
 
     // Frontmatter — _tokens reflects the rendered output, not the full entity.
@@ -62,6 +86,23 @@ pub fn render_entity_markdown(entity: &Entity, sections_filter: Option<&[String]
             }
         }
     }
+    // Signal headline — name, value, level per declared signal, in
+    // declaration order. The contributors ride in the appended
+    // `## Signals` section below, never here.
+    if let Some(sigs) = signals
+        && !sigs.is_empty()
+    {
+        let headline: Vec<String> = sigs
+            .iter()
+            .map(|s| format!("{}: {} ({})", s.name, s.value, s.level_wire()))
+            .collect();
+        lines.push(format!("_signals: [{}]", headline.join(", ")));
+    }
+    // Grounded-label headline; the evidence rides in the appended
+    // `## Labelling` section below.
+    if let Some(lab) = labelling {
+        lines.push(format!("_label: {}", lab.label.wire()));
+    }
     let tokens = estimate_tokens(&body_text);
     lines.push(format!("_tokens: {tokens}"));
 
@@ -85,6 +126,65 @@ pub fn render_entity_markdown(entity: &Entity, sections_filter: Option<&[String]
     lines.push(String::new());
 
     lines.push(body_text);
+
+    // Contributors — the evidence ships with the number, always. One
+    // bullet per signal, mirroring the `## Relations` append style.
+    if let Some(sigs) = signals
+        && !sigs.is_empty()
+    {
+        lines.push(String::new());
+        lines.push("## Signals".to_string());
+        lines.push(String::new());
+        for s in sigs {
+            if s.contributors.is_empty() {
+                lines.push(format!(
+                    "- **{}**: {} ({})",
+                    s.name,
+                    s.value,
+                    s.level_wire()
+                ));
+            } else {
+                let ids: Vec<String> = s.contributors.iter().map(|c| c.to_string()).collect();
+                lines.push(format!(
+                    "- **{}**: {} ({}) — {}",
+                    s.name,
+                    s.value,
+                    s.level_wire(),
+                    ids.join(", ")
+                ));
+            }
+        }
+    }
+    // Labelling evidence — a defeated label always carries its
+    // accepted direct attackers (one unanswered counter-claim
+    // flipping a well-supported claim is visible as exactly that);
+    // an undecided label the open attacker set that keeps it open.
+    if let Some(lab) = labelling {
+        lines.push(String::new());
+        lines.push("## Labelling".to_string());
+        lines.push(String::new());
+        lines.push(format!("- label: {}", lab.label.wire()));
+        if !lab.defeated_by.is_empty() {
+            lines.push(format!("- defeated_by: {}", lab.defeated_by.join(", ")));
+        }
+        if !lab.undecided_by.is_empty() {
+            lines.push(format!("- undecided_by: {}", lab.undecided_by.join(", ")));
+        }
+        if let Some(shape) = &lab.shape {
+            let share = match shape.terminal_share {
+                Some(s) => format!("{s:.2}"),
+                None => "null".to_string(),
+            };
+            lines.push(format!(
+                "- shape: depth {}, branching {:.2}, terminal_share {}, defeated_in_support {}, undecided_in_support {}",
+                shape.depth,
+                shape.branching,
+                share,
+                shape.defeated_in_support,
+                shape.undecided_in_support,
+            ));
+        }
+    }
     lines.join("\n")
 }
 
@@ -705,8 +805,29 @@ pub fn build_entity_envelope(
     origin: OriginClass,
     outgoing_edges: &[crate::store::Edge],
     incoming_edges: Option<&[crate::store::InEdge]>,
+    signals: Option<&[crate::ops::signals::ComputedSignal]>,
+    labelling: Option<&crate::ops::labelling::LabellingView>,
 ) -> serde_json::Value {
     let mut envelope = serde_json::Map::new();
+    // Declared aggregate signals — present exactly when the entity's
+    // type declares any (the schema author opted in by declaring; a
+    // reader who must ask for the signal is a reader who forgets to).
+    // Undeclared types keep their byte-identical envelope.
+    if let Some(sigs) = signals
+        && !sigs.is_empty()
+    {
+        envelope.insert(
+            "_signals".to_string(),
+            crate::ops::signals::signals_json(sigs),
+        );
+    }
+    // Grounded labelling — present exactly when the mem's schema
+    // declares `relationships.labelling`; the label ships with its
+    // evidence, and the shape block exactly when `support` is
+    // declared.
+    if let Some(lab) = labelling {
+        envelope.insert("_labelling".to_string(), lab.to_json());
+    }
     envelope.insert(
         "_hash".to_string(),
         serde_json::Value::String(entity.content_hash.clone()),
@@ -1663,11 +1784,20 @@ pub fn build_schema_payload_scoped(
                 .required_outgoing
                 .iter()
                 .map(|block| {
-                    serde_json::json!({
+                    let mut b = serde_json::json!({
                         "relationships": block.relationships,
                         "cardinality": block.cardinality.to_string(),
                         "severity": block.severity,
-                    })
+                    });
+                    // Conditional blocks carry their trigger at both
+                    // verbosity levels (the lite skeleton projects this
+                    // object unchanged); unconditional blocks keep
+                    // their byte-identical three-key shape.
+                    if let (Some(wf), Some(wv)) = (&block.when_field, &block.when_value) {
+                        b["when_field"] = serde_json::json!(wf);
+                        b["when_value"] = serde_json::json!(wv);
+                    }
+                    b
                 })
                 .collect();
 
@@ -1718,16 +1848,28 @@ pub fn build_schema_payload_scoped(
                         field,
                         value,
                         rel_type,
+                        rel_types,
                         direction,
                         severity,
-                    } => serde_json::json!({
-                        "kind": "status_propagation",
-                        "field": field,
-                        "value": value,
-                        "rel_type": rel_type,
-                        "direction": direction,
-                        "severity": severity,
-                    }),
+                    } => {
+                        let mut c = serde_json::json!({
+                            "kind": "status_propagation",
+                            "field": field,
+                            "value": value,
+                            "direction": direction,
+                            "severity": severity,
+                        });
+                        // Echo the declaration's own shape: the
+                        // single-name key stays byte-identical, a
+                        // relation set rides under `rel_types`.
+                        if let Some(single) = rel_type {
+                            c["rel_type"] = serde_json::json!(single);
+                        }
+                        if let Some(set) = rel_types {
+                            c["rel_types"] = serde_json::json!(set);
+                        }
+                        c
+                    }
                 })
                 .collect();
             let mut obj = serde_json::json!({
@@ -1743,6 +1885,24 @@ pub fn build_schema_payload_scoped(
                 "required_outgoing": required_outgoing,
                 "constraints": constraints,
             });
+            // Reachability obligations — like `required_outgoing`, a
+            // health condition the schema response must not hide; the
+            // declaration is echoed in its YAML shape. Emitted only
+            // when declared so undeclared schemas keep their payload
+            // bytes unchanged.
+            if !td.must_reach.is_empty() {
+                obj["must_reach"] = serde_json::to_value(&td.must_reach)
+                    .expect("must_reach declarations serialize");
+            }
+            // Aggregate-signal declarations — served behaviour (the
+            // `_signals` read insert, the health axis, the crossing
+            // warning) an agent must see at introspection time; the
+            // declaration is echoed in its YAML shape. Emitted only
+            // when declared.
+            if !td.signals.is_empty() {
+                obj["signals"] =
+                    serde_json::to_value(&td.signals).expect("signal declarations serialize");
+            }
             // Leaf declaration — a legality-relevant fact an agent
             // planning writes must see; emitted only when true so
             // undeclared schemas keep their payload bytes unchanged.
@@ -1807,6 +1967,28 @@ pub fn build_schema_payload_scoped(
         "origin": origin.as_wire(),
     });
     let obj = payload.as_object_mut().unwrap();
+
+    // Declared acyclicity sets — a legality condition on the relate
+    // path (a cycle in a set's union subgraph refuses), so it ships in
+    // BOTH modes; emitted only when declared so undeclared schemas
+    // keep their payload bytes unchanged.
+    if !manifest.relationships.acyclic_sets.is_empty() {
+        obj.insert(
+            "acyclic_sets".into(),
+            serde_json::to_value(&manifest.relationships.acyclic_sets)
+                .expect("acyclic_sets serialize"),
+        );
+    }
+    // Grounded-labelling declaration — served behaviour (the
+    // `_labelling` read insert and the `labelling` health axis) an
+    // agent must see at introspection time; echoed in its YAML shape,
+    // in BOTH modes, only when declared.
+    if let Some(lab) = &manifest.relationships.labelling {
+        obj.insert(
+            "labelling".into(),
+            serde_json::to_value(lab).expect("labelling declaration serializes"),
+        );
+    }
 
     // Schema-level prose — FULL mode only. An agent that asked for the
     // lite skeleton is orienting on structure; the human-readable
@@ -2144,6 +2326,16 @@ fn lite_types_projection(types_full: &[serde_json::Value]) -> Vec<serde_json::Va
             // a legality-relevant per-type fact.
             if t.get("leaf") == Some(&serde_json::json!(true)) {
                 o["leaf"] = serde_json::json!(true);
+            }
+            // Reachability obligations ride whole — a health condition
+            // the skeleton must not hide; key present only when the
+            // full payload carries it.
+            if let Some(mr) = t.get("must_reach") {
+                o["must_reach"] = mr.clone();
+            }
+            // Signal declarations ride whole for the same reason.
+            if let Some(sig) = t.get("signals") {
+                o["signals"] = sig.clone();
             }
             o
         })
@@ -2593,6 +2785,7 @@ mod tests {
                 key: "note".to_string(),
                 heading: "Note".to_string(),
                 required: false,
+                load_bearing: None,
                 search_weight: 1.0,
                 catch_all: false,
                 write_rules: vec![],
@@ -2620,6 +2813,8 @@ mod tests {
             staleness_threshold_days: 90,
             write_rules: vec![],
             required_outgoing: vec![],
+            must_reach: vec![],
+            signals: vec![],
             constraints: vec![],
             declared_metadata_keys: vec![],
         };
@@ -3164,6 +3359,8 @@ mod tests {
             OriginClass::FirstParty,
             &edges,
             None,
+            None,
+            None,
         );
         let relationships = env["relationships"].as_array().expect("array");
         let refs = relationships
@@ -3219,6 +3416,8 @@ mod tests {
             OriginClass::ThirdParty,
             &edges,
             None,
+            None,
+            None,
         );
         assert_eq!(env["origin"], "third-party", "origin is envelope-level");
         let rels = env["relationships"].as_array().expect("array");
@@ -3236,6 +3435,8 @@ mod tests {
             OriginClass::FirstParty,
             &edges,
             Some(&incoming),
+            None,
+            None,
         );
         assert_eq!(env["origin"], "first-party");
         let rels = env["relationships"].as_array().expect("array");
@@ -3270,6 +3471,8 @@ mod tests {
             None,
             OriginClass::FirstParty,
             &edges,
+            None,
+            None,
             None,
         );
         let relationships = env["relationships"].as_array().expect("array");
@@ -3323,6 +3526,8 @@ mod tests {
             None,
             OriginClass::FirstParty,
             &[],
+            None,
+            None,
             None,
         );
 
@@ -3389,6 +3594,8 @@ mod tests {
             OriginClass::FirstParty,
             &[],
             None,
+            None,
+            None,
         );
         let metadata = env["metadata"]
             .as_object()
@@ -3425,6 +3632,8 @@ mod tests {
             OriginClass::FirstParty,
             &[],
             None,
+            None,
+            None,
         );
         // Top-level structured slots stay structured.
         assert!(
@@ -3457,6 +3666,8 @@ mod tests {
             OriginClass::FirstParty,
             &[],
             None,
+            None,
+            None,
         );
         assert_eq!(env_filtered["_tokens_unfiltered_body"], 42);
         assert!(
@@ -3472,6 +3683,8 @@ mod tests {
             None,
             OriginClass::FirstParty,
             &[],
+            None,
+            None,
             None,
         );
         assert!(env_unfiltered.get("_tokens_unfiltered_body").is_none());
@@ -4168,6 +4381,365 @@ write_rules: []
             assert!(
                 note.contains("status_propagation"),
                 "deprecation pointer names the real propagation declaration"
+            );
+        }
+    }
+
+    /// A conditional `required_outgoing` block's trigger (`when_field`
+    /// / `when_value`) is visible at BOTH verbosity levels — no
+    /// legality condition the schema response omits — while an
+    /// unconditional block keeps its byte-identical three-key shape
+    /// (no `when_*` keys at all).
+    #[test]
+    fn conditional_required_outgoing_trigger_visible_at_both_levels() {
+        let manifest = r#"name: condro-render
+version: 0.1.0
+description: conditional required_outgoing render fixture
+when_to_use: tests
+types:
+  - task
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 3.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let task_yaml = "name: task\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: status\n    description: workflow state\n    field_type: string\n    enum_values: [open, checked]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - status\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nrequired_outgoing:\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n  - relationships: [PART_OF]\n    cardinality: at_least_one\n    severity: block\n    when_field: status\n    when_value: checked\n";
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("task".to_string(), task_yaml.to_string())],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let task = &payload[types_key].as_array().expect("types array")[0];
+            let ro = task["required_outgoing"].as_array().expect("blocks array");
+            assert_eq!(ro.len(), 2);
+            assert!(
+                ro[0].get("when_field").is_none() && ro[0].get("when_value").is_none(),
+                "unconditional block carries no when_* keys: {:?}",
+                ro[0]
+            );
+            assert_eq!(ro[1]["when_field"], "status");
+            assert_eq!(ro[1]["when_value"], "checked");
+        }
+    }
+
+    /// Declared `acyclic_sets` and a `status_propagation` relation
+    /// set are visible at BOTH verbosity levels; a single-name
+    /// propagation declaration keeps its `rel_type` key with no
+    /// `rel_types`, and a schema without sets carries no
+    /// `acyclic_sets` key at all.
+    #[test]
+    fn acyclic_sets_and_propagation_rel_types_visible_at_both_levels() {
+        let manifest = r#"name: relsets-render
+version: 0.1.0
+description: relation-set render fixture
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  acyclic_sets:
+    - [GROUNDS, CONCLUDES]
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: CONCLUDES
+      description: c
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let claim = "name: claim\ndescription: t\nwhen_to_use: tests\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: standing\n    description: s\n    field_type: string\n    enum_values: [active, withdrawn]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\n  - standing\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_types: [GROUNDS, CONCLUDES]\n    direction: incoming\n  - kind: status_propagation\n    field: standing\n    value: withdrawn\n    rel_type: PART_OF\n    direction: outgoing\n";
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("claim".to_string(), claim.to_string())],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            assert_eq!(
+                payload["acyclic_sets"],
+                serde_json::json!([["GROUNDS", "CONCLUDES"]]),
+                "acyclic_sets present at {verbosity:?}"
+            );
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let claim = &payload[types_key].as_array().expect("types array")[0];
+            let constraints = claim["constraints"].as_array().expect("constraints array");
+            assert_eq!(
+                constraints[0]["rel_types"],
+                serde_json::json!(["GROUNDS", "CONCLUDES"])
+            );
+            assert!(
+                constraints[0].get("rel_type").is_none(),
+                "set declaration carries no single-name key: {:?}",
+                constraints[0]
+            );
+            assert_eq!(constraints[1]["rel_type"], "PART_OF");
+            assert!(
+                constraints[1].get("rel_types").is_none(),
+                "single-name declaration stays byte-identical: {:?}",
+                constraints[1]
+            );
+        }
+
+        // A schema without sets carries no `acyclic_sets` key.
+        let plain = software_schema();
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&plain, vec![], verbosity, OriginClass::FirstParty);
+            assert!(
+                payload.get("acyclic_sets").is_none(),
+                "undeclared schema carries no acyclic_sets key"
+            );
+        }
+    }
+
+    /// The labelling declaration is visible at BOTH verbosity levels
+    /// with attack set and support walk echoed whole; a schema
+    /// declaring none carries no `labelling` key at all.
+    #[test]
+    fn labelling_declaration_visible_at_both_levels_and_absent_when_undeclared() {
+        let manifest = r#"name: labelling-render
+version: 0.1.0
+description: labelling render fixture
+when_to_use: tests
+types:
+  - claim
+relationships:
+  mode: strict
+  labelling:
+    attack: [REBUTS]
+    support:
+      relationships: [GROUNDS]
+      direction: out
+      terminal_types: [claim]
+  definitions:
+    - name: REBUTS
+      description: attack
+      default_weight: 3.0
+    - name: GROUNDS
+      description: support
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let claim = "name: claim\ndescription: t\nwhen_to_use: tests\nmetadata_fields: []\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[("claim".to_string(), claim.to_string())],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            assert_eq!(
+                payload["labelling"]["attack"],
+                serde_json::json!(["REBUTS"]),
+                "attack set present at {verbosity:?}"
+            );
+            assert_eq!(
+                payload["labelling"]["support"]["relationships"],
+                serde_json::json!(["GROUNDS"])
+            );
+            assert_eq!(payload["labelling"]["support"]["direction"], "out");
+        }
+
+        let plain = software_schema();
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&plain, vec![], verbosity, OriginClass::FirstParty);
+            assert!(
+                payload.get("labelling").is_none(),
+                "undeclared schema carries no labelling key"
+            );
+        }
+    }
+
+    /// Declared signals are visible at BOTH verbosity levels with the
+    /// declaration echoed whole; a type declaring none carries no
+    /// `signals` key at all.
+    #[test]
+    fn signal_declarations_visible_at_both_levels_and_absent_when_undeclared() {
+        let manifest = r#"name: signals-render
+version: 0.1.0
+description: signal render fixture
+when_to_use: tests
+types:
+  - claim
+  - objection
+relationships:
+  mode: strict
+  definitions:
+    - name: REBUTS
+      description: r
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let claim = format!(
+            "name: claim\ndescription: t\nwhen_to_use: tests\nmetadata_fields: []\n{body}signals:\n  - name: attack_load\n    kind: edge_load\n    relationships: [REBUTS]\n    direction: in\n    thresholds:\n      - at_least: 1\n        level: notice\n      - at_least: 3\n        level: warn\n"
+        );
+        let objection = format!(
+            "name: objection\ndescription: t\nwhen_to_use: tests\nmetadata_fields:\n  - key: state\n    description: s\n    field_type: string\n    enum_values: [open, closed]\n{body}"
+        );
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[
+                    ("claim".to_string(), claim),
+                    ("objection".to_string(), objection),
+                ],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let types = payload[types_key].as_array().expect("types array");
+            let claim = types
+                .iter()
+                .find(|t| t["name"] == "claim")
+                .expect("claim type present");
+            let sigs = claim["signals"].as_array().expect("signals array");
+            assert_eq!(sigs[0]["name"], "attack_load");
+            assert_eq!(sigs[0]["kind"], "edge_load");
+            assert_eq!(sigs[0]["direction"], "in");
+            assert_eq!(sigs[0]["thresholds"][1]["at_least"], 3);
+            assert_eq!(sigs[0]["thresholds"][1]["level"], "warn");
+            let objection = types
+                .iter()
+                .find(|t| t["name"] == "objection")
+                .expect("objection type present");
+            assert!(
+                objection.get("signals").is_none(),
+                "undeclared type carries no signals key"
+            );
+        }
+    }
+
+    /// A declared `must_reach` obligation is visible at BOTH verbosity
+    /// levels with the declaration echoed (relation set, direction,
+    /// terminal types, depth); a type declaring none carries no
+    /// `must_reach` key at all (undeclared schemas keep their payload
+    /// bytes unchanged).
+    #[test]
+    fn must_reach_visible_at_both_levels_and_absent_when_undeclared() {
+        let manifest = r#"name: mustreach-render
+version: 0.1.0
+description: must_reach render fixture
+when_to_use: tests
+types:
+  - claim
+  - evidence
+relationships:
+  mode: strict
+  definitions:
+    - name: GROUNDS
+      description: g
+      default_weight: 3.0
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let body = "sections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nno_self_loop_relationships: []\nupdatable_fields:\n  - title\n  - body\nhealth_required_fields:\n  - body\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        let claim = format!(
+            "name: claim\ndescription: t\nwhen_to_use: tests\n{body}must_reach:\n  - relationships: [GROUNDS]\n    direction: out\n    terminal_types: [evidence]\n    max_depth: 12\n"
+        );
+        let evidence = format!("name: evidence\ndescription: t\nwhen_to_use: tests\n{body}");
+        let schema = Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[
+                    ("claim".to_string(), claim),
+                    ("evidence".to_string(), evidence),
+                ],
+            )
+            .expect("render fixture schema must parse"),
+        );
+
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            let types_key = if verbosity == SchemaVerbosity::Full {
+                "types"
+            } else {
+                "types_summary"
+            };
+            let types = payload[types_key].as_array().expect("types array");
+            let claim = types
+                .iter()
+                .find(|t| t["name"] == "claim")
+                .expect("claim type present");
+            let mr = claim["must_reach"].as_array().expect("obligations array");
+            assert_eq!(mr.len(), 1);
+            assert_eq!(mr[0]["relationships"], serde_json::json!(["GROUNDS"]));
+            assert_eq!(mr[0]["direction"], "out");
+            assert_eq!(mr[0]["terminal_types"], serde_json::json!(["evidence"]));
+            assert_eq!(mr[0]["max_depth"], 12);
+            let evidence = types
+                .iter()
+                .find(|t| t["name"] == "evidence")
+                .expect("evidence type present");
+            assert!(
+                evidence.get("must_reach").is_none(),
+                "undeclared type carries no must_reach key: {evidence:?}"
             );
         }
     }

@@ -38,6 +38,18 @@ hosting = "github"
 # Both need repository secrets (`CARGO_REGISTRY_TOKEN`, `NPM_TOKEN`) and
 # fail loudly when they are absent rather than skipping.
 publish-jobs = ["homebrew", "./publish-crates", "./publish-npm"]
+# The job that runs after `announce`: scripts/release-verify.sh asks every
+# channel, from outside, whether it serves the tag, and reads the run's
+# own publish jobs for one that SKIPPED on a non-prerelease (dist's
+# announce accepts a skipped publish job by design, which is how a
+# channel can be left unfed behind a green release). It fails the run
+# when any channel disagrees. The same workflow runs on dispatch with a
+# tag input, so any past release can be re-verified from CI.
+post-announce-jobs = ["./release-verify"]
+# Reading the run's jobs needs `actions: read`, which the workflow's
+# top-level `contents: write` grant does not include; the checkout keeps
+# `contents: read`.
+github-custom-job-permissions = { release-verify = { actions = "read", contents = "read" } }
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program

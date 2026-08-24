@@ -259,8 +259,8 @@ anything you intend to gate.
 
 ## Related
 
-- [The fidelity contract](/concepts/fidelity-contract/) — what verify
+- [The fidelity contract](../../concepts/fidelity-contract/) — what verify
   measures and why.
-- [Grow a mem from a source](/guides/grow-a-mem-from-a-source/) —
+- [Grow a mem from a source](../grow-a-mem-from-a-source/) —
   creating the binding this guide gates.
-- [CLI reference](/reference/cli/cli/) — the full exit-code table.
+- [CLI reference](../../reference/cli/cli/) — the full exit-code table.

@@ -56,9 +56,13 @@ jobs:
           else
             targets="${{ inputs.target }}"
           fi
+          # Explicit host triple: the prebuilt cargo-fuzz binary is musl-linked
+          # and defaults to its own compile-time target, where ASan cannot
+          # link against static libc.
+          host=$(rustc +nightly -vV | sed -n 's/^host: //p')
           for t in $targets; do
             echo "::group::fuzz $t (${secs}s)"
-            cargo +nightly fuzz run "$t" "corpus/$t" -- -max_total_time="$secs"
+            cargo +nightly fuzz run "$t" "corpus/$t" --target "$host" -- -max_total_time="$secs"
             echo "::endgroup::"
           done
       - name: Upload crash artifacts

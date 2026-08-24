@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-07-13T16:43:05Z
-last_modified: 2026-08-18T20:18:02Z
+last_modified: 2026-08-23T14:48:16Z
 status: active
 tags: projection, verify, sync, pilot, evidence, s1b, engine
 ---
@@ -16,6 +16,7 @@ The S1b milestone required two non-code bindings exercised build→sync→verify
 
 ## Relationships
 - **REFERENCES**: [[engine:projection-verify-and-findings-store]]
+- **INFORMED_BY**: [[issue-trackers-enter-as-a-memstead-owned-pilot-mirror-not-a-field-script-or-a-forge-medium]]
 
 ## Substance
 

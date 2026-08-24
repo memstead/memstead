@@ -1,0 +1,5 @@
+# Fixture allowlist: the docs-guard-allow.txt format.
+# "the memstead binaries run ..." is prose.
+binaries
+# a documented placeholder family
+re:demo .*

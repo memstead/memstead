@@ -128,10 +128,46 @@ impl super::Engine {
         }
         let medium = self.resolve_anchor_medium(mem);
         let medium_ref = medium.as_ref().map(|(t, ns)| (t.as_str(), *ns));
-        let anchors: Vec<crate::anchor::Anchor> = inputs
+        let mut anchors: Vec<crate::anchor::Anchor> = inputs
             .iter()
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
             .collect::<Result<_, _>>()?;
+
+        // Supplied `content` under the source's preparation: the context-free
+        // validator hashed the bytes under the default canonicalization; the
+        // seam knows the anchor's source and re-hashes through the registry's
+        // rule for that source (touchpoint A at write time), so the recorded
+        // hash is the one a later observation computes.
+        if inputs.iter().any(|i| i.content.is_some()) {
+            let joins = self.anchor_source_roots(mem);
+            for (input, anchor) in inputs.iter().zip(anchors.iter_mut()) {
+                let (Some(content), Some(source)) = (&input.content, &anchor.source) else {
+                    continue;
+                };
+                let Some(join) = joins.get(source) else {
+                    continue;
+                };
+                if join.preparation.is_none() {
+                    continue;
+                }
+                match crate::preparation::path_prepared_hash(
+                    join.preparation.as_deref(),
+                    &anchor.artifact,
+                    anchor.grain,
+                    content.as_bytes(),
+                ) {
+                    crate::preparation::PathPrepared::Hash(h) => anchor.hash = Some(h),
+                    crate::preparation::PathPrepared::NoHash => {}
+                    crate::preparation::PathPrepared::UnitAbsent => {
+                        return Err(EngineError::from(
+                            crate::anchor::AnchorValidationError::UnitAbsentFromContent {
+                                artifact: anchor.artifact.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
 
         // Source-vs-binding check: when an anchor names BOTH a producing
         // binding and a source, and that binding hash still resolves in
@@ -208,9 +244,9 @@ impl super::Engine {
                 let base = crate::engine::query::anchor_base_path(&a.artifact);
                 let mut candidates: Vec<String> = Vec::new();
                 if let Some(source) = &a.source
-                    && let Some(pointer) = source_roots.get(source)
+                    && let Some(join) = source_roots.get(source)
                 {
-                    candidates.push(crate::engine::query::join_pointer(pointer, base));
+                    candidates.push(crate::engine::query::join_pointer(&join.pointer, base));
                 }
                 candidates.push(base.to_string());
                 if !candidates.iter().any(|c| root.join(c).exists()) {
@@ -1009,8 +1045,13 @@ pub(super) fn route_edge_validation(
 /// - **Cycle on an acyclic rel-type.** An add closing a back-path
 ///   `to → … → from` (via [`crate::graph::query::would_cycle`]) refuses
 ///   with the existing path, capped at [`RELATIONSHIP_CYCLE_PATH_CAP`].
+/// - **Cycle in a declared acyclicity set.** When the rel-type belongs
+///   to a `relationships.acyclic_sets` set, an add closing a back-path
+///   in the set's UNION subgraph (via
+///   [`crate::graph::query::would_cycle_in_set`]) refuses; the payload
+///   additionally echoes the set and the path's per-hop rel-types.
 ///
-/// Both refuse [`EngineError::RelationshipCycle`] (`RELATIONSHIP_CYCLE`)
+/// All refuse [`EngineError::RelationshipCycle`] (`RELATIONSHIP_CYCLE`)
 /// with identical recovery detail on every path. Callers skip this on
 /// remove paths — removal can only break cycles, never close one.
 pub(super) fn validate_edge_acyclicity(
@@ -1028,6 +1069,8 @@ pub(super) fn validate_edge_acyclicity(
             to: to.clone(),
             existing_path: vec![from.clone()],
             path_truncated: false,
+            acyclic_set: None,
+            existing_path_rel_types: None,
         });
     }
     if schema.relationship_acyclic(rel_type)
@@ -1044,6 +1087,33 @@ pub(super) fn validate_edge_acyclicity(
             to: to.clone(),
             existing_path,
             path_truncated: truncated,
+            acyclic_set: None,
+            existing_path_rel_types: None,
+        });
+    }
+    // Cycle in a declared acyclicity SET: the union subgraph of the
+    // set must stay acyclic, so the back-path may mix rel-types. The
+    // refusal is additive — it echoes the declared set and one
+    // rel-type per hop of the path.
+    if let Some(set) = schema.acyclic_set_containing(rel_type)
+        && let Some((path, path_rels)) =
+            crate::graph::query::would_cycle_in_set(store, from, to, set)
+    {
+        let truncated = path.len() > RELATIONSHIP_CYCLE_PATH_CAP;
+        let mut existing_path = path;
+        let mut existing_path_rel_types = path_rels;
+        if truncated {
+            existing_path.truncate(RELATIONSHIP_CYCLE_PATH_CAP);
+            existing_path_rel_types.truncate(existing_path.len().saturating_sub(1));
+        }
+        return Err(EngineError::RelationshipCycle {
+            rel_type: rel_type.to_string(),
+            from: from.clone(),
+            to: to.clone(),
+            existing_path,
+            path_truncated: truncated,
+            acyclic_set: Some(set.to_vec()),
+            existing_path_rel_types: Some(existing_path_rel_types),
         });
     }
     Ok(())

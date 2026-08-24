@@ -20,6 +20,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { capabilityGate, resolveWorkspaceRootFrom } from '../../../scripts/binary-version.mjs';
 
 const MEMSTEAD_BIN = process.env.MEMSTEAD_BIN || 'memstead';
 const LABEL = 'ingest';
@@ -93,10 +94,21 @@ if (clearMode) {
 // ── brief: named binding, or --all round-robin selection ─────────────────────
 // The router pipes the brief as the agent's prompt — the slot WILL be acted
 // on, so `--consume` takes it. (A plain `--all` render without the flag is a
-// pure read that leaves the rotation untouched.)
+// pure read that leaves the rotation untouched.) The flag is version-gated
+// on the recorded binary like every other capability: a record below the
+// threshold, or no record, omits the flag and says so, instead of sending
+// it and catching the engine's refusal.
+let consumeNote = '';
+if (allMode) {
+  const gate = capabilityGate(resolveWorkspaceRootFrom(process.cwd()), 'consume');
+  if (!gate.capable) consumeNote = gate.reason;
+}
 const briefArgs = allMode
-  ? ['--json', 'projection', 'brief', '--all', '--consume']
+  ? consumeNote
+    ? ['--json', 'projection', 'brief', '--all']
+    : ['--json', 'projection', 'brief', '--all', '--consume']
   : ['--json', 'projection', 'brief', target];
+if (consumeNote) process.stdout.write(`> **[${LABEL}] ${consumeNote}.**\n`);
 const r = memstead(briefArgs);
 
 if (r.error) {

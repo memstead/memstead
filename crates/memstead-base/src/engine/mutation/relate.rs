@@ -114,14 +114,25 @@ impl Engine {
         // invisible to a walk over the endpoint mems alone, so an add
         // an eager boot refuses would land silently and corrupt an
         // innocent edge on the next full load (the fourth lazy-mount
-        // grade demonstrated exactly that on a three-mem chain). Full
-        // load before the guard; non-acyclic rel-types skip the cost.
-        if !args.remove
-            && self
-                .schemas
-                .get(&source_mem)
-                .is_some_and(|s| s.relationship_acyclic(&args.rel_type))
-        {
+        // grade demonstrated exactly that on a three-mem chain). The
+        // same holds for a rel-type in an `acyclic_sets` set, whose
+        // guard walks the set's UNION subgraph, and for declared
+        // aggregate signals on either endpoint's schema: the
+        // threshold-crossing diff counts edges that can originate in
+        // any mem, so a partial store silently mis-levels it. Full
+        // load before the guard; writes touching neither skip the
+        // cost.
+        let cycle_guard_needs_full = !args.remove
+            && self.schemas.get(&source_mem).is_some_and(|s| {
+                s.relationship_acyclic(&args.rel_type)
+                    || s.acyclic_set_containing(&args.rel_type).is_some()
+            });
+        let signal_diff_needs_full = [source_mem.as_str(), args.target.mem()].iter().any(|m| {
+            self.schemas
+                .get(*m)
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        });
+        if cycle_guard_needs_full || signal_diff_needs_full {
             self.ensure_mems_loaded(None);
         }
 
@@ -184,6 +195,15 @@ impl Engine {
                 warnings,
             });
         }
+
+        // Aggregate signals: capture both endpoints' levels before the
+        // store mutates — the entities a relate can move are exactly
+        // the edge's endpoints. Diffed after the write below.
+        let signal_snapshot = crate::ops::signals::snapshot_levels(
+            &self.store,
+            &self.schemas,
+            [&prepared.from, &prepared.to],
+        );
 
         self.stage_prepared_relate(&prepared)?;
 
@@ -281,6 +301,15 @@ impl Engine {
             mut warnings,
             ..
         } = prepared;
+
+        // Signal crossings ride the out-of-band warning channel beside
+        // the success payload — never error-shaped, never changing the
+        // mutation's success semantics.
+        warnings.extend(crate::ops::signals::crossing_warnings(
+            &self.store,
+            &self.schemas,
+            &signal_snapshot,
+        ));
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-commit path
@@ -1048,23 +1077,25 @@ impl Engine {
             self.reload_if_stale(Some(m));
         }
         // Same acyclic-guard rule as the single-item path: any added
-        // edge on an ACYCLIC rel-type walks the whole rel-type
-        // subgraph, so the walk must see every mem — deferred (lazy,
-        // unloaded) ones included — or a cycle through an unloaded
-        // mem is admitted (the fifth lazy-mount grade demonstrated
-        // exactly that through this path).
-        // Same acyclic-guard rule as the single-item path: any added
-        // edge on an ACYCLIC rel-type walks the whole rel-type
-        // subgraph, so the walk must see every mem — deferred (lazy,
-        // unloaded) ones included — or a cycle through an unloaded
-        // mem is admitted (the fifth lazy-mount grade demonstrated
-        // exactly that through this path).
+        // edge on an ACYCLIC rel-type (or a rel-type in an
+        // `acyclic_sets` set, whose guard walks the set's UNION
+        // subgraph) walks the whole subgraph, so the walk must see
+        // every mem — deferred (lazy, unloaded) ones included — or a
+        // cycle through an unloaded mem is admitted (the fifth
+        // lazy-mount grade demonstrated exactly that through this
+        // path). Declared signals on either endpoint's schema need
+        // the full load for the same reason as the single-item path.
         if relates.iter().any(|(a, _)| {
-            !a.remove
-                && self
-                    .schemas
-                    .get(a.source.mem())
-                    .is_some_and(|s| s.relationship_acyclic(&a.rel_type))
+            (!a.remove
+                && self.schemas.get(a.source.mem()).is_some_and(|s| {
+                    s.relationship_acyclic(&a.rel_type)
+                        || s.acyclic_set_containing(&a.rel_type).is_some()
+                }))
+                || [a.source.mem(), a.target.mem()].iter().any(|m| {
+                    self.schemas
+                        .get(*m)
+                        .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+                })
         }) {
             self.ensure_mems_loaded(None);
         }

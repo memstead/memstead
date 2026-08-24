@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-08-18T21:41:04Z
+last_modified: 2026-08-23T14:48:20Z
 status: superseded
 decided_on: 2026-07-10
 deciders: memstead-core
@@ -34,6 +34,7 @@ The four-primitive model ([[engineering--model-the-pipeline-as-four-primitives-m
 - **REFERENCES**: [[engine:pipeline]]
 - **REFERENCES**: [[engine:cli-command-surface]]
 - **SUPERSEDES**: [[model-the-pipeline-as-four-primitives-medium-facet-projection-ingest]]
+- **INFORMED_BY**: [[the-never-clobber-merge-input-has-no-mechanical-source-build-writes-are-unattributed]]
 
 ## Options
 

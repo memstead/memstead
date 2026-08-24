@@ -1688,6 +1688,62 @@ mod tests {
         assert!(!store.current(&new).contains(&f_old));
     }
 
+    /// The impl-version bump's documented invalidation-by-construction: a
+    /// finding recorded under the `hash(D)` a prior engine generation
+    /// computed (`PREPARATION_IMPL_VERSION` 0, for a binding declaring no
+    /// preparation at all) is not current under the live hash — segregated
+    /// as superseded, never presented — because the impl version is hashed
+    /// into every binding's identity. The old key still reads its own batch,
+    /// so nothing is deleted, only retired from the current view.
+    #[test]
+    fn impl_version_bump_invalidates_findings_by_construction() {
+        use crate::binding::{
+            PREPARATION_IMPL_VERSION, ScaffoldParams, hash_binding, hash_binding_at_impl_version,
+            scaffold_binding,
+        };
+        let binding = scaffold_binding(ScaffoldParams {
+            destination_mem: "plugin",
+            source_name: "source-tree",
+            pointer: "../public",
+            medium_type: crate::pipeline::MediumType::Codebase,
+            intent: None,
+            additional_deny_paths: Vec::new(),
+        })
+        .binding;
+        assert!(binding.sources[0].preparation.is_none());
+        // The live constant is whatever the latest landed implementation set
+        // it to; the pin is that the version-0 hash (the pre-registry
+        // generation) is not the live one.
+        let _ = PREPARATION_IMPL_VERSION;
+        let old = key(&hash_binding_at_impl_version(&binding, 0), "head1");
+        let live = key(&hash_binding(&binding), "head1");
+        assert_ne!(old.binding_hash, live.binding_hash);
+
+        let mut store = FindingsStore::default();
+        let f_old = Finding {
+            key: old.clone(),
+            facet: "source-tree".to_string(),
+            target: FindingTarget::Artifact {
+                artifact: "src/old.rs".to_string(),
+            },
+            class: FindingClass::Uncovered,
+            detail: "recorded before the bump".to_string(),
+            created_at: "1".to_string(),
+        };
+        store.record(old.clone(), "1".to_string(), vec![f_old.clone()]);
+
+        assert!(
+            store.current(&live).is_empty(),
+            "a finding keyed on the pre-bump hash is invalid under the live hash"
+        );
+        assert_eq!(store.superseded(&live), vec![&f_old]);
+        assert_eq!(
+            store.current(&old),
+            &[f_old.clone()][..],
+            "nothing is deleted"
+        );
+    }
+
     /// Criterion — findings survive head movement: the store keys on `hash(D)`
     /// alone, so a finding recorded at head1 stays `current` when read at
     /// head2 (the sync brief's read is head-agnostic), still carrying the head

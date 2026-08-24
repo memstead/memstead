@@ -83,46 +83,95 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // mem's slice of the store — the entity, its sections, and its
     // OUTGOING edges (carried by its own source record) — plus mount
     // metadata. So a lazy workspace pays only the target mem's load,
-    // the cold-path cut the plan names. The one exception is
-    // `--include-relations`, whose INCOMING edges can originate in any
-    // mem: that form takes the full load, never a partial answer.
+    // the cold-path cut the plan names. Three forms are cross-mem and
+    // take the full load, never a partial answer:
+    // `--include-relations` (INCOMING edges can originate in any mem),
+    // declared signals (an `in`-direction signal reads incoming edges,
+    // and a neighbour pair reads the counterpart record either side of
+    // the edge), and the labelling view (it counts the cross-mem edges
+    // it excludes, and the support walk may cross mems). The scoped
+    // cold path stays for every mem whose schema declares neither.
+    let declares_cross_mem_serving = |schema: Option<std::sync::Arc<memstead_schema::Schema>>| {
+        schema.is_some_and(|s| {
+            s.manifest.relationships.labelling.is_some()
+                || s.types.values().any(|td| !td.signals.is_empty())
+        })
+    };
     let engine_handle = if args.include_relations {
         ctx.cli_engine()?
     } else {
-        ctx.cli_engine_scoped(id.mem())?
-    };
-    let (entity, output, outgoing_snapshot, incoming_snapshot, origin, provenance) =
-        match engine_handle {
+        let scoped = ctx.cli_engine_scoped(id.mem())?;
+        let escalate = match &scoped {
             #[cfg(feature = "mem-repo")]
-            CliEngine::MemRepo(engine) => {
-                let entity = engine
-                    .get_entity(&id)
-                    .cloned()
-                    .ok_or_else(|| miss(&engine))?;
-                let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
-                let outgoing = engine.store().outgoing(&id).to_vec();
-                let incoming = args
-                    .include_relations
-                    .then(|| engine.store().incoming(&id).to_vec());
-                let origin = engine.mem_origin_class(id.mem());
-                let prov = provenance_block(&engine);
-                (entity, md, outgoing, incoming, origin, prov)
-            }
+            CliEngine::MemRepo(engine) => declares_cross_mem_serving(engine.schema_for(id.mem())),
             CliEngine::Filesystem(engine) => {
-                let entity = engine
-                    .get_entity(&id)
-                    .cloned()
-                    .ok_or_else(|| miss(&engine))?;
-                let md = render_with_optional_relations(&entity, &id, engine.store(), &args);
-                let outgoing = engine.store().outgoing(&id).to_vec();
-                let incoming = args
-                    .include_relations
-                    .then(|| engine.store().incoming(&id).to_vec());
-                let origin = engine.mem_origin_class(id.mem());
-                let prov = provenance_block(&engine);
-                (entity, md, outgoing, incoming, origin, prov)
+                declares_cross_mem_serving(engine.schema_for(id.mem()))
             }
         };
+        if escalate { ctx.cli_engine()? } else { scoped }
+    };
+    let (
+        entity,
+        output,
+        outgoing_snapshot,
+        incoming_snapshot,
+        origin,
+        provenance,
+        signals,
+        labelling,
+    ) = match engine_handle {
+        #[cfg(feature = "mem-repo")]
+        CliEngine::MemRepo(engine) => {
+            let entity = engine
+                .get_entity(&id)
+                .cloned()
+                .ok_or_else(|| miss(&engine))?;
+            let signals = engine.computed_signals(&entity);
+            let labelling = engine.computed_labelling(&entity);
+            let md = render_with_optional_relations(
+                &entity,
+                &id,
+                engine.store(),
+                &args,
+                signals.as_deref(),
+                labelling.as_ref(),
+            );
+            let outgoing = engine.store().outgoing(&id).to_vec();
+            let incoming = args
+                .include_relations
+                .then(|| engine.store().incoming(&id).to_vec());
+            let origin = engine.mem_origin_class(id.mem());
+            let prov = provenance_block(&engine);
+            (
+                entity, md, outgoing, incoming, origin, prov, signals, labelling,
+            )
+        }
+        CliEngine::Filesystem(engine) => {
+            let entity = engine
+                .get_entity(&id)
+                .cloned()
+                .ok_or_else(|| miss(&engine))?;
+            let signals = engine.computed_signals(&entity);
+            let labelling = engine.computed_labelling(&entity);
+            let md = render_with_optional_relations(
+                &entity,
+                &id,
+                engine.store(),
+                &args,
+                signals.as_deref(),
+                labelling.as_ref(),
+            );
+            let outgoing = engine.store().outgoing(&id).to_vec();
+            let incoming = args
+                .include_relations
+                .then(|| engine.store().incoming(&id).to_vec());
+            let origin = engine.mem_origin_class(id.mem());
+            let prov = provenance_block(&engine);
+            (
+                entity, md, outgoing, incoming, origin, prov, signals, labelling,
+            )
+        }
+    };
 
     let chunked = match args.token_budget {
         Some(budget) => apply_chunking(
@@ -164,6 +213,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             origin,
             &outgoing_snapshot,
             incoming_snapshot.as_deref(),
+            signals.as_deref(),
+            labelling.as_ref(),
         );
         if let (Some(prov), Some(obj)) = (&provenance, envelope.as_object_mut()) {
             obj.insert("mutation_provenance".into(), prov.clone());
@@ -229,13 +280,16 @@ fn render_with_optional_relations(
     id: &EntityId,
     store: &Store,
     args: &Args,
+    signals: Option<&[memstead_base::ops::signals::ComputedSignal]>,
+    labelling: Option<&memstead_base::ops::labelling::LabellingView>,
 ) -> String {
     let sections_filter = if args.sections.is_empty() {
         None
     } else {
         Some(args.sections.as_slice())
     };
-    let mut md = render::render_entity_markdown(entity, sections_filter);
+    let mut md =
+        render::render_entity_markdown_with_signals(entity, sections_filter, signals, labelling);
     if args.include_relations {
         let outgoing = store.outgoing(id).to_vec();
         let incoming = store.incoming(id).to_vec();

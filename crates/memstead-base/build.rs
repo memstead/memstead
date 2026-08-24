@@ -5,8 +5,8 @@
 //! use, where every build otherwise reports the same crate semver).
 //!
 //! `MEMSTEAD_BUILD_SHA` is ALWAYS emitted — the short HEAD sha (plus
-//! a `-dirty` suffix when tracked files are modified) inside a git
-//! checkout, the empty string everywhere else (crates.io builds,
+//! a `-dirty` suffix when tracked build inputs are modified) inside a
+//! git checkout, the empty string everywhere else (crates.io builds,
 //! vendored trees): a failing git probe must never break the build.
 //! `crate::build_info` turns the value into the full build version.
 
@@ -47,13 +47,46 @@ fn main() {
                 println!("cargo:rerun-if-changed={git_dir}/{head_ref}");
             }
         }
+        // The dirty flag must follow the working tree, not only the refs:
+        // with the refs alone, editing a crate and building recompiled
+        // the crate without re-running this script, so the stamp kept
+        // the clean form it had computed at the last commit and the
+        // `-dirty` suffix could only ever appear after HEAD moved, when
+        // the tree was clean again. Watch the build inputs the probe
+        // scopes to (a directory entry re-runs on any change beneath it);
+        // the cost is one `git status` per build that would rebuild
+        // anyway.
+        if let Some(top) = git(&["rev-parse", "--show-toplevel"]) {
+            for input in ["crates", "Cargo.toml", "Cargo.lock"] {
+                println!("cargo:rerun-if-changed={top}/{input}");
+            }
+        }
     }
     let sha = git(&["rev-parse", "--short", "HEAD"])
         .map(|sha| {
             // `--untracked-files=no`: only modified TRACKED files
             // mark the build dirty; a stray scratch file does not.
-            // A failed probe reads as clean — best-effort throughout.
-            let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
+            // Scoped to the build inputs (the crates and the two
+            // manifests): a modified doc, workflow or folder-mem file
+            // elsewhere in the repository changes no byte of the
+            // binary, and a `-dirty` stamp it did not earn would
+            // fail the staleness check that compares the stamp with
+            // the committed tree. A failed probe reads as clean —
+            // best-effort throughout.
+            // `:/` anchors each pathspec to the repository top: the
+            // script runs in the crate directory, where a bare
+            // `crates` would name a path that does not exist and match
+            // nothing (which read as "clean").
+            let dirty = git(&[
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+                "--",
+                ":/crates",
+                ":/Cargo.toml",
+                ":/Cargo.lock",
+            ])
+            .is_some();
             if dirty { format!("{sha}-dirty") } else { sha }
         })
         .unwrap_or_default();

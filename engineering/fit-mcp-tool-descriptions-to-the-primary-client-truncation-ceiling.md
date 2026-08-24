@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-07-13T16:44:02Z
+last_modified: 2026-08-23T14:48:18Z
 status: accepted
 decided_on: 2026-07-06
 deciders: memstead-core
@@ -29,6 +29,7 @@ Claude Code — the primary MCP consumer through the pre-release window — sile
 - **REFERENCES**: [[engine:mcp-tool-surface]]
 - **REFERENCES**: [[mcp-tool-surface-stays-small]]
 - **MOTIVATED_BY**: [[agent-first-surface-design]]
+- **MOTIVATES**: [[the-schema-serves-by-the-types-you-will-write-and-an-oversized-full-reply-steers-instead-of-spilling]]
 
 ## Options
 

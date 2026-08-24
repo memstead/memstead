@@ -426,19 +426,27 @@ impl CliError {
                 to,
                 existing_path,
                 path_truncated,
+                acyclic_set,
+                existing_path_rel_types,
             } => {
                 let existing_path_json: Vec<String> =
                     existing_path.iter().map(|id| id.to_string()).collect();
-                (
-                    ExitKind::Validation,
-                    Some(serde_json::json!({
-                        "rel_type": rel_type,
-                        "from": from.to_string(),
-                        "to": to.to_string(),
-                        "existing_path": existing_path_json,
-                        "path_truncated": path_truncated,
-                    })),
-                )
+                let mut details = serde_json::json!({
+                    "rel_type": rel_type,
+                    "from": from.to_string(),
+                    "to": to.to_string(),
+                    "existing_path": existing_path_json,
+                    "path_truncated": path_truncated,
+                });
+                // Additive set-refusal extras; single-rel-type
+                // refusals keep their byte-identical payload.
+                if let Some(set) = acyclic_set {
+                    details["acyclic_set"] = serde_json::json!(set);
+                }
+                if let Some(rels) = existing_path_rel_types {
+                    details["existing_path_rel_types"] = serde_json::json!(rels);
+                }
+                (ExitKind::Validation, Some(details))
             }
             SetAndUnsetConflict { keys } => (
                 ExitKind::Validation,

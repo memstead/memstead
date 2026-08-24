@@ -264,6 +264,7 @@ fn relationships_format_def() -> &'static memstead_schema::SectionDef {
             key: "relationships".to_string(),
             heading: "Relationships".to_string(),
             required: false,
+            load_bearing: None,
             search_weight: 0.0,
             catch_all: false,
             write_rules: vec![],

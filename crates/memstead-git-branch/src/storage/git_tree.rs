@@ -511,6 +511,27 @@ impl MemWriter for GitTreeMemWriter {
 }
 
 impl memstead_base::backend::MemBackend for GitTreeMemWriter {
+    /// The per-mem branch ref exists. `list_entities` folds a missing
+    /// branch into an empty list (a fresh mem has no commits yet), so
+    /// this is the only way boot can tell "never created" from "empty"
+    /// and say `missing_ref` instead of `empty`.
+    fn storage_present(&self) -> Result<bool, memstead_base::backend::BackendError> {
+        let repo = gix::open(&self.gitdir).map_err(|e| {
+            memstead_base::backend::BackendError::Other(format!(
+                "git-tree backend storage_present: open {}: {e}",
+                self.gitdir.display()
+            ))
+        })?;
+        repo.try_find_reference(&self.ref_name)
+            .map(|r| r.is_some())
+            .map_err(|e| {
+                memstead_base::backend::BackendError::Other(format!(
+                    "git-tree backend storage_present: resolve {}: {e}",
+                    self.ref_name
+                ))
+            })
+    }
+
     fn list_entities(&self) -> Result<Vec<PathBuf>, memstead_base::backend::BackendError> {
         // Walk the per-mem branch tree, return only `.md` paths
         // outside the `.memstead/` umbrella (config / schemas / changelog
@@ -1327,6 +1348,30 @@ mod tests {
             logical_operation_id: None,
             entity_ids: None,
         }
+    }
+
+    /// `storage_present` answers for the ref, not the entity count: a
+    /// branch that was never created is absent (and `list_entities`
+    /// still says empty, which is the ambiguity boot's `MOUNT_UNBACKED`
+    /// probe exists to resolve); after the first commit it is present.
+    #[test]
+    fn storage_present_tracks_the_branch_ref() {
+        use memstead_base::backend::MemBackend;
+        let tmp = TempDir::new().unwrap();
+        let gitdir = fresh_repo_dir(tmp.path());
+        let writer = GitTreeMemWriter::new(gitdir, "refs/heads/probe".to_string());
+        assert!(!MemBackend::storage_present(&writer).unwrap(), "no ref yet");
+        assert!(
+            MemBackend::list_entities(&writer).unwrap().is_empty(),
+            "and it lists as empty"
+        );
+        MemWriter::write_entity(&writer, Path::new("one.md"), b"# one\n").unwrap();
+        MemWriter::commit(&writer, "seed", &ctx_for_test()).unwrap();
+        assert!(
+            MemBackend::storage_present(&writer).unwrap(),
+            "the first commit creates the ref"
+        );
+        assert_eq!(MemBackend::list_entities(&writer).unwrap().len(), 1);
     }
 
     fn read_blob(gitdir: &Path, ref_name: &str, path: &str) -> Option<Vec<u8>> {

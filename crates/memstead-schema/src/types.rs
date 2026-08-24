@@ -93,6 +93,23 @@ pub struct TypeDefinition {
     /// keep current behaviour.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_outgoing: Vec<RequiredOutgoing>,
+    /// Declared reachability obligations (see [`MustReach`]): entities
+    /// of this type must reach at least one entity of a named terminal
+    /// type, following edges of a named relation set in a named
+    /// direction, within an optional maximum depth. Health-path only,
+    /// always warn-tier (the loader refuses `block`: a transitive
+    /// property is established by writes on OTHER entities, so a
+    /// write-time refusal would punish the wrong mutation). Empty
+    /// default keeps current behaviour.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub must_reach: Vec<MustReach>,
+    /// Declared aggregate signals (see [`SignalDef`]): exact,
+    /// parameter-free counts with declared thresholds, computed at
+    /// read time and served with their evidence — never scored,
+    /// never blocking, never stored. Empty default keeps every
+    /// response byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<SignalDef>,
     /// Declared keep-health constraints (the constraint vocabulary —
     /// see [`ConstraintDef`]). Empty default: a schema declaring no
     /// constraints behaves byte-identically to before the vocabulary
@@ -145,6 +162,154 @@ pub struct RequiredOutgoing {
     /// relate-remove would leave, the entity below cardinality).
     #[serde(default)]
     pub severity: ConstraintSeverity,
+    /// Optional condition: the block applies only when this metadata
+    /// field of the entity holds `when_value`. The same two keys
+    /// `requires_when` uses — one vocabulary for one idea. The loader
+    /// requires the pair to appear together, `when_field` to name a
+    /// declared metadata field of this type carrying `enum_values`,
+    /// and `when_value` to be a member. Absent pair = unconditional
+    /// block = long-standing behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_field: Option<String>,
+    /// The triggering value (see `when_field`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when_value: Option<String>,
+}
+
+/// One reachability obligation on a type definition. The obligated
+/// entity must reach at least one non-stub entity whose type is in
+/// `terminal_types`, walking edges whose rel-type is in
+/// `relationships` (an inline relation set), in `direction`, within
+/// `max_depth` hops when bounded. Evaluated on the health sweep only
+/// (`constraints` axis), never on the write path — no single write
+/// completes a transitive absence. The incoming direction with
+/// `max_depth: 1` covers the required-incoming-edge case.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MustReach {
+    /// Edge names the walk follows — any name in the set continues the
+    /// path. Loader validates each against the schema's relationship
+    /// vocabulary.
+    pub relationships: Vec<String>,
+    /// `out` follows edges pointing away from the walked entity, `in`
+    /// follows edges pointing at it — the same vocabulary the store
+    /// and `memstead_search` speak.
+    pub direction: ReachDirection,
+    /// Type names that satisfy the obligation when reached. Loader
+    /// validates each against the schema's declared types.
+    pub terminal_types: Vec<String>,
+    /// Maximum number of hops a conforming path may take. Absent =
+    /// unbounded. Zero refuses at load (nothing is reachable in zero
+    /// hops).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_depth: Option<u32>,
+    /// Always `warn` — the loader refuses `block` on this form.
+    #[serde(default)]
+    pub severity: ConstraintSeverity,
+}
+
+/// One declared aggregate signal on a type definition. This wave
+/// ships one kind, `edge_load`: count the edges of a named rel-type
+/// set, in a named direction, on entities of this type, optionally
+/// restricted to edges whose counterpart entity holds a named enum
+/// value. Thresholds map counts to levels; below the first threshold
+/// the served level is `none`. Values are computed at read time in
+/// O(degree), never stored, never part of `_hash`; a signal may not
+/// reference another signal, and nothing multiplies, averages, or
+/// decays — a count and a threshold are the whole vocabulary.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignalDef {
+    /// Unique per type, `[a-z][a-z0-9_]*` — the stable name prose
+    /// and consumers bind guidance to.
+    pub name: String,
+    /// Closed kind enum — one member in this wave.
+    pub kind: SignalKind,
+    /// Edge names the count covers (inline relation set; loader
+    /// validates each against the vocabulary).
+    pub relationships: Vec<String>,
+    /// `in` counts edges pointing at the entity, `out` edges pointing
+    /// away — the same vocabulary the store and search speak.
+    pub direction: ReachDirection,
+    /// Optional counterpart filter, whole or not at all: count only
+    /// edges whose counterpart entity holds `neighbour_value` in
+    /// `neighbour_field`. A counterpart lacking the field or holding
+    /// another value simply does not count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neighbour_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neighbour_value: Option<String>,
+    /// Non-empty, strictly increasing `at_least` values.
+    pub thresholds: Vec<SignalThreshold>,
+}
+
+impl SignalDef {
+    /// The served level for a count: the highest threshold whose
+    /// `at_least` the count meets, `None` below the first (wire level
+    /// `none`).
+    pub fn level_for(&self, count: u64) -> Option<SignalLevel> {
+        self.thresholds
+            .iter()
+            .rev()
+            .find(|t| count >= t.at_least)
+            .map(|t| t.level)
+    }
+}
+
+/// Closed signal-kind vocabulary. Adding a member is a
+/// format-generation event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalKind {
+    EdgeLoad,
+}
+
+/// One threshold step of a signal declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignalThreshold {
+    pub at_least: u64,
+    pub level: SignalLevel,
+}
+
+/// Signal levels — deliberately NOT [`ConstraintSeverity`]: a signal
+/// level is the output of a threshold, not the severity of a
+/// violation. `warn` participates in `health --strict` like a
+/// warn-tier constraint finding; `notice` never does — that is the
+/// whole difference between the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalLevel {
+    Notice,
+    Warn,
+}
+
+impl std::fmt::Display for SignalLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SignalLevel::Notice => "notice",
+            SignalLevel::Warn => "warn",
+        })
+    }
+}
+
+/// Walk direction for [`MustReach`] — wire literals `out` / `in`,
+/// matching the store's relationship rendering and `memstead_search`'s
+/// `direction` parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReachDirection {
+    Out,
+    In,
+}
+
+impl std::fmt::Display for ReachDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ReachDirection::Out => "out",
+            ReachDirection::In => "in",
+        })
+    }
 }
 
 /// Uniform severity for the constraint vocabulary — one model across
@@ -243,16 +408,46 @@ pub enum ConstraintDef {
         /// The terminal value that starts the taint (validated
         /// against `field`'s enum, when it declares one).
         value: String,
-        /// The rel-type the taint travels along.
-        rel_type: String,
+        /// The single rel-type the taint travels along. Exactly one
+        /// of `rel_type` / `rel_types` per declaration — the loader
+        /// refuses both-present and neither-present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rel_type: Option<String>,
+        /// The relation SET the taint travels along — the union
+        /// subgraph, so a taint crosses rel-type boundaries. Inline
+        /// list of declared names, per the bundle-wide convention.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rel_types: Option<Vec<String>>,
         /// Which direction reaches the dependents: `incoming` taints
-        /// the entities whose `rel_type` edges point at the terminal
-        /// entity (and their dependents, transitively); `outgoing`
-        /// the entities the terminal entity points at.
+        /// the entities whose edges point at the terminal entity (and
+        /// their dependents, transitively); `outgoing` the entities
+        /// the terminal entity points at.
         direction: PropagationDirection,
         #[serde(default)]
         severity: ConstraintSeverity,
     },
+}
+
+impl ConstraintDef {
+    /// The effective relation set of a `status_propagation`
+    /// declaration: the single `rel_type` as a one-element list, or
+    /// the declared `rel_types`. The loader guarantees exactly one of
+    /// the two is present. Returns `None` for other constraint forms.
+    pub fn propagation_rel_types(&self) -> Option<Vec<String>> {
+        match self {
+            ConstraintDef::StatusPropagation {
+                rel_type,
+                rel_types,
+                ..
+            } => match (rel_type, rel_types) {
+                (Some(single), None) => Some(vec![single.clone()]),
+                (None, Some(set)) => Some(set.clone()),
+                // Loader-refused shapes; empty keeps callers total.
+                _ => Some(Vec::new()),
+            },
+            _ => None,
+        }
+    }
 }
 
 /// Traversal direction for [`ConstraintDef::StatusPropagation`].
@@ -419,6 +614,21 @@ pub struct SectionDef {
     /// (`MISSING_REQUIRED_SECTION`).
     #[serde(default)]
     pub required: bool,
+    /// Whether this section is **load-bearing** for the entity's claim:
+    /// the part of the entity a dependent conclusion rests on, as
+    /// opposed to notes, context, or bookkeeping. Consumed by the
+    /// `entity-load-bearing` preparation (`memstead-base::preparation`):
+    /// an entity-grain anchor's prepared form is the stable
+    /// serialization of the type's load-bearing sections, so a notes-only
+    /// edit never breaks a dependent's prepared hash while a load-bearing
+    /// edit always does. **Absence means undeclared**: when NO section of
+    /// a type declares this flag, the type's required sections are its
+    /// load-bearing set (and a type with no required sections falls back
+    /// to every section). Declaring `load_bearing: false` on a required
+    /// section is legal and excludes it once any section of the type
+    /// declares the flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_bearing: Option<bool>,
     pub search_weight: f32,
     #[serde(default)]
     pub catch_all: bool,

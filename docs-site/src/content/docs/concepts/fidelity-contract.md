@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-A [projection](/glossary/#pipeline-medium--facet--projection) binds a source — a
+A [projection](../../glossary/#pipeline-medium--facet--projection) binds a source — a
 codebase, a filesystem, another mem — to a destination mem and populates it. The
 **fidelity contract** is the promise the engine makes about that mem afterward:
 it will tell you, deterministically and without inventing numbers, how faithfully
@@ -98,7 +98,7 @@ the contract would rather admit a blind spot than paper over one.
 Three caps bound what the contract can currently claim — positioning decisions and
 known gaps, stated plainly rather than left silent or dressed up as imminent
 features. If you are gating a pull request on verify ([the CI
-guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
+guide](../../guides/verify-in-ci/)), these are the edges of what the gate can see:
 
 - **Web-medium sync and enumeration.** A `web` medium can be named and read, but the
   engine does not enumerate or maintain it. Because its capability row advertises no
@@ -108,13 +108,26 @@ guide](/guides/verify-in-ci/)), these are the edges of what the gate can see:
   refuses outright; and a record that carries one anyway is refused at validation.
   Asking a web binding to sync therefore names the capability gap itself, never a
   remedy no medium can honour.
-- **Preparation of non-text media (e.g. PDF).** A facet may declare a preparation
-  step (PDF→markdown, audio→transcript), but no preparation implementation ships
-  today. A source that declares one is **skipped at run time**: the record is
-  accepted at declaration, and the run that would consume it reports the
-  unsupported preparation and exits without doing work. The gap is named when
-  you hit it, not when you declare it — which is the honest description of
-  where the edge currently sits.
+- **Preparation is a registry, and it ships three flavours.** A source's
+  `preparation` names a preparation the engine registers: `entity-load-bearing`
+  for graph sources (an entity anchor hashes its type's load-bearing sections,
+  so a notes-only edit does not drift a dependent), `dated-entries` for
+  path-shaped sources (a file of dated entries is delivered as units
+  `<path>#<stamp>` in stamp order, identical on every pass, and a unit anchor
+  drifts only when its own entry changes), and `code-map` for code sources (a
+  file anchor hashes the file's interface digest and a tree anchor the code map
+  of the scoped files under it, so an implementation edit does not drift an
+  anchor and a signature change does, within the digest's recorded limits; the
+  digest is heuristic, by language family). A tree anchor on a source without a code map is recorded
+  but never hashed: it resolves `recheck`, not drift.
+  Non-text media conversion (PDF, DOCX, audio) is a non-goal: an agent with a
+  capable read tool extracts, and the prepared-content hash already falls back
+  to a raw-byte digest for a binary artifact, so drift over a PDF is detected
+  without any preparation. An identifier the registry does not know is refused
+  at declaration on every edit path; a hand-edited record carrying one is
+  skipped at run time with the registered set named, never run over content the
+  engine cannot prepare. The registered set is listed in the
+  [binding reference](../../reference/binding/).
 
 - **The mtime `#synced` baseline does not survive a fresh checkout.** A binding using
   mtime change-detection compares modification times against a recorded baseline, and a

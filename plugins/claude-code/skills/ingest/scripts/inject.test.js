@@ -19,7 +19,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -69,11 +69,27 @@ after(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-/** Run the router with the given args and STUB_MODE; return {stdout, calls}. */
-function runRouter(routerArgs, mode) {
+/** A workspace directory with the engine's marker and a recorded binary
+ * version (or none when `version` is null), for the capability gates. */
+function workspaceWithRecord(version) {
+  const root = mkdtempSync(join(tmpdir(), 'ingest-ws-'));
+  mkdirSync(join(root, '.memstead'), { recursive: true });
+  writeFileSync(join(root, '.memstead', 'workspace.toml'), 'format = "memstead-git-branch-2"\n');
+  if (version) {
+    mkdirSync(join(root, '.memstead.cache', 'plugin'), { recursive: true });
+    writeFileSync(join(root, '.memstead.cache', 'plugin', 'binary-version.json'), JSON.stringify({ version }));
+  }
+  return root;
+}
+
+/** Run the router with the given args and STUB_MODE; return {stdout, calls}.
+ * `cwd` defaults to a workspace whose recorded binary is 0.10.0, so the
+ * capability-gated flags are on; pass another workspace to test the gates. */
+function runRouter(routerArgs, mode, cwd = workspaceWithRecord('0.10.0')) {
   if (existsSync(logFile)) rmSync(logFile);
   const res = spawnSync('node', [ROUTER, ...routerArgs], {
     encoding: 'utf-8',
+    cwd,
     env: { ...process.env, MEMSTEAD_BIN: stub, STUB_MODE: mode, STUB_LOG: logFile },
   });
   const calls = existsSync(logFile)
@@ -87,6 +103,19 @@ describe('ingest router — brief routing', () => {
     const { stdout, calls } = runRouter(['--all'], 'brief-ok');
     assert.equal(stdout, '# Build brief\nDo the thing.\n');
     assert.deepEqual(calls[0], ['--json', 'projection', 'brief', '--all', '--consume']);
+  });
+
+  it('omits --consume and says why when the recorded binary predates it (and when no record exists)', () => {
+    const old = runRouter(['--all'], 'brief-ok', workspaceWithRecord('0.9.0'));
+    assert.deepEqual(old.calls[0], ['--json', 'projection', 'brief', '--all']);
+    assert.match(old.stdout, /recorded binary 0\.9\.0 predates `--consume` support \(needs 0\.10\.0\); rendering the brief as a pure read/);
+    const none = runRouter(['--all'], 'brief-ok', workspaceWithRecord(null));
+    assert.deepEqual(none.calls[0], ['--json', 'projection', 'brief', '--all']);
+    assert.match(none.stdout, /no recorded binary version/);
+    // At the threshold the flag passes and nothing is said about it.
+    const ok = runRouter(['--all'], 'brief-ok');
+    assert.deepEqual(ok.calls[0], ['--json', 'projection', 'brief', '--all', '--consume']);
+    assert.doesNotMatch(ok.stdout, /recorded binary/);
   });
 
   it('routes a named binding to `projection brief <binding>`', () => {

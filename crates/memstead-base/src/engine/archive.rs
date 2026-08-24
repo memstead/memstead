@@ -1081,6 +1081,110 @@ E
         );
     }
 
+    /// `make_archive_self_contained` turns the archive `install` refuses
+    /// into one it accepts: the cross-mem row is dropped and reported,
+    /// the same-mem row and the body text survive, the result passes
+    /// strict validation and hydrates. Complement: an already
+    /// self-contained archive comes back with nothing dropped.
+    #[test]
+    fn self_contained_repack_drops_cross_mem_rows_and_passes_install_validation() {
+        let tmp = TempDir::new().unwrap();
+        let (engine, mem_dir) = folder_mem_with_entities(&tmp, &["Alpha"]);
+        let md = "\
+---
+type: spec
+created_date: 2026-01-15
+last_modified: 2026-01-15
+level: M0
+---
+# Broker
+
+## Identity
+
+Talks to [[other:thing]] over the wire.
+
+## Purpose
+
+B
+
+## Specifies
+
+C
+
+## Constraints
+
+D
+
+## Rationale
+
+E
+
+## Relationships
+
+- **USES**: [[other--thing]]
+- **REFERENCES**: [[alpha]]
+";
+        std::fs::write(mem_dir.join("broker.md"), md).unwrap();
+        let out = tmp.path().join("specs.mem");
+        engine.export_mem("specs", &out).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        assert!(
+            crate::validator::validate_and_normalize_archive(&bytes).is_err(),
+            "precondition: the raw export is refused"
+        );
+
+        let sealed = crate::validator::make_archive_self_contained(&bytes).unwrap();
+        assert_eq!(sealed.dropped.len(), 1, "{:?}", sealed.dropped);
+        assert_eq!(sealed.dropped[0].entity_path, "broker.md");
+        assert_eq!(sealed.dropped[0].target_id, "other--thing");
+        assert_eq!(sealed.dropped[0].target_mem, "other");
+        // The proof is the strict validator, the one `install` runs.
+        let validated = crate::validator::validate_and_normalize_archive(&sealed.bytes)
+            .expect("the self-contained archive passes strict validation");
+        assert!(validated.dangling_cross_mem_edges.is_empty());
+        let broker = validated
+            .entities
+            .iter()
+            .find(|e| e.id.as_ref() == "specs--broker")
+            .expect("broker travels");
+        assert_eq!(
+            broker
+                .relationships
+                .iter()
+                .map(|r| r.target.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["specs--alpha"],
+            "only the same-mem row survives"
+        );
+        assert!(
+            broker
+                .sections
+                .values()
+                .any(|b| b.contains("[[other:thing]]")),
+            "body wiki-links are never touched"
+        );
+        let hydrated = Engine::from_archive_bytes(sealed.bytes).unwrap();
+        assert_eq!(
+            hydrated.store().all_entities().filter(|e| !e.stub).count(),
+            2
+        );
+
+        // Complement: nothing to drop on an archive that is already clean.
+        std::fs::remove_file(mem_dir.join("broker.md")).unwrap();
+        let clean_engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(FilesystemMemWriter::new(mem_dir.clone())) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let clean_out = tmp.path().join("clean.mem");
+        clean_engine.export_mem("specs", &clean_out).unwrap();
+        let clean =
+            crate::validator::make_archive_self_contained(&std::fs::read(&clean_out).unwrap())
+                .unwrap();
+        assert!(clean.dropped.is_empty());
+        assert!(crate::validator::validate_and_normalize_archive(&clean.bytes).is_ok());
+    }
+
     /// Complement: a self-contained export (no cross-mem edges) carries
     /// no dangling-edge warnings.
     #[test]

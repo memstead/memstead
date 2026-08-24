@@ -395,10 +395,13 @@ impl Engine {
     /// rendered markdown.
     ///
     /// `state` is `None` (unobserved — never a fabricated state) when there is
-    /// no workspace root, when the grain is `url` (whose observation stays
-    /// deferred), or when an `entity` anchor's mem is **not mounted** — an
-    /// unmounted mem is not a mem of deleted entities, and saying so would
-    /// route a deletion proposal to prune.
+    /// no workspace root, when the grain is `url` (the engine never fetches;
+    /// a url anchor's hash is the registry's prepared form of the content
+    /// its observer supplied at write time), when an `entity` anchor's
+    /// source declares a preparation the registry does not know (the form
+    /// cannot be computed), or when an `entity` anchor's mem is **not
+    /// mounted** — an unmounted mem is not a mem of deleted entities, and
+    /// saying so would route a deletion proposal to prune.
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
         let source_roots = self.anchor_source_roots(id.mem());
@@ -433,19 +436,27 @@ impl Engine {
     /// joins is decided by that priority, deterministically. An anchor
     /// without a `source` (a hand-authored mem, a binding-less write)
     /// observes workspace-relative exactly as before. A `url`
-    /// grain has no observation and returns `None` (the report vocabulary's
-    /// `unresolvable`), as does a workspace-root-less engine. An `entity`
+    /// grain has no engine-side observation and returns `None` (the report
+    /// vocabulary's `unresolvable`) — the engine never fetches; its hash is
+    /// recorded from observation-supplied content at write time — as does a
+    /// workspace-root-less engine. An `entity`
     /// grain is not a filesystem path but is not unobservable either — it
     /// resolves against the live graph via
-    /// [`Self::observe_entity_anchor`]. This replaces the retired `single_path_medium_root` gate,
+    /// [`Self::observe_entity_anchor`], under the preparation its source
+    /// declares (touchpoint A of [`crate::preparation`]: the registry
+    /// decides the prepared form the artifact hashes as). This replaces the retired `single_path_medium_root` gate,
     /// whose single-source assumption nulled every anchor of a mem with
     /// zero or several bindings — the honest per-anchor answer supersedes
     /// the all-or-nothing mem-level one.
     fn observe_anchor(
         &self,
         anchor: &crate::anchor::Anchor,
-        source_roots: &std::collections::BTreeMap<String, String>,
+        source_roots: &std::collections::BTreeMap<String, AnchorSourceJoin>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
+        let join = anchor
+            .source
+            .as_deref()
+            .and_then(|name| source_roots.get(name));
         // An `entity`-grain anchor points into a mem's graph, not a file
         // tree. It has always returned `None` here — "unobserved this pass" —
         // which meant it could never be drifted, never be orphaned, and always
@@ -453,15 +464,10 @@ impl Engine {
         // deliberately stale anchor over a changed source entity went unflagged
         // while the capability matrix claimed full parity.
         if anchor.grain == crate::anchor::AnchorGrain::Entity {
-            return self.observe_entity_anchor(anchor);
+            return self.observe_entity_anchor(anchor, join.and_then(|j| j.preparation.as_deref()));
         }
         let root = self.workspace_root.as_deref()?;
-        let source_pointer = anchor
-            .source
-            .as_deref()
-            .and_then(|name| source_roots.get(name))
-            .map(String::as_str);
-        observe_path_anchor(root, anchor, source_pointer)
+        observe_path_anchor(root, anchor, join)
     }
 
     /// Observe an `entity`-grain anchor against the live graph — the entity-
@@ -471,10 +477,16 @@ impl Engine {
     /// The artifact is an entity id. Present/absent comes from the store, so
     /// this works uniformly across backends — a git-branch mem has no
     /// working-tree file to stat, which is exactly why observation cannot go
-    /// through the filesystem here. The compared form is the **canonical
-    /// rendered markdown**, hashed with the same `prepared_content_hash` the
-    /// path arm uses, so an anchor's recorded hash means the same thing in
-    /// both namespaces.
+    /// through the filesystem here. The compared form is the preparation
+    /// registry's **prepared form** for `preparation` (the anchor's source's
+    /// declared preparation, [`crate::preparation::entity_prepared_hash`]):
+    /// the **canonical rendered markdown** when the source declares none —
+    /// byte-for-byte today's form — or the load-bearing serialization under
+    /// `entity-load-bearing`; hashed with the same `prepared_content_hash`
+    /// the path arm uses, so an anchor's recorded hash means the same thing
+    /// in both namespaces. An identifier the registry does not know cannot
+    /// be prepared: the anchor is reported unobserved (`None`), never hashed
+    /// under a fabricated form.
     ///
     /// A stub is treated as absent: a stub is the engine's placeholder for an
     /// unresolved reference, not the entity the anchor claims to pin. Scoring
@@ -482,6 +494,7 @@ impl Engine {
     fn observe_entity_anchor(
         &self,
         anchor: &crate::anchor::Anchor,
+        preparation: Option<&str>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
         let id = EntityId::canonical(&anchor.artifact);
 
@@ -510,8 +523,14 @@ impl Engine {
             ));
         };
         let current_hash = if anchor.class.is_hash_bearing() {
-            let rendered = crate::render::render_entity_markdown(entity, None);
-            Some(crate::anchor::prepared_content_hash(rendered.as_bytes()))
+            let type_def = self
+                .schema_for(id.mem())
+                .and_then(|schema| schema.get_type(&entity.entity_type));
+            Some(crate::preparation::entity_prepared_hash(
+                entity,
+                type_def.as_deref(),
+                preparation,
+            )?)
         } else {
             None
         };
@@ -524,16 +543,19 @@ impl Engine {
         ))
     }
 
-    /// The `source name → pointer` map for `mem`'s bindings — the filesystem
+    /// The `source name → join` map for `mem`'s bindings: the filesystem
     /// roots that anchors written in the source dialect join onto (decision
-    /// 26: anchor artifact paths are source-relative first). Empty when the
-    /// workspace has no root, the pipeline store does not load, or `mem` has
-    /// no bindings — resolution then degrades to the workspace-relative
-    /// dialect alone, which is exactly the hand-authored-mem posture.
+    /// 26: anchor artifact paths are source-relative first) and the
+    /// preparation each source declares (touchpoint A: what the registry
+    /// prepares the artifact as before hashing). Empty when the workspace
+    /// has no root, the pipeline store does not load, or `mem` has no
+    /// bindings — resolution then degrades to the workspace-relative dialect
+    /// alone with no preparation, which is exactly the hand-authored-mem
+    /// posture.
     pub(crate) fn anchor_source_roots(
         &self,
         mem: &str,
-    ) -> std::collections::BTreeMap<String, String> {
+    ) -> std::collections::BTreeMap<String, AnchorSourceJoin> {
         let mut roots = std::collections::BTreeMap::new();
         let Some(root) = self.workspace_root.as_deref() else {
             return roots;
@@ -545,7 +567,12 @@ impl Engine {
             for source in &record.config.sources {
                 roots
                     .entry(source.name.clone())
-                    .or_insert_with(|| source.pointer.clone());
+                    .or_insert_with(|| AnchorSourceJoin {
+                        pointer: source.pointer.clone(),
+                        preparation: source.preparation.clone(),
+                        source: source.clone(),
+                        deny_paths: record.config.deny_paths.clone(),
+                    });
             }
         }
         roots
@@ -580,7 +607,7 @@ impl Engine {
                         .source
                         .as_deref()
                         .and_then(|name| source_roots.get(name))
-                        .map(|pointer| join_pointer(pointer, anchor_base_path(&a.artifact)));
+                        .map(|join| join_pointer(&join.pointer, anchor_base_path(&a.artifact)));
                     if anchor_references_path(a, artifact_path)
                         || joined.is_some_and(|j| {
                             path_references(
@@ -1293,20 +1320,154 @@ impl Engine {
         }
     }
 
-    /// Drop the cached community detection result — unless the store
-    /// still sits at the generation the memo was computed from
-    /// (flywheel W8/01). The keep case is exactly the batch-rollback
-    /// path: the restored snapshot restored the generation with it,
-    /// so the memo describes the live state and recomputing it would
-    /// be pure waste. Every real mutation bumps the generation first,
-    /// so those clears behave as before.
+    /// Drop the cached community detection result and the grounded
+    /// labelling memo — unless the store still sits at the generation
+    /// each memo was computed from (flywheel W8/01). The keep case is
+    /// exactly the batch-rollback path: the restored snapshot restored
+    /// the generation with it, so the memo describes the live state
+    /// and recomputing it would be pure waste. Every real mutation
+    /// bumps the generation first, so those clears behave as before.
+    /// Coupling the labelling reset here means every site that already
+    /// invalidates communities (all mutation paths, drift reload,
+    /// quarantine attach/detach, apply-commit) invalidates the
+    /// labelling too, so a stale label can never outlive the state
+    /// change that moved it.
     pub fn invalidate_communities(&mut self) {
-        if let Some((memo_key, _)) = self.community_memo.get()
-            && *memo_key == self.derived_key()
-        {
-            return;
+        let key = self.derived_key();
+        if !matches!(self.community_memo.get(), Some((k, _)) if *k == key) {
+            self.community_memo = OnceCell::new();
         }
-        self.community_memo = OnceCell::new();
+        if !matches!(self.labelling_memo.get(), Some((k, _)) if *k == key) {
+            self.labelling_memo = OnceCell::new();
+        }
+    }
+
+    /// The grounded labelling of one mem — `None` when its pinned
+    /// schema declares no `relationships.labelling`. Computed on
+    /// first access for every declaring mem, memoised until the next
+    /// invalidation; generation-keyed like `community_memo`.
+    pub fn mem_labelling(&self, mem: &str) -> Option<&crate::ops::labelling::MemLabelling> {
+        // Generation sanity, same contract as `communities()`: a
+        // stored memo must match the live derived key — a mismatch
+        // means a mutation path missed invalidate_communities.
+        if let Some((memo_key, _)) = self.labelling_memo.get() {
+            debug_assert_eq!(
+                *memo_key,
+                self.derived_key(),
+                "labelling memo key lags the engine — a mutation path missed invalidate_communities"
+            );
+        }
+        let (_, map) = self.labelling_memo.get_or_init(|| {
+            let mut out = std::collections::HashMap::new();
+            for (mem_name, schema) in &self.schemas {
+                if let Some(lab) = crate::ops::labelling::labelling_of(schema) {
+                    out.insert(
+                        mem_name.clone(),
+                        crate::ops::labelling::compute_mem_labelling(
+                            &self.store,
+                            mem_name,
+                            &lab.attack,
+                        ),
+                    );
+                }
+            }
+            (self.derived_key(), out)
+        });
+        map.get(mem)
+    }
+
+    /// One entity's served labelling view — `None` when the entity is
+    /// a stub or its mem's schema declares no labelling; serving
+    /// surfaces then keep their byte-identical payloads. The shape
+    /// block is present exactly when the declaration carries a
+    /// `support` walk.
+    pub fn computed_labelling(
+        &self,
+        entity: &Entity,
+    ) -> Option<crate::ops::labelling::LabellingView> {
+        use crate::ops::labelling::{Label, compute_shape, labelling_of};
+        if entity.stub {
+            return None;
+        }
+        let schema = self.schemas.get(entity.mem.as_str())?;
+        let lab = labelling_of(schema)?;
+        let mem_lab = self.mem_labelling(entity.mem.as_str())?;
+        let label = *mem_lab.labels.get(entity.id.0.as_str())?;
+        let defeated_by = if label == Label::Defeated {
+            mem_lab.accepted_attackers_of(entity.id.0.as_str())
+        } else {
+            Vec::new()
+        };
+        let undecided_by = if label == Label::Undecided {
+            mem_lab.undecided_attackers_of(entity.id.0.as_str())
+        } else {
+            Vec::new()
+        };
+        let shape = lab.support.as_ref().map(|walk| {
+            let label_of = |id: &EntityId| -> Option<Label> {
+                self.mem_labelling(id.mem())
+                    .and_then(|ml| ml.labels.get(id.0.as_str()).copied())
+            };
+            compute_shape(&self.store, &entity.id, walk, &label_of)
+        });
+        Some(crate::ops::labelling::LabellingView {
+            label,
+            defeated_by,
+            undecided_by,
+            shape,
+        })
+    }
+
+    /// The `labelling` health axis payload — per declaring mem:
+    /// counts per label, the defeated list with its accepted
+    /// attackers, the undecided list with its open attacker set, and
+    /// the excluded cross-mem attack-edge count. One composer shared
+    /// by the CLI health command and both MCP flavours.
+    pub fn health_labelling_axis(&self, mem_filter: Option<&str>) -> serde_json::Value {
+        use crate::ops::labelling::Label;
+        let mut mems = serde_json::Map::new();
+        let mut mem_names: Vec<&String> = self.schemas.keys().collect();
+        mem_names.sort();
+        for mem in mem_names {
+            if let Some(v) = mem_filter
+                && mem != v
+            {
+                continue;
+            }
+            let Some(ml) = self.mem_labelling(mem) else {
+                continue;
+            };
+            let mut accepted = 0usize;
+            let mut defeated: Vec<serde_json::Value> = Vec::new();
+            let mut undecided: Vec<serde_json::Value> = Vec::new();
+            for (id, label) in &ml.labels {
+                match label {
+                    Label::Accepted => accepted += 1,
+                    Label::Defeated => defeated.push(serde_json::json!({
+                        "id": id,
+                        "defeated_by": ml.accepted_attackers_of(id),
+                    })),
+                    Label::Undecided => undecided.push(serde_json::json!({
+                        "id": id,
+                        "undecided_by": ml.undecided_attackers_of(id),
+                    })),
+                }
+            }
+            mems.insert(
+                mem.clone(),
+                serde_json::json!({
+                    "counts": {
+                        "accepted": accepted,
+                        "defeated": defeated.len(),
+                        "undecided": undecided.len(),
+                    },
+                    "defeated": defeated,
+                    "undecided": undecided,
+                    "cross_mem_edges_excluded": ml.cross_mem_edges_excluded,
+                }),
+            );
+        }
+        serde_json::Value::Object(mems)
     }
 
     /// Real entities with no incoming or outgoing edges — leaf-declared
@@ -1356,6 +1517,62 @@ impl Engine {
         mem_filter: Option<&str>,
     ) -> Vec<crate::ops::health::ConstraintFindingReport> {
         crate::ops::health::collect_constraint_findings(&self.store, mem_filter, &self.schemas)
+    }
+
+    /// The evaluated aggregate signals for one entity — `None` when
+    /// the mem has no schema, the type is unknown or a stub, or the
+    /// type declares no signals; serving surfaces then keep their
+    /// byte-identical payloads.
+    pub fn computed_signals(
+        &self,
+        entity: &Entity,
+    ) -> Option<Vec<crate::ops::signals::ComputedSignal>> {
+        if entity.stub {
+            return None;
+        }
+        let schema = self.schemas.get(entity.mem.as_str())?;
+        let td = schema.types.get(entity.entity_type.as_str())?;
+        if td.signals.is_empty() {
+            return None;
+        }
+        Some(crate::ops::signals::compute_signals(
+            &self.store,
+            td,
+            &entity.id,
+        ))
+    }
+
+    /// Every entity carrying at least one signal above `none` — the
+    /// include-gated `signals` health axis.
+    pub fn signal_reports(
+        &self,
+        mem_filter: Option<&str>,
+    ) -> Vec<crate::ops::health::SignalReport> {
+        crate::ops::health::collect_signal_reports(&self.store, mem_filter, &self.schemas)
+    }
+
+    /// The `signals` health axis payload — the entity roster plus
+    /// per-level counts. One composer shared by the CLI health
+    /// command and both MCP flavours so the axis cannot drift
+    /// between surfaces.
+    pub fn health_signals_axis(&self, mem_filter: Option<&str>) -> serde_json::Value {
+        use memstead_schema::SignalLevel;
+        let reports = self.signal_reports(mem_filter);
+        let mut notice = 0usize;
+        let mut warn = 0usize;
+        for r in &reports {
+            for s in &r.signals {
+                match s.level {
+                    Some(SignalLevel::Notice) => notice += 1,
+                    Some(SignalLevel::Warn) => warn += 1,
+                    None => {}
+                }
+            }
+        }
+        serde_json::json!({
+            "entities": reports,
+            "counts": { "notice": notice, "warn": warn },
+        })
     }
 
     /// Defective section-format declarations the loaded schemas carry
@@ -2251,6 +2468,24 @@ pub struct ResolvedAnchor {
     pub observed_hash: Option<String>,
 }
 
+/// What an anchor's `source` name resolves to in its mem's bindings: the
+/// declared pointer (the filesystem root a source-dialect artifact path
+/// joins onto, decision 26) and the declared preparation (what the
+/// preparation registry prepares the artifact as before hashing —
+/// touchpoint A of [`crate::preparation`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnchorSourceJoin {
+    /// The source's declared `pointer`.
+    pub(crate) pointer: String,
+    /// The source's declared `preparation`, if any.
+    pub(crate) preparation: Option<String>,
+    /// The declaring source itself — its scope is what a `tree` anchor's
+    /// prepared form enumerates under a code-map preparation.
+    pub(crate) source: crate::pipeline::Source,
+    /// The binding's `deny_paths`, applied on top of the source scope.
+    pub(crate) deny_paths: Vec<String>,
+}
+
 /// Observe a single path-namespace anchor against `root` (its medium's
 /// filesystem root) and resolve its live state plus — for a present
 /// hash-bearing (`anchored` / `derived`) `file` / `span` anchor — the
@@ -2260,22 +2495,31 @@ pub struct ResolvedAnchor {
 ///
 /// The computed hash is what lets [`crate::anchor::resolve_anchor`]
 /// adjudicate `drifted` vs `resolves` deterministically against the recorded
-/// hash. A `span` anchor hashes its whole containing file (the span locator
-/// selects within it; the file is the hashed unit); a `tree` grain has no
-/// prepared form this cycle and observes no hash; a read failure likewise
-/// observes no hash — those resolve `recheck`, never a fabricated `drifted`.
-/// Non-hash classes (`authored` / `informed-by`) skip the read entirely, so
-/// an anchor-less or hash-free mem pays no observation cost.
+/// hash. The prepared form is the registry's rule for the anchor's
+/// source's preparation ([`crate::preparation::path_prepared_hash`]): a
+/// `span` anchor hashes its whole containing file (the span locator selects
+/// within it; the file is the hashed unit), except under a **delivery
+/// preparation**, where a `<path>#<key>` span names one delivery unit (the
+/// unit's own text is the hashed unit, and a key the file no longer yields
+/// is an absent artifact); under a **code-map** preparation a file or span
+/// hashes the interface digest, and a `tree` hashes the code map of every
+/// scoped file under it. A `tree` grain under no code map has no prepared
+/// form and observes no hash; a read failure likewise observes no hash —
+/// those resolve `recheck`, never a fabricated `drifted`. Non-hash classes
+/// (`authored` / `informed-by`) skip the read entirely, so an anchor-less or
+/// hash-free mem pays no observation cost.
 fn observe_path_anchor(
     root: &Path,
     anchor: &crate::anchor::Anchor,
-    source_pointer: Option<&str>,
+    join: Option<&AnchorSourceJoin>,
 ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
     use crate::anchor::AnchorGrain;
     match anchor.grain {
         AnchorGrain::Span | AnchorGrain::File | AnchorGrain::Tree => {}
         AnchorGrain::Url | AnchorGrain::Entity => return None,
     }
+    let source_pointer = join.map(|j| j.pointer.as_str());
+    let preparation = join.and_then(|j| j.preparation.as_deref());
     let base = anchor_base_path(&anchor.artifact);
     // Decision 29: the source-join is authoritative — an artifact path is
     // source-relative first (joined onto the declaring source's pointer,
@@ -2293,13 +2537,52 @@ fn observe_path_anchor(
             None,
         ));
     }
-    let current_hash = if anchor.class.is_hash_bearing()
-        && matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span)
-        && path.is_file()
+    let current_hash = if !anchor.class.is_hash_bearing() {
+        None
+    } else if matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span) && path.is_file() {
+        match std::fs::read(&path).ok().map(|bytes| {
+            crate::preparation::path_prepared_hash(
+                preparation,
+                &anchor.artifact,
+                anchor.grain,
+                &bytes,
+            )
+        }) {
+            Some(crate::preparation::PathPrepared::Hash(h)) => Some(h),
+            Some(crate::preparation::PathPrepared::UnitAbsent) => {
+                return Some((
+                    crate::anchor::resolve_anchor(
+                        anchor,
+                        &crate::anchor::ArtifactObservation::Absent,
+                    ),
+                    None,
+                ));
+            }
+            Some(crate::preparation::PathPrepared::NoHash) | None => None,
+        }
+    } else if anchor.grain == AnchorGrain::Tree
+        && path.is_dir()
+        && preparation == Some(crate::preparation::CODE_MAP)
+        && let Some(join) = join
     {
-        std::fs::read(&path)
-            .ok()
-            .map(|bytes| crate::anchor::prepared_content_hash(&bytes))
+        // The tree's code map: every scoped file under the tree, by the
+        // declaring source's own scope and the binding's deny paths. The
+        // path the anchor names is workspace-relative or source-relative;
+        // the enumeration is workspace-relative, so compare the resolved
+        // absolute paths.
+        let files: Vec<(String, String)> =
+            crate::ingest::cursor::enumerate_facet_files(&join.source, &join.deny_paths, root)
+                .into_iter()
+                .filter(|f| root.join(f).starts_with(&path))
+                .filter_map(|f| {
+                    std::fs::read(root.join(&f))
+                        .ok()
+                        .map(|bytes| (f, String::from_utf8_lossy(&bytes).into_owned()))
+                })
+                .collect();
+        Some(crate::anchor::prepared_content_hash(
+            crate::preparation::code_map_tree_digest(&files).as_bytes(),
+        ))
     } else {
         None
     };
@@ -3193,7 +3476,15 @@ community:
             engine.workspace_root().is_none(),
             "from_mounts has no workspace path",
         );
-        assert!(engine.load_warnings().is_empty());
+        // An entity-less mount reports itself empty; nothing else.
+        assert!(
+            engine
+                .load_warnings()
+                .iter()
+                .all(|w| w.code() == "MOUNT_UNBACKED"),
+            "{:?}",
+            engine.load_warnings()
+        );
     }
 
     #[test]

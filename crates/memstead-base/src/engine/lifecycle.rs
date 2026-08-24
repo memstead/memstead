@@ -749,6 +749,11 @@ impl Engine {
         // targeting the new mem resolve correctly during this
         // load.
         let (entries, read_errors) = collect_source_entries(backend.as_ref())?;
+        if let Some(w) =
+            super::boot::unbacked_mount_warning(&mount, backend.as_ref(), Some(entries.len()))
+        {
+            self.load_warnings.push(w);
+        }
         let load_result = parse_entries(entries, read_errors, &mount.mem, schema.as_ref());
 
         let mut mem_names: Vec<String> = self.mounts.iter().map(|m| m.mount.mem.clone()).collect();
@@ -1176,12 +1181,43 @@ impl Engine {
             .unwrap_or_else(|| "<unset>".to_string());
         let in_flight = self.mounts[mount_idx].mount.migration_target.clone();
 
-        if current_pin.as_ref() == Some(target) {
+        // The noop question is asked of the pin the engine actually
+        // serves (the loaded schema, resolved from the authoritative
+        // backend config at boot), never of the mount's expectation
+        // alone. With a `SCHEMA_PIN_MISMATCH` (mount says 0.4.0, config
+        // says 0.1.0) the old comparison against the mount answered
+        // "noop" for a target of 0.4.0 and the config stayed at 0.1.0
+        // forever: the one command meant to repair the mismatch could
+        // not. When the served pin already equals the target and only
+        // the mount expectation lags, the expectation is aligned in
+        // place and reported as switched.
+        let served_pin: Option<memstead_schema::SchemaRef> = self.schemas.get(mem).map(|s| {
+            let (name, version) = s.id();
+            memstead_schema::SchemaRef::new(name, version)
+        });
+        // During a dual-pin migration the served schema IS the target
+        // (writes validate against it) while the config still pins the
+        // old generation, so the shortcut applies only with no migration
+        // in flight; an in-flight target falls through to the
+        // conformance gate that completes it.
+        if served_pin.as_ref() == Some(target) && in_flight.is_none() {
+            if current_pin.as_ref() == Some(target) {
+                return Ok(SetSchemaOutcome {
+                    mem: mem.to_string(),
+                    schema_pin: current_pin_display,
+                    migration_target: in_flight.map(|t| t.as_display()),
+                    outcome: SetSchemaResult::Noop,
+                    findings: Vec::new(),
+                });
+            }
+            self.mounts[mount_idx].mount.schema = Some(target.clone());
+            self.mounts[mount_idx].mount.migration_target = None;
+            self.persist_state()?;
             return Ok(SetSchemaOutcome {
                 mem: mem.to_string(),
-                schema_pin: current_pin_display,
-                migration_target: in_flight.map(|t| t.as_display()),
-                outcome: SetSchemaResult::Noop,
+                schema_pin: target.as_display(),
+                migration_target: None,
+                outcome: SetSchemaResult::Switched,
                 findings: Vec::new(),
             });
         }
@@ -2275,6 +2311,15 @@ impl Engine {
         // mutating the store on a failed reload.
         let backend = self.mounts[mount_idx].backend.as_ref();
         let (entries, read_errors) = collect_source_entries(backend)?;
+        // The unbacked-mount probe rides the reload like the other
+        // load-time warnings: a branch that appeared (or vanished) since
+        // boot changes the answer, and the sink's per-mem replace below
+        // drops the boot-time one.
+        let unbacked = super::boot::unbacked_mount_warning(
+            &self.mounts[mount_idx].mount,
+            backend,
+            Some(entries.len()),
+        );
         let load_result = parse_entries(entries, read_errors, mem, schema.as_ref());
 
         // Build the LoadCollector inputs — mem roster + last-
@@ -2288,6 +2333,9 @@ impl Engine {
 
         // Failure fence above; below this point the store is mutated.
         self.store.remove_entities_by_mem(mem);
+        if let Some(w) = unbacked {
+            warnings_sink.push(w);
+        }
         let fallback = engine_fallback_type();
         push_entities_into_store(
             &mut self.store,
@@ -3039,9 +3087,15 @@ write_rules: []
         mount.schema = Some("default@1.3.0".parse().unwrap());
         let mut engine =
             Engine::from_mounts(vec![(mount, Box::new(writer) as Box<dyn MemBackend>)]).unwrap();
+        // The only thing a clean, entity-less mount says about itself
+        // is that it is empty (`MOUNT_UNBACKED` / `empty`).
         assert!(
-            engine.load_warnings().is_empty(),
-            "clean boot has no warnings"
+            engine
+                .load_warnings()
+                .iter()
+                .all(|w| w.code() == "MOUNT_UNBACKED"),
+            "clean boot has no warnings beyond the empty-mount one: {:?}",
+            engine.load_warnings()
         );
 
         // Drop a markdown file with two `## Identity` headings.
@@ -4759,6 +4813,49 @@ community:
 
     fn sref(s: &str) -> memstead_schema::SchemaRef {
         s.parse().unwrap()
+    }
+
+    /// A `SCHEMA_PIN_MISMATCH` state (the mount expects the target, the
+    /// served config pins an older generation) is exactly what
+    /// `set-schema` must repair: the switch persists the config pin and
+    /// reports `switched`, never `noop`. Complement: with both in
+    /// agreement the same call is a noop.
+    #[test]
+    fn set_schema_repairs_a_mount_expectation_ahead_of_the_served_pin() {
+        let (_tmp, mut engine) = migration_engine();
+        // Fabricate the mismatch: the mount expectation says mig-b while
+        // the engine still serves mig-a from the config.
+        let idx = engine
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == "specs")
+            .unwrap();
+        engine.mounts[idx].mount.schema = Some(sref("mig-b@0.1.0"));
+        assert_eq!(engine.schemas.get("specs").unwrap().id().0, "mig-a");
+
+        let out = engine
+            .set_mem_schema("specs", &sref("mig-b@0.1.0"))
+            .unwrap();
+        // The fixture's entities are not integral against mig-b, so the
+        // honest answer is a started migration; the point is that it is
+        // NOT the noop the stale mount expectation used to produce.
+        assert_eq!(
+            out.outcome,
+            crate::engine::SetSchemaResult::MigrationStarted,
+            "a served pin behind the target enters the switch path, never a noop: {out:?}"
+        );
+        assert!(!out.findings.is_empty());
+        assert_eq!(
+            engine.schemas.get("specs").unwrap().id().0,
+            "mig-b",
+            "writes now validate against the target"
+        );
+
+        // Complement: served pin and expectation both at the target (no
+        // migration in flight) is a noop.
+        let (_tmp2, mut clean) = migration_engine();
+        let again = clean.set_mem_schema("specs", &sref("mig-a@0.1.0")).unwrap();
+        assert_eq!(again.outcome, crate::engine::SetSchemaResult::Noop);
     }
 
     #[test]

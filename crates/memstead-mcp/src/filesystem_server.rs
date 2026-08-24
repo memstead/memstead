@@ -704,23 +704,34 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             to,
             existing_path,
             path_truncated,
+            acyclic_set,
+            existing_path_rel_types,
         } => {
             let existing_path_json: Vec<String> =
                 existing_path.iter().map(|id| id.to_string()).collect();
+            let subgraph = match &acyclic_set {
+                Some(set) => format!("[{}] acyclicity-set", set.join(", ")),
+                None => rel_type.clone(),
+            };
             let message = format!(
-                "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {rel_type} subgraph"
+                "creating edge {rel_type} from '{from}' to '{to}' would close a cycle in the {subgraph} subgraph"
             );
-            tool_error_with_details(
-                "RELATIONSHIP_CYCLE",
-                &message,
-                Some(serde_json::json!({
-                    "rel_type": rel_type,
-                    "from": from.to_string(),
-                    "to": to.to_string(),
-                    "existing_path": existing_path_json,
-                    "path_truncated": path_truncated,
-                })),
-            )
+            let mut details = serde_json::json!({
+                "rel_type": rel_type,
+                "from": from.to_string(),
+                "to": to.to_string(),
+                "existing_path": existing_path_json,
+                "path_truncated": path_truncated,
+            });
+            // Additive set-refusal extras; single-rel-type refusals
+            // keep their byte-identical payload.
+            if let Some(set) = &acyclic_set {
+                details["acyclic_set"] = serde_json::json!(set);
+            }
+            if let Some(rels) = &existing_path_rel_types {
+                details["existing_path_rel_types"] = serde_json::json!(rels);
+            }
+            tool_error_with_details("RELATIONSHIP_CYCLE", &message, Some(details))
         }
         EngineError::SetAndUnsetConflict { keys } => {
             let message = format!("metadata keys appear in both set and unset: {keys:?}");
@@ -1063,7 +1074,17 @@ impl FilesystemMcpServer {
             }
         };
         let sections_filter = p.sections.as_deref();
-        let mut md = render_entity_markdown(&entity, sections_filter);
+        // Declared aggregate signals — computed once, served on both
+        // channels; `None` for types declaring none keeps both
+        // channels byte-identical.
+        let computed_signals = engine.computed_signals(&entity);
+        let computed_labelling = engine.computed_labelling(&entity);
+        let mut md = memstead_base::render::render_entity_markdown_with_signals(
+            &entity,
+            sections_filter,
+            computed_signals.as_deref(),
+            computed_labelling.as_ref(),
+        );
         // Inject `_hash` as the first frontmatter field so callers
         // can pin it to `expected_hash` on the next mutation.
         if let Some(idx) = md.find("---\n") {
@@ -1128,6 +1149,8 @@ impl FilesystemMcpServer {
             engine.mem_origin_class(id.mem()),
             engine.store().outgoing(&entity.id),
             incoming_for_envelope.as_deref(),
+            computed_signals.as_deref(),
+            computed_labelling.as_ref(),
         );
         // Mutation provenance (agent-trust plan 13), opt-in — same
         // block and key the full flavour serves; default responses
@@ -1787,12 +1810,16 @@ impl FilesystemMcpServer {
         let wants_open_questions = include.iter().any(|s| s == "open_questions");
         let wants_stale_derivations = include.iter().any(|s| s == "stale_derivations");
         let wants_checks = include.iter().any(|s| s == "checks");
+        let wants_signals = include.iter().any(|s| s == "signals");
+        let wants_labelling = include.iter().any(|s| s == "labelling");
         if wants_anchors
             || wants_constraints
             || wants_friction
             || wants_open_questions
             || wants_stale_derivations
             || wants_checks
+            || wants_signals
+            || wants_labelling
         {
             let mut value = match serde_json::to_value(&health) {
                 Ok(v) => v,
@@ -1826,6 +1853,12 @@ impl FilesystemMcpServer {
             if wants_checks {
                 value["checks"] =
                     memstead_base::ops::health::health_checks_axis(&engine, mem_scope);
+            }
+            if wants_signals {
+                value["signals"] = engine.health_signals_axis(mem_scope);
+            }
+            if wants_labelling {
+                value["labelling"] = engine.health_labelling_axis(mem_scope);
             }
             return json_response(&value);
         }

@@ -154,6 +154,12 @@ pub enum SchemaLoadError {
         reason: String,
     },
 
+    #[error("relationships.acyclic_sets is invalid: {reason} — offending entry: '{offender}'")]
+    InvalidAcyclicSet { offender: String, reason: String },
+
+    #[error("relationships.labelling is invalid: {reason} — offending name: '{offender}'")]
+    InvalidLabelling { offender: String, reason: String },
+
     #[error(
         "type '{type_name}' section '{section}' format declaration is invalid: {}",
         problems.join("; ")
@@ -783,6 +789,77 @@ fn load_with_context(
         });
     }
 
+    // Acyclicity sets: each set names two or more DECLARED rel-types,
+    // and a rel-type appears in at most one set across all sets
+    // (overlapping sets have no coherent refusal message; a duplicate
+    // inside one set is the same defect). A single-member set is the
+    // per-definition `acyclic` flag's job and refuses here.
+    let mut acyclic_set_member_seen: HashSet<&str> = HashSet::new();
+    for set in &manifest.relationships.acyclic_sets {
+        if set.len() < 2 {
+            errors.push(SchemaLoadError::InvalidAcyclicSet {
+                offender: set.join(", "),
+                reason: "a set needs at least two rel-types (a single member is the \
+                         per-definition `acyclic` flag)"
+                    .to_string(),
+            });
+        }
+        for name in set {
+            if !rel_names.contains(name.as_str()) {
+                errors.push(SchemaLoadError::InvalidAcyclicSet {
+                    offender: name.clone(),
+                    reason: "names no declared relationship".to_string(),
+                });
+            }
+            if !acyclic_set_member_seen.insert(name.as_str()) {
+                errors.push(SchemaLoadError::InvalidAcyclicSet {
+                    offender: name.clone(),
+                    reason: "a rel-type may appear in at most one acyclicity set".to_string(),
+                });
+            }
+        }
+    }
+
+    // Labelling declaration: `attack` names at least one declared
+    // rel-type; a `support` block names declared rel-types too (its
+    // `terminal_types` need every type loaded and are checked in the
+    // schema-level pass; its `direction` is a closed enum).
+    if let Some(lab) = &manifest.relationships.labelling {
+        if lab.attack.is_empty() {
+            errors.push(SchemaLoadError::InvalidLabelling {
+                offender: "(empty)".to_string(),
+                reason: "`labelling.attack` must name at least one rel-type".to_string(),
+            });
+        }
+        for name in &lab.attack {
+            if !rel_names.contains(name.as_str()) {
+                errors.push(SchemaLoadError::InvalidLabelling {
+                    offender: name.clone(),
+                    reason: "`labelling.attack` entry names no declared relationship".to_string(),
+                });
+            }
+        }
+        if let Some(sup) = &lab.support {
+            if sup.relationships.is_empty() {
+                errors.push(SchemaLoadError::InvalidLabelling {
+                    offender: "(empty)".to_string(),
+                    reason: "`labelling.support.relationships` must name at least one rel-type"
+                        .to_string(),
+                });
+            }
+            for name in &sup.relationships {
+                if !rel_names.contains(name.as_str()) {
+                    errors.push(SchemaLoadError::InvalidLabelling {
+                        offender: name.clone(),
+                        reason: "`labelling.support.relationships` entry names no declared \
+                                 relationship"
+                            .to_string(),
+                    });
+                }
+            }
+        }
+    }
+
     // Option C coupling — auto-force `manual_authoring: forbidden` on
     // the rel-type named by `alias_target_rel_type`. Schemas setting
     // the pointer opt the named rel-type out of explicit authoring;
@@ -1083,6 +1160,79 @@ fn load_with_context(
                     });
                 }
             }
+            // `must_reach.terminal_types` name types of this schema —
+            // checkable only once every type is loaded.
+            for ob in &td.must_reach {
+                for t in &ob.terminal_types {
+                    if !types_map.contains_key(t.as_str()) {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "must_reach",
+                            offender: t.clone(),
+                            reason: "`terminal_types` entry names no type of this schema"
+                                .to_string(),
+                        });
+                    }
+                }
+            }
+            // A signal's neighbour pair reads the COUNTERPART entity,
+            // whose type this schema cannot pin statically: the field
+            // must be declared with `enum_values` on at least one type
+            // of the schema, and the value must be a member on at
+            // least one such declaring type.
+            for sig in &td.signals {
+                if let (Some(field), Some(value)) = (&sig.neighbour_field, &sig.neighbour_value) {
+                    let declaring: Vec<&crate::types::MetadataFieldDef> = types_map
+                        .values()
+                        .flat_map(|t| t.metadata_fields.iter())
+                        .filter(|f| f.key == *field && f.enum_values.is_some())
+                        .collect();
+                    if declaring.is_empty() {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "signal",
+                            offender: field.clone(),
+                            reason: "`neighbour_field` is declared with `enum_values` on no \
+                                     type of this schema"
+                                .to_string(),
+                        });
+                    } else if !declaring.iter().any(|f| {
+                        f.enum_values
+                            .as_ref()
+                            .is_some_and(|allowed| allowed.contains(value))
+                    }) {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "signal",
+                            offender: value.clone(),
+                            reason: format!(
+                                "`neighbour_value` is outside `{field}`'s enum_values on every \
+                                 declaring type"
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // `labelling.support.terminal_types` name types of this schema —
+    // checkable only once every type is loaded (mirrors the
+    // `must_reach` pass; skipped on type-parse failure like the rest
+    // of the schema-level pass).
+    if !had_type_parse_failure
+        && let Some(lab) = &manifest.relationships.labelling
+        && let Some(sup) = &lab.support
+    {
+        for t in &sup.terminal_types {
+            if !types_map.contains_key(t.as_str()) {
+                errors.push(SchemaLoadError::InvalidLabelling {
+                    offender: t.clone(),
+                    reason: "`labelling.support.terminal_types` entry names no type of this \
+                             schema"
+                        .to_string(),
+                });
+            }
         }
     }
 
@@ -1332,6 +1482,198 @@ fn validate_type(
                 errors.push(e);
             }
         }
+        // Conditional blocks: `when_field` / `when_value` travel as a
+        // pair, the field must be a declared metadata field carrying
+        // `enum_values`, and the value must be a member. Stricter than
+        // `requires_when` (which tolerates non-enum trigger fields):
+        // an edge obligation armed by a free-text value would never
+        // fire predictably, so the loader refuses instead of loading a
+        // dead condition.
+        match (&block.when_field, &block.when_value) {
+            (None, None) => {}
+            (Some(f), None) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "required_outgoing",
+                    offender: f.clone(),
+                    reason: "`when_field` requires `when_value` alongside it".to_string(),
+                });
+            }
+            (None, Some(v)) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "required_outgoing",
+                    offender: v.clone(),
+                    reason: "`when_value` requires `when_field` alongside it".to_string(),
+                });
+            }
+            (Some(f), Some(v)) => match td.metadata_fields.iter().find(|mf| mf.key == *f) {
+                None => {
+                    errors.push(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "required_outgoing",
+                        offender: f.clone(),
+                        reason: "`when_field` names no metadata field of this type".to_string(),
+                    });
+                }
+                Some(when_def) => match &when_def.enum_values {
+                    None => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "required_outgoing",
+                            offender: f.clone(),
+                            reason: format!(
+                                "`when_field` must name a metadata field with `enum_values`; `{f}` declares none"
+                            ),
+                        });
+                    }
+                    Some(allowed) if !allowed.contains(v) => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "required_outgoing",
+                            offender: v.clone(),
+                            reason: format!(
+                                "`when_value` is not in `{f}`'s enum_values [{}]",
+                                allowed.join(", ")
+                            ),
+                        });
+                    }
+                    Some(_) => {}
+                },
+            },
+        }
+    }
+
+    // Reachability obligations. Per-type checks here; `terminal_types`
+    // needs every type loaded and is checked in the schema-level pass.
+    for ob in &td.must_reach {
+        if ob.relationships.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "(empty)".to_string(),
+                reason: "`relationships` must name at least one relationship".to_string(),
+            });
+        }
+        for r in &ob.relationships {
+            if let Err(e) = check_rel(&td.name, "must_reach", r, rel_names, available_rels) {
+                errors.push(e);
+            }
+        }
+        if ob.terminal_types.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "(empty)".to_string(),
+                reason: "`terminal_types` must name at least one type".to_string(),
+            });
+        }
+        if ob.max_depth == Some(0) {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "0".to_string(),
+                reason: "`max_depth` must be at least 1 — nothing is reachable in zero hops"
+                    .to_string(),
+            });
+        }
+        if ob.severity == crate::types::ConstraintSeverity::Block {
+            // A transitive property is established by writes on OTHER
+            // entities, so a write-time refusal would punish the wrong
+            // mutation — refuse the promise rather than load-and-
+            // downgrade (same posture as status_propagation).
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "must_reach",
+                offender: "block".to_string(),
+                reason: "must_reach is always warn-tier — a reachability gap is created by \
+                         writes on other entities, so no single write can be refused for it"
+                    .to_string(),
+            });
+        }
+    }
+
+    // Aggregate signals. Per-type checks here; the neighbour pair's
+    // cross-type validation needs every type loaded and runs in the
+    // schema-level pass.
+    let mut signal_names_seen: HashSet<&str> = HashSet::new();
+    for sig in &td.signals {
+        let name_ok = sig
+            .name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
+            && sig
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !name_ok {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "`name` must match [a-z][a-z0-9_]*".to_string(),
+            });
+        }
+        if !signal_names_seen.insert(sig.name.as_str()) {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "duplicate signal name on this type".to_string(),
+            });
+        }
+        if sig.relationships.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "`relationships` must name at least one relationship".to_string(),
+            });
+        }
+        for r in &sig.relationships {
+            if let Err(e) = check_rel(&td.name, "signals", r, rel_names, available_rels) {
+                errors.push(e);
+            }
+        }
+        if sig.thresholds.is_empty() {
+            errors.push(SchemaLoadError::InvalidConstraint {
+                type_name: td.name.clone(),
+                kind: "signal",
+                offender: sig.name.clone(),
+                reason: "`thresholds` must declare at least one step".to_string(),
+            });
+        }
+        for pair in sig.thresholds.windows(2) {
+            if pair[1].at_least <= pair[0].at_least {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "signal",
+                    offender: pair[1].at_least.to_string(),
+                    reason: "`thresholds` must have strictly increasing `at_least` values"
+                        .to_string(),
+                });
+            }
+        }
+        match (&sig.neighbour_field, &sig.neighbour_value) {
+            (None, None) | (Some(_), Some(_)) => {}
+            (Some(f), None) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "signal",
+                    offender: f.clone(),
+                    reason: "`neighbour_field` requires `neighbour_value` alongside it".to_string(),
+                });
+            }
+            (None, Some(v)) => {
+                errors.push(SchemaLoadError::InvalidConstraint {
+                    type_name: td.name.clone(),
+                    kind: "signal",
+                    offender: v.clone(),
+                    reason: "`neighbour_value` requires `neighbour_field` alongside it".to_string(),
+                });
+            }
+        }
     }
 
     // Constraint vocabulary (loader honesty: a malformed declaration
@@ -1431,6 +1773,7 @@ fn validate_type(
                 field,
                 value,
                 rel_type,
+                rel_types,
                 severity,
                 ..
             } => {
@@ -1459,14 +1802,59 @@ fn validate_type(
                         }
                     }
                 }
-                if !rel_names.contains(rel_type) {
-                    errors.push(SchemaLoadError::InvalidConstraint {
-                        type_name: td.name.clone(),
-                        kind: "status_propagation",
-                        offender: rel_type.clone(),
-                        reason: "`rel_type` is not in the schema's relationship vocabulary"
-                            .to_string(),
-                    });
+                // Exactly one of `rel_type` / `rel_types`; every named
+                // member must be declared; an empty set is a defect.
+                match (rel_type, rel_types) {
+                    (Some(_), Some(_)) => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "status_propagation",
+                            offender: "rel_type".to_string(),
+                            reason: "declare `rel_type` or `rel_types`, not both".to_string(),
+                        });
+                    }
+                    (None, None) => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "status_propagation",
+                            offender: "(missing)".to_string(),
+                            reason: "one of `rel_type` / `rel_types` is required".to_string(),
+                        });
+                    }
+                    (Some(single), None) => {
+                        if !rel_names.contains(single) {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "status_propagation",
+                                offender: single.clone(),
+                                reason: "`rel_type` is not in the schema's relationship vocabulary"
+                                    .to_string(),
+                            });
+                        }
+                    }
+                    (None, Some(set)) => {
+                        if set.is_empty() {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "status_propagation",
+                                offender: "(empty)".to_string(),
+                                reason: "`rel_types` must name at least one relationship"
+                                    .to_string(),
+                            });
+                        }
+                        for name in set {
+                            if !rel_names.contains(name) {
+                                errors.push(SchemaLoadError::InvalidConstraint {
+                                    type_name: td.name.clone(),
+                                    kind: "status_propagation",
+                                    offender: name.clone(),
+                                    reason: "`rel_types` entry is not in the schema's \
+                                             relationship vocabulary"
+                                        .to_string(),
+                                });
+                            }
+                        }
+                    }
                 }
                 if *severity == crate::types::ConstraintSeverity::Block {
                     // Propagation can never refuse a write (the taint

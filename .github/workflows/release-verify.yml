@@ -1,0 +1,77 @@
+# cargo-dist post-announce job: does every channel serve the tag?
+#
+# Runs after `announce` on every tag push, via
+# `post-announce-jobs = ["./release-verify"]` in dist-workspace.toml, and
+# on dispatch against any tag. It calls the same `scripts/release-verify.sh`
+# the release chapter tells a maintainer to run: the channels are asked
+# from outside (GitHub Release, installers, the Homebrew tap, the plugin
+# manifests, crates.io, npm), and the run's own publish jobs are read for
+# one that SKIPPED on a non-prerelease (dist's announce accepts that by
+# design; 0.6.0 announced while the tap kept serving 0.4.0).
+#
+# WHY a job and not only a script: a script helps whoever runs it. 0.6.0's
+# stale tap was found by hand, days later. The job makes the release run
+# itself red when a channel disagrees, and the failed-run notification
+# does the rest.
+#
+# Exit codes of the script: 0 green, 1 fatal (the job fails), 2 green with
+# report-only findings (a notice), 3 skipped for lack of network (a
+# warning, never a red run: a skip is not a verdict).
+name: release-verify
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag to verify, e.g. v0.10.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Always the triggering ref: the tag on a tag push, the branch on
+          # dispatch. Never check out the tag on dispatch: that would run
+          # the TAG'S OWN copy of release-verify.sh (observed 2026-08-23:
+          # v0.10.0's pre-consolidation script, no v-prefix strip, every
+          # channel falsely red). The tag under test is a parameter; the
+          # tree-vs-tag report line compares this tree against it, which
+          # is that line's whole point.
+          persist-credentials: false
+
+      - name: Every channel serves the tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          # Actions runs `bash -e`; the exit code is captured, not fatal.
+          code=0
+          if [ -n "${INPUT_TAG:-}" ]; then
+            tag="$INPUT_TAG"
+            # A dispatched run is not the release run: the script resolves
+            # the tag's own release.yml run and reads its publish jobs.
+            bash scripts/release-verify.sh "$tag" || code=$?
+          else
+            tag="${GITHUB_REF_NAME}"
+            bash scripts/release-verify.sh "$tag" --run-id "${GITHUB_RUN_ID}" || code=$?
+          fi
+          case "$code" in
+            0) ;;
+            2) echo "::notice::release-verify: every channel serves $tag; report-only findings above" ;;
+            3) echo "::warning::release-verify SKIPPED: no network from this runner; nothing verified" ;;
+            *) echo "::error::release-verify: a channel or publish job disagrees with $tag (see above)"; exit 1 ;;
+          esac

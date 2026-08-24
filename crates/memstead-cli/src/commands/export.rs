@@ -56,6 +56,18 @@ pub struct Args {
     #[arg(long = "mem", value_name = "NAME")]
     pub mem_name: Option<String>,
 
+    /// For `--format mem`: make the archive self-contained by dropping
+    /// every `## Relationships` row whose target lives in another mem,
+    /// then re-pack and strictly validate it (the same pass `install`
+    /// runs). Without it, a mem that references its sibling mems exports
+    /// with `DANGLING_CROSS_MEM_EDGE_IN_EXPORT` warnings and `install`
+    /// refuses the archive; with it, every dropped edge is reported as
+    /// `CROSS_MEM_EDGE_DROPPED` instead. Section text, body wiki-links
+    /// included, is never touched: an alias row synthesised from a body
+    /// link loses nothing the body does not still say.
+    #[arg(long)]
+    pub self_contained: bool,
+
     /// Absolute base URL for entity links in `--format llms-txt` (e.g.
     /// `https://example.com`). With it, references render as absolute
     /// links exactly as the served document does; without it they target
@@ -200,6 +212,8 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 let body = memstead_base::render::render_entity_markdown(entity, None);
                 let tokens = memstead_base::chunking::estimate_tokens(&body);
                 let outgoing = engine.store().outgoing(&entity.id);
+                // Export is a canonical-form surface — computed
+                // signals are a serving projection and stay out.
                 memstead_base::render::build_entity_envelope(
                     entity,
                     tokens,
@@ -208,6 +222,8 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     None,
                     engine.mem_origin_class(entity.id.mem()),
                     outgoing,
+                    None,
+                    None,
                     None,
                 )
             })
@@ -296,9 +312,23 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
         None => default_output_path(&mem_name, config)?,
     };
 
-    let result = engine
+    let mut result = engine
         .export_mem(&mem_name, &output)
         .map_err(CliError::from_engine_op)?;
+
+    // `--self-contained`: drop the cross-mem rows the archive cannot
+    // resolve, re-pack, strictly validate, and write the result over the
+    // just-written file. The dropped edges replace the dangling warnings
+    // in the report: they are the same edges, now gone instead of
+    // refused later.
+    let dropped = if args.self_contained {
+        let self_contained = make_self_contained_on_disk(&output)?;
+        result.size_bytes = self_contained.bytes.len() as u64;
+        result.dangling_cross_mem_edges.clear();
+        Some(self_contained.dropped)
+    } else {
+        None
+    };
 
     // Surface each cross-mem edge
     // whose target won't travel inside the single-mem archive — these
@@ -307,7 +337,7 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
     let dangling = &result.dangling_cross_mem_edges;
 
     if ctx.json {
-        let warnings: Vec<_> = dangling
+        let mut warnings: Vec<_> = dangling
             .iter()
             .map(|e| {
                 json!({
@@ -318,12 +348,23 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
                 })
             })
             .collect();
+        if let Some(dropped) = &dropped {
+            warnings.extend(dropped.iter().map(|e| {
+                json!({
+                    "code": "CROSS_MEM_EDGE_DROPPED",
+                    "entity": e.entity_path,
+                    "target_id": e.target_id,
+                    "target_mem": e.target_mem,
+                })
+            }));
+        }
         print_json(&json!({
             "archive_path": result.archive_path,
             "name": result.name,
             "version": result.version,
             "entity_count": result.entity_count,
             "size_bytes": result.size_bytes,
+            "self_contained": args.self_contained,
             "warnings": warnings,
         }))?;
     } else {
@@ -335,6 +376,9 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
             result.entity_count,
             result.size_bytes,
         );
+        if args.self_contained {
+            block.push_str("\n- Self-contained: yes");
+        }
         if !dangling.is_empty() {
             block.push_str("\n\n## Warnings\n");
             for e in dangling {
@@ -346,9 +390,50 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
                 ));
             }
         }
+        if let Some(dropped) = &dropped
+            && !dropped.is_empty()
+        {
+            block.push_str("\n\n## Dropped cross-mem edges\n");
+            for e in dropped {
+                block.push_str(&format!(
+                    "\n- **CROSS_MEM_EDGE_DROPPED**: `{}` → `{}` (mem `{}`): the relationship \
+                     row does not travel; a body wiki-link to the same target still does.",
+                    e.entity_path, e.target_id, e.target_mem,
+                ));
+            }
+        }
         print_markdown(&block);
     }
     Ok(())
+}
+
+/// Apply [`memstead_base::validator::make_archive_self_contained`] to
+/// the archive at `path`, writing the self-contained bytes back in place.
+fn make_self_contained_on_disk(
+    path: &std::path::Path,
+) -> anyhow::Result<memstead_base::validator::SelfContainedArchive> {
+    let bytes = std::fs::read(path).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!("read {}: {e}", path.display()),
+        )
+    })?;
+    let out = memstead_base::validator::make_archive_self_contained(&bytes).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "ARCHIVE_VALIDATION_FAILED",
+            format!("self-contained re-pack of {}: {e}", path.display()),
+        )
+    })?;
+    std::fs::write(path, &out.bytes).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            crate::INTERNAL_CODE,
+            format!("write {}: {e}", path.display()),
+        )
+    })?;
+    Ok(out)
 }
 
 #[cfg(feature = "mem-repo")]
@@ -467,7 +552,6 @@ fn run_mem_filesystem(
         }
     };
 
-    let size_bytes = bytes.len();
     std::fs::write(&output, &bytes).map_err(|e| {
         CliError::new(
             ExitKind::Generic,
@@ -475,6 +559,14 @@ fn run_mem_filesystem(
             format!("write {}: {e}", output.display()),
         )
     })?;
+    let dropped = if args.self_contained {
+        Some(make_self_contained_on_disk(&output)?.dropped)
+    } else {
+        None
+    };
+    let size_bytes = std::fs::metadata(&output)
+        .map(|m| m.len() as usize)
+        .unwrap_or(bytes.len());
     // Count only the exported mem's entities — the store also holds
     // mounted sibling mems (the multi-mount setup), which do not travel
     // in this archive.
@@ -485,19 +577,41 @@ fn run_mem_filesystem(
         .count();
 
     if ctx.json {
+        let warnings: Vec<_> = dropped
+            .iter()
+            .flatten()
+            .map(|e| {
+                json!({
+                    "code": "CROSS_MEM_EDGE_DROPPED",
+                    "entity": e.entity_path,
+                    "target_id": e.target_id,
+                    "target_mem": e.target_mem,
+                })
+            })
+            .collect();
         print_json(&json!({
             "archive_path": output.to_string_lossy(),
             "name": workspace_mem,
             "entity_count": entity_count,
             "size_bytes": size_bytes,
+            "self_contained": args.self_contained,
+            "warnings": warnings,
         }))?;
     } else {
-        print_markdown(&format!(
+        let mut block = format!(
             "# Exported `{workspace_mem}`\n\n- Archive: `{}`\n- Entities: {}\n- Size: {} bytes",
             output.display(),
             entity_count,
             size_bytes,
-        ));
+        );
+        if args.self_contained {
+            block.push_str("\n- Self-contained: yes");
+            let n = dropped.as_ref().map(|d| d.len()).unwrap_or(0);
+            if n > 0 {
+                block.push_str(&format!("\n- Cross-mem edges dropped: {n}"));
+            }
+        }
+        print_markdown(&block);
     }
     Ok(())
 }

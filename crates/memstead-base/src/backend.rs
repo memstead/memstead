@@ -71,6 +71,20 @@ pub trait MemBackend: Send + Sync {
         Ok(self.read_entity(rel_path)?.is_some())
     }
 
+    /// Does the storage location this backend names exist at all: the
+    /// branch ref, the folder, the archive file? Distinct from "holds
+    /// no entities": a mount whose branch was never created and a mount
+    /// whose branch is empty both list zero entities, and only this
+    /// probe tells them apart. Boot asks it to raise `MOUNT_UNBACKED`
+    /// with the right reason (`missing_ref` / `missing_path` versus
+    /// `empty`); before it existed, a mount pointing at a branch that
+    /// did not exist sat in the writable roster with zero entities and
+    /// no warning. The default says `true` (in-memory and test
+    /// backends have nothing to be missing).
+    fn storage_present(&self) -> Result<bool, BackendError> {
+        Ok(true)
+    }
+
     /// Upsert `content` at `rel_path`. Pending until [`Self::commit`].
     fn write_entity(&self, rel_path: &Path, content: &[u8]) -> Result<(), BackendError>;
 

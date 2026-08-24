@@ -546,7 +546,23 @@ pub(crate) fn split_sections(
         } else {
             body.len()
         };
-        let content = body[content_start..content_end].trim().to_string();
+        // Leading trim drops blank lines wholesale but keeps the first
+        // visible line's indentation: a full trim promoted an indented
+        // heading-lookalike (` ## Specifies`) to column 0 inside stored
+        // content, where the catch-all re-emit made the NEXT parse read
+        // it as a real section heading — structure from content, and a
+        // broken parse-generate fixpoint (fuzz finding, long tier,
+        // 2026-08-24, corpus member `crash-de0c69e0…`). Trailing trim
+        // stays full: it can never move a line to column 0. The
+        // runtime validator's embedded-heading guard keeps its own full
+        // trim, so the mutation path refuses exactly what it refused.
+        let raw = &body[content_start..content_end];
+        let visible_start = raw
+            .split_inclusive('\n')
+            .take_while(|line| line.trim().is_empty())
+            .map(str::len)
+            .sum::<usize>();
+        let content = raw[visible_start..].trim_end().to_string();
         // Schema section keys are underscore-separated (e.g. `current_state`).
         // A heading like `## Current State` must derive to the same form so
         // schema-declared sections land in `result_sections` under the right
@@ -691,11 +707,26 @@ fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition)
 
     let mut parts = Vec::new();
 
+    // Every merged piece must stay fence-balanced on its own: a piece
+    // ending inside an open code fence inverts the mask parity of every
+    // piece after it, so lines that were masked content in this parse
+    // become structure on the next one (a fenced `## Specifies` was
+    // promoted to a real duplicate heading and first-wins dropped the
+    // body — fuzz finding, long tier, 2026-08-24, corpus member
+    // `crash-07c152bb…`). Same referee-as-oracle helper as the
+    // generator's section closer.
+    let fence_closed = |content: &str| -> String {
+        match crate::markdown::closing_fence_if_unterminated(content) {
+            Some(closer) => format!("{content}\n{closer}"),
+            None => content.to_string(),
+        }
+    };
+
     // First, add the explicit catch-all section content
     if let Some(content) = sections.get(catch_all.key.as_str())
         && !content.is_empty()
     {
-        parts.push(content.clone());
+        parts.push(fence_closed(content));
     }
 
     // Then add all non-schema sections (with headings reconstructed),
@@ -710,7 +741,14 @@ fn build_catch_all(sections: &IndexMap<String, String>, schema: &TypeDefinition)
                 key.chars().next().unwrap_or_default().to_uppercase(),
                 &key[key.chars().next().map_or(0, |c| c.len_utf8())..]
             );
-            parts.push(format!("{heading}\n{content}"));
+            // The piece's fence state is judged over exactly the bytes
+            // emitted, heading line INCLUDED: a key can carry a live
+            // fence opener (CR line endings inside the original heading
+            // line make its tail a CommonMark line of its own), so
+            // closing the content alone read an in-piece closer as a
+            // fresh opener and the document grew by one fence line per
+            // round (fuzz finding, corpus member `crash-eca0fc99…`).
+            parts.push(fence_closed(&format!("{heading}\n{content}")));
         }
     }
 
@@ -1452,6 +1490,56 @@ Third unknown.
         assert_eq!(
             m1, m2,
             "parse→generate is idempotent over multi-unknown-section input"
+        );
+    }
+
+    // Fixture pinned by the coverage-guided long tier (first dispatch,
+    // 2026-08-24; corpus member `crash-de0c69e0…`): the splitter's full
+    // content trim promoted an INDENTED heading-lookalike on the first
+    // content line (` ## Specifies`) to column 0 inside stored content;
+    // the catch-all re-emit then made the next parse read it as a real
+    // duplicate section heading, whose first-wins rule dropped the
+    // content — structure from content, and a broken fixpoint. Leading
+    // blank lines still drop; the first visible line keeps its
+    // indentation.
+    #[test]
+    fn indented_heading_lookalike_stays_content_and_round_trips() {
+        let md = "\
+---
+type: spec
+---
+# Promoted Heading
+
+## Identity
+
+Base.
+
+## Unknown Extra
+
+ ## Specifies
+
+Some content that must survive.
+";
+        let schema = spec_schema();
+        let e1 = parse_markdown(md, "indent.md", &schema, "specs").unwrap();
+        assert!(
+            e1.entity.sections["specifies"].contains(" ## Specifies"),
+            "the indented lookalike keeps its indentation inside the catch-all"
+        );
+        assert!(
+            e1.entity.sections["specifies"].contains("Some content that must survive."),
+            "content after the lookalike is preserved"
+        );
+        let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
+        let e2 = parse_markdown(&m1, "indent.md", &schema, "specs").unwrap();
+        let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
+        assert_eq!(
+            m1, m2,
+            "parse→generate is a fixpoint after one normalising round"
+        );
+        assert!(
+            e2.entity.sections["specifies"].contains("Some content that must survive."),
+            "no content is lost across rounds"
         );
     }
 

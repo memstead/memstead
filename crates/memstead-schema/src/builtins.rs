@@ -106,6 +106,83 @@ pub fn builtin_packages() -> Vec<BuiltinPackage> {
     out
 }
 
+/// One embedded built-in package by identity, or `None` when no
+/// built-in carries that `(name, version)`.
+pub fn builtin_package(name: &str, version: &str) -> Option<BuiltinPackage> {
+    builtin_packages()
+        .into_iter()
+        .find(|p| p.name == name && p.version == version)
+}
+
+/// The file name a package's README travels under.
+pub const PACKAGE_README_FILE: &str = "README.md";
+
+/// Render a package README for the package it ships in: every
+/// `<name>@<x.y.z>` reference to the package's OWN name is rewritten to
+/// the resolved `<name>@<version>`. References to other schemas, to
+/// names that merely contain this one (`my-default@1.0.0`), and bare
+/// names without a pin are left alone; the bytes themselves are never
+/// touched (a shipped built-in is sealed by the retention guard).
+///
+/// Why at render time: sibling versions of a built-in ship the README
+/// of their first generation verbatim, so 17 of 25 sealed packages
+/// stated a version that was not theirs. A docs-only correction does
+/// not justify a new schema generation, and editing a sealed package
+/// in place is refused by design; the resolved manifest is the one
+/// source of the identity, so the reader gets it from there.
+pub fn render_package_readme(name: &str, version: &str, readme: &str) -> String {
+    let needle = format!("{name}@");
+    let mut out = String::with_capacity(readme.len());
+    let mut rest = readme;
+    while let Some(at) = rest.find(&needle) {
+        let (before, tail) = rest.split_at(at);
+        let after = &tail[needle.len()..];
+        // Word boundary before the name: not part of a longer name.
+        let bounded = before
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '-' || c == '_'));
+        let pin_len = semver_prefix_len(after);
+        if bounded && pin_len > 0 {
+            out.push_str(before);
+            out.push_str(&needle);
+            out.push_str(version);
+            rest = &after[pin_len..];
+        } else {
+            out.push_str(before);
+            out.push_str(&needle);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Length of a leading `MAJOR.MINOR.PATCH` in `s`, or 0 when `s` does
+/// not start with one (a trailing `.4` or a pre-release tag ends the
+/// match at the patch number; a fourth component refuses the match).
+fn semver_prefix_len(s: &str) -> usize {
+    let mut len = 0;
+    for part in 0..3 {
+        let digits = s[len..].chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 {
+            return 0;
+        }
+        len += digits;
+        if part < 2 {
+            if !s[len..].starts_with('.') {
+                return 0;
+            }
+            len += 1;
+        }
+    }
+    // A fourth dotted number is not a semver pin.
+    if s[len..].starts_with('.') && s[len + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+        return 0;
+    }
+    len
+}
+
 /// Load every embedded schema into owned `Schema` values.
 pub fn load_builtin_schemas() -> Result<Vec<Arc<Schema>>, SchemaLoadError> {
     let mut out = Vec::new();
@@ -174,6 +251,57 @@ fn load_builtin_dir(dir: &Dir<'_>) -> Result<Schema, SchemaLoadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_package_readme_rewrites_own_pins_only() {
+        let readme = "Pin `default@1.0.0` (or `default@1.0.0`); see planning@0.1.0 and \
+                      my-default@1.0.0; bare `default` stays; default@1.0.0.1 is not a pin; \
+                      default@1.0.0-rc1 keeps its tag";
+        let out = render_package_readme("default", "1.3.0", readme);
+        assert_eq!(
+            out,
+            "Pin `default@1.3.0` (or `default@1.3.0`); see planning@0.1.0 and \
+             my-default@1.0.0; bare `default` stays; default@1.0.0.1 is not a pin; \
+             default@1.3.0-rc1 keeps its tag"
+        );
+        // Unchanged input when nothing matches, byte for byte.
+        assert_eq!(render_package_readme("software", "0.4.0", readme), readme);
+        assert_eq!(render_package_readme("default", "1.3.0", ""), "");
+    }
+
+    #[test]
+    fn every_builtin_readme_renders_its_own_identity() {
+        let mut rendered = 0;
+        for pkg in builtin_packages() {
+            let Some((_, bytes)) = pkg.files.iter().find(|(p, _)| p == PACKAGE_README_FILE) else {
+                continue;
+            };
+            let readme = std::str::from_utf8(bytes).expect("README is UTF-8");
+            let out = render_package_readme(&pkg.name, &pkg.version, readme);
+            let own = format!("{}@{}", pkg.name, pkg.version);
+            let needle = format!("{}@", pkg.name);
+            for (i, _) in out.match_indices(&needle) {
+                let bounded = out[..i]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !(c.is_alphanumeric() || c == '-' || c == '_'));
+                let tail = &out[i + needle.len()..];
+                if bounded && semver_prefix_len(tail) > 0 {
+                    assert!(
+                        tail.starts_with(&pkg.version),
+                        "{own}: README still states {}",
+                        &out[i..i + needle.len() + semver_prefix_len(tail)]
+                    );
+                }
+            }
+            assert!(
+                out.contains(&own) || !readme.contains(&needle),
+                "{own}: a README that pins its own name must render the resolved pin"
+            );
+            rendered += 1;
+        }
+        assert!(rendered > 0, "at least one built-in ships a README");
+    }
 
     /// The three scaffolding-bearing built-ins ship a parseable
     /// `mem-template.json` carrying their instance writeGuidance key;

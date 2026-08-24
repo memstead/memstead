@@ -8,6 +8,313 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Every generated part is fence-checked, the title and relationships
+  block included (fuzz finding, long tier, local run).** The generator
+  fence-terminated only section content, but a TITLE can itself carry a
+  live fence opener (CR characters inside it are CommonMark line
+  endings of their own, so its tail after a CR is a line that can open
+  a fence); the opener then masked every following section heading on
+  the next parse and the document collapsed to empty required sections.
+  `close_open_fence` now runs over exactly the bytes of every emitted
+  part. Triggering input pinned in the shared corpus.
+- **The catch-all merge keeps every merged piece fence-balanced (fuzz
+  finding, long tier, first local run).** The catch-all reconstruction
+  concatenates section contents; a piece ending inside an open code
+  fence inverted the mask parity of every piece after it, so a
+  `## Specifies` that sat safely inside a fence in one parse surfaced
+  as a real duplicate heading in the next, and the duplicate rule
+  dropped the tail of the section. Each merged piece now closes its own
+  unterminated fence (same oracle helper the generator's section closer
+  uses), judged over exactly the bytes emitted, the re-emitted heading
+  line included: a heading can itself carry a live fence opener, since
+  CR characters inside it are CommonMark line endings of their own, and
+  judging the content alone read an in-piece closer as a fresh opener
+  and grew the document by one fence line per round. Both triggering
+  inputs pinned in the shared corpus.
+- **A same-mem relationship target whose path matches the cross-mem
+  dash form self-qualifies (fuzz finding, long tier, third dispatch).**
+  A same-mem target with a path like `nttype--ospity` rendered as a
+  bare wiki-link, which the decoder's tier 0 reads back as the
+  cross-mem `nttype:ospity` — a different id, so the edge drifted and
+  parse-generate was not a fixpoint. The generator now asks the decoder
+  itself whether the bare path re-decodes to the same id and renders
+  the colon-qualified form when it does not; unambiguous targets stay
+  bare and canonical bytes are unchanged for them. Triggering input
+  pinned in the shared corpus.
+- **An indented heading-lookalike on a section's first content line no
+  longer becomes structure (fuzz finding, long tier, second dispatch).**
+  The section splitter's full content trim promoted a first line like
+  ` ## Specifies` to column 0 inside stored content; after the
+  catch-all re-emit, the next parse read it as a real duplicate section
+  heading and the duplicate rule dropped the content, breaking the
+  parse-generate fixpoint and losing body text on the tolerant path.
+  Leading blank lines still drop, but the first visible line now keeps
+  its indentation, so the lookalike stays content forever. The mutation
+  path's embedded-heading refusal keeps its own full trim and refuses
+  exactly what it refused. Triggering input pinned in the shared corpus.
+- **Lenient wiki-link ids are stable under parse-generate (fuzz finding,
+  long tier, first dispatch).** The alias and anchor cuts inside the
+  decoration strip run after its whitespace trim, so `[[foo |label]]` or
+  an anchor following a line break left trailing whitespace inside the
+  lenient id; the generated relationship row then re-parsed to a
+  different id on the next round, breaking the one-round fixpoint. The
+  lenient decoder now trims what the cuts expose. The strict gate is
+  untouched and still refuses those shapes; the triggering input is
+  pinned in the shared fuzz corpus and replayed by the normal suite.
+- **The fuzz workflow builds for the runner's real host triple.** Its first
+  dispatch failed before fuzzing: the prebuilt cargo-fuzz binary is
+  musl-linked and defaults to its own compile-time target, where
+  AddressSanitizer cannot link against static libc. The run step now passes
+  `--target` resolved from `rustc -vV`.
+- **The sync brief names the drift-clearing move.** Its drifted-findings
+  guidance said "update the entity, then re-verify to advance the baseline",
+  which leaves a drifted anchor drifted: neither an entity update nor the
+  baseline advance re-baselines the anchor hash. The missing two-step
+  (re-declare the anchor on the entity without a hash; the next
+  binding-backed verify backfills the freshly observed hash) cost a live
+  sync session the whole discovery loop on 2026-08-24. The brief states it
+  now, in the drifted group's own instruction.
+
+## [0.11.0] - 2026-08-24
+
+### Added
+- **Code-map preparation: anchors on code drift on interface changes
+  only.** The registry's third flavour, `code-map`, on path-shaped
+  sources: a scoped file's prepared form is its interface digest
+  (imports, exports, declarations with their signatures; comments,
+  formatting and bodies invisible), heuristic and language-family aware
+  by extension (JS/TS and the C-like families, Python, a Vue or Svelte
+  component's script block, canonical JSON; everything else whole). A `tree` anchor
+  under it hashes the code map of every scoped file under the tree (file
+  hash and path, path order), which closes the tree grain's
+  recorded-but-unhashed residue for code sources; a tree anchor on a
+  source without a code map stays unhashed and resolves `recheck`, the
+  stated remainder. Write-time `content` on a prepared source is hashed
+  through the source's preparation, so the recorded hash is the one
+  observation computes, and the build brief tells the agent when a
+  source's anchors hash a prepared form. Measured on a 214-file
+  JS/Vue/Python corpus: the digest is 4.6% of the raw bytes, and over 300
+  commits 252 of 424 scoped file changes (59.4%) were body-only, so a
+  code-map anchor stays quiet for them. `PREPARATION_IMPL_VERSION` is 3.
+- **Delivery preparation: one file, many units, one order.** The
+  preparation registry's second touchpoint is live: a source declaring a
+  delivery preparation is delivered as units, addressed `<path>#<key>`,
+  in a total order derived from the units' own keys (never discovery or
+  directory order), identical on every pass. First flavour,
+  `dated-entries`, for path-shaped sources: a unit begins at every line
+  opening with an ISO date or date-time (after markdown markers), its key
+  is the normalized stamp (an ordinal disambiguates same-stamp entries in
+  one file), and a source's units deliver in stamp order across files, so
+  a chronological corpus (logs, transcripts, journals, mail threads) is
+  never shuffled and unit N assumes only the units before it. A first run
+  delivers every unit; a change run delivers only the added, changed and
+  removed units at their ordered positions, diffed against the git
+  baseline content (without one, every unit of a changed file, flagged as
+  coarser). The brief presents the sequence numbered by position, capped
+  at the build operation's `batch_size` with the remainder counted and
+  re-presented in order as units are disposed; `projection advance`
+  accepts unit ids, and an anchor over exactly a unit auto-disposes it (a
+  file-level anchor never disposes units). A span anchor `<path>#<key>`
+  on such a source hashes the unit, not the file: an unchanged unit in a
+  changed file still resolves, a removed unit orphans, an edited one
+  drifts. Sources declaring no delivery preparation keep file-granularity
+  delivery byte-for-byte. `PREPARATION_IMPL_VERSION` is 2.
+- **The preparation slot has a registry, and its first flavour.** A
+  source's `preparation` names a preparation the engine registers
+  (`memstead-base::preparation`); the engine refuses only an identifier
+  the registry does not know (the same `PreparationUnsupported` shape,
+  now naming the registered set) on the edit paths and, for a hand-edited
+  record, on the brief-render path, whose message no longer speaks of
+  facets. A registered identifier over a medium whose anchor namespace
+  admits none of its grains refuses too (`PreparationGrainMismatch`). The
+  registry is consulted at anchor observation (the prepared form an
+  artifact hashes as; the standalone `verify-anchors` and the
+  binding-backed verify share that one site and inherit every entry) and
+  is reserved at ingest delivery. First flavour, `entity-load-bearing`
+  for graph sources: an entity-grain anchor's prepared form is the stable
+  serialization of the type's load-bearing sections (the new optional
+  `load_bearing` flag on a schema section; else the required sections;
+  else every section), so a notes-only edit keeps a dependent's anchor
+  resolving while a load-bearing edit drifts it. A source declaring no
+  preparation observes byte-for-byte as before. The `url` grain acquires
+  its prepared form the way path grains do, over the content its observer
+  supplies: anchors accept `content` beside `hash` (the engine computes the
+  prepared hash; mutually exclusive with `hash`, refused for the
+  `entity`/`tree` grains and non-hash classes), and a url anchor defaults
+  to `hash_stability: unstable`. `PREPARATION_IMPL_VERSION` is 1: every
+  binding's `hash(D)` changed, so every prior finding is superseded by
+  construction and re-derived by the next verify (findings are
+  measurements, never content).
+- **An untagged release is now a machine-visible state.** 0.9.0 was cut,
+  committed and pushed and never tagged; every channel kept serving 0.8.1
+  for four days while the tree said otherwise, and nothing noticed.
+  `scripts/untagged-release.sh` compares the workspace version against the
+  newest tag the remote actually carries (`git ls-remote`, SemVer
+  precedence, so `v0.9.0` never outranks `v0.10.0`) and refuses once the
+  release commit has sat on `origin/main` for more than a day, naming the
+  commit and its date; `scripts/ci-status.sh` runs it before its CI
+  readout, derives the repository from `origin` instead of a hard-coded
+  name, and counts only the checks of workflows this repository defines
+  (GitHub's own Dependabot updater run had painted a green `main` red).
+  The `untagged-release` workflow runs the same check daily and on
+  dispatch, keeping exactly one issue in step with it (filed when it trips,
+  updated while it holds, closed when it clears, nothing on a tagged
+  state) through `scripts/untagged-release-issue.sh`.
+- **`release-verify.sh` runs inside the release itself.** Declared as
+  cargo-dist's post-announce job (`custom-release-verify`, rendered into
+  `release.yml` by `dist generate`), it asks every channel from outside
+  after `announce` and fails the run when one disagrees with the tag; the
+  same workflow runs on dispatch with a tag input, so any past release can
+  be re-verified from CI. It also reads the run's own publish jobs and
+  fails on one that concluded `skipped` on a non-prerelease (dist's
+  `announce` accepts that by design; it is how a channel stays unfed
+  behind a green release). The script now has four exit codes: 0 green, 1
+  fatal, 2 green with report-only findings (today: the local tree standing
+  ahead of the verified tag), 3 skipped for lack of network
+  (`MEMSTEAD_VERIFY_OFFLINE=1` simulates it), plus explicit option
+  parsing (`--run-id`, `--repo`) beside the positional version.
+- **`xtask release` refuses two more states that shipped.** A missing
+  flagship directory is a refusal, not a warning, unless
+  `--allow-missing-flagship` names the skip (the docs-vs-binary guard then
+  runs nowhere, and the cut says so). An `[Unreleased]` section above 64
+  KB is refused naming its size unless `--allow-large-body` is passed:
+  cargo-dist lifts the section into the GitHub Release body and the
+  Homebrew publish job died on 0.6.0's 81 KB of it.
+
+- **`MOUNT_UNBACKED`: a mount that resolves to nothing says so.** A
+  git-branch mount whose branch was never created (or was deleted), a
+  folder or archive mount whose path is gone, and a mount whose storage
+  holds no entity all listed as "zero entities" and sat in the writable
+  roster without a word; the dogfood workspace carried two such mounts
+  for weeks. Boot and reload now raise `MOUNT_UNBACKED` with
+  `details.reason` in `missing_ref | missing_path | empty` and the
+  location named; a mount serving at least one entity is silent. The
+  backend trait gained `storage_present()` (the branch ref, the folder,
+  the archive file) so the probe can tell "never created" from "empty".
+  The overview, the cold-start surface, carries it too: an unbacked mem's
+  roster entry names the reason and location under `Unbacked:` (the
+  structured `mems[].unbacked` field) and the warning rides
+  `## Warnings`, so `Entities: 0` is never mistaken for an empty mem.
+- **`health --strict` refuses configuration defects.** Always on, no
+  include needed: `SCHEMA_PIN_MISMATCH`, `SCHEMA_UNSTAMPED_SOURCE_ROT` and
+  `MOUNT_UNBACKED`. With `integrity` included: `DANGLING_LINK` and
+  `ORPHAN_STUB`. Stale entities, drifted anchors and
+  `SCHEMA_GENERATIONS_BEHIND` stay advisory. A strict run used to exit 0
+  on a workspace with three pin mismatches, two rotted schema packages,
+  two unbacked mounts, seven stubs and fourteen dangling-link findings.
+
+- **`memstead export --format mem --self-contained`.** A mem that
+  references its sibling mems exported with `DANGLING_CROSS_MEM_EDGE_IN_EXPORT`
+  warnings and then could not be installed anywhere, not even back into
+  the workspace it came from: `install` refuses cross-mem relationship
+  rows by design. The flag drops every `## Relationships` row whose
+  target lives in another mem, re-packs canonically and proves the
+  result with the strict validator `install` runs; each dropped edge is
+  reported as `CROSS_MEM_EDGE_DROPPED`. Section text, body wiki-links
+  included, is never touched, so an alias row synthesised from a body
+  link loses nothing the body does not still say. The dogfood
+  workspace's retired `features` mem (fifty such rows, all alias rows)
+  is the first archive to round-trip this way.
+- **The prose is checked against the binary it describes.**
+  `ci/check_prose.py` (built-ins only) runs every `memstead` invocation
+  in fenced `bash`/`sh`/`console` blocks and in the `run:` lines of fenced
+  `yaml`, every flag attached to one, and every relative link against a
+  given binary's `--help` tree; a `--scope whole-file` switch extends the
+  sweep to inline code and prose for the documents that want it; a
+  docs-site content tree named with `--routes-root` resolves its links
+  by route (`../../glossary/`, `/reference/cli/cli/`); placeholders and
+  prose phrases are allowlisted by the `xtask/docs-guard-allow.txt`
+  format, now with `flag:` and `re:` entries; a directory argument
+  stands for every Markdown file below it. `run-tests.sh` gained the leg
+  "the public prose describes the binary" over the README, CONTRIBUTING,
+  GLOSSARY, VISION, the examples README, `docs/**` (minus the divergence
+  corpus), the docs-site guides and concepts and the plugin's Markdown,
+  after the checker's own fixture self-test. `xtask release`'s
+  docs-vs-binary guard is the same checker at whole-file scope over the
+  flagship (the Rust extractor is gone); it still refuses an unknown
+  command and still honours `--allow-missing-flagship` and
+  `--allow-large-body`. First catch: `docs/proof/reconstruction/README.md`
+  documented a `memstead stats` that does not exist.
+- **`release-verify.sh --prose` reports the gap between the prose and the
+  published tag.** It resolves the highest tag on `origin`
+  (`untagged-release.sh --highest-tag`), downloads that release's CLI
+  archive once into a cache (`MEMSTEAD_VERIFY_CACHE`), runs the checker's
+  user-facing subset (README, guides, plugin; `--prose-set` overrides)
+  against the published binary, and prints file and flag per gap as a
+  report-only finding (exit 2), never trusting a local binary's version
+  string; exit 3 `SKIPPED: no network` when the archive cannot be
+  fetched. The same script now checks the changelog: every `## [X.Y.Z]`
+  header other than `[Unreleased]` must have a tag on `origin` or a
+  "never published" note, and every compare link must name refs that
+  exist (`MEMSTEAD_VERIFY_TAGS` seeds the tag list for tests).
+- **The plugin gates `--repo` and `--consume` on the recorded binary.**
+  Beside the anchors gate, `binary-version.mjs` carries `REPO_MIN` and
+  `CONSUME_MIN` (both 0.10.0) in a `CAPABILITIES` table and a
+  `capabilityGate(root, name)` (CLI: `gate <dir> [capability]`). Setup
+  drops `--repo` from `quickstart` and the ingest router drops
+  `--consume` from `projection brief --all` when the recorded binary
+  predates the flag, each saying which version it found and which it
+  needs; at or above the minimum the flag passes silently; a missing or
+  unparseable record degrades the same way. `--fail-on-findings` and
+  `--redact-anchors` sit on no skill path and stay ungated.
+- **`memstead schema <ref>` renders a built-in package's README for the
+  generation it ships in.** Sibling generations of a built-in carry the
+  README of their first generation verbatim (the bytes are sealed by the
+  retention guard, so no in-place edit may fix them), and 17 of 25 packages
+  stated a version that was not theirs. The render substitutes every
+  `<name>@<x.y.z>` reference to the package's own name with the resolved
+  pin and leaves everything else alone; `<ref>` is a pin (`planning@0.4.0`)
+  or a bare name, resolved to its newest generation for a read (`install`
+  keeps refusing bare names, so a pin stays explicit). `--json` carries
+  `schema`, `name`, `version`, `origin` and the rendered `readme`. The
+  `new` / `validate` / `install` subcommands are unchanged. Exercised for
+  every built-in in the binary, so a new generation is covered the day it
+  ships; `MANIFEST.toml` and the sealed bytes are untouched.
+
+### Fixed
+- **`mem set-schema` repairs a `SCHEMA_PIN_MISMATCH` instead of
+  declaring a noop.** The noop check compared the target with the mount's
+  expectation in `mounts.json`; with the mount ahead of the mem's own
+  config (the mismatch the warning names) a target equal to the mount
+  answered "noop" and the authoritative config stayed on the old
+  generation forever. The check now asks the pin the engine actually
+  serves; when the served pin already equals the target and only the
+  mount expectation lags, the expectation is aligned and reported as
+  switched. An in-flight dual-pin migration still completes through the
+  conformance gate.
+
+### Changed
+- **`SUSPICIOUS_NESTED_PREFIX` says what it can tell.** When the link's
+  prefix is itself a mounted mem the message reads "target missing in
+  mem X" (a well-formed cross-mem reference whose target is absent; every
+  one of the eight hits on the dogfood graph); when the prefix only
+  matches a mem name's last segment it reads "prefix 'X' is not a mounted
+  mem" (the rename-drift pattern). `details` gains `target_mem` and
+  `prefix_mounted`. The old wording called every case "almost certainly
+  mem-rename drift", which was wrong eight times out of eight.
+- **`memstead-mcp --version` prints the stamped build version**
+  (`<semver>+g<sha>[-dirty]` inside a git checkout), the same string the
+  server hands out as `serverInfo.version` and the CLI already printed.
+  The bare crate version could not tell a day-stale release binary from a
+  fresh build of the same version line, which is exactly what a
+  binary-staleness check needs to know. The stamp's `-dirty` suffix now
+  reflects modified build inputs only (`crates/`, `Cargo.toml`,
+  `Cargo.lock`): a modified doc, workflow or folder-mem file elsewhere in
+  the repository changes no byte of the binary. The build script now
+  re-runs when those inputs change, not only when a ref moves; before, an
+  edit-then-build kept the clean stamp computed at the last commit and the
+  `-dirty` suffix could not appear in the ordinary flow.
+
+## [0.10.0] - 2026-08-23
+
+Forward compatibility: this release is one schema-language generation. Schema
+packages declaring any of the wave's new keys (`when_field` / `when_value` on
+`required_outgoing` blocks, `must_reach`, `relationships.acyclic_sets`,
+`status_propagation.rel_types`, `signals`, `relationships.labelling`) need
+engine 0.10.0 or later; older engines refuse them at parse
+(`deny_unknown_fields`), never load-and-ignore.
+
+### Fixed
 - **Three parser defects found by the new adversarial harness, each fixed
   at the parser.** A BOM-prefixed local file silently parsed as all-body
   and lost its entire frontmatter, while the strict validator and the
@@ -35,6 +342,107 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   security reports.
 
 ### Added
+- **Grounded labelling over a declared attack set:
+  `relationships.labelling`, plus chain-shape statistics.** A schema can
+  name which of its rel-types constitute `attack`; the engine serves the
+  grounded labelling (the one argumentation-semantics computation that is
+  parameter-free, unique, polynomial, and explainable by construction) as a
+  reported observation with its evidence: `accepted` / `defeated` /
+  `undecided` per non-stub entity of a declaring mem, a defeated label
+  always naming its accepted direct attackers, an undecided one the open
+  attacker set that keeps it open. Served on entity reads (`_labelling` on
+  the structured envelope; `_label` in the rendered frontmatter plus a
+  `## Labelling` evidence section) and on the include-gated `labelling`
+  health axis (counts per label, defeated/undecided lists with evidence,
+  and `cross_mem_edges_excluded` — a cross-mem attack edge is excluded and
+  counted, never guessed). The labelling is deliberately support-blind: a
+  defeated supporter never flips what it supports. An optional `support`
+  walk (the `must_reach` grammar: `relationships`, `direction`,
+  `terminal_types`) adds chain-shape statistics to the read (`depth`,
+  `branching`, `terminal_share`, `defeated_in_support`,
+  `undecided_in_support`); the engine serves numbers, the reader judges.
+  Labels are never stored, never gate writes, and the memo invalidates
+  wherever the community memo does (every mutation, drift reload,
+  quarantine transitions, apply-commit). The loader refuses empty or
+  undeclared attack sets and malformed support blocks; schemas without the
+  declaration keep byte-identical responses everywhere.
+
+- **Aggregate signals: `signals` on type definitions, served with their
+  evidence.** A type can declare exact, parameter-free counts with declared
+  thresholds: this wave ships one `kind`, `edge_load` (count the edges of an
+  inline relation set in a named `direction`, optionally restricted via
+  `neighbour_field` / `neighbour_value` to edges whose counterpart holds a
+  named enum value). `thresholds` map counts to levels of the new two-member
+  `SignalLevel` enum (`notice` / `warn`, deliberately not
+  `ConstraintSeverity`); below the first threshold the served level is
+  `none`. Values are computed at read time, never stored, never part of
+  `_hash`, and nothing multiplies, averages, or decays. Served on every
+  entity read of a declaring type (`_signals` on the structured envelope;
+  headline in the rendered frontmatter plus a `## Signals` contributors
+  section), on the new include-gated `signals` health axis (above-`none`
+  entities with per-level counts; `warn` participates in `--strict`,
+  `notice` never does), and as the new out-of-band warning
+  `SIGNAL_THRESHOLD_CROSSED` on mutations that move a signal across a
+  threshold in either direction (entity, signal, value, old and new level;
+  never error-shaped). The loader refuses bad names, duplicate names,
+  undeclared rel-types, empty or non-increasing thresholds, and
+  half-declared or undeclared neighbour pairs. Declarations render in the
+  `memstead_schema` response at both verbosity levels; schemas without
+  signals keep byte-identical responses everywhere.
+
+- **Relation sets for acyclicity and propagation: `relationships.acyclic_sets`
+  and `status_propagation.rel_types`.** A schema manifest can now declare
+  acyclicity over a SET of rel-types: a write that closes a cycle in the
+  union subgraph refuses with the existing `RELATIONSHIP_CYCLE` error, whose
+  payload additively gains `acyclic_set` (the declared set) and
+  `existing_path_rel_types` (one rel-type per hop, so the path may mix
+  rel-types); single-rel-type refusals and the per-definition `acyclic` flag
+  stay byte-identical. The boot-time sweep drops on-disk cycle-closing edges
+  in a set's union subgraph exactly as it does per rel-type. The
+  `status_propagation` constraint accepts `rel_types` (an inline relation
+  set) where it accepts `rel_type` today; the single-name key keeps parsing,
+  exactly one of the two per declaration, and taint walks the union so it
+  crosses rel-type boundaries. The loader refuses undeclared names, a
+  rel-type in two sets, sets with fewer than two members, `rel_type` and
+  `rel_types` together, and an empty `rel_types`. Both shapes are visible in
+  the `memstead_schema` response at both verbosity levels; schemas without
+  the declarations keep byte-identical responses.
+
+- **Reachability obligations: `must_reach` on type definitions.** A type can
+  now declare that its entities must reach at least one non-stub entity of a
+  named set of terminal types (`terminal_types`), following edges of an
+  inline relation set (`relationships`) in a named `direction` (`out` / `in`,
+  the vocabulary search already speaks), within an optional `max_depth`.
+  Evaluated on the health sweep only (the `constraints` axis), never on the
+  write path: a transitive gap is created by writes on other entities, so
+  the loader refuses `severity: block` (same posture as
+  `status_propagation`). Findings echo the whole declaration; a satisfied
+  obligation is silent; cycles terminate via visited-set discipline;
+  cross-mem edges are followed like any edge; the incoming direction with
+  `max_depth: 1` covers the required-incoming-edge case. The loader refuses
+  undeclared rel-types, unknown terminal types, unknown directions, empty
+  sets, and a zero depth. The `memstead_schema` response shows the
+  obligation at both verbosity levels; schemas without the form keep
+  byte-identical responses and health output.
+
+- **Conditional edge requirements: `when_field` / `when_value` on
+  `required_outgoing` blocks.** A type definition can now declare that an
+  outgoing-edge obligation applies only while a named metadata field of the
+  entity holds a named enum value (the same two keys `requires_when` already
+  uses; absent pair = unconditional block = unchanged behaviour). Semantics
+  are identical to unconditional blocks in every other respect: same
+  cardinality vocabulary, same warn/block severity model, evaluated on
+  create, on update (a metadata flip that arms a block on an entity lacking
+  the edge is caught), and on the relate remove path, and surfaced on the
+  `missing_required_outgoing` health axis. Wherever the engine names an
+  unsatisfied block (the `MISSING_REQUIRED_OUTGOING` refusal payload, the
+  write-time warning, the health finding, and the `memstead_schema`
+  response at both verbosity levels), a conditional block carries its
+  `when_field` and `when_value`, so the reader sees which trigger armed it.
+  The loader refuses a condition whose field is undeclared or lacks
+  `enum_values`, whose value is outside the enum, or that carries one key
+  without the other, with a typed error naming the offender.
+
 - **A coverage-guided fuzzing tier and a committed shared seed corpus for
   the three trust-boundary parsers.** A workspace-excluded `fuzz/` crate
   (cargo-fuzz/libFuzzer) carries three targets: raw bytes through the
@@ -533,7 +941,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   section, and `install.sh`'s next-step line now name
   `memstead quickstart --repo .` beside it.
 
-## [0.9.0] - 2026-08-19
+## [0.9.0] - 2026-08-19 (cut 2026-08-19, never published; its content ships in 0.10.0)
 
 ### Added
 - **A pilot-grade GitHub-issues mirror** (`scripts/mirror-issues.mjs`):
@@ -2620,8 +3028,9 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.9.0...HEAD
-[0.9.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.9.0
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/memstead/memstead/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.10.0
 [0.8.1]: https://github.com/memstead/memstead/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/memstead/memstead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/memstead/memstead/compare/v0.6.0...v0.7.0

@@ -144,10 +144,10 @@ For full worked schemas to read (not copy — the scaffold already gave you a va
 Beyond what is *legal to write*, a type can declare what is *unhealthy to keep* — a `constraints:` list on the type definition, drawn from a closed vocabulary of five forms under one uniform `severity` model: `warn` (a health finding on the health report) or `block` (a write-time refusal, plus a health finding for pre-existing violations). The forms:
 
 - **`requires_when`** — a field or section becomes required when another metadata field holds a declared value (`status: checked` requires `checked_by`). Defaults to `warn`.
-- **`required_outgoing` severity** — each required-edge block on the type can carry `severity: block`, promoting its historical `MISSING_REQUIRED_OUTGOING` warning to a refusal.
+- **`required_outgoing` severity and condition** — each required-edge block on the type can carry `severity: block`, promoting its historical `MISSING_REQUIRED_OUTGOING` warning to a refusal, and an optional `when_field` / `when_value` pair (the same two keys `requires_when` uses): the block then applies only while that metadata field holds that enum value. The trigger field must be declared with `enum_values`; every payload naming the unsatisfied block echoes the trigger.
 - **`unique`** — a tuple of metadata fields unique among entities of this type within the mem. Defaults to `block`: the point is bouncing the duplicate at write time.
 - **`enum_from_neighbour`** — a field whose legal values are the bullet-list entries of a named section on the entity reached via a named outgoing edge; a value nothing backs is a violation. Defaults to `warn`.
-- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it via a named rel-type and direction; tainted entities surface as health findings naming their tainting ancestor. Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes the retired `propagating_relationships` key, whose sole self-loop-refusal behaviour now lives under the honestly named `no_self_loop_relationships` (optional; the old key refuses at authoring load with a typed rename error).
+- **`status_propagation`** — a terminal value of a named status field taints every entity reaching it via a named rel-type and direction (or a relation set: `rel_types: [A, B]` walks the union, so a taint crosses rel-type boundaries; declare exactly one of `rel_type` / `rel_types`); tainted entities surface as health findings naming their tainting ancestor. Always warn-tier (a parent falling *after* the child was written cannot retroactively make that write illegal). It supersedes the retired `propagating_relationships` key, whose sole self-loop-refusal behaviour now lives under the honestly named `no_self_loop_relationships` (optional; the old key refuses at authoring load with a typed rename error).
 
 ```yaml
 # types/recipe.yaml
@@ -162,7 +162,62 @@ constraints:
 
 A malformed declaration — an unknown `kind`, an undeclared field or relationship — refuses at `schema validate` / `schema install` with a typed error; nothing loads and gets silently ignored. Declared constraints render on the `memstead_schema` MCP response at both verbosity levels. The exact shape of every form is in the generated IDE-validation reference [`crates/memstead-schema/generated/type-definition.schema.json`](https://github.com/memstead/memstead/tree/main/crates/memstead-schema/generated).
 
-## 8. Declare a section's markdown shape
+## 8. Reasoning forms: reachability, acyclicity sets, signals, labelling
+
+Four further declarations turn chain structure into something the engine checks or reports. All are optional, additive, and served on the `memstead_schema` response at both verbosity levels; schema packages declaring any of them need engine 0.10.0 or later (older engines refuse the unknown keys at parse).
+
+**`must_reach`** (on a type) — entities of the type must reach at least one entity of a named terminal-type set, following an inline relation set in a named direction (`out` / `in`), within an optional `max_depth`. Health-sweep only, always warn-tier (the loader refuses `block`: a reachability gap is created by writes on *other* entities). The incoming direction with `max_depth: 1` covers "must have at least one incoming edge of these types".
+
+```yaml
+# types/claim.yaml
+must_reach:
+  - relationships: [GROUNDS, CONCLUDES]
+    direction: out
+    terminal_types: [evidence]
+    max_depth: 12          # optional; absent = unbounded
+```
+
+**`acyclic_sets`** (on the manifest's `relationships:` block) — acyclicity over the *union* subgraph of a set of rel-types, for cycles no single rel-type contains (a support chain alternating two rel-types, two hierarchies that must jointly stay acyclic). A write closing a cycle in the union refuses with `RELATIONSHIP_CYCLE`; the payload echoes the set and one rel-type per hop of the existing path. Each set names two or more declared rel-types; a rel-type may appear in at most one set; the per-relationship `acyclic: true` flag keeps its exact meaning and may coexist.
+
+```yaml
+# schema.yaml
+relationships:
+  mode: strict
+  acyclic_sets:
+    - [GROUNDS, CONCLUDES]
+```
+
+**`signals`** (on a type) — exact, parameter-free counts with declared thresholds, served with their evidence on every read of the type. One kind in this generation, `edge_load`: count edges of an inline relation set in a named direction, optionally restricted to edges whose counterpart holds a named enum value (`neighbour_field` / `neighbour_value`). Thresholds map counts to `notice` / `warn` (its own two-member level enum, not the constraint severity; below the first threshold the level is `none`). Served as `_signals` on the entity envelope and the `signals` health axis (`warn` participates in `health --strict`); a write moving a signal across a threshold carries the out-of-band `SIGNAL_THRESHOLD_CROSSED` warning, never an error. Values are computed at read time — never stored, never part of `_hash` — and nothing multiplies, averages, or decays. A raw count is gameable by one author repeating one objection; bind your schema's prose to the numbers accordingly.
+
+```yaml
+# types/claim.yaml
+signals:
+  - name: attack_load
+    kind: edge_load
+    relationships: [REBUTS, UNDERCUTS]
+    direction: in
+    thresholds:
+      - at_least: 1
+        level: notice
+      - at_least: 3
+        level: warn
+```
+
+**`labelling`** (on the manifest's `relationships:` block) — name which rel-types constitute *attack*, and the engine serves the grounded labelling of that attack graph: unattacked entities `accepted`, targets of an accepted attacker `defeated`, entities whose attackers are all defeated `accepted`, the rest `undecided` (cycles stay open). The one argumentation semantics that is parameter-free, unique, and polynomial — and the most sceptical: one unanswered attack defeats a well-supported claim, so a defeated label always names its accepted direct attackers and an undecided one the open attacker set. Served as `_labelling` on entity reads and the `labelling` health axis; computed per mem (cross-mem attack edges are excluded and counted); a label is a reported observation, never a stored value, never a write gate. The labelling is deliberately **support-blind**: a defeated supporter never flips what it supports — the optional `support` walk adds chain-shape statistics (`depth`, `branching`, `terminal_share`, `defeated_in_support`, `undecided_in_support`) so the reader sees that defeat as a number and judges.
+
+```yaml
+# schema.yaml
+relationships:
+  mode: strict
+  labelling:
+    attack: [REBUTS, UNDERCUTS]
+    support:               # optional; enables the shape statistics
+      relationships: [GROUNDS]
+      direction: out
+      terminal_types: [evidence]
+```
+
+## 9. Declare a section's markdown shape
 
 A section declaration can also pin the markdown structure of its body — a flat `content` expression over the mdast block vocabulary (`paragraph`, `list`, `table`, `code`, `blockquote`, `heading`, `thematicBreak`, `html`), with attribute forms (`list(bullet)`, `list(ordered)`, `heading(3)`–`heading(6)`, `code(lang=json)`) and regular operators: sequence by space, alternation `(paragraph | list)`, repetition `+` `*` `?`. Optional companions:
 
@@ -187,7 +242,7 @@ sections:
 
 A section with no `content` stays free-form, exactly as before. Violations refuse (or warn) with `SECTION_CONTENT_MISMATCH`, `SECTION_ITEM_PATTERN_MISMATCH`, or `INVALID_TABLE_COLUMNS` — each carrying the declared expression, the found block sequence, and the `example` — indexed in the [Error Code Index](../../reference/errors/). The full key shapes live in the same generated reference as the constraints.
 
-## 9. Teach by example — one validated exemplar per type
+## 10. Teach by example — one validated exemplar per type
 
 LLMs learn from examples far better than from rules. A type may carry one canonical `exemplar:` — a complete entity in the mem markdown shape — and the engine **validates it through the real create path** at `memstead schema validate` and at install: a package whose exemplar does not conform refuses with a typed error naming the type and the defect. There is no warn-and-carry mode, so an exemplar can never drift into teaching a shape the validator would refuse — the failure mode that kills every hand-maintained example in ordinary documentation.
 

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T04:20:01Z
-last_modified: 2026-08-15T04:20:01Z
+last_modified: 2026-08-23T14:48:17Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -37,6 +37,7 @@ The method ships to npm separately — the publication is its own act, not impli
 ## Relationships
 - **REFERENCES**: [[engine:wasm-browser-engine-js-api]]
 - **REFERENCES**: [[engine:mem-archive-export-surface]]
+- **GENERALIZES**: [[the-sealed-schema-an-archive-carries-is-the-language-never-the-install-package]]
 
 ## Options
 

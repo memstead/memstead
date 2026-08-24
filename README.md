@@ -176,8 +176,16 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 | Folder | What it is |
 |---|---|
 | `crates/` | The Rust engine — schema layer, in-memory store, the two storage backends (folder + git-branch), the `memstead` CLI, the `memstead-mcp` server, plus the wasm crate. The serve and bridge crates live in the private commercial repository (see [LICENSING.md](LICENSING.md)) |
+| `xtask/` | Internal build tooling (`cargo run -p xtask -- <subcommand>`): the generated reference, the release cut, the sizing curve |
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
-| [`docs/`](docs/), [`examples/`](examples/) | [Documentation](docs/) (organized by Diátaxis: tutorial / how-to / reference / explanation) and [example schemas](examples/) (`agent-program`, and the paired `reimpl-source`/`reimpl-target`) |
+| [`docs/`](docs/) | The documentation index plus the pages that live beside the code (build, sizing curve, the measured proofs) |
+| `docs-site/` | The published documentation site (Astro): guides, concepts and the generated CLI / MCP / WASM reference |
+| [`examples/`](examples/) | Example schemas: `agent-program`, and the paired `reimpl-source`/`reimpl-target` |
+| `engineering/` | This project's standing engineering knowledge as a live mem: decisions, principles, memos (see [`engineering/README.md`](engineering/README.md)) |
+| `tests/` | Shared test fixtures used across the crates' integration tests |
+| `ci/` | The CI probes that drive the built binaries from outside (full and lean smoke, the verify gate) and the prose checker that holds the docs to the binary |
+| `fuzz/` | Coverage-guided fuzz targets for the trust-boundary parsers (see [`fuzz/README.md`](fuzz/README.md)) |
+| `scripts/` | Repository guards (leak scan, plan refs, mechanism leak, plugin architecture), the release machinery (`release-verify.sh`, `untagged-release.sh`, `ci-status.sh`) and the crates.io / npm publishers |
 
 Memstead also has a hosted registry; that is a separate, closed-source part of the project and not part of this open repository.
 

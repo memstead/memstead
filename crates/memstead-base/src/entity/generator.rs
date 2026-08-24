@@ -29,8 +29,12 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
     let metadata_str = build_metadata(entity, schema);
     parts.push(format!("---\n{metadata_str}\n---"));
 
-    // Title
-    parts.push(format!("# {}", entity.title));
+    // Title. Fence-checked like every body part: a title can embed a
+    // live fence opener (CR characters inside it are CommonMark line
+    // endings of their own, so its tail after a CR is a line that can
+    // open a fence), which masked every following section on the next
+    // parse (fuzz finding, corpus member `crash-711dc30a…`).
+    parts.push(close_open_fence(format!("# {}", entity.title)));
 
     // Required sections (schema order)
     for s in schema.sections.iter().filter(|s| s.required) {
@@ -39,10 +43,7 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             .get(s.key.as_str())
             .map(|v| v.as_str())
             .unwrap_or("");
-        parts.push(close_open_fence(
-            format!("## {}\n{content}", s.heading),
-            content,
-        ));
+        parts.push(close_open_fence(format!("## {}\n{content}", s.heading)));
     }
 
     // Relationships section (between required and optional).
@@ -58,7 +59,19 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             .relationships
             .iter()
             .map(|r| {
-                let link = if r.target.mem() == entity.mem {
+                // Same-mem targets render bare — unless the bare path
+                // would re-decode as a DIFFERENT id: a path that itself
+                // matches the cross-mem dash form (`nttype--ospity`) is
+                // read back by the decoder's tier 0 as `nttype:ospity`,
+                // so the round-trip drifts (fuzz finding, long tier,
+                // 2026-08-24, corpus member `crash-219d83e3…`). The
+                // decoder itself is the oracle — no second model of the
+                // tier-0 rules; ambiguous paths self-qualify with the
+                // colon form.
+                let link = if r.target.mem() == entity.mem
+                    && crate::entity::id::wiki_link_to_id_lenient(r.target.path(), &entity.mem)
+                        == r.target
+                {
                     r.target.path().to_string()
                 } else {
                     format!("{}:{}", r.target.mem(), r.target.path())
@@ -81,7 +94,10 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
                 }
             })
             .collect();
-        parts.push(format!("## Relationships\n{}", rel_lines.join("\n")));
+        parts.push(close_open_fence(format!(
+            "## Relationships\n{}",
+            rel_lines.join("\n")
+        )));
     }
 
     // Optional sections (schema order)
@@ -92,26 +108,30 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             .map(|v| v.as_str())
             .unwrap_or("");
         // All sections get the same spacing for roundtrip stability
-        parts.push(close_open_fence(
-            format!("## {}\n\n{content}", s.heading),
-            content,
-        ));
+        parts.push(close_open_fence(format!("## {}\n\n{content}", s.heading)));
     }
 
     parts.join("\n\n") + "\n"
 }
 
-/// Terminate a section block whose content ends inside an open code
-/// fence. Without this, everything the generator writes after the block
+/// Terminate an emitted part that ends inside an open code fence.
+/// Without this, everything the generator writes after the part
 /// — the following section headings included — is inside that fence on
 /// the next parse: sections are absorbed, and the document grows on
 /// every parse→generate round. The fix is at generation, not by
 /// mutating the stored content: one round normalises (the reparsed
 /// section content then carries the closing fence), after which
-/// parse→generate is a fixpoint. Balanced content is untouched, so
+/// parse→generate is a fixpoint. Balanced parts are untouched, so
 /// canonical bytes of well-formed entities do not change.
-fn close_open_fence(mut part: String, content: &str) -> String {
-    if let Some(closer) = crate::markdown::closing_fence_if_unterminated(content) {
+///
+/// The check runs over exactly the bytes emitted — heading and title
+/// lines included, not just section content — because a heading or
+/// title can itself carry a live fence opener: CR characters inside it
+/// are CommonMark line endings of their own, so its tail after a CR is
+/// a line that can open a fence (fuzz findings, corpus members
+/// `crash-eca0fc99…` and `crash-711dc30a…`).
+fn close_open_fence(mut part: String) -> String {
+    if let Some(closer) = crate::markdown::closing_fence_if_unterminated(&part) {
         part.push('\n');
         part.push_str(&closer);
     }
@@ -322,6 +342,41 @@ mod tests {
             heading_spans: std::collections::HashMap::new(),
             raw_section_headings: Vec::new(),
         }
+    }
+
+    // Fixture pinned by the coverage-guided long tier (2026-08-24,
+    // corpus member `crash-219d83e3…`): a same-mem target whose PATH
+    // itself matches the cross-mem dash form (`nttype--ospity`)
+    // rendered bare, and the decoder's tier 0 read the bare form back
+    // as cross-mem `nttype:ospity` — a different id, so parse→generate
+    // was not a fixpoint. Such targets must self-qualify with the
+    // colon form; unambiguous same-mem targets stay bare.
+    #[test]
+    fn same_mem_target_matching_the_dash_form_self_qualifies() {
+        let schema = type_by_name(builtin_names::SPEC).unwrap();
+        let mut entity = make_entity("Dash Path", "specs");
+        entity.relationships.push(Relationship {
+            rel_type: "USES".to_string(),
+            target: EntityId::new("specs", "nttype--ospity"),
+            description: None,
+        });
+        entity.relationships.push(Relationship {
+            rel_type: "PART_OF".to_string(),
+            target: EntityId::new("specs", "plain-target"),
+            description: None,
+        });
+        let md = generate_markdown(&entity, &schema);
+        assert!(
+            md.contains("[[specs:nttype--ospity]]"),
+            "ambiguous same-mem path self-qualifies: {md}"
+        );
+        assert!(
+            md.contains("[[plain-target]]"),
+            "unambiguous same-mem path stays bare: {md}"
+        );
+        // The rendered row round-trips to the same id.
+        let decoded = crate::entity::id::wiki_link_to_id_lenient("specs:nttype--ospity", "specs");
+        assert_eq!(decoded, EntityId::new("specs", "nttype--ospity"));
     }
 
     #[test]

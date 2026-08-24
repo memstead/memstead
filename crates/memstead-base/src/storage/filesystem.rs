@@ -312,6 +312,14 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
     /// Metadata-class existence probe: pending buffer first (same
     /// precedence as `read_entity`), then one `symlink_metadata` call —
     /// no file open, no byte read.
+    /// The mem root directory exists. A folder mount whose path is
+    /// gone (a moved checkout, a mem never materialised) lists zero
+    /// entities exactly like an empty one; this is how boot tells the
+    /// two apart.
+    fn storage_present(&self) -> Result<bool, BackendError> {
+        Ok(self.root.is_dir())
+    }
+
     fn entity_exists(&self, rel_path: &Path) -> Result<bool, BackendError> {
         let key = normalise_rel_path(rel_path)?;
         let pending = self.pending.lock().map_err(|_| {

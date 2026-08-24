@@ -16,6 +16,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use memstead_base::MediumType;
 use memstead_base::binding::{medium_capabilities, prune_guarantee_for_medium};
+use memstead_base::preparation::{self, Touchpoint};
 use serde_json::Value;
 
 /// The media rendered in the capability matrix, in a fixed order.
@@ -25,6 +26,18 @@ const MEDIA: [MediumType; 5] = [
     MediumType::Git,
     MediumType::Graph,
     MediumType::Web,
+];
+
+/// Preferred per-source field order (the medium half first, then the facet
+/// half). Unlisted properties append sorted, as for [`FIELD_ORDER`].
+const SOURCE_FIELD_ORDER: &[&str] = &[
+    "name",
+    "type",
+    "pointer",
+    "change_detection",
+    "scope",
+    "engagement",
+    "preparation",
 ];
 
 /// Preferred top-level field order (declaration first, operations last). Any
@@ -83,6 +96,65 @@ fn render(schema: &Value) -> String {
         }
         md.push('\n');
     }
+
+    // --- Per-source fields ---
+    md.push_str("## Per-source fields\n\n");
+    let source_def = &schema["$defs"]["source"];
+    if let Some(desc) = source_def["description"].as_str() {
+        md.push_str(desc);
+        md.push_str("\n\n");
+    }
+    if let Some(props) = source_def["properties"].as_object() {
+        let req = string_set(&source_def["required"]);
+        md.push_str("| Field | Type | Required | Allowed values | Description |\n");
+        md.push_str("| --- | --- | --- | --- | --- |\n");
+        for key in ordered_keys_with(props, SOURCE_FIELD_ORDER) {
+            render_field_row(
+                &mut md,
+                &key,
+                &props[&key],
+                req.contains(key.as_str()),
+                schema,
+            );
+        }
+        md.push('\n');
+    }
+    // The preparation registry, from the engine: the page never restates a
+    // roster the code owns.
+    md.push_str(
+        "### Registered preparations\n\n`preparation` names a preparation the engine registers; an \
+         identifier outside this table is refused at binding validation (and a hand-edited record \
+         carrying one is skipped at run time, the registered set named). A registered preparation \
+         is legal only over a medium whose anchor namespace admits one of its grains. The engine \
+         consults the registry at two touchpoints: anchor observation (the prepared form an \
+         artifact hashes as — shared by the binding-backed verify and the standalone \
+         `verify-anchors`, so both inherit every entry) and ingest delivery (a source's unit \
+         sequence: one file can carry many units addressed `<path>#<key>`, delivered in a total \
+         order derived from the units' own keys, identical on every pass; the build operation's \
+         `batch_size` bounds how many not-yet-disposed units a pass presents). Non-text media conversion (PDF, DOCX, audio) is a \
+         non-goal: an agent's read tool extracts, and the prepared-content hash already \
+         drift-detects binary artifacts by raw bytes.\n\n",
+    );
+    md.push_str("| Identifier | Touchpoint | Grains | What it prepares |\n");
+    md.push_str("| --- | --- | --- | --- |\n");
+    for p in preparation::registry() {
+        let grains: Vec<String> = p
+            .grains
+            .iter()
+            .map(|g| format!("`{}`", g.as_wire()))
+            .collect();
+        md.push_str(&format!(
+            "| `{}` | {} | {} | {} |\n",
+            p.id,
+            match p.touchpoint {
+                Touchpoint::PreparedForm => "anchor observation (prepared form)",
+                Touchpoint::DeliveryUnits => "ingest delivery (unit sequence)",
+            },
+            grains.join(", "),
+            escape_pipes(p.description),
+        ));
+    }
+    md.push('\n');
 
     // --- Operations ---
     md.push_str("## Operations\n\n");
@@ -230,9 +302,14 @@ fn allowed_values(v: &Value) -> String {
 /// Field keys in [`FIELD_ORDER`] first, then any remaining keys sorted — so the
 /// output is deterministic and never omits a property the schema adds later.
 fn ordered_keys(props: &serde_json::Map<String, Value>) -> Vec<String> {
+    ordered_keys_with(props, FIELD_ORDER)
+}
+
+/// [`ordered_keys`] under an explicit preferred order.
+fn ordered_keys_with(props: &serde_json::Map<String, Value>, order: &[&str]) -> Vec<String> {
     let mut keys: Vec<String> = props.keys().cloned().collect();
     keys.sort();
-    let mut out: Vec<String> = FIELD_ORDER
+    let mut out: Vec<String> = order
         .iter()
         .filter(|k| props.contains_key(**k))
         .map(|k| k.to_string())

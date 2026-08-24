@@ -228,11 +228,18 @@ fn scan_nested_prefix_drift(
                 if target_mem == suffix {
                     let candidate_target =
                         resolve_two_pass(target_id.path(), current_mem, ctx.mem_names, store);
+                    // A prefix that IS a roster member reached here only
+                    // because its target is missing (the existing-target
+                    // case returned above): say "target missing", not
+                    // "rename drift". A prefix that merely matches a
+                    // member's last segment is the rename pattern.
+                    let prefix_mounted = ctx.mem_names.iter().any(|v| v.as_str() == target_mem);
                     ctx.warnings.push(WarningHint::SuspiciousNestedPrefix {
                         from: from.clone(),
                         resolved_id: target_id.clone(),
                         candidate_target,
                         section: section.clone(),
+                        prefix_mounted,
                     });
                     break;
                 }
@@ -567,6 +574,17 @@ pub fn validate_loaded_relations(
     // either way the cycle is broken and the agent sees a typed
     // warning naming the dropped relation.
 
+    // A cycle space is either one acyclic-flagged rel-type's subgraph
+    // (the long-standing sweep) or the UNION subgraph of a declared
+    // `relationships.acyclic_sets` set, whose cycles may mix
+    // rel-types. Both sweep identically; the set space's adjacency
+    // remembers each edge's rel-type so the dropped edge is named
+    // precisely.
+    enum CycleSpace<'a> {
+        Single(&'a String),
+        Set(&'a Vec<String>),
+    }
+
     // Collect the union of acyclic rel-types declared by any schema
     // in this workspace.
     let mut acyclic_rel_types: Vec<String> = Vec::new();
@@ -577,28 +595,53 @@ pub fn validate_loaded_relations(
             }
         }
     }
+    // Collect the distinct declared acyclicity sets — iterated in
+    // sorted mem order so the sweep order (and therefore which
+    // back-edge drops) is stable across HashMap iteration orders.
+    let mut acyclic_set_spaces: Vec<Vec<String>> = Vec::new();
+    let mut schema_mems: Vec<&String> = schemas.keys().collect();
+    schema_mems.sort();
+    for mem in schema_mems {
+        for set in &schemas[mem.as_str()].manifest.relationships.acyclic_sets {
+            if !acyclic_set_spaces.contains(set) {
+                acyclic_set_spaces.push(set.clone());
+            }
+        }
+    }
 
     let mut cycle_drops: Vec<(EntityId, EntityId, String)> = Vec::new();
-    for rel_type in &acyclic_rel_types {
-        // Adjacency list scoped to this rel-type. Includes edges
-        // whose source mem's schema declares the rel-type as
-        // acyclic — a mem whose schema doesn't declare the type
-        // acyclic shouldn't have its edges dropped just because a
-        // sibling mem does.
-        let mut adj: std::collections::HashMap<EntityId, Vec<EntityId>> =
+    for space in acyclic_rel_types
+        .iter()
+        .map(CycleSpace::Single)
+        .chain(acyclic_set_spaces.iter().map(CycleSpace::Set))
+    {
+        // Adjacency list scoped to this cycle space. Includes edges
+        // whose source mem's schema declares the space (the acyclic
+        // flag, or the set) — a mem whose schema doesn't declare it
+        // shouldn't have its edges dropped just because a sibling mem
+        // does. Each edge carries its rel-type for the drop record.
+        let mut adj: std::collections::HashMap<EntityId, Vec<(EntityId, String)>> =
             std::collections::HashMap::new();
         for entity in store.all_entities() {
             let Some(schema) = schemas.get(entity.mem.as_str()) else {
                 continue;
             };
-            if !schema.relationship_acyclic(rel_type) {
+            let member = match &space {
+                CycleSpace::Single(r) => schema.relationship_acyclic(r),
+                CycleSpace::Set(s) => schema.has_acyclic_set(s),
+            };
+            if !member {
                 continue;
             }
             for edge in store.outgoing(&entity.id) {
-                if &edge.rel_type == rel_type {
+                let in_space = match &space {
+                    CycleSpace::Single(r) => edge.rel_type == **r,
+                    CycleSpace::Set(s) => s.iter().any(|n| n == &edge.rel_type),
+                };
+                if in_space {
                     adj.entry(entity.id.clone())
                         .or_default()
-                        .push(edge.target.clone());
+                        .push((edge.target.clone(), edge.rel_type.clone()));
                 }
             }
         }
@@ -619,15 +662,20 @@ pub fn validate_loaded_relations(
         // iteration order.
         let mut seeds: Vec<EntityId> = adj.keys().cloned().collect();
         seeds.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        let sort_targets = |v: &mut Vec<(EntityId, String)>| {
+            v.sort_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()).then_with(|| a.1.cmp(&b.1)));
+        };
         for seed in seeds {
             if color.get(&seed).copied() != Some(Color::White) {
                 continue;
             }
             // Iterative DFS to avoid stack blow-ups on deep graphs.
             // Stack entry: (node, sorted-adjacency-index, sorted-adjacency-snapshot).
-            let mut stack: Vec<(EntityId, usize, Vec<EntityId>)> = Vec::new();
-            let mut start_targets: Vec<EntityId> = adj.get(&seed).cloned().unwrap_or_default();
-            start_targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+            type DfsFrame = (EntityId, usize, Vec<(EntityId, String)>);
+            let mut stack: Vec<DfsFrame> = Vec::new();
+            let mut start_targets: Vec<(EntityId, String)> =
+                adj.get(&seed).cloned().unwrap_or_default();
+            sort_targets(&mut start_targets);
             color.insert(seed.clone(), Color::Gray);
             stack.push((seed.clone(), 0, start_targets));
             while let Some((node, idx, targets)) = stack.last_mut() {
@@ -637,20 +685,20 @@ pub fn validate_loaded_relations(
                     stack.pop();
                     continue;
                 }
-                let target = targets[*idx].clone();
+                let (target, edge_rel) = targets[*idx].clone();
                 *idx += 1;
                 let node_id = node.clone();
                 match color.get(&target).copied() {
                     Some(Color::White) => {
-                        let mut next_targets: Vec<EntityId> =
+                        let mut next_targets: Vec<(EntityId, String)> =
                             adj.get(&target).cloned().unwrap_or_default();
-                        next_targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+                        sort_targets(&mut next_targets);
                         color.insert(target.clone(), Color::Gray);
                         stack.push((target, 0, next_targets));
                     }
                     Some(Color::Gray) => {
                         // Back-edge — closes a cycle. Drop it.
-                        cycle_drops.push((node_id, target, rel_type.clone()));
+                        cycle_drops.push((node_id, target, edge_rel));
                     }
                     Some(Color::Black) | None => {
                         // Already fully explored or not in the
@@ -659,6 +707,14 @@ pub fn validate_loaded_relations(
                 }
             }
         }
+    }
+    // An edge can sit in two spaces at once (its rel-type flagged
+    // acyclic AND inside a set) — dedupe so it is dropped and warned
+    // once.
+    {
+        let mut seen: std::collections::HashSet<(EntityId, EntityId, String)> =
+            std::collections::HashSet::new();
+        cycle_drops.retain(|d| seen.insert(d.clone()));
     }
 
     for (from_id, target, rel_type) in cycle_drops {
@@ -843,6 +899,7 @@ mod tests {
                 resolved_id,
                 candidate_target,
                 section,
+                prefix_mounted,
             } => {
                 assert_eq!(from.as_ref(), "test-mem-plugin--author");
                 // Tier-0 resolves `[[plugin--foo]]` to `plugin--foo`
@@ -854,6 +911,18 @@ mod tests {
                     Some("test-mem-plugin--foo")
                 );
                 assert_eq!(section, "constraints");
+                // `plugin` is no roster member, only `test-mem-plugin`'s
+                // last segment: the rename-drift class.
+                assert!(!prefix_mounted, "a suffix-only prefix is not a mounted mem");
+                let msg = warnings[0].message();
+                assert!(
+                    msg.contains("prefix 'plugin' is not a mounted mem"),
+                    "the message names the class: {msg}"
+                );
+                assert!(
+                    !msg.contains("almost certainly"),
+                    "no guessed diagnosis: {msg}"
+                );
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1004,6 +1073,91 @@ mod tests {
             }
             other => panic!("unexpected variant: {other:?}"),
         }
+    }
+
+    /// A link whose prefix IS a mounted mem, with the target missing
+    /// there: the warning still fires (nothing resolves) but names the
+    /// class honestly, "target missing in mem engine", instead of
+    /// calling a well-formed cross-mem reference rename drift. This is
+    /// every one of the eight hits the dogfood graph carried. The
+    /// complement: the same link with the target present is silent.
+    #[test]
+    fn mounted_prefix_with_missing_target_is_classed_target_missing() {
+        let fallback = default_fallback();
+        let author = || {
+            real_entity(
+                "plugin--author",
+                &[("purpose", "Depends on [[engine--health]].")],
+            )
+        };
+        let mem_names = vec!["engine".to_string(), "plugin".to_string()];
+        let known_suffixes = vec!["engine".to_string(), "plugin".to_string()];
+
+        let mut store = Store::new();
+        let mut warnings = Vec::new();
+        push_entities_into_store(
+            &mut store,
+            vec![author()],
+            &fallback,
+            Some(LoadCollector {
+                warnings: &mut warnings,
+                known_suffixes: &known_suffixes,
+                mem_names: &mem_names,
+            }),
+        );
+        assert_eq!(warnings.len(), 1, "a missing cross-mem target fires once");
+        match &warnings[0] {
+            WarningHint::SuspiciousNestedPrefix {
+                resolved_id,
+                prefix_mounted,
+                candidate_target,
+                ..
+            } => {
+                assert_eq!(resolved_id.as_ref(), "engine--health");
+                assert!(*prefix_mounted, "`engine` is a roster member");
+                assert!(
+                    candidate_target.is_none(),
+                    "nothing to suggest: the target is absent"
+                );
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        let msg = warnings[0].message();
+        assert!(
+            msg.contains("target missing in mem engine"),
+            "the message says what it can tell: {msg}"
+        );
+        assert!(
+            !msg.contains("rename"),
+            "a mounted prefix is never called rename drift: {msg}"
+        );
+        let json = serde_json::to_value(&warnings[0]).unwrap();
+        assert_eq!(json["details"]["target_mem"], "engine");
+        assert_eq!(json["details"]["prefix_mounted"], true);
+
+        // Complement: target present, no warning at all.
+        let mut store2 = Store::new();
+        push_entities_into_store(
+            &mut store2,
+            vec![real_entity("engine--health", &[])],
+            &fallback,
+            None,
+        );
+        let mut warnings2 = Vec::new();
+        push_entities_into_store(
+            &mut store2,
+            vec![author()],
+            &fallback,
+            Some(LoadCollector {
+                warnings: &mut warnings2,
+                known_suffixes: &known_suffixes,
+                mem_names: &mem_names,
+            }),
+        );
+        assert!(
+            warnings2.is_empty(),
+            "a well-formed link to an existing target is silent: {warnings2:?}"
+        );
     }
 
     /// Two mems sharing a last-segment suffix: both contribute to the

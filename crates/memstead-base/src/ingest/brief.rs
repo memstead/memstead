@@ -411,6 +411,46 @@ pub struct SourceCursor {
     /// `memstead projection advance <binding-id> …` line the changed-slice
     /// preface now emits instead of a raw `mem set-sync-state` command (D4/D7).
     pub binding_id: String,
+    /// Touchpoint B: one ordered delivery sequence per primary source that
+    /// declares a delivery preparation. Their unit ids also ride `union`
+    /// (the advance gate accepts them); the class lists never repeat them,
+    /// because a class list is alphabetical and a sequence is not.
+    pub delivery: Vec<DeliverySequence>,
+}
+
+/// One unit of a [`DeliverySequence`], as presented.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveredUnit {
+    /// The unit's artifact id, `<path>#<key>` ([`crate::preparation::unit_id`]).
+    pub id: String,
+    /// The unit's intrinsic order key; the sequence sorts by it, then by id.
+    pub order_key: String,
+    /// How the unit changed (every unit of a first delivery is `Added`).
+    pub change: crate::preparation::UnitChange,
+    /// Already disposed in the binding's in-progress advance store, so it is
+    /// counted but not re-presented.
+    pub disposed: bool,
+}
+
+/// The ordered delivery sequence of one source under a delivery preparation
+/// (touchpoint B of [`crate::preparation`]): the same source state yields the
+/// same sequence on every pass, first run and change run alike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliverySequence {
+    /// The source's declared name.
+    pub source: String,
+    /// The declared delivery preparation identifier.
+    pub preparation: String,
+    /// No baseline existed: every unit of the source is delivered, in order.
+    pub first_run: bool,
+    /// For at least one changed file no baseline content was retrievable,
+    /// so every unit of that file is listed rather than only the changed ones.
+    pub degraded: bool,
+    /// How many not-yet-disposed units to present this pass (the build
+    /// operation's `batch_size`; `0` presents all).
+    pub batch: usize,
+    /// Every delivered unit, in the total order.
+    pub units: Vec<DeliveredUnit>,
 }
 
 /// Single-quote a value for the emitted shell command, escaping embedded
@@ -422,6 +462,78 @@ fn shell_quote(s: &str) -> String {
 
 /// Render one changed-slice class (Deleted / Modified / Added), capped at
 /// [`SLICE_CAP`] with a `…and N more` overflow line.
+/// Render one delivery sequence: the not-yet-disposed units in the total
+/// order, numbered by their position in that order (so a unit keeps its
+/// number across the passes of one delivery while earlier units are
+/// disposed), capped at the sequence's batch with the remainder counted,
+/// never reshuffled.
+fn render_delivery_sequence(lines: &mut Vec<String>, seq: &DeliverySequence) {
+    use crate::preparation::UnitChange;
+    lines.push(format!(
+        "### Delivery sequence: `{}` (`{}`)\n",
+        seq.source, seq.preparation
+    ));
+    let opening = if seq.first_run {
+        "First delivery of this source: every unit, in the source's own order."
+    } else {
+        "The units that changed since the last pass, at their positions in the source's own \
+         order."
+    };
+    lines.push(format!(
+        "{opening} Work them top to bottom: the order derives from the units' own keys, never \
+         from discovery or directory order, it is identical on every pass, and a unit assumes \
+         only the units numbered before it. Address a unit as `<path>#<key>` in anchors and \
+         dispositions.\n"
+    ));
+    if seq.degraded {
+        lines.push(
+            "_(No baseline content was retrievable for one or more changed files, so every unit \
+             of those files is listed; precision is coarser this pass only.)_\n"
+                .to_string(),
+        );
+    }
+    let pending: Vec<(usize, &DeliveredUnit)> = seq
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(_, u)| !u.disposed)
+        .collect();
+    let disposed = seq.units.len() - pending.len();
+    let shown = if seq.batch == 0 {
+        pending.len()
+    } else {
+        pending.len().min(seq.batch)
+    };
+    for (position, unit) in &pending[..shown] {
+        let label = match unit.change {
+            UnitChange::Added => "new",
+            UnitChange::Modified => "changed",
+            UnitChange::Deleted => "deleted",
+        };
+        lines.push(format!("{}. `{}` ({label})", position + 1, unit.id));
+    }
+    if pending.len() > shown {
+        lines.push(format!(
+            "- …and {} more, presented in order once these are disposed",
+            pending.len() - shown
+        ));
+    }
+    if disposed > 0 {
+        lines.push(format!(
+            "_({disposed} unit{} of this sequence already disposed this pass.)_",
+            if disposed == 1 { "" } else { "s" }
+        ));
+    }
+    if pending.is_empty() {
+        lines.push(
+            "_(Every unit of this sequence is disposed; the baseline advances when the pass \
+             completes.)_"
+                .to_string(),
+        );
+    }
+    lines.push(String::new());
+}
+
 fn render_slice_class(lines: &mut Vec<String>, label: &str, paths: &[String]) {
     if paths.is_empty() {
         return;
@@ -497,10 +609,31 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
              artifacts **first** — they are where the graph is most likely now wrong.\n"
                 .to_string(),
         );
+        // Delivery sequences first: for a source under a delivery
+        // preparation the order IS the steering, and their unit ids never
+        // repeat in the alphabetical class lists below.
+        for seq in &cursor.delivery {
+            render_delivery_sequence(&mut lines, seq);
+        }
+        let unit_ids: std::collections::BTreeSet<&str> = cursor
+            .delivery
+            .iter()
+            .flat_map(|s| s.units.iter().map(|u| u.id.as_str()))
+            .collect();
+        let without_units = |v: &[String]| -> Vec<String> {
+            v.iter()
+                .filter(|p| !unit_ids.contains(p.as_str()))
+                .cloned()
+                .collect()
+        };
         // Deletions first — cheapest, highest-signal drift.
-        render_slice_class(&mut lines, "Deleted", &cursor.union.deleted);
-        render_slice_class(&mut lines, "Modified", &cursor.union.modified);
-        render_slice_class(&mut lines, "Added", &cursor.union.added);
+        render_slice_class(&mut lines, "Deleted", &without_units(&cursor.union.deleted));
+        render_slice_class(
+            &mut lines,
+            "Modified",
+            &without_units(&cursor.union.modified),
+        );
+        render_slice_class(&mut lines, "Added", &without_units(&cursor.union.added));
         if cursor.degraded {
             lines.push(
                 "_(Precise change history for one or more facets was unavailable, so its full \
@@ -654,6 +787,39 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
                 .map(|n| format!("`{n}`"))
                 .collect::<Vec<_>>()
                 .join(", ")
+        ));
+    }
+    // A source under a preparation hashes a PREPARED form, which no agent
+    // computes by hand: say so, and say what to do instead.
+    for source in &resolved.sources {
+        let crate::ingest::resolve::ResolvedSource::Primary(src) = source else {
+            continue;
+        };
+        let Some(prep) = src
+            .preparation
+            .as_deref()
+            .and_then(crate::preparation::lookup)
+        else {
+            continue;
+        };
+        let what = match prep.id {
+            crate::preparation::CODE_MAP => {
+                "the file's interface digest (imports, exports, signatures; comments, \
+                 formatting and bodies invisible), and a `tree` anchor the code map of every \
+                 scoped file under it"
+            }
+            crate::preparation::DATED_ENTRIES => {
+                "the unit's own text for a `<path>#<key>` span, the file's bytes otherwise"
+            }
+            crate::preparation::ENTITY_LOAD_BEARING => "the entity's load-bearing sections",
+            _ => prep.description,
+        };
+        block.push_str(&format!(
+            "Anchors on `{}` hash a prepared form (`{}`): {what}. Never compute `hash` \
+             yourself for this source — leave it empty (verify records it on first \
+             observation), or for a `file` or `span` anchor pass the artifact's `content` \
+             and the engine hashes the prepared form (a `tree` anchor takes no content).\n\n",
+            src.name, prep.id
         ));
     }
     block
@@ -974,7 +1140,11 @@ fn render_open_findings(findings: &[Finding]) -> String {
         &mut lines,
         "Drifted — the anchored content changed",
         "The source the entity describes moved. Update the affected section to match — \
-         only the part that changed. If the entity is still accurate, leave it.",
+         only the part that changed. If the entity is still accurate, leave it. Either \
+         way, re-declare the anchor on the entity (same artifact, grain, class and \
+         source, no hash): the next verify backfills the freshly observed hash and the \
+         drift clears. Updating the entity alone, or advancing the baseline, leaves \
+         the anchor drifted.",
         &group(FindingClass::Drifted),
     );
     render_findings_group(
@@ -1641,6 +1811,121 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         }
     }
 
+    /// The provenance block names a prepared-form source and scopes the
+    /// `content` advice to file and span anchors; a binding without a
+    /// preparation carries no such paragraph.
+    #[test]
+    fn anchor_instruction_names_prepared_form_sources() {
+        let mut resolved = resolved("home", None, vec![primary(MediumType::Codebase, vec![])]);
+        let plain = render_anchor_instruction(&resolved);
+        assert!(!plain.contains("hash a prepared form"));
+        if let Some(ResolvedSource::Primary(src)) = resolved.sources.first_mut() {
+            src.preparation = Some(crate::preparation::CODE_MAP.to_string());
+        }
+        let prepared = render_anchor_instruction(&resolved);
+        assert!(
+            prepared.contains("hash a prepared form (`code-map`)"),
+            "{prepared}"
+        );
+        assert!(prepared.contains("interface digest"));
+        assert!(prepared.contains("for a `file` or `span` anchor pass the artifact's `content`"));
+        assert!(prepared.contains("a `tree` anchor takes no content"));
+    }
+
+    /// A delivery sequence renders in its total order, numbered by position,
+    /// capped at the batch with the remainder counted, disposed units
+    /// subtracted but counted, and its unit ids kept out of the alphabetical
+    /// class lists (a file-level id in the same slice still lists there).
+    #[test]
+    fn changed_slice_renders_delivery_sequences_in_order() {
+        use crate::preparation::UnitChange;
+        let unit = |id: &str, order: &str, change: UnitChange, disposed: bool| DeliveredUnit {
+            id: id.to_string(),
+            order_key: order.to_string(),
+            change,
+            disposed,
+        };
+        let units = vec![
+            unit(
+                "log/b.md#2026-08-20T00:00:00",
+                "2026-08-20T00:00:00",
+                UnitChange::Added,
+                true,
+            ),
+            unit(
+                "log/a.md#2026-08-21T00:00:00",
+                "2026-08-21T00:00:00",
+                UnitChange::Deleted,
+                false,
+            ),
+            unit(
+                "log/b.md#2026-08-22T00:00:00",
+                "2026-08-22T00:00:00",
+                UnitChange::Modified,
+                false,
+            ),
+            unit(
+                "log/a.md#2026-08-23T00:00:00",
+                "2026-08-23T00:00:00",
+                UnitChange::Added,
+                false,
+            ),
+        ];
+        let cursor = SourceCursor {
+            // `slice(deleted, modified, added)`.
+            union: slice(
+                &["log/a.md#2026-08-21T00:00:00"],
+                &["log/b.md#2026-08-22T00:00:00"],
+                &[
+                    "log/a.md#2026-08-23T00:00:00",
+                    "log/b.md#2026-08-20T00:00:00",
+                    "other/x.rs",
+                ],
+            ),
+            write_commands: vec![],
+            reseed: vec![],
+            no_signal: vec![],
+            any_changes: true,
+            degraded: false,
+            dead_denies: vec![],
+            dest_mem: "home".to_string(),
+            binding_id: "home/log".to_string(),
+            delivery: vec![DeliverySequence {
+                source: "log".to_string(),
+                preparation: "dated-entries".to_string(),
+                first_run: false,
+                degraded: true,
+                batch: 2,
+                units,
+            }],
+        };
+        let out = render_changed_slice(&cursor);
+        assert!(
+            out.contains("### Delivery sequence: `log` (`dated-entries`)"),
+            "{out}"
+        );
+        assert!(out.contains("The units that changed since the last pass"));
+        assert!(out.contains("No baseline content was retrievable"));
+        let listed: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with(|c: char| c.is_ascii_digit()))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                "2. `log/a.md#2026-08-21T00:00:00` (deleted)",
+                "3. `log/b.md#2026-08-22T00:00:00` (changed)",
+            ],
+            "positions are total-order positions; the disposed first unit is skipped"
+        );
+        assert!(out.contains("…and 1 more, presented in order once these are disposed"));
+        assert!(out.contains("1 unit of this sequence already disposed"));
+        // The class lists carry only the file-level id.
+        assert!(out.contains("**Added:**\n- `other/x.rs`\n"), "{out}");
+        assert!(!out.contains("**Modified:**"));
+        assert!(!out.contains("**Deleted:**"));
+    }
+
     /// No changes and no reseed → the block is empty (brief stays a plain roam).
     #[test]
     fn changed_slice_empty_when_nothing_moved() {
@@ -1654,6 +1939,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         assert_eq!(render_changed_slice(&cursor), "");
     }
@@ -1673,6 +1959,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec!["dev".to_string(), "typo/**".to_string()],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         let out = render_changed_slice(&cursor);
         assert!(out.contains("deny_paths` entries match nothing"));
@@ -1695,6 +1982,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         let expected_lines = [
             "## Source changes since the last sync\n",
@@ -1733,6 +2021,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "d".to_string(),
             binding_id: "d/p".to_string(),
+            delivery: vec![],
         };
         let out = render_changed_slice(&cursor);
         assert!(out.starts_with("## Source changes since the last sync\n\n"));
@@ -1770,6 +2059,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "d".to_string(),
             binding_id: "d/p".to_string(),
+            delivery: vec![],
         };
         let out = render_changed_slice(&cursor);
         assert!(out.starts_with("## Source changes since the last sync\n"));
@@ -1814,6 +2104,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "d".to_string(),
             binding_id: "d/p".to_string(),
+            delivery: vec![],
         };
         let out = render_changed_slice(&cursor);
         assert!(out.contains("The source moved"));
@@ -1907,6 +2198,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "d".to_string(),
             binding_id: "d/p".to_string(),
+            delivery: vec![],
         };
         let out = render_changed_slice(&cursor);
         assert!(out.contains(&format!("- …and {} more added", 3)));
@@ -1958,6 +2250,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         }
     }
 
@@ -2017,6 +2310,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         let findings = vec![
             finding(
@@ -2156,6 +2450,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         let out = render_sync_brief(&r, &cursor, &[], &[], false);
         assert!(out.contains("## Stale claims beyond the slice — search, then judge"));
@@ -2245,6 +2540,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         let findings = vec![
             finding(
@@ -2332,6 +2628,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             dead_denies: vec![],
             dest_mem: "engine".to_string(),
             binding_id: "engine/graph".to_string(),
+            delivery: vec![],
         };
         let preface = render_changed_slice(&changed_cursor);
         assert_clean(

@@ -69,6 +69,13 @@
         "$ref": "#/$defs/MetadataFieldDef"
       }
     },
+    "must_reach": {
+      "description": "Declared reachability obligations (see [`MustReach`]): entities\nof this type must reach at least one entity of a named terminal\ntype, following edges of a named relation set in a named\ndirection, within an optional maximum depth. Health-path only,\nalways warn-tier (the loader refuses `block`: a transitive\nproperty is established by writes on OTHER entities, so a\nwrite-time refusal would punish the wrong mutation). Empty\ndefault keeps current behaviour.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MustReach"
+      }
+    },
     "name": {
       "type": "string"
     },
@@ -90,6 +97,13 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/SectionDef"
+      }
+    },
+    "signals": {
+      "description": "Declared aggregate signals (see [`SignalDef`]): exact,\nparameter-free counts with declared thresholds, computed at\nread time and served with their evidence — never scored,\nnever blocking, never stored. Empty default keeps every\nresponse byte-identical.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SignalDef"
       }
     },
     "staleness_threshold_days": {
@@ -246,7 +260,7 @@
           "type": "object",
           "properties": {
             "direction": {
-              "description": "Which direction reaches the dependents: `incoming` taints\nthe entities whose `rel_type` edges point at the terminal\nentity (and their dependents, transitively); `outgoing`\nthe entities the terminal entity points at.",
+              "description": "Which direction reaches the dependents: `incoming` taints\nthe entities whose edges point at the terminal entity (and\ntheir dependents, transitively); `outgoing` the entities\nthe terminal entity points at.",
               "$ref": "#/$defs/PropagationDirection"
             },
             "field": {
@@ -258,8 +272,21 @@
               "const": "status_propagation"
             },
             "rel_type": {
-              "description": "The rel-type the taint travels along.",
-              "type": "string"
+              "description": "The single rel-type the taint travels along. Exactly one\nof `rel_type` / `rel_types` per declaration — the loader\nrefuses both-present and neither-present.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rel_types": {
+              "description": "The relation SET the taint travels along — the union\nsubgraph, so a taint crosses rel-type boundaries. Inline\nlist of declared names, per the bundle-wide convention.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
             },
             "severity": {
               "$ref": "#/$defs/ConstraintSeverity",
@@ -275,7 +302,6 @@
             "kind",
             "field",
             "value",
-            "rel_type",
             "direction"
           ]
         }
@@ -469,12 +495,64 @@
         "field_type"
       ]
     },
+    "MustReach": {
+      "description": "One reachability obligation on a type definition. The obligated\nentity must reach at least one non-stub entity whose type is in\n`terminal_types`, walking edges whose rel-type is in\n`relationships` (an inline relation set), in `direction`, within\n`max_depth` hops when bounded. Evaluated on the health sweep only\n(`constraints` axis), never on the write path — no single write\ncompletes a transitive absence. The incoming direction with\n`max_depth: 1` covers the required-incoming-edge case.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "`out` follows edges pointing away from the walked entity, `in`\nfollows edges pointing at it — the same vocabulary the store\nand `memstead_search` speak.",
+          "$ref": "#/$defs/ReachDirection"
+        },
+        "max_depth": {
+          "description": "Maximum number of hops a conforming path may take. Absent =\nunbounded. Zero refuses at load (nothing is reachable in zero\nhops).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "relationships": {
+          "description": "Edge names the walk follows — any name in the set continues the\npath. Loader validates each against the schema's relationship\nvocabulary.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "description": "Always `warn` — the loader refuses `block` on this form.",
+          "$ref": "#/$defs/ConstraintSeverity",
+          "default": "warn"
+        },
+        "terminal_types": {
+          "description": "Type names that satisfy the obligation when reached. Loader\nvalidates each against the schema's declared types.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relationships",
+        "direction",
+        "terminal_types"
+      ]
+    },
     "PropagationDirection": {
       "description": "Traversal direction for [`ConstraintDef::StatusPropagation`].",
       "type": "string",
       "enum": [
         "incoming",
         "outgoing"
+      ]
+    },
+    "ReachDirection": {
+      "description": "Walk direction for [`MustReach`] — wire literals `out` / `in`,\nmatching the store's relationship rendering and `memstead_search`'s\n`direction` parameter.",
+      "type": "string",
+      "enum": [
+        "out",
+        "in"
       ]
     },
     "RequiredCardinality": {
@@ -502,6 +580,20 @@
           "description": "Constraint severity (form 4 of the constraint vocabulary):\n`warn` (the historical default — health finding +\n`MISSING_REQUIRED_OUTGOING` write-time warning) or `block`\n(write-time refusal when a create/update would land, or a\nrelate-remove would leave, the entity below cardinality).",
           "$ref": "#/$defs/ConstraintSeverity",
           "default": "warn"
+        },
+        "when_field": {
+          "description": "Optional condition: the block applies only when this metadata\nfield of the entity holds `when_value`. The same two keys\n`requires_when` uses — one vocabulary for one idea. The loader\nrequires the pair to appear together, `when_field` to name a\ndeclared metadata field of this type carrying `enum_values`,\nand `when_value` to be a member. Absent pair = unconditional\nblock = long-standing behaviour.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when_value": {
+          "description": "The triggering value (see `when_field`).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,
@@ -556,6 +648,13 @@
         "key": {
           "type": "string"
         },
+        "load_bearing": {
+          "description": "Whether this section is **load-bearing** for the entity's claim:\nthe part of the entity a dependent conclusion rests on, as\nopposed to notes, context, or bookkeeping. Consumed by the\n`entity-load-bearing` preparation (`memstead-base::preparation`):\nan entity-grain anchor's prepared form is the stable\nserialization of the type's load-bearing sections, so a notes-only\nedit never breaks a dependent's prepared hash while a load-bearing\nedit always does. **Absence means undeclared**: when NO section of\na type declares this flag, the type's required sections are its\nload-bearing set (and a type with no required sections falls back\nto every section). Declaring `load_bearing: false` on a required\nsection is legal and excludes it once any section of the type\ndeclares the flag.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "required": {
           "description": "Whether an entity must carry this section — **absence means\noptional**, the same rule metadata fields follow. `required:\ntrue` refuses a create without the section\n(`MISSING_REQUIRED_SECTION`).",
           "type": "boolean",
@@ -597,6 +696,93 @@
         "default",
         "csv_array",
         "omit_when_falsy"
+      ]
+    },
+    "SignalDef": {
+      "description": "One declared aggregate signal on a type definition. This wave\nships one kind, `edge_load`: count the edges of a named rel-type\nset, in a named direction, on entities of this type, optionally\nrestricted to edges whose counterpart entity holds a named enum\nvalue. Thresholds map counts to levels; below the first threshold\nthe served level is `none`. Values are computed at read time in\nO(degree), never stored, never part of `_hash`; a signal may not\nreference another signal, and nothing multiplies, averages, or\ndecays — a count and a threshold are the whole vocabulary.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "`in` counts edges pointing at the entity, `out` edges pointing\naway — the same vocabulary the store and search speak.",
+          "$ref": "#/$defs/ReachDirection"
+        },
+        "kind": {
+          "description": "Closed kind enum — one member in this wave.",
+          "$ref": "#/$defs/SignalKind"
+        },
+        "name": {
+          "description": "Unique per type, `[a-z][a-z0-9_]*` — the stable name prose\nand consumers bind guidance to.",
+          "type": "string"
+        },
+        "neighbour_field": {
+          "description": "Optional counterpart filter, whole or not at all: count only\nedges whose counterpart entity holds `neighbour_value` in\n`neighbour_field`. A counterpart lacking the field or holding\nanother value simply does not count.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neighbour_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relationships": {
+          "description": "Edge names the count covers (inline relation set; loader\nvalidates each against the vocabulary).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "thresholds": {
+          "description": "Non-empty, strictly increasing `at_least` values.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SignalThreshold"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "relationships",
+        "direction",
+        "thresholds"
+      ]
+    },
+    "SignalKind": {
+      "description": "Closed signal-kind vocabulary. Adding a member is a\nformat-generation event.",
+      "type": "string",
+      "enum": [
+        "edge_load"
+      ]
+    },
+    "SignalLevel": {
+      "description": "Signal levels — deliberately NOT [`ConstraintSeverity`]: a signal\nlevel is the output of a threshold, not the severity of a\nviolation. `warn` participates in `health --strict` like a\nwarn-tier constraint finding; `notice` never does — that is the\nwhole difference between the two.",
+      "type": "string",
+      "enum": [
+        "notice",
+        "warn"
+      ]
+    },
+    "SignalThreshold": {
+      "description": "One threshold step of a signal declaration.",
+      "type": "object",
+      "properties": {
+        "at_least": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "level": {
+          "$ref": "#/$defs/SignalLevel"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at_least",
+        "level"
       ]
     },
     "TableFormat": {

@@ -116,15 +116,28 @@ impl Engine {
         // unrelated concurrent write leaves this entity's hash intact
         // and the update proceeds. The drift notice rides the outcome.
         let mut drift_warnings = self.reload_if_stale(Some(args.id.mem()));
-        // Declared relations on an ACYCLIC rel-type run the same
-        // whole-subgraph cycle guard relate runs — full load first, or
-        // a cycle through a deferred mem's edge is invisible (see the
-        // relate path's comment for the demonstrated failure).
+        // Declared relations on an ACYCLIC rel-type (or one in an
+        // `acyclic_sets` set, whose guard walks the set's UNION
+        // subgraph) run the same whole-subgraph cycle guard relate
+        // runs — full load first, or a cycle through a deferred mem's
+        // edge is invisible (see the relate path's comment for the
+        // demonstrated failure). Declared signals on the entity's
+        // schema or any relation target's schema need the full load
+        // too: the threshold-crossing diff counts edges that can
+        // originate in any mem.
         if args.declare_relations.iter().any(|r| {
-            self.schemas
-                .get(args.id.mem())
-                .is_some_and(|s| s.relationship_acyclic(&r.rel_type))
-        }) {
+            self.schemas.get(args.id.mem()).is_some_and(|s| {
+                s.relationship_acyclic(&r.rel_type)
+                    || s.acyclic_set_containing(&r.rel_type).is_some()
+            }) || self
+                .schemas
+                .get(r.to.mem())
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        }) || self
+            .schemas
+            .get(args.id.mem())
+            .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+        {
             self.ensure_mems_loaded(None);
         }
         let mut outcome = match self.prepare_update(args)? {
@@ -149,6 +162,38 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<UpdateEntityOutcome, EngineError> {
+        // Aggregate signals: the entities an update can move are the
+        // updated entity itself, the endpoints of every edge it adds
+        // or removes (pre-write counterparts in both directions plus
+        // the post-write markdown's targets), and — through the
+        // neighbour filter — the counterparts of an entity whose
+        // `neighbour_field` value the write changes (covered by the
+        // same pre-write counterpart set). Captured before disk or
+        // store mutate, diffed after the store applies.
+        let signal_snapshot = {
+            let mut candidates: Vec<EntityId> = vec![prepared.id.clone()];
+            candidates.extend(
+                self.store
+                    .outgoing(&prepared.id)
+                    .iter()
+                    .map(|e| e.target.clone()),
+            );
+            candidates.extend(
+                self.store
+                    .incoming(&prepared.id)
+                    .iter()
+                    .map(|e| e.from.clone()),
+            );
+            if let Ok(parsed) = parse_markdown(
+                &prepared.markdown,
+                &prepared.file_path,
+                prepared.type_def.as_ref(),
+                &prepared.mem,
+            ) {
+                candidates.extend(parsed.entity.relationships.iter().map(|r| r.target.clone()));
+            }
+            crate::ops::signals::snapshot_levels(&self.store, &self.schemas, candidates.iter())
+        };
         let backend = self.mounts[prepared.mount_idx].backend.as_ref();
         backend.write_entity(Path::new(&prepared.file_path), prepared.markdown.as_bytes())?;
         // Stage the anchors sidecar into the same commit as the entity
@@ -229,6 +274,13 @@ impl Engine {
         // enforcement point. Only reached on the real-commit path; the
         // no-op and dry-run prepare outcomes never demand a note.
         let mut warnings = prepared.warnings;
+        // Signal crossings — out-of-band beside the success payload,
+        // never error-shaped.
+        warnings.extend(crate::ops::signals::crossing_warnings(
+            &self.store,
+            &self.schemas,
+            &signal_snapshot,
+        ));
         if let Some(w) = self.note_missing_warning("update_entity", note) {
             warnings.push(w);
         }
@@ -1151,15 +1203,24 @@ impl Engine {
             self.reload_if_stale(Some(v));
         }
         // Same acyclic-guard rule as the single-item path: declared
-        // relations on an ACYCLIC rel-type walk the whole rel-type
-        // subgraph, so the walk must see every mem — deferred ones
-        // included (see the batch_relate comment).
+        // relations on an ACYCLIC rel-type (or one in an
+        // `acyclic_sets` set) walk the whole subgraph, so the walk
+        // must see every mem — deferred ones included (see the
+        // batch_relate comment). Declared signals on any involved
+        // schema need the full load too (see the single-item path).
         if updates.iter().any(|(a, _)| {
             a.declare_relations.iter().any(|r| {
-                self.schemas
-                    .get(a.id.mem())
-                    .is_some_and(|s| s.relationship_acyclic(&r.rel_type))
-            })
+                self.schemas.get(a.id.mem()).is_some_and(|s| {
+                    s.relationship_acyclic(&r.rel_type)
+                        || s.acyclic_set_containing(&r.rel_type).is_some()
+                }) || self
+                    .schemas
+                    .get(r.to.mem())
+                    .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
+            }) || self
+                .schemas
+                .get(a.id.mem())
+                .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
         }) {
             self.ensure_mems_loaded(None);
         }

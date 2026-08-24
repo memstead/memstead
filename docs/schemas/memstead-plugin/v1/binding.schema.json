@@ -239,7 +239,7 @@
           "type": "object"
         },
         "preparation": {
-          "description": "Optional deterministic preparation step identifier (e.g. `pdf-to-markdown`). A preparation the engine has no implementation for is refused at validation time.",
+          "description": "Optional preparation identifier: one registered in the engine's preparation registry (today `entity-load-bearing` for graph sources, where an entity anchor's prepared form is the type's load-bearing sections, `dated-entries` for path-shaped sources, where a file of dated entries is delivered as units `<path>#<stamp>` in stamp order, and `code-map` for code sources, where a file anchor hashes the file's interface digest and a tree anchor the code map of the scoped files under it). At most one per source. An identifier the registry does not know is refused at validation time; a registered one over a medium whose anchor namespace admits none of its grains is refused too.",
           "type": "string",
           "minLength": 1
         }

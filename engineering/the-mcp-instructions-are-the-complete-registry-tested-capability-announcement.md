@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-08T09:59:17Z
-last_modified: 2026-08-08T09:59:17Z
+last_modified: 2026-08-23T14:48:16Z
 status: accepted
 decided_on: 2026-08-08
 deciders: operator (agent-trust bundle plan 05)
@@ -19,6 +19,9 @@ The costliest failure class in the two field projects, measured in thrown-away w
 
 ## Consequences
 A returning agent that sees a changed `_engine_version` knows to re-read the roster — that plus the complete roster is the "what changed" answer with no new tool and no capability-changelog surface (deferred; revisit only if capability blindness recurs WITH this landed). MCP `tools/list` stays as the protocol channel but is insufficient alone — it cannot carry the cross-surface note, the version, or workflow grouping, and instruction text is what models attend to at session start. Every new tool now forces an instruction-roster edit at registration time (the bidirectional test is the forcing function). The rmcp `tool_handler` macro only accepts string literals, so both flavours hand-write `get_info` — a future macro upgrade could fold that back.
+
+## Relationships
+- **INFORMED_BY**: [[refusals-pre-announce-across-gates-additive-in-the-later-gates-own-shape-never-merged-envelopes]]
 
 ## Options
 
