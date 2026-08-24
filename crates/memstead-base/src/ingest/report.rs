@@ -1922,7 +1922,7 @@ mod tests {
         assert_eq!(report.anchors.by_class.get("authored"), Some(&1));
         // Two hash-bearing anchors present: the file anchor's recorded hash
         // mismatches the observed prepared form → deterministic drift; the
-        // tree anchor has no prepared form this cycle → recheck (honest
+        // tree anchor has no prepared form without a code map → recheck (honest
         // deferral, never fabricated drift). Observed excludes authored.
         assert_eq!(report.anchors.observed, 2);
         assert_eq!(report.anchors.recheck, 1);

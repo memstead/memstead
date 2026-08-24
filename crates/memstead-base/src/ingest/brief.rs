@@ -789,6 +789,39 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
                 .join(", ")
         ));
     }
+    // A source under a preparation hashes a PREPARED form, which no agent
+    // computes by hand: say so, and say what to do instead.
+    for source in &resolved.sources {
+        let crate::ingest::resolve::ResolvedSource::Primary(src) = source else {
+            continue;
+        };
+        let Some(prep) = src
+            .preparation
+            .as_deref()
+            .and_then(crate::preparation::lookup)
+        else {
+            continue;
+        };
+        let what = match prep.id {
+            crate::preparation::CODE_MAP => {
+                "the file's interface digest (imports, exports, signatures; comments, \
+                 formatting and bodies invisible), and a `tree` anchor the code map of every \
+                 scoped file under it"
+            }
+            crate::preparation::DATED_ENTRIES => {
+                "the unit's own text for a `<path>#<key>` span, the file's bytes otherwise"
+            }
+            crate::preparation::ENTITY_LOAD_BEARING => "the entity's load-bearing sections",
+            _ => prep.description,
+        };
+        block.push_str(&format!(
+            "Anchors on `{}` hash a prepared form (`{}`): {what}. Never compute `hash` \
+             yourself for this source — leave it empty (verify records it on first \
+             observation), or for a `file` or `span` anchor pass the artifact's `content` \
+             and the engine hashes the prepared form (a `tree` anchor takes no content).\n\n",
+            src.name, prep.id
+        ));
+    }
     block
 }
 
@@ -1772,6 +1805,27 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             source: source.to_string(),
             reason,
         }
+    }
+
+    /// The provenance block names a prepared-form source and scopes the
+    /// `content` advice to file and span anchors; a binding without a
+    /// preparation carries no such paragraph.
+    #[test]
+    fn anchor_instruction_names_prepared_form_sources() {
+        let mut resolved = resolved("home", None, vec![primary(MediumType::Codebase, vec![])]);
+        let plain = render_anchor_instruction(&resolved);
+        assert!(!plain.contains("hash a prepared form"));
+        if let Some(ResolvedSource::Primary(src)) = resolved.sources.first_mut() {
+            src.preparation = Some(crate::preparation::CODE_MAP.to_string());
+        }
+        let prepared = render_anchor_instruction(&resolved);
+        assert!(
+            prepared.contains("hash a prepared form (`code-map`)"),
+            "{prepared}"
+        );
+        assert!(prepared.contains("interface digest"));
+        assert!(prepared.contains("for a `file` or `span` anchor pass the artifact's `content`"));
+        assert!(prepared.contains("a `tree` anchor takes no content"));
     }
 
     /// A delivery sequence renders in its total order, numbered by position,

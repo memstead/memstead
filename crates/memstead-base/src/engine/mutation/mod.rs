@@ -128,10 +128,46 @@ impl super::Engine {
         }
         let medium = self.resolve_anchor_medium(mem);
         let medium_ref = medium.as_ref().map(|(t, ns)| (t.as_str(), *ns));
-        let anchors: Vec<crate::anchor::Anchor> = inputs
+        let mut anchors: Vec<crate::anchor::Anchor> = inputs
             .iter()
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
             .collect::<Result<_, _>>()?;
+
+        // Supplied `content` under the source's preparation: the context-free
+        // validator hashed the bytes under the default canonicalization; the
+        // seam knows the anchor's source and re-hashes through the registry's
+        // rule for that source (touchpoint A at write time), so the recorded
+        // hash is the one a later observation computes.
+        if inputs.iter().any(|i| i.content.is_some()) {
+            let joins = self.anchor_source_roots(mem);
+            for (input, anchor) in inputs.iter().zip(anchors.iter_mut()) {
+                let (Some(content), Some(source)) = (&input.content, &anchor.source) else {
+                    continue;
+                };
+                let Some(join) = joins.get(source) else {
+                    continue;
+                };
+                if join.preparation.is_none() {
+                    continue;
+                }
+                match crate::preparation::path_prepared_hash(
+                    join.preparation.as_deref(),
+                    &anchor.artifact,
+                    anchor.grain,
+                    content.as_bytes(),
+                ) {
+                    crate::preparation::PathPrepared::Hash(h) => anchor.hash = Some(h),
+                    crate::preparation::PathPrepared::NoHash => {}
+                    crate::preparation::PathPrepared::UnitAbsent => {
+                        return Err(EngineError::from(
+                            crate::anchor::AnchorValidationError::UnitAbsentFromContent {
+                                artifact: anchor.artifact.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
 
         // Source-vs-binding check: when an anchor names BOTH a producing
         // binding and a source, and that binding hash still resolves in

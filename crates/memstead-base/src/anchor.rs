@@ -482,12 +482,20 @@ pub enum AnchorValidationError {
     ContentAndHash,
     /// `content` was supplied for a grain whose prepared form is never
     /// computed from supplied bytes: `entity` (computed from the live graph)
-    /// or `tree` (no prepared form).
+    /// or `tree` (whose prepared form, under a code map, is enumerated by
+    /// the engine).
     #[error(
         "anchor grain '{grain}' does not accept `content`: its prepared form is not computed \
          from supplied bytes (accepted for span / file / url)"
     )]
     ContentNotAcceptedForGrain { grain: &'static str },
+    /// `content` was supplied for a `<path>#<key>` unit under a delivery
+    /// preparation, but the content yields no unit with that key.
+    #[error(
+        "anchor artifact {artifact:?} names a delivery unit the supplied `content` does not \
+         yield; supply the whole file's content, or address a unit it contains"
+    )]
+    UnitAbsentFromContent { artifact: String },
     /// A `source` was supplied but is empty after trimming — a source
     /// name, when present, must be one of the producing binding's
     /// declared names, and an empty string can never be one.
@@ -591,6 +599,10 @@ impl AnchorValidationError {
                     "accepted_grains".into(),
                     serde_json::json!(["span", "file", "url"]),
                 );
+            }
+            AnchorValidationError::UnitAbsentFromContent { artifact } => {
+                d.insert("field".into(), "content".into());
+                d.insert("got".into(), serde_json::json!(artifact));
             }
             AnchorValidationError::ArtifactUnresolvable {
                 artifact,

@@ -33,7 +33,7 @@ One inline source — the full description of a body of information the pipeline
 | `change_detection` | string | no | `none`, `git`, `mtime`, `auto` | Optional declared change-detection strategy: `none` / `git` / `mtime` / `auto`. Unset means `auto` (the engine probes for a git work tree). A graph-typed source always uses the graph snapshot signal. |
 | `scope` | array | no | — | Allow/deny selection over the source. A source with no allow patterns is unscoped — a typed refusal at run time, not "everything"; a source that truly wants everything writes `**/*`. |
 | `engagement` | object | no | — | Engagement contract — verbs, tools, terminology, discipline. Free-form; the engine does not interpret it. |
-| `preparation` | string | no | — | Optional preparation identifier: one registered in the engine's preparation registry (today `entity-load-bearing` for graph sources, where an entity anchor's prepared form is the type's load-bearing sections, and `dated-entries` for path-shaped sources, where a file of dated entries is delivered as units `<path>#<stamp>` in stamp order). At most one per source. An identifier the registry does not know is refused at validation time; a registered one over a medium whose anchor namespace admits none of its grains is refused too. |
+| `preparation` | string | no | — | Optional preparation identifier: one registered in the engine's preparation registry (today `entity-load-bearing` for graph sources, where an entity anchor's prepared form is the type's load-bearing sections, `dated-entries` for path-shaped sources, where a file of dated entries is delivered as units `<path>#<stamp>` in stamp order, and `code-map` for code sources, where a file anchor hashes the file's interface digest and a tree anchor the code map of the scoped files under it). At most one per source. An identifier the registry does not know is refused at validation time; a registered one over a medium whose anchor namespace admits none of its grains is refused too. |
 
 ### Registered preparations
 
@@ -43,6 +43,7 @@ One inline source — the full description of a body of information the pipeline
 | --- | --- | --- | --- |
 | `entity-load-bearing` | anchor observation (prepared form) | `entity` | an entity's prepared form is the stable serialization of its type's load-bearing sections (explicitly declared, else the required sections, else every section) — notes-only edits keep dependents' anchors resolving |
 | `dated-entries` | ingest delivery (unit sequence) | `span` | a file is a sequence of entries opening with an ISO date or date-time; each entry is one delivery unit `<path>#<stamp>`, and a source's units deliver in stamp order, identical on every pass — a chronological corpus (logs, transcripts, journals, mail threads) is never shuffled |
+| `code-map` | anchor observation (prepared form) | `file`, `span`, `tree` | a scoped code file's prepared form is its interface digest (imports, exports, declarations and their signatures; comments, formatting and bodies invisible), and a tree's is the digest of every scoped file under it — an anchor drifts when an interface changes and stays quiet when only an implementation does |
 
 ## Operations
 

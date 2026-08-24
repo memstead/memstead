@@ -629,8 +629,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             msg,
-            "> **[ingest] Ingest \"ing\" is unsupported: source \"manuals\" declares preparation \"pdf-to-markdown\", which is not in this engine's preparation registry (registered: entity-load-bearing, dated-entries). Skipping.**\n"
+            format!(
+                "> **[ingest] Ingest \"ing\" is unsupported: source \"manuals\" declares preparation \"pdf-to-markdown\", which is not in this engine's preparation registry (registered: {}). Skipping.**\n",
+                crate::preparation::registered_identifiers().join(", ")
+            )
         );
+        assert!(msg.contains("entity-load-bearing, dated-entries, code-map"));
         assert!(!msg.contains("facet"));
     }
 }

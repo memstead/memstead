@@ -2867,6 +2867,318 @@ mod tests {
         );
     }
 
+    /// Touchpoint A's code-map flavour end to end: anchors on a code-map
+    /// source hash interface digests, so a comment, formatting or body edit
+    /// leaves file, span and tree anchors resolving while a signature edit
+    /// drifts them; a file joining the tree drifts the tree anchor alone;
+    /// the sibling source without a preparation keeps whole-file hashing
+    /// and its tree anchor stays unhashed (the stated remainder); and a
+    /// write-time `content` on a code-map source records the digest hash,
+    /// never the raw one.
+    #[test]
+    fn code_map_anchors_drift_on_interface_changes_only() {
+        use crate::anchor::{
+            Anchor, AnchorGrain, AnchorInput, AnchorProvenanceClass, AnchorSidecar, AnchorState,
+        };
+        use crate::binding::{
+            BINDING_VERSION, Binding, BuildMode, BuildOperation, Operations, VerifyOperation,
+        };
+        use crate::entity::EntityId;
+        use crate::ingest::resolve::Source;
+        use crate::pipeline::{IngestTrigger, PatternMode};
+        use crate::preparation::{CODE_MAP, code_map_digest, code_map_tree_digest};
+        use crate::workspace::{
+            Mount, MountCapability, MountLifecycle, MountStorage, Workspace, WorkspaceSettings,
+        };
+        use crate::workspace_store::WorkspaceStoreAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("home");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mem_dir.join("holder.md"),
+            "---\ntype: assertion\n---\n\n# Holder\n\n## Claim\n\nHolds anchors.\n\n\
+             ## Evidence\n\nSee code.\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "home".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        // The corpus: a source tree under code-map, a sibling tree without.
+        let corpus = root.join("corpus");
+        std::fs::create_dir_all(corpus.join("src")).unwrap();
+        std::fs::create_dir_all(corpus.join("plain")).unwrap();
+        const A: &str = "// auth\nimport axios from 'axios'\n\nexport async function login(user, password) {\n  // call\n  return axios.post('/login', { user, password })\n}\n";
+        const B: &str = "// the limit\nexport const LIMIT = 10\n";
+        let write = |rel: &str, text: &str| std::fs::write(corpus.join(rel), text).unwrap();
+        write("src/a.js", A);
+        write("src/b.js", B);
+        write("plain/notes.js", "export const N = 1\n");
+
+        let source = |name: &str, scope: &str, preparation: Option<&str>| Source {
+            name: name.to_string(),
+            medium_type: MediumType::Codebase,
+            pointer: "corpus".to_string(),
+            change_detection: Some("none".to_string()),
+            scope: vec![PatternEntry {
+                path: scope.to_string(),
+                mode: PatternMode::Allow,
+            }],
+            engagement: None,
+            preparation: preparation.map(str::to_string),
+        };
+        let binding = Binding {
+            version: BINDING_VERSION,
+            intent: None,
+            sources: vec![
+                source("code", "corpus/src/**/*.js", Some(CODE_MAP)),
+                source("plain", "corpus/plain/**", None),
+            ],
+            reference_mems: vec![],
+            destination_mem: "home".to_string(),
+            deny_paths: vec![],
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: Operations {
+                build: Some(BuildOperation {
+                    mode: BuildMode::Discovery,
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 5,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: Some(VerifyOperation {
+                    trigger: IngestTrigger::Manual,
+                    batch_size: 5,
+                    adjudication_cap: 0,
+                    full_resync_every: 0,
+                }),
+            },
+        };
+        assert!(crate::binding::validate_binding(&binding).is_ok());
+        crate::pipeline_store::write_binding(root, "home", "code", &binding).unwrap();
+
+        let digest_hash = |rel: &str, text: &str| {
+            crate::anchor::prepared_content_hash(code_map_digest(rel, text).as_bytes())
+        };
+        let tree_hash = |files: &[(&str, &str)]| {
+            let owned: Vec<(String, String)> = files
+                .iter()
+                .map(|(p, t)| (p.to_string(), t.to_string()))
+                .collect();
+            crate::anchor::prepared_content_hash(code_map_tree_digest(&owned).as_bytes())
+        };
+        let anchor = |artifact: &str, grain: AnchorGrain, source: &str, hash: &str| Anchor {
+            artifact: artifact.to_string(),
+            grain,
+            class: AnchorProvenanceClass::Anchored,
+            hash: Some(hash.to_string()),
+            source: Some(source.to_string()),
+            binding: None,
+            at_version: None,
+            derived_from: Vec::new(),
+            hash_stability: crate::anchor::AnchorHashStability::Stable,
+        };
+        let plain_raw = crate::anchor::prepared_content_hash(b"export const N = 1\n");
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "home--holder",
+            vec![
+                anchor(
+                    "corpus/src/a.js",
+                    AnchorGrain::File,
+                    "code",
+                    &digest_hash("corpus/src/a.js", A),
+                ),
+                anchor(
+                    "corpus/src/a.js#L4-L7",
+                    AnchorGrain::Span,
+                    "code",
+                    &digest_hash("corpus/src/a.js", A),
+                ),
+                anchor(
+                    "corpus/src",
+                    AnchorGrain::Tree,
+                    "code",
+                    &tree_hash(&[("corpus/src/a.js", A), ("corpus/src/b.js", B)]),
+                ),
+                anchor(
+                    "corpus/plain/notes.js",
+                    AnchorGrain::File,
+                    "plain",
+                    &plain_raw,
+                ),
+                anchor(
+                    "corpus/plain",
+                    AnchorGrain::Tree,
+                    "plain",
+                    "0000000000000000",
+                ),
+            ],
+        );
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        let states = |root: &std::path::Path| {
+            let engine = crate::Engine::from_workspace_root(root).unwrap();
+            let resolved = engine.entity_anchors_resolved(&EntityId::canonical("home--holder"));
+            let of = |artifact: &str| {
+                let r = resolved
+                    .iter()
+                    .find(|r| r.anchor.artifact == artifact)
+                    .unwrap_or_else(|| panic!("no anchor {artifact}"));
+                (r.state, r.observed_hash.clone())
+            };
+            (
+                of("corpus/src/a.js").0,
+                of("corpus/src/a.js#L4-L7").0,
+                of("corpus/src").0,
+                of("corpus/plain/notes.js").0,
+                of("corpus/plain"),
+                engine.verify_mem_anchors("home").unwrap(),
+            )
+        };
+
+        // Unchanged: everything under the code map resolves; the plain tree
+        // is hash-bearing but unobservable (no hash on the engine's side), so
+        // it is `recheck`, never a fabricated drift — the stated remainder.
+        let (file, span, tree, plain_file, plain_tree, report) = states(root);
+        assert_eq!(
+            (file, span, tree, plain_file),
+            (
+                Some(AnchorState::Resolves),
+                Some(AnchorState::Resolves),
+                Some(AnchorState::Resolves),
+                Some(AnchorState::Resolves)
+            )
+        );
+        assert_eq!(plain_tree, (Some(AnchorState::Recheck), None));
+        assert_eq!((report.resolved, report.drifted, report.recheck), (4, 0, 1));
+
+        // Comment, formatting and body edits: invisible.
+        write(
+            "src/a.js",
+            "// auth (rewritten comment)\nimport axios from 'axios'\n\nexport async function login(user, password) {\n    return await axios.post('/session',   { user, password })\n}\n",
+        );
+        let (file, span, tree, _, _, report) = states(root);
+        assert_eq!(
+            (file, span, tree),
+            (
+                Some(AnchorState::Resolves),
+                Some(AnchorState::Resolves),
+                Some(AnchorState::Resolves)
+            ),
+            "a body edit must not drift a code-map anchor"
+        );
+        assert_eq!(report.drifted, 0);
+
+        // A signature edit: file, span and tree drift.
+        write(
+            "src/a.js",
+            "// auth\nimport axios from 'axios'\n\nexport async function login(user, password, remember) {\n  return axios.post('/login', { user, password, remember })\n}\n",
+        );
+        let (file, span, tree, plain_file, _, report) = states(root);
+        assert_eq!(
+            (file, span, tree),
+            (
+                Some(AnchorState::Drifted),
+                Some(AnchorState::Drifted),
+                Some(AnchorState::Drifted)
+            )
+        );
+        assert_eq!(plain_file, Some(AnchorState::Resolves));
+        assert_eq!(report.drifted, 3);
+
+        // Restore, then a new file joins the tree: the tree drifts alone.
+        write("src/a.js", A);
+        write("src/c.js", "export const C = 1\n");
+        let (file, span, tree, _, _, _) = states(root);
+        assert_eq!(
+            (file, span),
+            (Some(AnchorState::Resolves), Some(AnchorState::Resolves))
+        );
+        assert_eq!(
+            tree,
+            Some(AnchorState::Drifted),
+            "a file joining the tree changes its code map"
+        );
+
+        // The plain source is untouched by the code map: a body edit in its
+        // file drifts the whole-file hash exactly as before.
+        write("plain/notes.js", "export const N = 1 // note\n");
+        let (_, _, _, plain_file, _, _) = states(root);
+        assert_eq!(plain_file, Some(AnchorState::Drifted));
+
+        // Write time: `content` on a code-map source records the digest hash.
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let input = AnchorInput {
+            artifact: Some("corpus/src/b.js".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            source: Some("code".to_string()),
+            content: Some(B.to_string()),
+            ..Default::default()
+        };
+        let validated = engine.validate_anchor_inputs("home", &[input]).unwrap();
+        assert_eq!(
+            validated[0].hash.as_deref(),
+            Some(digest_hash("corpus/src/b.js", B).as_str())
+        );
+        assert_ne!(
+            validated[0].hash.as_deref(),
+            Some(crate::anchor::prepared_content_hash(B.as_bytes()).as_str())
+        );
+        let plain_input = AnchorInput {
+            artifact: Some("corpus/plain/notes.js".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            source: Some("plain".to_string()),
+            content: Some("export const N = 1\n".to_string()),
+            ..Default::default()
+        };
+        let validated = engine
+            .validate_anchor_inputs("home", &[plain_input])
+            .unwrap();
+        assert_eq!(
+            validated[0].hash.as_deref(),
+            Some(plain_raw.as_str()),
+            "no preparation: the raw canonicalization, as before"
+        );
+    }
+
     /// Criterion 6's regression pin: the graph change-detection half is
     /// untouched except for the deliberate unscoped gate. A SCOPED graph
     /// facet still routes to the graph strategy and reports the same

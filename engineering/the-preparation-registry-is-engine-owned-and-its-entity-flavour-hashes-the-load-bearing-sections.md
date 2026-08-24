@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T22:05:01Z
-last_modified: 2026-08-23T23:01:44Z
+last_modified: 2026-08-24T01:07:54Z
 status: accepted
 decided_on: 2026-08-24
 deciders: implementing agent, executing the operator-authored preparation plan bundle
@@ -30,6 +30,7 @@ The graded design `engineering--one-preparation-slot-three-flavours-two-engine-t
 - **REFERENCES**: [[engine:anchor-primitive]]
 - **REFERENCES**: [[engine:pipeline]]
 - **REFERENCES**: [[delivery-preparation-delivers-dated-entries-as-units-in-one-stamp-ordered-sequence]]
+- **REFERENCES**: [[code-map-preparation-hashes-a-heuristic-interface-digest-and-closes-the-tree-grain-for-code-sources]]
 
 ## Options
 
@@ -45,3 +46,6 @@ Landed in `memstead-base::preparation` with tests pinning: registry membership, 
 
 
 2026-08-24, later the same day: touchpoint B's first entry landed; "reserved, no entry yet" above describes the state at this decision, not the current one. See [[engineering--delivery-preparation-delivers-dated-entries-as-units-in-one-stamp-ordered-sequence]]; `PREPARATION_IMPL_VERSION` is 2 since.
+
+
+2026-08-24, later still: the code-map flavour landed as touchpoint A's second entry, see [[engineering--code-map-preparation-hashes-a-heuristic-interface-digest-and-closes-the-tree-grain-for-code-sources]]; `PREPARATION_IMPL_VERSION` is 3 since.

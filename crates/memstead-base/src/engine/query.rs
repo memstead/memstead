@@ -467,13 +467,7 @@ impl Engine {
             return self.observe_entity_anchor(anchor, join.and_then(|j| j.preparation.as_deref()));
         }
         let root = self.workspace_root.as_deref()?;
-        let source_pointer = join.map(|j| j.pointer.as_str());
-        observe_path_anchor(
-            root,
-            anchor,
-            source_pointer,
-            join.and_then(|j| j.preparation.as_deref()),
-        )
+        observe_path_anchor(root, anchor, join)
     }
 
     /// Observe an `entity`-grain anchor against the live graph — the entity-
@@ -576,6 +570,8 @@ impl Engine {
                     .or_insert_with(|| AnchorSourceJoin {
                         pointer: source.pointer.clone(),
                         preparation: source.preparation.clone(),
+                        source: source.clone(),
+                        deny_paths: record.config.deny_paths.clone(),
                     });
             }
         }
@@ -2483,6 +2479,11 @@ pub(crate) struct AnchorSourceJoin {
     pub(crate) pointer: String,
     /// The source's declared `preparation`, if any.
     pub(crate) preparation: Option<String>,
+    /// The declaring source itself — its scope is what a `tree` anchor's
+    /// prepared form enumerates under a code-map preparation.
+    pub(crate) source: crate::pipeline::Source,
+    /// The binding's `deny_paths`, applied on top of the source scope.
+    pub(crate) deny_paths: Vec<String>,
 }
 
 /// Observe a single path-namespace anchor against `root` (its medium's
@@ -2494,27 +2495,31 @@ pub(crate) struct AnchorSourceJoin {
 ///
 /// The computed hash is what lets [`crate::anchor::resolve_anchor`]
 /// adjudicate `drifted` vs `resolves` deterministically against the recorded
-/// hash. A `span` anchor hashes its whole containing file (the span locator
-/// selects within it; the file is the hashed unit) — except under a
-/// **delivery preparation** on the anchor's source (touchpoint B of
-/// [`crate::preparation`]), where a `<path>#<key>` span names one delivery
-/// unit: the unit's own text is the hashed unit, and a key the file no
-/// longer yields is an absent artifact (the anchor orphans). A `tree` grain
-/// has no prepared form this cycle and observes no hash; a read failure
-/// likewise observes no hash — those resolve `recheck`, never a fabricated
-/// `drifted`. Non-hash classes (`authored` / `informed-by`) skip the read
-/// entirely, so an anchor-less or hash-free mem pays no observation cost.
+/// hash. The prepared form is the registry's rule for the anchor's
+/// source's preparation ([`crate::preparation::path_prepared_hash`]): a
+/// `span` anchor hashes its whole containing file (the span locator selects
+/// within it; the file is the hashed unit), except under a **delivery
+/// preparation**, where a `<path>#<key>` span names one delivery unit (the
+/// unit's own text is the hashed unit, and a key the file no longer yields
+/// is an absent artifact); under a **code-map** preparation a file or span
+/// hashes the interface digest, and a `tree` hashes the code map of every
+/// scoped file under it. A `tree` grain under no code map has no prepared
+/// form and observes no hash; a read failure likewise observes no hash —
+/// those resolve `recheck`, never a fabricated `drifted`. Non-hash classes
+/// (`authored` / `informed-by`) skip the read entirely, so an anchor-less or
+/// hash-free mem pays no observation cost.
 fn observe_path_anchor(
     root: &Path,
     anchor: &crate::anchor::Anchor,
-    source_pointer: Option<&str>,
-    preparation: Option<&str>,
+    join: Option<&AnchorSourceJoin>,
 ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
     use crate::anchor::AnchorGrain;
     match anchor.grain {
         AnchorGrain::Span | AnchorGrain::File | AnchorGrain::Tree => {}
         AnchorGrain::Url | AnchorGrain::Entity => return None,
     }
+    let source_pointer = join.map(|j| j.pointer.as_str());
+    let preparation = join.and_then(|j| j.preparation.as_deref());
     let base = anchor_base_path(&anchor.artifact);
     // Decision 29: the source-join is authoritative — an artifact path is
     // source-relative first (joined onto the declaring source's pointer,
@@ -2532,37 +2537,52 @@ fn observe_path_anchor(
             None,
         ));
     }
-    let current_hash = if anchor.class.is_hash_bearing()
-        && matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span)
-        && path.is_file()
-    {
-        let bytes = std::fs::read(&path).ok();
-        let unit_key = anchor.artifact.split_once('#').map(|(_, key)| key);
-        match (
-            bytes,
-            unit_key,
-            crate::preparation::delivery_preparation(preparation),
-        ) {
-            (Some(bytes), Some(key), Some(prep)) if anchor.grain == AnchorGrain::Span => {
-                let text = String::from_utf8_lossy(&bytes);
-                match crate::preparation::unitize(prep.id, &text)
-                    .and_then(|units| units.into_iter().find(|u| u.key == key))
-                {
-                    Some(unit) => Some(unit.hash),
-                    None => {
-                        return Some((
-                            crate::anchor::resolve_anchor(
-                                anchor,
-                                &crate::anchor::ArtifactObservation::Absent,
-                            ),
-                            None,
-                        ));
-                    }
-                }
+    let current_hash = if !anchor.class.is_hash_bearing() {
+        None
+    } else if matches!(anchor.grain, AnchorGrain::File | AnchorGrain::Span) && path.is_file() {
+        match std::fs::read(&path).ok().map(|bytes| {
+            crate::preparation::path_prepared_hash(
+                preparation,
+                &anchor.artifact,
+                anchor.grain,
+                &bytes,
+            )
+        }) {
+            Some(crate::preparation::PathPrepared::Hash(h)) => Some(h),
+            Some(crate::preparation::PathPrepared::UnitAbsent) => {
+                return Some((
+                    crate::anchor::resolve_anchor(
+                        anchor,
+                        &crate::anchor::ArtifactObservation::Absent,
+                    ),
+                    None,
+                ));
             }
-            (Some(bytes), _, _) => Some(crate::anchor::prepared_content_hash(&bytes)),
-            (None, _, _) => None,
+            Some(crate::preparation::PathPrepared::NoHash) | None => None,
         }
+    } else if anchor.grain == AnchorGrain::Tree
+        && path.is_dir()
+        && preparation == Some(crate::preparation::CODE_MAP)
+        && let Some(join) = join
+    {
+        // The tree's code map: every scoped file under the tree, by the
+        // declaring source's own scope and the binding's deny paths. The
+        // path the anchor names is workspace-relative or source-relative;
+        // the enumeration is workspace-relative, so compare the resolved
+        // absolute paths.
+        let files: Vec<(String, String)> =
+            crate::ingest::cursor::enumerate_facet_files(&join.source, &join.deny_paths, root)
+                .into_iter()
+                .filter(|f| root.join(f).starts_with(&path))
+                .filter_map(|f| {
+                    std::fs::read(root.join(&f))
+                        .ok()
+                        .map(|bytes| (f, String::from_utf8_lossy(&bytes).into_owned()))
+                })
+                .collect();
+        Some(crate::anchor::prepared_content_hash(
+            crate::preparation::code_map_tree_digest(&files).as_bytes(),
+        ))
     } else {
         None
     };

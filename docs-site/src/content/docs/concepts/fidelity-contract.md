@@ -108,14 +108,18 @@ guide](../../guides/verify-in-ci/)), these are the edges of what the gate can se
   refuses outright; and a record that carries one anyway is refused at validation.
   Asking a web binding to sync therefore names the capability gap itself, never a
   remedy no medium can honour.
-- **Preparation is a registry, and it ships two flavours.** A source's
+- **Preparation is a registry, and it ships three flavours.** A source's
   `preparation` names a preparation the engine registers: `entity-load-bearing`
   for graph sources (an entity anchor hashes its type's load-bearing sections,
-  so a notes-only edit does not drift a dependent) and `dated-entries` for
+  so a notes-only edit does not drift a dependent), `dated-entries` for
   path-shaped sources (a file of dated entries is delivered as units
   `<path>#<stamp>` in stamp order, identical on every pass, and a unit anchor
-  drifts only when its own entry changes). Codebase-to-code-map is designed,
-  not shipped.
+  drifts only when its own entry changes), and `code-map` for code sources (a
+  file anchor hashes the file's interface digest and a tree anchor the code map
+  of the scoped files under it, so an implementation edit does not drift an
+  anchor and a signature change does, within the digest's recorded limits; the
+  digest is heuristic, by language family). A tree anchor on a source without a code map is recorded
+  but never hashed: it resolves `recheck`, not drift.
   Non-text media conversion (PDF, DOCX, audio) is a non-goal: an agent with a
   capable read tool extracts, and the prepared-content hash already falls back
   to a raw-byte digest for a binary artifact, so drift over a PDF is detected

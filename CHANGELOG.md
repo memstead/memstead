@@ -8,6 +8,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Code-map preparation: anchors on code drift on interface changes
+  only.** The registry's third flavour, `code-map`, on path-shaped
+  sources: a scoped file's prepared form is its interface digest
+  (imports, exports, declarations with their signatures; comments,
+  formatting and bodies invisible), heuristic and language-family aware
+  by extension (JS/TS and the C-like families, Python, a Vue or Svelte
+  component's script block, canonical JSON; everything else whole). A `tree` anchor
+  under it hashes the code map of every scoped file under the tree (file
+  hash and path, path order), which closes the tree grain's
+  recorded-but-unhashed residue for code sources; a tree anchor on a
+  source without a code map stays unhashed and resolves `recheck`, the
+  stated remainder. Write-time `content` on a prepared source is hashed
+  through the source's preparation, so the recorded hash is the one
+  observation computes, and the build brief tells the agent when a
+  source's anchors hash a prepared form. Measured on a 214-file
+  JS/Vue/Python corpus: the digest is 4.6% of the raw bytes, and over 300
+  commits 252 of 424 scoped file changes (59.4%) were body-only, so a
+  code-map anchor stays quiet for them. `PREPARATION_IMPL_VERSION` is 3.
 - **Delivery preparation: one file, many units, one order.** The
   preparation registry's second touchpoint is live: a source declaring a
   delivery preparation is delivered as units, addressed `<path>#<key>`,
