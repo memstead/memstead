@@ -122,6 +122,21 @@ pub struct InstallArgs {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    // Publish the authoring meta-schemas into `.memstead/meta-schemas/` so an
+    // editor validates authored schema YAML against them (resolved by each
+    // package's `# yaml-language-server:` directive). This is the only place
+    // that writes them: they used to be published at engine boot, which made
+    // every read of a mem modify the directory it read. Only the three
+    // schema-authoring subcommands publish; rendering a built-in
+    // (`memstead schema <ref>`) is a read and stays one. Best-effort — a
+    // read-only workspace, or none at all, still runs the command.
+    if matches!(
+        args.command,
+        Some(SchemaCommand::New(_) | SchemaCommand::Validate(_) | SchemaCommand::Install(_))
+    ) && let Some((_, root)) = ctx.workspace_shape()
+    {
+        let _ = memstead_schema::meta_schema::publish_meta_schemas(&root);
+    }
     match (args.command, args.reference) {
         (Some(SchemaCommand::New(a)), _) => scaffold_new(ctx, a),
         (Some(SchemaCommand::Validate(a)), _) => validate(ctx, a),
@@ -1124,7 +1139,8 @@ fn write_package(
 /// package member, or `None` for non-YAML members (README,
 /// mem-template.json). Paths are relative to the member's location
 /// under `.memstead/schemas/<name>@<version>/` and resolve to the
-/// workspace's `.memstead/meta-schemas/` published by engine boot.
+/// workspace's `.memstead/meta-schemas/`, published by the schema
+/// subcommands (see the note in `run`), never by engine boot.
 fn directive_for(archive_path: &str) -> Option<&'static str> {
     if archive_path == "schema.yaml" {
         Some("# yaml-language-server: $schema=../../meta-schemas/schema-manifest.schema.json")

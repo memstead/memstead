@@ -330,9 +330,10 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
             from_host_mems: migration.from_host_mems,
         });
     }
-    // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
-    // (best-effort) so editors validate authored schema YAML.
-    let _ = memstead_schema::meta_schema::publish_meta_schemas(workspace_root);
+    // The authoring meta-schemas are NOT published here — see the note in
+    // `memstead_base::engine::boot`. Publishing them at load made every read
+    // of a mem write to the directory it read; it now happens in the
+    // schema-authoring commands instead.
     Ok(engine)
 }
 

@@ -595,11 +595,16 @@ impl Engine {
         engine.set_pipeline_configs(crate::pipeline_store::load_pipeline_configs(
             workspace_root,
         )?);
-        // Publish the authoring meta-schemas into `.memstead/meta-schemas/`
-        // so an editor validates authored schema YAML against them
-        // (resolved by each package's `# yaml-language-server:` directive).
-        // Best-effort — a read-only workspace still boots.
-        let _ = memstead_schema::meta_schema::publish_meta_schemas(workspace_root);
+        // The authoring meta-schemas are NOT published here. They are an
+        // editor convenience for hand-authored schema YAML, and publishing
+        // them at boot made every read of a mem write to the directory it
+        // read: pointing the binary at a workspace stamped a newer binary's
+        // meta-schemas over the ones on disk. That broke read-only mounts,
+        // installed third-party mems, and sealed corpora, which cannot be
+        // verified without being modified. Publishing now happens in the
+        // schema-authoring commands (`memstead schema new` / `validate` /
+        // `install`), the only paths that produce YAML an editor validates.
+        // Boot is a read; a read does not write.
         Ok(engine)
     }
 }
@@ -3198,6 +3203,73 @@ pattern = "exec-*"
             engine.status().entity_count >= 1,
             "the standalone mem's entity must load"
         );
+    }
+
+    #[test]
+    fn booting_a_workspace_writes_nothing_into_it() {
+        // A read is a read. Booting an engine over a workspace must not
+        // touch a single byte of it: not the config, not the mount state,
+        // and not the authoring meta-schemas, which used to be republished
+        // on every boot and so stamped a newer binary's copy over whatever
+        // was on disk. That made a read-only mount, an installed
+        // third-party mem, and a sealed corpus impossible to read without
+        // modifying. The meta-schemas now publish from the schema-authoring
+        // commands instead. This test fails if any boot-time write returns.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead").join("meta-schemas")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("config.json"),
+            r#"{"schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        // A deliberately stale meta-schema: byte-different from the embedded
+        // one, so a returning republish overwrites it and the test sees it.
+        let stale = root
+            .join(".memstead")
+            .join("meta-schemas")
+            .join("type-definition.schema.json");
+        std::fs::write(&stale, "{\"title\":\"stale, from an older binary\"}").unwrap();
+        std::fs::write(
+            root.join("hello.md"),
+            "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nStandalone body.\n",
+        )
+        .unwrap();
+
+        fn snapshot(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+            let mut out = std::collections::BTreeMap::new();
+            let mut stack = vec![dir.to_path_buf()];
+            while let Some(d) = stack.pop() {
+                for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if let Ok(bytes) = std::fs::read(&p) {
+                        out.insert(p, bytes);
+                    }
+                }
+            }
+            out
+        }
+
+        let before = snapshot(root);
+        let engine = Engine::from_workspace_root(root).expect("the fixture must boot");
+        assert_eq!(engine.status().mem_count, 1, "fixture sanity: one mount");
+        let after = snapshot(root);
+
+        assert_eq!(
+            before.keys().collect::<Vec<_>>(),
+            after.keys().collect::<Vec<_>>(),
+            "boot created or removed a file in the workspace it read"
+        );
+        for (path, bytes) in &before {
+            assert_eq!(
+                bytes,
+                after.get(path).unwrap(),
+                "boot rewrote {} in the workspace it read",
+                path.display()
+            );
+        }
     }
 
     #[test]

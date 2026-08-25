@@ -2,13 +2,19 @@
 //!
 //! `schema-manifest.schema.json` and `type-definition.schema.json` are
 //! generated from the Rust schema structs and committed under
-//! `generated/`. They are baked into the binary here so the engine can
-//! *publish* them into a workspace's `.memstead/meta-schemas/` at boot —
-//! a well-known location an authored package's
+//! `generated/`. They are baked into the binary here so the CLI's
+//! schema-authoring subcommands can *publish* them into a workspace's
+//! `.memstead/meta-schemas/`: a well-known location an authored package's
 //! `# yaml-language-server: $schema=…` directive resolves against, giving
 //! IDE-side validation as the YAML is edited. `memstead schema install`
 //! rewrites a package's directive to the installed-location form so the
 //! published copy is what the editor checks against.
+//!
+//! **Publishing is never done at engine boot.** It was, and that made every
+//! read of a workspace write into the directory it read, which broke
+//! read-only mounts, installed third-party mems, and sealed corpora. Only
+//! `memstead schema new` / `validate` / `install` publish; every other path
+//! through the engine leaves the directory byte-identical.
 
 use std::path::Path;
 
