@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-24
+
 ### Changed
 - **Every surface that teaches an install now states the restart wall
   (sealed-gate finding F7).** A running agent session does not attach an
@@ -3117,7 +3119,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/memstead/memstead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/memstead/memstead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.10.0
 [0.8.1]: https://github.com/memstead/memstead/compare/v0.8.0...v0.8.1
