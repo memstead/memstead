@@ -66,6 +66,15 @@ The ideas and rationale behind Memstead.
 - **[Reconstruction measurement](proof/reconstruction/README.md)** — the
   observed run behind the "one-thirteenth of the tokens" claim, with the
   rerun recipe.
+- **[Divergence campaign](proof/divergence/README.md)** — the pre-registered
+  ten-round measurement of write-time enforcement against a tolerant markdown
+  substrate, with both bands applied: a measured loss on answer accuracy and a
+  measured win on corpus integrity.
+- **[Substrate eval](proof/substrate/README.md)** — the controlled run that
+  found no answer-time advantage of schema-forced typing over equally-curated
+  free-form notes.
+- **[Drift-closure self-proof](proof/drift/README.md)** — the method and source
+  behind the "79% of 153 findings, ~12-minute median" figure.
 
 ---
 
