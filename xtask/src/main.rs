@@ -101,6 +101,29 @@ struct EvalArgs {
     /// Model id passed to both arms (same model is the point).
     #[arg(long, default_value = "claude-opus-4-8")]
     model: String,
+
+    // --- read-surface headroom mode (the divergence campaign's diagnostic
+    // sibling; see docs/proof/read-surface/prereg.md) ---
+    /// Run the read-surface headroom experiment over the divergence campaign's
+    /// frozen corpora. Takes the campaign's proof directory (the one holding
+    /// `prereg/`, `arm-a/` and `arm-b-mem/`). Reads only: every arm is served
+    /// from a fresh copy and the committed corpora are never a working
+    /// directory.
+    #[arg(long)]
+    headroom: Option<PathBuf>,
+    /// Where to materialise the headroom run's corpus copies and mcp-config.
+    #[arg(long, default_value = "/tmp/headroom-run")]
+    headroom_dir: PathBuf,
+    /// Smoke pass: run only the first N queries of the battery. Omit for the
+    /// full battery. The number actually run is recorded in the result, so a
+    /// partial pass can never be mistaken for the full one.
+    #[arg(long)]
+    headroom_queries: Option<usize>,
+    /// The `claude` executable the reader and judge sessions shell to. Defaults
+    /// to bare `claude` (resolved on `PATH`); pass an absolute path when the
+    /// harness runs somewhere `PATH` does not carry it.
+    #[arg(long, default_value = "claude")]
+    claude_binary: String,
     /// Trials per arm per task — the N behind the variance.
     #[arg(long, default_value_t = 3)]
     trials: usize,
@@ -233,6 +256,11 @@ fn run_eval(args: EvalArgs) -> Result<()> {
             .clone()
             .unwrap_or_else(|| std::env::temp_dir().join("memstead-eval-selftest.json"));
         return eval::selftest::run(&output);
+    }
+    // Read-surface headroom mode: selected by --headroom. Like divergence mode
+    // it consumes a committed package and ignores --subject/--tasks.
+    if args.headroom.is_some() {
+        return run_headroom_eval(&args);
     }
     // Divergence mode: selected by --package. It consumes the pre-registration
     // package as its only configuration and does not use --subject/--tasks.
@@ -499,6 +527,61 @@ fn run_substrate_eval(args: &EvalArgs, subject: &str, tasks: &[eval::TaskSpec]) 
         );
     }
     eprintln!("wrote series to {}", output.display());
+    Ok(())
+}
+
+/// Read-surface headroom entry: load the divergence campaign's committed
+/// package, copy its frozen corpora, and score five access surfaces over the
+/// same battery with the same judge. Reads only; writes nothing but its own
+/// working copies and the result file.
+fn run_headroom_eval(args: &EvalArgs) -> Result<()> {
+    let proof_dir = args.headroom.as_ref().expect("dispatch checked");
+    let prereg = proof_dir.join("prereg");
+    let arm_a = proof_dir.join("arm-a");
+    let arm_b = proof_dir.join("arm-b-mem");
+    for d in [&prereg, &arm_a, &arm_b] {
+        if !d.is_dir() {
+            anyhow::bail!(
+                "--headroom expects the divergence proof directory (prereg/, arm-a/, arm-b-mem/); {} is missing",
+                d.display()
+            );
+        }
+    }
+    let package = eval::divergence::Package::load(&prereg)?;
+    let mut queries = eval::divergence::load_queries(&prereg)?;
+    if let Some(n) = args.headroom_queries {
+        queries.truncate(n);
+        eprintln!(
+            "headroom: smoke pass over {} of the battery's queries",
+            queries.len()
+        );
+    }
+    let mcp_binary = args
+        .mcp_binary
+        .clone()
+        .context("--headroom needs --mcp-binary <path to memstead-mcp> for the engine arm")?;
+    let model = package.single_model()?.to_string();
+
+    std::fs::create_dir_all(&args.headroom_dir)?;
+    let mat = eval::headroom::materialise(&arm_a, &arm_b, &args.headroom_dir, &mcp_binary)?;
+    let judge = eval::divergence::ClaudeDivergenceJudge {
+        executable: args.claude_binary.clone(),
+        sandbox_dir: mat.sandbox.clone(),
+    };
+    let result = eval::headroom::run(
+        &package,
+        &queries,
+        args.trials,
+        &model,
+        &args.claude_binary,
+        &mat,
+        &judge,
+    )?;
+    print!("{}", result.summary());
+    if let Some(out) = args.output.as_ref() {
+        std::fs::write(out, serde_json::to_vec_pretty(&result)?)?;
+        eprintln!("headroom: wrote {}", out.display());
+    }
     Ok(())
 }
 

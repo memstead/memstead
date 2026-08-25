@@ -1049,7 +1049,7 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
 /// where an accumulated corpus / slice digest grew large); stdin has no such limit.
 /// `claude -p` with no positional prompt reads it from stdin (verified 2026-07-15).
 #[allow(dead_code)]
-fn base_session_args(model: &str, budget_usd: Option<f64>) -> Vec<String> {
+pub(super) fn base_session_args(model: &str, budget_usd: Option<f64>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         "--output-format".to_string(),
@@ -1818,11 +1818,25 @@ fn count_on_marker_line(lower: &str, marker: &str) -> Option<usize> {
 /// non-zero but emits a usable stream, and that must count as a real (budgeted)
 /// session whose partial usage enters the ledger — not a spawn failure. A
 /// non-zero exit with nothing parseable is a genuine failure and refuses.
-fn spawn_claude_session(
+pub(super) fn spawn_claude_session(
     executable: &str,
     args: &[String],
     prompt: &str,
     cwd: &Path,
+) -> Result<SessionOutput> {
+    spawn_claude_session_with_env(executable, args, prompt, cwd, &[])
+}
+
+/// [`spawn_claude_session`] plus environment overrides for the child. The
+/// headroom experiment uses it to hand a shell-armed reader a `PATH` from which
+/// the `memstead` binaries are absent, so a "read it with your shell" arm cannot
+/// quietly become an engine arm.
+pub(super) fn spawn_claude_session_with_env(
+    executable: &str,
+    args: &[String],
+    prompt: &str,
+    cwd: &Path,
+    extra_env: &[(String, String)],
 ) -> Result<SessionOutput> {
     use std::io::Write;
     use std::process::Stdio;
@@ -1836,6 +1850,7 @@ fn spawn_claude_session(
         .current_dir(cwd)
         // Give the MCP server room to finish its handshake before the first turn.
         .env("MCP_TIMEOUT", "60000")
+        .envs(extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

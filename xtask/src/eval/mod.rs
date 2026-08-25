@@ -48,6 +48,7 @@ pub mod contamination;
 pub mod coverage;
 pub mod divergence;
 pub mod grade;
+pub mod headroom;
 pub mod judge;
 pub mod replay;
 pub mod selftest;
