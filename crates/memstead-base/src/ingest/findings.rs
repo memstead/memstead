@@ -1377,7 +1377,15 @@ fn run_verify(
     // targets exist, and which of them this pass actually resolved.
     let mut anchors_existing: BTreeSet<String> = BTreeSet::new();
     let mut anchors_observed: BTreeSet<String> = BTreeSet::new();
-    for (eid, resolved_anchor) in engine.mem_anchors_resolved(&resolved.destination_mem) {
+    // Scoped to this binding's population (consistency-sweep 03/01). An
+    // excluded anchor must never raise a finding against a binding that did
+    // not write it or has disclaimed the file; the report names the exclusions.
+    let population = crate::ingest::anchor_population::population_for(
+        engine,
+        resolved,
+        Some(binding_hash_of(binding, resolved).as_str()),
+    );
+    for (eid, resolved_anchor) in population.included {
         let tkey = target_key(&FindingTarget::Anchor {
             entity: eid.as_ref().to_string(),
             artifact: resolved_anchor.anchor.artifact.clone(),

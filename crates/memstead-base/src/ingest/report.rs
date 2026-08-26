@@ -144,6 +144,25 @@ pub struct AnchorComposition {
     /// Non-`authored` anchors that could **not** be observed this pass (state
     /// `None`) — reported honestly, never counted as resolved.
     pub unobserved: usize,
+    /// Distinct artifacts among the counted anchors. One artifact legitimately
+    /// carries several rows at different grains or classes, and a reader reads
+    /// the figures above as being about artifacts, so the two are stated side
+    /// by side rather than the rows being merged.
+    pub distinct_artifacts: usize,
+    /// Anchors another binding wrote, excluded from every figure above. That
+    /// binding reports on them.
+    pub excluded_other_binding: usize,
+    /// Anchors pointing at artifacts this binding's scope does not cover,
+    /// excluded from every figure above.
+    pub excluded_out_of_scope: usize,
+    /// The excluded anchors by artifact, named rather than merely counted: a
+    /// number a reader cannot act on reproduces the original defect one level
+    /// up.
+    pub excluded_artifacts: Vec<String>,
+    /// Counted anchors that carry no producing binding and were kept by the
+    /// pre-provenance fallback. Stated so a reader can tell a population
+    /// established by provenance from one resting on the fallback.
+    pub counted_without_provenance: usize,
 }
 
 /// One facet's capability-matrix row + resolved change signal (B1 capability
@@ -1170,9 +1189,29 @@ pub fn compute_fidelity_report(
         tree_anchors,
     };
 
-    // --- Anchor composition + resolution over the mem's anchors ---
-    let mut anchors = AnchorComposition::default();
-    for (_eid, resolved_anchor) in engine.mem_anchors_resolved(&dest) {
+    // --- Anchor composition + resolution over THIS BINDING'S anchors ---
+    // Scoped rather than mem-wide (consistency-sweep 03/01): the axis answers
+    // for the population this binding is responsible for, and names the rest.
+    let population = crate::ingest::anchor_population::population_for(
+        engine,
+        resolved,
+        Some(key.binding_hash.as_str()),
+    );
+    let mut anchors = AnchorComposition {
+        distinct_artifacts: population.distinct_artifacts(),
+        excluded_other_binding: population
+            .excluded_count(crate::ingest::anchor_population::ExclusionReason::OtherBinding),
+        excluded_out_of_scope: population
+            .excluded_count(crate::ingest::anchor_population::ExclusionReason::OutOfScope),
+        excluded_artifacts: population
+            .excluded
+            .iter()
+            .map(|e| format!("{} ({})", e.artifact, e.reason.as_wire()))
+            .collect(),
+        counted_without_provenance: population.without_provenance,
+        ..Default::default()
+    };
+    for (_eid, resolved_anchor) in population.included {
         let a = &resolved_anchor.anchor;
         *anchors
             .by_class
@@ -1413,6 +1452,7 @@ mod tests {
                 recheck: 1,
                 orphaned: 0,
                 unobserved: 0,
+                ..Default::default()
             },
             findings_by_class: BTreeMap::from([
                 ("uncovered".to_string(), 1),
@@ -2136,6 +2176,7 @@ mod rollup_tests {
                 recheck: 0,
                 orphaned: 0,
                 unobserved: 0,
+                ..Default::default()
             },
             findings_by_class: BTreeMap::new(),
             backlog: 0,

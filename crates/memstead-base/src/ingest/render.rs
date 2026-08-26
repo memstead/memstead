@@ -269,6 +269,13 @@ pub fn render_sync_brief_for(
 /// status rollup ([`super::status::projection_rollup`]) all read it, so onboarding
 /// framing and the no-red-verdict-from-pre-binding-history refusal stay in lockstep
 /// across every surface.
+/// DELIBERATELY MEM-WIDE, unlike the three reporting consumers that
+/// consistency-sweep 03/01 scoped to one binding's population. This predicate
+/// gates whether a verdict may be red at all, so narrowing it would change a
+/// REFUSAL rather than a figure: a mem carrying another binding's anchors would
+/// begin counting as pre-binding for this one, and a red verdict it should
+/// have produced would go quiet. That is the exit-code contract, which 03/01's
+/// scope excludes.
 pub fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool {
     let no_anchors = engine
         .mem_anchors_resolved(&resolved.destination_mem)

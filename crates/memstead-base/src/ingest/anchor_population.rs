@@ -32,14 +32,15 @@
 //! empty reads as success.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use crate::Engine;
 use crate::anchor::AnchorGrain;
 use crate::engine::query::ResolvedAnchor;
 use crate::entity::EntityId;
-use crate::ingest::cursor::enumerate_source_artifacts;
+use crate::ingest::cursor::build_glob_set;
 use crate::ingest::resolve::{ResolvedIngest, ResolvedSource};
+use crate::pipeline::PatternMode;
+use globset::GlobSet;
 
 /// Why an anchor is not in the population. Every exclusion carries one, and
 /// the report names them, because a number a reader cannot act on reproduces
@@ -107,13 +108,16 @@ impl AnchorPopulation {
 /// value the findings store keys on. Pass `None` where the caller genuinely
 /// has no binding identity, which keeps every anchor and excludes only by
 /// scope.
+///
+/// Takes no workspace root: scope is the binding's DECLARED patterns, so the
+/// partition needs no filesystem access and cannot be perturbed by what
+/// happens to exist when it runs.
 pub fn population_for(
     engine: &Engine,
     resolved: &ResolvedIngest,
     binding_hash: Option<&str>,
-    workspace_root: &Path,
 ) -> AnchorPopulation {
-    let in_scope = scope_artifacts(engine, resolved, workspace_root);
+    let scope = scope_matcher(resolved);
     let mut out = AnchorPopulation::default();
 
     for (eid, resolved_anchor) in engine.mem_anchors_resolved(&resolved.destination_mem) {
@@ -139,9 +143,8 @@ pub fn population_for(
         // serves both. An empty enumeration means the binding declares no
         // artifacts this pass; excluding on it would empty the axis for a
         // reason unrelated to the anchor, so it is treated as no opinion.
-        if let Some(known) = &in_scope
-            && !known.contains(anchor.artifact.as_str())
-            && !covers_prefix(known, anchor)
+        if let Some(matcher) = &scope
+            && !in_declared_scope(matcher, anchor)
         {
             out.excluded.push(ExcludedAnchor {
                 entity: eid,
@@ -160,36 +163,102 @@ pub fn population_for(
     out
 }
 
-/// A `tree`-grain anchor names a directory, and the enumeration lists the
-/// files under it. Membership for such an anchor is "the scope contains
-/// something beneath this artifact", not equality.
-fn covers_prefix(known: &BTreeSet<String>, anchor: &crate::anchor::Anchor) -> bool {
-    if anchor.grain != AnchorGrain::Tree {
-        return false;
-    }
-    let prefix = format!("{}/", anchor.artifact.trim_end_matches('/'));
-    known.iter().any(|k| k.starts_with(&prefix))
-}
-
-/// Every artifact this binding's sources currently enumerate, or `None` when
-/// the binding enumerates nothing at all (see the call site for why that is
-/// treated as no opinion rather than as an empty scope).
-fn scope_artifacts(
-    engine: &Engine,
-    resolved: &ResolvedIngest,
-    workspace_root: &Path,
-) -> Option<BTreeSet<String>> {
-    let mut known = BTreeSet::new();
+/// The binding's DECLARED scope as a matcher, or `None` when it declares no
+/// allow patterns at all (an unscoped facet has no opinion).
+///
+/// Declared, not enumerated, and the distinction is the whole point. An
+/// earlier version asked the enumerator which artifacts exist right now, which
+/// silently excluded every anchor whose file had been DELETED. An orphaned
+/// anchor is the single highest-signal finding the axis produces, and that
+/// version made it vanish instead: a test that expected orphan plus drifted
+/// caught it. A deleted file is still in scope; its absence is the finding.
+fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
+    let mut allows: Vec<&str> = Vec::new();
+    let mut denies: Vec<&str> = Vec::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
-            for artifact in
-                enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root)
-            {
-                known.insert(artifact);
+            for rule in &p.scope {
+                match rule.mode {
+                    PatternMode::Allow => allows.push(rule.path.as_str()),
+                    PatternMode::Deny => denies.push(rule.path.as_str()),
+                }
             }
         }
     }
-    if known.is_empty() { None } else { Some(known) }
+    for dp in &resolved.deny_paths {
+        denies.push(dp.as_str());
+    }
+    // No allow patterns at all is an UNSCOPED facet, which has no opinion.
+    // Building an empty allow set instead would exclude every anchor, which is
+    // the "silently drops" half of the posture rather than the "excludes and
+    // names" half.
+    if allows.is_empty() {
+        return None;
+    }
+    let allow_set = build_glob_set(&allows)?;
+    let deny_set = if denies.is_empty() {
+        None
+    } else {
+        build_glob_set(&denies)
+    };
+    Some(ScopeMatcher {
+        allow: allow_set,
+        deny: deny_set,
+        allow_heads: allows.iter().map(|p| literal_head(p)).collect(),
+    })
+}
+
+/// The declared scope, as the two glob sets plus the literal head of each
+/// allow pattern (see [`ScopeMatcher::covers_tree`]).
+struct ScopeMatcher {
+    allow: GlobSet,
+    deny: Option<GlobSet>,
+    allow_heads: Vec<String>,
+}
+
+impl ScopeMatcher {
+    /// A `tree`-grain anchor names a DIRECTORY, which no file glob matches:
+    /// `src/**/*.rs` matches no path ending in `/`. So a directory is in scope
+    /// when the scope could contain something beneath it, decided by comparing
+    /// it with each allow pattern's literal head (`src/**/*.rs` heads at
+    /// `src/`). Synthesising a filename under the directory and matching that
+    /// was the first attempt, and it failed on exactly this pattern, because
+    /// no invented name satisfies an extension filter.
+    fn covers_tree(&self, dir: &str) -> bool {
+        let dir = format!("{}/", dir.trim_end_matches('/'));
+        self.allow_heads
+            .iter()
+            .any(|h| h.starts_with(&dir) || dir.starts_with(h.as_str()))
+    }
+}
+
+/// A glob pattern's leading literal path, up to the first metacharacter.
+fn literal_head(pattern: &str) -> String {
+    let cut = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
+    let head = &pattern[..cut];
+    match head.rfind('/') {
+        Some(i) => head[..=i].to_string(),
+        None => String::new(),
+    }
+}
+
+/// Is this artifact inside the binding's declared scope?
+///
+/// A `tree`-grain anchor names a directory, which no file glob matches, so it
+/// is in scope when the scope could contain something beneath it. An
+/// `entity`-grain anchor is a graph id rather than a path and file globs
+/// cannot judge it, so it is never excluded on path grounds.
+fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> bool {
+    if anchor.grain == AnchorGrain::Entity {
+        return true;
+    }
+    let path = anchor.artifact.trim_end_matches('/');
+    if let Some(deny) = &matcher.deny
+        && deny.is_match(path)
+    {
+        return false;
+    }
+    matcher.allow.is_match(path) || (anchor.grain == AnchorGrain::Tree && matcher.covers_tree(path))
 }
 
 #[cfg(test)]
@@ -227,7 +296,7 @@ mod tests {
     /// One mem, real files so the enumerator has a scope, and a seeded anchor
     /// sidecar. Mirrors the harness `prune.rs` proved.
     fn fixture(
-        tmp: &Path,
+        tmp: &std::path::Path,
         scope: &str,
         files: &[&str],
         anchors: Vec<Anchor>,
@@ -335,8 +404,8 @@ mod tests {
                 anchor("src/b.rs", Some("hash-B"), AnchorGrain::File),
             ],
         );
-        let a = population_for(&engine, &r, Some("hash-A"), tmp.path());
-        let b = population_for(&engine, &r, Some("hash-B"), tmp.path());
+        let a = population_for(&engine, &r, Some("hash-A"));
+        let b = population_for(&engine, &r, Some("hash-B"));
         assert_eq!(a.included.len(), 1);
         assert_eq!(b.included.len(), 1);
         assert_ne!(
@@ -362,7 +431,7 @@ mod tests {
                 anchor("docs/b.md", Some("h"), AnchorGrain::File),
             ],
         );
-        let pop = population_for(&engine, &r, Some("h"), tmp.path());
+        let pop = population_for(&engine, &r, Some("h"));
         assert_eq!(pop.included.len(), 1);
         assert_eq!(pop.included[0].1.anchor.artifact, "src/a.rs");
         assert_eq!(pop.excluded.len(), 1, "named, not dropped");
@@ -380,7 +449,7 @@ mod tests {
             vec![anchor("docs/b.md", Some("h"), AnchorGrain::File)],
         );
         let before = engine.mem_anchors_resolved("engine").len();
-        let _ = population_for(&engine, &r, Some("h"), tmp.path());
+        let _ = population_for(&engine, &r, Some("h"));
         assert_eq!(engine.mem_anchors_resolved("engine").len(), before);
     }
 
@@ -398,7 +467,7 @@ mod tests {
                 anchor("src/a.rs", Some("h"), AnchorGrain::Span),
             ],
         );
-        let pop = population_for(&engine, &r, Some("h"), tmp.path());
+        let pop = population_for(&engine, &r, Some("h"));
         assert_eq!(pop.included.len(), 2, "two rows, not merged");
         assert_eq!(pop.distinct_artifacts(), 1, "one artifact");
     }
@@ -414,24 +483,68 @@ mod tests {
             &["src/a.rs"],
             vec![anchor("src/a.rs", None, AnchorGrain::File)],
         );
-        let pop = population_for(&engine, &r, Some("h"), tmp.path());
+        let pop = population_for(&engine, &r, Some("h"));
         assert_eq!(pop.included.len(), 1);
         assert_eq!(pop.without_provenance, 1);
     }
 
-    /// A binding enumerating nothing has no opinion on scope rather than an
-    /// empty one, so a momentarily-unmatched source cannot empty the axis for
-    /// a reason unrelated to the anchors.
+    /// Scope is the DECLARED patterns, not what happens to exist. An anchor
+    /// whose file was deleted stays in the population, because its absence is
+    /// the orphan finding the axis exists to raise. An earlier version asked
+    /// the enumerator instead and made every orphan vanish.
     #[test]
-    fn an_empty_enumeration_is_no_opinion() {
+    fn a_deleted_artifact_stays_in_scope_so_its_orphaning_is_reported() {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, r) = fixture(
             tmp.path(),
-            "nothing/**/*.rs",
-            &[],
-            vec![anchor("src/a.rs", Some("h"), AnchorGrain::File)],
+            "src/**/*.rs",
+            &["src/present.rs"],
+            vec![
+                anchor("src/present.rs", Some("h"), AnchorGrain::File),
+                anchor("src/gone.rs", Some("h"), AnchorGrain::File),
+            ],
         );
-        let pop = population_for(&engine, &r, Some("h"), tmp.path());
+        let pop = population_for(&engine, &r, Some("h"));
+        assert_eq!(pop.included.len(), 2, "the deleted file is still in scope");
+        assert!(pop.excluded.is_empty());
+    }
+
+    /// A `tree`-grain anchor names a directory, which no file glob matches, so
+    /// it is judged by whether the scope could contain something beneath it.
+    #[test]
+    fn a_tree_anchor_is_in_scope_when_the_scope_reaches_under_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/sub/a.rs"],
+            vec![
+                anchor("src/sub/", Some("h"), AnchorGrain::Tree),
+                anchor("docs/", Some("h"), AnchorGrain::Tree),
+            ],
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert_eq!(pop.included.len(), 1);
+        assert_eq!(pop.included[0].1.anchor.artifact, "src/sub/");
+        assert_eq!(pop.excluded.len(), 1);
+        assert_eq!(pop.excluded[0].artifact, "docs/");
+    }
+
+    /// A source declaring no allow patterns is unscoped and has no opinion,
+    /// rather than an empty scope that would exclude everything.
+    #[test]
+    fn an_unscoped_source_excludes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, mut r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("anywhere/x.md", Some("h"), AnchorGrain::File)],
+        );
+        if let Some(ResolvedSource::Primary(p)) = r.sources.first_mut() {
+            p.scope.clear();
+        }
+        let pop = population_for(&engine, &r, Some("h"));
         assert_eq!(pop.included.len(), 1);
         assert!(pop.excluded.is_empty());
     }

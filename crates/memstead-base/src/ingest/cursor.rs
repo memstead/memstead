@@ -324,7 +324,7 @@ fn in_repo_pathspec(
 
 /// Build a [`GlobSet`] from workspace-relative glob patterns, or `None` if
 /// any pattern is malformed.
-fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
+pub(crate) fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
         builder.add(Glob::new(pattern).ok()?);

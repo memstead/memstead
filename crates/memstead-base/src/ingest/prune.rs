@@ -196,7 +196,10 @@ pub fn prune_proposals(
     };
     let mode = PruneMode::from_guarantee(prune.guarantee);
 
-    // Group the destination mem's resolved anchors by entity.
+    // Group THIS BINDING'S anchors by entity (consistency-sweep 03/01).
+    // Proposing deletion over another binding's anchors, or over artifacts
+    // this binding's scope excludes, would act on a population it does not
+    // answer for, and prune acts rather than merely reports.
     struct Acc {
         classes: Vec<AnchorProvenanceClass>,
         artifacts: Vec<String>,
@@ -206,7 +209,12 @@ pub fn prune_proposals(
         any: bool,
     }
     let mut by_entity: BTreeMap<String, Acc> = BTreeMap::new();
-    for (eid, resolved_anchor) in engine.mem_anchors_resolved(&resolved.destination_mem) {
+    let population = crate::ingest::anchor_population::population_for(
+        engine,
+        resolved,
+        Some(crate::binding::hash_binding(binding).as_str()),
+    );
+    for (eid, resolved_anchor) in population.included {
         let entry = by_entity.entry(eid.as_ref().to_string()).or_insert(Acc {
             classes: Vec::new(),
             artifacts: Vec::new(),
