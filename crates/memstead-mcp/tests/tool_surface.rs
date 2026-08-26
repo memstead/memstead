@@ -1278,6 +1278,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_METADATA_FIELD",
             "INVALID_ENUM_VALUE",
             "INVALID_FIELD_VALUE",
+            "SECTION_CONTENT_INVALID",
             "REQUIRED_FIELD_UNSET",
             "INVALID_REL_TYPE",
             "details.declared",
@@ -1329,6 +1330,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_METADATA_FIELD",
             "INVALID_ENUM_VALUE",
             "INVALID_FIELD_VALUE",
+            "SECTION_CONTENT_INVALID",
             "REQUIRED_FIELD_UNSET",
             "details.declared",
             "details.allowed",
@@ -2133,11 +2135,9 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     // Mem invariants
     "CROSS_MEM_LINK_NOT_ALLOWED",
     "CROSS_MEM_TARGET_NOT_FOUND",
-    "MEM_NOT_WRITABLE",
     "MEM_NAME_COLLISION",
     "MEM_PATH_NOT_ALLOWED",
     "MEM_SCHEMA_NOT_ALLOWED",
-    "MEM_BRANCH_MISSING",
     "MEM_REFERENCED_BY_POLICY",
     // Refuse-on-write-mem-referrers (replaces force flag).
     "HAS_INCOMING_REFS",
@@ -2166,11 +2166,8 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     "PARSE_ERROR",
     "MEM_ERROR",
     "INVALID_INPUT",
-    "VCS_ERROR",
     "INTERNAL_IO_ERROR",
     "CONFIG_ERROR",
-    "EXPORT_ERROR",
-    "WORKSPACE_SCHEMAS_ERROR",
     // MCP filter (workspace-level `[mcp].disabled_tools`)
     "TOOL_DISABLED",
     // memstead_changes_since cursor resolution

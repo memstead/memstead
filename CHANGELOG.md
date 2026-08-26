@@ -28,10 +28,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   agent hitting either had no entry telling it the refusal carries a recovery
   payload. `INVALID_FIELD_VALUE` joins its siblings in the server
   instructions, the `create` and `update` descriptions and both dry-run
-  descriptions; `SECTION_CONTENT_INVALID` joins the instructions' canonical
-  list. The `create` and `update` descriptions sit against a hard 2048-byte
-  cap, so each dropped one repetition of a cross-reference it already makes
-  twice rather than raising the cap.
+  descriptions; `SECTION_CONTENT_INVALID` joins the instructions and the same
+  two descriptions. The `create` and `update` descriptions sit against a hard 2048-byte
+  cap, so each dropped two repetitions of a cross-reference it made three
+  times rather than raising the cap, and each still points at the server
+  instructions once.
+- **The server instructions no longer advertise five error codes nothing can
+  produce.** `MEM_NOT_WRITABLE`, `MEM_BRANCH_MISSING`, `VCS_ERROR`,
+  `EXPORT_ERROR` and `WORKSPACE_SCHEMAS_ERROR` were listed in the instruction
+  string's error-code enumeration with no construction site anywhere in the
+  workspace and no entry in the generated Error Code Index, so an agent was
+  told to expect refusals that cannot arrive. `READ_ONLY_FIELD` and
+  `SECTION_NOT_UPDATABLE` were the mirror defect: both carry a `details`
+  recovery payload and neither was in the recovery-payload list. All of it is
+  now gated mechanically rather than by a hand-maintained list: one check
+  fails when the instructions name a code the workspace cannot construct, one
+  when the recovery-payload list omits a schema-conformance code the engine
+  can return, one when such a code is named nowhere in the MCP prose at all.
+  The hand-maintained list is what missed `INVALID_FIELD_VALUE` in the first
+  place.
 - **Transport and diff act on the branch the mount declares.** `memstead
   push` and `memstead pull` used to reconstruct their refs from the mem's
   name, so a mem whose declared branch sits under a namespace

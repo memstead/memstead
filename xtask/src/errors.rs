@@ -59,7 +59,7 @@ pub fn render(workspace_root: &Path) -> Result<String> {
     Ok(render_index(&codes))
 }
 
-fn scan(workspace_root: &Path) -> Result<BTreeMap<String, Vec<Occurrence>>> {
+pub fn scan(workspace_root: &Path) -> Result<BTreeMap<String, Vec<Occurrence>>> {
     let mut codes: BTreeMap<String, Vec<Occurrence>> = BTreeMap::new();
 
     scan_engine_codes(workspace_root, &mut codes)?;
@@ -279,4 +279,186 @@ fn pathdiff(root: &Path, target: &Path) -> String {
         .strip_prefix(root)
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| target.display().to_string())
+}
+
+#[cfg(test)]
+mod code_vocabulary_tests {
+    //! The MCP prose names error codes. Two things can go wrong with that,
+    //! and both did: a code the engine can produce goes unnamed, so an agent
+    //! hitting it has no entry telling it what the refusal carries; or the
+    //! prose names a code nothing can produce, so an agent is told to expect
+    //! a refusal that will never arrive.
+    //!
+    //! Both are checked here rather than against a hand-maintained list,
+    //! because the hand-maintained list is what failed. `tool_surface.rs`
+    //! holds `STRUCTURED_ERROR_CODES` and asserts every entry appears in the
+    //! prose; that direction cannot notice a code missing from the list
+    //! itself, and on 2026-08-26 it was missing `INVALID_FIELD_VALUE` while
+    //! carrying five codes with no construction site anywhere.
+    //!
+    //! The index these check against is the same scan the published Error
+    //! Code Index is rendered from: every `fn code()` body in
+    //! `memstead-base`, every `tool_error(...)` callsite in `memstead-mcp`,
+    //! and the CLI's own codes.
+
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask sits one level under the workspace root")
+            .to_path_buf()
+    }
+
+    fn index(root: &Path) -> BTreeSet<String> {
+        super::scan(root)
+            .expect("the error-code scan must run")
+            .into_keys()
+            .collect()
+    }
+
+    /// Every file the MCP servers compile their prose in from.
+    fn mcp_prose(root: &Path) -> String {
+        let dir = root.join("crates/memstead-mcp/descriptions");
+        let mut text = String::new();
+        let mut files = 0usize;
+        for surface in ["full", "filesystem"] {
+            let d = dir.join(surface);
+            for entry in
+                std::fs::read_dir(&d).unwrap_or_else(|e| panic!("reading {}: {e}", d.display()))
+            {
+                let path = entry.expect("a readable dir entry").path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                text.push_str(&std::fs::read_to_string(&path).expect("a readable file"));
+                text.push('\n');
+                files += 1;
+            }
+        }
+        assert!(
+            files >= 30,
+            "the description walk found only {files} files — a walk that reaches \
+             (almost) nothing is worse than an absent one"
+        );
+        text
+    }
+
+    /// The codes `ValidationError::code()` can return: the schema-conformance
+    /// vocabulary, derived from the engine rather than restated.
+    fn conformance_codes(root: &Path) -> BTreeSet<String> {
+        let src = root.join("crates/memstead-base/src/runtime_validator.rs");
+        let text = std::fs::read_to_string(&src)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", src.display()));
+        let re =
+            regex::Regex::new(r#"ValidationError::\w+\s*\{[^}]*\}\s*=>\s*"([A-Z][A-Z0-9_]+)""#)
+                .unwrap();
+        let codes: BTreeSet<String> = re.captures_iter(&text).map(|c| c[1].to_string()).collect();
+        assert!(
+            codes.len() >= 5,
+            "found only {} ValidationError codes in {} — the derivation broke, \
+             which is a failure and not a pass",
+            codes.len(),
+            src.display()
+        );
+        codes
+    }
+
+    /// The two code lists the full server's instructions render, parsed from
+    /// their own anchors so neither is restated here.
+    fn instruction_lists(root: &Path) -> (Vec<String>, Vec<String>) {
+        let p = root.join("crates/memstead-mcp/descriptions/full/server-instructions-head.md");
+        let text =
+            std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("reading {}: {e}", p.display()));
+        let split = |s: &str| -> Vec<String> {
+            s.split(',')
+                .map(|c| c.trim().to_string())
+                .filter(|c| !c.is_empty())
+                .collect()
+        };
+        let recovery = regex::Regex::new(r"carry recovery payloads as a fallback \(([^)]*)\)")
+            .unwrap()
+            .captures(&text)
+            .map(|c| split(&c[1]))
+            .expect("the recovery-payload list must still be findable by its anchor");
+        let enumerated = regex::Regex::new(r"Error codes: ([A-Z0-9_, ]+?)\.")
+            .unwrap()
+            .captures(&text)
+            .map(|c| split(&c[1]))
+            .expect("the error-code enumeration must still be findable by its anchor");
+        (recovery, enumerated)
+    }
+
+    #[test]
+    fn the_instructions_name_no_code_the_engine_cannot_produce() {
+        let root = workspace_root();
+        let known = index(&root);
+        let (recovery, enumerated) = instruction_lists(&root);
+        let mut phantom: Vec<String> = Vec::new();
+        for (list, code) in recovery
+            .iter()
+            .map(|c| ("recovery-payload list", c))
+            .chain(enumerated.iter().map(|c| ("error-code enumeration", c)))
+        {
+            if !known.contains(code) {
+                phantom.push(format!("{list}: {code}"));
+            }
+        }
+        assert!(
+            phantom.is_empty(),
+            "the MCP server instructions name {} code(s) with no construction site \
+             anywhere in the workspace, so an agent is told to expect a refusal that \
+             cannot arrive:\n  {}",
+            phantom.len(),
+            phantom.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn the_recovery_payload_list_names_every_schema_conformance_code() {
+        // Scoped to the ONE rendering that claims to be the vocabulary. An
+        // earlier version of this check concatenated every description file
+        // and asked only whether each code appeared somewhere in the blob;
+        // that is satisfied by a code sitting in the `Error codes:`
+        // enumeration while the recovery-payload list beside it stays
+        // incomplete, which is exactly the state it failed to catch.
+        //
+        // The per-tool descriptions are deliberately NOT checked this way.
+        // They sit against a hard byte cap, they name the codes their own
+        // path most often hits, and each points at this list. Widening the
+        // check to them would demand bytes that do not exist.
+        let root = workspace_root();
+        let (recovery, _) = instruction_lists(&root);
+        let missing: Vec<String> = conformance_codes(&root)
+            .into_iter()
+            .filter(|c| !recovery.iter().any(|r| r == c))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the engine can return {} schema-conformance code(s) with a recovery \
+             payload that the MCP server instructions' recovery-payload list does \
+             not name, so an agent hitting one is not told the refusal carries \
+             `details` it can fix from:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn the_mcp_prose_names_every_schema_conformance_code() {
+        let root = workspace_root();
+        let prose = mcp_prose(&root);
+        let missing: Vec<String> = conformance_codes(&root)
+            .into_iter()
+            .filter(|c| !prose.contains(c.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the engine can return {} schema-conformance code(s) that no MCP \
+             description or instruction names anywhere:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
 }
