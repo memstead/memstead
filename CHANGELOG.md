@@ -7,6 +7,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **`release-verify.sh` tells "the channel is wrong" from "I could not
+  look".** On the 0.12.0 release an exhausted anonymous REST quota made the
+  script render two correctly-serving channels as red, because every one of
+  its eight HTTP channel reads classified any failed read as a
+  disagreement. Each read now has a third state: a channel whose read
+  failed reports as UNMEASURED, naming the cause drawn from the response
+  itself (HTTP status, or the rate limit with its reset time), rides the
+  report-only exit code, and the verdict line stops claiming "every channel
+  serves" when channels went unread. The pre-flight probe now fails on the
+  response shapes the channel reads fail on (a rate-limited 403 used to
+  pass it), an unresolvable target is a named skip instead of a red run,
+  and a mistyped flag is fatal instead of sharing the exit code the CI
+  wrapper renders as a green "everything serves" notice. The reads stay
+  anonymous by decision: the script measures what a stranger receives.
+- **The one-line installer no longer depends on GitHub's anonymous REST
+  quota (cold-start finding, major).** `install.sh` resolved "latest" via
+  `api.github.com`, so on an address that had spent the 60-per-hour
+  anonymous budget (an office, a campus, a CI runner) the entry page's
+  first command failed with a bare 403. Resolution now follows the
+  release host's own redirect (`/releases/latest` → `/releases/tag/<tag>`),
+  which is not quota-bound; no code path contacts the REST API and no
+  request is authenticated. A genuinely failed resolution now names the
+  probable cause and the `--version <tag>` / `MEMSTEAD_VERSION` escape and
+  exits non-zero. Riding along: a failed child-installer download is no
+  longer masked by the `curl | sh` pipe (the script downloads first, runs
+  second), and a fixture suite with a faked rate-limited API pins all of
+  it in the ordinary test run.
+
 ## [0.12.0] - 2026-08-24
 
 ### Changed

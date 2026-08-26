@@ -64,11 +64,27 @@ set -- $forward
 # Resolve "latest" to the actual tag once so both child installers
 # pull from the same release. Avoids a race window where a new release
 # lands between the two fetches.
+#
+# Resolution follows the release host's redirect
+# (github.com/<repo>/releases/latest -> .../releases/tag/<tag>), which is
+# not subject to GitHub's anonymous REST quota. The REST API is
+# deliberately contacted nowhere in this script: a shared address (an
+# office, a campus, a CI runner) that has spent the 60-per-hour anonymous
+# budget must still be able to install.
 if [ "$RELEASE" = "latest" ]; then
-    api="https://api.github.com/repos/${REPO}/releases/latest"
-    RELEASE=$(curl -sSf "$api" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-    if [ -z "$RELEASE" ]; then
-        echo "could not resolve latest release from $api" >&2
+    latest_url="https://github.com/${REPO}/releases/latest"
+    if ! final_url=$(curl -sSfLI -o /dev/null -w '%{url_effective}' "$latest_url"); then
+        echo "could not resolve the latest release from $latest_url" >&2
+        echo "likely cause: no network, or the repository has no published release." >&2
+        echo "workaround: pin a release yourself with --version <tag> or MEMSTEAD_VERSION=<tag>;" >&2
+        echo "tags are listed at https://github.com/${REPO}/releases" >&2
+        exit 1
+    fi
+    RELEASE="${final_url##*/tag/}"
+    if [ -z "$RELEASE" ] || [ "$RELEASE" = "$final_url" ]; then
+        echo "could not resolve the latest release from $latest_url (no tag redirect; landed on: $final_url)" >&2
+        echo "workaround: pin a release yourself with --version <tag> or MEMSTEAD_VERSION=<tag>;" >&2
+        echo "tags are listed at https://github.com/${REPO}/releases" >&2
         exit 1
     fi
 fi
@@ -80,13 +96,24 @@ echo "==> memstead unified installer (${RELEASE})"
 for component in memstead-cli memstead-mcp; do
     url="${base}/${component}-installer.sh"
     echo "==> running ${component}-installer.sh"
+    # Download to a file first, then run it: piping curl into sh lets a
+    # failed fetch feed sh an empty script that exits 0, and the wrapper
+    # would then report success over an install that never happened.
+    child=$(mktemp "${TMPDIR:-/tmp}/${component}-installer.XXXXXX")
+    if ! curl -sSfL "$url" -o "$child"; then
+        rm -f "$child"
+        echo "${component} installer download failed from ${url}" >&2
+        exit 1
+    fi
     # Forward all positional args (e.g. `--quiet`, `--target-dir`) to
     # each child installer. The child scripts are cargo-dist-generated
     # and accept the same flag set.
-    if ! curl -sSfL "$url" | sh -s -- "$@"; then
+    if ! sh "$child" "$@"; then
+        rm -f "$child"
         echo "${component} install failed" >&2
         exit 1
     fi
+    rm -f "$child"
 done
 
 echo ""
