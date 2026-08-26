@@ -8,6 +8,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **memstead.ai's playground derives its live session graph from the engine's
+  shared topology.** The server behind the playground carried its own
+  coordinate-free projection, written when reaching the engine's types meant
+  dragging a git library in; `Engine::mem_topology` now lives in the engine
+  core that server already depends on, so the re-derivation is gone and what
+  remains adapts the shared projection to the wire shape the browser already
+  consumes. Nothing in the shipped binary changes. Two behaviours do: an entity
+  the community partition never assigned is no longer presented as a member of
+  the first cluster, and the per-response community index now ranks the
+  clusters present in the projected mem rather than every cluster in the
+  workspace.
+
 - **The frontmatter delimiter contract has one implementation.** The tolerant
   split, the borrowing peek and the strict validator each carried their own
   copy of the same ten lines of offset arithmetic, held in step only by a
