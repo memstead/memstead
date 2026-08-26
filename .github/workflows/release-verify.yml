@@ -14,9 +14,11 @@
 # itself red when a channel disagrees, and the failed-run notification
 # does the rest.
 #
-# Exit codes of the script: 0 green, 1 fatal (the job fails), 2 green with
-# report-only findings (a notice), 3 skipped for lack of network (a
-# warning, never a red run: a skip is not a verdict).
+# Exit codes of the script: 0 green, 1 fatal (the job fails; a
+# disagreement, a skipped publish job, or an invalid invocation), 2 no
+# disagreement but report-only and/or UNMEASURED findings (a notice — an
+# unmeasured channel could not be read and was NOT confirmed), 3 skipped
+# (a warning, never a red run: a skip is not a verdict).
 name: release-verify
 
 on:
@@ -71,7 +73,7 @@ jobs:
           fi
           case "$code" in
             0) ;;
-            2) echo "::notice::release-verify: every channel serves $tag; report-only findings above" ;;
-            3) echo "::warning::release-verify SKIPPED: no network from this runner; nothing verified" ;;
-            *) echo "::error::release-verify: a channel or publish job disagrees with $tag (see above)"; exit 1 ;;
+            2) echo "::notice::release-verify: no channel disagrees with $tag; report-only or unmeasured findings above (an unmeasured channel was not confirmed — read the verdict line)" ;;
+            3) echo "::warning::release-verify SKIPPED: nothing verified (no network, rate-limited API, or unresolvable target — see above)" ;;
+            *) echo "::error::release-verify: a channel or publish job disagrees with $tag, or the invocation was invalid (see above)"; exit 1 ;;
           esac

@@ -45,11 +45,15 @@
 #
 # Exit codes:
 #   0  every channel serves the version and nothing is reported
-#   1  fatal: a channel disagrees or cannot be read, or a publish job skipped
-#      on a non-prerelease
-#   2  green, with report-only findings printed (lines prefixed REPORT:)
-#   3  skipped: no network (also forced by MEMSTEAD_VERIFY_OFFLINE=1), or the
-#      release archive cannot be fetched for --prose
+#   1  fatal: a channel disagrees, a publish job skipped on a non-prerelease,
+#      or the invocation itself is invalid (unknown option)
+#   2  no channel disagrees, with report-only findings printed (REPORT:
+#      lines) and/or channels the script could not read (UNMEASURED lines:
+#      a failed read is not a failing subject — the channel may well serve
+#      the tag; the script could not look)
+#   3  skipped: no network, a rate-limited API root, or the target release
+#      could not be resolved (also forced by MEMSTEAD_VERIFY_OFFLINE=1), or
+#      the release archive cannot be fetched for --prose
 #
 # Report-only lines today: the tree-vs-tag gap (the local workspace version
 # is ahead of the verified tag, i.e. unreleased changes exist); the changelog
@@ -79,8 +83,11 @@ while [ $# -gt 0 ]; do
     --repo) REPO="${2:-}"; shift 2 ;;
     --prose) PROSE=1; shift ;;
     --prose-set) PROSE_SET+=("${2:?--prose-set needs a path}"); shift 2 ;;
-    -h|--help) sed -n '2,62p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    --*) echo "release-verify: unknown option '$1'" >&2; exit 2 ;;
+    -h|--help) sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Exit 1, never 2: the CI wrapper renders 2 as a green notice, so a
+    # mistyped flag used to produce a line claiming a verification that
+    # never ran. An invalid invocation is fatal.
+    --*) echo "release-verify: unknown option '$1'" >&2; exit 1 ;;
     *) WANT="${1#v}"; shift ;;
   esac
 done
@@ -95,6 +102,53 @@ say()    { printf '  %-34s %s\n' "$1" "$2"; }
 fail()   { printf '  %-34s \033[31m%s\033[0m\n' "$1" "$2"; DISAGREE=$((DISAGREE + 1)); }
 ok()     { printf '  %-34s \033[32m%s\033[0m\n' "$1" "$2"; }
 report() { printf '  REPORT: %s\n' "$1"; REPORTS=$((REPORTS + 1)); }
+# The third state: the script could not read the channel. Not a
+# disagreement (the channel may well serve the tag) and not agreement
+# (nothing was observed). Rides the report counter — exit 2, never 1 —
+# and the verdict line names it separately.
+UNMEASURED=0
+unmeasured() { printf '  %-34s \033[33mUNMEASURED: %s\033[0m\n' "$1" "$2"; UNMEASURED=$((UNMEASURED + 1)); REPORTS=$((REPORTS + 1)); }
+
+# fetch <url> [curl args...]: on HTTP 2xx returns 0 with the body in the
+# file $FETCH_BODY (a body file, not stdout: a command substitution would
+# run fetch in a subshell and lose the reason). On anything else returns
+# non-zero with the reason in FETCH_REASON — drawn from the response itself
+# (status code, rate-limit headers, the reset time), never inferred from an
+# empty extraction, so an HTTP error body is told apart from a field that
+# is genuinely absent. Deliberately anonymous: no authorization header,
+# ever — the point of this script is what an unauthenticated stranger
+# receives.
+FETCH_REASON=""
+FETCH_BODY="$(mktemp)"
+FETCH_HDR="$(mktemp)"
+trap 'rm -f "$FETCH_BODY" "$FETCH_HDR"' EXIT
+fetch() {
+  local url="$1"; shift
+  local code reason reset when
+  : > "$FETCH_BODY"; : > "$FETCH_HDR"
+  if ! code=$(curl -sS --max-time 20 -D "$FETCH_HDR" -o "$FETCH_BODY" -w '%{http_code}' "$@" "$url" 2>/dev/null); then
+    FETCH_REASON="network error reading $url"
+    return 1
+  fi
+  if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+    FETCH_REASON=""
+    return 0
+  fi
+  reason="HTTP $code from $url"
+  if [ "$code" = "403" ] || [ "$code" = "429" ]; then
+    if grep -qi 'rate limit' "$FETCH_BODY" 2>/dev/null || grep -qi '^x-ratelimit-remaining: *0' "$FETCH_HDR" 2>/dev/null; then
+      reset=$(sed -n 's/^[Xx]-[Rr]ate[Ll]imit-[Rr]eset: *//p' "$FETCH_HDR" | tr -d '\r' | head -1)
+      if [ -n "$reset" ]; then
+        when=$(date -u -r "$reset" '+%H:%M:%S UTC' 2>/dev/null || date -u -d "@$reset" '+%H:%M:%S UTC' 2>/dev/null || echo "epoch $reset")
+        reason="rate limited (anonymous quota; resets $when)"
+      else
+        reason="rate limited (anonymous quota)"
+      fi
+    fi
+  fi
+  FETCH_REASON="$reason"
+  return 1
+}
 
 # ── is there a network at all ────────────────────────────────────────────────
 # No network is not a red release; it is no verdict. Exit 3 says so, and the
@@ -104,8 +158,14 @@ if [ "${MEMSTEAD_VERIFY_OFFLINE:-0}" = "1" ]; then
   echo "SKIPPED: no network (MEMSTEAD_VERIFY_OFFLINE=1)"
   exit 3
 fi
-if ! curl -sS -o /dev/null --max-time 20 "https://api.github.com" 2>/dev/null; then
-  echo "SKIPPED: no network (api.github.com unreachable)"
+# The probe must fail on every response shape the channel reads themselves
+# would fail on — a rate-limited 403 completes the request, so a bare curl
+# exit test passed the probe and then read eight channels it could not read.
+if ! fetch "https://api.github.com"; then
+  case "$FETCH_REASON" in
+    "rate limited"*) echo "SKIPPED: api.github.com is $FETCH_REASON; the channels cannot be read anonymously right now" ;;
+    *) echo "SKIPPED: no network (api.github.com unreachable)" ;;
+  esac
   exit 3
 fi
 
@@ -194,11 +254,16 @@ fi
 
 # ── what are we verifying against ────────────────────────────────────────────
 if [ -z "$WANT" ]; then
-  WANT=$(curl -sS "https://api.github.com/repos/$REPO/releases/latest" \
-    | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)
+  # A failed read here is no verdict about any channel: without a target
+  # nothing can be verified, so this is a named skip (exit 3), never a red.
+  if ! fetch "https://api.github.com/repos/$REPO/releases/latest"; then
+    echo "SKIPPED: could not resolve the latest release ($FETCH_REASON); nothing verified" >&2
+    exit 3
+  fi
+  WANT=$(sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
   if [ -z "$WANT" ]; then
-    echo "could not read the latest release from GitHub" >&2
-    exit 1
+    echo "SKIPPED: the latest-release response carries no tag_name; nothing verified" >&2
+    exit 3
   fi
   echo "→ verifying the latest published release: $WANT"
 else
@@ -208,33 +273,43 @@ echo ""
 
 # ── 1. the GitHub Release ────────────────────────────────────────────────────
 # The source of truth every other channel is supposed to follow.
-latest=$(curl -sS "https://api.github.com/repos/$REPO/releases/latest" \
-  | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)
-if [ "$latest" = "$WANT" ]; then
-  ok "GitHub Release (Latest)" "$latest"
+if fetch "https://api.github.com/repos/$REPO/releases/latest"; then
+  latest=$(sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
+  if [ "$latest" = "$WANT" ]; then
+    ok "GitHub Release (Latest)" "$latest"
+  else
+    fail "GitHub Release (Latest)" "${latest:-no tag_name in the response} (expected $WANT)"
+  fi
 else
-  fail "GitHub Release (Latest)" "${latest:-unreadable} (expected $WANT)"
+  unmeasured "GitHub Release (Latest)" "$FETCH_REASON"
 fi
 
 # ── 2. install.sh, the primary channel ───────────────────────────────────────
 # install.sh resolves "latest" through the same API, so what matters is that
 # the release carries the installers a user's shell will actually fetch.
-assets=$(curl -sS "https://api.github.com/repos/$REPO/releases/tags/v$WANT" \
-  | grep -o '"name": "[^"]*installer.sh"' | wc -l | tr -d ' ')
-if [ "${assets:-0}" -ge 2 ]; then
-  ok "install.sh installers" "$assets present"
+if fetch "https://api.github.com/repos/$REPO/releases/tags/v$WANT"; then
+  assets=$(grep -o '"name": "[^"]*installer.sh"' "$FETCH_BODY" | wc -l | tr -d ' ')
+  if [ "${assets:-0}" -ge 2 ]; then
+    ok "install.sh installers" "$assets present"
+  else
+    fail "install.sh installers" "${assets:-0} found (expected 2: cli + mcp)"
+  fi
 else
-  fail "install.sh installers" "${assets:-0} found (expected 2: cli + mcp)"
+  unmeasured "install.sh installers" "$FETCH_REASON"
 fi
 
 # ── 3. Homebrew tap ──────────────────────────────────────────────────────────
 # The channel that silently went stale. Read the formulas as brew reads them.
 for f in memstead-cli memstead-mcp; do
-  v=$(curl -sS "$TAP_RAW/$f.rb" | sed -n 's/^ *version "\([^"]*\)".*/\1/p' | head -1)
-  if [ "$v" = "$WANT" ]; then
-    ok "Homebrew $f" "$v"
+  if fetch "$TAP_RAW/$f.rb"; then
+    v=$(sed -n 's/^ *version "\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
+    if [ "$v" = "$WANT" ]; then
+      ok "Homebrew $f" "$v"
+    else
+      fail "Homebrew $f" "${v:-no version in the formula} (expected $WANT)"
+    fi
   else
-    fail "Homebrew $f" "${v:-unreadable} (expected $WANT)"
+    unmeasured "Homebrew $f" "$FETCH_REASON"
   fi
 done
 
@@ -244,12 +319,15 @@ done
 for pair in "plugins/claude-code/.claude-plugin/plugin.json:plugin" \
             ".claude-plugin/marketplace.json:marketplace"; do
   path="${pair%%:*}"; label="${pair##*:}"
-  v=$(curl -sS "https://raw.githubusercontent.com/$REPO/v$WANT/$path" \
-    | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1)
-  if [ "$v" = "$WANT" ]; then
-    ok "Claude Code $label" "$v"
+  if fetch "https://raw.githubusercontent.com/$REPO/v$WANT/$path"; then
+    v=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
+    if [ "$v" = "$WANT" ]; then
+      ok "Claude Code $label" "$v"
+    else
+      fail "Claude Code $label" "${v:-no version in the manifest} (expected $WANT)"
+    fi
   else
-    fail "Claude Code $label" "${v:-unreadable} (expected $WANT)"
+    unmeasured "Claude Code $label" "$FETCH_REASON"
   fi
 done
 
@@ -259,27 +337,33 @@ done
 # being remembered, which is how crates.io sat two minor versions back and npm
 # six. The tag publishes both now, so both are held to the release like every
 # other channel.
-crates=$(curl -sS -H "User-Agent: memstead-release-verify (ci@memstead.com)" \
-  "https://crates.io/api/v1/crates/memstead-cli" \
-  | sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' | head -1)
-npmv=$(curl -sS "https://registry.npmjs.org/@memstead/wasm" \
-  | sed -n 's/.*"latest": *"\([^"]*\)".*/\1/p' | head -1)
-if [ "$crates" = "$WANT" ]; then
-  ok   "crates.io" "$crates"
-elif [ -z "$crates" ]; then
-  fail "crates.io" "unreadable"
+if fetch "https://crates.io/api/v1/crates/memstead-cli" \
+    -H "User-Agent: memstead-release-verify (ci@memstead.com)"; then
+  crates=$(sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
+  if [ "$crates" = "$WANT" ]; then
+    ok   "crates.io" "$crates"
+  elif [ -z "$crates" ]; then
+    fail "crates.io" "no max_version in the response (expected $WANT)"
+  else
+    fail "crates.io" "$crates (want $WANT)"
+  fi
 else
-  fail "crates.io" "$crates (want $WANT)"
+  unmeasured "crates.io" "$FETCH_REASON"
 fi
 # npm rides the engine's version line (engineering decision, 2026-08-15), so
 # it is compared like any other channel. Its own line is exactly how it came
 # to sit at 0.1.2 against a 0.7.0 CLI with nothing anywhere saying so.
-if [ "$npmv" = "$WANT" ]; then
-  ok   "npm @memstead/wasm" "$npmv"
-elif [ -z "$npmv" ]; then
-  fail "npm @memstead/wasm" "unreadable"
+if fetch "https://registry.npmjs.org/@memstead/wasm"; then
+  npmv=$(sed -n 's/.*"latest": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
+  if [ "$npmv" = "$WANT" ]; then
+    ok   "npm @memstead/wasm" "$npmv"
+  elif [ -z "$npmv" ]; then
+    fail "npm @memstead/wasm" "no latest dist-tag in the response (expected $WANT)"
+  else
+    fail "npm @memstead/wasm" "$npmv (want $WANT)"
+  fi
 else
-  fail "npm @memstead/wasm" "$npmv (want $WANT)"
+  unmeasured "npm @memstead/wasm" "$FETCH_REASON"
 fi
 
 # ── 6. the publish jobs of the release run ───────────────────────────────────
@@ -395,6 +479,11 @@ echo ""
 if [ "$DISAGREE" -gt 0 ]; then
   echo "✗ $DISAGREE channel(s) or publish job(s) disagree: a user's version depends on how they installed"
   exit 1
+elif [ "$UNMEASURED" -gt 0 ]; then
+  # The verdict line must not assert more than was observed: an unmeasured
+  # channel is neither wrong nor confirmed.
+  echo "− $UNMEASURED channel(s) UNMEASURED (could not be read); every channel that was read serves $WANT ($REPORTS finding(s) above)"
+  exit 2
 elif [ "$REPORTS" -gt 0 ]; then
   echo "✓ every channel serves $WANT ($REPORTS report-only finding(s) above)"
   exit 2

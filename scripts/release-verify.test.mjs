@@ -44,20 +44,52 @@ function scratch({ treeVersion, fx }) {
   writeFileSync(join(dir, "Cargo.toml"), `[workspace]\nmembers = []\n\n[workspace.package]\nversion = "${treeVersion}"\n`);
   for (const [name, body] of Object.entries(fx)) writeFileSync(join(dir, "fx", name), body);
   writeFileSync(join(dir, "bin/curl"), `#!/bin/bash
-# fake curl: serve a fixture file by URL pattern; the network probe succeeds
+# fake curl: serve a fixture file by URL pattern, honoring -o/-D/-w the way
+# the script's fetch helper uses them. FAKE_FAIL_URLS (space-separated URL
+# substrings) makes matching URLs answer FAKE_FAIL_CODE (default 403) with
+# FAKE_FAIL_BODY — an error body, not an absent response; when
+# FAKE_RATELIMIT=1 the failure carries rate-limit headers and
+# FAKE_RATELIMIT_RESET as the reset epoch.
 FX="${join(dir, "fx")}"
-url=""
-for a in "$@"; do case "$a" in http*) url="$a" ;; esac; done
+url=""; out=""; dump=""; wfmt=""; prev=""
+for a in "$@"; do
+  case "$prev" in
+    -o) out="$a"; prev=""; continue ;;
+    -D) dump="$a"; prev=""; continue ;;
+    -w) wfmt="$a"; prev=""; continue ;;
+    -H) prev=""; continue ;;
+  esac
+  case "$a" in
+    -o|-D|-w|-H) prev="$a" ;;
+    http*) url="$a" ;;
+  esac
+done
+emit() { # $1 body-file  $2 http-code  $3 extra-headers
+  if [ -n "$dump" ]; then printf 'HTTP/2 %s\\r\\n%s\\r\\n' "$2" "$3" > "$dump"; fi
+  if [ -n "$out" ]; then cat "$1" > "$out"; else cat "$1"; fi
+  if [ -n "$wfmt" ]; then printf '%s' "$2"; fi
+  exit 0
+}
+for bad in \${FAKE_FAIL_URLS:-}; do
+  case "$url" in *"$bad"*)
+    body=$(mktemp); printf '%s' "\${FAKE_FAIL_BODY:-upstream error}" > "$body"
+    hdrs=""
+    if [ "\${FAKE_RATELIMIT:-}" = 1 ]; then
+      hdrs=$(printf 'x-ratelimit-remaining: 0\\r\\nx-ratelimit-reset: %s\\r\\n' "\${FAKE_RATELIMIT_RESET:-1756200000}")
+    fi
+    emit "$body" "\${FAKE_FAIL_CODE:-403}" "$hdrs" ;;
+  esac
+done
 case "$url" in
-  https://api.github.com) exit 0 ;;
-  */releases/latest) cat "$FX/latest.json" ;;
-  */releases/tags/*) cat "$FX/release-tag.json" ;;
-  */Formula/memstead-cli.rb) cat "$FX/memstead-cli.rb" ;;
-  */Formula/memstead-mcp.rb) cat "$FX/memstead-mcp.rb" ;;
-  */plugin.json) cat "$FX/plugin.json" ;;
-  */marketplace.json) cat "$FX/marketplace.json" ;;
-  *crates.io*) cat "$FX/crates.json" ;;
-  *registry.npmjs.org*) cat "$FX/npm.json" ;;
+  https://api.github.com) emit /dev/null 200 "" ;;
+  */releases/latest) emit "$FX/latest.json" 200 "" ;;
+  */releases/tags/*) emit "$FX/release-tag.json" 200 "" ;;
+  */Formula/memstead-cli.rb) emit "$FX/memstead-cli.rb" 200 "" ;;
+  */Formula/memstead-mcp.rb) emit "$FX/memstead-mcp.rb" 200 "" ;;
+  */plugin.json) emit "$FX/plugin.json" 200 "" ;;
+  */marketplace.json) emit "$FX/marketplace.json" 200 "" ;;
+  *crates.io*) emit "$FX/crates.json" 200 "" ;;
+  *registry.npmjs.org*) emit "$FX/npm.json" 200 "" ;;
   *) echo "fake curl: unmapped $url" >&2; exit 22 ;;
 esac
 `);
@@ -239,8 +271,75 @@ test("the changelog check reports a header without tag or note and a non-resolvi
   assert.doesNotMatch(ok.out, /REPORT: changelog/);
 });
 
-test("an unknown option refuses with exit 2", () => {
+test("an unknown option is fatal (exit 1), never the report-verdict code the CI renders green", () => {
   const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
   const r = run(dir, ["--bogus"]);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /unknown option/);
+});
+
+// ── failed reads are unmeasured, never disagreements ────────────────────────
+
+test("a rate-limited channel reads as UNMEASURED naming the reset, exit 2, never red", () => {
+  const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
+  const r = run(dir, ["0.10.0"], {
+    FAKE_FAIL_URLS: "crates.io",
+    FAKE_FAIL_BODY: '{"message":"API rate limit exceeded"}',
+    FAKE_RATELIMIT: "1",
+    FAKE_RATELIMIT_RESET: "1756200000",
+  });
   assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /crates\.io\s+.*UNMEASURED: rate limited \(anonymous quota; resets .*\)/);
+  assert.doesNotMatch(r.out, /crates\.io\s+.*unreadable/);
+  assert.match(r.out, /1 channel\(s\) UNMEASURED/);
+  assert.doesNotMatch(r.out, /channel\(s\) or publish job\(s\) disagree/);
+});
+
+test("a plain HTTP error is UNMEASURED with the status named; the other channels still read (partial failure)", () => {
+  const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
+  const r = run(dir, ["0.10.0"], {
+    FAKE_FAIL_URLS: "registry.npmjs.org",
+    FAKE_FAIL_CODE: "503",
+    FAKE_FAIL_BODY: "upstream unavailable",
+  });
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /npm @memstead\/wasm\s+.*UNMEASURED: HTTP 503/);
+  assert.match(r.out, /Homebrew memstead-cli\s+.*0\.10\.0/);
+  assert.match(r.out, /GitHub Release \(Latest\)\s+.*0\.10\.0/);
+});
+
+test("a run in which every channel is unmeasured does not claim every channel serves", () => {
+  const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
+  const r = run(dir, ["0.10.0"], {
+    FAKE_FAIL_URLS: "releases/latest releases/tags Formula plugin.json marketplace.json crates.io registry.npmjs.org",
+    FAKE_FAIL_CODE: "500",
+    FAKE_FAIL_BODY: "boom",
+  });
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /8 channel\(s\) UNMEASURED/);
+  assert.doesNotMatch(r.out, /^✓ every channel serves/m);
+});
+
+test("the pre-flight probe skips on a rate-limited API root instead of proceeding", () => {
+  const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
+  const r = run(dir, ["0.10.0"], {
+    FAKE_FAIL_URLS: "https://api.github.com",
+    FAKE_FAIL_BODY: '{"message":"API rate limit exceeded"}',
+    FAKE_RATELIMIT: "1",
+  });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.out, /SKIPPED: api\.github\.com is rate limited/);
+  assert.doesNotMatch(r.out, /Homebrew/);
+});
+
+test("an unresolvable latest target is a named skip (exit 3), not a red run", () => {
+  const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
+  const r = run(dir, [], {
+    FAKE_FAIL_URLS: "releases/latest",
+    FAKE_FAIL_CODE: "403",
+    FAKE_FAIL_BODY: '{"message":"API rate limit exceeded"}',
+    FAKE_RATELIMIT: "1",
+  });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.out, /SKIPPED: could not resolve the latest release \(rate limited/);
 });
