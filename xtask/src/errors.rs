@@ -415,6 +415,97 @@ mod code_vocabulary_tests {
         );
     }
 
+    /// The per-tool excerpts of the conformance vocabulary, and the
+    /// hand-maintained list the tool-surface gate reads.
+    ///
+    /// Their contract is one-directional: an excerpt may omit a code (the two
+    /// capped descriptions have no room for the full set) but may never name
+    /// one the workspace cannot construct, and must carry the elision marker
+    /// that declares it an excerpt. The canonical list is held to both
+    /// directions by the test above.
+    fn vocabulary_excerpts(root: &Path) -> Vec<(String, String)> {
+        let files = [
+            "crates/memstead-mcp/descriptions/full/memstead_create.md",
+            "crates/memstead-mcp/descriptions/full/memstead_update.md",
+            "crates/memstead-mcp/src/tools/mutation.rs",
+            "crates/memstead-mcp/tests/tool_surface.rs",
+        ];
+        let re = regex::Regex::new(
+            r"(?:Schema-bound (?:failures|errors)|refuse[sd]? (?:with the IDENTICAL typed envelope a real call would return|on section/field grounds)) \(([^)]*)\)",
+        )
+        .unwrap();
+        let hand_list =
+            regex::Regex::new(r"(?s)const STRUCTURED_ERROR_CODES: &\[&str\] = &\[(.*?)\];")
+                .unwrap();
+        let mut out = Vec::new();
+        for rel in files {
+            let path = root.join(rel);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+            if rel.ends_with("tool_surface.rs") {
+                let list = hand_list
+                    .captures(&text)
+                    .map(|c| c[1].to_string())
+                    .expect("STRUCTURED_ERROR_CODES must still be findable");
+                out.push((rel.to_string(), list));
+                continue;
+            }
+            for c in re.captures_iter(&text) {
+                out.push((rel.to_string(), c[1].to_string()));
+            }
+        }
+        assert!(
+            out.len() >= 5,
+            "the excerpt walk found only {} list(s) — a walk that finds \
+             (almost) nothing is worse than an absent one",
+            out.len()
+        );
+        out
+    }
+
+    #[test]
+    fn no_vocabulary_excerpt_names_a_code_the_engine_cannot_produce() {
+        let root = workspace_root();
+        let known = index(&root);
+        let code = regex::Regex::new(r"[A-Z][A-Z0-9_]{3,}").unwrap();
+        let mut phantom = Vec::new();
+        for (where_, list) in vocabulary_excerpts(&root) {
+            for m in code.find_iter(&list) {
+                if !known.contains(m.as_str()) {
+                    phantom.push(format!("{where_}: {}", m.as_str()));
+                }
+            }
+        }
+        assert!(
+            phantom.is_empty(),
+            "{} code(s) are named in a vocabulary excerpt with no construction \
+             site anywhere in the workspace:\n  {}",
+            phantom.len(),
+            phantom.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn every_per_tool_excerpt_declares_itself_one() {
+        let root = workspace_root();
+        let missing: Vec<String> = vocabulary_excerpts(&root)
+            .into_iter()
+            // The hand-maintained list is a test fixture, not prose an agent
+            // reads, so it carries no marker and needs none.
+            .filter(|(w, _)| !w.ends_with("tool_surface.rs"))
+            .filter(|(_, list)| !list.contains('…'))
+            .map(|(w, _)| w)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{} per-tool list(s) render the conformance vocabulary without the \
+             elision marker that declares them excerpts, so they read as \
+             complete sets they are not:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
+
     #[test]
     fn the_recovery_payload_list_names_every_schema_conformance_code() {
         // Scoped to the ONE rendering that claims to be the vocabulary. An

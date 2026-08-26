@@ -41,12 +41,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   told to expect refusals that cannot arrive. `READ_ONLY_FIELD` and
   `SECTION_NOT_UPDATABLE` were the mirror defect: both carry a `details`
   recovery payload and neither was in the recovery-payload list. All of it is
-  now gated mechanically rather than by a hand-maintained list: one check
-  fails when the instructions name a code the workspace cannot construct, one
-  when the recovery-payload list omits a schema-conformance code the engine
-  can return, one when such a code is named nowhere in the MCP prose at all.
-  The hand-maintained list is what missed `INVALID_FIELD_VALUE` in the first
-  place.
+  now gated mechanically rather than by a hand-maintained list. Five checks,
+  all derived from the same scan the Error Code Index is built from: the
+  instructions may name no code the workspace cannot construct; the canonical
+  recovery-payload list may omit no schema-conformance code the engine can
+  return; no such code may go unnamed in the MCP prose entirely; no per-tool
+  excerpt may name an impossible code; and every per-tool excerpt carries the
+  elision marker that declares it an excerpt rather than a complete set. The
+  hand-maintained list is what missed `INVALID_FIELD_VALUE` in the first
+  place, and it is now held to the first of those rules too.
 - **Transport and diff act on the branch the mount declares.** `memstead
   push` and `memstead pull` used to reconstruct their refs from the mem's
   name, so a mem whose declared branch sits under a namespace
