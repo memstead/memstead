@@ -93,7 +93,77 @@ echo "════════════════════════�
 # nextest skips doctests by design, so without this leg every doc example
 # in the crates was a stated API contract that never executed anywhere —
 # not locally, not in CI.
-if (cd "$ROOT" && cargo test --doc --workspace --features mem-repo); then
+#
+# Scoped, not --workspace: rustdoc must fully process every named crate
+# just to LOOK for doctests, serially — on the biggest crates that is
+# minutes of wall clock for zero tests found. So the leg runs only the
+# crates that carry at least one RUNNABLE doc fence: a bare ``` opener,
+# or one whose info string is drawn from the doctest vocabulary (rust,
+# no_run, should_panic, compile_fail, edition20xx, standalone_crate).
+# Fences tagged json/text/toml/js and `ignore` fences are never compiled
+# by rustdoc, so they earn no rustdoc pass (the old raw grep counted
+# them, which kept four provably empty crates on this roster). The scan
+# pairs openers with closers, so closing fences cannot count as openers.
+# The roster check is two-way: a crate that gains a runnable fence while
+# missing here fails the leg, and a listed crate whose last runnable
+# fence disappeared fails too — the roster can neither silently narrow
+# nor silently bloat.
+DOCTEST_CRATES=(memstead-base)
+has_runnable_doctests() {
+  python3 - "$1" <<'PY'
+import pathlib, re, sys
+RUNNABLE = re.compile(r"rust|no_run|should_panic|compile_fail|standalone_crate|edition\d{4}")
+DOC_FENCE = re.compile(r"^\s*//[/!]\s*```(.*)$")
+DOC_LINE = re.compile(r"^\s*//[/!]")
+root = pathlib.Path(sys.argv[1])
+for f in sorted(root.rglob("*.rs")):
+    in_fence = False
+    for line in f.read_text(errors="ignore").splitlines():
+        m = DOC_FENCE.match(line)
+        if not m:
+            if in_fence and not DOC_LINE.match(line):
+                in_fence = False  # doc block ended, fence cannot span it
+            continue
+        if in_fence:
+            in_fence = False  # closing fence
+            continue
+        in_fence = True
+        info = m.group(1).strip().strip("`")
+        tokens = [t for t in re.split(r"[,\s]+", info) if t]
+        if not tokens or all(RUNNABLE.fullmatch(t) for t in tokens):
+            sys.exit(0)  # runnable opener found
+sys.exit(1)
+PY
+}
+DOCTEST_ROSTER_OK=1
+for d in "$ROOT"/crates/*/; do
+  name=$(basename "$d")
+  if has_runnable_doctests "$d/src"; then
+    case " ${DOCTEST_CRATES[*]} " in
+      *" $name "*) ;;
+      *)
+        DOCTEST_ROSTER_OK=0
+        echo "  ✗ crate '$name' carries runnable doctests but is not in DOCTEST_CRATES — add it"
+        ;;
+    esac
+  else
+    case " ${DOCTEST_CRATES[*]} " in
+      *" $name "*)
+        DOCTEST_ROSTER_OK=0
+        echo "  ✗ crate '$name' is in DOCTEST_CRATES but has no runnable doctest fence — remove it"
+        ;;
+    esac
+  fi
+done
+DOCTEST_ARGS=()
+for c in "${DOCTEST_CRATES[@]}"; do DOCTEST_ARGS+=("-p" "$c"); done
+# No --features mem-repo here: that feature lives on memstead-cli and
+# memstead-mcp, and cargo hard-errors when a feature is requested for a
+# selection that does not carry it (the roster is memstead-base only).
+# If a crate that owns mem-repo rejoins the roster, reintroduce the flag
+# then; the two-way roster check above makes that moment loud.
+if [ "$DOCTEST_ROSTER_OK" = "1" ] \
+  && (cd "$ROOT" && cargo test --doc "${DOCTEST_ARGS[@]}"); then
   echo "  ✓ doctests passed"
 else
   FAILED+=("doctests")
