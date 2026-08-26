@@ -23,6 +23,7 @@
 //! which the plugin skill consumes as a thin client.
 
 pub mod advance;
+pub mod anchor_population;
 pub mod brief;
 pub mod change_detection;
 pub mod check_path;
