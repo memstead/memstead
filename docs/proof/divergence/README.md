@@ -59,6 +59,9 @@ across all four checkpoints.
 
 ## What the accuracy endpoint substantially measures (added 2026-08-25)
 
+**This section is post-hoc and not pre-registered.** It appears after the
+verdict the pre-registration binds, never instead of it.
+
 A direct count over the two committed corpora, made four weeks after the run,
 changes how the accuracy number should be read. It is recorded here rather than
 left for a reader to discover.
