@@ -109,6 +109,28 @@ impl Mount {
     }
 }
 
+/// A mount's declared branch as a fully-qualified local ref. The
+/// `branch` field tolerates both `refs/heads/<path>` (used verbatim,
+/// any `refs/` value is) and bare `<path>` (prefixed) — the same
+/// normalisation `instantiate_full_backend` applies. Every operation
+/// that needs the mem's local ref derives it from the declared branch
+/// through this function; nothing reconstructs a ref from the mem
+/// name.
+pub fn branch_full_ref(branch: &str) -> String {
+    if branch.starts_with("refs/") {
+        branch.to_string()
+    } else {
+        format!("refs/heads/{branch}")
+    }
+}
+
+/// A mount's declared branch as the short name remote-tracking refs
+/// use (`refs/remotes/<remote>/<short>`): the `refs/heads/` prefix
+/// stripped when present, the value verbatim otherwise.
+pub fn branch_short_name(branch: &str) -> &str {
+    branch.strip_prefix("refs/heads/").unwrap_or(branch)
+}
+
 /// Storage reference for a [`Mount`]. One variant per
 /// [`crate::backend::MemBackend`] implementation. New backends add
 /// a variant; the file-adapter learns to round-trip it.

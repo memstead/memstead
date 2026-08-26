@@ -505,8 +505,11 @@ pub type GitBranchExportToBytesFn = fn(
 /// [`crate::ops::Diff`]. Refs are arbitrary `gix::rev_parse_single`
 /// inputs — branch names, commit SHAs, tag names. Resolves each
 /// independently so cross-branch (cross-mem) diffs work uniformly.
+/// `branch` is the mount's declared branch; a bare `HEAD` token in
+/// either ref re-anchors onto it.
 pub type GitBranchDiffFn = fn(
     gitdir: &Path,
+    branch: &str,
     mem: &str,
     ref_a: &str,
     ref_b: &str,
@@ -528,14 +531,24 @@ pub type GitBranchFetchFn = fn(
 pub type GitBranchReadTreeFn =
     fn(gitdir: &Path, ref_name: &str) -> Result<Vec<(String, String)>, BackendError>;
 
-/// `Engine::pull` dispatch for git-branch mounts.
-pub type GitBranchPullFn =
-    fn(gitdir: &Path, remote: &str, mem: &str) -> Result<crate::ops::PullOutcome, BackendError>;
+/// `Engine::pull` dispatch for git-branch mounts. `branch` is the
+/// mount's declared branch — the single source of truth for both the
+/// local ref and the remote-tracking ref; `mem` labels the outcome
+/// only.
+pub type GitBranchPullFn = fn(
+    gitdir: &Path,
+    remote: &str,
+    branch: &str,
+    mem: &str,
+) -> Result<crate::ops::PullOutcome, BackendError>;
 
-/// `Engine::push` dispatch for git-branch mounts.
+/// `Engine::push` dispatch for git-branch mounts. `branch` is the
+/// mount's declared branch (see [`GitBranchPullFn`]); `mem` labels
+/// the outcome only.
 pub type GitBranchPushFn = fn(
     gitdir: &Path,
     remote: &str,
+    branch: &str,
     mem: &str,
     force: bool,
 ) -> Result<crate::ops::PushOutcome, BackendError>;

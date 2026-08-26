@@ -114,7 +114,7 @@ pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};
 pub use workspace::{
     CreateRuleSetting, DeleteRuleSetting, Mount, MountCapability, MountLifecycle, MountStorage,
-    SCHEMA_WILDCARD, Workspace, WorkspaceSettings,
+    SCHEMA_WILDCARD, Workspace, WorkspaceSettings, branch_full_ref, branch_short_name,
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,

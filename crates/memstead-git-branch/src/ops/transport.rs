@@ -97,18 +97,27 @@ pub fn fetch_in_gitdir(
 
 /// `memstead_pull` implementation: runs a fetch, then checks whether the
 /// local branch can fast-forward to the remote-tracking ref. Refuses
-/// with `LOCAL_DIVERGENCE:<branch>:<remote_ref>` when the local branch
-/// has committed locally beyond the merge-base.
-pub fn pull_in_gitdir(gitdir: &Path, remote: &str, mem: &str) -> Result<PullOutcome, BackendError> {
+/// with `LOCAL_DIVERGENCE:<mem>:<remote_ref>` when the local branch
+/// has committed locally beyond the merge-base. `branch` is the
+/// mount's declared branch — both refs derive from it, never from the
+/// mem name (the two differ on namespaced mounts).
+pub fn pull_in_gitdir(
+    gitdir: &Path,
+    remote: &str,
+    branch: &str,
+    mem: &str,
+) -> Result<PullOutcome, BackendError> {
     let fetched = fetch_in_gitdir(gitdir, remote, &[])?;
 
-    let branch_ref = format!("refs/heads/{mem}");
-    let remote_ref = format!("refs/remotes/{remote}/{mem}");
+    let branch_ref = memstead_base::branch_full_ref(branch);
+    let short = memstead_base::branch_short_name(branch);
+    let remote_ref = format!("refs/remotes/{remote}/{short}");
 
     let remote_sha = resolve_ref(gitdir, &remote_ref).ok_or_else(|| {
         BackendError::Other(format!(
             "remote-tracking ref `{remote_ref}` is absent after fetch; \
-             the remote may not carry mem `{mem}`"
+             the remote does not carry branch `{short}` \
+             (mem `{mem}`'s declared branch)"
         ))
     })?;
     let local_sha = resolve_ref(gitdir, &branch_ref);
@@ -151,18 +160,24 @@ pub fn pull_in_gitdir(gitdir: &Path, remote: &str, mem: &str) -> Result<PullOutc
 }
 
 /// `memstead_push` implementation: invokes `git push <remote>
-/// refs/heads/<mem>` against the gitdir. Without `force`, the
+/// <declared-branch-ref>` against the gitdir. Without `force`, the
 /// underlying git refuses non-fast-forward pushes; we map that
-/// stderr shape into `NON_FAST_FORWARD:<mem>:<remote>`.
+/// stderr shape into `NON_FAST_FORWARD:<mem>:<remote>`. `branch` is
+/// the mount's declared branch — the pushed ref derives from it,
+/// never from the mem name.
 pub fn push_in_gitdir(
     gitdir: &Path,
     remote: &str,
+    branch: &str,
     mem: &str,
     force: bool,
 ) -> Result<PushOutcome, BackendError> {
-    let branch_ref = format!("refs/heads/{mem}");
-    let local_sha = resolve_ref(gitdir, &branch_ref)
-        .ok_or_else(|| BackendError::Other(format!("UNKNOWN_REF: {branch_ref}")))?;
+    let branch_ref = memstead_base::branch_full_ref(branch);
+    let local_sha = resolve_ref(gitdir, &branch_ref).ok_or_else(|| {
+        BackendError::Other(format!(
+            "UNKNOWN_REF: {branch_ref} (mem `{mem}`'s declared branch)"
+        ))
+    })?;
 
     let mut args: Vec<String> = vec!["push".to_string()];
     if force {
@@ -494,7 +509,7 @@ mod tests {
         let sha = commit(&local, "specs", "a.md", &body("A"));
 
         // Push the local branch to the remote.
-        let push = push_in_gitdir(&local, "origin", "specs", false).unwrap();
+        let push = push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
         assert_eq!(push.new_sha, sha);
         assert_eq!(push.branch_ref, "refs/heads/specs");
         assert!(!push.forced);
@@ -544,11 +559,11 @@ mod tests {
             writer.commit("seed", &CommitContext::internal()).unwrap();
         }
 
-        push_in_gitdir(&local, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
 
         let second = init_local(&tmp, "second");
         add_remote(&second, "origin", &remote);
-        pull_in_gitdir(&second, "origin", "specs").unwrap();
+        pull_in_gitdir(&second, "origin", "specs", "specs").unwrap();
 
         // The pulled branch carries the sidecar blob byte-for-byte.
         let reader = GitTreeMemWriter::new(second.to_path_buf(), "refs/heads/specs".to_string());
@@ -563,11 +578,11 @@ mod tests {
         let remote = init_bare_remote(&tmp, "remote.git");
         add_remote(&local, "origin", &remote);
         let sha = commit(&local, "specs", "a.md", &body("A"));
-        push_in_gitdir(&local, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
 
         let second = init_local(&tmp, "second");
         add_remote(&second, "origin", &remote);
-        let pull = pull_in_gitdir(&second, "origin", "specs").unwrap();
+        let pull = pull_in_gitdir(&second, "origin", "specs", "specs").unwrap();
         assert_eq!(pull.new_sha, sha);
         assert_eq!(pull.previous_sha, "");
         let head = resolve_ref(&second, "refs/heads/specs").unwrap();
@@ -581,19 +596,19 @@ mod tests {
         let remote = init_bare_remote(&tmp, "remote.git");
         add_remote(&local, "origin", &remote);
         commit(&local, "specs", "a.md", &body("A"));
-        push_in_gitdir(&local, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
 
         let second = init_local(&tmp, "second");
         add_remote(&second, "origin", &remote);
-        pull_in_gitdir(&second, "origin", "specs").unwrap();
+        pull_in_gitdir(&second, "origin", "specs", "specs").unwrap();
 
         // Advance local on second AND on remote independently so the
         // two branches diverge.
         commit(&second, "specs", "second.md", &body("local"));
         commit(&local, "specs", "first.md", &body("upstream"));
-        push_in_gitdir(&local, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
 
-        let err = pull_in_gitdir(&second, "origin", "specs").unwrap_err();
+        let err = pull_in_gitdir(&second, "origin", "specs", "specs").unwrap_err();
         match err {
             BackendError::Other(msg) => assert!(
                 msg.starts_with("LOCAL_DIVERGENCE:"),
@@ -636,7 +651,7 @@ mod tests {
         add_remote(&local_upstream, "origin", &remote);
 
         commit(&local_upstream, "specs", "alpha.md", &body("Alpha"));
-        push_in_gitdir(&local_upstream, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local_upstream, "origin", "specs", "specs", false).unwrap();
 
         // Land a malformed entity on the upstream and push it. The
         // body has no frontmatter at all — the strict validator's
@@ -649,7 +664,7 @@ mod tests {
             )
             .unwrap();
         writer.commit("oops", &CommitContext::internal()).unwrap();
-        push_in_gitdir(&local_upstream, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local_upstream, "origin", "specs", "specs", false).unwrap();
 
         // Build a fresh local engine + git-branch mount pointing at a
         // clean clone-like gitdir; we still need to add the remote
@@ -760,6 +775,157 @@ mod tests {
         assert!(resolve_ref(&remote, "refs/heads/specs").is_none());
     }
 
+    /// Criterion 4 (05/04): a mem whose declared branch is not its
+    /// name under the standard prefix pushes and pulls — both refs
+    /// derive from the declared branch, never from the mem name.
+    #[test]
+    fn push_pull_act_on_declared_namespaced_branch() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+
+        let sha = commit(&local, "team/specs", "a.md", &body("A"));
+
+        let push = push_in_gitdir(&local, "origin", "team/specs", "specs", false).unwrap();
+        assert_eq!(push.branch_ref, "refs/heads/team/specs");
+        assert_eq!(push.mem, "specs");
+        // The remote carries the declared branch — and no ref invented
+        // from the mem name.
+        assert_eq!(resolve_ref(&remote, "refs/heads/team/specs").unwrap(), sha);
+        assert!(resolve_ref(&remote, "refs/heads/specs").is_none());
+
+        let second = init_local(&tmp, "second");
+        add_remote(&second, "origin", &remote);
+        let pull = pull_in_gitdir(&second, "origin", "team/specs", "specs").unwrap();
+        assert_eq!(pull.branch_ref, "refs/heads/team/specs");
+        assert_eq!(pull.source_ref, "refs/remotes/origin/team/specs");
+        assert_eq!(resolve_ref(&second, "refs/heads/team/specs").unwrap(), sha);
+    }
+
+    /// Criterion 8 (05/04): when the ref genuinely cannot be
+    /// resolved, the message names the mount's declared branch — what
+    /// was looked for, not a name the engine invented.
+    #[test]
+    fn push_missing_declared_branch_names_it_in_the_error() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+
+        let err = push_in_gitdir(&local, "origin", "team/ghost", "specs", false).unwrap_err();
+        match err {
+            BackendError::Other(msg) => {
+                assert!(msg.starts_with("UNKNOWN_REF:"), "got: {msg}");
+                assert!(msg.contains("refs/heads/team/ghost"), "got: {msg}");
+                assert!(msg.contains("declared branch"), "got: {msg}");
+            }
+            other => panic!("expected Other, got {other:?}"),
+        }
+    }
+
+    /// Criterion 1 + 4 (05/04) at the engine layer: push and pull on
+    /// a mount whose declared branch is namespaced act on that branch
+    /// end to end (validation ref included).
+    #[test]
+    fn engine_push_and_pull_act_on_declared_namespaced_branch() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+        // The engine's pre-push gate runs strict schema validation, so
+        // this fixture needs the full required-section shape (unlike
+        // the backend-only round-trip fixtures).
+        let strict_body = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# A\n\n## Purpose\n\nA\n\n## Identity\n\nA\n";
+        let sha = commit(&local, "team/specs", "a.md", strict_body);
+
+        let namespaced_mount = |gitdir: &Path| memstead_base::Mount {
+            mem: "specs".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: gitdir.to_path_buf(),
+                branch: "team/specs".to_string(),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+
+        let mount = namespaced_mount(&local);
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+
+        let push = engine.push("specs", "origin", false).unwrap();
+        assert_eq!(push.branch_ref, "refs/heads/team/specs");
+        assert_eq!(resolve_ref(&remote, "refs/heads/team/specs").unwrap(), sha);
+        assert!(resolve_ref(&remote, "refs/heads/specs").is_none());
+
+        let downstream_gitdir = init_local(&tmp, "downstream");
+        add_remote(&downstream_gitdir, "origin", &remote);
+        let mount = namespaced_mount(&downstream_gitdir);
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+
+        let pull = engine.pull("specs", "origin").unwrap();
+        assert_eq!(pull.branch_ref, "refs/heads/team/specs");
+        assert_eq!(
+            resolve_ref(&downstream_gitdir, "refs/heads/team/specs").unwrap(),
+            sha
+        );
+    }
+
+    /// Criterion 6 (05/04): the pre-push schema gate no longer passes
+    /// when it could not run. A mount whose declared branch does not
+    /// resolve refuses naming that branch — previously the gate's
+    /// error was silently discarded and execution continued.
+    #[test]
+    fn engine_push_gate_refuses_when_it_cannot_run() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+        // No commit on the declared branch — the validation ref
+        // cannot resolve.
+
+        let mount = memstead_base::Mount {
+            mem: "specs".to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: local.clone(),
+                branch: "team/ghost".to_string(),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
+        let mut engine = memstead_base::Engine::from_mounts(vec![(mount, backend)]).unwrap();
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+
+        let err = engine.push("specs", "origin", false).unwrap_err();
+        match err {
+            memstead_base::EngineError::UnknownRef(raw) => {
+                assert!(
+                    raw.contains("refs/heads/team/ghost"),
+                    "the refusal must name the declared branch, got: {raw}"
+                );
+            }
+            other => panic!("expected UnknownRef from the gate, got {other:?}"),
+        }
+        // The remote was never contacted.
+        assert!(resolve_ref(&remote, "refs/heads/team/ghost").is_none());
+    }
+
     #[test]
     fn push_refuses_non_fast_forward_without_force() {
         let tmp = TempDir::new().unwrap();
@@ -767,14 +933,14 @@ mod tests {
         let remote = init_bare_remote(&tmp, "remote.git");
         add_remote(&local, "origin", &remote);
         commit(&local, "specs", "a.md", &body("A"));
-        push_in_gitdir(&local, "origin", "specs", false).unwrap();
+        push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
 
         // Another local with a divergent commit history.
         let second = init_local(&tmp, "second");
         add_remote(&second, "origin", &remote);
         commit(&second, "specs", "diff.md", &body("divergent"));
 
-        let err = push_in_gitdir(&second, "origin", "specs", false).unwrap_err();
+        let err = push_in_gitdir(&second, "origin", "specs", "specs", false).unwrap_err();
         match err {
             BackendError::Other(msg) => {
                 assert!(

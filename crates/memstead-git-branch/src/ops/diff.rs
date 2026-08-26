@@ -41,16 +41,18 @@ use memstead_base::ops::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 
 use crate::EMPTY_TREE_SHA;
 
-/// Normalise a caller-supplied ref against the per-mem branch
-/// convention, shared by `memstead_diff` and `memstead_changes_since`.
+/// Normalise a caller-supplied ref against the mount's declared
+/// branch, shared by `memstead_diff` and `memstead_changes_since`.
 ///
 /// Rewrites a leading `HEAD` *token* — the whole ref (`HEAD`) or the base
-/// of a revspec (`HEAD~5`, `HEAD^`, `HEAD^{tree}`, `HEAD@{1}`) — to
-/// `refs/heads/<mem>`, preserving the suffix, so resolution targets the
-/// selected mem's branch tip rather than the mem-repo gitdir's
-/// symbolic HEAD (which points at the dummy default branch). gix already
-/// parses the revspec suffix; this only re-anchors the `HEAD` base. A ref
-/// that merely *starts with* `HEAD` (e.g. `HEADER`, `HEAD-foo`) is left
+/// of a revspec (`HEAD~5`, `HEAD^`, `HEAD^{tree}`, `HEAD@{1}`) — to the
+/// mount's declared branch ref, preserving the suffix, so resolution
+/// targets the selected mem's branch tip rather than the mem-repo
+/// gitdir's symbolic HEAD (which points at the dummy default branch).
+/// The anchor is the DECLARED branch, never a ref derived from the mem
+/// name — the two differ on namespaced mounts. gix already parses the
+/// revspec suffix; this only re-anchors the `HEAD` base. A ref that
+/// merely *starts with* `HEAD` (e.g. `HEADER`, `HEAD-foo`) is left
 /// alone — the character after `HEAD` must be a revspec operator
 /// (`~ ^ : @`) or end-of-string. Targeted at the per-mem entry point
 /// only: mem-less callers (cross-mem diffs naming a peer branch) pass
@@ -58,11 +60,11 @@ use crate::EMPTY_TREE_SHA;
 ///
 /// The empty-tree sentinel is handled inside `resolve_tree` so callers see
 /// a single dispatch.
-pub(crate) fn normalise_ref_for_mem(mem: &str, raw: &str) -> String {
+pub(crate) fn normalise_ref_for_branch(branch: &str, raw: &str) -> String {
     if let Some(rest) = raw.strip_prefix("HEAD")
         && (rest.is_empty() || rest.starts_with(['~', '^', ':', '@']))
     {
-        return format!("refs/heads/{mem}{rest}");
+        return format!("{}{rest}", memstead_base::branch_full_ref(branch));
     }
     raw.to_string()
 }
@@ -146,8 +148,11 @@ fn peek_meta(raw: &Option<String>) -> (Option<String>, Option<String>) {
 
 /// Two-ref structural diff. See module docs for the v1 scope and the
 /// known gaps (rename, ripple) that will surface as handover items.
+/// `branch` is the mount's declared branch; a bare `HEAD` token in
+/// either ref re-anchors onto it.
 pub fn diff_two_refs(
     gitdir: &Path,
+    branch: &str,
     mem: &str,
     ref_a: &str,
     ref_b: &str,
@@ -160,13 +165,13 @@ pub fn diff_two_refs(
         )));
     }
     let repo = gix::open(gitdir).map_err(|e| BackendError::Other(format!("gix open: {e}")))?;
-    // Bare `HEAD` substitutes to `refs/heads/<mem>` so the diff targets
-    // the mem's branch tip (not the gitdir's symbolic HEAD on a
-    // dummy default branch). Per-mem callers always pass a mem
-    // selector; the substitution is unconditional on this entry
-    // point.
-    let normalised_a = normalise_ref_for_mem(mem, ref_a);
-    let normalised_b = normalise_ref_for_mem(mem, ref_b);
+    // Bare `HEAD` substitutes to the mount's declared branch so the
+    // diff targets the mem's branch tip (not the gitdir's symbolic
+    // HEAD on a dummy default branch). Per-mem callers always pass
+    // the mount's branch; the substitution is unconditional on this
+    // entry point.
+    let normalised_a = normalise_ref_for_branch(branch, ref_a);
+    let normalised_b = normalise_ref_for_branch(branch, ref_b);
     let tree_a = resolve_tree(&repo, &normalised_a)?;
     let tree_b = resolve_tree(&repo, &normalised_b)?;
     let resolved_a_sha = sha_for(&repo, &normalised_a)?;
@@ -782,6 +787,7 @@ mod tests {
         let err = diff_two_refs(
             &gitdir,
             "specs",
+            "specs",
             "no-such-ref",
             "no-such-other",
             &DiffConfig::default(),
@@ -802,20 +808,59 @@ mod tests {
     fn normalise_rewrites_only_the_head_token() {
         // #53: the HEAD base of a revspec re-anchors on the mem branch,
         // suffix preserved.
-        assert_eq!(normalise_ref_for_mem("v", "HEAD"), "refs/heads/v");
-        assert_eq!(normalise_ref_for_mem("v", "HEAD~5"), "refs/heads/v~5");
-        assert_eq!(normalise_ref_for_mem("v", "HEAD^"), "refs/heads/v^");
+        assert_eq!(normalise_ref_for_branch("v", "HEAD"), "refs/heads/v");
+        assert_eq!(normalise_ref_for_branch("v", "HEAD~5"), "refs/heads/v~5");
+        assert_eq!(normalise_ref_for_branch("v", "HEAD^"), "refs/heads/v^");
         assert_eq!(
-            normalise_ref_for_mem("v", "HEAD^{tree}"),
+            normalise_ref_for_branch("v", "HEAD^{tree}"),
             "refs/heads/v^{tree}"
         );
-        assert_eq!(normalise_ref_for_mem("v", "HEAD@{1}"), "refs/heads/v@{1}");
+        assert_eq!(
+            normalise_ref_for_branch("v", "HEAD@{1}"),
+            "refs/heads/v@{1}"
+        );
         // Refusal: a ref that merely starts with "HEAD" is left alone.
-        assert_eq!(normalise_ref_for_mem("v", "HEADER"), "HEADER");
-        assert_eq!(normalise_ref_for_mem("v", "HEAD-foo"), "HEAD-foo");
+        assert_eq!(normalise_ref_for_branch("v", "HEADER"), "HEADER");
+        assert_eq!(normalise_ref_for_branch("v", "HEAD-foo"), "HEAD-foo");
         // Refusal: a plain branch / SHA passes through unchanged.
-        assert_eq!(normalise_ref_for_mem("v", "main"), "main");
-        assert_eq!(normalise_ref_for_mem("v", "deadbeef"), "deadbeef");
+        assert_eq!(normalise_ref_for_branch("v", "main"), "main");
+        assert_eq!(normalise_ref_for_branch("v", "deadbeef"), "deadbeef");
+        // The anchor is the DECLARED branch, never a mem-name-derived
+        // ref: a namespaced mount's `HEAD` lands on its namespace, and
+        // an already-qualified declared branch is used verbatim.
+        assert_eq!(
+            normalise_ref_for_branch("team/v", "HEAD"),
+            "refs/heads/team/v"
+        );
+        assert_eq!(
+            normalise_ref_for_branch("refs/heads/team/v", "HEAD~2"),
+            "refs/heads/team/v~2"
+        );
+    }
+
+    #[test]
+    fn diff_bare_head_resolves_on_namespaced_declared_branch() {
+        // A mem whose declared branch is not its name under the
+        // standard prefix: `HEAD` must land on the declared branch.
+        let tmp = TempDir::new().unwrap();
+        let gitdir = init_gitdir(&tmp);
+        let writer = GitTreeMemWriter::new(gitdir.clone(), "refs/heads/team/specs".to_string());
+        writer
+            .write_entity(Path::new("a.md"), body_with_title("A").as_bytes())
+            .unwrap();
+        let sha = writer.commit("seed", &CommitContext::internal()).unwrap();
+
+        let diff = diff_two_refs(
+            &gitdir,
+            "team/specs",
+            "specs",
+            EMPTY_TREE_SHA,
+            "HEAD",
+            &DiffConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(diff.resolved_b_sha, sha);
+        assert_eq!(diff.entries.len(), 1);
     }
 
     #[test]
@@ -838,8 +883,15 @@ mod tests {
             "c2 add beta",
         );
 
-        let diff = diff_two_refs(&gitdir, "specs", "HEAD~1", "HEAD", &DiffConfig::default())
-            .expect("HEAD revspec must resolve against the mem branch");
+        let diff = diff_two_refs(
+            &gitdir,
+            "specs",
+            "specs",
+            "HEAD~1",
+            "HEAD",
+            &DiffConfig::default(),
+        )
+        .expect("HEAD revspec must resolve against the mem branch");
         assert_eq!(diff.entries.len(), 1, "only beta added between c1 and c2");
         assert!(
             matches!(diff.entries[0], EntityDiff::Added { .. }),
@@ -884,6 +936,7 @@ mod tests {
 
         let diff = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             &sha_a,
             "refs/heads/specs",
@@ -947,7 +1000,15 @@ mod tests {
             include_content: false,
             ..DiffConfig::default()
         };
-        let diff = diff_two_refs(&gitdir, "specs", &sha_seed, "refs/heads/specs", &cfg).unwrap();
+        let diff = diff_two_refs(
+            &gitdir,
+            "specs",
+            "specs",
+            &sha_seed,
+            "refs/heads/specs",
+            &cfg,
+        )
+        .unwrap();
         assert_eq!(diff.entries.len(), 1);
         match &diff.entries[0] {
             EntityDiff::Modified {
@@ -1004,7 +1065,15 @@ mod tests {
             include_content: true,
             ..DiffConfig::default()
         };
-        let diff = diff_two_refs(&gitdir, "specs", sha_empty, "refs/heads/specs", &cfg).unwrap();
+        let diff = diff_two_refs(
+            &gitdir,
+            "specs",
+            "specs",
+            sha_empty,
+            "refs/heads/specs",
+            &cfg,
+        )
+        .unwrap();
         assert_eq!(diff.entries.len(), 1);
         match &diff.entries[0] {
             EntityDiff::Added {
@@ -1074,6 +1143,7 @@ mod tests {
 
         let diff = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             &sha_seed,
             "refs/heads/specs",
@@ -1155,6 +1225,7 @@ mod tests {
         let diff = diff_two_refs(
             &gitdir,
             "specs",
+            "specs",
             &sha_a,
             "refs/heads/specs",
             &DiffConfig::default(),
@@ -1221,6 +1292,7 @@ mod tests {
         let diff = diff_two_refs(
             &gitdir,
             "specs",
+            "specs",
             &sha_a,
             "refs/heads/specs",
             &DiffConfig::default(),
@@ -1271,7 +1343,8 @@ mod tests {
             include_ripple: false,
             ..DiffConfig::default()
         };
-        let diff = diff_two_refs(&gitdir, "specs", &sha_a, "refs/heads/specs", &cfg).unwrap();
+        let diff =
+            diff_two_refs(&gitdir, "specs", "specs", &sha_a, "refs/heads/specs", &cfg).unwrap();
         for entry in &diff.entries {
             let ripple = match entry {
                 EntityDiff::Added { ripple, .. }
@@ -1312,6 +1385,7 @@ mod tests {
 
         let diff = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             &sha_a,
             "refs/heads/specs",
@@ -1435,6 +1509,7 @@ mod tests {
         let diff = diff_two_refs(
             &gitdir,
             "specs",
+            "specs",
             "refs/heads/specs",
             "refs/heads/specs",
             &DiffConfig::default(),
@@ -1466,6 +1541,7 @@ mod tests {
 
         let diff = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             EMPTY_TREE_SHA,
             "refs/heads/specs",
@@ -1510,6 +1586,7 @@ mod tests {
 
         let err = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             &tree_sha,
             "refs/heads/specs",
@@ -1556,10 +1633,18 @@ mod tests {
         // resolving bare HEAD literally would either refuse or hit
         // the wrong branch. The substitution targets
         // `refs/heads/<mem>` per the mem selector.
-        let via_head = diff_two_refs(&gitdir, "specs", &sha_a, "HEAD", &DiffConfig::default())
-            .expect("bare HEAD must resolve via mem substitution");
+        let via_head = diff_two_refs(
+            &gitdir,
+            "specs",
+            "specs",
+            &sha_a,
+            "HEAD",
+            &DiffConfig::default(),
+        )
+        .expect("bare HEAD must resolve via mem substitution");
         let via_explicit = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             &sha_a,
             "refs/heads/specs",
@@ -1593,6 +1678,7 @@ mod tests {
         );
         let diff = diff_two_refs(
             &gitdir,
+            "specs",
             "specs",
             EMPTY_TREE_SHA,
             "HEAD",

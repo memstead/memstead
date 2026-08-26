@@ -43,6 +43,13 @@ Each mem is one branch; push the ones you want backed up:
 memstead push knowledge
 ```
 
+The argument is the mem's name; the pushed ref is the branch the mem's
+mount declares. The two usually coincide (`knowledge` lives on
+`refs/heads/knowledge`), but a mount may declare any branch it likes —
+a mem named `engine` on `refs/heads/team/engine` pushes that declared
+branch, and the recovery flow below fetches and resets against it
+(`refs/remotes/origin/team/engine`).
+
 The push refuses rather than surprises:
 
 - `UNKNOWN_REMOTE` — the remote name isn't configured (step 1).

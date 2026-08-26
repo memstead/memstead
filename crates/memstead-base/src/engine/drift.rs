@@ -499,13 +499,13 @@ impl Engine {
         // prospective state against the schema before letting the
         // pull's fast-forward land. Errors map to the typed surface
         // just like a standalone `memstead_fetch` call.
-        let gitdir = match &self.mounts[mount_idx].mount.storage {
+        let (gitdir, branch) = match &self.mounts[mount_idx].mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_pull` requires a git-branch mount",
                 )));
             }
-            MountStorage::GitBranch { gitdir, .. } => gitdir.clone(),
+            MountStorage::GitBranch { gitdir, branch } => (gitdir.clone(), branch.clone()),
         };
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
@@ -526,13 +526,19 @@ impl Engine {
         // blob against the mem's pinned schema, and refuse the
         // pull if any parse fails. The local branch pointer is still
         // unchanged at this point — the refusal is fully atomic.
-        let remote_ref = format!("refs/remotes/{remote}/{mem}");
+        // The remote-tracking ref follows the mount's declared
+        // branch, never the mem name — the two differ on namespaced
+        // mounts.
+        let remote_ref = format!(
+            "refs/remotes/{remote}/{}",
+            crate::workspace::branch_short_name(&branch)
+        );
         self.validate_ref_against_schema(&hook, &gitdir, mem, &remote_ref)?;
 
         // Run the underlying pull (re-runs the fetch via git CLI, but
         // that's a no-op cache-wise and keeps the fast-forward logic
         // co-located with the rest of the transport implementation).
-        let outcome = (hook.pull)(&gitdir, remote, mem).map_err(|e| match e {
+        let outcome = (hook.pull)(&gitdir, remote, &branch, mem).map_err(|e| match e {
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
                 EngineError::UnknownRemote(
                     msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
@@ -578,13 +584,13 @@ impl Engine {
         force: bool,
     ) -> Result<crate::ops::PushOutcome, EngineError> {
         let m = self.find_mount(mem)?;
-        let gitdir = match &m.mount.storage {
+        let (gitdir, branch) = match &m.mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
                     "mem '{mem}' is not git-backed — `memstead_push` requires a git-branch mount",
                 )));
             }
-            MountStorage::GitBranch { gitdir, .. } => gitdir.clone(),
+            MountStorage::GitBranch { gitdir, branch } => (gitdir.clone(), branch.clone()),
         };
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
@@ -592,26 +598,43 @@ impl Engine {
             ))
         })?;
 
-        // Pre-push schema validation: walk the local branch tree, run
-        // the mem's pinned schema over every `.md` blob. Any parse
-        // failure refuses the push with `LOCAL_INVALID_STATE` — the
-        // remote is not contacted.
-        let local_ref = format!("refs/heads/{mem}");
-        if let Err(EngineError::SchemaViolationInFetch { violations, .. }) =
-            self.validate_ref_against_schema(&hook, &gitdir, mem, &local_ref)
-        {
-            return Err(EngineError::LocalInvalidState {
-                mem: mem.to_string(),
-                remote: remote.to_string(),
-                detail: format!(
-                    "{} violation(s) in local branch: {}",
-                    violations.len(),
-                    violations.join("; "),
-                ),
-            });
+        // Pre-push schema validation: walk the local branch tree (the
+        // mount's declared branch, never a ref derived from the mem
+        // name), run the mem's pinned schema over every `.md` blob.
+        // Any parse failure refuses the push with
+        // `LOCAL_INVALID_STATE` — the remote is not contacted. A gate
+        // that cannot run (the ref unresolvable, the tree unreadable)
+        // refuses too: a validation that did not happen must never
+        // read as a pass.
+        let local_ref = crate::workspace::branch_full_ref(&branch);
+        match self.validate_ref_against_schema(&hook, &gitdir, mem, &local_ref) {
+            Ok(()) => {}
+            Err(EngineError::SchemaViolationInFetch { violations, .. }) => {
+                return Err(EngineError::LocalInvalidState {
+                    mem: mem.to_string(),
+                    remote: remote.to_string(),
+                    detail: format!(
+                        "{} violation(s) in local branch: {}",
+                        violations.len(),
+                        violations.join("; "),
+                    ),
+                });
+            }
+            Err(EngineError::UnknownRef(raw)) => {
+                // Names the declared branch the gate looked for, so
+                // the reader sees what was resolved, not an invented
+                // ref.
+                return Err(EngineError::UnknownRef(raw));
+            }
+            Err(other) => {
+                return Err(EngineError::Backend(BackendError::Other(format!(
+                    "pre-push schema validation could not run for mem '{mem}' \
+                     (declared branch `{local_ref}`): {other}",
+                ))));
+            }
         }
 
-        (hook.push)(&gitdir, remote, mem, force).map_err(|e| match e {
+        (hook.push)(&gitdir, remote, &branch, mem, force).map_err(|e| match e {
             BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
                 EngineError::UnknownRemote(
                     msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
@@ -792,7 +815,7 @@ impl Engine {
     ///
     /// `target_sha` accepts anything `gix::rev_parse_single` admits:
     /// a SHA, an abbreviated SHA, a branch name, a tag. The branch
-    /// itself (`refs/heads/<mem>`) must exist.
+    /// itself (the mount's declared branch) must exist.
     ///
     /// Refusal codes:
     /// - [`EngineError::UnknownMem`] (`UNKNOWN_MEM`)
@@ -979,7 +1002,8 @@ impl Engine {
     /// git-branch mounts). `ref_a` / `ref_b` are arbitrary refs the
     /// underlying git layer accepts — branch names, commit SHAs, tag
     /// names — so cross-mem diffs work via fully-qualified refs
-    /// (`refs/heads/<other-mem>`) without a separate API.
+    /// (the other mount's declared branch) without a separate API. A
+    /// bare `HEAD` token re-anchors onto this mem's declared branch.
     ///
     /// Refusal codes:
     /// - [`EngineError::UnknownMem`] (`UNKNOWN_MEM`) — no mount
@@ -1017,9 +1041,9 @@ impl Engine {
                     "mem '{mem}' is not git-backed — `memstead_diff` requires a git-branch mount",
                 )))
             }
-            MountStorage::GitBranch { gitdir, .. } => match self.git_branch_ops.as_ref() {
+            MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => {
-                    (hook.diff)(gitdir, mem, ref_a, ref_b, &config).map_err(|e| match e {
+                    (hook.diff)(gitdir, branch, mem, ref_a, ref_b, &config).map_err(|e| match e {
                         // Map the standard backend-side "ref not found" shape into the
                         // typed engine-level refusal. The git-branch dispatcher uses
                         // `BackendError::Other` with a leading marker so the engine can

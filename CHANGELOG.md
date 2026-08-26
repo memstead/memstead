@@ -8,6 +8,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Fixed
+- **Transport and diff act on the branch the mount declares.** `memstead
+  push` and `memstead pull` used to reconstruct their refs from the mem's
+  name, so a mem whose declared branch sits under a namespace
+  (`refs/heads/team/engine` for mem `engine`) could not be pushed or
+  pulled at all — the error named a ref the engine invented, and pull
+  blamed the remote for not carrying the mem. Both now derive every ref
+  (local, remote-tracking, and the pre-transfer validation ref) from the
+  mount's declared branch; the bare `HEAD` shorthand in `memstead diff`
+  and a `HEAD`-based `since` in `memstead changes` re-anchor on it too.
+  Flat workspaces, where branch and mem name coincide, behave exactly as
+  before. The pre-push schema gate additionally stops passing when it
+  could not run: validating a ref that does not resolve now refuses
+  naming the declared branch instead of silently skipping validation and
+  pushing anyway.
 - **`release-verify.sh` tells "the channel is wrong" from "I could not
   look".** On the 0.12.0 release an exhausted anonymous REST quota made the
   script render two correctly-serving channels as red, because every one of

@@ -89,10 +89,13 @@ pub fn changes_since(
     // `HEAD~5` / `^` resolve against the per-mem branch tip, not the
     // gitdir's symbolic HEAD (the dummy default branch). Only for the
     // mem-repo backend (signalled by `head_ref` being `Some`); disk-
-    // backed mems keep gitdir-HEAD semantics. The original `since` is
-    // echoed in the response and error messages.
+    // backed mems keep gitdir-HEAD semantics. The anchor is the
+    // mount's declared branch (the `head_ref` the engine passes),
+    // never a ref derived from the mem name — the two differ on
+    // namespaced mounts. The original `since` is echoed in the
+    // response and error messages.
     let resolve_since = match head_ref {
-        Some(_) => crate::ops::diff::normalise_ref_for_mem(mem_name, since),
+        Some(head) => crate::ops::diff::normalise_ref_for_branch(head, since),
         None => since.to_string(),
     };
 
