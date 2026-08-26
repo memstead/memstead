@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::divergence::{DivergenceJudge, Package, base_session_args, spawn_claude_session_with_env};
+use super::divergence::{
+    DivergenceJudge, Package, base_session_args, spawn_claude_session_with_env,
+};
 
 /// The five access surfaces. The corpus each reads is fixed by the surface; the
 /// only thing that varies across the five is how the reader is allowed to reach
@@ -104,7 +106,12 @@ pub struct Materialised {
 }
 
 /// Copy the frozen corpora into `work`, leaving the originals untouched.
-pub fn materialise(arm_a: &Path, arm_b: &Path, work: &Path, mcp_binary: &Path) -> Result<Materialised> {
+pub fn materialise(
+    arm_a: &Path,
+    arm_b: &Path,
+    work: &Path,
+    mcp_binary: &Path,
+) -> Result<Materialised> {
     let engine_workspace = work.join("engine-workspace");
     let typed_files = work.join("typed-files");
     let control_files = work.join("control-files");
@@ -357,9 +364,7 @@ pub fn run(
             let mut scores = Vec::with_capacity(trials);
             for trial in 0..trials {
                 let block = if surface == Surface::Dump {
-                    format!(
-                        "The knowledge base is reproduced in full below.\n\n{dump_corpus}"
-                    )
+                    format!("The knowledge base is reproduced in full below.\n\n{dump_corpus}")
                 } else {
                     surface.substrate_block(pkg)
                 };
