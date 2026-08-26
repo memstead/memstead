@@ -1277,6 +1277,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_SECTION",
             "UNKNOWN_METADATA_FIELD",
             "INVALID_ENUM_VALUE",
+            "INVALID_FIELD_VALUE",
             "REQUIRED_FIELD_UNSET",
             "INVALID_REL_TYPE",
             "details.declared",
@@ -1327,6 +1328,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_SECTION",
             "UNKNOWN_METADATA_FIELD",
             "INVALID_ENUM_VALUE",
+            "INVALID_FIELD_VALUE",
             "REQUIRED_FIELD_UNSET",
             "details.declared",
             "details.allowed",
@@ -2056,6 +2058,53 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
 /// extending this list fails `every_error_code_appears_in_a_description`,
 /// forcing a description touch so agents can cross-reference the `code`
 /// back to a calling tool.
+/// The relocated prose files must not grow a stray trailing newline.
+///
+/// Tool descriptions live in `crates/memstead-mcp/descriptions/**` and end
+/// with a newline like any text file; `descriptions::text` strips exactly
+/// that one. The two instruction halves cannot be trimmed, because `concat!`
+/// runs at compile time, so their files deliberately end without a newline.
+/// An editor "fixing" that would silently change the served bytes, and both
+/// strings are single-line by construction, so a newline anywhere in either
+/// is the signal.
+#[test]
+fn relocated_prose_carries_no_stray_newline() {
+    for (surface, text) in [
+        ("full", memstead_mcp::server::SERVER_INSTRUCTIONS),
+        (
+            "filesystem",
+            memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS,
+        ),
+    ] {
+        assert!(
+            !text.contains('\n'),
+            "{surface} server instructions contain a newline — a descriptions/**/server-instructions-*.md file grew a trailing newline, which changes the served bytes"
+        );
+    }
+    for (surface, tools) in [
+        ("full", McpServer::tool_router().list_all()),
+        (
+            "filesystem",
+            memstead_mcp::filesystem_server::FilesystemMcpServer::tool_router().list_all(),
+        ),
+    ] {
+        for tool in &tools {
+            let d = tool.description.as_deref().unwrap_or_default();
+            assert!(
+                !d.is_empty(),
+                "{surface}/{}: served an empty description — its descriptions/**/*.md file is missing or blank",
+                tool.name
+            );
+            assert_eq!(
+                d.trim_end(),
+                d,
+                "{surface}/{}: description ends in whitespace — its file grew a second trailing newline or trailing spaces",
+                tool.name
+            );
+        }
+    }
+}
+
 const STRUCTURED_ERROR_CODES: &[&str] = &[
     // Lookup
     "ENTITY_NOT_FOUND",
@@ -2069,6 +2118,8 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     "UNKNOWN_METADATA_FIELD",
     "UNKNOWN_ENTITY_TYPE",
     "INVALID_ENUM_VALUE",
+    "INVALID_FIELD_VALUE",
+    "SECTION_CONTENT_INVALID",
     "INVALID_REL_TYPE",
     "INVALID_REL_SHAPE",
     // Update-path rules

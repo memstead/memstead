@@ -17,6 +17,7 @@
 //! The binary entry point ([`main.rs`](main.rs)) stays thin: argument
 //! parsing, logging, then delegation into this crate.
 
+pub mod descriptions;
 pub mod error_envelope;
 pub mod error_envelopes;
 pub mod filesystem_server;

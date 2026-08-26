@@ -7,7 +7,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **The MCP tool descriptions are text files, not string literals.** Every
+  agent that touches Memstead reads them before it does anything else, which
+  makes them the product's most-read prose; as single-line literals inside a
+  17,000-line source file they were diffable only as multi-thousand-character
+  one-line changes, and no prose checker reached them, because the vocabulary
+  lint walks `.md` and `.mdx`. All 32 descriptions across both servers, plus
+  both servers' session-start instruction strings, now live under
+  `crates/memstead-mcp/descriptions/` and are compiled in with `include_str!`.
+  The served bytes are unchanged. rmcp's `#[tool(description = ...)]` accepts
+  a string literal and nothing else, so the attribute carries no description
+  and a router wrapper stamps each one in; every consumer reaches the router
+  through that wrapper.
+
 ### Fixed
+- **`INVALID_FIELD_VALUE` and `SECTION_CONTENT_INVALID` are named where the
+  schema-conformance vocabulary is listed.** Both are codes the engine can
+  produce, and both were missing from the recovery-code lists agents read: an
+  agent hitting either had no entry telling it the refusal carries a recovery
+  payload. `INVALID_FIELD_VALUE` joins its siblings in the server
+  instructions, the `create` and `update` descriptions and both dry-run
+  descriptions; `SECTION_CONTENT_INVALID` joins the instructions' canonical
+  list. The `create` and `update` descriptions sit against a hard 2048-byte
+  cap, so each dropped one repetition of a cross-reference it already makes
+  twice rather than raising the cap.
 - **Transport and diff act on the branch the mount declares.** `memstead
   push` and `memstead pull` used to reconstruct their refs from the mem's
   name, so a mem whose declared branch sits under a namespace

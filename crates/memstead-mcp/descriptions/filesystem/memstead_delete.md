@@ -1,0 +1,1 @@
+Remove an entity from the filesystem-mem workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references — v1 has no per-call force toggle on the MCP surface; use `memstead delete --force` on the CLI. The `note` lands in `.memstead/changes.jsonl` (the per-mutation changelog).

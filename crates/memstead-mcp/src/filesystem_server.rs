@@ -1047,11 +1047,10 @@ fn validation_envelope(err: memstead_base::runtime_validator::ValidationError) -
     crate::error_envelopes::validation_envelope(err)
 }
 
-#[tool_router(vis = "pub")]
+#[tool_router(router = tool_router_undescribed, vis = "pub(crate)")]
 impl FilesystemMcpServer {
     #[tool(
         name = "memstead_entity",
-        description = "Read one entity as markdown (filesystem-mem flavour). Same JSON shape as the mem-repo `memstead_entity` — envelope carries `origin` (trust class) and direction-labelled `relationships[]` (`direction: \"out\"` with `target`; with `include_relations`, additionally `direction: \"in\"` with `from`). Frontmatter carries `_hash` (content hash) for optimistic locking on follow-up mutations. Pass `sections` to narrow the rendered body; `include_relations` appends the entity's outgoing and incoming edges to both channels; `include_context` appends its community cluster.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1169,7 +1168,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_create",
-        description = "Create a new entity in the filesystem-mem workspace. Required: `title`, `entity_type`. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` refusals remain for control characters, empty-deriving titles, and over-long ids). Optional `sections`, `metadata`, `note`, `mem`. `mem` selects the target mount; omit it to land in the default writable mem (the first writable mount in declaration order). A create aimed at a read-only mount is refused with READ_ONLY_MOUNT. A `MISSING_REQUIRED_SECTION` refusal that finds required-no-default metadata fields also unset pre-announces them under `details.pre_announced.required_field_unset.missing[]` (element shape identical to `REQUIRED_FIELD_UNSET`'s `details.missing[]`) so one retry clears both gates — the block is absent when the metadata gate is satisfied. The `note` lands in `.memstead/changes.jsonl` (the filesystem-mem analogue of the mem-repo commit body). `relations` and `dry_run` are not implemented on this surface: passing a non-empty `relations` or `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — so a `dry_run` preview can never accidentally land a real write. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours both.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1263,7 +1261,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_update",
-        description = "Update an existing entity in the filesystem-mem workspace. `expected_hash` (from a previous memstead_entity read) is required — mismatch returns code HASH_MISMATCH with details.current carrying the live hash. This surface honours `sections` (replace) + `metadata` (set) + `metadata_unset` + `declare_relations` + `relations_unset`. The mem-repo `append_sections` / `patch_sections` / `dry_run` shapes are NOT implemented here: passing a non-empty `append_sections` / `patch_sections`, or `dry_run: true`, is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names them), never silently ignored — an agent that patches is told its patch was dropped instead of believing it applied. Omit them, or use the unified engine (mem-repo MCP / CLI) which honours all three.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1376,7 +1373,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_delete",
-        description = "Remove an entity from the filesystem-mem workspace. `expected_hash` is required (read first via memstead_entity); mismatch returns HASH_MISMATCH. Refuses entities with incoming references — v1 has no per-call force toggle on the MCP surface; use `memstead delete --force` on the CLI. The `note` lands in `.memstead/changes.jsonl` (the per-mutation changelog).",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
@@ -1423,7 +1419,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_relate",
-        description = "Connect or disconnect two entities with a typed relationship in the same filesystem-mem. Cross-mem targets are rejected with CROSS_MEM_RELATION (filesystem-mem is single-mem by design). `remove: true` drops the matching pair if present; otherwise the call appends. No-op paths (already present add, absent remove) succeed silently and do not append a changelog line. `dry_run` is not implemented on this surface: passing `dry_run: true` is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names it), never silently ignored — so a rehearsal can never accidentally land a real write. Omit it, or use the unified engine (mem-repo MCP / CLI) which honours it.",
         // idempotent_hint = true: relate's duplicate-add and
         // remove-nonexistent paths are typed-warning no-ops, so a retry
         // converges. Matches the mem-repo server's annotation —
@@ -1649,7 +1644,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_search",
-        description = "Search entities by lexical content + structural filters. Same JSON shape as the mem-repo `memstead_search`. The first call after engine init or any mutation pays a one-time search-index build (scales with entity count); subsequent calls reuse the cache. Pass an empty `query: {}` (or omit it) for a metadata-only structural filter — the list shape folds in here. Filters: `mem`, `entity_type`, `edge_type` (first-class engine axes), `stub`, plus `filters: { <field>: <value> }` for any schema-declared `filterable: equality` field (e.g. `{\"level\": \"M0\", \"tags\": \"auth\"}`). Strict type-narrowing: an entity whose type doesn't declare a *filterable* field is excluded (warning `FILTER_TYPE_SCOPED`); a field declared but not filterable on any reachable type is ignored — the result equals the same search without it (warning `FIELD_NOT_FILTERABLE`), never emptied, in both the scoped and unscoped case; a key no schema declares is ignored (`UNKNOWN_FILTER_KEY`). Pagination via `limit` / `offset`. Section bodies are not shipped per hit — read them with `memstead_entity`. A page is bounded to `token_budget` (default 12000): an overflowing page returns the highest-ranked hits that fit with a `SEARCH_RESULTS_TRUNCATED` warning (`kept`/`budget`) while `_total` stays the full count — page on with `offset` or raise `token_budget`.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1698,7 +1692,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_health",
-        description = "Return the workspace's health summary: orphans, stubs, missing required fields, stale entities. Same JSON shape as the mem-repo `memstead_health`, across every mounted mem. Pass `mem` to scope counts, scans, and include sections to one visible mem; a name matching no visible mem refuses `UNKNOWN_MEM` (never a clean full report); omitted serves the engine-wide sweep. `include` accepts the shared health key set — the lean surface dispatches `dangling_links` (matching the mem-repo response shape: `{from, target_id, target_path, section}`) and validates every key against the allowed set, emitting `UNKNOWN_INCLUDE_KEY` on the response's `warnings[]` for typos. `conformance` / `integrity` are dispatched too: `conformance` lints every entity against the effective schema (the pin, or `target_schema` when given) into a `findings` array of `{id, axis, code, detail}` with write-time typed codes; `integrity` adds the consistency axis (DANGLING_LINK, ORPHAN_STUB) to the same list; `anchors` adds per-mem counts of the four standalone anchor-verification states (resolved/drifted/recheck/unresolvable). `constraints` lists standing declared-constraint violations with `severity`. Other detail keys (`orphans`, `stubs`, …) are accepted but the v1 surface returns the full report regardless — narrowing is a follow-up.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1868,7 +1861,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_schema",
-        description = "Read the workspace's pinned schema as a JSON document — `ref` (canonical `name@version`), `relationship_mode`, the relationship vocabulary, `community`, `used_by[]`, top-level `origin` (`first-party` / `third-party`; a third-party schema is served structural-only with its prose-instruction fields omitted), top-level `alias_target_rel_type` (when authored — the rel-type body wiki-links `[[target]]` auto-emit), and per-type section/field detail. Accepts either `name` (bare name or canonical pin) or `mem` (the workspace's single mem). Passing both is `INVALID_INPUT`. v1 surface returns the engine's pinned schema regardless of which form is used (filesystem-mem is single-mem, single-schema). Default `verbosity` is `\"lite\"` — a cheap cold-start skeleton: entity-type names + section keys + field shapes, relationship names + endpoints, the alias pointer, prose dropped (heavy arrays ship as `types_summary`/`relationships_summary`). Pass `verbosity: \"full\"` for the complete prose payload. An unrecognized `verbosity` returns `INVALID_INPUT`. Scope full with `types: [\"<name>\", …]` for the complete prose of exactly the types you will write (unserved types listed in `types_omitted`; an unknown name refuses `UNKNOWN_ENTITY_TYPE` naming the valid set); an unscoped full exceeding `token_budget` degrades visibly — prose drops to the skeleton, `_schema_mode: \"reduced\"` + `_hint` steer to `types` — never silent truncation. Returns `ENTITY_NOT_FOUND` when `name` explicitly mismatches the pinned schema; `UNKNOWN_MEM` when `mem` is not the workspace's mem.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1993,7 +1985,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_diff",
-        description = "Return a two-ref structural diff at entity granularity. **Filesystem-mem flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed mems. Use the mem-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -2018,7 +2009,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_changes_since",
-        description = "Read the per-mutation changelog at `.memstead/changes.jsonl` since a given RFC 3339 timestamp. **Diverges from the mem-repo flavour** — filesystem-mem has no commit history, so `since` is a timestamp string (e.g. `\"2026-05-08T15:30:00.000Z\"`) and the response yields the JSONL entries with `ts > since` as a structured array. Pass an empty string or the UNIX epoch (`\"1970-01-01T00:00:00.000Z\"`) for a full dump. `mem` is honoured: it must name a visible mem, whose per-mem ledger is served; an unknown name refuses `UNKNOWN_MEM` naming the visible set (a ledger-less backend, e.g. an in-memory sketch, serves an empty list). `include_notes: true` is honoured with lean semantics: the response additionally carries `notes[]` — one entry per ledger line bearing a note, with `timestamp`, `kind`, `entity_id`, `note`, `actor`, `client` (no `sha`/`subject` — there are no commits on this substrate). `rename_similarity` is NOT implemented here (no commit history to run rename detection over): passing it is REFUSED up front with `UNSUPPORTED_PARAM` (`details.params` names it), never silently ignored — omit it, or use the unified engine (mem-repo MCP / CLI) which honours it.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -2126,7 +2116,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_rename",
-        description = "Rename an entity by changing its title. The slug, id, and on-disk file path follow. Titles accept any single-line text (control characters such as tab/newline are rejected); the title is stored verbatim as display text, while characters outside Unicode alphanumerics, whitespace, and hyphen are dropped from the derived slug — warning TITLE_CHARS_DROPPED_FROM_SLUG names them (`INVALID_TITLE` refusals remain for control characters, empty-deriving titles, and over-long ids). `expected_hash` is required. Atomic referrer rewrite: every Write-Mem entity whose relationships or section bodies point at the old id has its `[[old-slug]]` tokens rewritten in one per-mem commit; ReadOnly referrers leave a residual stub at the old id holding the surviving incoming edges.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -2168,7 +2157,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_check",
-        description = "Record a check: \"entity E checked, verdict ok | failed, via method M\" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and the mem's change history are untouched). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed here as `check_state`. Verdict vocabulary is closed (`ok` | `failed`); an unknown verdict refuses `INVALID_VERDICT`. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED`).",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -2223,7 +2211,6 @@ impl FilesystemMcpServer {
 
     #[tool(
         name = "memstead_overview",
-        description = "Start here — the cold-start entry point for a Memstead engine. Returns the schema catalogue, the mem inventory, and the community clusters as Markdown. Every visible mem is listed under `## Mems`: a writable mem carries a `durable` flag and `storage` kind (an in-memory sketch reads `durable: false` / `storage: in-memory` — writes are volatile, evicted on session-TTL / restart), and a read-only mount carries `Access: read-only`, its deployment-declared trust `Origin` (`first-party` / `third-party`), and its own entity count. Per-mem counts, `_entity_count`, and the communities section always agree — one rendering authority. Schemas list as `{ref, description}` only — call `memstead_schema(name=<ref>)` for full per-type bodies. Token-budget-driven: hard-required content (mems, schema, community titles) always ships; heavy content greedy-fills the remaining budget by default-priority. Anything that didn't fit is advertised under `## Hints` with `estimated_tokens`; re-query by passing `key` into `include[]`. Allowed `include` keys: `community_members`, `community_bridges`, `mem_distribution`, `dangling_links`. `mem` scopes the roster, schema anchor, and communities to any one visible mem (a read-only mount included); a name matching no visible mem returns `UNKNOWN_MEM` whose list names every visible mem. Set `rebuild: true` to invalidate the community memo before computing — it recomputes the whole-graph Louvain partition (detection is global; there is no per-subgraph scoping). A small or disconnected subgraph may surface as no cluster: sparsely-connected / edge-less nodes collapse into a single catch-all rather than forming their own cluster. This surface carries no mem-lifecycle tools, so the `## Lifecycle Namespaces` section is omitted. Frontmatter `_overview_mode` is \"complete\", \"reduced\", or \"overbudget\"; `_mem_schema` appears only under a `mem` filter; `_workspace_root` is the serving engine's absolute workspace path (omitted for rootless in-memory engines).",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -2289,11 +2276,22 @@ impl FilesystemMcpServer {
 /// baked in at compile time; the roster must name every tool this
 /// flavour registers (bidirectionally test-enforced).
 pub const FS_SERVER_INSTRUCTIONS: &str = concat!(
-    "Memstead: schema-agnostic graph engine over typed, interconnected markdown entities. Each mem is a typed model of a chosen subject — its modal flavour (knowledge, planning, inquiry, spec, or any mix) follows from the schema the mem pins. Granularity: a mem is the packaged unit — a whole typed model, designed for 1,000-5,000 entities (operating costs measured in docs/sizing-curve.md; larger holdings work at proportionally higher load cost); an entity is never called a mem (a mem is not one 'memory'/fact). Cold-start: call memstead_overview first for the schema catalogue and mem inventory; read a mem's schema via memstead_schema before mutating.",
-    " Engine version: ",
+    include_str!("../descriptions/filesystem/server-instructions-head.md"),
     env!("CARGO_PKG_VERSION"),
-    " — serverInfo.version carries the same value; a version different from your last session means this surface may have changed: re-read the roster below. Tool roster (complete, 13 tools): READ — memstead_overview (workspace dashboard: schemas, mems, communities, quarantine roster), memstead_entity (one entity + _hash), memstead_search (text + metadata filter), memstead_schema (the pinned schema, lite/full), memstead_health (drift, conformance, quarantine roster, boot diagnosis), memstead_diff (two-ref structural diff), memstead_changes_since (change deltas for incremental sync). WRITE — memstead_create, memstead_update, memstead_relate, memstead_rename, memstead_delete (entity mutations, optimistic _hash locking). PROCESS — memstead_check (record a check of one entity: verdict ok|failed with method note; never a mutation — derived check state serves in memstead_entity's opt-in provenance block). CLI companion: the `memstead` CLI serves this same engine with verb families that deliberately do not live on this surface — bulk mutation (batch-create, batch-update, batch-relate: reach for these instead of looping single MCP mutation calls when writing many entities), archive export (export), distribution/registry (publish, unpublish, login, logout, domain), workspace bootstrap and repair (init, quickstart, projection migrate, schema install), and read/report verbs (status, list, context, due — the due-brief: open entities whose schema-declared due date falls inside a window, overdue first). If a task feels like N repetitive single-entity calls, check the CLI first."
+    include_str!("../descriptions/filesystem/server-instructions-tail.md"),
 );
+
+impl FilesystemMcpServer {
+    /// The tool router every consumer uses: the macro-generated routes with
+    /// each description stamped in from `descriptions::FILESYSTEM`. See
+    /// `McpServer::tool_router` for why the prose cannot live in the
+    /// attribute.
+    pub fn tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        let mut router = Self::tool_router_undescribed();
+        crate::descriptions::apply(&mut router, crate::descriptions::FILESYSTEM);
+        router
+    }
+}
 
 #[tool_handler(router = FilesystemMcpServer::tool_router())]
 impl ServerHandler for FilesystemMcpServer {
