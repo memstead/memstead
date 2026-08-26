@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:07Z
-last_modified: 2026-08-23T14:45:36Z
+last_modified: 2026-08-26T08:03:27Z
 status: accepted
 decided_on: 2026-07-11
 deciders: operator
@@ -26,7 +26,6 @@ Operator decision, 2026-07-11, after the projection-pipeline bundle completed. T
 
 ## Relationships
 - **REFERENCES**: [[plugin:auto-commit-hook]]
-- **REFERENCES**: [[plugin:outer-commit-skill]]
 
 ## Options
 
@@ -34,7 +33,7 @@ Operator decision, 2026-07-11, after the projection-pipeline bundle completed. T
 
 ## Notes
 
-Realized in public plugin release 0.4.0 (skill + hook family deletion, hooks.json, lint roster, docs regen). The retired surfaces' graph records: [[plugin--outer-commit-skill]], [[plugin--auto-commit-hook]] (both marked HISTORICAL, stability frozen).
+Realized in public plugin release 0.4.0 (skill + hook family deletion, hooks.json, lint roster, docs regen). The retired surfaces' graph records: `outer-commit-skill`, [[plugin--auto-commit-hook]] (both marked HISTORICAL, stability frozen).
 
 
 The "seven skills" roster count recorded in this decision was accurate at decision time; the same-day plugin diet (plugin 0.5.0) later folded /verify into /sync `--verify`, making the roster **six**.
