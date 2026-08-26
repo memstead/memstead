@@ -389,8 +389,7 @@ pub fn collect_dangling_cross_mem_edges_from_bytes(
     let mut parse_results = Vec::with_capacity(entries.markdown_files.len());
     for md in &entries.markdown_files {
         let raw = md.content.as_str();
-        let raw_stripped = raw.strip_prefix('\u{feff}').unwrap_or(raw);
-        let type_name = crate::entity::parser::peek_type_from_frontmatter(raw_stripped);
+        let type_name = crate::entity::parser::peek_type_from_frontmatter(raw);
         let peeked_schema = type_name
             .as_deref()
             .and_then(|n| {
@@ -401,13 +400,9 @@ pub fn collect_dangling_cross_mem_edges_from_bytes(
             })
             .unwrap_or_else(|| fallback_schema.clone());
 
-        let parse_result = crate::entity::parser::parse_markdown(
-            raw_stripped,
-            &md.path,
-            &peeked_schema,
-            &config.name,
-        )
-        .map_err(|e| map_parse_error(&md.path, &e))?;
+        let parse_result =
+            crate::entity::parser::parse_markdown(raw, &md.path, &peeked_schema, &config.name)
+                .map_err(|e| map_parse_error(&md.path, &e))?;
         parse_results.push(parse_result);
     }
 
@@ -459,9 +454,8 @@ fn validate_impl(
     let mut parse_results = Vec::with_capacity(entries.markdown_files.len());
     for md in &entries.markdown_files {
         let raw = md.content.as_str();
-        let raw_stripped = raw.strip_prefix('\u{feff}').unwrap_or(raw);
 
-        let type_name = crate::entity::parser::peek_type_from_frontmatter(raw_stripped);
+        let type_name = crate::entity::parser::peek_type_from_frontmatter(raw);
         let peeked_schema = type_name
             .as_deref()
             .and_then(|n| {
@@ -472,13 +466,9 @@ fn validate_impl(
             })
             .unwrap_or_else(|| fallback_schema.clone());
 
-        let parse_result = crate::entity::parser::parse_markdown(
-            raw_stripped,
-            &md.path,
-            &peeked_schema,
-            &config.name,
-        )
-        .map_err(|e| map_parse_error(&md.path, &e))?;
+        let parse_result =
+            crate::entity::parser::parse_markdown(raw, &md.path, &peeked_schema, &config.name)
+                .map_err(|e| map_parse_error(&md.path, &e))?;
 
         strict::validate_strict(raw, &parse_result.entity, &peeked_schema, &md.path)?;
 

@@ -12,7 +12,7 @@ use regex::Regex;
 
 use super::ValidationError;
 use crate::entity::id::wiki_link_to_id;
-use crate::entity::parser::{mask_code_blocks, split_sections};
+use crate::entity::parser::{Frontmatter, mask_code_blocks, split_sections};
 use crate::entity::{Entity, MetadataValue};
 
 /// Run every strict check against one entity. `raw_bytes` is the
@@ -24,9 +24,10 @@ pub fn validate_strict(
     schema: &TypeDefinition,
     path: &str,
 ) -> Result<(), ValidationError> {
-    let raw = strip_bom(raw_bytes);
-
-    let (meta_block, body) = split_frontmatter_strict(raw, path)?;
+    // No byte-order-mark strip here: `split_frontmatter_core` owns it, and a
+    // second strip is how the two paths came to disagree about where a
+    // document begins.
+    let (meta_block, body) = split_frontmatter_strict(raw_bytes, path)?;
     check_metadata(meta_block, entity, schema, path)?;
     check_title_presence(body, path)?;
     check_sections_present(entity, schema, path)?;
@@ -38,10 +39,6 @@ pub fn validate_strict(
     Ok(())
 }
 
-fn strip_bom(s: &str) -> &str {
-    s.strip_prefix('\u{feff}').unwrap_or(s)
-}
-
 /// Verify the frontmatter opens with `---` on the first line and
 /// closes with `\n---`. Returns (metadata block text, body text).
 /// Body excludes the closing `\n---` line and the newline after it.
@@ -49,34 +46,20 @@ pub(crate) fn split_frontmatter_strict<'a>(
     raw: &'a str,
     path: &str,
 ) -> Result<(&'a str, &'a str), ValidationError> {
-    let after_open_len = if raw.starts_with("---\n") {
-        4
-    } else if raw.starts_with("---\r\n") {
-        5
-    } else {
-        return Err(ValidationError::MissingFrontmatter {
+    // The refusing wrapper. The arithmetic is `split_frontmatter_core`'s; what
+    // is strict here is only that each failure becomes a typed error instead
+    // of a degradation, and those refusals are wire-visible at archive
+    // ingress.
+    match crate::entity::parser::split_frontmatter_core(raw).1 {
+        Frontmatter::Present { meta, body } => Ok((meta, body)),
+        Frontmatter::NoOpeningDelimiter => Err(ValidationError::MissingFrontmatter {
             path: path.to_string(),
-        });
-    };
-
-    let after_open = &raw[after_open_len..];
-    let close_pos =
-        after_open
-            .find("\n---")
-            .ok_or_else(|| ValidationError::InvalidFrontmatter {
-                path: path.to_string(),
-                reason: "frontmatter block is not closed with `\\n---`".to_string(),
-            })?;
-    let meta_block = &after_open[..close_pos];
-
-    let body_start_rel = close_pos + "\n---".len();
-    let body_rest = &after_open[body_start_rel..];
-    let body = body_rest
-        .strip_prefix("\r\n")
-        .or_else(|| body_rest.strip_prefix('\n'))
-        .unwrap_or(body_rest);
-
-    Ok((meta_block, body))
+        }),
+        Frontmatter::Unclosed => Err(ValidationError::InvalidFrontmatter {
+            path: path.to_string(),
+            reason: "frontmatter block is not closed with `\\n---`".to_string(),
+        }),
+    }
 }
 
 fn check_metadata(
@@ -763,9 +746,10 @@ Design notes.
 
     #[test]
     fn accepts_leading_bom() {
-        // The BOM is stripped by the archive extraction layer before
-        // parse_markdown sees the bytes — mirror that here. The strict
-        // checker also tolerates BOM on the raw pass (defense-in-depth).
+        // Nothing upstream strips the mark: archive extraction keeps the
+        // raw bytes so offset reporting stays truthful, and `validate_strict`
+        // hands them straight to the core, which strips. Both the marked and
+        // the unmarked form must therefore validate identically.
         let raw = format!("\u{feff}{MINIMAL_SPEC}");
         let stripped = raw.strip_prefix('\u{feff}').unwrap();
         let entity = parse(stripped);

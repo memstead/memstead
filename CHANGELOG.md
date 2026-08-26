@@ -8,6 +8,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **The frontmatter delimiter contract has one implementation.** The tolerant
+  split, the borrowing peek and the strict validator each carried their own
+  copy of the same ten lines of offset arithmetic, held in step only by a
+  differential property test, and the byte-order-mark was stripped in four
+  places under three different conventions (one of which had already lost a
+  marked file's entire frontmatter). All three are now thin wrappers over
+  `split_frontmatter_core`, which strips the mark once and returns borrowed
+  slices; the wrappers differ only in what they do with a missing or unclosed
+  block, which is the only thing that ever differed. Behaviour is unchanged and
+  was proved so: the pre-consolidation implementations were kept alongside the
+  core and compared over 12,017 cases (the generated adversarial space plus the
+  committed corpus) before being removed. The differential property retired
+  with the duplication it existed to hold in step; the corpus replay stays, now
+  exercising the core.
+
+  One behaviour did move, and it is a latent inconsistency the consolidation
+  exposed rather than a regression: archive validation used to strip the mark
+  before handing bytes to the parser, so a marked file inside an archive was
+  content-hashed without its mark while the same file read locally was hashed
+  with it. Both paths now hash the bytes as they arrived, so the two agree.
 - **The MCP tool descriptions are text files, not string literals.** Every
   agent that touches Memstead reads them before it does anything else, which
   makes them the product's most-read prose; as single-line literals inside a

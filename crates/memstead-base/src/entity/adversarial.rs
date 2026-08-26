@@ -10,14 +10,13 @@
 //! - **No panic**: no input panics any entry point — for the tolerant
 //!   parser, whose only refusal branch is I/O, crash and invariant break
 //!   are the only observable failures, so this is the load-bearing check.
-//! - **Boundary agreement**: the three frontmatter implementations (the
-//!   tolerant [`super::parser::split_frontmatter`], the borrowing
-//!   [`super::parser::body_after_frontmatter`] peek, and the strict
-//!   [`crate::validator::strict::split_frontmatter_strict`]) agree on where
-//!   frontmatter ends and the body begins. Strict's refusal domain maps
-//!   exactly onto the tolerant path's whole-input-is-body degradation —
-//!   an input strict refuses must never yield frontmatter tolerantly, and
-//!   an input strict accepts must split identically everywhere.
+//! - **Wrapper contracts**: there is ONE frontmatter implementation since
+//!   consistency-sweep 02/01, so the three-way boundary agreement this module
+//!   used to assert retired with the duplication it held in step. What the
+//!   wrappers still owe is checked instead: the peek returns a suffix slice of
+//!   the caller's own buffer (two callers recover the frontmatter prefix by
+//!   subtracting its length), and strict refuses exactly where the tolerant
+//!   path degrades to whole-input-as-body.
 //! - **Masking is offset-safe**: both masks preserve byte length and every
 //!   newline position, which is the implicit invariant all the
 //!   match-on-masked / slice-from-original arithmetic rests on.
@@ -192,36 +191,33 @@ fn exercise(input: &str) {
     let _ = parser::peek_title_and_type(input);
 
     let baf = parser::body_after_frontmatter(input);
-    let (meta, body) = split_frontmatter(input).expect("tolerant split refused a string input");
+    let (_meta, body) = split_frontmatter(input).expect("tolerant split refused a string input");
 
-    // Boundary agreement across the three implementations. Strict's
-    // caller contract strips a BOM before the split; the tolerant family
-    // must land on the same boundary for the same document.
+    // No comparison between frontmatter implementations remains here. The
+    // three-way agreement retired with the duplication it held in step
+    // (consistency-sweep 02/01), and a two-way comparison over one core would
+    // test the wrappers rather than the arithmetic. What is left is a property
+    // of the core itself.
+    //
+    // The peek must return a SUFFIX SLICE of the caller's own buffer: two
+    // callers recover the frontmatter prefix by subtracting the body's length,
+    // so a core that copied or normalised would break them silently.
     let stripped = input.strip_prefix('\u{feff}').unwrap_or(input);
-    match split_frontmatter_strict(stripped, "fuzz.md") {
-        Ok((smeta, sbody)) => {
-            assert_eq!(
-                meta, smeta,
-                "tolerant and strict disagree on the frontmatter block"
-            );
-            assert_eq!(body, sbody, "tolerant and strict disagree on the body");
-            assert_eq!(baf, sbody, "peek and strict disagree on the body");
-        }
-        Err(_) => {
-            assert!(
-                meta.is_empty(),
-                "strict refused but the tolerant split extracted frontmatter"
-            );
-            assert_eq!(
-                body, stripped,
-                "strict refused but the tolerant split did not degrade to whole-input body"
-            );
-            assert_eq!(
-                baf, stripped,
-                "strict refused but the peek did not degrade to whole-input body"
-            );
-        }
-    }
+    let base = stripped.as_ptr() as usize;
+    let at = baf.as_ptr() as usize;
+    // A SUFFIX, not merely a subslice: it must end where the buffer ends.
+    // Containment alone would accept a core that trimmed a trailing byte, and
+    // the two subtracting callers would then recover a prefix that is one byte
+    // too long.
+    assert!(at >= base, "the peek left the caller's buffer");
+    assert_eq!(
+        at + baf.len(),
+        base + stripped.len(),
+        "the peek stopped returning a SUFFIX slice of the caller's buffer"
+    );
+    // Strict is exercised for panic-freedom, not compared: with one core,
+    // asserting that two wrappers over it agree tests the wrappers.
+    let _ = split_frontmatter_strict(input, "fuzz.md");
 
     // Masking preserves byte length and every newline position — the
     // invariant all match-on-masked / slice-from-original arithmetic
@@ -287,6 +283,14 @@ fn committed_frontmatter_corpus_replays() {
     assert!(replayed > 0, "corpus dir exists but replayed nothing");
 }
 
+/// The adversarial smoke tier, minus the differential the consolidation
+/// retired. What it still holds is not what the three-implementation property
+/// held: no input panics any entry point (the tolerant parser's only refusal
+/// branch is I/O, so a crash or a broken invariant is the only observable
+/// failure), the masks preserve byte length and newline positions, and
+/// parse-then-generate is an immediate fixpoint. None of that is a comparison
+/// between implementations, so none of it retired with the duplication, and
+/// the 17-file corpus is far too small to carry it alone.
 #[test]
 fn frontmatter_family_survives_adversarial_inputs() {
     for seed in [0x5eed_f001_u64, 0x5eed_f002, 0x5eed_f003] {

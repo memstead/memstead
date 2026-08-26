@@ -191,23 +191,78 @@ pub fn parse_file(
 // Frontmatter
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The frontmatter delimiter contract — one implementation
+// ---------------------------------------------------------------------------
+
+/// What a document's leading `---` block turned out to be.
+///
+/// The three historical readers differed only in what they did with these
+/// three cases, never in how they found them: the tolerant path degraded on
+/// both failures, the peek borrowed and degraded, the strict path refused with
+/// a different typed error for each. That difference belongs to the wrappers;
+/// the arithmetic below belongs here, once.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Frontmatter<'a> {
+    /// A closed block. Both slices borrow the input.
+    Present { meta: &'a str, body: &'a str },
+    /// The document does not open with `---` on its first line.
+    NoOpeningDelimiter,
+    /// It opens but never closes with `\n---`.
+    Unclosed,
+}
+
+/// Split a document at its frontmatter delimiters.
+///
+/// Returns the byte-order-mark-stripped input alongside the verdict, because
+/// every caller that degrades to "the whole document is body" must degrade to
+/// the *stripped* document: a marked local file once parsed as all body and
+/// lost its entire frontmatter precisely because two paths disagreed about
+/// where the document began. **The mark is stripped here and nowhere else.**
+///
+/// Both returned slices are suffixes of the returned `stripped` slice, which
+/// is itself a suffix of `content`. Two callers recover the frontmatter prefix
+/// by subtracting the body's length, so a core that copied or normalised
+/// anything would break them silently.
+pub(crate) fn split_frontmatter_core(content: &str) -> (&str, Frontmatter<'_>) {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+
+    let after_open = if content.starts_with("---\r\n") {
+        5
+    } else if content.starts_with("---\n") {
+        4
+    } else {
+        return (content, Frontmatter::NoOpeningDelimiter);
+    };
+
+    let rest = &content[after_open..];
+    let Some(close_pos) = rest.find("\n---") else {
+        return (content, Frontmatter::Unclosed);
+    };
+    let meta = &rest[..close_pos];
+
+    let body_rest = &rest[close_pos + "\n---".len()..];
+    let body = body_rest
+        .strip_prefix("\r\n")
+        .or_else(|| body_rest.strip_prefix('\n'))
+        .unwrap_or(body_rest);
+
+    (content, Frontmatter::Present { meta, body })
+}
+
 /// Extract the `type:` value from frontmatter without running the full parser.
 ///
 /// Used by the loader to resolve each file's type independently — the mem
 /// config's default type is only a fallback for files that don't declare one.
 /// Returns None if there's no frontmatter, no `type:` line, or it's empty.
 pub fn peek_type_from_frontmatter(content: &str) -> Option<String> {
-    let content = strip_bom(content);
-    let after_open = if content.starts_with("---\r\n") {
-        5
-    } else if content.starts_with("---\n") {
-        4
-    } else {
+    let (_, split) = split_frontmatter_core(content);
+    let Frontmatter::Present {
+        meta: frontmatter, ..
+    } = split
+    else {
         return None;
     };
-
-    let close_pos = content[after_open..].find("\n---")?;
-    let frontmatter = &content[after_open..after_open + close_pos];
 
     for line in frontmatter.lines() {
         let trimmed = line.trim();
@@ -265,61 +320,23 @@ pub fn peek_title_and_type(content: &str) -> (Option<String>, Option<String>) {
 /// engine that hold one already pass section bodies. A caller holding
 /// a raw file or git blob does not, and must trim it here first.
 pub fn body_after_frontmatter(content: &str) -> &str {
-    let content = strip_bom(content);
-    let after_open = if content.starts_with("---\r\n") {
-        5
-    } else if content.starts_with("---\n") {
-        4
-    } else {
-        return content;
-    };
-    let Some(close_pos) = content[after_open..].find("\n---") else {
-        return content;
-    };
-    let body_start = after_open + close_pos + 4; // past "\n---"
-    let rest = &content[body_start..];
-    rest.strip_prefix("\r\n")
-        .or_else(|| rest.strip_prefix('\n'))
-        .unwrap_or(rest)
-}
-
-/// Strip a leading UTF-8 BOM. The strict validator and the archive
-/// extraction layer both strip it before their frontmatter split; the
-/// tolerant family must land on the same boundary for the same document
-/// — before this, a BOM'd local file silently parsed as all-body and
-/// lost its entire frontmatter (the archive path was unaffected).
-fn strip_bom(s: &str) -> &str {
-    s.strip_prefix('\u{feff}').unwrap_or(s)
+    match split_frontmatter_core(content) {
+        (_, Frontmatter::Present { body, .. }) => body,
+        (stripped, _) => stripped,
+    }
 }
 
 /// Split content into frontmatter metadata string and body.
 /// Returns (metadata_string, body). Both boundaries are found in the
 /// raw content — the caller masks the body afterwards.
 pub(crate) fn split_frontmatter(content: &str) -> Result<(String, String), ParseError> {
-    let content = strip_bom(content);
-    // Look for YAML frontmatter: ---\n...\n---
-    if content.starts_with("---\n") || content.starts_with("---\r\n") {
-        let after_open = if content.starts_with("---\r\n") { 5 } else { 4 };
-        // Find closing ---
-        if let Some(close_pos) = content[after_open..].find("\n---") {
-            let meta_end = after_open + close_pos;
-            let metadata = content[after_open..meta_end].to_string();
-            // Body starts after the closing --- and its newline
-            let body_start = meta_end + 4; // "\n---"
-            let body_start = if content[body_start..].starts_with('\n') {
-                body_start + 1
-            } else if content[body_start..].starts_with("\r\n") {
-                body_start + 2
-            } else {
-                body_start
-            };
-            let body = content[body_start..].to_string();
-            return Ok((metadata, body));
-        }
+    // The every-local-read path: it never refuses. A document with no opening
+    // delimiter, or an unclosed block, is entirely body — a hand-edited file
+    // without frontmatter must still load.
+    match split_frontmatter_core(content) {
+        (_, Frontmatter::Present { meta, body }) => Ok((meta.to_string(), body.to_string())),
+        (stripped, _) => Ok((String::new(), stripped.to_string())),
     }
-
-    // No frontmatter found — entire content is body
-    Ok((String::new(), content.to_string()))
 }
 
 /// Parse metadata key-value pairs with JS-compatible type coercion.
@@ -1429,10 +1446,11 @@ Real content after code block.
     }
 
     // Fixture pinned by the adversarial harness (seed 0x5eedf001, case 224):
-    // a BOM'd file parsed tolerantly as all-body — the entire frontmatter
-    // was silently lost — while the strict validator and the archive path
-    // strip the BOM and see the frontmatter. All three implementations
-    // must land on the same boundary for the same document.
+    // a BOM'd file parsed tolerantly as all-body, losing its entire
+    // frontmatter, while the strict validator and the archive path stripped
+    // the mark and saw it. That divergence is why the mark is now stripped in
+    // `split_frontmatter_core` and nowhere else: one implementation cannot
+    // disagree with itself about where a document begins.
     #[test]
     fn bom_prefixed_frontmatter_is_recognized() {
         let md = "\u{feff}---\ntype: spec\n---\n# Bom Entity\n\n## Identity\n\nBody.\n";

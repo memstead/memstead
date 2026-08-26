@@ -1,8 +1,11 @@
 //! Coverage-guided fuzzing of the frontmatter/markdown parser family
 //! through its public entry points. The invariants mirror the seeded
-//! smoke tier (`memstead-base/src/entity/adversarial.rs`); the
-//! differential three-implementations property lives only there (it
-//! needs `pub(crate)` seams). Findings are fixed at the parser and
+//! smoke tier (`memstead-base/src/entity/adversarial.rs`). The
+//! differential three-implementations property that used to live there
+//! retired with the duplication it held in step (consistency-sweep
+//! 02/01): there is one `split_frontmatter_core` now, so what both
+//! tiers assert is panic-freedom, the mask invariants and the
+//! parse-generate fixpoint. Findings are fixed at the parser and
 //! pinned as fixture regression tests in the normal suite — never
 //! closed by widening acceptance.
 
