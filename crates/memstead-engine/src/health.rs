@@ -690,6 +690,19 @@ pub fn compose_health(
         );
     }
 
+    // `include=["ledger"]` — a folder mem's ledger set against its file set
+    // (04/04, criteria 1 and 2). Reads only: no ledger line is written,
+    // rewritten or removed and no file is touched, because writing lines for
+    // edits the engine did not author would fabricate provenance for a change
+    // it cannot attribute. Git-branch mems are absent from the map rather than
+    // present and clean (criterion 4).
+    if include.iter().any(|s| s == "ledger") {
+        obj.insert(
+            "ledger".into(),
+            serde_json::to_value(engine.ledger_reconciliation()).unwrap_or_default(),
+        );
+    }
+
     // Workspace policy surface — opt-in via `include_config: true`
     // (the documented boolean alias) OR the catalogue key
     // `include=["config"]`; both render the same projection, and

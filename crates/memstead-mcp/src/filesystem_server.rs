@@ -218,6 +218,22 @@ fn mem_is_durable(engine: &memstead_base::Engine, mem: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// What the durability marker for `mem` was derived from. Rides beside
+/// `durable` so a caller cannot read the mount-kind answer as a stronger one
+/// (04/04, criterion 7). The parity twin of the mem-repo server's.
+fn mem_durability_basis(engine: &memstead_base::Engine, mem: &str) -> &'static str {
+    engine
+        .mounts()
+        .iter()
+        .find(|m| m.mem == mem)
+        .map(|m| {
+            m.storage
+                .durability_basis(engine.mem_head_sha(mem).ok().flatten().as_deref())
+                .as_wire()
+        })
+        .unwrap_or("inferred-from-mount-kind")
+}
+
 /// Refuse params the filesystem-mem MCP surface does not honour rather
 /// than silently dropping them (Plan 03, Part B). Each `(name, meaningful)`
 /// pair flags a param this surface hardwires off; `meaningful` is true when
@@ -1247,6 +1263,7 @@ impl FilesystemMcpServer {
                 // synthesis used to emit. commit_sha + title +
                 // mem are now first-class on the outcome.
                 let durable = mem_is_durable(&engine, &outcome.mem);
+                let durability_basis = mem_durability_basis(&engine, &outcome.mem);
                 let body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "title": outcome.title,
@@ -1255,6 +1272,7 @@ impl FilesystemMcpServer {
                     "_hash": outcome.content_hash,
                     "commit_sha": outcome.commit_sha,
                     "durable": durable,
+                    "durability_basis": durability_basis,
                     "warnings": outcome.warnings,
                     "type_guidance": outcome.type_guidance,
                 });
@@ -1372,11 +1390,13 @@ impl FilesystemMcpServer {
         match engine.update_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let durable = mem_is_durable(&engine, outcome.id.mem());
+                let durability_basis = mem_durability_basis(&engine, outcome.id.mem());
                 let body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
                     "durable": durable,
+                    "durability_basis": durability_basis,
                     "modified_sections": outcome.modified_sections.replaced,
                     "modified_metadata_set": outcome.modified_metadata.set,
                     "modified_metadata_unset": outcome.modified_metadata.unset,
@@ -1433,11 +1453,13 @@ impl FilesystemMcpServer {
         match engine.delete_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let durable = mem_is_durable(&engine, outcome.id.mem());
+                let durability_basis = mem_durability_basis(&engine, outcome.id.mem());
                 let body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "file_path": outcome.file_path,
                     "removed_incoming": outcome.removed_incoming,
                     "durable": durable,
+                    "durability_basis": durability_basis,
                     // Engine-emitted warnings (residual-stub demotion,
                     // and `NOTE_MISSING` under `require_notes`).
                     "warnings": outcome.warnings,
@@ -1515,6 +1537,7 @@ impl FilesystemMcpServer {
                         RelateAction::NoOpAlreadyPresent | RelateAction::NoOpAbsent => "noop",
                     };
                     let durable = mem_is_durable(&engine, outcome.from.mem());
+                    let durability_basis = mem_durability_basis(&engine, outcome.from.mem());
                     let body = serde_json::json!({
                         "results": [{
                             "from": outcome.from.to_string(),
@@ -1526,6 +1549,7 @@ impl FilesystemMcpServer {
                         }],
                         "commit_sha": outcome.commit_sha,
                         "durable": durable,
+                    "durability_basis": durability_basis,
                         "warnings": outcome.warnings,
                         "orphan_stubs_removed": outcome
                             .orphan_stubs_removed
@@ -1848,7 +1872,9 @@ impl FilesystemMcpServer {
         let wants_checks = include.iter().any(|s| s == "checks");
         let wants_signals = include.iter().any(|s| s == "signals");
         let wants_labelling = include.iter().any(|s| s == "labelling");
-        if wants_body_observations
+        let wants_ledger = include.iter().any(|s| s == "ledger");
+        if wants_ledger
+            || wants_body_observations
             || wants_anchors
             || wants_constraints
             || wants_friction
@@ -1862,6 +1888,16 @@ impl FilesystemMcpServer {
                 Ok(v) => v,
                 Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
             };
+            if wants_ledger {
+                // The lean server is the agent surface for FOLDER mems, which
+                // are the only mems this axis can say anything about. It
+                // computed `wants_ledger` and inserted nothing, so the key the
+                // instructions advertise came back empty from the one server
+                // that could fill it (04/04, criterion 11, found by the plan's
+                // grade).
+                value["ledger"] =
+                    serde_json::to_value(engine.ledger_reconciliation()).unwrap_or_default();
+            }
             if let Some(obs) = body_observations {
                 value["body_observations"] =
                     serde_json::to_value(obs).unwrap_or(serde_json::Value::Null);
@@ -2186,6 +2222,7 @@ impl FilesystemMcpServer {
         match engine.rename_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let durable = mem_is_durable(&engine, outcome.new_id.mem());
+                let durability_basis = mem_durability_basis(&engine, outcome.new_id.mem());
                 let body = serde_json::json!({
                     "old_id": outcome.old_id.to_string(),
                     "new_id": outcome.new_id.to_string(),
@@ -2193,6 +2230,7 @@ impl FilesystemMcpServer {
                     "new_file_path": outcome.new_path,
                     "_hash": outcome.content_hash,
                     "durable": durable,
+                    "durability_basis": durability_basis,
                     // Engine-emitted warnings (slug-noop, and
                     // `NOTE_MISSING` under `require_notes`).
                     "warnings": outcome.warnings,

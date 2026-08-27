@@ -608,6 +608,20 @@ pub enum WarningHint {
         new_head: String,
         entities_loaded: usize,
     },
+    /// `OUT_OF_BAND_EDITS_UNDETECTED`: this folder mem's drift cursor is its
+    /// own change ledger, which only the engine writes, so an edit made to the
+    /// files by anything else advances nothing (04/04, criterion 3).
+    ///
+    /// The engine keeps serving pre-edit content and `changes_since` reports
+    /// the edit as never having happened. It is not fixable cheaply: the
+    /// staleness probe runs before every operation, and turning it into a
+    /// directory walk would change the cost profile of the whole folder
+    /// backend. So the engine says it cannot detect them rather than staying
+    /// quiet, and `memstead health --include ledger` reconciles on demand.
+    ///
+    /// Never fires for a git-branch mem: its change set is a real two-tree
+    /// diff, so the condition cannot arise.
+    OutOfBandEditsUndetected { mem: String },
     /// A config write found the stored config had moved on from what this
     /// engine last observed: another writer changed it in between
     /// (consistency-sweep 04/03, criterion 3).
@@ -771,6 +785,11 @@ pub enum WarningHint {
         running_engine: String,
         /// Resolved schema the last mutation validated against.
         stamped_schema: String,
+        /// Which way the versions differ. Present because "they differ" left
+        /// the reader to work out whether their binary was ahead of the mem
+        /// or behind it, which is the only part that changes what they should
+        /// do (04/04, criterion 8).
+        direction: crate::build_info::SkewDirection,
     },
     /// Generation-behind hint: the mem's pinned schema resolved from
     /// the BUILT-IN catalogue and the catalogue registers at least
@@ -1553,6 +1572,13 @@ impl fmt::Display for WarningHint {
                  and dropped the rest. The next read-modify-write will \
                  collapse the markdown to one heading."
             ),
+            WarningHint::OutOfBandEditsUndetected { mem } => write!(
+                f,
+                "mem '{mem}' is folder-backed, so its drift cursor is its own change ledger and \
+                 only the engine writes it: an edit made to its files by anything else is not \
+                 detected, and reads keep serving the pre-edit content. Reconcile on demand with \
+                 `memstead health --include ledger`.",
+            ),
             WarningHint::ConfigWriteIntervened { mem, fields } => write!(
                 f,
                 "mem '{mem}' config had changed since this engine last read it: another writer \
@@ -1712,14 +1738,21 @@ impl fmt::Display for WarningHint {
                 stamped_engine,
                 running_engine,
                 stamped_schema,
+                direction,
             } => write!(
                 f,
                 "mem '{mem}': the last mutation was performed by engine \
                  v{stamped_engine} (against schema {stamped_schema}); \
-                 this binary is engine v{running_engine}. Informative \
+                 this binary is engine v{running_engine} ({}). Informative \
                  only — the next mutation re-stamps. If behaviour \
                  differs from the last session, the binary changed \
                  between them.",
+                match direction {
+                    crate::build_info::SkewDirection::StampedNewer =>
+                        "the mem was last written by a NEWER binary than this one",
+                    crate::build_info::SkewDirection::StampedOlder =>
+                        "the mem was last written by an OLDER binary than this one",
+                },
             ),
             WarningHint::SchemaGenerationsBehind {
                 mem,
@@ -1916,6 +1949,7 @@ impl WarningHint {
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::ConfigWriteIntervened { .. } => "CONFIG_WRITE_INTERVENED",
+            Self::OutOfBandEditsUndetected { .. } => "OUT_OF_BAND_EDITS_UNDETECTED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::MountUnbacked { .. } => "MOUNT_UNBACKED",
             Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
@@ -2016,6 +2050,7 @@ impl WarningHint {
                 stamped_engine: "0.3.0".into(),
                 running_engine: "0.4.0".into(),
                 stamped_schema: "default@1.0.0".into(),
+                direction: crate::build_info::SkewDirection::StampedOlder,
             },
             WarningHint::SchemaGenerationsBehind {
                 mem: "m".into(),
@@ -2175,6 +2210,9 @@ impl WarningHint {
                 mem: "test-mem-plugin".into(),
                 fields: vec!["description".into()],
             },
+            WarningHint::OutOfBandEditsUndetected {
+                mem: "test-mem-plugin".into(),
+            },
             WarningHint::MemReloaded {
                 mem: "test-mem-plugin".into(),
                 old_head: "abc123".into(),
@@ -2251,6 +2289,7 @@ impl WarningHint {
 
     fn details_payload(&self) -> serde_json::Value {
         match self {
+            Self::OutOfBandEditsUndetected { mem } => serde_json::json!({ "mem": mem }),
             Self::ConfigWriteIntervened { mem, fields } => serde_json::json!({
                 "mem": mem,
                 "fields": fields,
@@ -2502,12 +2541,14 @@ impl WarningHint {
                 stamped_engine,
                 running_engine,
                 stamped_schema,
+                direction,
             } => {
                 serde_json::json!({
                     "mem": mem,
                     "stamped_engine": stamped_engine,
                     "running_engine": running_engine,
                     "stamped_schema": stamped_schema,
+                    "direction": direction,
                 })
             }
             Self::SchemaGenerationsBehind {

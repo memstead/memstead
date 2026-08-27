@@ -23,7 +23,13 @@ pub struct Args {
     /// anchors (per-mem counts of the standalone anchor-verification
     /// states, with `unresolvable` meaning the artifact is GONE and
     /// `unobserved` meaning the pass could not measure it, plus the
-    /// population those counts cover), friction (the workspace-local
+    /// population those counts cover), ledger (a FOLDER mem's change
+    /// ledger set against the markdown files beside it: entities the
+    /// ledger records with no file, and files the ledger never
+    /// mentions — read-only, it never writes or tidies a ledger line;
+    /// git-branch mems are absent rather than clean, because their
+    /// change set is a real two-tree diff and the divergence cannot
+    /// arise), friction (the workspace-local
     /// refusal ledger's summary — counts per typed refusal code and
     /// per verb, with per-code reason breakdowns where the code
     /// carries a closed engine-owned discriminator, whole-ledger plus
@@ -133,6 +139,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         body_observations,
         config_entries,
         anchors_axis,
+        ledger_axis,
         open_questions_axis,
         stale_derivations_axis,
         checks_axis,
@@ -341,6 +348,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &anchors_axis {
         obj.insert("anchors".to_string(), axis.clone());
+    }
+    if let Some(axis) = &ledger_axis {
+        obj.insert("ledger".to_string(), axis.clone());
     }
     if let Some(axis) = &open_questions_axis {
         obj.insert("open_questions".to_string(), axis.clone());
@@ -681,6 +691,52 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
             for (kind, count) in entries {
                 lines.push(format!("  - {kind}: {count}"));
+            }
+        }
+        lines.push(String::new());
+    }
+
+    // The human-readable half of the ledger axis. Rendering it only in
+    // `--json` would put the reconciliation out of reach of the operator who
+    // runs `memstead health` by eye, which is the same class of gap this plan
+    // exists to close (04/04, criterion 11).
+    if let Some(axis) = ledger_axis.as_ref().and_then(|a| a.as_object()) {
+        lines.push(format!("## Ledger vs files ({} folder mem(s))", axis.len()));
+        if axis.is_empty() {
+            lines.push(
+                "- no folder mems: the check does not apply to git-branch storage, whose \
+                 change set is a real two-tree diff"
+                    .to_string(),
+            );
+        }
+        for (mem, r) in axis {
+            let ghosts = r["ledger_without_file"]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or(0);
+            let unlogged = r["file_without_ledger"]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or(0);
+            if ghosts == 0 && unlogged == 0 {
+                lines.push(format!("- `{mem}`: ledger and files agree"));
+                continue;
+            }
+            lines.push(format!(
+                "- `{mem}`: {ghosts} recorded with no file, {unlogged} file(s) the ledger \
+                 never mentions"
+            ));
+            for id in r["ledger_without_file"].as_array().into_iter().flatten() {
+                lines.push(format!(
+                    "  - recorded, no file: `{}`",
+                    id.as_str().unwrap_or("")
+                ));
+            }
+            for id in r["file_without_ledger"].as_array().into_iter().flatten() {
+                lines.push(format!(
+                    "  - file, never recorded: `{}`",
+                    id.as_str().unwrap_or("")
+                ));
             }
         }
         lines.push(String::new());
@@ -1052,6 +1108,8 @@ struct GatheredHealth {
     /// `health_anchors_axis` helper (same axis MCP renders). `None`
     /// otherwise — absence of the key means "not requested".
     anchors_axis: Option<serde_json::Value>,
+    /// `--include ledger`: a folder mem's ledger set against its file set.
+    ledger_axis: Option<serde_json::Value>,
     /// `Some(...)` when the caller asked for `--include
     /// open_questions`: the composed per-mem worklist from the shared
     /// `health_open_questions_axis` helper (same axis MCP renders).
@@ -1293,6 +1351,11 @@ fn fill_anchors_axis(engine: &memstead_base::Engine, include: &[String], g: &mut
     if include.iter().any(|s| s == "anchors") {
         g.anchors_axis = Some(memstead_base::ops::health::health_anchors_axis(engine));
     }
+    // Folder mems only; a git-branch mem is absent rather than clean
+    // (04/04, criterion 4).
+    if include.iter().any(|s| s == "ledger") {
+        g.ledger_axis = serde_json::to_value(engine.ledger_reconciliation()).ok();
+    }
 }
 
 fn fill_schema_breakdowns(engine: &memstead_base::Engine, g: &mut GatheredHealth) {
@@ -1367,6 +1430,7 @@ fn gather_from_store(
         Vec::new()
     };
     GatheredHealth {
+        ledger_axis: None,
         health,
         findings: Vec::new(),
         real_count,

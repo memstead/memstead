@@ -293,8 +293,15 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
 #[serde(rename_all = "kebab-case")]
 pub enum RollupVerdict {
     /// No binding declares open findings and no source has moved past its
-    /// baseline — or there are no bindings at all.
+    /// baseline. Reached only when there was something to examine.
     Clean,
+    /// There were no projection bindings to examine, so this rollup asserts
+    /// nothing (04/04, criterion 5). It used to answer `clean` here, which a
+    /// reader takes as a general all-clear over a workspace it never looked
+    /// at. A verdict that is only sometimes emitted is still read as general
+    /// when it is, so the empty case gets its own word rather than borrowing
+    /// the reassuring one.
+    NothingDeclared,
     /// Onboarding only: one or more bindings predate their binding (adopt) and
     /// nothing else needs a maintenance pass. **A pre-binding mem is never a red
     /// verdict** — 0% anchored is expected onboarding, not a defect (E1).
@@ -310,6 +317,7 @@ impl RollupVerdict {
     pub fn as_wire(&self) -> &'static str {
         match self {
             RollupVerdict::Clean => "clean",
+            RollupVerdict::NothingDeclared => "nothing-declared",
             RollupVerdict::Onboarding => "onboarding",
             RollupVerdict::ActionNeeded => "action-needed",
         }
@@ -324,6 +332,11 @@ impl RollupVerdict {
 pub struct Rollup {
     /// The single lead verdict.
     pub verdict: RollupVerdict,
+    /// What the verdict answers for, in words, so it cannot be read as a
+    /// claim about the workspace at large (04/04, criterion 5). A verdict
+    /// without its subject is the bundle's own failure class: a surface
+    /// stating a fact broader than the one it established.
+    pub subject: String,
     /// A one-line human/agent summary of the workspace's projection health.
     pub headline: String,
     /// Up to three concrete next actions, highest-severity first (e.g. "3
@@ -334,8 +347,11 @@ pub struct Rollup {
 impl Default for Rollup {
     fn default() -> Self {
         Rollup {
-            verdict: RollupVerdict::Clean,
-            headline: "No projection bindings declared.".to_string(),
+            verdict: RollupVerdict::NothingDeclared,
+            subject: "no projection bindings".to_string(),
+            headline: "No projection bindings are declared, so this says nothing about the \
+                       workspace beyond that."
+                .to_string(),
             actions: Vec::new(),
         }
     }
@@ -494,10 +510,14 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
         RollupVerdict::Clean => {
             format!("All {total} projection(s) are in sync — no open findings, no moved sources.")
         }
+        // Unreachable: the empty case returns `Rollup::default()` above,
+        // before any binding is examined.
+        RollupVerdict::NothingDeclared => "No projection bindings were examined.".to_string(),
     };
 
     Rollup {
         verdict,
+        subject: format!("{total} projection binding(s)"),
         headline,
         actions,
     }
@@ -795,10 +815,14 @@ mod tests {
         assert!(rollup.headline.contains("Onboarding"));
     }
 
-    /// G1 — a workspace with no bindings rolls up to the default **clean**
-    /// verdict with no actions.
+    /// A workspace with no bindings does NOT roll up to `clean`.
+    ///
+    /// It used to (G1's original rule), and that is what 04/04's criterion 5
+    /// changes: a reader takes `clean` as an all-clear over the workspace,
+    /// and this rollup never looked at one. The empty case says
+    /// `nothing-declared` and names its subject instead.
     #[test]
-    fn rollup_empty_without_bindings_is_clean() {
+    fn rollup_without_bindings_asserts_nothing_rather_than_clean() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".memstead")).unwrap();
@@ -825,7 +849,13 @@ mod tests {
         )])
         .unwrap();
         let rollup = projection_rollup(&engine, root);
-        assert_eq!(rollup.verdict, RollupVerdict::Clean);
+        assert_eq!(rollup.verdict, RollupVerdict::NothingDeclared);
+        assert_eq!(rollup.subject, "no projection bindings");
+        assert!(
+            rollup.headline.contains("says nothing about the workspace"),
+            "the headline must not read as an all-clear: {}",
+            rollup.headline
+        );
         assert!(rollup.actions.is_empty());
         assert!(rollup.headline.contains("No projection bindings"));
     }

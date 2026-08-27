@@ -1718,6 +1718,31 @@ impl Engine {
     /// headings repeated so that later bodies were not kept, and frontmatter
     /// keys the next write will drop.
     ///
+    /// A folder mem's ledger set against its file set, per mem.
+    ///
+    /// **Folder mems only, and that is the point** (04/04, criterion 4). On a
+    /// git-branch mem the change set is a real two-tree diff against the
+    /// committed tree, so ledger-versus-files divergence is structurally
+    /// impossible; emitting an always-clean version of this check there would
+    /// be a surface asserting something it never had to establish, which is
+    /// the failure class this bundle exists to remove. Such a mem is absent
+    /// from the map rather than present and empty.
+    pub fn ledger_reconciliation(
+        &self,
+    ) -> std::collections::BTreeMap<String, crate::filesystem::changelog::LedgerReconciliation>
+    {
+        let mut out = std::collections::BTreeMap::new();
+        for m in &self.mounts {
+            let crate::workspace::MountStorage::Folder { path } = &m.mount.storage else {
+                continue;
+            };
+            if let Ok(r) = crate::filesystem::changelog::reconcile_ledger(path) {
+                out.insert(m.mount.mem.clone(), r);
+            }
+        }
+        out
+    }
+
     /// Separate from [`Self::conformance_findings`] on purpose. These are
     /// observations, not violations: absorbing an undeclared heading is the
     /// catch-all working as designed, and reporting it as a finding would fail
@@ -1844,6 +1869,26 @@ impl Engine {
             let mut merged = self.load_warnings.clone();
             merged.append(&mut summary.warnings);
             summary.warnings = merged;
+        }
+        // A standing property, reported here rather than on every boot: a
+        // folder mem's drift cursor is its own ledger, which only the engine
+        // writes, so an edit made to its files by anything else is invisible
+        // and reads keep serving the pre-edit content. Silence about that is
+        // the one outcome 04/04's criterion 3 forbids. Git-branch mems are
+        // absent: their change set is a real two-tree diff, so the condition
+        // cannot arise (criterion 4).
+        for m in &self.mounts {
+            if matches!(
+                m.mount.storage,
+                crate::workspace::MountStorage::Folder { .. }
+            ) && mem.is_none_or(|scope| scope == m.mount.mem)
+            {
+                summary
+                    .warnings
+                    .push(crate::ops::WarningHint::OutOfBandEditsUndetected {
+                        mem: m.mount.mem.clone(),
+                    });
+            }
         }
         // Quarantine roster — a boot-honesty fact, present whenever
         // non-empty, never behind an include gate. Empty (and omitted

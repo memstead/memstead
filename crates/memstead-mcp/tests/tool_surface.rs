@@ -1556,6 +1556,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "CHECK_NOT_RECORDED",
         ],
         "memstead_health" => &[
+            // The folder-mem ledger axis and the warning that makes it
+            // necessary (04/04). This surface serves folder mems, so it is
+            // the one where both matter.
+            "OUT_OF_BAND_EDITS_UNDETECTED",
             // Open-questions axis (include=open_questions) — agent-trust
             // plan 11's composed what-don't-we-know worklist; `more` is
             // its explicit-truncation field.
@@ -1593,6 +1597,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "fully_adjudicated",
             // The conformance axis's observation channel (04/01).
             "body_observations",
+            // The folder-mem ledger-vs-files axis (04/04).
+            "ledger",
             "memstead verify-anchors",
             "writable_mems",
             "default_writable_mem",

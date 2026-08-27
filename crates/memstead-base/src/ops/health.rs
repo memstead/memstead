@@ -49,6 +49,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "open_questions",
     "stale_derivations",
     "checks",
+    "ledger",
 ];
 
 /// The `include=["anchors"]` axis — per-mem counts of the four

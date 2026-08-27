@@ -470,8 +470,29 @@ impl super::Engine {
         else {
             return Vec::new();
         };
+        // Skew at WRITE time, and before the restamp below erases the evidence
+        // (04/04, criterion 9). Boot-only detection meant a long-lived server
+        // that started under one binary and was written to by another never
+        // said so, and the very write that would have revealed it wrote the
+        // stamp that hid it. The write is never refused (criterion 10): a
+        // deliberate downgrade is the operator's business.
+        let mut warnings = Vec::new();
+        if let Some(prior) = config.mutation_stamp.as_ref()
+            && let Some(direction) = crate::build_info::skew_direction(
+                &prior.engine_version,
+                crate::build_info::full_version(),
+            )
+        {
+            warnings.push(crate::ops::WarningHint::EngineVersionSkew {
+                mem: mem.clone(),
+                stamped_engine: prior.engine_version.clone(),
+                running_engine: crate::build_info::full_version().to_string(),
+                stamped_schema: prior.schema.clone(),
+                direction,
+            });
+        }
         if config.mutation_stamp.as_ref() == Some(&stamp) {
-            return Vec::new();
+            return warnings;
         }
         // Through the shared writer like the seven lifecycle setters
         // (04/03, criterion 7). This one is why the damage looked
@@ -494,12 +515,13 @@ impl super::Engine {
             },
         ) {
             Ok((_, intervened)) if !intervened.is_empty() => {
-                vec![crate::ops::WarningHint::ConfigWriteIntervened {
+                warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
                     mem,
                     fields: intervened,
-                }]
+                });
+                warnings
             }
-            _ => Vec::new(),
+            _ => warnings,
         }
     }
 }
@@ -1879,6 +1901,103 @@ mod tests {
         );
     }
 
+    /// 04/04, criteria 9 and 10: skew reaches the write that meets it, before
+    /// that write's own restamp erases the evidence, and the write still
+    /// lands.
+    ///
+    /// Boot-only detection meant a long-lived server started under one binary
+    /// and written to by another never said so, because the first mutation
+    /// both revealed and hid the fact.
+    #[test]
+    fn skew_is_reported_at_the_write_and_the_write_still_lands() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: "0.0.1".to_string(),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+        let outcome = engine
+            .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
+            .unwrap();
+
+        let skew: Vec<_> = outcome
+            .warnings
+            .iter()
+            .filter(|w| w.code() == "ENGINE_VERSION_SKEW")
+            .collect();
+        assert_eq!(
+            skew.len(),
+            1,
+            "the write that meets the skew must report it: {:?}",
+            outcome.warnings
+        );
+        assert!(
+            matches!(
+                skew[0],
+                crate::ops::WarningHint::EngineVersionSkew {
+                    direction: crate::build_info::SkewDirection::StampedOlder,
+                    ..
+                }
+            ),
+            "and say which way: {:?}",
+            skew[0]
+        );
+        // Criterion 10: it landed. An older engine is not prevented from
+        // writing; a deliberate downgrade is the operator's business.
+        assert!(engine.get_entity(&outcome.id).is_some());
+        assert_eq!(
+            disk_stamp(&mem_dir).map(|s| s.engine_version),
+            Some(crate::build_info::full_version().to_string()),
+            "and the restamp still happened"
+        );
+
+        // Second write, same binary: nothing left to report.
+        let again = engine
+            .create_entity_with_ctx(spec_create_args("Second"), &CommitContext::internal())
+            .unwrap();
+        assert!(
+            !again
+                .warnings
+                .iter()
+                .any(|w| w.code() == "ENGINE_VERSION_SKEW"),
+            "the skew is resolved once restamped: {:?}",
+            again.warnings
+        );
+    }
+
+    /// Criterion 8's complement at the write tier: a stamp from the same
+    /// release with a different build hash is not skew, so a workspace whose
+    /// binary is rebuilt from source is not told its engine disagrees on
+    /// every mutation.
+    #[test]
+    fn a_rebuild_of_the_same_release_is_not_skew_at_the_write() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: format!("{}+gdeadbee", crate::ENGINE_VERSION),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+        let outcome = engine
+            .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
+            .unwrap();
+        assert!(
+            !outcome
+                .warnings
+                .iter()
+                .any(|w| w.code() == "ENGINE_VERSION_SKEW"),
+            "a differing build hash on the same version is not skew: {:?}",
+            outcome.warnings
+        );
+    }
+
     /// Criterion 3/4 (agent-trust plan 02): boot under a different
     /// binary version surfaces the warn-tier `ENGINE_VERSION_SKEW`
     /// naming both versions, on load warnings AND in `health()`;
@@ -1909,12 +2028,15 @@ mod tests {
             stamped_engine,
             running_engine,
             stamped_schema,
+            direction,
         } = skew[0]
         {
             assert_eq!(mem, "specs");
             assert_eq!(stamped_engine, "0.0.1");
             assert_eq!(running_engine, crate::build_info::full_version());
             assert_eq!(stamped_schema, "default@1.0.0");
+            // 0.0.1 against any shipped version: the mem is behind us.
+            assert_eq!(*direction, crate::build_info::SkewDirection::StampedOlder);
         }
         let health = engine.health();
         assert!(

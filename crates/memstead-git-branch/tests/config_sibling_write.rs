@@ -73,3 +73,33 @@ fn a_long_lived_engine_does_not_revert_a_siblings_config_write() {
         "and the long-lived engine's own change landed"
     );
 }
+
+/// 04/04, criterion 4: a git-branch mem gains no ledger check and no
+/// undetected-edits warning.
+///
+/// Its change set is a real two-tree diff against the committed tree, so
+/// ledger-versus-files divergence cannot arise there. Emitting an
+/// always-clean version of the check would be a surface asserting something
+/// it never had to establish, which is the failure class this bundle removes.
+/// Absent, not present-and-empty.
+#[test]
+fn a_git_branch_mem_gains_no_ledger_check_and_no_undetected_edits_warning() {
+    let tmp = TempDir::new().unwrap();
+    init_real_mem_repo(tmp.path(), &[("specs", "default@1.0.0")]);
+    let engine = engine_from_workspace_root(tmp.path()).expect("engine boots");
+
+    assert!(
+        engine.ledger_reconciliation().is_empty(),
+        "a git-branch mem must be absent from the reconciliation map, not clean in it: {:?}",
+        engine.ledger_reconciliation()
+    );
+    let health = engine.health();
+    assert!(
+        !health
+            .warnings
+            .iter()
+            .any(|w| w.code() == "OUT_OF_BAND_EDITS_UNDETECTED"),
+        "the condition cannot arise on a git-branch mem: {:?}",
+        health.warnings
+    );
+}

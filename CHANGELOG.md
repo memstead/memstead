@@ -8,6 +8,43 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **`status` and the change record answer for what they actually examined.**
+  Three surfaces stated facts they had not established, and each is now
+  either established or declared unestablished.
+
+  A folder mem's drift cursor is its own change ledger, which only the engine
+  writes, so an edit made to its files by anything else advanced nothing: the
+  engine kept serving pre-edit content and `changes_since` reported the edit
+  as never having happened. The cursor stays cheap (a directory walk before
+  every operation would change the cost profile of the whole backend), and
+  the engine now SAYS it cannot detect such edits, as the health warning
+  `OUT_OF_BAND_EDITS_UNDETECTED`. `health --include ledger` reconciles the
+  ledger against the files on demand, naming a ledger line with no file
+  separately from a file with no ledger line, and writes nothing: tidying the
+  ledger would fabricate provenance for a change the engine cannot attribute.
+  Git-branch mems gain neither, because their change set is a real two-tree
+  diff and the divergence cannot arise there.
+
+  `memstead status` names the subject its verdict answers for, and a
+  workspace with no projection bindings reports `nothing-declared` instead of
+  `clean` — the old verdict read as a general all-clear over a workspace it
+  never looked at. It also names every mem whose durability it could not
+  establish, without claiming debt it did not observe.
+
+  Every mutation response carries `durability_basis` beside `durable`, so a
+  caller can tell an answer established from a real commit from one read off
+  the mount kind. The marker itself is unchanged: removing it would move the
+  same guess into every caller.
+
+  `ENGINE_VERSION_SKEW` is now a semver comparison carrying a direction
+  (whether the mem was last written by a newer or an older binary). The old
+  rule was raw string inequality, so every rebuild between releases read as
+  skew, which on any workspace built from source was the common case and
+  drowned the real signal. It also fires at write time against the stored
+  stamp, not at boot only: boot-only detection meant the first mutation both
+  revealed the skew and, by restamping, hid it. Never fatal and never a
+  refusal, so a deliberate downgrade still works.
+
 - **A long-lived server can no longer write its boot-time config over a
   sibling's work.** Each mem's config was read once at boot and held for the
   life of the process, which for an MCP server is days. Eight operations cloned

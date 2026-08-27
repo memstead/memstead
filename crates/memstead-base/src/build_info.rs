@@ -35,6 +35,43 @@ pub fn full_version() -> &'static str {
     })
 }
 
+/// Which way a mem's stamped engine version differs from the running binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkewDirection {
+    /// The mem was last written by a NEWER binary than this one. The
+    /// interesting direction: this binary may not understand what that one
+    /// wrote.
+    StampedNewer,
+    /// The mem was last written by an OLDER binary than this one.
+    StampedOlder,
+}
+
+/// The direction of engine-version skew between a mem's stamp and the running
+/// binary, or `None` when there is none to report.
+///
+/// Compared as semver, which ignores build metadata, so two builds of the same
+/// release differ in their `+g<sha>` suffix and are NOT skew: the stamp writer
+/// still restamps (the sha is provenance worth keeping current) but nobody is
+/// told their engine disagrees when it does not (consistency-sweep 04/04,
+/// criterion 8). The previous rule was raw string inequality, which called
+/// every rebuild between releases a skew.
+///
+/// `None` also when either side fails to parse. A stamp this binary cannot
+/// read is not evidence of a direction, and guessing one would be worse than
+/// the silence.
+pub fn skew_direction(stamped: &str, running: &str) -> Option<SkewDirection> {
+    let (a, b) = (
+        stamped.parse::<semver::Version>().ok()?,
+        running.parse::<semver::Version>().ok()?,
+    );
+    match a.cmp_precedence(&b) {
+        std::cmp::Ordering::Greater => Some(SkewDirection::StampedNewer),
+        std::cmp::Ordering::Less => Some(SkewDirection::StampedOlder),
+        std::cmp::Ordering::Equal => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +97,33 @@ mod tests {
             (parsed.major, parsed.minor, parsed.patch),
             (bare.major, bare.minor, bare.patch)
         );
+    }
+
+    /// 04/04, criterion 8. The build-metadata case is the one the old raw
+    /// string comparison got wrong: every rebuild between releases read as
+    /// skew, which is why the warning was noise on a dogfood workspace.
+    #[test]
+    fn skew_is_semver_difference_and_never_a_build_hash() {
+        use super::{SkewDirection, skew_direction};
+        assert_eq!(
+            skew_direction("0.11.0", "0.12.0"),
+            Some(SkewDirection::StampedOlder)
+        );
+        assert_eq!(
+            skew_direction("0.13.0", "0.12.0"),
+            Some(SkewDirection::StampedNewer)
+        );
+        // Same release, different commit: not skew in either direction.
+        assert_eq!(skew_direction("0.12.0+gabc123", "0.12.0+gdef456"), None);
+        assert_eq!(skew_direction("0.12.0", "0.12.0+gabc123"), None);
+        assert_eq!(skew_direction("0.12.0+gabc123-dirty", "0.12.0"), None);
+        // A pre-release IS a semver difference, and the direction is real.
+        assert_eq!(
+            skew_direction("0.12.0-rc.1", "0.12.0"),
+            Some(SkewDirection::StampedOlder)
+        );
+        // Unparseable: no direction rather than a guessed one.
+        assert_eq!(skew_direction("not-a-version", "0.12.0"), None);
+        assert_eq!(skew_direction("0.12.0", ""), None);
     }
 }

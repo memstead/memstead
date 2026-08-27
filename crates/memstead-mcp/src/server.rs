@@ -513,8 +513,22 @@ fn attach_durability(body: &mut serde_json::Value, engine: &memstead_base::Engin
         .find(|m| m.mem == mem)
         .map(|m| m.storage.is_durable())
         .unwrap_or(false);
+    // The marker stays; what travels with it is what it was derived from, so
+    // a caller cannot read the mount-kind answer as a stronger one (04/04,
+    // criterion 7).
+    let basis = engine
+        .mounts()
+        .iter()
+        .find(|m| m.mem == mem)
+        .map(|m| {
+            m.storage
+                .durability_basis(engine.mem_head_sha(mem).ok().flatten().as_deref())
+                .as_wire()
+        })
+        .unwrap_or("inferred-from-mount-kind");
     if let Some(obj) = body.as_object_mut() {
         obj.insert("durable".into(), serde_json::json!(durable));
+        obj.insert("durability_basis".into(), serde_json::json!(basis));
     }
 }
 

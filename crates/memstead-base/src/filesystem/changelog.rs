@@ -719,3 +719,186 @@ mod tests {
         assert_eq!(MutationKind::Batch.as_str(), "batch");
     }
 }
+
+/// A folder mem's ledger set against its file set, reported and never
+/// repaired (consistency-sweep 04/04, criteria 1 and 2).
+///
+/// The ledger is the change record AND the drift cursor, and it is written
+/// only by the engine. A hand-edited, hand-added or hand-deleted markdown
+/// file appends no line, so `changes_since` reports an edit that happened as
+/// never having happened, and a ledger line can name a file that is gone.
+/// Neither is a parse bug; both are the record and the files disagreeing, and
+/// nothing said so.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct LedgerReconciliation {
+    /// Entity ids the ledger records but whose file is absent.
+    pub ledger_without_file: Vec<String>,
+    /// Entity ids present as files that the ledger never mentions.
+    pub file_without_ledger: Vec<String>,
+}
+
+impl LedgerReconciliation {
+    pub fn is_clean(&self) -> bool {
+        self.ledger_without_file.is_empty() && self.file_without_ledger.is_empty()
+    }
+}
+
+/// Reconcile `mem_root`'s ledger against the markdown files beside it.
+///
+/// **Reads only.** No ledger line is written, rewritten or removed, and no
+/// file is touched. Writing lines for edits the engine did not author would
+/// fabricate provenance for a change it cannot attribute, which is why this
+/// reports rather than tidies (criterion 2).
+///
+/// Called on demand, never on the staleness probe: that runs before every
+/// operation, and turning it into a directory walk would change the cost
+/// profile of the whole folder backend.
+pub fn reconcile_ledger(mem_root: &Path) -> Result<LedgerReconciliation, ChangelogError> {
+    let mut on_disk: std::collections::BTreeSet<String> = Default::default();
+    let meta_dir = mem_root.join(crate::mem::MEM_META_DIR);
+    let mut stack = vec![mem_root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(ChangelogError::Io {
+                    path: dir.clone(),
+                    source,
+                });
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // The engine's own sidecar is not entity content.
+            if path == meta_dir {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|x| x == "md")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                on_disk.insert(stem.to_string());
+            }
+        }
+    }
+
+    let mut in_ledger: std::collections::BTreeSet<String> = Default::default();
+    let log_path = changelog_path(mem_root);
+    match std::fs::read_to_string(&log_path) {
+        Ok(raw) => {
+            for line in raw.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed)
+                    && let Some(entity) = v.get("entity").and_then(|x| x.as_str())
+                {
+                    // Ledger ids are mem-qualified (`mem--slug`); files are
+                    // named by the slug alone. Compare on the slug, which is
+                    // what both surfaces actually agree on.
+                    let slug = entity.rsplit("--").next().unwrap_or(entity);
+                    in_ledger.insert(slug.to_string());
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(ChangelogError::Io {
+                path: log_path,
+                source,
+            });
+        }
+    }
+
+    Ok(LedgerReconciliation {
+        ledger_without_file: in_ledger.difference(&on_disk).cloned().collect(),
+        file_without_ledger: on_disk.difference(&in_ledger).cloned().collect(),
+    })
+}
+
+#[cfg(test)]
+mod reconcile_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn seed(root: &Path, files: &[&str], ledger_entities: &[&str]) {
+        for f in files {
+            std::fs::write(root.join(format!("{f}.md")), b"# x\n").unwrap();
+        }
+        let meta = root.join(crate::mem::MEM_META_DIR);
+        std::fs::create_dir_all(&meta).unwrap();
+        let lines: String = ledger_entities
+            .iter()
+            .map(|e| format!(r#"{{"ts":"2026-08-27T00:00:00Z","entity":"docs--{e}"}}"#) + "\n")
+            .collect();
+        std::fs::write(meta.join("changes.jsonl"), lines).unwrap();
+    }
+
+    /// 04/04, criterion 1: both directions of disagreement are named, and
+    /// named apart. A ledger line with no file and a file with no ledger line
+    /// are different problems for the reader.
+    #[test]
+    fn both_directions_of_ledger_divergence_are_named_separately() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), &["alpha", "orphaned-file"], &["alpha", "ghost"]);
+        let r = reconcile_ledger(tmp.path()).unwrap();
+        assert_eq!(r.ledger_without_file, vec!["ghost".to_string()]);
+        assert_eq!(r.file_without_ledger, vec!["orphaned-file".to_string()]);
+        assert!(!r.is_clean());
+    }
+
+    /// Criterion 2: the check reads. A reconciliation that tidied the ledger
+    /// would be fabricating provenance for changes the engine cannot
+    /// attribute, so nothing it touches may move.
+    #[test]
+    fn reconciliation_writes_nothing_at_all() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), &["alpha", "orphaned-file"], &["alpha", "ghost"]);
+        let ledger = tmp
+            .path()
+            .join(crate::mem::MEM_META_DIR)
+            .join("changes.jsonl");
+        let before_ledger = std::fs::read(&ledger).unwrap();
+        let before_files: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| (e.path(), e.metadata().map(|m| m.len()).unwrap_or(0)))
+            .collect();
+
+        let _ = reconcile_ledger(tmp.path()).unwrap();
+
+        assert_eq!(std::fs::read(&ledger).unwrap(), before_ledger);
+        let after_files: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| (e.path(), e.metadata().map(|m| m.len()).unwrap_or(0)))
+            .collect();
+        assert_eq!(after_files.len(), before_files.len());
+    }
+
+    /// A mem whose ledger and files agree reports clean, so the check is a
+    /// signal rather than a permanent complaint.
+    #[test]
+    fn an_agreeing_mem_reconciles_clean() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), &["alpha", "beta"], &["alpha", "beta"]);
+        assert!(reconcile_ledger(tmp.path()).unwrap().is_clean());
+    }
+
+    /// The engine's own sidecar is not entity content: counting
+    /// `.memstead/` would report every mem as diverging forever.
+    #[test]
+    fn the_engine_sidecar_is_not_mistaken_for_an_entity() {
+        let tmp = TempDir::new().unwrap();
+        seed(tmp.path(), &["alpha"], &["alpha"]);
+        std::fs::write(
+            tmp.path().join(crate::mem::MEM_META_DIR).join("notes.md"),
+            b"not an entity\n",
+        )
+        .unwrap();
+        assert!(reconcile_ledger(tmp.path()).unwrap().is_clean());
+    }
+}

@@ -32,6 +32,7 @@ struct TypeCount<'a> {
 #[derive(Serialize)]
 struct StatusPayload<'a> {
     rollup: Rollup,
+    mems: Vec<MemDurability>,
     total_nodes: usize,
     real_nodes: usize,
     stub_nodes: usize,
@@ -41,6 +42,56 @@ struct StatusPayload<'a> {
     projections: Vec<ProjectionStatus>,
 }
 
+/// One mem's durability line: what the engine can say about whether that
+/// mem's writes are recorded anywhere, and what it cannot (04/04, criterion
+/// 6).
+#[derive(Serialize)]
+struct MemDurability {
+    mem: String,
+    backend: &'static str,
+    /// The engine's narrow answer: writes survive a process restart.
+    durable: bool,
+    /// Whether that answer was established from a real commit or read off the
+    /// mount kind.
+    basis: &'static str,
+    /// Present exactly when the engine cannot establish that the mem's writes
+    /// reached version control. Never a claim that they did not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unestablished: Option<&'static str>,
+}
+
+/// What the engine can and cannot say about each mem's durability.
+///
+/// `status` used to touch no backend at all, so a folder mem's writes could
+/// be sitting outside any version control and nothing said so. It still does
+/// not shell out to git: a folder mem's root may not be in a repository, and
+/// a missing repository is not a defect. The reportable fact is that the
+/// engine cannot ESTABLISH durability there, which is true either way
+/// (04/04, criterion 6). It never claims debt it did not observe.
+fn mem_durability(engine: &memstead_base::Engine) -> Vec<MemDurability> {
+    engine
+        .mounts()
+        .iter()
+        .map(|m| {
+            let head = engine.mem_head_sha(&m.mem).ok().flatten();
+            let basis = m.storage.durability_basis(head.as_deref());
+            MemDurability {
+                mem: m.mem.clone(),
+                backend: m.storage.backend_id(),
+                durable: m.storage.is_durable(),
+                basis: basis.as_wire(),
+                unestablished: match basis {
+                    memstead_base::workspace::DurabilityBasis::Established => None,
+                    memstead_base::workspace::DurabilityBasis::InferredFromMountKind => Some(
+                        "writes land on disk and survive a restart; whether they reached \
+                         version control is not something the engine can establish",
+                    ),
+                },
+            }
+        })
+        .collect()
+}
+
 pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     // The workspace root (for the projection store / advance store reads). The
     // engine build below fails before this matters when we are outside a
@@ -48,7 +99,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     // no projections" once we get past `cli_engine()?`.
     let root = ctx.workspace_shape().map(|(_, r)| r);
 
-    let (status, total, real, schema_counts, projections, rollup) = match ctx.cli_engine()? {
+    let (status, total, real, schema_counts, projections, rollup, mems) = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             let status = engine.status();
@@ -61,6 +112,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 .as_deref()
                 .map(|r| projection_rollup(&engine, r))
                 .unwrap_or_default();
+            let mems = mem_durability(&engine);
             (
                 status,
                 store.len(),
@@ -68,6 +120,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 count_by_type(store),
                 projections,
                 rollup,
+                mems,
             )
         }
         CliEngine::Filesystem(engine) => {
@@ -81,6 +134,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 .as_deref()
                 .map(|r| projection_rollup(&engine, r))
                 .unwrap_or_default();
+            let mems = mem_durability(&engine);
             (
                 status,
                 store.len(),
@@ -88,6 +142,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 count_by_type(store),
                 projections,
                 rollup,
+                mems,
             )
         }
     };
@@ -102,6 +157,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     if ctx.json {
         let payload = StatusPayload {
             rollup,
+            mems,
             total_nodes: total,
             real_nodes: real,
             stub_nodes: stubs,
@@ -132,7 +188,32 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     // drill-down.
     lines.push("# Status".to_string());
     lines.push(String::new());
-    lines.push(format!("**Verdict:** {}", rollup.verdict.as_wire()));
+    // The subject rides with the verdict, never apart from it: a bare
+    // "clean" is read as a claim about the workspace, and this one answers
+    // for projection bindings only (04/04, criterion 5).
+    lines.push(format!(
+        "**Verdict:** {} — for {}",
+        rollup.verdict.as_wire(),
+        rollup.subject,
+    ));
+
+    // What the engine could not establish, named rather than left to the
+    // reader's assumption. A mem whose durability IS established says so and
+    // adds no caveat (04/04, criterion 6 and its complement).
+    let unestablished: Vec<&MemDurability> =
+        mems.iter().filter(|m| m.unestablished.is_some()).collect();
+    if !unestablished.is_empty() {
+        lines.push(String::new());
+        lines.push("**Durability not established** for:".to_string());
+        for m in &unestablished {
+            lines.push(format!(
+                "- `{}` ({}) — {}",
+                m.mem,
+                m.backend,
+                m.unestablished.unwrap_or_default(),
+            ));
+        }
+    }
     lines.push(String::new());
     lines.push(rollup.headline.clone());
     if !rollup.actions.is_empty() {

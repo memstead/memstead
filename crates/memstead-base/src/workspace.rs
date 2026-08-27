@@ -194,12 +194,63 @@ impl MountStorage {
     /// fact the durability marker projects: derived from the storage
     /// *kind*, not from `current_head()` (which is `None` for both
     /// `Folder` and `InMemory` and so cannot tell them apart).
+    /// How the durability answer for this storage was arrived at.
+    ///
+    /// [`Self::is_durable`] answers from the storage KIND, which is a real
+    /// answer to a narrow question (does a write survive process restart)
+    /// and is routinely read as a broader one (is the write recorded
+    /// somewhere it could be recovered from). Callers cannot tell the two
+    /// apart from a bare boolean, so the basis travels with it (04/04,
+    /// criterion 7). The marker itself is unchanged and stays.
+    pub fn durability_basis(&self, head: Option<&str>) -> DurabilityBasis {
+        match self {
+            // A real commit object, named by a backend that HAS commits. The
+            // storage kind gates this on purpose: a folder backend's
+            // `current_head()` is its change ledger's last timestamp, not a
+            // commit, so keying only on "a head exists" reported `established`
+            // for every folder mem that had ever been written — strictly
+            // stronger than the mount-kind answer this field was added to
+            // qualify, which is the misreading it exists to prevent (04/04,
+            // criteria 6 and 7, found by the plan's grade).
+            MountStorage::GitBranch { .. } if head.is_some_and(|h| !h.is_empty()) => {
+                DurabilityBasis::Established
+            }
+            _ => DurabilityBasis::InferredFromMountKind,
+        }
+    }
+
     pub fn is_durable(&self) -> bool {
         match self {
             MountStorage::Folder { .. }
             | MountStorage::GitBranch { .. }
             | MountStorage::Archive { .. } => true,
             MountStorage::InMemory => false,
+        }
+    }
+}
+
+/// Whether a durability answer was established or inferred.
+///
+/// The distinction exists because the engine's answer is derived from the
+/// mount kind, which is honest about surviving a restart and says nothing
+/// about the write having reached version control. A folder mem is the case
+/// that matters: its writes land on disk, so `durable` is true, and whether
+/// anything could recover them is a question the engine cannot answer at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DurabilityBasis {
+    /// The backend named a real commit for this write, so it is recorded.
+    Established,
+    /// Read off the storage kind. True for surviving a restart; silent on
+    /// whether the write is recorded anywhere it could be recovered from.
+    InferredFromMountKind,
+}
+
+impl DurabilityBasis {
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            DurabilityBasis::Established => "established",
+            DurabilityBasis::InferredFromMountKind => "inferred-from-mount-kind",
         }
     }
 }

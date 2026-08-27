@@ -219,23 +219,30 @@ impl Engine {
             // this binary gets a warn-tier hint — informative, never
             // fatal, and a stamp-less (pre-stamp) mem is silent by
             // construction. Read-only: the stamp is only ever
-            // rewritten by the next mutation. Full build versions
-            // (semver + git build sha) compare as full strings, so a
-            // rebuild between mutations fires the hint even between
-            // releases; a plain-semver stamp from an older binary
-            // comparing against a sha-carrying build fires too — that
-            // is desired, no migration.
+            // rewritten by the next mutation.
+            //
+            // Compared as SEMVER, not as full strings (04/04, criterion 8).
+            // The old rule fired on any difference including the `+g<sha>`
+            // build metadata, so every rebuild between releases read as
+            // skew — noise on any workspace whose binary is built from
+            // source, which is every dogfood workspace. Semver ordering
+            // ignores build metadata, so what survives is a real version
+            // difference, and it now carries its direction.
             if let Some(stamp) = m
                 .mem_config
                 .as_ref()
                 .and_then(|c| c.mutation_stamp.as_ref())
-                && stamp.engine_version != crate::build_info::full_version()
+                && let Some(direction) = crate::build_info::skew_direction(
+                    &stamp.engine_version,
+                    crate::build_info::full_version(),
+                )
             {
                 load_warnings.push(WarningHint::EngineVersionSkew {
                     mem: m.mount.mem.clone(),
                     stamped_engine: stamp.engine_version.clone(),
                     running_engine: crate::build_info::full_version().to_string(),
                     stamped_schema: stamp.schema.clone(),
+                    direction,
                 });
             }
             // Authoritative pin first (the backend config), then the
