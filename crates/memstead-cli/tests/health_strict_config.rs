@@ -352,6 +352,152 @@ propagating_relationships: []
     );
 }
 
+/// 04/07, criteria 3, 5 and 6: cross-mem links are gated on write and
+/// default-deny, so an edge whose grant was revoked is a state the engine
+/// would refuse to create today. Before this plan it stayed where it was,
+/// loaded without comment and exited zero under `--strict`; the workspace's
+/// own policy file had stopped describing its graph and no surface noticed.
+///
+/// The revocation names the edges it orphans at the moment it happens
+/// (criterion 5) and is never refused (criterion 6), and a strict run
+/// afterwards does not exit clean (criterion 3).
+#[test]
+fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
+    let tmp = TempDir::new().unwrap();
+    let a = tmp.path().join("alpha-mem");
+    let b = tmp.path().join("beta-mem");
+    fs::create_dir_all(&a).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    write_default_mem(&a, "The anchor of alpha.");
+    write_default_mem(&b, "The anchor of beta.");
+    init_real_mem_repo_from_disk(tmp.path(), &[(&a, "alpha"), (&b, "beta")]);
+
+    // Grant, then write the cross-mem edge under it.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["workspace", "grant-cross-link", "alpha", "beta"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--mem",
+            "beta",
+            "--title",
+            "Target",
+            "--type",
+            "spec",
+            "--section",
+            "identity=A real target.",
+            "--section",
+            "purpose=Exists.",
+            "--metadata",
+            "level=M0",
+        ])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--mem",
+            "alpha",
+            "--title",
+            "Source",
+            "--type",
+            "spec",
+            "--section",
+            "identity=Depends on beta.",
+            "--section",
+            "purpose=The referrer.",
+            "--metadata",
+            "level=M0",
+            "--relation",
+            "DEPENDS_ON:beta--target",
+        ])
+        .assert()
+        .success();
+
+    // With the grant standing, strict is clean on this axis.
+    let (code, _, envelope) = strict_health(tmp.path(), &["integrity"]);
+    assert_eq!(code, 0, "a permitted edge must not fail strict: {envelope}");
+
+    // Criterion 6: the revocation is not refused and needs no force flag.
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["workspace", "revoke-cross-link", "alpha", "beta"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "revocation is never refused: {text}");
+
+    // Criterion 5: it NAMES the orphaned edge, not just a count.
+    assert!(
+        text.contains("alpha--source") && text.contains("beta--target"),
+        "the revocation must name the edges it orphaned: {text}"
+    );
+
+    // Criterion 3: strict now refuses.
+    let (code, json, envelope) = strict_health(tmp.path(), &["integrity"]);
+    assert_eq!(code, 1, "{envelope}");
+    assert!(
+        envelope.contains("ungranted_cross_mem_edges: 1"),
+        "{envelope}"
+    );
+    let codes: Vec<&str> = json["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["code"].as_str())
+        .collect();
+    assert!(codes.contains(&"CROSS_MEM_EDGE_UNGRANTED"), "{codes:?}");
+
+    // Criterion 5, the precision half: a SECOND, unrelated revocation must not
+    // re-report the edge the first one orphaned. Reporting the whole standing
+    // set would blame every later edit for what an earlier one left behind.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["workspace", "grant-cross-link", "beta", "alpha"])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["workspace", "revoke-cross-link", "beta", "alpha"])
+        .output()
+        .unwrap();
+    let second = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "{second}");
+    assert!(
+        !second.contains("alpha--source"),
+        "the alpha→beta edge was orphaned by the FIRST revocation; this one \
+         orphaned nothing and must say so: {second}"
+    );
+
+    // Criterion 4, at the CLI: the mem still serves. Reading the referrer is
+    // not blocked by the condition its own edge raises.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["entity", "alpha--source"])
+        .assert()
+        .success();
+
+    // Criterion 9, at the CLI: the remedy needs no grant.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "relate",
+            "alpha--source",
+            "DEPENDS_ON",
+            "beta--target",
+            "--remove",
+        ])
+        .assert()
+        .success();
+    let (code, _, envelope) = strict_health(tmp.path(), &["integrity"]);
+    assert_eq!(code, 0, "removing the edge resolves it: {envelope}");
+}
+
 /// 04/06, criteria 2 and 4: the CLI's own rendered surfaces name the
 /// condition. The markdown block used to print `section: (none)` and
 /// leave the reader to work out which of three problems they had, and

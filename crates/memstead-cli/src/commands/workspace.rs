@@ -439,20 +439,90 @@ fn grant_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()>
 fn revoke_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()> {
     let root = require_workspace_root()?;
     let target = CrossLinkTarget::parse(&args.to);
-    let warnings = workspace_config_edit::revoke_cross_link(&root, &args.from, &target)
+
+    // What was ALREADY unbacked before this edit. Reported without it, the
+    // revocation would blame itself for every edge some earlier unrelated
+    // revocation left behind (04/07, criterion 5).
+    let before = ctx
+        .cli_engine()
+        .map(|mut e| e.base_mut().ungranted_cross_mem_edges())
+        .unwrap_or_default();
+
+    let mut warnings = workspace_config_edit::revoke_cross_link(&root, &args.from, &target)
         .map_err(lift_edit_error)?;
+
+    // Revocation is never refused and needs no force flag: an operator who has
+    // decided two mems should no longer link can say so before cleaning up,
+    // and the cleanup is easier once the policy states the intent. But it is
+    // also the one moment the operator can act cheaply — the store is loaded
+    // and they remember what they changed — so the edges the revocation just
+    // orphaned are named here rather than discovered on a later gate run
+    // (04/07, criteria 5 and 6). Named, not counted: a count says something is
+    // wrong without saying what to look at.
+    //
+    // Booted AFTER the edit, so the scan answers against the policy as it now
+    // stands. The engine is not booted at all when the revoke was a no-op, so
+    // the ordinary case pays nothing and gains no noise (criterion 7).
+    let orphaned: Vec<String> = if warnings.is_empty() {
+        match ctx.cli_engine() {
+            Ok(mut engine) => memstead_base::Engine::newly_ungranted(
+                &before,
+                engine.base_mut().ungranted_cross_mem_edges(),
+            )
+            .iter()
+            .map(|f| {
+                let d = &f.detail;
+                format!(
+                    "`{}` --{}-> `{}`",
+                    d["from"].as_str().unwrap_or(&f.id),
+                    d["rel_type"].as_str().unwrap_or("?"),
+                    d["target_id"].as_str().unwrap_or("?"),
+                )
+            })
+            .collect(),
+            // A workspace that will not boot is a separate problem, and it is
+            // not this command's to report: the revocation already landed and
+            // saying so is more useful than failing after the fact.
+            Err(_) => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+
     let heading = format!(
         "Workspace revoke-cross-link `{}` → `{}`",
         args.from, args.to
     );
-    let bullets = vec![
+    let mut bullets = vec![
         format!("From: `{}`", args.from),
         format!("To: `{}`", args.to),
     ];
+    if !orphaned.is_empty() {
+        // Also on the warning channel, which every revoke surface already
+        // renders — the bullets below are this command's own presentation.
+        warnings.push(
+            workspace_config_edit::WorkspaceEditWarning::CrossLinkRevokeOrphanedEdges {
+                edges: orphaned.clone(),
+            },
+        );
+        bullets.push(format!(
+            "Edges left without a grant ({}) — they are NOT removed; \
+             `memstead health --include integrity --strict` now refuses \
+             until each is granted again or removed:",
+            orphaned.len()
+        ));
+        for edge in &orphaned {
+            bullets.push(format!("  {edge}"));
+        }
+    }
     confirm_block(
         ctx,
         "revoke-cross-link",
-        serde_json::json!({ "from": args.from, "to": args.to }),
+        serde_json::json!({
+            "from": args.from,
+            "to": args.to,
+            "orphaned_edges": orphaned,
+        }),
         &heading,
         bullets,
         &warnings,

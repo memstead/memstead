@@ -190,6 +190,45 @@ fn revoke_cross_link_drops_key_when_empty() {
     assert!(!body.contains("plugin = "), "got:\n{body}");
 }
 
+/// 04/07, criterion 7: the ordinary case gains no noise. Revoking a grant
+/// that backs no existing edge reports nothing beyond the pre-existing
+/// not-found warning — the orphan scan is what an operator needs when it has
+/// something to say, and silence otherwise is the whole point of adding it.
+#[test]
+fn revoking_a_grant_backing_no_edge_reports_no_orphans() {
+    let ws = seed_workspace();
+    memstead()
+        .current_dir(ws.path())
+        .args(["workspace", "grant-cross-link", "plugin", "engine"])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(ws.path())
+        .args(["workspace", "revoke-cross-link", "plugin", "engine"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "{text}");
+    assert!(
+        !text.to_lowercase().contains("without a grant"),
+        "no orphan block when the revocation orphans nothing: {text}"
+    );
+
+    // And the no-op revoke keeps its existing warning, unchanged.
+    let out = memstead()
+        .current_dir(ws.path())
+        .args(["workspace", "revoke-cross-link", "plugin", "engine"])
+        .output()
+        .unwrap();
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.status.success(), "{all}");
+    assert!(all.contains("GRANT_NOT_FOUND"), "{all}");
+}
+
 #[test]
 fn set_mutations_require_notes_toggles() {
     let ws = seed_workspace();

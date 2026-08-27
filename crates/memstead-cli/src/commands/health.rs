@@ -91,7 +91,8 @@ pub struct Args {
     /// level), and with `integrity` the consistency findings
     /// `ORPHAN_STUB`, `DANGLING_LINK_TARGET_MISSING`,
     /// `DANGLING_LINK_NOT_RELATED` and
-    /// `DANGLING_RELATION_TARGET_MISSING`. Stale entities, drifted
+    /// `DANGLING_RELATION_TARGET_MISSING` and
+    /// `CROSS_MEM_EDGE_UNGRANTED`. Stale entities, drifted
     /// anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The
     /// output is rendered first, then the non-zero exit fires; new
     /// Tier-2 codes opt in additively without breaking the flag's
@@ -327,6 +328,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let orphan_stubs = findings.iter().filter(|f| f.code == "ORPHAN_STUB").count();
             if orphan_stubs > 0 {
                 strict_violations.push(("orphan_stubs", orphan_stubs));
+            }
+            // An edge the write gate would refuse to create today is a
+            // workspace whose policy file has stopped describing its graph.
+            // Strict is opt-in and is exactly the gate an operator runs after
+            // changing policy, so this is where the two are forced back into
+            // agreement (04/07, criterion 3).
+            let ungranted = findings
+                .iter()
+                .filter(|f| f.code == "CROSS_MEM_EDGE_UNGRANTED")
+                .count();
+            if ungranted > 0 {
+                strict_violations.push(("ungranted_cross_mem_edges", ungranted));
             }
         }
         obj.insert("findings".into(), serde_json::to_value(&findings)?);

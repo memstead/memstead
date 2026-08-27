@@ -372,11 +372,25 @@ fn heading_has_body(
 /// Run the consistency axis over `mem`, projecting the pre-existing
 /// graph-coherence checks into the integrity-finding shape: dangling
 /// wiki-links (the `DANGLING_LINK_*` / `DANGLING_RELATION_*` family, on the
-/// linking entity) and stubs with
-/// their referrers (`ORPHAN_STUB`, on the stub). The category
-/// collectors are the same ones the dedicated health includes use —
-/// `integrity` is a projection, not a second implementation.
-pub fn consistency_findings(store: &Store, mem: &str) -> Vec<IntegrityFinding> {
+/// linking entity), stubs with
+/// their referrers (`ORPHAN_STUB`, on the stub), and cross-mem edges the
+/// workspace no longer permits (`CROSS_MEM_EDGE_UNGRANTED`, on the referrer).
+/// The category collectors are the same ones the dedicated health includes
+/// use — `integrity` is a projection, not a second implementation.
+///
+/// `grant_allows` is the workspace's cross-mem grant resolution, passed in
+/// rather than recomputed. There is exactly one such resolver
+/// (`Engine::cross_mem_link_allowed`) and it is the same one the write gate
+/// consults; a second implementation here would answer a subtly different
+/// question from the gate it exists to mirror, and would drift the moment the
+/// create-rule default union changed (04/07, criterion 8). It is a closure
+/// because this module has no `Engine`, and the single Engine-side funnel
+/// supplies it for every caller.
+pub fn consistency_findings(
+    store: &Store,
+    mem: &str,
+    grant_allows: &dyn Fn(&str, &str) -> bool,
+) -> Vec<IntegrityFinding> {
     let mut findings = Vec::new();
     for link in super::health::collect_dangling_links(store, Some(mem)) {
         findings.push(IntegrityFinding {
@@ -394,6 +408,49 @@ pub fn consistency_findings(store: &Store, mem: &str) -> Vec<IntegrityFinding> {
                 "repair": link.kind.repair(),
             }),
         });
+    }
+    // Cross-mem edges whose grant no longer permits them. The write gate is
+    // default-deny, so such an edge is a state the engine would refuse to
+    // create today; leaving it unreported means the workspace policy file has
+    // stopped describing the graph and nothing forces the two back into
+    // agreement. Reported and strict, never a load refusal: a policy edit must
+    // not take a mem offline, because the recovery needs the very links the
+    // refusal would block (04/07).
+    for entity in store.all_entities() {
+        if entity.mem != mem || entity.stub {
+            continue;
+        }
+        for rel in &entity.relationships {
+            let to_mem = rel.target.mem();
+            // Same-mem edges never traverse the gate. The resolver admits them
+            // unconditionally, so asking is correct as well as cheap, but the
+            // early skip keeps the scan proportional to cross-mem edges.
+            if to_mem == entity.mem {
+                continue;
+            }
+            if grant_allows(&entity.mem, to_mem) {
+                continue;
+            }
+            findings.push(IntegrityFinding {
+                id: entity.id.to_string(),
+                axis: IntegrityAxis::Consistency,
+                code: "CROSS_MEM_EDGE_UNGRANTED".to_string(),
+                detail: serde_json::json!({
+                    "from": entity.id,
+                    "target_id": rel.target,
+                    "rel_type": rel.rel_type,
+                    "from_mem": entity.mem,
+                    "to_mem": to_mem,
+                    // The cause, stated: this is NOT a missing target. The
+                    // target may be perfectly present; what is absent is the
+                    // workspace's permission for the pair (criterion 1).
+                    "cause": "no cross-mem grant permits this pair",
+                    "repair": "grant the pair with `memstead workspace grant-cross-link`, \
+                               or remove the edge with `memstead relate --remove` \
+                               (removal needs no grant)",
+                }),
+            });
+        }
     }
     for (stub_id, referrers) in crate::graph::query::find_stubs(store) {
         if stub_id.mem() != mem {

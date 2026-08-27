@@ -1837,6 +1837,7 @@ impl Engine {
 
     /// Consistency-axis integrity findings for one mem — the
     /// pre-existing graph-coherence categories (dangling links, stubs)
+    /// plus cross-mem edges the workspace grant table no longer permits,
     /// projected into the `{ id, axis, code, detail }` finding shape.
     pub fn consistency_findings(
         &self,
@@ -1848,7 +1849,63 @@ impl Engine {
         Ok(crate::ops::integrity::consistency_findings(
             &self.store,
             mem,
+            // The one grant resolver, the same one the write gate calls. Every
+            // consumer of the axis reaches it through this funnel, so there is
+            // no site where a second answer could be written (04/07).
+            &|from, to| self.cross_mem_link_allowed(from, to),
         ))
+    }
+
+    /// Every cross-mem edge the workspace's current grant resolution does
+    /// not permit, across every visible mem.
+    ///
+    /// A projection of [`Self::consistency_findings`] filtered to the one
+    /// code, not a second scan: the revoke path and the health axis must
+    /// never be able to answer differently about the same edge, and the
+    /// surest way to guarantee that is for one of them to BE the other
+    /// (04/07, criterion 8).
+    ///
+    /// Call it after the grant edit has landed and the settings have been
+    /// reloaded — the answer is "what does the CURRENT policy leave
+    /// unbacked", which is what an operator revoking a grant wants to know.
+    ///
+    /// Takes `&mut self` because it must load lazily-deferred mems first. A
+    /// deferred mem's entities are not in the store, so scanning without the
+    /// load would report zero ungranted edges for it and call that clean —
+    /// which is precisely the silent all-clear this whole axis exists to
+    /// prevent. The long-lived server engines carry lazy mounts; the CLI's
+    /// fresh boot does not, so this only bites on the surface where it is
+    /// hardest to notice.
+    pub fn ungranted_cross_mem_edges(&mut self) -> Vec<crate::ops::integrity::IntegrityFinding> {
+        self.ensure_mems_loaded(None);
+        let mut mems: Vec<&String> = self.schemas.keys().collect();
+        mems.sort();
+        mems.into_iter()
+            .filter_map(|mem| self.consistency_findings(mem).ok())
+            .flatten()
+            .filter(|f| f.code == "CROSS_MEM_EDGE_UNGRANTED")
+            .collect()
+    }
+
+    /// The edges that went from permitted to unpermitted between two
+    /// readings of [`Self::ungranted_cross_mem_edges`] — what a policy edit
+    /// just orphaned, as opposed to what was already orphaned before it.
+    ///
+    /// A revocation that reported the whole standing set would blame this
+    /// edit for every edge some earlier unrelated revocation left behind,
+    /// which is a different and less useful claim (04/07, criterion 5).
+    pub fn newly_ungranted(
+        before: &[crate::ops::integrity::IntegrityFinding],
+        after: Vec<crate::ops::integrity::IntegrityFinding>,
+    ) -> Vec<crate::ops::integrity::IntegrityFinding> {
+        let seen: std::collections::BTreeSet<(String, String)> = before
+            .iter()
+            .map(|f| (f.id.clone(), f.detail["target_id"].to_string()))
+            .collect();
+        after
+            .into_iter()
+            .filter(|f| !seen.contains(&(f.id.clone(), f.detail["target_id"].to_string())))
+            .collect()
     }
 
     /// Engine-wide health summary across every mount.

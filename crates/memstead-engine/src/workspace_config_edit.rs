@@ -102,6 +102,17 @@ pub enum WorkspaceEditWarning {
     /// links never traverse the cross-link gate, so the grant is a
     /// no-op. It still persists; the meaninglessness is surfaced.
     CrossLinkSelfGrantNoop { mem: String },
+    /// `revoke_cross_link` removed a grant that existing edges were
+    /// relying on. The edges are NOT removed — a policy edit must not
+    /// delete user data — but they are now in a state the default-deny
+    /// write gate would refuse to create, so they are named at the moment
+    /// the operator can act on them cheapest rather than left for a later
+    /// gate run (04/07, criterion 5).
+    ///
+    /// Rides the warning channel deliberately: every revoke surface
+    /// already renders these, so the CLI operator, the HTTP client and the
+    /// web app get the same account without three separate renderings.
+    CrossLinkRevokeOrphanedEdges { edges: Vec<String> },
 }
 
 impl WorkspaceEditWarning {
@@ -115,6 +126,7 @@ impl WorkspaceEditWarning {
             Self::GrantNotFound { .. } => "GRANT_NOT_FOUND",
             Self::CrossLinkTargetUnregistered { .. } => "CROSS_LINK_TARGET_UNREGISTERED",
             Self::CrossLinkSelfGrantNoop { .. } => "CROSS_LINK_SELF_GRANT_NOOP",
+            Self::CrossLinkRevokeOrphanedEdges { .. } => "CROSS_LINK_REVOKE_ORPHANED_EDGES",
         }
     }
 }
@@ -145,6 +157,12 @@ impl std::fmt::Display for WorkspaceEditWarning {
             Self::CrossLinkSelfGrantNoop { mem } => write!(
                 f,
                 "self-grant `{mem} → {mem}` is a no-op — intra-mem links never traverse the cross-link gate; the grant is persisted but has no effect"
+            ),
+            Self::CrossLinkRevokeOrphanedEdges { edges } => write!(
+                f,
+                "{} existing edge(s) are now without a grant and are NOT removed: {}. Each refuses `memstead health --include integrity --strict` until it is granted again or removed (`memstead relate ... --remove`, which needs no grant)",
+                edges.len(),
+                edges.join(", ")
             ),
         }
     }

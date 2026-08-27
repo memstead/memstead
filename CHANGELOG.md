@@ -7,6 +7,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **A cross-mem edge whose grant was revoked is now reported, and fails a strict
+  run.** Cross-mem links are default-deny and gated on write. Revoke the grant
+  afterwards and every edge written under it stayed exactly where it was, loaded
+  without comment and exited zero under `--strict`: the workspace's own policy
+  file had stopped describing its graph and no surface noticed. Grants were
+  policed against the mem roster (delete refuses, rename re-keys) and never
+  against the edge set.
+
+  `health --include integrity` now reports `CROSS_MEM_EDGE_UNGRANTED` on the
+  consistency axis, naming the referrer, the target, and that the cause is an
+  absent grant rather than a missing target, and `--strict` refuses while any
+  remain. `memstead workspace revoke-cross-link` names the edges the revocation
+  orphans at the moment it happens, rather than leaving them to be discovered on
+  a later gate run.
+
+  Never a load refusal and never a quarantine: a policy edit must not take a mem
+  offline, because the recovery would need the very links the refusal blocks.
+  Revocation is not refused and needs no force flag, it deletes no edges, and
+  removing an orphaned edge still needs no grant — so the reported condition is
+  always resolvable. The check calls the same resolver the write gate calls,
+  including the create-rule default union, so an edge permitted only through
+  that union is not reported.
+
 ### Changed
 - **`DANGLING_LINK` split into the three conditions it was fusing.** One code
   covered a body link whose target has no file, a body link to a written

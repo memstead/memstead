@@ -1557,6 +1557,443 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
 /// raised. The gate is not wrapped in `if params.delete_files {`, so
 /// unregister-only deletes against mems whose surviving writable peers
 /// still point at them are refused rather than silently admitted.
+/// 04/07: the grant table and the edge set cannot silently disagree.
+/// Cross-mem links are default-deny and gated on write; revoke the grant
+/// afterwards and, before this plan, every edge written under it stayed where
+/// it was, loaded without comment and passed strict health. The workspace's
+/// own policy file stopped describing its graph and no surface noticed.
+///
+/// Covers criteria 1, 2 and 4: the edge is reported with its cause once the
+/// grant is gone, an edge the resolution still permits is NOT reported
+/// (including one permitted only through the create-rule default union, and
+/// one inside a single mem), and the mem carrying the ungranted edge keeps
+/// serving.
+#[test]
+fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
+    use memstead_base::CreateEntityArgs;
+    use memstead_base::ops::RelateArg;
+    use memstead_base::vcs::Actor;
+    use memstead_schema::workspace_config::CrossLinkValue;
+
+    let tmp = TempDir::new().unwrap();
+    let a_dir = tmp.path().join("mem-a");
+    let b_dir = tmp.path().join("mem-b");
+    std::fs::create_dir_all(&a_dir).unwrap();
+    std::fs::create_dir_all(&b_dir).unwrap();
+    let mut engine = Engine::from_mounts(vec![
+        (
+            folder_mount("a", a_dir.clone()),
+            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("b", b_dir.clone()),
+            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+
+    let granted = |engine: &mut Engine| {
+        let mut cross_links: std::collections::BTreeMap<String, CrossLinkValue> =
+            Default::default();
+        cross_links.insert("a".to_string(), CrossLinkValue::List(vec!["b".to_string()]));
+        engine.set_settings(WorkspaceSettings {
+            mem_create_rules: Vec::new(),
+            mem_delete_rules: Vec::new(),
+            cross_mem_links: cross_links,
+            ..Default::default()
+        });
+    };
+    granted(&mut engine);
+
+    let seed_sections = || {
+        let mut sample = CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: String::new(),
+            title: String::new(),
+            entity_type: String::new(),
+            sections: Default::default(),
+            metadata: Default::default(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        sample
+            .sections
+            .insert("identity".to_string(), "seed identity".to_string());
+        sample
+            .sections
+            .insert("purpose".to_string(), "seed purpose".to_string());
+        sample.sections
+    };
+    let create = |engine: &mut Engine, mem: &str, title: &str, relations: Vec<RelateArg>| {
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: mem.to_string(),
+                    title: title.to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: seed_sections(),
+                    metadata: Default::default(),
+                    relations,
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .unwrap_or_else(|e| panic!("seed {mem}--{title}: {e:?}"));
+    };
+    create(&mut engine, "b", "Target", Vec::new());
+    create(&mut engine, "a", "Peer", Vec::new());
+    // The cross-mem edge, written while the grant permitted it.
+    create(
+        &mut engine,
+        "a",
+        "Source",
+        vec![RelateArg {
+            to: memstead_base::EntityId::canonical("b--target"),
+            rel_type: "DEPENDS_ON".to_string(),
+            description: None,
+        }],
+    );
+    // A same-mem edge, which never traverses the gate at all.
+    create(
+        &mut engine,
+        "a",
+        "Neighbour",
+        vec![RelateArg {
+            to: memstead_base::EntityId::canonical("a--peer"),
+            rel_type: "DEPENDS_ON".to_string(),
+            description: None,
+        }],
+    );
+
+    // Criterion 2: while the grant stands, nothing is reported — and the
+    // same-mem edge is not reported either.
+    assert!(
+        engine.ungranted_cross_mem_edges().is_empty(),
+        "a permitted edge must not be reported: {:?}",
+        engine.ungranted_cross_mem_edges()
+    );
+
+    // Revoke. The edge is untouched on disk; only the policy changed.
+    engine.set_settings(WorkspaceSettings {
+        mem_create_rules: Vec::new(),
+        mem_delete_rules: Vec::new(),
+        cross_mem_links: Default::default(),
+        ..Default::default()
+    });
+
+    // Criterion 1: reported, naming referrer, target, and the cause.
+    let found = engine.ungranted_cross_mem_edges();
+    assert_eq!(found.len(), 1, "{found:?}");
+    let f = &found[0];
+    assert_eq!(f.code, "CROSS_MEM_EDGE_UNGRANTED");
+    assert_eq!(f.id, "a--source");
+    assert_eq!(f.detail["target_id"].as_str(), Some("b--target"));
+    assert_eq!(f.detail["from_mem"].as_str(), Some("a"));
+    assert_eq!(f.detail["to_mem"].as_str(), Some("b"));
+    assert!(
+        f.detail["cause"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("grant"),
+        "the cause must say the grant is absent, not that the target is: {:?}",
+        f.detail
+    );
+    // The target is present. A reader must not be able to mistake this for a
+    // dangling reference (criterion 1).
+    assert!(
+        engine
+            .store()
+            .get(&memstead_base::EntityId::canonical("b--target"))
+            .is_some_and(|e| !e.stub),
+        "the target of an ungranted edge is a real entity"
+    );
+
+    // Criterion 4: never a load refusal, never a quarantine. Both mems keep
+    // serving, and the entity carrying the ungranted edge still reads.
+    assert!(
+        engine
+            .store()
+            .get(&memstead_base::EntityId::canonical("a--source"))
+            .is_some(),
+        "the mem whose only defect is an ungranted edge continues to serve"
+    );
+
+    // Criterion 2, the harder half: an edge permitted ONLY through the
+    // create-rule default union is not reported. A check that consulted the
+    // explicit table alone would report this one.
+    engine.set_settings(WorkspaceSettings {
+        mem_create_rules: vec![memstead_base::workspace::CreateRuleSetting {
+            pattern: "a".to_string(),
+            schemas: Vec::new(),
+            default_cross_links: Some(CrossLinkValue::Wildcard),
+        }],
+        mem_delete_rules: Vec::new(),
+        cross_mem_links: Default::default(),
+        ..Default::default()
+    });
+    assert!(
+        engine.ungranted_cross_mem_edges().is_empty(),
+        "an edge permitted through the create-rule default union must not be \
+         reported — the explicit table is only the first of four steps: {:?}",
+        engine.ungranted_cross_mem_edges()
+    );
+}
+
+/// 04/07: a lazily-deferred mem's edges must not be silently missed. A
+/// deferred mem's entities are not in the store, so a scan that did not load
+/// first would report zero ungranted edges for it and call that clean — a
+/// silent all-clear, which is the exact failure the whole axis exists to
+/// prevent. The long-lived server engines carry lazy mounts; the CLI's fresh
+/// boot does not, so this only bites where it is hardest to notice.
+#[test]
+fn a_deferred_mems_ungranted_edges_are_found_not_silently_skipped() {
+    use memstead_base::CreateEntityArgs;
+    use memstead_base::ops::RelateArg;
+    use memstead_base::vcs::Actor;
+    use memstead_schema::workspace_config::CrossLinkValue;
+
+    let tmp = TempDir::new().unwrap();
+    let a_dir = tmp.path().join("mem-a");
+    let b_dir = tmp.path().join("mem-b");
+    std::fs::create_dir_all(&a_dir).unwrap();
+    std::fs::create_dir_all(&b_dir).unwrap();
+
+    let sections = {
+        let mut sample = CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: String::new(),
+            title: String::new(),
+            entity_type: String::new(),
+            sections: Default::default(),
+            metadata: Default::default(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        sample
+            .sections
+            .insert("identity".to_string(), "seed identity".to_string());
+        sample
+            .sections
+            .insert("purpose".to_string(), "seed purpose".to_string());
+        sample.sections
+    };
+
+    // Seed the edge on an EAGER engine, under a grant that permits it.
+    {
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("a", a_dir.clone()),
+                Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("b", b_dir.clone()),
+                Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let mut grants: std::collections::BTreeMap<String, CrossLinkValue> = Default::default();
+        grants.insert("a".to_string(), CrossLinkValue::List(vec!["b".to_string()]));
+        engine.set_settings(WorkspaceSettings {
+            cross_mem_links: grants,
+            ..Default::default()
+        });
+        for (mem, title, relations) in [
+            ("b", "Target", Vec::new()),
+            (
+                "a",
+                "Source",
+                vec![RelateArg {
+                    to: memstead_base::EntityId::canonical("b--target"),
+                    rel_type: "DEPENDS_ON".to_string(),
+                    description: None,
+                }],
+            ),
+        ] {
+            engine
+                .create_entity(
+                    CreateEntityArgs {
+                        anchors: Vec::new(),
+                        mem: mem.to_string(),
+                        title: title.to_string(),
+                        entity_type: "spec".to_string(),
+                        sections: sections.clone(),
+                        metadata: Default::default(),
+                        relations,
+                        dry_run: false,
+                    },
+                    Actor::Cli,
+                    None,
+                    None,
+                )
+                .expect("seed");
+        }
+    }
+
+    // Fresh boot with the REFERRER's mem lazy, and no grant at all.
+    let lazy_a = Mount {
+        lifecycle: MountLifecycle::Lazy,
+        ..folder_mount("a", a_dir.clone())
+    };
+    let mut engine = Engine::from_mounts(vec![
+        (
+            lazy_a,
+            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("b", b_dir.clone()),
+            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+    engine.set_settings(WorkspaceSettings {
+        cross_mem_links: Default::default(),
+        ..Default::default()
+    });
+
+    // The referrer is not in the store yet — this is the state a scan without
+    // the load would have called clean.
+    assert!(
+        engine
+            .store()
+            .get(&memstead_base::EntityId::canonical("a--source"))
+            .is_none(),
+        "precondition: the lazy mem's entities are deferred"
+    );
+
+    let found = engine.ungranted_cross_mem_edges();
+    assert_eq!(
+        found.len(),
+        1,
+        "the deferred mem's ungranted edge must be found, not reported clean: {found:?}"
+    );
+    assert_eq!(found[0].id, "a--source");
+    assert_eq!(found[0].code, "CROSS_MEM_EDGE_UNGRANTED");
+}
+
+/// 04/07, criterion 9: the reported condition is resolvable through the
+/// engine. Remove-shaped writes deliberately skip the write gate, so an edge
+/// that lost its grant can still be removed — otherwise the report would name
+/// a condition with no remedy.
+#[test]
+fn an_ungranted_edge_can_still_be_removed_without_a_grant() {
+    use memstead_base::CreateEntityArgs;
+    use memstead_base::ops::RelateArg;
+    use memstead_base::vcs::Actor;
+    use memstead_schema::workspace_config::CrossLinkValue;
+
+    let tmp = TempDir::new().unwrap();
+    let a_dir = tmp.path().join("mem-a");
+    let b_dir = tmp.path().join("mem-b");
+    std::fs::create_dir_all(&a_dir).unwrap();
+    std::fs::create_dir_all(&b_dir).unwrap();
+    let mut engine = Engine::from_mounts(vec![
+        (
+            folder_mount("a", a_dir.clone()),
+            Box::new(FilesystemMemWriter::new(a_dir.clone())) as Box<dyn MemBackend>,
+        ),
+        (
+            folder_mount("b", b_dir.clone()),
+            Box::new(FilesystemMemWriter::new(b_dir.clone())) as Box<dyn MemBackend>,
+        ),
+    ])
+    .unwrap();
+    let mut cross_links: std::collections::BTreeMap<String, CrossLinkValue> = Default::default();
+    cross_links.insert("a".to_string(), CrossLinkValue::List(vec!["b".to_string()]));
+    engine.set_settings(WorkspaceSettings {
+        mem_create_rules: Vec::new(),
+        mem_delete_rules: Vec::new(),
+        cross_mem_links: cross_links,
+        ..Default::default()
+    });
+
+    let sections = {
+        let mut sample = CreateEntityArgs {
+            anchors: Vec::new(),
+            mem: String::new(),
+            title: String::new(),
+            entity_type: String::new(),
+            sections: Default::default(),
+            metadata: Default::default(),
+            relations: Vec::new(),
+            dry_run: false,
+        };
+        sample
+            .sections
+            .insert("identity".to_string(), "seed identity".to_string());
+        sample
+            .sections
+            .insert("purpose".to_string(), "seed purpose".to_string());
+        sample.sections
+    };
+    for (mem, title, relations) in [
+        ("b", "Target", Vec::new()),
+        (
+            "a",
+            "Source",
+            vec![RelateArg {
+                to: memstead_base::EntityId::canonical("b--target"),
+                rel_type: "DEPENDS_ON".to_string(),
+                description: None,
+            }],
+        ),
+    ] {
+        engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: mem.to_string(),
+                    title: title.to_string(),
+                    entity_type: "spec".to_string(),
+                    sections: sections.clone(),
+                    metadata: Default::default(),
+                    relations,
+                    dry_run: false,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .expect("seed");
+    }
+
+    // Revoke, leaving the edge ungranted.
+    engine.set_settings(WorkspaceSettings {
+        mem_create_rules: Vec::new(),
+        mem_delete_rules: Vec::new(),
+        cross_mem_links: Default::default(),
+        ..Default::default()
+    });
+    assert_eq!(engine.ungranted_cross_mem_edges().len(), 1);
+
+    // The remedy works without re-granting first. Making removal require a
+    // grant would make an orphaned edge unremovable, which is the opposite of
+    // the goal.
+    engine
+        .relate_entity(
+            memstead_base::RelateEntityArgs {
+                source: memstead_base::EntityId::canonical("a--source"),
+                target: memstead_base::EntityId::canonical("b--target"),
+                rel_type: "DEPENDS_ON".to_string(),
+                description: None,
+                expected_hash: None,
+                remove: true,
+                dry_run: false,
+            },
+            Actor::Cli,
+            None,
+            None,
+        )
+        .expect("removing an ungranted edge must not require a grant");
+
+    assert!(
+        engine.ungranted_cross_mem_edges().is_empty(),
+        "the reported condition is resolvable through the engine"
+    );
+}
+
 #[test]
 fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
     use memstead_base::CreateEntityArgs;

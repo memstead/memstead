@@ -1667,6 +1667,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "DANGLING_LINK_NOT_RELATED",
             "DANGLING_RELATION_TARGET_MISSING",
             "ORPHAN_STUB",
+            // An existing cross-mem edge the workspace grant table no longer
+            // permits — a state the default-deny write gate would refuse to
+            // create today, reported rather than refused at load (04/07).
+            "CROSS_MEM_EDGE_UNGRANTED",
             "SCHEMA_NOT_FOUND",
             // Load-time drift warning emitted by `push_entities_into_store`
             // at init/reload/attach.
