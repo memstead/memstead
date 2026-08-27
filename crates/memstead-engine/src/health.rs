@@ -950,7 +950,16 @@ fn render_count_map(s: &mut String, val: Option<&serde_json::Value>, title: &str
 }
 
 /// One-line summary of a health detail item: prefer `id` (+ `title`),
-/// else a dangling-link `from → target_id`, else the compact JSON.
+/// else a dangling reference as `[kind] from → target_id`, else the
+/// compact JSON.
+///
+/// The `kind` prefix matters because this is the health TEXT channel —
+/// what an agent reads once the JSON exceeds `token_budget`, or whenever
+/// it passes `chunk`. Without it the three dangling conditions, which
+/// have three different repairs, render as one identical line shape and
+/// the reader is back to the fused report the codes were split to end
+/// (04/06, criteria 2 and 4). Mirrors `overview.rs`'s rendered section
+/// and the CLI's markdown block.
 fn summarize_health_item(item: &serde_json::Value) -> String {
     if let Some(id) = item.get("id").and_then(|x| x.as_str()) {
         match item.get("title").and_then(|x| x.as_str()) {
@@ -959,7 +968,10 @@ fn summarize_health_item(item: &serde_json::Value) -> String {
         }
     } else if let Some(from) = item.get("from").and_then(|x| x.as_str()) {
         let target = item.get("target_id").and_then(|x| x.as_str()).unwrap_or("");
-        format!("{from} → {target}")
+        match item.get("kind").and_then(|x| x.as_str()) {
+            Some(kind) => format!("[{kind}] {from} → {target}"),
+            None => format!("{from} → {target}"),
+        }
     } else {
         serde_json::to_string(item).unwrap_or_default()
     }
@@ -1014,6 +1026,43 @@ mod tests {
         );
         // Absent key renders nothing at all.
         assert!(!render_health_markdown(&base_payload()).contains("Body observations"));
+    }
+
+    /// 04/06, criteria 2 and 4: the text channel names the condition.
+    /// This is the surface an agent gets once the JSON exceeds
+    /// `token_budget`, and it rendered all three dangling conditions as
+    /// one indistinguishable `from → target` line while every other
+    /// surface had been migrated — the last place the fused report
+    /// survived.
+    #[test]
+    fn render_health_markdown_names_the_dangling_condition() {
+        let mut v = base_payload();
+        v["dangling_links"] = json!([
+            {
+                "kind": "DANGLING_LINK_TARGET_MISSING",
+                "from": "specs--a", "target_id": "specs--gone",
+                "target_path": "gone", "section": "purpose",
+            },
+            {
+                "kind": "DANGLING_RELATION_TARGET_MISSING",
+                "from": "specs--b", "target_id": "specs--vanished",
+                "target_path": "vanished", "section": null,
+            },
+        ]);
+        let md = render_health_markdown(&v);
+        assert!(
+            md.contains("[DANGLING_LINK_TARGET_MISSING] specs--a → specs--gone"),
+            "{md}"
+        );
+        assert!(
+            md.contains("[DANGLING_RELATION_TARGET_MISSING] specs--b → specs--vanished"),
+            "{md}"
+        );
+        // The two conditions do not render as the same line shape.
+        assert!(
+            !md.contains("- specs--a → specs--gone"),
+            "the unprefixed form is what fused them: {md}"
+        );
     }
 
     /// Text-channel parity: the `checks` / `stale_derivations` axes

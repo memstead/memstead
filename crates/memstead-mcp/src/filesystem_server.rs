@@ -4565,9 +4565,10 @@ mod tests {
         assert!(text.contains(&format!("- {b}")));
     }
 
-    /// `memstead_overview include=["dangling_links"]` lists every non-stub
-    /// entity whose section body wiki-links resolve to a stub or
-    /// missing target. Pre-fix the lean overview surface hardcoded
+    /// `memstead_overview include=["dangling_links"]` renders the
+    /// dangling-reference section. This fixture exercises one of the three
+    /// conditions, `DANGLING_LINK_TARGET_MISSING`: a body wiki-link whose
+    /// target has no markdown file. Pre-fix the lean overview surface hardcoded
     /// `[]` here and the `## Dangling Links` block never rendered,
     /// even when the health surface populated the same
     /// view. The test fails against that state.
@@ -4636,6 +4637,11 @@ mod tests {
         assert!(
             text.contains("demo--gone"),
             "Dangling Links must name the dangling target: {text}"
+        );
+        assert!(
+            text.contains("[DANGLING_LINK_TARGET_MISSING]"),
+            "the rendered section must name which of the three conditions this \
+             is, not leave the reader to infer it from a null field (04/06): {text}"
         );
     }
 

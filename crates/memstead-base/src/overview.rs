@@ -1225,10 +1225,13 @@ pub fn compose_overview(
             let from = link["from"].as_str().unwrap_or("?");
             let target = link["target_id"].as_str().unwrap_or("?");
             let section = link["section"].as_str();
+            // The condition is named, not implied by an absent section field
+            // (04/06, criterion 4).
+            let kind = link["kind"].as_str().unwrap_or("?");
             if let Some(s) = section {
-                md.push_str(&format!("- `{from}` → `{target}` (in `{s}`)\n"));
+                md.push_str(&format!("- [{kind}] `{from}` → `{target}` (in `{s}`)\n"));
             } else {
-                md.push_str(&format!("- `{from}` → `{target}`\n"));
+                md.push_str(&format!("- [{kind}] `{from}` → `{target}`\n"));
             }
         }
         md.push('\n');

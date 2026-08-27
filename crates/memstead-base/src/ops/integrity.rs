@@ -371,7 +371,8 @@ fn heading_has_body(
 
 /// Run the consistency axis over `mem`, projecting the pre-existing
 /// graph-coherence checks into the integrity-finding shape: dangling
-/// wiki-links (`DANGLING_LINK`, on the linking entity) and stubs with
+/// wiki-links (the `DANGLING_LINK_*` / `DANGLING_RELATION_*` family, on the
+/// linking entity) and stubs with
 /// their referrers (`ORPHAN_STUB`, on the stub). The category
 /// collectors are the same ones the dedicated health includes use —
 /// `integrity` is a projection, not a second implementation.
@@ -381,12 +382,16 @@ pub fn consistency_findings(store: &Store, mem: &str) -> Vec<IntegrityFinding> {
         findings.push(IntegrityFinding {
             id: link.from.to_string(),
             axis: IntegrityAxis::Consistency,
-            code: "DANGLING_LINK".to_string(),
+            // The code comes from the discriminator the producer set, so the
+            // three conditions arrive under three names and each carries the
+            // repair it implies (04/06).
+            code: link.kind.code().to_string(),
             detail: serde_json::json!({
                 "from": link.from,
                 "target_id": link.target_id,
                 "target_path": link.target_path,
                 "section": link.section,
+                "repair": link.kind.repair(),
             }),
         });
     }

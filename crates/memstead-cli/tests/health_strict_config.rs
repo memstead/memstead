@@ -352,10 +352,57 @@ propagating_relationships: []
     );
 }
 
+/// 04/06, criteria 2 and 4: the CLI's own rendered surfaces name the
+/// condition. The markdown block used to print `section: (none)` and
+/// leave the reader to work out which of three problems they had, and
+/// the open-questions worklist carried a parallel `dangling_link`
+/// vocabulary of its own. Both now read the same three codes the
+/// findings list does.
+#[test]
+fn cli_markdown_and_open_questions_name_the_dangling_condition() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("hold");
+    fs::create_dir_all(&dir).unwrap();
+    write_default_mem(&dir, "Points at [[nowhere]] on purpose.");
+    init_real_mem_repo_from_disk(tmp.path(), &[(&dir, "hold")]);
+
+    // The human-facing markdown block.
+    let md = memstead()
+        .current_dir(tmp.path())
+        .args(["health", "--include", "dangling_links"])
+        .output()
+        .unwrap();
+    let md = String::from_utf8(md.stdout).unwrap();
+    assert!(
+        md.contains("[DANGLING_LINK_TARGET_MISSING]"),
+        "the rendered block must name the condition: {md}"
+    );
+
+    // The open-questions worklist, on the same condition.
+    let oq = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "health", "--include", "open_questions"])
+        .output()
+        .unwrap();
+    let oq = String::from_utf8(oq.stdout).unwrap();
+    assert!(
+        oq.contains("DANGLING_LINK_TARGET_MISSING"),
+        "the worklist must carry the same code, not a vocabulary of its \
+         own: {oq}"
+    );
+    assert!(
+        !oq.contains("\"dangling_link\""),
+        "the parallel kind vocabulary is retired: {oq}"
+    );
+}
+
 /// A body link to a target that does not exist creates a stub; with
-/// `integrity` included the run refuses on `DANGLING_LINK` and
-/// `ORPHAN_STUB`, and without the include it does not (the axis is
-/// opt-in, like the other include-gated ones).
+/// `integrity` included the run refuses on
+/// `DANGLING_LINK_TARGET_MISSING` and `ORPHAN_STUB`, and without the
+/// include it does not (the axis is opt-in, like the other
+/// include-gated ones). The other two dangling conditions have their own
+/// coverage in `memstead-base`; this test's subject is the strict gate,
+/// and it pins which condition its fixture actually raises.
 #[test]
 fn strict_with_integrity_refuses_dangling_links_and_orphan_stubs() {
     let tmp = TempDir::new().unwrap();
@@ -395,7 +442,26 @@ fn strict_with_integrity_refuses_dangling_links_and_orphan_stubs() {
         .iter()
         .filter_map(|f| f["code"].as_str())
         .collect();
-    assert!(codes.contains(&"DANGLING_LINK"), "{codes:?}");
+    // Both of this fixture's dangling links are the *target missing*
+    // condition: `[[nowhere]]` resolves to nothing at all, and
+    // `[[ghost-target]]` resolves to the auto-created stub, which the
+    // body scan counts as missing. Neither is a link to a written
+    // entity that lacks a relationship, and neither is a relationship
+    // row pointing at an absent target. The old assertion pinned the
+    // fused `DANGLING_LINK`, which said none of that (04/06).
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|c| **c == "DANGLING_LINK_TARGET_MISSING")
+            .count(),
+        2,
+        "{codes:?}"
+    );
+    assert!(
+        !codes.contains(&"DANGLING_LINK_NOT_RELATED")
+            && !codes.contains(&"DANGLING_RELATION_TARGET_MISSING"),
+        "this fixture produces neither of the other two conditions; {codes:?}"
+    );
     assert!(codes.contains(&"ORPHAN_STUB"), "{codes:?}");
     assert_eq!(code, 1, "{envelope}");
     assert!(envelope.contains("dangling_links:"), "{envelope}");

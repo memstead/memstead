@@ -3353,8 +3353,12 @@ pub struct HealthSummary {
     /// byte-unchanged.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub leaf_entities_by_type: std::collections::BTreeMap<String, usize>,
-    /// Inline wiki-links in entity section bodies that resolve to stub
-    /// targets (no on-disk markdown file). Populated only when the caller
+    /// Dangling references: the three conditions [`DanglingLink`] carries,
+    /// which are NOT all "a body wiki-link to a missing file" — that is one
+    /// of them. See [`DanglingLinkKind`] for the other two (a body link to
+    /// a written entity the referrer does not relate to, and a
+    /// relationships row naming an absent entity) and their repairs.
+    /// Populated only when the caller
     /// opts in via `include=["dangling_links"]`; `None` otherwise, so
     /// absence-of-key means "not requested" and presence-of-empty-array
     /// means "requested, zero findings". Scan is handler-driven (same
@@ -3439,14 +3443,36 @@ pub struct UntaggedStats {
     pub by_entity_type: HashMap<String, usize>,
 }
 
-/// One dangling wiki-link finding surfaced by
-/// `memstead_health include=["dangling_links"]`. A link is dangling when its
-/// resolved target is a stub (i.e. the markdown file does not exist on disk).
-/// This is the post-delete / renamed-without-rewrite / typo signal.
+/// One dangling-reference finding surfaced by
+/// `memstead_health include=["dangling_links"]` and projected onto the
+/// consistency axis by `include=["integrity"]`.
+///
+/// Three conditions reach this type, and [`kind`](Self::kind) says which:
+/// a body wiki-link whose target has no markdown file (the post-delete /
+/// renamed-without-rewrite / typo signal), a body wiki-link to a fully
+/// written entity that the referrer does not relate to, and a relationships
+/// row naming an entity absent from the store. Their repairs differ, so the
+/// codes differ; see [`DanglingLinkKind`].
+///
+/// The prose this replaces described only the first condition, which is how
+/// the fusion survived: the type read as if it had one subject while
+/// producing three (04/06, criterion 6).
 #[derive(Debug, Clone, Serialize)]
 pub struct DanglingLink {
+    /// Which of the three conditions this is, and therefore which repair
+    /// applies. Carried from the one producer, never re-derived: the split
+    /// happens where the conditions are distinguished (04/06).
+    pub kind: DanglingLinkKind,
     pub from: EntityId,
-    /// Canonical ID the wiki-link resolves to. Stub-typed in the store.
+    /// Canonical ID the wiki-link resolves to.
+    ///
+    /// NOT necessarily a stub: it is a stub or absent for
+    /// [`DanglingLinkKind::LinkTargetMissing`] and
+    /// [`DanglingLinkKind::RelationTargetMissing`], and a real, non-stub
+    /// entity for [`DanglingLinkKind::LinkNotRelated`], where the entity is
+    /// fine and the relationship row is what is missing. The old wording said
+    /// "stub-typed in the store", which was true of one of the three
+    /// conditions this type carried.
     pub target_id: EntityId,
     /// Resolved mem-relative path segment of the target ID (e.g. `gone`
     /// for `specs--gone`). This is the normalised form the engine records —
@@ -3454,11 +3480,89 @@ pub struct DanglingLink {
     /// to preserve the authored form is a future-work item if agents need
     /// grep-to-source precision.
     pub target_path: String,
-    /// Section key in which the link appears (e.g. `"purpose"`). `None`
-    /// only if the link appears outside any typed section — unusual but
-    /// possible in free-form prose before the first heading.
+    /// Section key the body wiki-link appears in (e.g. `"purpose"`).
+    ///
+    /// `None` for [`DanglingLinkKind::RelationTargetMissing`], whose source is
+    /// the auto-managed relationships block rather than a body section. That
+    /// absence used to be the ONLY way to tell that condition apart, which is
+    /// why `kind` exists: a reader should not have to inspect a payload for
+    /// nulls to learn which repair applies (04/06, criterion 4).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub section: Option<String>,
+}
+
+/// The three conditions the one dangling-link collector distinguishes.
+///
+/// They were emitted under a single `DANGLING_LINK` code through an identical
+/// payload, so a reader could not tell which of three repairs applied, and
+/// neither could the surfaces rendering it. Two of the three were not
+/// discriminable at all. The project's error discipline is that a typed code
+/// names one condition, so each gets its own (04/06).
+///
+/// The serialised value IS the code, so a payload's `kind`, a finding's
+/// `code` and a rendered line all read the same string. A kebab-case serde
+/// name would be a second spelling of one condition, which is the shape of
+/// the defect this plan removes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DanglingLinkKind {
+    /// A body wiki-link whose target is absent from the store or present only
+    /// as a stub. Repair: create the target entity.
+    #[serde(rename = "DANGLING_LINK_TARGET_MISSING")]
+    LinkTargetMissing,
+    /// A body wiki-link to an existing, non-stub entity that the referrer's
+    /// relationships list does not name. The entity is fine; the relationship
+    /// row is missing. Repair: `memstead_relate` the two.
+    #[serde(rename = "DANGLING_LINK_NOT_RELATED")]
+    LinkNotRelated,
+    /// A relationships row whose target is entirely absent, neither stub nor
+    /// real. Repair: remove the row, or create the target.
+    ///
+    /// A stub target here is a legitimate forward reference (the alias
+    /// machinery auto-stubs absent targets by design) and is deliberately not
+    /// flagged.
+    #[serde(rename = "DANGLING_RELATION_TARGET_MISSING")]
+    RelationTargetMissing,
+}
+
+impl DanglingLinkKind {
+    /// The stable wire code. One code, one condition, one repair.
+    pub fn code(&self) -> &'static str {
+        match self {
+            DanglingLinkKind::LinkTargetMissing => "DANGLING_LINK_TARGET_MISSING",
+            DanglingLinkKind::LinkNotRelated => "DANGLING_LINK_NOT_RELATED",
+            DanglingLinkKind::RelationTargetMissing => "DANGLING_RELATION_TARGET_MISSING",
+        }
+    }
+
+    /// Every code this family can emit. The strict counter and any other
+    /// consumer filtering on the literal string reads THIS rather than
+    /// keeping its own copy (04/06, criterion 3).
+    ///
+    /// Kept honest by `all_codes_covers_every_variant`, whose exhaustive
+    /// match stops compiling when a variant is added — without it this is
+    /// just another hand-written list, and a fourth condition would fall
+    /// out of the strict gate silently, which is the failure the roster
+    /// exists to prevent.
+    pub const ALL_CODES: &'static [&'static str] = &[
+        "DANGLING_LINK_TARGET_MISSING",
+        "DANGLING_LINK_NOT_RELATED",
+        "DANGLING_RELATION_TARGET_MISSING",
+    ];
+
+    /// What to do about it, in one clause.
+    pub fn repair(&self) -> &'static str {
+        match self {
+            DanglingLinkKind::LinkTargetMissing => {
+                "create the target entity, or remove the wiki-link"
+            }
+            DanglingLinkKind::LinkNotRelated => {
+                "relate the two entities, so the body link is backed by a relationship row"
+            }
+            DanglingLinkKind::RelationTargetMissing => {
+                "remove the relationship row, or create the target entity"
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3755,6 +3859,53 @@ pub struct RefreshFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ALL_CODES` is what the strict gate and the graph referee filter
+    /// on, so a condition missing from it is a condition that stops
+    /// failing a gate — silently, since nothing else would break. The
+    /// exhaustive match below is the enforcement: add a variant and this
+    /// stops COMPILING, which is the only moment anyone would otherwise
+    /// have to remember (04/06, criterion 3).
+    #[test]
+    fn all_codes_covers_every_variant() {
+        let every = [
+            DanglingLinkKind::LinkTargetMissing,
+            DanglingLinkKind::LinkNotRelated,
+            DanglingLinkKind::RelationTargetMissing,
+        ];
+        for kind in every {
+            // Exhaustive by construction: a new variant fails to compile
+            // here before it can quietly miss the roster.
+            match kind {
+                DanglingLinkKind::LinkTargetMissing
+                | DanglingLinkKind::LinkNotRelated
+                | DanglingLinkKind::RelationTargetMissing => {}
+            }
+            assert!(
+                DanglingLinkKind::ALL_CODES.contains(&kind.code()),
+                "{} is emitted but absent from ALL_CODES, so every filter \
+                 reading the roster would skip it",
+                kind.code()
+            );
+            assert!(
+                !kind.repair().is_empty(),
+                "{} has no repair clause",
+                kind.code()
+            );
+        }
+        assert_eq!(
+            DanglingLinkKind::ALL_CODES.len(),
+            every.len(),
+            "ALL_CODES carries a code no variant emits"
+        );
+        // The serialised `kind` IS the code — one spelling per condition.
+        for kind in every {
+            assert_eq!(
+                serde_json::to_value(kind).unwrap(),
+                serde_json::Value::String(kind.code().to_string())
+            );
+        }
+    }
 
     // Locks the wire shape of `Query` across every combination of
     // set/unset fields. Agents compose queries on the fly; a drift here

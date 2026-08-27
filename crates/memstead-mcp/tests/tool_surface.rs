@@ -1619,6 +1619,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "target_id",
             "target_path",
             "section",
+            // The discriminator on a `dangling_links` entry (04/06): which
+            // of the three conditions this one is. `section` used to carry
+            // that job implicitly, by being null.
+            "kind",
             "total",
             "incoming",
             "outgoing",
@@ -1659,7 +1663,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "axis",
             "code",
             "detail",
-            "DANGLING_LINK",
+            "DANGLING_LINK_TARGET_MISSING",
+            "DANGLING_LINK_NOT_RELATED",
+            "DANGLING_RELATION_TARGET_MISSING",
             "ORPHAN_STUB",
             "SCHEMA_NOT_FOUND",
             // Load-time drift warning emitted by `push_entities_into_store`

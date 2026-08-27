@@ -89,7 +89,9 @@ pub struct Args {
     /// exist, or holds no entity). Include-gated participation:
     /// `missing_required_outgoing`, `constraints`, `signals` (warn
     /// level), and with `integrity` the consistency findings
-    /// `DANGLING_LINK` and `ORPHAN_STUB`. Stale entities, drifted
+    /// `ORPHAN_STUB`, `DANGLING_LINK_TARGET_MISSING`,
+    /// `DANGLING_LINK_NOT_RELATED` and
+    /// `DANGLING_RELATION_TARGET_MISSING`. Stale entities, drifted
     /// anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The
     /// output is rendered first, then the non-zero exit fires; new
     /// Tier-2 codes opt in additively without breaking the flag's
@@ -309,9 +311,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // exited 0 on a workspace with ten of one and seven of the
         // other. Conformance findings keep their own reporting.
         if include.iter().any(|s| s == "integrity") {
+            // Reads the family's own code list rather than a hand-written
+            // one, so splitting the fused code could not silently drop two of
+            // the three conditions out of the strict gate — the most likely
+            // accidental outcome of that change (04/06, criterion 3).
             let dangling = findings
                 .iter()
-                .filter(|f| f.code == "DANGLING_LINK")
+                .filter(|f| {
+                    memstead_base::ops::DanglingLinkKind::ALL_CODES.contains(&f.code.as_str())
+                })
                 .count();
             if dangling > 0 {
                 strict_violations.push(("dangling_links", dangling));
@@ -649,11 +657,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if let Some(v) = obj.get("dangling_links").and_then(|v| v.as_array()) {
         lines.push("## Dangling links".to_string());
         for item in v {
+            // Name the condition and its repair. A reader used to get three
+            // different problems in one shape and had to work out which by
+            // noticing whether `section` was null (04/06, criterion 4).
             lines.push(format!(
-                "- {} → {} (section: {})",
+                "- [{}] {} → {}{}",
+                item["kind"].as_str().unwrap_or("?"),
                 item["from"].as_str().unwrap_or(""),
                 item["target_id"].as_str().unwrap_or(""),
-                item["section"].as_str().unwrap_or("(none)")
+                item["section"]
+                    .as_str()
+                    .map(|s| format!(" (in `{s}`)"))
+                    .unwrap_or_default(),
             ));
         }
         lines.push(String::new());

@@ -8,6 +8,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **`DANGLING_LINK` split into the three conditions it was fusing.** One code
+  covered a body link whose target has no file, a body link to a written
+  entity that the referrer does not relate to, and a relationship row naming
+  an entity absent from the store. The three have three different repairs, and
+  two of them were not separable from the payload at all: a reader had to
+  notice whether `section` was null and guess. `dangling_links` entries now
+  carry `kind`, and the consistency axis emits
+  `DANGLING_LINK_TARGET_MISSING`, `DANGLING_LINK_NOT_RELATED` or
+  `DANGLING_RELATION_TARGET_MISSING` with a `repair` detail. The health strict
+  gate refuses on all three, so the split does not widen what passes.
+
+  Breaking for anything that pinned the literal `DANGLING_LINK`: no surface
+  emits it any more.
+
 - **Every configured mount appears on every surface that lists mounts.** A
   mount that could not serve was either missing from a roster or present on it
   looking healthy, depending on how each surface built its list. Nine call

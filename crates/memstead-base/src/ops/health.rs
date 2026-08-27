@@ -330,15 +330,20 @@ pub fn health_open_questions_axis(
                 .collect(),
         );
 
-        // Dangling links — same collector as the overview include.
+        // Dangling links — same collector as the overview include, and the
+        // SAME three names rather than a parallel vocabulary of its own
+        // (04/06, criterion 2). This axis emitted one `dangling_link` kind
+        // over all three conditions, which is the fused code by another
+        // spelling; a second vocabulary is the one that drifts first.
         let dangling = capped(
             collect_dangling_links(engine.store(), Some(mem))
                 .iter()
                 .map(|d| {
                     serde_json::json!({
-                        "kind": "dangling_link",
+                        "kind": d.kind.code(),
                         "id": d.from.to_string(),
                         "target": d.target_id.to_string(),
+                        "repair": d.kind.repair(),
                     })
                 })
                 .collect(),
@@ -876,21 +881,27 @@ pub fn collect_tag_distribution(
     (entries, folded, untagged)
 }
 
-/// Scan every non-stub entity's section bodies for body wiki-links that
-/// either (a) resolve to a stub target (missing on-disk file) or
-/// (b) lack a backing explicit relation in the referrer (alias-orphan
-/// under the alias model). Both cases surface through the same
-/// `DanglingLink` shape — the existing field set continues to round-trip;
-/// alias-orphans are detectable by the target *not* being a stub while
-/// the referrer's relationships list omits it.
+/// Collect the three separately-repaired conditions the diagnostic
+/// covers, each tagged with its own [`DanglingLinkKind`]:
 ///
-/// The scan also covers the `## Relationships` table: a typed-relation
-/// target whose entity vanished (out-of-band file edit, historical
-/// cross-mem corruption from the pre-F15 mem-delete path, etc.)
-/// would otherwise stay invisible to the diagnostic surface.
-/// Relationship-section danglers ship the same envelope shape with
-/// `section: None` — the Option marks the source axis without requiring
-/// a magic-string sentinel.
+/// - `LinkTargetMissing` — a body wiki-link whose target has no markdown
+///   file: either absent from the store entirely, or present only as a
+///   stub. Repair: write the entity, or drop the link.
+/// - `LinkNotRelated` — a body wiki-link to a fully written entity that
+///   the referrer's relationships list omits (an alias orphan under the
+///   alias model). The target is fine; the row is missing. Repair: a
+///   write of the referrer re-synthesises the row.
+/// - `RelationTargetMissing` — a `## Relationships` row naming an entity
+///   absent from the store entirely, not even as a stub. Auto-stubbing
+///   means this only arises from out-of-band file edits or historical
+///   cross-mem corruption (the pre-F15 mem-delete path). Repair: restore
+///   the target or remove the edge.
+///
+/// The three used to share one code, and only the first was identifiable
+/// from the payload; the other two were told apart, if at all, by
+/// whether `section` happened to be null. `section` still marks the
+/// source axis (`None` for the relationship table), but the condition is
+/// named, not inferred.
 ///
 /// `mem_filter` narrows *scanning* to entities in that mem; resolution
 /// stays global so cross-mem links whose target is a real entity
@@ -918,8 +929,17 @@ pub fn collect_dangling_links(store: &Store, mem_filter: Option<&str>) -> Vec<Da
             for target_id in extract_inline_links_lenient(section_body, &entity.mem) {
                 let target_missing = store.get(&target_id).map(|e| e.stub).unwrap_or(true);
                 let alias_orphan = !target_missing && !explicit_targets.contains(&target_id);
+                // The one place the three conditions are distinguished, so the
+                // one place the discriminator is set. Consumers read `kind`;
+                // none re-derives it against the store (04/06).
+                let kind = if target_missing {
+                    crate::ops::DanglingLinkKind::LinkTargetMissing
+                } else {
+                    crate::ops::DanglingLinkKind::LinkNotRelated
+                };
                 if target_missing || alias_orphan {
                     out.push(DanglingLink {
+                        kind,
                         from: entity.id.clone(),
                         target_id: target_id.clone(),
                         target_path: target_id.path().to_string(),
@@ -955,6 +975,7 @@ pub fn collect_dangling_links(store: &Store, mem_filter: Option<&str>) -> Vec<Da
                 continue;
             }
             out.push(DanglingLink {
+                kind: crate::ops::DanglingLinkKind::RelationTargetMissing,
                 from: entity.id.clone(),
                 target_id: rel.target.clone(),
                 target_path: rel.target.path().to_string(),
@@ -2100,6 +2121,7 @@ fn ymd_to_days(year: u64, month: u64, day: u64) -> u64 {
 mod tests {
     use super::*;
     use crate::entity::{Entity, EntityId, MetadataValue};
+    use crate::ops::DanglingLinkKind;
     use crate::store::Store;
     use indexmap::IndexMap;
     use memstead_schema::type_by_name;
@@ -2690,6 +2712,105 @@ write_rules: []
         assert_eq!(d.target_id, b_id);
         assert_eq!(d.target_path, "b");
         assert_eq!(d.section.as_deref(), Some("purpose"));
+        assert_eq!(d.kind, DanglingLinkKind::LinkTargetMissing);
+    }
+
+    /// 04/06: the three conditions the fused `DANGLING_LINK` name used
+    /// to cover are discriminated at the producer, and each carries its
+    /// own repair. Two of them (a body link to a written entity with no
+    /// relationship, and a relationship row whose target is absent from
+    /// the store) were not separable at all before — the payload
+    /// distinguished them only by whether `section` happened to be
+    /// null, which is a rendering accident, not a condition.
+    #[test]
+    fn the_three_dangling_conditions_are_discriminated() {
+        use crate::entity::store_builder::make_stub;
+
+        let mut store = Store::new();
+
+        // (1) Body link whose target has no markdown file at all.
+        let gone = make_entity_with_body("gone-link", "purpose", "See [[absent]].");
+        store.upsert(gone.id.clone(), gone.clone());
+        let absent = EntityId::new("specs", "absent");
+        store.upsert(absent.clone(), make_stub(absent.clone()));
+
+        // (2) Body link to a fully written entity that the source does
+        // not relate to. The target exists; the edge does not.
+        let written = make_entity("written", true);
+        store.upsert(written.id.clone(), written.clone());
+        let unrelated = make_entity_with_body("unrelated-link", "purpose", "See [[written]].");
+        store.upsert(unrelated.id.clone(), unrelated.clone());
+
+        // (3) Relationship row naming an entity that is not in the
+        // store at all — not even as a stub. Auto-stubbing means this
+        // only arises from out-of-band edits or historical corruption.
+        let mut rel_source = make_entity("rel-source", true);
+        rel_source.relationships.push(crate::entity::Relationship {
+            rel_type: "DEPENDS_ON".to_string(),
+            target: EntityId::new("specs", "vanished"),
+            description: None,
+        });
+        store.upsert(rel_source.id.clone(), rel_source.clone());
+
+        let found = super::collect_dangling_links(&store, None);
+        let kind_of = |from: &str| {
+            found
+                .iter()
+                .find(|d| d.from.path() == from)
+                .unwrap_or_else(|| panic!("no dangling link from {from}: {found:?}"))
+                .kind
+        };
+        assert_eq!(kind_of("gone-link"), DanglingLinkKind::LinkTargetMissing);
+        assert_eq!(kind_of("unrelated-link"), DanglingLinkKind::LinkNotRelated);
+        assert_eq!(
+            kind_of("rel-source"),
+            DanglingLinkKind::RelationTargetMissing
+        );
+
+        // Three conditions, three codes, three repairs: no two of them
+        // collapse onto the same string.
+        let codes: std::collections::BTreeSet<_> = found.iter().map(|d| d.kind.code()).collect();
+        let repairs: std::collections::BTreeSet<_> =
+            found.iter().map(|d| d.kind.repair()).collect();
+        assert_eq!(codes.len(), 3, "{found:?}");
+        assert_eq!(repairs.len(), 3, "{found:?}");
+    }
+
+    /// 04/06, criterion 5: the relationships row keeps its tolerance.
+    /// A row whose target is a stub is a legitimate forward reference —
+    /// the alias machinery auto-stubs absent targets by design — and the
+    /// split must not start reporting them. The body scan treats the
+    /// same stub as missing, which is the whole reason the two axes
+    /// needed separate codes rather than one.
+    #[test]
+    fn a_relationship_row_pointing_at_a_stub_is_still_not_flagged() {
+        use crate::entity::store_builder::make_stub;
+
+        let mut store = Store::new();
+        let stub_id = EntityId::new("specs", "forward");
+        store.upsert(stub_id.clone(), make_stub(stub_id.clone()));
+
+        let mut source = make_entity("forward-ref", true);
+        source.relationships.push(crate::entity::Relationship {
+            rel_type: "DEPENDS_ON".to_string(),
+            target: stub_id.clone(),
+            description: None,
+        });
+        store.upsert(source.id.clone(), source.clone());
+
+        assert!(
+            super::collect_dangling_links(&store, None).is_empty(),
+            "a forward reference through the relationships table stays unflagged"
+        );
+
+        // The complement of the complement: the SAME stub reached from a
+        // body wiki-link is the target-missing condition.
+        let body = make_entity_with_body("body-ref", "purpose", "See [[forward]].");
+        store.upsert(body.id.clone(), body.clone());
+        let found = super::collect_dangling_links(&store, None);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].from, body.id);
+        assert_eq!(found[0].kind, DanglingLinkKind::LinkTargetMissing);
     }
 
     /// Decision 18 (backlog-sweep plan 06): dangling-links and stubs

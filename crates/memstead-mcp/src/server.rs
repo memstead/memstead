@@ -10743,9 +10743,10 @@ write_rules: []
         );
     }
 
-    /// `memstead_overview include=["dangling_links"]` lists every non-stub
-    /// entity whose section body wiki-links resolve to a stub or
-    /// missing target. Pre-fix this slot returned a hardcoded `[]` and
+    /// `memstead_overview include=["dangling_links"]` renders the
+    /// dangling-reference section. This fixture exercises one of the three
+    /// conditions, `DANGLING_LINK_TARGET_MISSING`: a body wiki-link whose
+    /// target has no markdown file. Pre-fix this slot returned a hardcoded `[]` and
     /// the `## Dangling Links` block never rendered; the test fails
     /// against that state.
     #[test]
@@ -10794,6 +10795,14 @@ write_rules: []
         assert!(
             parsed.text.contains("specs--gone"),
             "Dangling Links must name the dangling target:\n{}",
+            parsed.text
+        );
+        // The condition, not only the two ids: this doc comment claims the
+        // fixture raises target-missing, so the rendering must say so
+        // (04/06, criterion 4).
+        assert!(
+            parsed.text.contains("[DANGLING_LINK_TARGET_MISSING]"),
+            "Dangling Links must name which of the three conditions:\n{}",
             parsed.text
         );
     }
@@ -13111,6 +13120,10 @@ write_rules: []
         assert_eq!(entry["target_id"].as_str(), Some("specs--gone"));
         assert_eq!(entry["target_path"].as_str(), Some("gone"));
         assert_eq!(entry["section"].as_str(), Some("purpose"));
+        // The condition reaches the response, not just the code (04/06).
+        // The old assertion set was satisfied by a payload that said
+        // nothing about which of three repairs applies.
+        assert_eq!(entry["kind"].as_str(), Some("DANGLING_LINK_TARGET_MISSING"));
     }
 
     /// `include=["tags"]` populates `tag_distribution`,
