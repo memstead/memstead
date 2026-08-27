@@ -48,6 +48,44 @@ pub enum IntegrityAxis {
     Conformance,
 }
 
+/// One per-entity BODY OBSERVATION — what an entity's stored body carries
+/// that its type does not declare (consistency-sweep 04/01).
+///
+/// **Deliberately not an [`IntegrityFinding`].** A finding is a thing to fix,
+/// and most of what this reports is nothing to fix: absorbing an undeclared
+/// heading into the catch-all is the feature working as designed, and making
+/// it a violation would fail every mem that uses the catch-all for the prose
+/// the schema did not anticipate. The distinction the reader needs is between
+/// content that was OBSERVED and content that was LOST, not between clean and
+/// dirty, so observations travel on their own channel and no observation can
+/// mark an entity unconformant.
+///
+/// What the conformance axis could see before this was a tautology: it linted
+/// `entity.sections.keys()`, which came out of the parser and are declared by
+/// construction. Every heading the file actually carried was invisible to it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BodyObservation {
+    pub id: String,
+    /// `ABSORBED_SECTION` | `UNDECLARED_METADATA_KEY` | `REPEATED_SECTION_HEADING`
+    pub code: String,
+    /// Whether the content survives the next write. This is the whole point of
+    /// the channel: `absorbed` content round-trips, `dropped` content does not,
+    /// and before this the reader could not tell which case they were in.
+    pub fate: ObservationFate,
+    pub detail: serde_json::Value,
+}
+
+/// What happens to the observed content on the next write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ObservationFate {
+    /// Kept, byte-verbatim, in the type's catch-all section. Nothing to fix.
+    Absorbed,
+    /// NOT kept. The next write drops it, and the reader is told before that
+    /// write rather than after it.
+    Dropped,
+}
+
 /// One per-entity integrity finding — the stable wire shape
 /// `{ id, axis, code, detail }`.
 ///
@@ -60,6 +98,14 @@ pub struct IntegrityFinding {
     pub axis: IntegrityAxis,
     pub code: String,
     pub detail: serde_json::Value,
+}
+
+impl BodyObservation {
+    /// Test convenience: the recorded occurrence count of a repeated heading.
+    #[cfg(test)]
+    fn occurrences_is(&self, n: u64) -> bool {
+        self.detail["occurrences"].as_u64() == Some(n)
+    }
 }
 
 impl IntegrityFinding {
@@ -102,6 +148,180 @@ pub fn conformance_findings(
         lint_entity(store, entity, schema, mem_schemas, &mut findings);
     }
     findings
+}
+
+/// Every body observation for `mem`, in a stable order.
+///
+/// Reads what the FILE carried, not what the parser kept: `raw_section_headings`
+/// is the literal `## ` list in document order, and `entity.metadata` holds
+/// every frontmatter key that arrived, declared or not. Linting the parsed
+/// section keys instead (which is what the conformance axis does) can only ever
+/// answer a question it already knows: those keys are declared by construction.
+pub fn body_observations(store: &Store, mem: &str, schema: &Schema) -> Vec<BodyObservation> {
+    let mut entities: Vec<&Entity> = store
+        .all_entities()
+        .filter(|e| e.mem == mem && !e.stub)
+        .collect();
+    entities.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+
+    let mut out = Vec::new();
+    for entity in entities {
+        let Some(type_def) = schema.types.get(entity.entity_type.as_str()) else {
+            // An unknown type is already a conformance FINDING; observing its
+            // body on top would say the same thing twice in a weaker voice.
+            continue;
+        };
+        observe_entity(entity, type_def, &mut out);
+    }
+    out.sort_by(|a, b| {
+        a.id.cmp(&b.id)
+            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| a.detail.to_string().cmp(&b.detail.to_string()))
+    });
+    out
+}
+
+fn observe_entity(
+    entity: &Entity,
+    type_def: &memstead_schema::TypeDefinition,
+    out: &mut Vec<BodyObservation>,
+) {
+    // Compare on KEYS through `derive_section_key`, and chain the
+    // relationships block in, because that is exactly the set the parser's
+    // own `build_catch_all` treats as known. Comparing raw heading strings
+    // against `s.heading` looks equivalent and is not: it misses the
+    // engine's auto-managed `## Relationships` block, which no type
+    // declares and which the generator re-emits from the parsed relations
+    // on every write. Reporting it made every entity in a real mem carry an
+    // observation. The rule must be the parser's own key set, never a
+    // second spelling of it.
+    let known: std::collections::BTreeSet<String> = type_def
+        .sections
+        .iter()
+        .map(|s| s.key.clone())
+        .chain(std::iter::once("relationships".to_string()))
+        .collect();
+    let catch_all = type_def.catch_all_section();
+
+    // 1. Headings the file carried that the type does not declare. Absorbed
+    //    into the catch-all and kept byte-verbatim, UNLESS the body under them
+    //    is empty: the catch-all builder skips empty content, so a bare heading
+    //    line is the one case that really is dropped. That is the case the
+    //    original repro described.
+    let mut seen: std::collections::BTreeMap<&str, usize> = Default::default();
+    for heading in &entity.raw_section_headings {
+        let occurrence = {
+            let n = seen.entry(heading.as_str()).or_default();
+            *n += 1;
+            *n
+        };
+        if known.contains(&memstead_schema::derive_section_key(heading)) {
+            continue;
+        }
+        // Only the FIRST occurrence is absorbed. Splitting is first-wins, so a
+        // later occurrence's body is gone whatever the catch-all does, and
+        // emitting a second `ABSORBED_SECTION` for it claimed a survival it
+        // does not have. The repeat is reported on its own code below, which
+        // is where that loss belongs.
+        if occurrence > 1 {
+            continue;
+        }
+        let absorbed_into = catch_all.map(|c| c.key.as_str());
+        let kept = absorbed_into.is_some() && heading_has_body(entity, heading, catch_all);
+        out.push(BodyObservation {
+            id: entity.id.to_string(),
+            code: "ABSORBED_SECTION".to_string(),
+            fate: if kept {
+                ObservationFate::Absorbed
+            } else {
+                ObservationFate::Dropped
+            },
+            detail: serde_json::json!({
+                "heading": heading,
+                "entity_type": entity.entity_type,
+                "absorbed_into": absorbed_into,
+                "note": if kept {
+                    "the type does not declare this heading; its content is kept \
+                     byte-verbatim in the catch-all section and survives the next write"
+                } else if absorbed_into.is_some() {
+                    "the type does not declare this heading and its body is empty; the \
+                     catch-all skips empty content, so the next write does NOT keep it"
+                } else {
+                    "the type does not declare this heading and has no catch-all section, \
+                     so the next write does NOT keep it"
+                },
+            }),
+        });
+    }
+
+    // 2. A heading that appears twice. Section splitting is first-wins, so
+    //    every later body is silently gone. The existing duplicate-heading
+    //    warning is filtered through the DECLARED keys with the catch-all
+    //    excluded, which is why a repeat of an undeclared heading and a repeat
+    //    of the catch-all's own heading both produce no warning anywhere.
+    for (heading, count) in seen.iter().filter(|(_, n)| **n > 1) {
+        out.push(BodyObservation {
+            id: entity.id.to_string(),
+            code: "REPEATED_SECTION_HEADING".to_string(),
+            fate: ObservationFate::Dropped,
+            detail: serde_json::json!({
+                "heading": heading,
+                "occurrences": count,
+                "note": "section splitting is first-wins: the body under the first \
+                         occurrence is kept and every later body was NOT kept",
+            }),
+        });
+    }
+
+    // 3. Frontmatter keys the file carried that the type does not declare. The
+    //    metadata builder emits only declared fields, so these are dropped on
+    //    EVERY write, unconditionally. Reported here, before that write rather
+    //    than after it. (A key supplied by a CALLER already refuses today with
+    //    `UNKNOWN_METADATA_FIELD`; this is the file-facing half, where the key
+    //    was never presented to a validator.)
+    for key in entity.metadata.keys() {
+        if RESERVED_METADATA.contains(&key.as_str()) || type_def.metadata_field(key).is_some() {
+            continue;
+        }
+        out.push(BodyObservation {
+            id: entity.id.to_string(),
+            code: "UNDECLARED_METADATA_KEY".to_string(),
+            fate: ObservationFate::Dropped,
+            detail: serde_json::json!({
+                "key": key,
+                "entity_type": entity.entity_type,
+                "note": "the type does not declare this frontmatter key; the generator \
+                         emits only declared fields, so the next write drops it",
+            }),
+        });
+    }
+}
+
+/// Engine-stamped frontmatter keys every type carries without declaring.
+const RESERVED_METADATA: &[&str] = &["type", "created_date", "last_modified"];
+
+/// Whether an undeclared heading's content actually survived into the
+/// catch-all. The catch-all re-emits absorbed content under its original
+/// heading line, so the heading appearing there is the evidence that it was
+/// kept; a bare heading with no body never reaches it.
+fn heading_has_body(
+    entity: &Entity,
+    heading: &str,
+    catch_all: Option<&memstead_schema::SectionDef>,
+) -> bool {
+    let Some(c) = catch_all else { return false };
+    let Some(value) = entity.sections.get(c.key.as_str()) else {
+        return false;
+    };
+    // Line-anchored, not `contains`. The catch-all builder SKIPS empty
+    // content, so an undeclared heading survives exactly when its own
+    // heading line was re-emitted into the catch-all value — and a
+    // substring test answers a different question, saying "kept" for a
+    // heading whose text merely appears inside neighbouring prose.
+    value.lines().any(|line| {
+        line.strip_prefix("## ")
+            .is_some_and(|rest| rest.trim() == heading)
+    })
 }
 
 /// Run the consistency axis over `mem`, projecting the pre-existing
@@ -523,6 +743,220 @@ community:
 
     fn codes(findings: &[IntegrityFinding]) -> Vec<&str> {
         findings.iter().map(|f| f.code.as_str()).collect()
+    }
+
+    /// Criteria 1 and 2 (consistency-sweep 04/01). A heading the type does not
+    /// declare is REPORTED, naming the entity, the heading and where the
+    /// content went — and it is an observation, never a conformance finding,
+    /// because absorbing it is the catch-all working as designed.
+    #[test]
+    fn an_absorbed_heading_is_observed_and_never_a_violation() {
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.raw_section_headings = vec!["Body".into(), "Field Notes".into()];
+        // The catch-all re-emits absorbed content under its original heading.
+        e.sections.insert(
+            "notes".into(),
+            "## Field Notes\n\nsomething useful\n".into(),
+        );
+        let id = e.id.to_string();
+        store.upsert(e.id.clone(), e);
+
+        let obs = body_observations(&store, "lv", &schema);
+        assert_eq!(obs.len(), 1, "got {obs:?}");
+        assert_eq!(obs[0].code, "ABSORBED_SECTION");
+        assert_eq!(obs[0].id, id);
+        assert_eq!(obs[0].detail["heading"], "Field Notes");
+        assert_eq!(
+            obs[0].fate,
+            ObservationFate::Absorbed,
+            "the content survives the next write, and the report must say so"
+        );
+
+        // The refusal complement: nothing on the conformance axis.
+        let schemas = schemas_for(&[("lv", schema.clone())]);
+        let findings = conformance_findings(&store, "lv", &schema, &schemas);
+        assert!(
+            findings.is_empty(),
+            "healthy catch-all use must not be a violation: {:?}",
+            codes(&findings)
+        );
+    }
+
+    /// Criterion 1's other half: a bare heading with no body is the one case
+    /// that really is lost, because the catch-all builder skips empty content.
+    /// Appending a bare heading line is what the original repro described.
+    #[test]
+    fn a_bare_undeclared_heading_is_observed_as_dropped() {
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.raw_section_headings = vec!["Body".into(), "Scratch".into()];
+        // Nothing reached the catch-all: the heading had no body.
+        store.upsert(e.id.clone(), e);
+
+        let obs = body_observations(&store, "lv", &schema);
+        assert_eq!(obs.len(), 1, "got {obs:?}");
+        assert_eq!(obs[0].code, "ABSORBED_SECTION");
+        assert_eq!(
+            obs[0].fate,
+            ObservationFate::Dropped,
+            "an empty heading is skipped by the catch-all, so it does NOT survive"
+        );
+    }
+
+    /// Criterion 3: a frontmatter key the type does not declare is reported
+    /// BEFORE the write that drops it. The generator emits only declared
+    /// fields, so this one is unconditional loss.
+    #[test]
+    fn an_undeclared_metadata_key_is_observed_as_dropped() {
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.metadata
+            .insert("reviewer".into(), MetadataValue::String("ada".into()));
+        // Engine-stamped keys are not the caller's and are not reported.
+        e.metadata
+            .insert("last_modified".into(), MetadataValue::String("x".into()));
+        store.upsert(e.id.clone(), e);
+
+        let obs = body_observations(&store, "lv", &schema);
+        assert_eq!(obs.len(), 1, "got {obs:?}");
+        assert_eq!(obs[0].code, "UNDECLARED_METADATA_KEY");
+        assert_eq!(obs[0].detail["key"], "reviewer");
+        assert_eq!(obs[0].fate, ObservationFate::Dropped);
+    }
+
+    /// Criterion 4: a repeated heading loses every later body, and the two
+    /// cases that produce no warning anywhere today are a repeat of an
+    /// UNDECLARED heading and a repeat of the CATCH-ALL's own heading.
+    #[test]
+    fn a_repeated_heading_is_observed_in_both_silent_cases() {
+        let schema = lint_schema();
+        for (headings, label) in [
+            (
+                vec!["Body", "Scratch", "Scratch"],
+                "undeclared heading twice",
+            ),
+            (
+                vec!["Body", "Notes", "Notes"],
+                "the catch-all's own heading twice",
+            ),
+        ] {
+            let mut store = Store::new();
+            let mut e = conformant_entity("lv", "alpha");
+            e.raw_section_headings = headings.iter().map(|h| h.to_string()).collect();
+            e.sections
+                .insert("notes".into(), "## Scratch\n\nkept\n".into());
+            store.upsert(e.id.clone(), e);
+
+            let obs = body_observations(&store, "lv", &schema);
+            let repeats: Vec<_> = obs
+                .iter()
+                .filter(|o| o.code == "REPEATED_SECTION_HEADING")
+                .collect();
+            assert_eq!(repeats.len(), 1, "{label}: got {obs:?}");
+            assert!(repeats[0].occurrences_is(2), "{label}");
+            assert_eq!(repeats[0].fate, ObservationFate::Dropped, "{label}");
+        }
+    }
+
+    /// Criterion 5, the refusal complement that gives the rest its worth: the
+    /// ordinary entity produces nothing. A check that fires on healthy content
+    /// is worse than no check, because it teaches readers to ignore it.
+    #[test]
+    fn an_ordinary_entity_produces_no_observations() {
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        // `Relationships` belongs here deliberately: it is the heading EVERY
+        // real entity carries, no type declares it, and a fixture without it
+        // is the fixture that lets the ordinary case look clean while a live
+        // mem reports one observation per entity. It was exactly that, until
+        // a grade read a real mem: 553 entities, 553 observations.
+        e.raw_section_headings = vec!["Body".into(), "Notes".into(), "Relationships".into()];
+        e.sections.insert("notes".into(), "plain prose\n".into());
+        store.upsert(e.id.clone(), e);
+        assert!(
+            body_observations(&store, "lv", &schema).is_empty(),
+            "declared headings, each once, the relationships block, no undeclared keys"
+        );
+    }
+
+    #[test]
+    fn a_repeated_undeclared_heading_claims_survival_only_for_the_first() {
+        // Splitting is first-wins, so the second body is gone whatever the
+        // catch-all does. Emitting `ABSORBED_SECTION` twice said "survives the
+        // next write" about a body that did not (grade caveat, 2026-08-27).
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.raw_section_headings = vec!["Body".into(), "Scratch".into(), "Scratch".into()];
+        e.sections
+            .insert("notes".into(), "## Scratch\n\nkept\n".into());
+        store.upsert(e.id.clone(), e);
+        let obs = body_observations(&store, "lv", &schema);
+        let absorbed: Vec<_> = obs
+            .iter()
+            .filter(|o| o.code == "ABSORBED_SECTION")
+            .collect();
+        assert_eq!(
+            absorbed.len(),
+            1,
+            "one per heading, not per occurrence: {obs:?}"
+        );
+        assert_eq!(absorbed[0].fate, ObservationFate::Absorbed);
+        // The loss the repeat causes is still reported, on its own code.
+        let repeats: Vec<_> = obs
+            .iter()
+            .filter(|o| o.code == "REPEATED_SECTION_HEADING")
+            .collect();
+        assert_eq!(repeats.len(), 1, "got: {obs:?}");
+        assert_eq!(repeats[0].detail["occurrences"], 2);
+    }
+
+    #[test]
+    fn the_auto_managed_relationships_block_is_never_an_observation() {
+        // The generator re-emits `## Relationships` from the parsed relations
+        // on every write, so it is neither absorbed nor dropped. Pinned apart
+        // from the ordinary-entity test because the two fail for different
+        // reasons: this one guards the exclusion, that one guards the fixture.
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.raw_section_headings = vec!["Relationships".into()];
+        store.upsert(e.id.clone(), e);
+        assert!(
+            body_observations(&store, "lv", &schema).is_empty(),
+            "the relationships block is engine-owned, not undeclared content"
+        );
+    }
+
+    #[test]
+    fn a_heading_named_inside_prose_is_not_mistaken_for_a_kept_one() {
+        // `heading_has_body` asks whether the catch-all RE-EMITTED the
+        // heading line, and a substring test answers a different question:
+        // prose that merely mentions the words reported the heading as
+        // absorbed when the write had in fact dropped it.
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.raw_section_headings = vec!["Body".into(), "Scratch".into()];
+        e.sections
+            .insert("notes".into(), "we discussed Scratch at length\n".into());
+        store.upsert(e.id.clone(), e);
+        let obs = body_observations(&store, "lv", &schema);
+        let absorbed: Vec<_> = obs
+            .iter()
+            .filter(|o| o.code == "ABSORBED_SECTION")
+            .collect();
+        assert_eq!(absorbed.len(), 1, "got: {obs:?}");
+        assert_eq!(
+            absorbed[0].fate,
+            ObservationFate::Dropped,
+            "a bare heading whose text appears in prose is still dropped"
+        );
     }
 
     #[test]

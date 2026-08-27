@@ -473,6 +473,9 @@ impl Engine {
                 .map(String::as_str),
             type_def.as_ref(),
         )?;
+        let mut heading_buf: Vec<&str> = Vec::new();
+        #[allow(unused_assignments)]
+        let mut catch_all = None;
         // Refuse embedded `^## ` in section content on every update path
         // that writes section bodies: `sections` (replace) and
         // `append_sections` (append). `patch_sections` replaces a
@@ -492,6 +495,11 @@ impl Engine {
                         .iter()
                         .map(|(k, p)| (k.as_str(), p.new.as_str())),
                 ),
+            {
+                let t: &memstead_schema::TypeDefinition = type_def.as_ref();
+                catch_all = crate::runtime_validator::catch_all_context(t, &mut heading_buf);
+                catch_all
+            },
         )?;
         for key in args.sections.keys() {
             validate_updatable_section(key.as_str(), type_def.as_ref())?;

@@ -296,12 +296,16 @@ impl Engine {
             parsed.entity.sections.keys().map(String::as_str),
             resolved_type.as_ref(),
         )?;
+        let mut heading_buf: Vec<&str> = Vec::new();
+        let catch_all =
+            crate::runtime_validator::catch_all_context(resolved_type.as_ref(), &mut heading_buf);
         crate::runtime_validator::validate_section_content(
             parsed
                 .entity
                 .sections
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str())),
+            catch_all,
         )?;
 
         let backend = self.mounts[mount_idx].backend.as_ref();

@@ -1591,6 +1591,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "unobserved",
             "population",
             "fully_adjudicated",
+            // The conformance axis's observation channel (04/01).
+            "body_observations",
             "memstead verify-anchors",
             "writable_mems",
             "default_writable_mem",

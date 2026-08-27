@@ -672,13 +672,22 @@ pub fn compose_health(
             }
         };
         let mut findings = Vec::new();
+        let mut observations = Vec::new();
         for v in &scan_mems {
             findings.extend(engine.conformance_findings(v, target.as_ref())?);
+            // Beside `findings`, never among them: an observation says what an
+            // entity body silently loses, and none of it makes the entity
+            // unconformant.
+            observations.extend(engine.body_observations(v, target.as_ref())?);
             if wants_consistency {
                 findings.extend(engine.consistency_findings(v)?);
             }
         }
         obj.insert("findings".into(), serde_json::to_value(&findings).unwrap());
+        obj.insert(
+            "body_observations".into(),
+            serde_json::to_value(&observations).unwrap(),
+        );
     }
 
     // Workspace policy surface — opt-in via `include_config: true`
@@ -764,6 +773,33 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
             for item in arr {
                 let _ = writeln!(s, "- {}", summarize_health_item(item));
             }
+        }
+    }
+
+    // Body observations — their own section, not a row in the table above:
+    // `summarize_health_item` prints an entity id and stops, and an
+    // observation whose fate is not stated says nothing at all. This is the
+    // MCP text channel, so it is what a cold agent reads (04/01, criterion 1).
+    if let Some(arr) = v.get("body_observations").and_then(|x| x.as_array()) {
+        let _ = writeln!(s, "\n## Body observations ({})", arr.len());
+        for item in arr {
+            let detail = &item["detail"];
+            let subject = detail
+                .get("heading")
+                .or_else(|| detail.get("key"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            let _ = writeln!(
+                s,
+                "- {} [{}] `{subject}`: {} ({})",
+                item["id"].as_str().unwrap_or(""),
+                item["code"].as_str().unwrap_or(""),
+                item["fate"].as_str().unwrap_or(""),
+                detail
+                    .get("note")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("no note"),
+            );
         }
     }
 
@@ -926,6 +962,45 @@ mod tests {
             "summary": { "total_entities": 1 },
             "total_nodes": 1,
         })
+    }
+
+    /// The description advertises `body_observations` on the conformance
+    /// axis, and a description is not a shipped field: the drift gate
+    /// compares description tokens against an allowlist, so it stayed green
+    /// while no server emitted the key at all (grade, 2026-08-27). This
+    /// pins the text channel end of it; the JSON end is pinned by the
+    /// handler test in `ops::integrity`.
+    #[test]
+    fn body_observations_render_their_code_and_fate_not_just_an_id() {
+        let mut v = base_payload();
+        v["body_observations"] = json!([{
+            "id": "specs--alpha",
+            "code": "ABSORBED_SECTION",
+            "fate": "absorbed",
+            "detail": { "heading": "Rogue", "note": "survives the next write" },
+        }, {
+            "id": "specs--beta",
+            "code": "UNDECLARED_METADATA_KEY",
+            "fate": "dropped",
+            "detail": { "key": "reviewer", "note": "the next write drops it" },
+        }]);
+        let md = render_health_markdown(&v);
+        assert!(md.contains("## Body observations (2)"), "{md}");
+        assert!(
+            md.contains(
+                "- specs--alpha [ABSORBED_SECTION] `Rogue`: absorbed (survives the next write)"
+            ),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "- specs--beta [UNDECLARED_METADATA_KEY] `reviewer`: dropped \
+                 (the next write drops it)"
+            ),
+            "{md}"
+        );
+        // Absent key renders nothing at all.
+        assert!(!render_health_markdown(&base_payload()).contains("Body observations"));
     }
 
     /// Text-channel parity: the `checks` / `stale_derivations` axes

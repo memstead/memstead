@@ -1773,6 +1773,8 @@ impl FilesystemMcpServer {
         // covers both mounts — the summary counts and roster come straight
         // from `engine.health()`, which is mount-aware, so nothing is
         // misreported on a multi-mount engine.
+        let mut body_observations: Option<Vec<memstead_base::ops::integrity::BodyObservation>> =
+            None;
         if include
             .iter()
             .any(|s| s == "conformance" || s == "integrity")
@@ -1804,6 +1806,15 @@ impl FilesystemMcpServer {
                         return tool_error(e.code(), &e.to_string());
                     }
                 }
+                // Beside `findings`, never among them: an observation says
+                // what an entity body silently loses, and none of it makes
+                // the entity unconformant.
+                match engine.body_observations(v, target.as_ref()) {
+                    Ok(o) => body_observations.get_or_insert_with(Vec::new).extend(o),
+                    Err(e) => {
+                        return tool_error(e.code(), &e.to_string());
+                    }
+                }
                 if include.iter().any(|s| s == "integrity") {
                     match engine.consistency_findings(v) {
                         Ok(f) => findings.extend(f),
@@ -1822,6 +1833,7 @@ impl FilesystemMcpServer {
         // ledger's summary — agent-trust plan 08) — from the shared
         // base helpers, patched onto the serialized report so
         // combined includes compose.
+        let wants_body_observations = body_observations.is_some();
         let wants_anchors = include.iter().any(|s| s == "anchors");
         let wants_constraints = include.iter().any(|s| s == "constraints");
         let wants_friction = include.iter().any(|s| s == "friction");
@@ -1830,7 +1842,8 @@ impl FilesystemMcpServer {
         let wants_checks = include.iter().any(|s| s == "checks");
         let wants_signals = include.iter().any(|s| s == "signals");
         let wants_labelling = include.iter().any(|s| s == "labelling");
-        if wants_anchors
+        if wants_body_observations
+            || wants_anchors
             || wants_constraints
             || wants_friction
             || wants_open_questions
@@ -1843,6 +1856,10 @@ impl FilesystemMcpServer {
                 Ok(v) => v,
                 Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
             };
+            if let Some(obs) = body_observations {
+                value["body_observations"] =
+                    serde_json::to_value(obs).unwrap_or(serde_json::Value::Null);
+            }
             if wants_anchors {
                 value["anchors"] = memstead_base::ops::health::health_anchors_axis(&engine);
             }

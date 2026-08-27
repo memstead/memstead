@@ -130,6 +130,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         tag_distribution,
         dangling_links,
         findings,
+        body_observations,
         config_entries,
         anchors_axis,
         open_questions_axis,
@@ -142,11 +143,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         CliEngine::MemRepo(mut engine) => {
             let mut g = gather_mem_repo(&mut engine, args.limit, include);
             g.findings = gather_findings(&engine, include, args.target_schema.as_deref())?;
+            g.body_observations =
+                gather_body_observations(&engine, include, args.target_schema.as_deref())?;
             g
         }
         CliEngine::Filesystem(mut engine) => {
             let mut g = gather_filesystem(&mut engine, args.limit, include);
             g.findings = gather_findings(&engine, include, args.target_schema.as_deref())?;
+            g.body_observations =
+                gather_body_observations(&engine, include, args.target_schema.as_deref())?;
             g
         }
     };
@@ -310,6 +315,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
         }
         obj.insert("findings".into(), serde_json::to_value(&findings)?);
+        // Beside the findings, never among them (04/01, criterion 2). An
+        // observation names content the type does not declare and says whether
+        // it survives; it never marks the entity unconformant, and it is
+        // deliberately absent from `strict_violations` above.
+        obj.insert(
+            "body_observations".into(),
+            serde_json::to_value(&body_observations)?,
+        );
     }
     if include.iter().any(|s| s == "tags")
         && let Some((distribution, folded, untagged)) = tag_distribution
@@ -986,6 +999,10 @@ struct GatheredHealth {
     /// the caller (engine-shaped, so outside `gather_from_store`) when
     /// `--include conformance` / `--include integrity` is requested.
     findings: Vec<memstead_base::ops::integrity::IntegrityFinding>,
+    /// Body observations (consistency-sweep 04/01) — what an entity's stored
+    /// body carries that its type does not declare. Beside the findings, never
+    /// among them: an observation is not a violation.
+    body_observations: Vec<memstead_base::ops::integrity::BodyObservation>,
     real_count: usize,
     /// `(id, title)` pairs — title resolved at gather time so the
     /// rendering layer doesn't need to keep the engine alive.
@@ -1097,6 +1114,46 @@ fn gather_findings(
         }
     }
     Ok(findings)
+}
+
+/// Body observations for every mem, when the caller asked for the conformance
+/// or integrity axis (consistency-sweep 04/01).
+///
+/// Gathered beside the findings and rendered beside them, never among them:
+/// an observation is not a violation and must never reach `strict_violations`,
+/// because absorbing an undeclared heading is the catch-all working as
+/// designed. What the reader gets is the distinction the axis could not make
+/// before: content that was absorbed and survives, against content the next
+/// write does not keep.
+fn gather_body_observations(
+    engine: &memstead_base::Engine,
+    include: &[String],
+    target_schema: Option<&str>,
+) -> anyhow::Result<Vec<memstead_base::ops::integrity::BodyObservation>> {
+    if !include
+        .iter()
+        .any(|s| s == "conformance" || s == "integrity")
+    {
+        return Ok(Vec::new());
+    }
+    let target = match target_schema {
+        None => None,
+        Some(raw) => Some(
+            raw.parse::<memstead_schema::SchemaRef>()
+                .map_err(|reason| anyhow::anyhow!("invalid --target-schema {raw:?}: {reason}"))?,
+        ),
+    };
+    let mut mems: Vec<String> = engine.schemas().keys().cloned().collect();
+    mems.sort();
+    let mut out = Vec::new();
+    for v in &mems {
+        out.extend(
+            engine
+                .body_observations(v, target.as_ref())
+                .map_err(crate::CliError::from_engine_op)?,
+        );
+    }
+    Ok(out)
 }
 
 #[cfg(feature = "mem-repo")]
@@ -1326,6 +1383,7 @@ fn gather_from_store(
         schema_format_defects,
         tag_distribution,
         dangling_links,
+        body_observations: Vec::new(),
         config_entries: None,
         anchors_axis: None,
         open_questions_axis: None,

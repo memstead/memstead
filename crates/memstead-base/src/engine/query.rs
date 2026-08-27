@@ -1713,6 +1713,44 @@ impl Engine {
         ))
     }
 
+    /// What `mem`'s entity BODIES carry that their types do not declare
+    /// (consistency-sweep 04/01): headings absorbed into the catch-all,
+    /// headings repeated so that later bodies were not kept, and frontmatter
+    /// keys the next write will drop.
+    ///
+    /// Separate from [`Self::conformance_findings`] on purpose. These are
+    /// observations, not violations: absorbing an undeclared heading is the
+    /// catch-all working as designed, and reporting it as a finding would fail
+    /// every mem that uses the feature. What a reader needs here is whether the
+    /// content SURVIVES, which each observation states.
+    pub fn body_observations(
+        &self,
+        mem: &str,
+        target_schema: Option<&memstead_schema::SchemaRef>,
+    ) -> Result<Vec<crate::ops::integrity::BodyObservation>, EngineError> {
+        let pinned = self
+            .schemas
+            .get(mem)
+            .ok_or_else(|| self.unknown_mem_error(mem))?;
+        let effective: Arc<Schema> = match target_schema {
+            None => pinned.clone(),
+            Some(target) => {
+                self.resolve_schema_by_ref(target)
+                    .ok_or_else(|| EngineError::SchemaNotFound {
+                        mem: mem.to_string(),
+                        pin: target.as_display(),
+                        sources: Vec::new(),
+                        install_hint: None,
+                    })?
+            }
+        };
+        Ok(crate::ops::integrity::body_observations(
+            &self.store,
+            mem,
+            &effective,
+        ))
+    }
+
     /// Resolve an exact `name@version` ref against every schema this
     /// engine can see: mem-pinned, workspace-authored, built-in.
     /// `None` when no loaded schema matches.

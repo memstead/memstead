@@ -255,7 +255,12 @@ impl Engine {
         // compose-then-reparse pipeline would split the value at the
         // heading and silently move the trailing content into another
         // section.
-        validate_section_content(args.sections.iter().map(|(k, v)| (k.as_str(), v.as_str())))?;
+        let mut heading_buf: Vec<&str> = Vec::new();
+        let catch_all = crate::runtime_validator::catch_all_context(&type_def, &mut heading_buf);
+        validate_section_content(
+            args.sections.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+            catch_all,
+        )?;
 
         // 4. Slug + id; reject duplicates against the in-memory store.
         //    Stub adoption: a pre-existing stub at the same id is

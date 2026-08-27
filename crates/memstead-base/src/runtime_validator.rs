@@ -134,6 +134,28 @@ pub enum ValidationError {
         section: String,
         embedded_heading: String,
     },
+    /// `EMPTY_UNDECLARED_HEADING`: caller-supplied content carries a heading
+    /// the type does not declare with NO body under it (consistency-sweep
+    /// 04/01, criterion 7). The catch-all builder skips empty content, so such
+    /// a heading is dropped on the write that accepts it: the caller is told
+    /// now rather than discovering the loss afterwards.
+    ///
+    /// The boundary is exactly the complement of the catch-all exemption
+    /// [`validate_section_content`] grants: an undeclared heading WITH a body
+    /// survives verbatim and is accepted, one without a body does not survive
+    /// and is refused. The exemption and this refusal are the same rule read
+    /// from its two sides.
+    #[error(
+        "section '{section}' carries heading '{heading}', which type '{entity_type}' does not \
+         declare and which has no body under it. The catch-all keeps absorbed content but skips \
+         empty content, so this heading would be dropped by the write. Give it a body, or \
+         remove the heading."
+    )]
+    EmptyUndeclaredHeading {
+        section: String,
+        heading: String,
+        entity_type: String,
+    },
     /// `SECTION_CONTENT_INVALID` (control-byte sub-case): a section body
     /// contains a control character other than tab (`\t`) or newline
     /// (`\n`). A NUL especially makes git classify the `.md` blob as
@@ -199,6 +221,7 @@ impl ValidationError {
             ValidationError::SectionNotUpdatable { .. } => "SECTION_NOT_UPDATABLE",
             ValidationError::InvalidRelationshipType { .. } => "INVALID_REL_TYPE",
             ValidationError::InvalidRelationshipShape { .. } => "INVALID_REL_SHAPE",
+            ValidationError::EmptyUndeclaredHeading { .. } => "EMPTY_UNDECLARED_HEADING",
             ValidationError::SectionContentInvalid { .. } => "SECTION_CONTENT_INVALID",
             ValidationError::SectionContentControlByte { .. } => "SECTION_CONTENT_INVALID",
             ValidationError::InvalidFieldValue { .. } => "INVALID_FIELD_VALUE",
@@ -327,6 +350,17 @@ impl ValidationError {
                 details.insert("suggestion".into(), serde_json::json!(suggestion_json));
                 serde_json::Value::Object(details)
             }
+            ValidationError::EmptyUndeclaredHeading {
+                section,
+                heading,
+                entity_type,
+            } => serde_json::json!({
+                "section": section,
+                "heading": heading,
+                "entity_type": entity_type,
+                "expected": "give the heading a body, or remove it: the catch-all keeps \
+                             absorbed content but skips empty content",
+            }),
             ValidationError::SectionContentInvalid {
                 section,
                 embedded_heading,
@@ -498,6 +532,16 @@ impl ValidationError {
                     "relationship '{rel_type}' from type '{from_type}' to type '{to_type}' violates declared shape — allowed sources: {sources_inline}; allowed targets: {targets_inline}.{suggestion_clause}"
                 )
             }
+            ValidationError::EmptyUndeclaredHeading {
+                section,
+                heading,
+                entity_type,
+            } => format!(
+                "section '{section}' carries heading '{heading}', which type '{entity_type}' does \
+                 not declare and which has no body under it. An undeclared heading WITH content \
+                 is kept byte-verbatim in the catch-all; an empty one is skipped, so this write \
+                 would drop it. Give the heading a body, or remove it."
+            ),
             ValidationError::SectionContentInvalid {
                 section,
                 embedded_heading,
@@ -657,6 +701,50 @@ pub struct MissingRequiredSection {
     pub write_rules: Vec<String>,
 }
 
+/// What a type's catch-all absorbs, for [`validate_section_content`].
+#[derive(Debug, Clone, Copy)]
+pub struct CatchAllContext<'a> {
+    /// The catch-all section's key.
+    pub key: &'a str,
+    /// The entity type, so a refusal can name what does not declare the
+    /// heading rather than leaving the caller to work it out.
+    pub entity_type: &'a str,
+    /// Every heading the type declares. A `## ` line matching one of these
+    /// forks the entity even inside the catch-all, so it stays refused.
+    pub declared_headings: &'a [&'a str],
+}
+
+/// Build a [`CatchAllContext`] for a type, when it has a catch-all section.
+/// The borrowed heading list lives in `buf`, which the caller owns.
+pub fn catch_all_context<'a>(
+    type_def: &'a memstead_schema::TypeDefinition,
+    buf: &'a mut Vec<&'a str>,
+) -> Option<CatchAllContext<'a>> {
+    let key = type_def.catch_all_section()?.key.as_str();
+    buf.extend(type_def.sections.iter().map(|s| s.heading.as_str()));
+    Some(CatchAllContext {
+        key,
+        entity_type: type_def.name.as_str(),
+        declared_headings: buf,
+    })
+}
+
+/// Whether the lines after `heading` in `body`, up to the next `## ` line,
+/// are all blank. That is what the catch-all builder skips.
+fn heading_body_is_empty(body: &str, heading_line: &str) -> bool {
+    let mut lines = body.lines().skip_while(|l| *l != heading_line);
+    lines.next();
+    for line in lines {
+        if line.starts_with("## ") {
+            return true;
+        }
+        if !line.trim().is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
 /// Refuse section content that would round-trip through the compose
 /// pipeline as a section delimiter. The compose-then-reparse loop's
 /// parser anchors on `(?m)^## (.+)$` over the *masked* body, so a
@@ -679,8 +767,24 @@ pub struct MissingRequiredSection {
 ///   indented code block never splits anything, so refusing it was the
 ///   write path disagreeing with the read path about what a code block
 ///   is.
+///
+/// `catch_all` names the type's catch-all section and its declared headings,
+/// when the caller knows them (consistency-sweep 04/01, criterion 6). Inside
+/// the CATCH-ALL body only, a `## ` line whose heading the type does not
+/// declare is accepted, because the reparse absorbs it straight back into the
+/// catch-all: the content does not land under a different key, which is the
+/// whole basis of this guard. That case is not hypothetical — it is what the
+/// engine itself emits, since the catch-all builder re-emits absorbed content
+/// under its original heading line, and an agent that read an entity and wrote
+/// that section back in replace mode was refused its own value.
+///
+/// This does NOT weaken the guard. A DECLARED heading inside the catch-all
+/// still refuses, because that one really does fork: the reparse would move
+/// the content to the declared key. Every other section is unchanged, and a
+/// caller who passes `None` gets exactly the old behaviour.
 pub fn validate_section_content<'a>(
     sections: impl Iterator<Item = (&'a str, &'a str)>,
+    catch_all: Option<CatchAllContext<'_>>,
 ) -> Result<(), ValidationError> {
     for (key, value) in sections {
         // Refuse control characters other than tab/newline before the
@@ -719,9 +823,32 @@ pub fn validate_section_content<'a>(
             // guard (plan 08): h1 and h2 are the entity's own levels
             // — the title and the section delimiters — so neither may
             // be embedded in a section body.
-            if (masked_line.starts_with("## ") && masked_line.len() > 3)
-                || (masked_line.starts_with("# ") && masked_line.len() > 2)
+            let is_h2 = masked_line.starts_with("## ") && masked_line.len() > 3;
+            let is_h1 = masked_line.starts_with("# ") && masked_line.len() > 2;
+            // The one exemption, and it is exact: the catch-all re-absorbs an
+            // undeclared h2 rather than forking on it — but only when there is
+            // something under it. An undeclared heading WITH a body survives
+            // the round trip verbatim; one with NO body is skipped by the
+            // catch-all builder and silently dropped by the write, so it
+            // refuses instead. The exemption and the refusal are the same rule
+            // read from its two sides (04/01, criteria 6 and 7).
+            if is_h2
+                && catch_all.is_some_and(|c| {
+                    c.key == key && !c.declared_headings.contains(&&masked_line[3..])
+                })
             {
+                if heading_body_is_empty(stored, line) {
+                    return Err(ValidationError::EmptyUndeclaredHeading {
+                        section: key.to_string(),
+                        heading: masked_line[3..].to_string(),
+                        entity_type: catch_all
+                            .map(|c| c.entity_type.to_string())
+                            .unwrap_or_default(),
+                    });
+                }
+                continue;
+            }
+            if is_h2 || is_h1 {
                 return Err(ValidationError::SectionContentInvalid {
                     section: key.to_string(),
                     embedded_heading: line.to_string(),
@@ -1988,7 +2115,7 @@ write_rules: []
 
     #[test]
     fn section_content_refuses_nul_byte() {
-        let err = validate_section_content([("body", "line1\u{0}line2")].into_iter())
+        let err = validate_section_content([("body", "line1\u{0}line2")].into_iter(), None)
             .expect_err("NUL in a section body must be refused");
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
         match &err {
@@ -2019,7 +2146,7 @@ write_rules: []
         // controls outside the tab/newline allow-list.
         for bad in ['\u{7}', '\u{b}', '\u{c}', '\r'] {
             let body = format!("ok{bad}more");
-            let err = validate_section_content([("s", body.as_str())].into_iter())
+            let err = validate_section_content([("s", body.as_str())].into_iter(), None)
                 .expect_err("control char must be refused");
             assert_eq!(err.code(), "SECTION_CONTENT_INVALID", "char {:?}", bad);
         }
@@ -2029,8 +2156,113 @@ write_rules: []
     fn section_content_allows_tab_and_newline() {
         // The two legitimate whitespace controls round-trip; multi-line
         // and tabbed bodies are unaffected.
-        validate_section_content([("body", "line1\nline2\n\tindented\tcols\n")].into_iter())
-            .expect("tab and newline must stay legal in section bodies");
+        validate_section_content(
+            [("body", "line1\nline2\n\tindented\tcols\n")].into_iter(),
+            None,
+        )
+        .expect("tab and newline must stay legal in section bodies");
+    }
+
+    /// Criterion 6 (consistency-sweep 04/01): the engine must accept back a
+    /// value it emitted. The catch-all re-emits absorbed content under its
+    /// original heading line, so an agent that read an entity and wrote that
+    /// section back in replace mode was refused its own value.
+    #[test]
+    fn the_catch_all_accepts_back_the_value_the_engine_emits() {
+        let declared = ["Body", "Notes"];
+        let ctx = CatchAllContext {
+            key: "notes",
+            entity_type: "doc",
+            declared_headings: &declared,
+        };
+        // What the engine hands out: the absorbed heading, verbatim.
+        validate_section_content(
+            [("notes", "## Field Notes\n\nsomething useful\n")].into_iter(),
+            Some(ctx),
+        )
+        .expect("the catch-all re-absorbs an undeclared heading, so writing it back is safe");
+    }
+
+    /// The refusal complement, and the reason the exemption is exact rather
+    /// than a loosening: a DECLARED heading inside the catch-all really does
+    /// fork the entity, because the reparse moves that content to the declared
+    /// key. It stays refused, and so does every other section.
+    #[test]
+    fn the_catch_all_exemption_does_not_weaken_the_guard() {
+        let declared = ["Body", "Notes"];
+        let ctx = CatchAllContext {
+            key: "notes",
+            entity_type: "doc",
+            declared_headings: &declared,
+        };
+        let err = validate_section_content(
+            [("notes", "## Body\n\nthis would move to `body` on reparse\n")].into_iter(),
+            Some(ctx),
+        )
+        .expect_err("a declared heading inside the catch-all forks the entity");
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
+
+        // A non-catch-all section is untouched by the exemption.
+        let err = validate_section_content([("body", "## Anything\n")].into_iter(), Some(ctx))
+            .expect_err("only the catch-all absorbs; every other section still forks");
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
+
+        // And an h1 is refused inside the catch-all too: it is the entity's
+        // own title level, not something the catch-all absorbs.
+        let err = validate_section_content([("notes", "# A Title\n")].into_iter(), Some(ctx))
+            .expect_err("h1 is the entity's title level");
+        assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
+    }
+
+    /// Criterion 7 (consistency-sweep 04/01): caller-supplied content carrying
+    /// an undeclared heading with NO body refuses, naming what was rejected.
+    /// This is the exact complement of the criterion-6 exemption: the catch-all
+    /// keeps absorbed content but SKIPS empty content, so accepting this write
+    /// would drop the heading and tell the caller nothing.
+    #[test]
+    fn an_empty_undeclared_heading_is_refused_at_the_write() {
+        let declared = ["Body", "Notes"];
+        let ctx = CatchAllContext {
+            key: "notes",
+            entity_type: "doc",
+            declared_headings: &declared,
+        };
+        for (body, label) in [
+            ("## Scratch\n", "bare heading, nothing after it"),
+            (
+                "## Scratch\n\n   \n",
+                "heading followed only by blank lines",
+            ),
+            (
+                "## Scratch\n\n## Other\n\nreal content\n",
+                "heading with the next heading under it",
+            ),
+        ] {
+            let err = validate_section_content([("notes", body)].into_iter(), Some(ctx))
+                .expect_err(label);
+            assert_eq!(err.code(), "EMPTY_UNDECLARED_HEADING", "{label}");
+            let d = err.details();
+            assert_eq!(d["heading"], "Scratch", "{label}");
+            assert_eq!(d["entity_type"], "doc", "{label}");
+        }
+    }
+
+    /// The refusal complement of criterion 7, which is what keeps it from
+    /// stranding every read-modify-write: a heading WITH a body is accepted,
+    /// because it survives.
+    #[test]
+    fn an_undeclared_heading_with_a_body_is_not_refused() {
+        let declared = ["Body", "Notes"];
+        let ctx = CatchAllContext {
+            key: "notes",
+            entity_type: "doc",
+            declared_headings: &declared,
+        };
+        validate_section_content(
+            [("notes", "## Scratch\n\nsomething\n")].into_iter(),
+            Some(ctx),
+        )
+        .expect("content under the heading survives, so the write is accepted");
     }
 
     #[test]
@@ -2040,6 +2272,7 @@ write_rules: []
         // like escapes) pass through untouched.
         validate_section_content(
             [("body", r"a literal \n and \t and \0 and \\ backslash")].into_iter(),
+            None,
         )
         .expect("backslashes are literal content, not control bytes");
     }
@@ -2048,8 +2281,9 @@ write_rules: []
     fn section_content_still_refuses_heading_injection() {
         // The pre-existing heading-injection guard is unchanged and
         // shares the wire code.
-        let err = validate_section_content([("body", "intro\n## Injected\ntail")].into_iter())
-            .expect_err("embedded `## ` heading must still be refused");
+        let err =
+            validate_section_content([("body", "intro\n## Injected\ntail")].into_iter(), None)
+                .expect_err("embedded `## ` heading must still be refused");
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
         assert!(matches!(err, ValidationError::SectionContentInvalid { .. }));
     }
@@ -2066,7 +2300,7 @@ write_rules: []
             "intro\n\n> ```\n> ## Not A Heading\n> ```\n",
             "intro\n\n    ## Not A Heading\n",
         ] {
-            validate_section_content([("body", body)].into_iter())
+            validate_section_content([("body", body)].into_iter(), None)
                 .unwrap_or_else(|e| panic!("code-block content must be admitted: {body:?} -> {e}"));
         }
     }
@@ -2077,9 +2311,11 @@ write_rules: []
     /// parse. The guard sees what the reparse will see.
     #[test]
     fn section_content_refuses_the_trim_fork() {
-        let err =
-            validate_section_content([("body", "    ## Not A Heading\n    more\n")].into_iter())
-                .expect_err("content whose trim exposes a column-0 heading must be refused");
+        let err = validate_section_content(
+            [("body", "    ## Not A Heading\n    more\n")].into_iter(),
+            None,
+        )
+        .expect_err("content whose trim exposes a column-0 heading must be refused");
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
         match err {
             ValidationError::SectionContentInvalid {
@@ -2094,7 +2330,7 @@ write_rules: []
 
     #[test]
     fn section_content_refuses_the_trim_fork_for_h1_too() {
-        let err = validate_section_content([("body", "  # Not A Title\n")].into_iter())
+        let err = validate_section_content([("body", "  # Not A Title\n")].into_iter(), None)
             .expect_err("h1 exposed by the trim must be refused");
         assert_eq!(err.code(), "SECTION_CONTENT_INVALID");
     }

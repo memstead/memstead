@@ -8,6 +8,42 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **An entity body that carries content its type does not declare is now
+  visible as exactly that.** Write an entity by hand with a heading the schema
+  does not declare, or a frontmatter key the type does not carry, and the engine
+  said nothing. Sometimes it was right and the content survived; sometimes the
+  content was gone on the next write. The reader could not tell which case they
+  were in, and the engine did not distinguish them either.
+
+  The health conformance axis gains BODY OBSERVATIONS, beside its findings and
+  never among them: an undeclared heading absorbed into the catch-all, a heading
+  repeated so that later bodies were not kept, and a frontmatter key the next
+  write drops. Each states whether the content SURVIVES, which is the
+  distinction that was missing. None of them marks an entity unconformant:
+  absorbing an undeclared heading is the catch-all working as designed, and
+  reporting it as a violation would fail every mem that uses the feature.
+
+  What the axis could see before was a tautology. It linted the parsed section
+  keys, which come out of the parser and are declared by construction, so every
+  heading a file actually carried was invisible to it. The observations read
+  what the FILE carried instead.
+
+  **The engine also stopped handing out a value it would not accept back.** The
+  catch-all re-emits absorbed content under its original heading line, so an
+  agent that read an entity and wrote that section back in replace mode was
+  refused its own value with `SECTION_CONTENT_INVALID`. Inside the catch-all
+  only, an undeclared heading is now accepted, because the reparse absorbs it
+  straight back rather than forking the entity. A DECLARED heading there still
+  refuses, because that one really would fork, and every other section is
+  unchanged.
+
+  Its exact complement is a new refusal, `EMPTY_UNDECLARED_HEADING`: an
+  undeclared heading with NO body under it is rejected at the write, because the
+  catch-all skips empty content and the write would drop it silently. Content
+  under the heading survives and is accepted; nothing under it does not and is
+  refused. A write against an entity whose stored body already carries absorbed
+  content, where the caller introduces none, is not affected.
+
 - **An anchor resolution figure never renders without the population it
   covers, and two checks keep it that way.** A resolution percentage is read by
   gates and by people as health. Every finding this campaign's anchor bundle
