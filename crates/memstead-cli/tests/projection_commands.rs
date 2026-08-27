@@ -62,7 +62,7 @@ fn fixture(mode: &str, deny: &str) -> TempDir {
     write_store(
         root,
         "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"src","scope":[{"path":"../public/**/*.rs","mode":"allow"}]}"#,
+        r#"{"name":"source-tree","medium":"src","scope":[{"path":"**/*.rs","mode":"allow"}]}"#,
     );
     write_store(
         root,
@@ -219,7 +219,7 @@ fn migrate_surfaces_preparation_capability_warning() {
     write_store(
         root,
         "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"src","scope":[{"path":"../public/**/*.rs","mode":"allow"}],"preparation":"pdf-to-markdown"}"#,
+        r#"{"name":"source-tree","medium":"src","scope":[{"path":"**/*.rs","mode":"allow"}],"preparation":"pdf-to-markdown"}"#,
     );
     let output = memstead()
         .current_dir(root)
@@ -989,7 +989,7 @@ fn advance_workspace() -> TempDir {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20}}}"#,
     );
 
     // The git source tree: base (a.rs + b.rs), then head1 (modify a.rs, delete b.rs).
@@ -2135,7 +2135,7 @@ fn migrate_v1_three_file_store_preserves_watermark_and_is_byte_idempotent() {
     write_store(
         root,
         "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"source-tree","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
+        r#"{"name":"source-tree","medium":"source-tree","scope":[{"path":"**/*.rs","mode":"allow"}]}"#,
     );
     write_store(
         root,
@@ -2246,7 +2246,7 @@ fn migrate_gen1_dry_run_writes_nothing() {
     };
     write_root(
         "scopes/engine/src.json",
-        r#"{"type":"codebase","scope":{"tree":[{"path":"../public/**/*.rs","mode":"allow"}]}}"#,
+        r#"{"type":"codebase","scope":{"tree":[{"path":"**/*.rs","mode":"allow"}]}}"#,
     );
     write_root(
         "projections/engine/graph.json",
@@ -2704,7 +2704,7 @@ fn brief_refuses_absent_build_then_enable_build_remedy_succeeds() {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"verify":{"trigger":"manual","batch_size":20}}}"#,
     );
 
     // brief refuses with the one-command remedy.
@@ -2752,7 +2752,7 @@ fn advance_refuses_absent_sync_then_enable_sync_remedy_succeeds() {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
     );
     assert!(read_binding(root).operations.sync.is_none());
 
@@ -2860,7 +2860,7 @@ fn migrate_consumes_reconcile_cursors_seeds_synced_and_deletes_it() {
     write_store(
         root,
         "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"src","scope":[{"path":"src/**/*.rs","mode":"allow"}]}"#,
+        r#"{"name":"source-tree","medium":"src","scope":[{"path":"**/*.rs","mode":"allow"}]}"#,
     );
     write_store(
         root,
@@ -3210,7 +3210,7 @@ fn verify_workspace() -> TempDir {
     write_store(
         root,
         "projections/engine/graph.json",
-        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
+        r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
     // The entity the sidecar row is keyed to. A row whose entity the mem does
     // not hold is DANGLING (consistency-sweep 03/02) and leaves the population
@@ -4244,7 +4244,7 @@ fn an_empty_facet_is_not_excused_by_a_sibling_that_walked() {
         "projections/dest/mirror.json",
         r#"{"version":2,"intent":"mixed","sources":[
             {"name":"src-graph","type":"graph","pointer":"srcmem","scope":[{"path":"type:nosuchtype","mode":"allow"}]},
-            {"name":"code-facet","type":"filesystem","pointer":"code","change_detection":"mtime","scope":[{"path":"code/**/*","mode":"allow"}]}
+            {"name":"code-facet","type":"filesystem","pointer":"code","change_detection":"mtime","scope":[{"path":"**/*","mode":"allow"}]}
         ],"reference_mems":[],"destination_mem":"dest","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
 

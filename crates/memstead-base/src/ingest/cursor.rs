@@ -269,15 +269,20 @@ fn git_head(git_root: &Path) -> Option<String> {
     (!sha.is_empty()).then_some(sha)
 }
 
-/// Translate a workspace-relative facet pattern into a git pathspec relative
-/// to `git_root`, with `:(glob)` magic (or `:(glob,exclude)` for a deny).
+/// Translate a pattern into a git pathspec relative to `git_root`, with
+/// `:(glob)` magic (or `:(glob,exclude)` for a deny).
+///
+/// `base` is the namespace the pattern is written in: the medium base for a
+/// facet scope pattern (source-relative), the workspace root for an
+/// ingest-level deny (workspace-relative). One join, named by the caller,
+/// rather than one hardcoded root that silently disagrees with the walk.
 ///
 /// A `**`-prefixed pattern is prefix-free — it matches under any directory,
 /// in particular the medium subtree — so it is emitted verbatim as a
 /// git-root-relative glob. Lexically re-rooting it (join + relativize) would
 /// produce `../**/…` for any non-root medium pointer, and git *fatals* on an
 /// out-of-tree pathspec, sinking the whole diff into a no-signal degrade.
-fn to_git_pathspec(pattern: &str, git_root: &Path, workspace_root: &Path, exclude: bool) -> String {
+fn to_git_pathspec(pattern: &str, git_root: &Path, base: &Path, exclude: bool) -> String {
     let magic = if exclude {
         ":(glob,exclude)"
     } else {
@@ -286,7 +291,7 @@ fn to_git_pathspec(pattern: &str, git_root: &Path, workspace_root: &Path, exclud
     if pattern.starts_with("**") {
         return format!("{magic}{pattern}");
     }
-    let resolved = normalize_lexical(&workspace_root.join(pattern));
+    let resolved = normalize_lexical(&base.join(pattern));
     let git_rel = relative_path(git_root, &resolved);
     format!("{magic}{}", git_rel.to_string_lossy())
 }
@@ -295,17 +300,12 @@ fn to_git_pathspec(pattern: &str, git_root: &Path, workspace_root: &Path, exclud
 /// `git_root` (its git-relative path escapes with a leading `..`). Git fatals
 /// on an out-of-tree pathspec, so a cross-repo deny must be dropped from the
 /// diff rather than pushed — it can match nothing in this repo regardless.
-fn in_repo_pathspec(
-    pattern: &str,
-    git_root: &Path,
-    workspace_root: &Path,
-    exclude: bool,
-) -> Option<String> {
+fn in_repo_pathspec(pattern: &str, git_root: &Path, base: &Path, exclude: bool) -> Option<String> {
     // Prefix-free glob — same verbatim re-anchoring as `to_git_pathspec`.
     if pattern.starts_with("**") {
-        return Some(to_git_pathspec(pattern, git_root, workspace_root, exclude));
+        return Some(to_git_pathspec(pattern, git_root, base, exclude));
     }
-    let resolved = normalize_lexical(&workspace_root.join(pattern));
+    let resolved = normalize_lexical(&base.join(pattern));
     let git_rel = relative_path(git_root, &resolved);
     if git_rel
         .components()
@@ -322,8 +322,10 @@ fn in_repo_pathspec(
     Some(format!("{magic}{}", git_rel.to_string_lossy()))
 }
 
-/// Build a [`GlobSet`] from workspace-relative glob patterns, or `None` if
-/// any pattern is malformed.
+/// Build a [`GlobSet`] from glob patterns, or `None` if any pattern is
+/// malformed. The namespace the patterns are written in is the caller's
+/// business — scope patterns are source-relative, ingest denies
+/// workspace-relative.
 pub(crate) fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
@@ -354,12 +356,32 @@ fn facet_unscoped(source: &Source) -> bool {
 /// an unscoped facet via `facet_unscoped` *before* enumerating, so the empty
 /// list is only ever reached for a genuinely-empty scoped enumeration.
 ///
+/// ## Scope patterns are SOURCE-relative
+///
+/// A facet's own `scope` patterns resolve against the source's **pointer** —
+/// the same base the walk starts from, and the same convention the anchor
+/// artifact decision already ratified for every other surface around a
+/// binding. It is also what the rendered brief teaches, printing the pointer
+/// and the allow list directly beneath it.
+///
+/// Until 2026-08-27 the walk honoured the pointer and then matched each
+/// candidate by its *workspace*-relative path, with no join. The two readings
+/// coincide only for an empty pointer (the shape the scaffolder writes, and
+/// the only shape the enumeration test covered), which is why the defect stayed
+/// invisible: under a non-empty pointer a prefix-anchored pattern or a bare
+/// literal matched nothing, a `**`-prefixed pattern matched regardless, and a
+/// scope mixing the two produced a silently truncated denominator that every
+/// coverage figure was then computed over. [`scope_migration_notes`] names the
+/// patterns a binding still has in the old dialect.
+///
 /// `deny_paths` are the ingest-level denies (`ResolvedIngest::deny_paths`),
-/// applied on top of the facet's own scope denies with the *same*
-/// workspace-relative glob grammar the git strategy pushes down as
-/// `:(glob,exclude)` pathspecs — so a denied file is excluded from the mtime
-/// input set exactly as it is from the git diff. Passing `&[]` yields the
-/// facet-scope-only behaviour.
+/// applied on top of the facet's own scope denies. These stay
+/// **workspace-relative** — deliberately, and it is not a second dialect for
+/// the same thing: an ingest deny spans every source in the binding, so it has
+/// no single pointer to be relative to, and the git strategy pushes the same
+/// entries down as workspace-rooted `:(glob,exclude)` pathspecs. Scope is
+/// per-source and source-relative; ingest denies are per-binding and
+/// workspace-relative. Passing `&[]` yields the facet-scope-only behaviour.
 pub fn enumerate_facet_files(
     source: &Source,
     deny_paths: &[String],
@@ -372,26 +394,25 @@ pub fn enumerate_facet_files(
         return Vec::new();
     }
     let mut allows: Vec<&str> = Vec::new();
-    let mut denies: Vec<&str> = Vec::new();
+    let mut scope_denies: Vec<&str> = Vec::new();
     for rule in &source.scope {
         match rule.mode {
             PatternMode::Allow => allows.push(&rule.path),
-            PatternMode::Deny => denies.push(&rule.path),
+            PatternMode::Deny => scope_denies.push(&rule.path),
         }
     }
-    // Ingest deny_paths deny on top of the facet's own denies, sharing the
-    // facet-scope glob grammar (workspace-relative, matched against each
-    // candidate's workspace-relative path) — the same entries the git strategy
-    // resolves as exclude pathspecs, so deny enforcement is strategy-invariant.
-    for dp in deny_paths {
-        denies.push(dp);
-    }
+    // Ingest deny_paths deny on top of the facet's own denies, in the
+    // workspace-relative grammar — the same entries the git strategy resolves
+    // as exclude pathspecs, so deny enforcement is strategy-invariant. They are
+    // matched against the candidate's workspace-relative path, NOT its
+    // source-relative one: an ingest deny spans every source in the binding.
+    let mut ws_denies: Vec<&str> = deny_paths.iter().map(String::as_str).collect();
     // Engine self-exclusion — unconditional, below configuration; the
     // git strategy pushes the same set as exclude pathspecs so the
     // denominator stays strategy-invariant.
     let forced = engine_state_denies(workspace_root);
     for f in &forced {
-        denies.push(f);
+        ws_denies.push(f);
     }
     if allows.is_empty() {
         return Vec::new();
@@ -399,20 +420,28 @@ pub fn enumerate_facet_files(
     let Some(allow_set) = build_glob_set(&allows) else {
         return Vec::new();
     };
-    let deny_set = if denies.is_empty() {
+    let scope_deny_set = if scope_denies.is_empty() {
         None
     } else {
-        build_glob_set(&denies)
+        build_glob_set(&scope_denies)
+    };
+    let ws_deny_set = if ws_denies.is_empty() {
+        None
+    } else {
+        build_glob_set(&ws_denies)
     };
 
-    // Walk the medium's directory tree; the facet patterns are
-    // workspace-relative, so each candidate is matched by its
-    // workspace-relative path. VCS internals are never source artifacts —
-    // they are pruned here so `.git/**` plumbing cannot enter `S(D)`,
-    // matching the git strategy (whose diffs never name `.git` files).
+    // Walk the medium's directory tree. A candidate is matched twice, in two
+    // namespaces: the facet's own scope patterns against its SOURCE-relative
+    // path (relative to the medium base below), the ingest-level denies
+    // against its workspace-relative one. The returned paths stay
+    // workspace-relative — that is the namespace every consumer of this list
+    // speaks. VCS internals are never source artifacts — they are pruned here
+    // so `.git/**` plumbing cannot enter `S(D)`, matching the git strategy
+    // (whose diffs never name `.git` files).
     let base = medium_base(&source.pointer, workspace_root);
     let mut out: Vec<String> = Vec::new();
-    let mut stack = vec![base];
+    let mut stack = vec![base.clone()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -434,11 +463,18 @@ pub fn enumerate_facet_files(
                     stack.push(path);
                 }
             } else if file_type.is_file() {
-                let rel = relative_path(workspace_root, &normalize_lexical(&path))
+                let normalized = normalize_lexical(&path);
+                let rel = relative_path(workspace_root, &normalized)
                     .to_string_lossy()
                     .to_string();
-                let denied = deny_set.as_ref().is_some_and(|d| d.is_match(&rel));
-                if allow_set.is_match(&rel) && !denied {
+                let src_rel = relative_path(&base, &normalized)
+                    .to_string_lossy()
+                    .to_string();
+                let denied = scope_deny_set
+                    .as_ref()
+                    .is_some_and(|d| d.is_match(&src_rel))
+                    || ws_deny_set.as_ref().is_some_and(|d| d.is_match(&rel));
+                if allow_set.is_match(&src_rel) && !denied {
                     out.push(rel);
                 }
             }
@@ -447,6 +483,53 @@ pub fn enumerate_facet_files(
     out.sort();
     out.dedup();
     out
+}
+
+/// One scope pattern still written in the retired workspace-relative dialect.
+///
+/// Emitted by [`scope_migration_notes`] so a binding author is told BEFORE a
+/// pattern's meaning changes, never after. The campaign rule this serves is
+/// the plain one: a surface does not quietly begin covering a different set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopePatternNote {
+    /// The pattern as written in the binding record.
+    pub pattern: String,
+    /// Whether it is an allow or a deny rule.
+    pub deny: bool,
+    /// The pattern rewritten into the source-relative dialect, when the
+    /// rewrite is mechanical (the pattern begins with the source's pointer).
+    /// `None` when it is not — the author has to decide what they meant.
+    pub suggested: Option<String>,
+}
+
+/// Name every scope pattern of `source` that reads as the retired
+/// workspace-relative dialect: one that begins with the source's own pointer,
+/// so it selected artifacts before the 2026-08-27 join and selects nothing
+/// after it.
+///
+/// A pointer-less source has no dialect to migrate (the two readings coincide
+/// — which is exactly why the defect stayed invisible on the scaffolded path),
+/// so it returns empty. A `**`-prefixed pattern is prefix-free and matched
+/// under both readings, so it is not reported.
+pub fn scope_migration_notes(source: &Source) -> Vec<ScopePatternNote> {
+    let pointer = source.pointer.trim_end_matches('/');
+    if pointer.is_empty() {
+        return Vec::new();
+    }
+    let prefix = format!("{pointer}/");
+    source
+        .scope
+        .iter()
+        .filter(|r| !r.path.starts_with("**"))
+        .filter_map(|rule| {
+            let stripped = rule.path.strip_prefix(&prefix)?;
+            Some(ScopePatternNote {
+                pattern: rule.path.clone(),
+                deny: rule.mode == PatternMode::Deny,
+                suggested: (!stripped.is_empty()).then(|| stripped.to_string()),
+            })
+        })
+        .collect()
 }
 
 /// Compute the git changed slice for one primary source between its stored
@@ -491,11 +574,11 @@ fn compute_git_slice(
 
     // Pathspecs from the facet scope + the ingest's deny_paths.
     let mut allows: Vec<&str> = Vec::new();
-    let mut denies: Vec<&str> = Vec::new();
+    let mut scope_denies: Vec<&str> = Vec::new();
     for rule in &source.scope {
         match rule.mode {
             PatternMode::Allow => allows.push(&rule.path),
-            PatternMode::Deny => denies.push(&rule.path),
+            PatternMode::Deny => scope_denies.push(&rule.path),
         }
     }
     if allows.is_empty() {
@@ -505,29 +588,37 @@ fn compute_git_slice(
             reason: NoSignalReason::Unscoped,
         };
     }
-    for dp in deny_paths {
-        denies.push(dp);
-    }
+    let mut ws_denies: Vec<&str> = deny_paths.iter().map(String::as_str).collect();
     // Engine self-exclusion — same forced set the mtime strategy's
     // enumeration applies, pushed down as exclude pathspecs so the
     // slice never names engine state either.
     let forced = engine_state_denies(workspace_root);
     for f in &forced {
-        denies.push(f);
+        ws_denies.push(f);
     }
-    let mut specs: Vec<String> = Vec::with_capacity(allows.len() + denies.len());
+    let mut specs: Vec<String> =
+        Vec::with_capacity(allows.len() + scope_denies.len() + ws_denies.len());
+    // Scope patterns are source-relative, so they re-anchor against the medium
+    // base — the same join the mtime enumeration performs. Ingest denies below
+    // stay workspace-rooted; the two namespaces are per-source and per-binding
+    // respectively, not two dialects for one thing.
     for a in &allows {
-        specs.push(to_git_pathspec(a, &git_root, workspace_root, false));
+        specs.push(to_git_pathspec(a, &git_root, &base, false));
     }
-    for d in &denies {
-        // A deny may target a path OUTSIDE this medium's git repo — a
-        // cross-medium workspace-relative glob such as `../dev/**`, whose tree
-        // lives in a sibling repo. Git *fatals* on an out-of-tree pathspec
-        // (`'../dev/**' is outside repository`), which would sink the entire
-        // diff into a no-signal degrade. Such a deny can exclude nothing here
-        // anyway (the files simply aren't in this repo), so drop it: the plugin
-        // hook still enforces it agent-side (workspace-relative, cross-repo),
-        // and a genuinely-dead entry is still surfaced by the brief warning.
+    // A deny may target a path OUTSIDE this medium's git repo — a
+    // cross-medium workspace-relative glob such as `../dev/**`, whose tree
+    // lives in a sibling repo. Git *fatals* on an out-of-tree pathspec
+    // (`'../dev/**' is outside repository`), which would sink the entire
+    // diff into a no-signal degrade. Such a deny can exclude nothing here
+    // anyway (the files simply aren't in this repo), so drop it: the plugin
+    // hook still enforces it agent-side (workspace-relative, cross-repo),
+    // and a genuinely-dead entry is still surfaced by the brief warning.
+    for d in &scope_denies {
+        if let Some(spec) = in_repo_pathspec(d, &git_root, &base, true) {
+            specs.push(spec);
+        }
+    }
+    for d in &ws_denies {
         if let Some(spec) = in_repo_pathspec(d, &git_root, workspace_root, true) {
             specs.push(spec);
         }
@@ -1854,6 +1945,137 @@ mod tests {
 
     /// Facet-file enumeration honours allow globs, deny globs, and the
     /// codebase/filesystem medium-type gate.
+    /// The defect this join closes: a source with a non-empty pointer whose
+    /// scope is written the way the brief presents it (paths beneath the
+    /// pointer) selects those artifacts. Under the retired workspace-relative
+    /// reading the prefix-anchored pattern matched nothing and the walk
+    /// returned an empty set with no signal that anything had been dropped.
+    #[test]
+    fn scope_patterns_resolve_against_the_source_pointer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src/lib/deep")).unwrap();
+        std::fs::write(root.join("src/lib/a.rs"), "").unwrap();
+        std::fs::write(root.join("src/lib/deep/b.rs"), "").unwrap();
+        std::fs::write(root.join("src/lib/skip.md"), "").unwrap();
+        std::fs::write(root.join("outside.rs"), "").unwrap();
+
+        let mut source = primary(vec![
+            PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "deep/**".to_string(),
+                mode: PatternMode::Deny,
+            },
+        ]);
+        source.pointer = "src/lib".to_string();
+        let got = enumerate_facet_files(&source, &[], root);
+        assert_eq!(
+            got,
+            vec!["src/lib/a.rs".to_string()],
+            "the deny is source-relative too, and nothing outside the pointer enters"
+        );
+    }
+
+    /// A bare literal beneath the pointer is the shape that could never even
+    /// appear as uncovered under the old reading: it matched nothing, so it
+    /// was absent from the denominator rather than present-and-uncovered.
+    #[test]
+    fn a_bare_literal_under_the_pointer_selects_its_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("pkg")).unwrap();
+        std::fs::write(root.join("pkg/Cargo.toml"), "").unwrap();
+        std::fs::write(root.join("pkg/other.toml"), "").unwrap();
+
+        let mut source = primary(vec![PatternEntry {
+            path: "Cargo.toml".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        source.pointer = "pkg".to_string();
+        assert_eq!(
+            enumerate_facet_files(&source, &[], root),
+            vec!["pkg/Cargo.toml".to_string()]
+        );
+    }
+
+    /// An ingest-level deny stays workspace-relative — it spans every source
+    /// in the binding, so it has no pointer to be relative to. The two
+    /// namespaces coexist on one candidate without either leaking.
+    #[test]
+    fn ingest_denies_stay_workspace_relative() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src/secret")).unwrap();
+        std::fs::write(root.join("src/keep.rs"), "").unwrap();
+        std::fs::write(root.join("src/secret/hide.rs"), "").unwrap();
+
+        let mut source = primary(vec![PatternEntry {
+            path: "**/*.rs".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        source.pointer = "src".to_string();
+        let got = enumerate_facet_files(&source, &["src/secret/**".to_string()], root);
+        assert_eq!(got, vec!["src/keep.rs".to_string()]);
+    }
+
+    /// An empty pointer is the shape the scaffolder writes and the only one
+    /// where the two readings coincide — it must be untouched by the join.
+    #[test]
+    fn an_empty_pointer_is_unaffected_by_the_join() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.md"), "").unwrap();
+        std::fs::write(root.join("docs/b.txt"), "").unwrap();
+
+        let source = primary(vec![PatternEntry {
+            path: "docs/**/*.md".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        assert_eq!(
+            enumerate_facet_files(&source, &[], root),
+            vec!["docs/a.md".to_string()]
+        );
+    }
+
+    #[test]
+    fn migration_notes_name_old_dialect_patterns_and_suggest_the_rewrite() {
+        let mut source = primary(vec![
+            PatternEntry {
+                path: "../public/plugins/claude-code/**/*.md".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "../public/plugins/claude-code/dist/**".to_string(),
+                mode: PatternMode::Deny,
+            },
+            PatternEntry {
+                path: "**/*.mjs".to_string(),
+                mode: PatternMode::Allow,
+            },
+        ]);
+        source.pointer = "../public/plugins/claude-code".to_string();
+        let notes = scope_migration_notes(&source);
+        assert_eq!(notes.len(), 2, "the prefix-free pattern is not reported");
+        assert_eq!(notes[0].suggested.as_deref(), Some("**/*.md"));
+        assert!(!notes[0].deny);
+        assert_eq!(notes[1].suggested.as_deref(), Some("dist/**"));
+        assert!(notes[1].deny);
+    }
+
+    /// A pointer-less source has no dialect to migrate.
+    #[test]
+    fn migration_notes_are_empty_without_a_pointer() {
+        let source = primary(vec![PatternEntry {
+            path: "dev/**/*.md".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        assert!(scope_migration_notes(&source).is_empty());
+    }
+
     #[test]
     fn enumerate_honours_allow_and_deny() {
         let ws = tempfile::tempdir().unwrap();
@@ -2603,8 +2825,9 @@ mod tests {
             version: BINDING_VERSION,
             intent: None,
             sources: vec![
-                source("logs", "corpus/*.md", Some(DATED_ENTRIES)),
-                source("plain", "corpus/plain/**", None),
+                // Source-relative against the `corpus` pointer.
+                source("logs", "*.md", Some(DATED_ENTRIES)),
+                source("plain", "plain/**", None),
             ],
             reference_mems: vec![],
             destination_mem: "home".to_string(),
@@ -2976,8 +3199,11 @@ mod tests {
             version: BINDING_VERSION,
             intent: None,
             sources: vec![
-                source("code", "corpus/src/**/*.js", Some(CODE_MAP)),
-                source("plain", "corpus/plain/**", None),
+                // Scope patterns are SOURCE-relative: the pointer is
+                // `corpus`, so these read as `corpus/src/**/*.js` and
+                // `corpus/plain/**` on disk.
+                source("code", "src/**/*.js", Some(CODE_MAP)),
+                source("plain", "plain/**", None),
             ],
             reference_mems: vec![],
             destination_mem: "home".to_string(),
