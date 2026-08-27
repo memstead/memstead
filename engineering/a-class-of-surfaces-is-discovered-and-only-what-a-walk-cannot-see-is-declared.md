@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-26T17:28:42Z
-last_modified: 2026-08-26T18:28:45Z
+last_modified: 2026-08-26T20:43:14Z
 authority: accepted
 universality: domain-wide
 tags: checkers, surfaces, discovery, manifests, coverage
@@ -33,6 +33,11 @@ The cost of the discipline is small and the cost of skipping it compounds: every
 
 This is [[a-test-gate-that-exists-must-gate]] read one level up: a gate whose scan set is smaller than its class exists without gating the part it never sees.
 
+
+A gate's scan set can be right while the gate is still blind, and only one test shape catches it. Planting a token on each surface class proves the MECHANISM: the reader reaches the class and the pattern fires. It says nothing about whether the pattern matches the wording a real finding actually used. Reproducing each closed finding on its own class, in the pre-correction wording recovered from git, proves the REACH. Recorded instance: the retired-form gate's plant-a-token self-test was green on every class while the gate was silent on four of the five verify-claim findings the sweep had just closed, because those surfaces said "read-only" and "never mutates" where the pattern expected the word "verify" nearby. The fixtures found it in one round; six earlier rounds of reading source files had not.
+
+A retired term is a claim only in its predication, and proximity is the wrong proxy for it. The same word can be the defect or ordinary correct prose depending on what it qualifies: "read-only" is accurate for a mount, a mem, a command and a commit-mining run, and wrong only where it qualifies a verification noun. Measured rather than argued: matching a bare "read-only" anywhere near a subject word produced 26 findings on the workspace and every one was a false positive, while requiring it to qualify fidelity, verification, verify or a measurement surface produced all five real findings and nothing else across 1751 surfaces. A pattern tuned by proximity buys exemptions; a pattern tuned by predication buys coverage.
+
 ## Exceptions
 
 A list is acceptable where the class is closed by construction and the closure is itself mechanically checked: an enum's variants, a generated file set whose generator is the walk. The distinguishing question is whether a new member can join the class without the list's author acting.
@@ -49,3 +54,6 @@ Where a class's substrate is absent from a given checkout (the private mem-repo 
 
 
 A hand-kept list fails in two directions, not one, and the second is easy to miss. It can omit a member the class contains, which is the failure everything above is about. It can also name a member that does not exist, and nothing notices, because the check that reads the list only ever asks whether each entry is present somewhere else. Recorded instance: the MCP server instructions, the most-read prose the project ships, advertised five error codes (`MEM_NOT_WRITABLE`, `MEM_BRANCH_MISSING`, `VCS_ERROR`, `EXPORT_ERROR`, `WORKSPACE_SCHEMAS_ERROR`) with no construction site anywhere in the workspace, while the same hand-kept list was missing two codes the engine can produce. An agent was told to expect refusals that cannot arrive, and given no entry for two that can. Both directions are cheap to derive once the class has a mechanical definition, and neither is detectable from the list alone.
+
+
+One source rendered several ways needs the same treatment, and reading the source is the check that cannot do it. memstead.ai's entry page, its agent runbook and the header of its whole-graph document are three renderings of one link table, and the table exists so they cannot drift. Comparing the table against itself proves nothing: what drifts is the prose written around it. Rendering all three and differencing the URLs they actually contain found four surfaces named on the entry page and nowhere else a reader might arrive, including the discovery manifest and the one-line installer. A 2026-08 sealed newcomer had already missed two working surfaces for this reason. The rule is the same one level down: compare what is rendered, never what is declared.

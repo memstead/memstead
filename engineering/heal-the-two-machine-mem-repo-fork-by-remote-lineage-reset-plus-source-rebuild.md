@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-26T08:10:35Z
-last_modified: 2026-08-26T12:26:29Z
+last_modified: 2026-08-26T20:12:30Z
 status: accepted
 decided_on: 2026-08-26
 deciders: operator
@@ -12,7 +12,7 @@ tags: mem-repo, sync, divergence, git-branch, reconciliation, dogfood
 # Heal the two-machine mem-repo fork by remote-lineage reset plus source rebuild
 
 ## Decision
-When the dogfood graph's git-branch mems diverge across machines beyond fast-forward reach, the serving position is reset to ONE lineage and the derived content is rebuilt from the sources rather than text-merged. For the 2026-07-04 to 2026-08-26 fork the other machine's lineage (the remote) won for all four mems and the schemas ref: it was fresher on three of four mems and carried the 0.11.0/0.12.0 release work. The losing lineage's unique hand-authored entities are salvaged selectively via engine verbs afterwards; its sync-derived content is deliberately dropped and re-derived by `/memstead:sync --inventory` runs per code-mem binding, because the source code is the authority for derived mems.
+When the dogfood graph's git-branch mems diverge across machines beyond fast-forward reach, the serving position is reset to ONE lineage and the derived content is rebuilt from the sources rather than text-merged. For the 2026-07-04 to 2026-08-26 fork the other machine's lineage (the remote) won for all four mems and the schemas ref: it was fresher on three of four mems and carried the 0.11.0/0.12.0 release work. The losing lineage's unique hand-authored entities are salvaged selectively via engine verbs afterwards; its sync-derived content is deliberately dropped and re-derived by `/sync --inventory` runs per code-mem binding, because the source code is the authority for derived mems.
 
 ## Context
 Nothing synchronized the dogfood workspace's mem-repo between the two machines after 2026-07-04; both engines kept committing locally. Measured divergence at healing time (local-only/remote-only commits): engine 345/94, plugin 131/75, registry 111/14, the `__MEMSTEAD` schemas ref 174/80, and `exec-launch-claims` 22/8 with NO merge-base at all (both machines created that mem independently). Both machines ran the same sync loops over the same sources, so 44 to 54 entity files per code mem were touched on BOTH sides. `memstead pull` only fast-forwards, so it could not heal this. The May 2026 multi-engine-coherence work ([[engine:reload-before-operation-coherence]], [[use-optimistic-content-hash-locking-for-all-mutations]]) solved same-machine coherence and explicitly deferred cross-machine write coordination; this fork was that deferred seam materializing.

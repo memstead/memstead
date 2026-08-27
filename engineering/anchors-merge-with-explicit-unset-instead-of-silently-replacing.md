@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-06T06:41:20Z
-last_modified: 2026-08-06T06:41:20Z
+last_modified: 2026-08-27T01:04:22Z
 status: accepted
 decided_on: 2026-08-06
 deciders: operator (stability-sweep plan 01), implementing agent
@@ -30,4 +30,4 @@ Incremental anchoring works: sync/ingest batches accumulate instead of displacin
 
 ## Notes
 
-
+Two refinements landed with consistency-sweep 03/03, both about the same merge key. Within ONE payload the `(artifact, grain, class)` triple must appear at most once: repeats collapsed to the last occurrence and the caller was never told an anchor it sent had gone, which is the same silent loss this decision removed one level up. A later call carrying the triple still replaces the stored row, which is what the merge is for. And a replacing row that omits `hash` now inherits the stored one: dropping it made the next verify re-baseline silently, so drift became unfalsifiable. Supplying a hash still replaces it; unsetting the row before writing it fresh is the explicit clear.

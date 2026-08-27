@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-08-23T14:48:19Z
+last_modified: 2026-08-26T20:12:30Z
 status: accepted
 decided_on: 2026-06-17
 deciders: dasboe
@@ -12,7 +12,7 @@ tags: plugin, skills, ingest, architecture
 # Rebuild the ingest skill as a situation brief over a procedure
 
 ## Decision
-We chose to rebuild the `/memstead:ingest` skill so its `inject.mjs` assembles a *situation brief* — the run's mandate, its sources, its destination, and its paired-process-mem facts — and delegates the actual read and write *mechanics* to the MCP tool descriptions and the pinned schema's writing-guidance, rather than hard-coding per-medium procedure prose into the prompt. The prior procedure-driven skill is preserved unchanged as the frozen [[plugin--old-ingest-skill]] fallback; the rebuilt [[plugin--ingest-skill]] is the live shape, whose prompt core is the [[plugin--ingest-situation-brief-assembler]].
+We chose to rebuild the `/ingest` skill so its `inject.mjs` assembles a *situation brief* — the run's mandate, its sources, its destination, and its paired-process-mem facts — and delegates the actual read and write *mechanics* to the MCP tool descriptions and the pinned schema's writing-guidance, rather than hard-coding per-medium procedure prose into the prompt. The prior procedure-driven skill is preserved unchanged as the frozen [[plugin--old-ingest-skill]] fallback; the rebuilt [[plugin--ingest-skill]] is the live shape, whose prompt core is the [[plugin--ingest-situation-brief-assembler]].
 
 ## Context
 The pre-rebuild ingest skill authored the agent's full procedure in prompt prose — per-source read instructions, tool lists, and write mechanics lived in prompt templates (`skills/old-ingest/prompts/*.md`) and a prose-heavy `mediums.json`. That duplicated knowledge the MCP tool descriptions and the schema writing-guidance already carry, so the two surfaces drifted: a change to a tool's contract or a schema's write-rules left the ingest prompt stale. The engine and its MCP surface are built for LLM agents as the primary consumer, so those descriptions are the canonical procedure — a prompt repeating them is a second source of truth that ages badly.
