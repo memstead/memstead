@@ -42,7 +42,7 @@ use crate::binding::{Binding, CoverageSemantics, MediumCapabilities, medium_capa
 use crate::chunking::estimate_tokens;
 
 use super::advance::read_advance_store;
-use super::cursor::{enumerate_source_artifacts, source_moved};
+use super::cursor::{enumerate_source_artifacts_reported, source_moved};
 use super::findings::{FindingClass, FindingKey, read_findings_store};
 use super::resolve::{ChangeStrategy, ResolvedIngest, ResolvedSource, resolve_change_strategy};
 
@@ -83,6 +83,17 @@ pub enum DenominatorBasis {
     /// is stated unavailable.
     NonEnumerable {
         /// Why no `S(D)` could be computed.
+        reason: String,
+    },
+    /// `S(D)` was enumerated but is known INCOMPLETE — a scope pattern would
+    /// not compile, so its share of the population never entered the walk.
+    /// The surviving set is reported as a count and never as a percentage:
+    /// a ratio over a denominator that is not the population is the
+    /// unexamined answer this campaign exists to remove.
+    Partial {
+        /// How many artifacts the surviving patterns did enumerate.
+        count: usize,
+        /// Why the enumeration is incomplete, naming the offending patterns.
         reason: String,
     },
 }
@@ -435,6 +446,11 @@ impl FidelityReport {
                  below is vacuous, not clean"
                     .to_string(),
             ),
+            DenominatorBasis::Partial { count, reason } => blind_spots.push(format!(
+                "the source enumeration is INCOMPLETE ({reason}) — {count} artifact(s) \
+                 survived, but their share of the population is unknown, so no coverage \
+                 percentage is reported below"
+            )),
             DenominatorBasis::Enumerated { .. } => {}
         }
         if self.anchors.observed == 0 {
@@ -708,6 +724,12 @@ fn render_hard_required(report: &FidelityReport) -> String {
             "No `S(D)` denominator: {reason}. Coverage is reported over anchors only; the \
              per-medium enumeration is unavailable.\n\n"
         )),
+        DenominatorBasis::Partial { count, reason } => md.push_str(&format!(
+            "`S(D)` is **partial**: {reason}. **{count}** source artifact(s) were \
+             enumerated by the patterns that did resolve, but that set is not the \
+             population, so the coverage figures below are counts and carry no \
+             percentage.\n\n"
+        )),
     }
 
     // --- Capability matrix (B1) ---
@@ -771,9 +793,12 @@ fn render_hard_required(report: &FidelityReport) -> String {
 
     // --- Coverage (B1, B4) ---
     md.push_str("## Coverage (grain-classed)\n\n");
+    // A partial enumeration reports counts and no percentage: `ratio` renders
+    // `n/a` for a zero denominator, which is exactly the honest shape here —
+    // the numerator is real, the population is not known.
     let den = match &report.coverage.denominator {
         DenominatorBasis::Enumerated { count } => *count,
-        DenominatorBasis::NonEnumerable { .. } => 0,
+        DenominatorBasis::NonEnumerable { .. } | DenominatorBasis::Partial { .. } => 0,
     };
     md.push_str(&format!(
         "- direct-covered (file / span anchors): {}\n",
@@ -1264,28 +1289,67 @@ pub fn compute_fidelity_report(
     // unmeasured — and the degradation below, which names a facet, could not
     // honestly speak for it. Same reasoning as the per-facet blind spot above.
     let mut empty_enumerable_facets: BTreeSet<String> = BTreeSet::new();
+    // Patterns the enumeration could not honour, and patterns still written in
+    // the retired workspace-relative dialect. The first makes `S(D)` partial;
+    // the second is the real cause behind an empty walk that would otherwise
+    // be blamed on the author having scoped nothing.
+    let mut malformed_patterns: Vec<String> = Vec::new();
+    let mut legacy_patterns: Vec<String> = Vec::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
             let caps = medium_capabilities(p.medium_type);
             if caps.enumerable {
                 enumerable_facets += 1;
             }
-            let walked =
-                enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root);
-            if caps.enumerable && walked.is_empty() {
+            let walked = enumerate_source_artifacts_reported(
+                engine,
+                p,
+                &resolved.deny_paths,
+                workspace_root,
+            );
+            if caps.enumerable && walked.files.is_empty() {
                 empty_enumerable_facets.insert(p.name.clone());
             }
-            s_d.extend(walked);
+            for m in &walked.malformed {
+                malformed_patterns.push(format!("`{}` in facet `{}`", m, p.name));
+            }
+            for note in &walked.legacy_dialect {
+                legacy_patterns.push(format!("`{}` in facet `{}`", note.pattern, p.name));
+            }
+            s_d.extend(walked.files);
         }
     }
     s_d.sort();
     s_d.dedup();
 
-    let denominator = if !s_d.is_empty() {
+    let denominator = if !malformed_patterns.is_empty() {
+        // Known-incomplete beats every other basis: whatever the surviving
+        // patterns enumerated, the population is not known.
+        DenominatorBasis::Partial {
+            count: s_d.len(),
+            reason: format!(
+                "scope pattern(s) that would not compile were skipped: {}",
+                malformed_patterns.join(", ")
+            ),
+        }
+    } else if !s_d.is_empty() {
         DenominatorBasis::Enumerated { count: s_d.len() }
     } else if enumerable_facets == 0 {
         DenominatorBasis::NonEnumerable {
             reason: "the medium type(s) are not enumerable this cycle".to_string(),
+        }
+    } else if !legacy_patterns.is_empty() {
+        // The walk came up empty and the scope is still in the retired
+        // workspace-relative dialect: that is the cause, and saying "nothing
+        // was in scope" would blame the author for patterns that DO select
+        // artifacts, just not under the reading the enumerator now uses.
+        DenominatorBasis::NonEnumerable {
+            reason: format!(
+                "scope pattern(s) still written against the workspace root rather than the \
+                 source pointer, so they select nothing under the pointer join: {}. Rewrite \
+                 them relative to the source's pointer",
+                legacy_patterns.join(", ")
+            ),
         }
     } else {
         // Enumerable per the matrix but the walk yielded nothing — an empty

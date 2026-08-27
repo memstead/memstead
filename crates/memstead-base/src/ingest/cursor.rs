@@ -327,11 +327,33 @@ fn in_repo_pathspec(pattern: &str, git_root: &Path, base: &Path, exclude: bool) 
 /// business — scope patterns are source-relative, ingest denies
 /// workspace-relative.
 pub(crate) fn build_glob_set(patterns: &[&str]) -> Option<GlobSet> {
+    build_glob_set_reporting(patterns).0
+}
+
+/// [`build_glob_set`], plus the patterns that would not compile.
+///
+/// All-or-nothing was the old contract and it degraded silently in both
+/// directions: one malformed allow emptied the whole enumeration, and one
+/// malformed deny disabled every deny and inflated the set. Now the valid
+/// patterns still compile and the malformed ones come back by name, so the
+/// caller can state the partiality instead of computing over it.
+/// `validate_binding` refuses a malformed scope pattern outright; this path
+/// carries records written before that gate existed.
+pub(crate) fn build_glob_set_reporting(patterns: &[&str]) -> (Option<GlobSet>, Vec<String>) {
     let mut builder = GlobSetBuilder::new();
+    let mut malformed = Vec::new();
+    let mut any = false;
     for pattern in patterns {
-        builder.add(Glob::new(pattern).ok()?);
+        match Glob::new(pattern) {
+            Ok(g) => {
+                builder.add(g);
+                any = true;
+            }
+            Err(_) => malformed.push((*pattern).to_string()),
+        }
     }
-    builder.build().ok()
+    let set = if any { builder.build().ok() } else { None };
+    (set, malformed)
 }
 
 /// Whether a primary source's facet declares **no allow patterns** — an
@@ -387,12 +409,25 @@ pub fn enumerate_facet_files(
     deny_paths: &[String],
     workspace_root: &Path,
 ) -> Vec<String> {
+    enumerate_facet_files_reported(source, deny_paths, workspace_root).files
+}
+
+/// [`enumerate_facet_files`], carrying what the enumeration could not speak
+/// for: patterns that would not compile, and patterns still in the retired
+/// workspace-relative dialect. Any surface that reduces the set to a figure
+/// must consult [`ScopeEnumeration::is_partial`] first.
+pub fn enumerate_facet_files_reported(
+    source: &Source,
+    deny_paths: &[String],
+    workspace_root: &Path,
+) -> ScopeEnumeration {
     if !matches!(
         source.medium_type,
         MediumType::Codebase | MediumType::Filesystem | MediumType::Git
     ) {
-        return Vec::new();
+        return ScopeEnumeration::default();
     }
+    let legacy_dialect = scope_migration_notes(source);
     let mut allows: Vec<&str> = Vec::new();
     let mut scope_denies: Vec<&str> = Vec::new();
     for rule in &source.scope {
@@ -415,20 +450,25 @@ pub fn enumerate_facet_files(
         ws_denies.push(f);
     }
     if allows.is_empty() {
-        return Vec::new();
+        return ScopeEnumeration {
+            legacy_dialect,
+            ..Default::default()
+        };
     }
-    let Some(allow_set) = build_glob_set(&allows) else {
-        return Vec::new();
-    };
-    let scope_deny_set = if scope_denies.is_empty() {
-        None
-    } else {
-        build_glob_set(&scope_denies)
-    };
-    let ws_deny_set = if ws_denies.is_empty() {
-        None
-    } else {
-        build_glob_set(&ws_denies)
+    // Malformed patterns no longer take the whole set with them: the valid
+    // ones compile, the bad ones come back by name, and the caller states the
+    // partiality. A malformed ALLOW leaves the denominator short; a malformed
+    // DENY leaves it long. Either way the figure over it is not the answer.
+    let (allow_set, mut malformed) = build_glob_set_reporting(&allows);
+    let (scope_deny_set, deny_malformed) = build_glob_set_reporting(&scope_denies);
+    malformed.extend(deny_malformed);
+    let (ws_deny_set, _) = build_glob_set_reporting(&ws_denies);
+    let Some(allow_set) = allow_set else {
+        return ScopeEnumeration {
+            malformed,
+            legacy_dialect,
+            ..Default::default()
+        };
     };
 
     // Walk the medium's directory tree. A candidate is matched twice, in two
@@ -482,7 +522,40 @@ pub fn enumerate_facet_files(
     }
     out.sort();
     out.dedup();
-    out
+    ScopeEnumeration {
+        files: out,
+        malformed,
+        legacy_dialect,
+    }
+}
+
+/// What an enumeration of a source's scope selected, and what it could not
+/// speak for.
+///
+/// The campaign rule this serves: a surface does not report a figure over
+/// state it did not examine. A coverage percentage computed over a denominator
+/// that silently lost patterns is exactly that figure, so the partiality
+/// travels with the set rather than being discarded at the seam.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScopeEnumeration {
+    /// The workspace-relative artifact paths the scope selected.
+    pub files: Vec<String>,
+    /// Scope patterns that would not compile, by name. Their share of the
+    /// population is unknown, so any enumeration carrying one is partial.
+    pub malformed: Vec<String>,
+    /// Scope patterns still written in the retired workspace-relative
+    /// dialect — reported so an author is told before a pattern's meaning
+    /// changes, never after.
+    pub legacy_dialect: Vec<ScopePatternNote>,
+}
+
+impl ScopeEnumeration {
+    /// Whether this enumeration is known to be incomplete. A partial
+    /// enumeration must not be reduced to a percentage: the denominator is
+    /// not the population.
+    pub fn is_partial(&self) -> bool {
+        !self.malformed.is_empty()
+    }
 }
 
 /// One scope pattern still written in the retired workspace-relative dialect.
@@ -812,12 +885,29 @@ pub fn enumerate_source_artifacts(
     deny_paths: &[String],
     workspace_root: &Path,
 ) -> Vec<String> {
+    enumerate_source_artifacts_reported(engine, source, deny_paths, workspace_root).files
+}
+
+/// [`enumerate_source_artifacts`], carrying what the enumeration could not
+/// speak for. Any surface reducing `S(D)` to a figure consults
+/// [`ScopeEnumeration::is_partial`] first.
+pub fn enumerate_source_artifacts_reported(
+    engine: &Engine,
+    source: &Source,
+    deny_paths: &[String],
+    workspace_root: &Path,
+) -> ScopeEnumeration {
     match source.medium_type {
         MediumType::Codebase | MediumType::Filesystem | MediumType::Git => {
-            enumerate_facet_files(source, deny_paths, workspace_root)
+            enumerate_facet_files_reported(source, deny_paths, workspace_root)
         }
-        MediumType::Graph => enumerate_graph_entities(engine, source),
-        MediumType::Web => Vec::new(),
+        // Entity selectors are their own grammar with their own parser — a
+        // graph scope has no glob to malform and no pointer dialect to migrate.
+        MediumType::Graph => ScopeEnumeration {
+            files: enumerate_graph_entities(engine, source),
+            ..Default::default()
+        },
+        MediumType::Web => ScopeEnumeration::default(),
     }
 }
 
@@ -2038,6 +2128,93 @@ mod tests {
         assert_eq!(
             enumerate_facet_files(&source, &[], root),
             vec!["docs/a.md".to_string()]
+        );
+    }
+
+    /// Criterion 7's complement, allow half: a malformed allow no longer takes
+    /// the whole enumeration with it. The valid patterns still select, and the
+    /// bad one comes back by name so the caller can state the partiality.
+    #[test]
+    fn a_malformed_allow_does_not_empty_the_enumeration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("a.rs"), "").unwrap();
+
+        let source = primary(vec![
+            PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "[unclosed".to_string(),
+                mode: PatternMode::Allow,
+            },
+        ]);
+        let got = enumerate_facet_files_reported(&source, &[], root);
+        assert_eq!(got.files, vec!["a.rs".to_string()]);
+        assert_eq!(got.malformed, vec!["[unclosed".to_string()]);
+        assert!(got.is_partial(), "a skipped pattern makes the set partial");
+    }
+
+    /// Criterion 7's complement, deny half: a malformed deny no longer
+    /// disables the other denies and inflates the denominator.
+    #[test]
+    fn a_malformed_deny_does_not_disable_the_other_denies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("skip")).unwrap();
+        std::fs::write(root.join("keep.rs"), "").unwrap();
+        std::fs::write(root.join("skip/gone.rs"), "").unwrap();
+
+        let source = primary(vec![
+            PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "skip/**".to_string(),
+                mode: PatternMode::Deny,
+            },
+            PatternEntry {
+                path: "[unclosed".to_string(),
+                mode: PatternMode::Deny,
+            },
+        ]);
+        let got = enumerate_facet_files_reported(&source, &[], root);
+        assert_eq!(
+            got.files,
+            vec!["keep.rs".to_string()],
+            "the good deny still applies"
+        );
+        assert_eq!(got.malformed, vec!["[unclosed".to_string()]);
+    }
+
+    /// A binding carrying a malformed scope pattern is refused at validation,
+    /// naming it — so the enumerator's tolerance above only ever carries
+    /// records written before this gate existed.
+    #[test]
+    fn validation_refuses_a_malformed_scope_pattern_by_name() {
+        use crate::binding::CapabilityError;
+        let mut binding = crate::binding::scaffold_binding(crate::binding::ScaffoldParams {
+            destination_mem: "home",
+            source_name: "src",
+            medium_type: MediumType::Codebase,
+            pointer: "src",
+            intent: None,
+            additional_deny_paths: Vec::new(),
+        })
+        .binding;
+        binding.sources[0].scope.push(PatternEntry {
+            path: "[unclosed".to_string(),
+            mode: PatternMode::Allow,
+        });
+        let errs = crate::binding::validate_binding(&binding).unwrap_err();
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                CapabilityError::MalformedScopePattern { pattern, .. } if pattern == "[unclosed"
+            )),
+            "expected MalformedScopePattern naming the pattern, got {errs:?}"
         );
     }
 

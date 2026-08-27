@@ -607,6 +607,22 @@ pub enum CapabilityError {
     /// state, so it must be present.
     #[error("a source has an empty name: every source names itself (the name keys its state)")]
     EmptySourceName,
+    /// A scope pattern is not a compilable glob. Refused at validation so a
+    /// malformed pattern never reaches the enumerator, where an all-or-nothing
+    /// glob set turned one bad allow into an empty denominator and one bad
+    /// deny into no denies at all — both silently.
+    #[error(
+        "source '{source_name}' declares a scope pattern that is not a valid glob: \
+         '{pattern}' ({reason})"
+    )]
+    MalformedScopePattern {
+        /// The source declaring it.
+        source_name: String,
+        /// The pattern as written.
+        pattern: String,
+        /// The glob compiler's own reason.
+        reason: String,
+    },
     /// Two sources in the record share a name — per-source state keys would
     /// collide.
     #[error(
@@ -809,6 +825,21 @@ pub fn validate_binding(binding: &Binding) -> Result<(), Vec<CapabilityError>> {
             });
         } else {
             seen_names.push(&source.name);
+        }
+
+        // A scope pattern must compile. Path-shaped mediums only: a graph
+        // source's scope entries are entity selectors, a different grammar
+        // with its own parser.
+        if !matches!(source.medium_type, MediumType::Graph | MediumType::Web) {
+            for rule in &source.scope {
+                if let Err(e) = globset::Glob::new(&rule.path) {
+                    refusals.push(CapabilityError::MalformedScopePattern {
+                        source_name: source.name.clone(),
+                        pattern: rule.path.clone(),
+                        reason: e.to_string(),
+                    });
+                }
+            }
         }
 
         let caps = medium_capabilities(source.medium_type);
