@@ -501,6 +501,24 @@ mod tests {
         // anchor resolves orphaned.
         let mut sidecar = AnchorSidecar::default();
         for (eid, anchors) in entity_anchors {
+            // The entity each row is keyed to. Written, because it exists: a
+            // row whose entity does not is DANGLING and is partitioned out of
+            // the population before prune sees it (consistency-sweep 03/02),
+            // which is exactly the phantom-entity proposal criterion 6 bans.
+            // A `!` prefix on the id means "seed the row but NOT the entity",
+            // which is the phantom-entity condition criterion 6 is about.
+            let (write_entity, eid) = match eid.strip_prefix('!') {
+                Some(rest) => (false, rest),
+                None => (true, *eid),
+            };
+            if write_entity {
+                let slug = eid.split_once("--").map_or(eid, |(_, s)| s);
+                std::fs::write(
+                    mem_dir.join(format!("{slug}.md")),
+                    "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+                )
+                .unwrap();
+            }
             sidecar.set(eid, anchors.clone());
         }
         std::fs::write(
@@ -562,6 +580,50 @@ mod tests {
     /// entity whose source artifact was removed surfaces BOTH sides in the sync
     /// brief and is NEVER auto-deleted. Requesting never-clobber over a non-git
     /// anchor (no retrievable base leg) degrades to conflict-flag.
+    /// Criterion 6 (consistency-sweep 03/02): prune must not propose deleting
+    /// an entity that is already gone. Its anchor is orphaned, which is
+    /// precisely the shape that made a phantom entity a candidate: prune
+    /// walked the sidecar by key and never asked whether the key still names
+    /// anything.
+    #[test]
+    fn prune_never_proposes_an_entity_that_does_not_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, root, binding, resolved) = setup(
+            tmp.path(),
+            PruneGuarantee::ConflictFlag,
+            &[
+                (
+                    "!engine--phantom",
+                    vec![orphan_anchor(
+                        "src/phantom.rs",
+                        AnchorProvenanceClass::Anchored,
+                        vec![],
+                        None,
+                    )],
+                ),
+                (
+                    "engine--real",
+                    vec![orphan_anchor(
+                        "src/real.rs",
+                        AnchorProvenanceClass::Anchored,
+                        vec![],
+                        None,
+                    )],
+                ),
+            ],
+        );
+
+        let proposals = prune_proposals(&engine, &root, &binding, &resolved);
+        assert_eq!(
+            proposals
+                .iter()
+                .map(|p| p.entity.as_str())
+                .collect::<Vec<_>>(),
+            vec!["engine--real"],
+            "the entity that exists is still a candidate; the phantom is not proposed"
+        );
+    }
+
     #[test]
     fn f2_conflict_flag_on_non_git_surfaces_both_sides_no_auto_delete() {
         let tmp = tempfile::tempdir().unwrap();

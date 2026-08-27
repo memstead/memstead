@@ -180,6 +180,14 @@ pub enum ProjectionCommand {
     /// artifact legitimately carries several rows), and says so when anchors
     /// recording no producing binding are included by the pre-provenance
     /// fallback.
+    ///
+    /// A sidecar row whose ENTITY the mem no longer holds is reported as
+    /// dangling and named, in no figure and never as resolving: it is a
+    /// sidecar integrity condition, not an anchor state, and nothing repairs
+    /// it, because the row is the trace of a writer that went around the
+    /// engine. Where the entity end could not be reconciled at all (an
+    /// unloaded, quarantined or partly unparsed mem), the report says so
+    /// rather than reporting a clean anchor axis.
     Verify(VerifyArgs),
     /// Answer deny verdicts: is a path (or Glob/Grep pattern) hidden by a
     /// binding's `deny_paths`? Evaluates each candidate against the named

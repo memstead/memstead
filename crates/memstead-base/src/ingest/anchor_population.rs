@@ -12,6 +12,24 @@
 //! verification is responsible for. Every anchor outside it is excluded AND
 //! NAMED; nothing is silently included and nothing silently dropped.
 //!
+//! **The entity end comes first (consistency-sweep 03/02).** An anchor is an
+//! edge with two ends and the engine checked one of them: a mem whose entity
+//! files are gone, but whose sidecar still names them, verified clean at a
+//! hundred percent, because every row resolved against a source that was fine.
+//! A row whose entity the mem no longer holds is partitioned out as DANGLING
+//! before either membership test below. It is not a fifth anchor state (the
+//! four describe the artifact end, and a vanished entity says nothing about
+//! the source) and not an exclusion (those are legal authoring this binding
+//! does not answer for). It is a sidecar integrity condition, reported and
+//! never repaired: the engine's own delete and rename paths keep the sidecar
+//! in step, so the row is the trace of a writer that went around the engine,
+//! and deleting it would erase the evidence.
+//!
+//! That test reads a NEGATIVE from the store, which is only evidence when the
+//! store holds everything the mem has. Where it does not
+//! ([`crate::Engine::entity_set_is_reconcilable`]), no row is called dangling
+//! and the population says why instead.
+//!
 //! Two signals decide membership, in this order.
 //!
 //! **Provenance.** An anchor recording a producing binding belongs to that
@@ -70,6 +88,21 @@ pub struct ExcludedAnchor {
     pub reason: ExclusionReason,
 }
 
+/// One sidecar row whose ENTITY is gone (consistency-sweep 03/02).
+///
+/// Not an exclusion and not an anchor state. The four states describe the
+/// artifact end of the edge, and a vanished entity says nothing about the
+/// source; an out-of-scope exclusion is legal authoring, and this is not. It
+/// is a sidecar integrity condition: the engine's own delete and rename paths
+/// keep the sidecar in step, so a dangling row is the trace of a writer that
+/// went around the engine.
+#[derive(Debug, Clone)]
+pub struct DanglingAnchor {
+    /// The id the sidecar is keyed by, which the mem no longer holds.
+    pub entity: EntityId,
+    pub artifact: String,
+}
+
 /// The partition of a mem's anchors for one binding.
 #[derive(Debug, Clone, Default)]
 pub struct AnchorPopulation {
@@ -77,10 +110,19 @@ pub struct AnchorPopulation {
     pub included: Vec<(EntityId, ResolvedAnchor)>,
     /// The rest, each with the reason it is out, in a stable order.
     pub excluded: Vec<ExcludedAnchor>,
+    /// Rows whose entity is gone, named rather than counted. In no binding's
+    /// population: the condition belongs to the mem's sidecar, so every
+    /// binding on the mem reports the same rows.
+    pub dangling: Vec<DanglingAnchor>,
     /// How many included anchors carried no producing binding and were kept by
     /// the fallback. Reported, never inferred: a reader must be able to tell a
     /// population established by provenance from one resting on the fallback.
     pub without_provenance: usize,
+    /// Why the entity end could NOT be reconciled this pass, when it could
+    /// not. `None` means it was. A surface that reads an empty `dangling`
+    /// without reading this would report a clean axis over state it did not
+    /// examine.
+    pub unreconciled: Option<&'static str>,
 }
 
 impl AnchorPopulation {
@@ -118,10 +160,27 @@ pub fn population_for(
     binding_hash: Option<&str>,
 ) -> AnchorPopulation {
     let scope = scope_matcher(resolved);
-    let mut out = AnchorPopulation::default();
+    // The entity end, before either membership test. A dangling row belongs
+    // to no binding's population, so asking whose it is first would let a
+    // scope or provenance exclusion hide the integrity condition behind a
+    // bucket that reads as legal.
+    let mut out = AnchorPopulation {
+        unreconciled: engine
+            .entity_set_is_reconcilable(&resolved.destination_mem)
+            .err(),
+        ..Default::default()
+    };
 
     for (eid, resolved_anchor) in engine.mem_anchors_resolved(&resolved.destination_mem) {
         let anchor = &resolved_anchor.anchor;
+
+        if out.unreconciled.is_none() && engine.entity_is_absent(&eid) {
+            out.dangling.push(DanglingAnchor {
+                entity: eid,
+                artifact: anchor.artifact.clone(),
+            });
+            continue;
+        }
 
         // Provenance first, because it is exact where it is present.
         match (anchor.binding.as_deref(), binding_hash) {
@@ -166,6 +225,8 @@ pub fn population_for(
     out.excluded.sort_by(|a, b| {
         (a.reason, &a.artifact, &a.entity.0).cmp(&(b.reason, &b.artifact, &b.entity.0))
     });
+    out.dangling
+        .sort_by(|a, b| (&a.entity.0, &a.artifact).cmp(&(&b.entity.0, &b.artifact)));
     out
 }
 
@@ -307,6 +368,21 @@ mod tests {
         files: &[&str],
         anchors: Vec<Anchor>,
     ) -> (Engine, ResolvedIngest) {
+        fixture_with(tmp, scope, files, anchors, true, MountLifecycle::Eager)
+    }
+
+    /// `write_entity: false` builds the condition 03/02 is about: a sidecar
+    /// keyed to an entity the mem does not hold. `lifecycle` builds the other
+    /// one, a mem whose entities are not in the store at all, where a missing
+    /// id proves nothing.
+    fn fixture_with(
+        tmp: &std::path::Path,
+        scope: &str,
+        files: &[&str],
+        anchors: Vec<Anchor>,
+        write_entity: bool,
+        lifecycle: MountLifecycle,
+    ) -> (Engine, ResolvedIngest) {
         let root = tmp.to_path_buf();
         let mem_dir = root.join("mem");
         std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
@@ -337,7 +413,7 @@ mod tests {
                             path: mem_dir.clone(),
                         },
                         capability: MountCapability::Write,
-                        lifecycle: MountLifecycle::Eager,
+                        lifecycle,
                         cross_linkable: false,
                         migration_target: None,
                     }],
@@ -345,6 +421,19 @@ mod tests {
                 },
             )
             .unwrap();
+
+        // The entity the sidecar is keyed to. Written, because it exists: a
+        // sidecar row whose entity does not is a DANGLING row, which the
+        // population partitions out on its own (consistency-sweep 03/02).
+        // Every fixture here omitted it, so every one of them was quietly a
+        // mem whose sidecar had outlived its entities.
+        if write_entity {
+            std::fs::write(
+                mem_dir.join("e.md"),
+                "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+            )
+            .unwrap();
+        }
 
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--e", anchors);
@@ -557,6 +646,108 @@ mod tests {
         );
         assert_eq!(pop.excluded.len(), 1);
         assert_eq!(pop.excluded[0].reason, ExclusionReason::OtherBinding);
+    }
+
+    /// Criteria 1, 2 and 3 (03/02). The row's ENTITY is gone. It is neither
+    /// in the population nor in an exclusion bucket: the exclusions are legal
+    /// authoring the binding does not answer for, and this is a sidecar the
+    /// mem's entities have outlived.
+    #[test]
+    fn a_row_whose_entity_is_gone_is_dangling_and_is_its_own_class() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture_with(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("src/a.rs", Some("h"), AnchorGrain::File)],
+            false,
+            MountLifecycle::Eager,
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert_eq!(pop.dangling.len(), 1, "the row is reported");
+        assert_eq!(pop.dangling[0].entity.as_ref(), "engine--e");
+        assert_eq!(pop.dangling[0].artifact, "src/a.rs");
+        assert!(pop.included.is_empty(), "and raises no figure");
+        assert!(
+            pop.excluded.is_empty(),
+            "an exclusion bucket would name it legal, which it is not"
+        );
+        assert_eq!(pop.unreconciled, None);
+    }
+
+    /// Criterion 4: detection reads. A reconciliation that tidied the sidecar
+    /// would erase the only evidence that a writer went around the engine.
+    #[test]
+    fn detecting_a_dangling_row_never_touches_the_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture_with(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("src/a.rs", Some("h"), AnchorGrain::File)],
+            false,
+            MountLifecycle::Eager,
+        );
+        let path = tmp
+            .path()
+            .join("mem")
+            .join(crate::anchor::ANCHOR_SIDECAR_PATH);
+        let before = std::fs::read(&path).unwrap();
+        let pop = population_for(&engine, &r, Some("h"));
+        assert_eq!(pop.dangling.len(), 1);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "the sidecar is evidence, not a mess to tidy"
+        );
+    }
+
+    /// Criterion 8. A deferred mem holds no entities in the store, so a
+    /// missing id proves nothing. Claiming zero dangling rows there would be
+    /// the silent-clean this campaign exists to remove: the population says
+    /// WHY instead, and keeps the rows it can still adjudicate.
+    #[test]
+    fn a_mem_whose_entities_are_not_loaded_says_so_instead_of_reporting_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture_with(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("src/a.rs", Some("h"), AnchorGrain::File)],
+            false,
+            MountLifecycle::Lazy,
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert!(
+            pop.unreconciled.is_some(),
+            "the surface must be able to say the entity end was not examined"
+        );
+        assert!(
+            pop.dangling.is_empty(),
+            "and must not fabricate dangling rows from an unloaded store"
+        );
+        assert_eq!(
+            pop.included.len(),
+            1,
+            "the artifact end is still adjudicable and is still reported"
+        );
+    }
+
+    /// Criterion 7's complement at this layer: an entity that IS there keeps
+    /// its anchors, so the fix cannot turn the engine's own correct delete and
+    /// rename handling into a finding.
+    #[test]
+    fn an_entity_that_exists_produces_no_dangling_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("src/a.rs", Some("h"), AnchorGrain::File)],
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert!(pop.dangling.is_empty());
+        assert_eq!(pop.included.len(), 1);
     }
 
     /// The fallback counter reports what was KEPT. Counting at the provenance

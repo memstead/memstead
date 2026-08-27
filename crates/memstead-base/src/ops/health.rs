@@ -282,8 +282,21 @@ pub fn health_open_questions_axis(
 
         // Anchors — same per-anchor mechanism as the anchors axis;
         // only the never-confirmed and unreachable states are holes.
-        let (mut recheck, mut unresolvable) = (Vec::new(), Vec::new());
+        // A dangling sidecar row is a hole too (consistency-sweep 03/02), and
+        // it gets its OWN bucket. `unresolvable` is the wire form of the
+        // orphaned state, whose repair is the opposite one: an orphaned anchor
+        // asks whether its entity should be re-anchored or pruned, a dangling
+        // row asks why the entity went missing. Folding the two together here
+        // would reproduce, on the health axis, exactly the collapse the axis
+        // itself refuses.
+        //
+        // `entity_end_unreconciled` rides along both ways: an empty dangling
+        // bucket means "none found" only when the check could run at all.
+        let (mut recheck, mut unresolvable, mut dangling_rows) =
+            (Vec::new(), Vec::new(), Vec::new());
+        let mut entity_end_unreconciled: Option<String> = None;
         if let Ok(report) = engine.verify_mem_anchors(mem) {
+            entity_end_unreconciled = report.unreconciled.clone();
             for a in &report.anchors {
                 let item = serde_json::json!({
                     "kind": format!("anchor_{}", a.state),
@@ -293,6 +306,7 @@ pub fn health_open_questions_axis(
                 match a.state.as_str() {
                     "recheck" => recheck.push(item),
                     "unresolvable" => unresolvable.push(item),
+                    "dangling" => dangling_rows.push(item),
                     _ => {}
                 }
             }
@@ -405,6 +419,7 @@ pub fn health_open_questions_axis(
         let total_open = stubs["count"].as_u64().unwrap_or(0)
             + recheck.len() as u64
             + unresolvable.len() as u64
+            + dangling_rows.len() as u64
             + constraints["count"].as_u64().unwrap_or(0)
             + dangling["count"].as_u64().unwrap_or(0)
             + process
@@ -416,6 +431,10 @@ pub fn health_open_questions_axis(
         entry.insert("stubs".into(), stubs);
         entry.insert("anchors_recheck".into(), capped(recheck));
         entry.insert("anchors_unresolvable".into(), capped(unresolvable));
+        entry.insert("anchors_dangling".into(), capped(dangling_rows));
+        if let Some(why) = entity_end_unreconciled {
+            entry.insert("entity_end_unreconciled".into(), serde_json::json!(why));
+        }
         entry.insert("unsatisfied_constraints".into(), constraints);
         entry.insert("dangling_links".into(), dangling);
         if !process.is_empty() {
@@ -451,6 +470,12 @@ pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value 
                 "drifted": report.drifted,
                 "recheck": report.recheck,
                 "unresolvable": report.unresolvable,
+                // The entity end (03/02). Carried here too, both ways: four
+                // counts over a mem whose sidecar has outlived its entities
+                // read as a healthy axis, and so does a zero over a mem whose
+                // entity end was never reconciled.
+                "dangling": report.dangling,
+                "entity_end_unreconciled": report.unreconciled,
             }),
         );
     }

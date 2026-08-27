@@ -170,6 +170,19 @@ pub struct AnchorComposition {
     /// pre-provenance fallback. Stated so a reader can tell a population
     /// established by provenance from one resting on the fallback.
     pub counted_without_provenance: usize,
+    /// Sidecar rows whose ENTITY is gone (consistency-sweep 03/02). In no
+    /// binding's population and in none of the state buckets above: they used
+    /// to resolve against their artifact alone and raise the numerator for an
+    /// entity that does not exist.
+    pub dangling: usize,
+    /// Those rows named, `entity → artifact`. Reported, never repaired: the
+    /// row is the only remaining trace that something wrote this mem behind
+    /// the engine's back.
+    pub dangling_rows: Vec<String>,
+    /// Why the entity end could not be reconciled this pass, when it could
+    /// not. An empty `dangling` means "none found" only when this is `None`;
+    /// otherwise it means "not looked for", and the report says which.
+    pub unreconciled: Option<String>,
 }
 
 /// One facet's capability-matrix row + resolved change signal (B1 capability
@@ -861,6 +874,34 @@ fn render_hard_required(report: &FidelityReport) -> String {
             ));
         }
     }
+    // The entity end (03/02). Always stated, both ways: an empty dangling set
+    // means "reconciled, none found" only when the reconciliation ran, and a
+    // surface that printed nothing in the other case would report a clean
+    // anchor axis over state it never examined.
+    match (&report.anchors.unreconciled, report.anchors.dangling) {
+        (Some(why), _) => md.push_str(&format!(
+            "- the entity end of these anchors was NOT reconciled this pass ({why}), so \
+             dangling sidecar rows would not have been detected\n"
+        )),
+        (None, 0) => {}
+        (None, n) => {
+            md.push_str(&format!(
+                "- {n} sidecar row(s) name an entity this mem no longer holds. Excluded from \
+                 every figure above, reported rather than repaired: the row is the trace of a \
+                 writer that went around the engine\n"
+            ));
+            const NAMED_CAP: usize = 10;
+            for r in report.anchors.dangling_rows.iter().take(NAMED_CAP) {
+                md.push_str(&format!("  - {r}\n"));
+            }
+            if report.anchors.dangling_rows.len() > NAMED_CAP {
+                md.push_str(&format!(
+                    "  - …and {} more (the count above is complete)\n",
+                    report.anchors.dangling_rows.len() - NAMED_CAP
+                ));
+            }
+        }
+    }
     if report.anchors.counted_without_provenance > 0 {
         md.push_str(&format!(
             "- {} counted anchor(s) record no producing binding and are included by the \
@@ -1197,6 +1238,7 @@ pub fn compute_fidelity_report(
     let mut tree_only_covered = 0usize;
     let mut uncovered: Vec<String> = Vec::new();
     let mut tree_fanout: BTreeMap<(String, String), usize> = BTreeMap::new();
+    let entity_end_reconciled = engine.entity_set_is_reconcilable(dest.as_str()).is_ok();
     for file in &s_d {
         // Filtered by BINDING, not merely by mem (consistency-sweep 03/01,
         // criterion 7). The mem filter alone let an anchor written by one
@@ -1205,6 +1247,12 @@ pub fn compute_fidelity_report(
         // anchor with no recorded binding still counts, by the same
         // pre-provenance fallback the population uses: a mem whose anchors
         // predate the field must not read as wholly uncovered on upgrade.
+        //
+        // An anchor whose ENTITY is gone covers nothing either (03/02,
+        // criterion 5): the artifact would otherwise read as covered on the
+        // strength of a row no entity stands behind. Only applied when the
+        // entity end could be reconciled at all, so an unreconcilable mem
+        // keeps its old coverage rather than reading as wholly uncovered.
         let refs = engine.anchors_referencing_artifact(file);
         let mine: Vec<&(crate::EntityId, crate::anchor::Anchor)> = refs
             .iter()
@@ -1214,6 +1262,7 @@ pub fn compute_fidelity_report(
                         .as_deref()
                         .map(|b| b == key.binding_hash.as_str())
                         .unwrap_or(true)
+                    && (!entity_end_reconciled || !engine.entity_is_absent(eid))
             })
             .collect();
         if mine.is_empty() {
@@ -1273,6 +1322,13 @@ pub fn compute_fidelity_report(
             .map(|e| format!("{} ({})", e.artifact, e.reason.as_wire()))
             .collect(),
         counted_without_provenance: population.without_provenance,
+        dangling: population.dangling.len(),
+        dangling_rows: population
+            .dangling
+            .iter()
+            .map(|d| format!("{} → {}", d.entity, d.artifact))
+            .collect(),
+        unreconciled: population.unreconciled.map(str::to_string),
         ..Default::default()
     };
     for (_eid, resolved_anchor) in population.included {
@@ -1859,7 +1915,52 @@ mod tests {
     #[test]
     fn compute_report_end_to_end() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
+        let (report, outcome, md) = end_to_end_report(tmp.path(), &["direct", "tree", "auth"]);
+        end_to_end_body(&report, &outcome, &md);
+    }
+
+    /// Criterion 5 (consistency-sweep 03/02): the same workspace with only the
+    /// tree entity present. `src/present.rs` was directly covered by the two
+    /// file anchors those two entities held, and a row no entity stands behind
+    /// is not evidence that an artifact is covered.
+    #[test]
+    fn coverage_does_not_rest_on_an_anchor_whose_entity_is_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (report, _outcome, md) = end_to_end_report(tmp.path(), &["tree"]);
+        assert_eq!(
+            report.coverage.direct_covered, 0,
+            "the only direct anchor on present.rs is dangling, so nothing covers it directly"
+        );
+        assert!(
+            report
+                .coverage
+                .uncovered
+                .contains(&"src/present.rs".to_string()),
+            "and the artifact reads uncovered rather than covered by a phantom"
+        );
+        // Both file-anchor rows are dangling; the tree row remains counted.
+        assert_eq!(report.anchors.dangling, 2);
+        assert_eq!(report.anchors.counted_rows, 1);
+        assert_eq!(report.anchors.unreconciled, None);
+        assert!(
+            md.contains("name an entity this mem no longer holds"),
+            "and the report says so on the page, not only in the struct"
+        );
+    }
+
+    /// The end-to-end workspace, with the set of entities the sidecar's keys
+    /// name as a parameter: dropping one is how 03/02's condition is built
+    /// (a row whose entity the mem does not hold), and the criterion-5 test
+    /// below needs the same three-file source and the same three anchors to
+    /// compare against.
+    fn end_to_end_report(
+        root: &std::path::Path,
+        entity_slugs: &[&str],
+    ) -> (
+        FidelityReport,
+        crate::ingest::findings::VerifyOutcome,
+        String,
+    ) {
         let mem_dir = root.join("mem");
         std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
         std::fs::write(
@@ -1917,6 +2018,16 @@ mod tests {
             binding: None,
             source: None,
         };
+        // The entity the sidecar is keyed to. Written, because it exists:
+        // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+        // and leaves the population before any figure counts it.
+        for slug in entity_slugs {
+            std::fs::write(
+                mem_dir.join(format!("{slug}.md")),
+                "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+            )
+            .unwrap();
+        }
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "engine--direct",
@@ -2003,7 +2114,15 @@ mod tests {
 
         // Assemble the tier-1 report (group B) under the same key.
         let report = compute_fidelity_report(&engine, root, binding, &resolved, &outcome.key);
+        let md = render_fidelity_report(&report, 8_000, &[]).markdown;
+        (report, outcome, md)
+    }
 
+    fn end_to_end_body(
+        report: &FidelityReport,
+        outcome: &crate::ingest::findings::VerifyOutcome,
+        md: &str,
+    ) {
         // S(D) = the three .rs files under src/.
         assert_eq!(
             report.coverage.denominator,
@@ -2041,7 +2160,6 @@ mod tests {
                 .any(|d| d.contains("hash-adjudication-deferred"))
         );
         // The rendered report is deterministic and carries the S(D) statement.
-        let md = render_fidelity_report(&report, 8_000, &[]).markdown;
         assert!(md.contains("per-medium enumeration `S(D)` = **3**"));
         // This mem carries anchors, so it does NOT predate its binding — no
         // onboarding framing (the E1 complement).

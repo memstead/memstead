@@ -236,6 +236,14 @@ ones it excluded, with the reason. So two reports on one mem are two different
 measurements, and neither is the mem's total. If you gate on the anchor figures,
 gate per binding.
 
+**An anchor whose entity vanished is reported, not counted.** If something
+wrote the mem from outside the engine and removed an entity, the sidecar row
+naming it is reported as dangling and excluded from every anchor figure. It is
+not repaired: the row is the evidence. If the mem could not be reconciled at all
+(not mounted, quarantined, lazily unloaded, or carrying a file that failed to
+parse) the report says so instead of showing a clean anchor axis, so a gate
+reading the anchor figures should treat that statement as a blind spot.
+
 **A medium with no change signal cannot show drift.** If a facet's
 capability row reports `change_signal: false`, drift on it is
 unobservable — not absent. The verdict degrades to `inconclusive` and

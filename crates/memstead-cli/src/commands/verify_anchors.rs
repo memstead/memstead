@@ -20,6 +20,13 @@ use crate::setup::CliContext;
 /// hand-authored mem with no binding at all; on a binding-backed mem it
 /// reports the same states the binding verify sees (one shared
 /// resolution mechanism). No entity changes; findings are recorded.
+///
+/// A row whose ENTITY the mem no longer holds is reported as `dangling`,
+/// its own class beside the four above: those describe the artifact end,
+/// and a vanished entity says nothing about the source. Nothing repairs
+/// it. Where the entity end could not be reconciled at all, the output
+/// says so rather than showing four clean counts over state it never
+/// examined.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Which mem to verify (by name).
@@ -70,14 +77,31 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "drifted": report.drifted,
             "recheck": report.recheck,
             "unresolvable": report.unresolvable,
+            "dangling": report.dangling,
+            "entity_end_unreconciled": report.unreconciled,
             "anchors": report.anchors,
             "findings": findings,
         }))?;
     } else {
         let mut out = format!(
-            "# Anchor verification — `{}`\n\n- Resolved: {}\n- Drifted: {}\n- Recheck: {}\n- Unresolvable: {}\n",
-            report.mem, report.resolved, report.drifted, report.recheck, report.unresolvable,
+            "# Anchor verification — `{}`\n\n- Resolved: {}\n- Drifted: {}\n- Recheck: {}\n- Unresolvable: {}\n- Dangling (entity gone): {}\n",
+            report.mem,
+            report.resolved,
+            report.drifted,
+            report.recheck,
+            report.unresolvable,
+            report.dangling,
         );
+        // Stated both ways (consistency-sweep 03/02): a dangling count of
+        // zero means "reconciled, none found" only when the reconciliation
+        // ran, and four clean counts over a mem whose entity end was never
+        // examined are the silent-clean this campaign exists to remove.
+        if let Some(why) = &report.unreconciled {
+            out.push_str(&format!(
+                "\n> **Entity end not reconciled** — {why}. Dangling rows would not have been \
+                 detected, so the counts above describe the artifact end only.\n"
+            ));
+        }
         if report.anchors.is_empty() {
             out.push_str("\n_(no anchors in this mem)_\n");
         } else {

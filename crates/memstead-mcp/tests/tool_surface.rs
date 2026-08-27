@@ -1580,6 +1580,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "drifted",
             "recheck",
             "unresolvable",
+            // The entity end of an anchor (consistency-sweep 03/02): a row
+            // naming an entity the mem no longer holds, and the statement of
+            // why that check could not run when it could not.
+            "dangling",
+            "entity_end_unreconciled",
             "memstead verify-anchors",
             "writable_mems",
             "default_writable_mem",

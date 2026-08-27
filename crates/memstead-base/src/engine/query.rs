@@ -687,9 +687,29 @@ impl Engine {
         }
         let mut report = MemAnchorVerification {
             mem: mem.to_string(),
+            unreconciled: self
+                .entity_set_is_reconcilable(mem)
+                .err()
+                .map(str::to_string),
             ..Default::default()
         };
+        let reconciled = report.unreconciled.is_none();
         for (eid, resolved) in self.mem_anchors_resolved(mem) {
+            // The entity end first: a row whose holder is gone is adjudicated
+            // against its artifact alone otherwise, and a matching hash then
+            // reports it as `resolved` for an entity that does not exist.
+            if reconciled && self.entity_is_absent(&eid) {
+                report.dangling += 1;
+                report.anchors.push(VerifiedAnchor {
+                    entity_id: eid.to_string(),
+                    artifact: resolved.anchor.artifact.clone(),
+                    grain: resolved.anchor.grain.as_wire().to_string(),
+                    class: resolved.anchor.class.as_wire().to_string(),
+                    state: "dangling".to_string(),
+                    observed_hash: resolved.observed_hash,
+                });
+                continue;
+            }
             let state = match resolved.state {
                 Some(crate::anchor::AnchorState::Resolves) => {
                     report.resolved += 1;
@@ -1162,6 +1182,66 @@ impl Engine {
     /// The quarantine entry for `mem`, when it is quarantined.
     pub fn quarantine_reason(&self, mem: &str) -> Option<&crate::engine::QuarantinedMem> {
         self.quarantined.iter().find(|q| q.mount.mem == mem)
+    }
+
+    /// Whether the store's entity set for `mem` can be trusted to answer the
+    /// question "does this entity still exist?".
+    ///
+    /// WHY this is a question and not an assumption: an anchor sidecar is
+    /// keyed by entity id, and a key with no entity behind it is a dangling
+    /// row (consistency-sweep 03/02). Detecting one means reading a NEGATIVE
+    /// from the store, and a negative is only evidence when the store is known
+    /// to hold everything the mem has. Four states break that, and each of
+    /// them would otherwise turn every anchor in the mem into a false dangling
+    /// report: the mem is not mounted at all, it is quarantined (serving
+    /// nothing), its lazy load has not run yet (mounted, entities absent), or
+    /// a file in it failed to parse, in which case an id missing from the
+    /// store may be a load failure rather than a deleted entity.
+    ///
+    /// The last case is deliberately COARSE for non-folder mounts: load-error
+    /// paths are normalized to absolute only for folder mounts, so a
+    /// git-branch mem's errors carry mem-relative paths that two mems can
+    /// spell identically. Attributing them by name would be a guess, and a
+    /// wrong guess here fabricates dangling rows. Any load error at all
+    /// therefore blocks reconciliation for a non-folder mem. The caller states
+    /// the block rather than skipping silently, which is the honest direction.
+    pub fn entity_set_is_reconcilable(&self, mem: &str) -> Result<(), &'static str> {
+        if self.quarantine_reason(mem).is_some() {
+            return Err("the mem is quarantined and serves no entities");
+        }
+        let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+            return Err("the mem is not mounted here");
+        };
+        if mount.deferred {
+            return Err("the mem's lazy entity load has not run this session");
+        }
+        if self.load_errors.is_empty() {
+            return Ok(());
+        }
+        match &mount.mount.storage {
+            crate::workspace::MountStorage::Folder { path } => {
+                if self.load_errors.iter().any(|(p, _)| p.starts_with(path)) {
+                    Err(
+                        "a file in this mem failed to parse, so an id missing from the store may be a load failure rather than a deleted entity",
+                    )
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Err(
+                "this workspace has files that failed to parse, and their paths cannot be attributed to one mem",
+            ),
+        }
+    }
+
+    /// Whether `id` names an entity this mem no longer holds. A STUB counts
+    /// as missing: a stub is the placeholder an unresolved wiki-link target
+    /// leaves behind, not an entity anyone wrote, so an anchor keyed to one
+    /// is dangling exactly as if nothing were there.
+    ///
+    /// Only meaningful once [`Self::entity_set_is_reconcilable`] says yes.
+    pub fn entity_is_absent(&self, id: &EntityId) -> bool {
+        self.store.get(id).is_none_or(|e| e.stub)
     }
 
     /// Mems whose lazy entity load is still DEFERRED — on the mount
@@ -2419,6 +2499,14 @@ pub struct MemAnchorVerification {
     pub recheck: usize,
     /// Source absent, or a grain/medium the mechanism does not reach.
     pub unresolvable: usize,
+    /// Rows whose ENTITY is gone (consistency-sweep 03/02). Its own class,
+    /// counted apart from the four above: those describe the artifact end,
+    /// and a vanished entity says nothing about the source. Folding it into
+    /// `unresolvable` would name the wrong repair.
+    pub dangling: usize,
+    /// Why the entity end could not be reconciled this pass, when it could
+    /// not. `dangling: 0` means "none found" only when this is `None`.
+    pub unreconciled: Option<String>,
     pub anchors: Vec<VerifiedAnchor>,
 }
 

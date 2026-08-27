@@ -8,6 +8,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **An anchor is an edge with two ends, and the engine checked one of them.** A
+  mem whose entity files were gone, but whose sidecar still named them, verified
+  clean at a hundred percent: every row resolved against a source that was fine,
+  and nothing asked whether the entity end still existed. Coverage counted the
+  artifact as covered for the vanished entity, findings named nonexistent ids,
+  and the prune pass could propose deleting an entity that was already gone.
+
+  A row whose entity the mem no longer holds is now reported as dangling, on the
+  binding report, the standalone anchor surface and health alike, named rather
+  than counted. It is its own condition, not a fifth anchor state: the four
+  describe the artifact end, and a vanished entity says nothing about the
+  source, so folding it into `orphaned` would name the opposite repair. Nothing
+  is deleted or rewritten, because the row is the only remaining trace that
+  something wrote the mem from outside the engine.
+
+  The check reads an absence from the loaded graph, which is evidence only when
+  the graph holds everything the mem has. A mem that is not mounted, is
+  quarantined, has not run its lazy load, or carries a file that failed to parse
+  is reported as unreconciled instead, with the reason. Every one of those would
+  otherwise have turned the mem's whole sidecar into false dangling rows, and a
+  zero over an entity end nobody examined reads as health.
+
 - **A binding's fidelity report answers for that binding's anchors.** The anchor
   axis had no notion of the population it covered, so it covered everything in
   the destination mem: a binding's report scored anchors another binding wrote,

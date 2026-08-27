@@ -1804,6 +1804,8 @@ Measure a binding's fidelity and record durable findings (E3b, group A). Read-on
 
 The anchor figures answer for THIS BINDING'S population only: anchors another binding wrote, and anchors pointing outside this binding's declared scope, are excluded from every figure and named in the report rather than dropped. They are never deleted or rewritten: exclusion is a reporting decision. The report states what its denominator counted (anchor rows, with the distinct-artifact count beside them, since one artifact legitimately carries several rows), and says so when anchors recording no producing binding are included by the pre-provenance fallback.
 
+A sidecar row whose ENTITY the mem no longer holds is reported as dangling and named, in no figure and never as resolving: it is a sidecar integrity condition, not an anchor state, and nothing repairs it, because the row is the trace of a writer that went around the engine. Where the entity end could not be reconciled at all (an unloaded, quarantined or partly unparsed mem), the report says so rather than reporting a clean anchor axis.
+
 **Usage:** `memstead projection verify [OPTIONS] <BINDING>`
 
 ###### **Arguments:**

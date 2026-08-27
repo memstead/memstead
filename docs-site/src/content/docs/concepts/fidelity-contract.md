@@ -90,6 +90,34 @@ reads as success. The report says how many anchors it counted on that basis, so 
 population established by provenance is distinguishable from one resting on the
 fallback.
 
+## An anchor has two ends
+
+An anchor ties an entity to a source artifact, and the measurement above checks
+the artifact end: does the source still say what was recorded. The other end is
+the entity itself, and it can vanish. The engine's own delete and rename paths
+take an entity's anchors with it, so this only happens when something writes the
+mem from outside: a sibling process, a branch reset, a file removed by hand, an
+archive installed over the top.
+
+A sidecar row naming an entity the mem no longer holds is reported as
+**dangling**, on the binding report and on the standalone anchor surface alike.
+It is not one of the four states, which describe the artifact end: a vanished
+entity says nothing about the source, and the repair is not the same one. An
+orphaned anchor asks whether its entity should be re-anchored or pruned; a
+dangling row asks why the entity went missing. It counts toward no figure, so it
+can no longer resolve at a hundred percent for an entity that does not exist,
+and it does not make an artifact count as covered.
+
+Nothing repairs it. Deleting the row would tidy the sidecar and erase the only
+remaining evidence that something wrote the mem behind the engine's back.
+
+The check reads an absence from the loaded graph, which is only evidence when
+the graph holds everything the mem has. Where it does not (a mem that is not
+mounted, one that is quarantined, one whose lazy load has not run, or one with
+a file that failed to parse) no row is called dangling and the report says why
+instead. A clean anchor axis over an entity end nobody examined would be exactly
+the false assurance this contract exists to prevent.
+
 ## Three tiers of scrutiny
 
 Not every check costs the same, so verification is layered — cheap deterministic

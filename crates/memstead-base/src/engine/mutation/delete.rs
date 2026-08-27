@@ -388,6 +388,64 @@ mod tests {
         assert!(engine.anchors_referencing_artifact("src/lib.rs").is_empty());
     }
 
+    /// Criterion 7 (consistency-sweep 03/02): the engine's own delete path
+    /// already stages the anchor removal, so the dangling detector must find
+    /// nothing afterwards. A fix that turned correct engine behaviour into a
+    /// finding would make every delete noisy.
+    #[test]
+    fn delete_through_the_engine_leaves_no_dangling_row() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_anchored(&tmp, "Anchored Doomed");
+        let (actor, client) = cli_actor();
+        engine
+            .delete_entity(
+                DeleteEntityArgs {
+                    id: seeded.id.clone(),
+                    expected_hash: Some(seeded.content_hash.clone()),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        let report = engine.verify_mem_anchors("specs").unwrap();
+        assert_eq!(report.unreconciled, None, "the entity end was examined");
+        assert_eq!(
+            report.dangling, 0,
+            "the delete path took the row with it, so there is nothing to report"
+        );
+    }
+
+    /// Criteria 1 and 3 on the standalone surface. The artifact is present and
+    /// its hash matches, which is exactly the case that used to count as
+    /// `resolved` for an entity that no longer exists.
+    #[test]
+    fn a_row_whose_entity_vanished_reads_dangling_not_resolved() {
+        let tmp = TempDir::new().unwrap();
+        let (_engine, seeded) = engine_with_anchored(&tmp, "Anchored Vanishing");
+        // Out of band, which is the whole condition: the engine's own delete
+        // would have taken the sidecar row with it.
+        std::fs::remove_file(tmp.path().join(format!(
+            "{}.md",
+            seeded.id.as_ref().split_once("--").unwrap().1
+        )))
+        .unwrap();
+        let engine = Engine::from_mounts(vec![(
+            folder_mount("specs", tmp.path().to_path_buf()),
+            Box::new(FilesystemMemWriter::new(tmp.path().to_path_buf())) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        drop(seeded);
+        let report = engine.verify_mem_anchors("specs").unwrap();
+        assert_eq!(report.dangling, 1);
+        assert_eq!(report.resolved, 0, "never evidence of health");
+        assert_eq!(
+            report.unresolvable, 0,
+            "and never folded into the artifact-end bucket, whose repair is the opposite"
+        );
+        assert_eq!(report.anchors[0].state, "dangling");
+    }
+
     #[test]
     fn delete_entity_removes_file_and_store_entry() {
         let tmp = TempDir::new().unwrap();

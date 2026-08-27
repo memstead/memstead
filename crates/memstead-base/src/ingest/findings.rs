@@ -1497,6 +1497,13 @@ fn run_verify(
     // durable store. An anchor with no recorded binding still counts, by the
     // same pre-provenance fallback the population uses.
     let this_binding = binding_hash_of(binding, resolved);
+    // An anchor whose ENTITY is gone covers nothing (03/02, criterion 5),
+    // guarded on the reconciliation having been possible at all so an
+    // unreconcilable mem keeps its coverage rather than reading as wholly
+    // uncovered.
+    let entity_end_reconciled = engine
+        .entity_set_is_reconcilable(&resolved.destination_mem)
+        .is_ok();
     let covered_now = |artifact: &str| {
         engine
             .anchors_referencing_artifact(artifact)
@@ -1507,6 +1514,7 @@ fn run_verify(
                         .as_deref()
                         .map(|b| b == this_binding.as_str())
                         .unwrap_or(true)
+                    && (!entity_end_reconciled || !engine.entity_is_absent(eid))
             })
     };
     for file in &sample_files {
@@ -2181,6 +2189,14 @@ mod tests {
             binding: None,
             source: None,
         };
+        // The entity the sidecar is keyed to. Written, because it exists:
+        // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+        // and leaves the population before any figure counts it.
+        std::fs::write(
+            mem_dir.join("e.md"),
+            "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "engine--e",
@@ -2380,6 +2396,14 @@ mod tests {
             binding: None,
             source: None,
         };
+        // The entity the sidecar is keyed to. Written, because it exists:
+        // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+        // and leaves the population before any figure counts it.
+        std::fs::write(
+            mem_dir.join("e.md"),
+            "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
         let mut sidecar = AnchorSidecar::default();
         sidecar.set("engine--e", vec![mk("src/present.rs"), mk("src/gone.rs")]);
         std::fs::write(
@@ -2586,6 +2610,14 @@ mod tests {
             source: None,
         };
         use AnchorHashStability::{Stable, Unstable};
+        // The entity the sidecar is keyed to. Written, because it exists:
+        // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+        // and leaves the population before any figure counts it.
+        std::fs::write(
+            mem_dir.join("e.md"),
+            "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "engine--e",
@@ -2857,6 +2889,14 @@ mod tests {
             binding: None,
             source: None,
         };
+        // The entity the sidecar is keyed to. Written, because it exists:
+        // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+        // and leaves the population before any figure counts it.
+        std::fs::write(
+            mem_dir.join("e.md"),
+            "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "engine--e",
@@ -3508,6 +3548,14 @@ mod tests {
             binding: None,
             source: None,
         };
+        // The entity the sidecar is keyed to. Written, because it exists:
+        // a row whose entity does not is DANGLING (consistency-sweep 03/02)
+        // and leaves the population before any figure counts it.
+        std::fs::write(
+            mem_dir.join("e.md"),
+            "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "engine--e",

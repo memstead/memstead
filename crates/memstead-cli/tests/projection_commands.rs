@@ -3212,6 +3212,15 @@ fn verify_workspace() -> TempDir {
         "projections/engine/graph.json",
         r#"{"version":2,"intent":"model the engine","sources":[{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{"path":"src/**/*.rs","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}"#,
     );
+    // The entity the sidecar row is keyed to. A row whose entity the mem does
+    // not hold is DANGLING (consistency-sweep 03/02) and leaves the population
+    // before any figure counts it, so a fixture without the entity would be
+    // measuring the wrong thing.
+    std::fs::write(
+        root.join("engine-mem").join("covers-a.md"),
+        "---\ntype: decision\n---\n\n# Covers A\n\n## Decision\n\nBody.\n",
+    )
+    .unwrap();
     std::fs::write(
         root.join("engine-mem").join(".memstead").join("anchors.json"),
         r#"{"version":1,"entities":{"engine--covers-a":[{"artifact":"src/a.rs","grain":"file","class":"anchored","hash_stability":"stable"}]}}"#,
