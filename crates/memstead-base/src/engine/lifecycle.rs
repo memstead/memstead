@@ -1369,6 +1369,7 @@ impl Engine {
         }
 
         let mut total_written = 0;
+        let mut refused: Vec<crate::ops::RefusedEntity> = Vec::new();
         let mut total_unchanged = 0;
         let mut skipped_mounts: Vec<crate::ops::SkippedMount> = Vec::new();
 
@@ -1415,8 +1416,21 @@ impl Engine {
                     Err(_) => true,
                 };
                 if needs_write {
-                    let _ = crate::entity::writer::write_entity(entity, mem_dir, type_def.as_ref());
-                    total_written += 1;
+                    match crate::entity::writer::write_entity(entity, mem_dir, type_def.as_ref()) {
+                        Ok(_) => total_written += 1,
+                        // The one refusal the export must not swallow: writing
+                        // this entity would bury the sections its open fence
+                        // absorbed. Name it and carry on — an export that
+                        // aborted here would strand every other entity.
+                        Err(e @ crate::entity::writer::WriteError::UnterminatedFence { .. }) => {
+                            refused.push(crate::ops::RefusedEntity {
+                                id: entity.id.to_string(),
+                                reason: "UNTERMINATED_FENCE_IN_STORED_BODY".to_string(),
+                                detail: e.to_string(),
+                            });
+                        }
+                        Err(_) => {}
+                    }
                 } else {
                     total_unchanged += 1;
                 }
@@ -1424,6 +1438,7 @@ impl Engine {
         }
 
         Ok(crate::ops::ExportResult {
+            refused_entities: refused,
             written: total_written,
             unchanged: total_unchanged,
             skipped_mounts,
@@ -1475,13 +1490,29 @@ impl Engine {
                 missing_fields: vec!["version".to_string()],
             });
         }
+        // Collected before the backend split so both storage flavours report
+        // it. `install` refuses the archive for each of these; naming them at
+        // export time is the same courtesy the dangling cross-mem edges get,
+        // and for the same reason: an operator who learns at install time has
+        // already shared the archive.
+        let fenced: Vec<String> = self
+            .store
+            .all_entities()
+            .filter(|e| e.mem == mem_name && !e.stub)
+            .filter(|e| {
+                e.sections
+                    .values()
+                    .any(|v| crate::markdown::closing_fence_if_unterminated(v.trim()).is_some())
+            })
+            .map(|e| e.id.to_string())
+            .collect();
         let workspace_root = self.workspace_root.as_deref();
         // Authored schemas live at the fixed `<workspace>/.memstead/schemas/`
         // location (the `schemas_dir` key is retired). Absent dir → the
         // schema-source chain falls through to cache/built-in, as before.
         let fixed_schemas_dir = workspace_root.map(|r| r.join(".memstead").join("schemas"));
         let workspace_schemas_dir = fixed_schemas_dir.as_deref();
-        match &mount.mount.storage {
+        let exported = match &mount.mount.storage {
             MountStorage::Folder { path } => crate::ops::export::export_mem(
                 path,
                 config,
@@ -1530,7 +1561,11 @@ impl Engine {
             MountStorage::InMemory => Err(EngineError::Backend(BackendError::Other(
                 "export not yet supported for in-memory backend".to_string(),
             ))),
-        }
+        };
+        exported.map(|mut r| {
+            r.unterminated_fence_entities = fenced;
+            r
+        })
     }
 
     /// Update a mem's `version` field in its per-mem config and

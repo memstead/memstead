@@ -46,6 +46,23 @@ pub fn write_entity(
         fs::create_dir_all(parent)?;
     }
 
+    // The export twin of the mutation path's `render_for_write` guard. An
+    // entity whose stored body ends inside an unterminated fence has already
+    // absorbed the sections after it, and the generator appends its closer
+    // AFTER those bytes: regenerating the file here would seal them inside a
+    // legitimately fenced block, which is the same unrecoverable freeze the
+    // mutation verbs refuse (04/02, criterion 5). Export declines the entity
+    // and says so rather than performing that write.
+    if let Some((section, fence)) = entity.sections.iter().find_map(|(k, v)| {
+        crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
+    }) {
+        return Err(WriteError::UnterminatedFence {
+            id: entity.id.to_string(),
+            section,
+            fence,
+        });
+    }
+
     // Generate markdown and write
     let content = generate_markdown(entity, schema);
     fs::write(&full_path, content)?;
@@ -61,6 +78,20 @@ pub enum WriteError {
     PathTraversal(String),
     #[error("entity has no file_path: {0}")]
     NoFilePath(String),
+    /// The entity's stored body ends inside an unterminated code fence, so
+    /// regenerating its file would bury the sections that fence absorbed.
+    /// Shares its condition (and its recovery: replace the named section
+    /// through the engine) with `UNTERMINATED_FENCE_IN_STORED_BODY`.
+    #[error(
+        "entity '{id}' section '{section}' ends inside an unterminated `{fence}` code fence — \
+         regenerating the file would bury the sections it absorbed. Repair it through the \
+         engine first: replace section '{section}' with a corrected body."
+    )]
+    UnterminatedFence {
+        id: String,
+        section: String,
+        fence: String,
+    },
 }
 
 #[cfg(test)]
@@ -218,5 +249,36 @@ mod tests {
         let path = write_entity(&entity, dir.path(), &schema).unwrap();
         assert!(path.exists());
         assert!(dir.path().join("parent").exists());
+    }
+
+    /// The export twin of the mutation guard. The grade that closed 04/02's
+    /// criterion 5 found this path still unguarded: the mutation verbs all
+    /// refused, and `export --format markdown` walked past them to the same
+    /// freeze. Both export loops reach bytes through this function, so the
+    /// guard belongs here rather than in each loop.
+    #[test]
+    fn an_open_fence_is_declined_rather_than_frozen_on_export() {
+        let tmp = TempDir::new().unwrap();
+        let mut entity = make_test_entity("fenced");
+        entity.sections.insert(
+            "identity".to_string(),
+            "intro\n\n```rust\nfn main() {}".to_string(),
+        );
+        let schema = type_by_name(builtin_names::SPEC).unwrap();
+        let err = write_entity(&entity, tmp.path(), schema.as_ref())
+            .expect_err("regenerating this file would bury the absorbed sections");
+        match err {
+            WriteError::UnterminatedFence {
+                ref section,
+                ref fence,
+                ..
+            } => {
+                assert_eq!(section, "identity");
+                assert_eq!(fence, "```");
+            }
+            other => panic!("expected UnterminatedFence, got {other:?}"),
+        }
+        // And nothing was written: a declined export leaves no file behind.
+        assert!(!tmp.path().join(&entity.file_path).exists());
     }
 }

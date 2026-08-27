@@ -103,6 +103,28 @@ pub fn render_entity_markdown_with_signals(
     if let Some(lab) = labelling {
         lines.push(format!("_label: {}", lab.label.wire()));
     }
+    // The text channel's half of `_unread_sections`. The JSON envelope carries
+    // the structured block; a reader on this channel sees the same sections
+    // rendered blank and, without this line, has nothing to tell them apart
+    // from sections the author left empty. This is the channel a cold agent
+    // reads, so it cannot be the one that stays quiet (04/02, criterion 4).
+    if let Some((absorbing, _)) = entity.sections.iter().find_map(|(k, v)| {
+        crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
+    }) {
+        let unread: Vec<&str> = entity
+            .sections
+            .iter()
+            .filter(|(k, v)| **k != absorbing && v.trim().is_empty())
+            .map(|(k, _)| k.as_str())
+            .collect();
+        if !unread.is_empty() {
+            lines.push(format!(
+                "_unread_sections: [{}] NOT empty: an unterminated code fence in `{absorbing}` \
+                 swallowed them, and their content is inside that section's body",
+                unread.join(", "),
+            ));
+        }
+    }
     let tokens = estimate_tokens(&body_text);
     lines.push(format!("_tokens: {tokens}"));
 
@@ -842,6 +864,41 @@ pub fn build_entity_envelope(
         "origin".to_string(),
         serde_json::Value::String(origin.as_wire().to_string()),
     );
+    // An entity whose body ends inside an unterminated fence has absorbed the
+    // sections after it; they come back as `""`, and a reader with no marker
+    // cannot tell that from a section the author left blank. Rendered at the
+    // shared envelope layer for the same reason `origin` is: it was first
+    // written on the conformance axis alone, which is opt-in, so the plain
+    // read — the one an agent actually makes — still reported them as merely
+    // empty (04/02, criterion 4, found by the plan's final grade).
+    //
+    // A marker, not a repair: the bytes are unchanged and no fence is closed.
+    // `_unread_sections` names the keys whose content is really sitting in
+    // `absorbed_into`, so a reader that branches on emptiness has something to
+    // branch on.
+    if let Some((absorbing, fence)) = entity.sections.iter().find_map(|(k, v)| {
+        crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
+    }) {
+        let unread: Vec<String> = entity
+            .sections
+            .iter()
+            .filter(|(k, v)| **k != absorbing && v.trim().is_empty())
+            .map(|(k, _)| k.clone())
+            .collect();
+        envelope.insert(
+            "_unread_sections".to_string(),
+            serde_json::json!({
+                "reason": "UNTERMINATED_FENCE",
+                "absorbed_into": absorbing,
+                "fence": fence,
+                "sections": unread,
+                "note": "these sections read as empty because an unterminated code fence in \
+                         `absorbed_into` swallowed them: their content is inside that section's \
+                         body. Repair through the engine by replacing that section; a write that \
+                         does not is refused.",
+            }),
+        );
+    }
     envelope.insert(
         "id".to_string(),
         serde_json::Value::String(entity.id.to_string()),
@@ -4921,5 +4978,63 @@ community:
             names(&full["relationships"]),
             names(&lite["relationships_summary"])
         );
+    }
+
+    /// Criterion 4 of 04/02, on the surface an agent actually reads. The
+    /// conformance axis knew, but it is opt-in; a plain `memstead_entity` /
+    /// `memstead entity --json` returned the swallowed sections as `""` with
+    /// nothing to distinguish them from sections the author left blank.
+    #[test]
+    fn swallowed_sections_carry_a_marker_on_the_plain_read() {
+        let mut e = test_entity();
+        e.sections.insert(
+            "identity".to_string(),
+            "intro\n\n```rust\nfn main() {}".to_string(),
+        );
+        e.sections.insert("purpose".to_string(), String::new());
+        let env = build_entity_envelope(
+            &e,
+            10,
+            None,
+            None,
+            None,
+            OriginClass::FirstParty,
+            &[],
+            None,
+            None,
+            None,
+        );
+        let marker = &env["_unread_sections"];
+        assert_eq!(marker["reason"], "UNTERMINATED_FENCE");
+        assert_eq!(marker["absorbed_into"], "identity");
+        assert_eq!(marker["sections"], serde_json::json!(["purpose"]));
+    }
+
+    #[test]
+    fn an_ordinary_entity_carries_no_unread_marker() {
+        // Including one whose empty section is genuinely just empty, and one
+        // carrying a CLOSED fence: a marker that fired on either would make
+        // every blank section look like data loss.
+        for body in ["plain prose", "```rust\nfn main() {}\n```"] {
+            let mut e = test_entity();
+            e.sections.insert("identity".to_string(), body.to_string());
+            e.sections.insert("purpose".to_string(), String::new());
+            let env = build_entity_envelope(
+                &e,
+                10,
+                None,
+                None,
+                None,
+                OriginClass::FirstParty,
+                &[],
+                None,
+                None,
+                None,
+            );
+            assert!(
+                env.get("_unread_sections").is_none(),
+                "body {body:?} produced a marker"
+            );
+        }
     }
 }

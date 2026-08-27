@@ -117,6 +117,51 @@ impl IntegrityFinding {
             detail: err.details(),
         }
     }
+
+    /// A conformance finding whose detail the read path knows and the write
+    /// path cannot: a write sees one section's content, a read sees which
+    /// declared sections that content swallowed.
+    fn conformance_with_detail(
+        id: &crate::entity::EntityId,
+        code: &str,
+        detail: serde_json::Value,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            axis: IntegrityAxis::Conformance,
+            code: code.to_string(),
+            detail,
+        }
+    }
+}
+
+/// The declared sections an unterminated fence in `body` has swallowed.
+///
+/// The parser masked their heading lines, so they never became section keys;
+/// their bytes sit verbatim inside `body`. Scanning the UNMASKED body for `## `
+/// lines and intersecting with the type's declared headings recovers exactly
+/// what the entity lost. Headings the type does not declare are left out on
+/// purpose: those are the catch-all's business (04/01), and naming them here
+/// would report the same bytes under two codes.
+pub(crate) fn swallowed_declared_sections(
+    body: &str,
+    type_def: &memstead_schema::TypeDefinition,
+) -> Vec<String> {
+    let declared: std::collections::BTreeSet<&str> = type_def
+        .sections
+        .iter()
+        .map(|s| s.heading.as_str())
+        .collect();
+    let mut out = Vec::new();
+    for line in body.lines() {
+        if let Some(heading) = line.strip_prefix("## ")
+            && declared.contains(heading.trim())
+            && !out.iter().any(|h| h == heading.trim())
+        {
+            out.push(heading.trim().to_string());
+        }
+    }
+    out
 }
 
 /// Run the conformance axis over every non-stub entity of `mem`,
@@ -400,6 +445,38 @@ fn lint_entity(
         ));
         return;
     };
+
+    // An unterminated fence, before anything else: it is the one condition
+    // under which the rest of this walk is reading a body that is not the
+    // entity's. Every declared section after the open fence was absorbed into
+    // it, so those keys are absent from `entity.sections` and the required-
+    // section check below would report them missing without saying why. This
+    // finding names the cause; that one names the symptom.
+    for (key, value) in &entity.sections {
+        let Some(fence) = crate::markdown::closing_fence_if_unterminated(value.trim()) else {
+            continue;
+        };
+        let swallowed = swallowed_declared_sections(value, type_def);
+        findings.push(IntegrityFinding::conformance_with_detail(
+            &entity.id,
+            "UNTERMINATED_FENCE",
+            serde_json::json!({
+                "section": key,
+                "fence": fence,
+                "entity_type": entity.entity_type,
+                "swallowed_sections": swallowed,
+                "note": if swallowed.is_empty() {
+                    "this section ends inside an unterminated code fence; no declared section \
+                     follows it in the file yet, but the next write would bury whatever does"
+                } else {
+                    "these declared sections are NOT empty: their content sits verbatim inside \
+                     the section above, hidden by an unterminated code fence. Supply a corrected \
+                     body for that section; the next write would otherwise close the fence \
+                     around them and make the loss permanent"
+                },
+            }),
+        ));
+    }
 
     // Section keys — one finding per unknown key (the write path stops
     // at the first; the linter reports all so one repair pass fixes
@@ -957,6 +1034,65 @@ community:
             ObservationFate::Dropped,
             "a bare heading whose text appears in prose is still dropped"
         );
+    }
+
+    #[test]
+    fn an_unterminated_fence_names_the_sections_it_swallowed() {
+        // Criteria 3 and 4. The `Notes` heading was masked by the open fence,
+        // so it never became a section key: its bytes sit inside `body`. The
+        // finding has to name it, because the only other signal the entity
+        // gives is a `notes` key that is simply absent.
+        let schema = lint_schema();
+        let mut store = Store::new();
+        let mut e = conformant_entity("lv", "alpha");
+        e.sections.insert(
+            "body".into(),
+            "intro\n\n```rust\nfn main() {}\n\n## Notes\n\nthe real notes\n".into(),
+        );
+        e.sections.shift_remove("notes");
+        store.upsert(e.id.clone(), e);
+        let schemas = schemas_for(&[("lv", schema.clone())]);
+        let findings = conformance_findings(&store, "lv", &schema, &schemas);
+        let fence: Vec<_> = findings
+            .iter()
+            .filter(|f| f.code == "UNTERMINATED_FENCE")
+            .collect();
+        assert_eq!(fence.len(), 1, "got: {:?}", codes(&findings));
+        assert_eq!(fence[0].id, "lv--alpha");
+        assert_eq!(fence[0].detail["section"], "body");
+        assert_eq!(fence[0].detail["fence"], "```");
+        assert_eq!(
+            fence[0].detail["swallowed_sections"],
+            serde_json::json!(["Notes"]),
+        );
+        // Criterion 4: never clean. A finding on the conformance axis is
+        // exactly what "not clean" means on this surface.
+        assert!(!findings.is_empty());
+    }
+
+    #[test]
+    fn an_entity_with_no_open_fence_gains_no_fence_finding() {
+        // Criterion 7 at the read tier. Both the no-fence and the closed-fence
+        // cases, because a guard that fires on any fence character would pass
+        // the first and fail the second.
+        let schema = lint_schema();
+        let schemas = schemas_for(&[("lv", schema.clone())]);
+        for body in [
+            "just prose",
+            "prose\n\n```rust\nfn main() {}\n```\n\nmore",
+            "```md\n## Notes\n```",
+        ] {
+            let mut store = Store::new();
+            let mut e = conformant_entity("lv", "alpha");
+            e.sections.insert("body".into(), body.into());
+            store.upsert(e.id.clone(), e);
+            let findings = conformance_findings(&store, "lv", &schema, &schemas);
+            assert!(
+                !findings.iter().any(|f| f.code == "UNTERMINATED_FENCE"),
+                "body {body:?} produced: {:?}",
+                codes(&findings)
+            );
+        }
     }
 
     #[test]

@@ -272,6 +272,10 @@ fn run_markdown(
             body["skipped_mounts"] = serde_json::to_value(&result.skipped_mounts)
                 .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
         }
+        if !result.refused_entities.is_empty() {
+            body["refused_entities"] = serde_json::to_value(&result.refused_entities)
+                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+        }
         print_json(&body)?;
     } else {
         let mut block = format!(
@@ -285,6 +289,15 @@ fn run_markdown(
                     "\n- `{}` — backend `{}` ({}); use `--format mem` for archive export",
                     m.mem, m.active_backend, m.reason,
                 ));
+            }
+        }
+        // Never silent: an entity the export declined is one the operator has
+        // to repair through the engine, and an export that reported only
+        // counts would read as complete over content it did not write.
+        if !result.refused_entities.is_empty() {
+            block.push_str("\n\n## Refused entities\n");
+            for r in &result.refused_entities {
+                block.push_str(&format!("\n- `{}` [{}] — {}", r.id, r.reason, r.detail));
             }
         }
         print_markdown(&block);
@@ -358,6 +371,12 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
                 })
             }));
         }
+        warnings.extend(result.unterminated_fence_entities.iter().map(|id| {
+            json!({
+                "code": "UNTERMINATED_FENCE_IN_EXPORT",
+                "entity": id,
+            })
+        }));
         print_json(&json!({
             "archive_path": result.archive_path,
             "name": result.name,
@@ -378,6 +397,18 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
         );
         if args.self_contained {
             block.push_str("\n- Self-contained: yes");
+        }
+        // `install` will refuse the archive for each of these, so the operator
+        // learns it here rather than after sharing.
+        if !result.unterminated_fence_entities.is_empty() {
+            block.push_str(
+                "\n\n## Entities `install` will refuse\n\nEach ends a section inside an \
+                 unterminated code fence, which absorbed the sections after it. Repair through \
+                 the engine (replace the absorbing section) and re-export.\n",
+            );
+            for id in &result.unterminated_fence_entities {
+                block.push_str(&format!("\n- `{id}` [UNTERMINATED_FENCE_IN_EXPORT]"));
+            }
         }
         if !dangling.is_empty() {
             block.push_str("\n\n## Warnings\n");

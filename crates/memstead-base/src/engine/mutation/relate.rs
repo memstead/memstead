@@ -4,7 +4,6 @@
 use std::path::Path;
 
 use crate::engine_fallback_type;
-use crate::entity::generator::generate_markdown;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
 use crate::entity::{Entity, EntityId, Relationship, normalise_description};
@@ -939,7 +938,7 @@ impl Engine {
         super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
 
         let file_path = next.file_path.clone();
-        let markdown = generate_markdown(&next, type_def.as_ref());
+        let markdown = super::render_for_write(&next, type_def.as_ref())?;
 
         Ok(RelatePrepareOutcome::Prepared(PreparedRelate {
             mount_idx,

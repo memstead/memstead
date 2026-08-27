@@ -5,7 +5,6 @@ use std::path::Path;
 
 use crate::engine_fallback_type;
 use crate::entity::EntityId;
-use crate::entity::generator::generate_markdown;
 use crate::entity::id::validate_and_derive_slug;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
@@ -206,7 +205,7 @@ impl Engine {
         let today = self.now_iso();
         super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
 
-        let markdown = generate_markdown(&next, type_def.as_ref());
+        let markdown = super::render_for_write(&next, type_def.as_ref())?;
 
         // Referrer collection. Walk every incoming edge — explicit
         // relations and `EdgeSource::BodyLink` synthesised mirrors
@@ -351,7 +350,7 @@ impl Engine {
             // staleness clock is preserved by carrying the prior
             // timestamp through from the cloned referrer. (Pre-fix this
             // stamped the shared `today` for cross-entity consistency.)
-            let ref_markdown = generate_markdown(&next_ref, referrer_type_def.as_ref());
+            let ref_markdown = super::render_for_write(&next_ref, referrer_type_def.as_ref())?;
             same_mem_writes.push((ref_markdown, next_ref.file_path.clone(), referrer_type_def));
         }
 
@@ -419,7 +418,7 @@ impl Engine {
             // above (slug rewrite is a foreign-key change, not a semantic
             // edit). Its content hash still changes; the staleness clock
             // does not reset.
-            let ref_markdown = generate_markdown(&next_ref, referrer_type_def.as_ref());
+            let ref_markdown = super::render_for_write(&next_ref, referrer_type_def.as_ref())?;
 
             peer_plans
                 .entry(peer_mem.clone())

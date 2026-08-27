@@ -787,6 +787,36 @@ pub enum EngineError {
         current_content: String,
         truncated: bool,
     },
+    /// `UNTERMINATED_FENCE_IN_STORED_BODY`: the entity on disk already ends a
+    /// section inside an open code fence, and this write does not resolve it
+    /// (consistency-sweep 04/02, criterion 5).
+    ///
+    /// The state is not the caller's doing: the generator closes every fence
+    /// it emits, so it can only arrive by hand-authoring, a folder mem edited
+    /// outside the engine, or sibling-committed branch state. But the closer
+    /// is appended AFTER the already-absorbed bytes, so a write here would
+    /// seal the swallowed sections inside a legitimately closed fence, and no
+    /// later pass can tell them from prose the author meant to fence. The
+    /// freeze is unrecoverable through the engine, which is why this refuses
+    /// rather than warns.
+    ///
+    /// The way out is replace mode on the named section: that value passes
+    /// the `UNTERMINATED_FENCE` guard, so it cannot leave a fence open, and
+    /// the caller can lift the swallowed content back out of it. Its sibling
+    /// [`ValidationError::UnterminatedFence`] refuses the same condition in
+    /// content the caller supplies.
+    #[error(
+        "entity '{id}' section '{section}' ends inside an unterminated `{fence}` code fence, and \
+         this update does not replace it. Writing now would close the fence around content that \
+         belongs to other sections and make the loss permanent. Replace section '{section}' with \
+         a corrected body in the same call."
+    )]
+    UnterminatedFenceInStoredBody {
+        id: String,
+        section: String,
+        fence: String,
+        swallowed: Vec<String>,
+    },
     /// Schema-strictness rejection from the runtime validator
     /// (`UNKNOWN_SECTION`, `UNKNOWN_METADATA`, `INVALID_ENUM_VALUE`).
     #[error("schema validation: {0}")]
@@ -1266,6 +1296,9 @@ impl EngineError {
             EngineError::MissingRequiredSection { .. } => "MISSING_REQUIRED_SECTION",
             EngineError::PatchSectionEmpty { .. } => "PATCH_SECTION_EMPTY",
             EngineError::PatchOldNotFound { .. } => "PATCH_OLD_NOT_FOUND",
+            EngineError::UnterminatedFenceInStoredBody { .. } => {
+                "UNTERMINATED_FENCE_IN_STORED_BODY"
+            }
             EngineError::Validation(v) => v.code(),
             EngineError::ParseAfterWrite(_) => "PARSE_ERROR",
             EngineError::Parse(_) => "PARSE_ERROR",
@@ -1637,6 +1670,21 @@ impl EngineError {
             } => {
                 serde_json::json!({ "target_id": target_id, "target_mem": target_mem })
             }
+            EngineError::UnterminatedFenceInStoredBody {
+                id,
+                section,
+                fence,
+                swallowed,
+            } => serde_json::json!({
+                "id": id,
+                "section": section,
+                "fence": fence,
+                "swallowed_sections": swallowed,
+                "expected": format!(
+                    "supply `sections` with a corrected body for '{section}': lift the swallowed \
+                     content back into its own sections and close the fence"
+                ),
+            }),
             EngineError::Validation(v) => v.details(),
             EngineError::MissingRequiredDescription {
                 rel_type,
@@ -1914,6 +1962,28 @@ impl EngineError {
                     }
                 }
                 out
+            }
+            EngineError::UnterminatedFenceInStoredBody {
+                id,
+                section,
+                fence,
+                swallowed,
+            } => {
+                let buried = if swallowed.is_empty() {
+                    "No declared section follows it in the file yet".to_string()
+                } else {
+                    format!("Buried right now: {}", swallowed.join(", "))
+                };
+                format!(
+                    "entity '{id}' section '{section}' ends inside an unterminated `{fence}` code \
+                     fence. In CommonMark an open fence runs to end of text, so the sections \
+                     after it were absorbed into this body on the last read and are reported as \
+                     empty. {buried}. Writing now appends the closing fence AFTER those bytes, \
+                     sealing them inside a legitimately fenced block where nothing can tell them \
+                     from prose the author meant to fence. Replace section '{section}' with a \
+                     corrected body in this same call: lift the swallowed content back into its \
+                     own sections and close the fence."
+                )
             }
             EngineError::Validation(v) => v.prose_render(),
             // Variants whose `Display` already inlines every recovery

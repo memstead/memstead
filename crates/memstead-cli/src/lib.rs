@@ -809,6 +809,24 @@ impl CliError {
                     anchor_err.detail().into_iter().collect(),
                 )),
             ),
+            // The stored body already ends inside an open fence and this
+            // write does not resolve it (04/02, criterion 5). The detail
+            // carries the sections it buried, which is what tells the
+            // operator what a corrected body has to put back.
+            UnterminatedFenceInStoredBody {
+                id,
+                section,
+                fence,
+                swallowed,
+            } => (
+                ExitKind::Validation,
+                Some(serde_json::json!({
+                    "id": id,
+                    "section": section,
+                    "fence": fence,
+                    "swallowed_sections": swallowed,
+                })),
+            ),
         };
         // Route the CLI message through the rich-prose renderer so markdown-
         // default mode and `--json --message` consumers see the same

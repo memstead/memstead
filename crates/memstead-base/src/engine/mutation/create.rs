@@ -34,7 +34,6 @@ fn build_type_guidance(
 }
 
 use crate::engine_fallback_type;
-use crate::entity::generator::generate_markdown;
 use crate::entity::id::validate_and_derive_slug;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
@@ -613,7 +612,7 @@ impl Engine {
             });
         }
 
-        let markdown = generate_markdown(&entity_for_render, type_def.as_ref());
+        let markdown = super::render_for_write(&entity_for_render, type_def.as_ref())?;
 
         // 7a. Inline `[[wiki-link]]` patterns in section bodies that
         //     point at non-existent targets get auto-stubbed by the

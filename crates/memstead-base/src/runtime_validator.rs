@@ -156,6 +156,29 @@ pub enum ValidationError {
         heading: String,
         entity_type: String,
     },
+    /// `UNTERMINATED_FENCE`: caller-supplied section content ends inside a
+    /// fenced code block that never closes (consistency-sweep 04/02,
+    /// criterion 1). Nothing about the parse is wrong: an open fence's range
+    /// runs to end of text in CommonMark, so every `## ` line the generator
+    /// writes after this section lands inside the fence, is masked, and is
+    /// absorbed into this section's body on the next read. The sections then
+    /// render as empty and the entity reads as healthy.
+    ///
+    /// The sibling guard [`ValidationError::SectionContentInvalid`] refuses
+    /// content that would BECOME a delimiter; this one refuses content that
+    /// would HIDE one. Both are about the same seam from opposite sides, and
+    /// neither can see the other's case: a fence opener is not a heading line,
+    /// and the heading guard's own mask is what renders the hidden heading
+    /// invisible to it.
+    ///
+    /// The oracle is `markdown::closing_fence_if_unterminated`, the referee's
+    /// existing sentinel probe. No second fence model is written here.
+    #[error(
+        "section '{section}' ends inside an unterminated `{fence}` code fence — every section \
+         heading written after it would be swallowed into this body and read back as empty. \
+         Close the fence with a line of `{fence}`."
+    )]
+    UnterminatedFence { section: String, fence: String },
     /// `SECTION_CONTENT_INVALID` (control-byte sub-case): a section body
     /// contains a control character other than tab (`\t`) or newline
     /// (`\n`). A NUL especially makes git classify the `.md` blob as
@@ -222,6 +245,7 @@ impl ValidationError {
             ValidationError::InvalidRelationshipType { .. } => "INVALID_REL_TYPE",
             ValidationError::InvalidRelationshipShape { .. } => "INVALID_REL_SHAPE",
             ValidationError::EmptyUndeclaredHeading { .. } => "EMPTY_UNDECLARED_HEADING",
+            ValidationError::UnterminatedFence { .. } => "UNTERMINATED_FENCE",
             ValidationError::SectionContentInvalid { .. } => "SECTION_CONTENT_INVALID",
             ValidationError::SectionContentControlByte { .. } => "SECTION_CONTENT_INVALID",
             ValidationError::InvalidFieldValue { .. } => "INVALID_FIELD_VALUE",
@@ -350,6 +374,13 @@ impl ValidationError {
                 details.insert("suggestion".into(), serde_json::json!(suggestion_json));
                 serde_json::Value::Object(details)
             }
+            ValidationError::UnterminatedFence { section, fence } => serde_json::json!({
+                "section": section,
+                "fence": fence,
+                "expected": format!(
+                    "close the fence with a line of `{fence}`, or remove the opener"
+                ),
+            }),
             ValidationError::EmptyUndeclaredHeading {
                 section,
                 heading,
@@ -541,6 +572,14 @@ impl ValidationError {
                  not declare and which has no body under it. An undeclared heading WITH content \
                  is kept byte-verbatim in the catch-all; an empty one is skipped, so this write \
                  would drop it. Give the heading a body, or remove it."
+            ),
+            ValidationError::UnterminatedFence { section, fence } => format!(
+                "section '{section}' ends inside an unterminated `{fence}` code fence. In \
+                 CommonMark an open fence runs to the end of the text, so every section heading \
+                 written after this one would land inside the fence, be masked, and be read back \
+                 as part of THIS section's body: the sections after it would render empty and \
+                 the entity would still read as healthy. Close the fence with a line of \
+                 `{fence}`, or remove the opener."
             ),
             ValidationError::SectionContentInvalid {
                 section,
@@ -807,6 +846,16 @@ pub fn validate_section_content<'a>(
                 control_char: ch,
                 codepoint: ch as u32,
                 byte_offset,
+            });
+        }
+        // Before the heading walk, because the two guards diagnose the same
+        // seam and this one has the better answer when both apply: a body
+        // that leaves a fence open AND carries a heading is swallowed, not
+        // forked, so naming the fence tells the caller what to fix.
+        if let Some(fence) = crate::markdown::closing_fence_if_unterminated(value.trim()) {
+            return Err(ValidationError::UnterminatedFence {
+                section: key.to_string(),
+                fence,
             });
         }
         // What the splitter will store, and what the splitter will
@@ -2219,6 +2268,57 @@ write_rules: []
     /// This is the exact complement of the criterion-6 exemption: the catch-all
     /// keeps absorbed content but SKIPS empty content, so accepting this write
     /// would drop the heading and tell the caller nothing.
+    #[test]
+    fn content_that_would_hide_a_delimiter_is_refused() {
+        // Criterion 1. An open fence's range runs to end of text, so every
+        // heading the generator writes after this section would be masked and
+        // absorbed into it.
+        let err = validate_section_content([("body", "```rust\nfn main() {}")].into_iter(), None)
+            .expect_err("an unterminated fence must be refused");
+        assert_eq!(err.code(), "UNTERMINATED_FENCE");
+        assert_eq!(err.details()["section"], "body");
+        assert_eq!(err.details()["fence"], "```");
+        // Tilde fences and longer runs report the closer that actually works.
+        let err = validate_section_content([("body", "~~~\nopen")].into_iter(), None)
+            .expect_err("tilde fences too");
+        assert_eq!(err.details()["fence"], "~~~");
+        let err = validate_section_content([("body", "````\n```\nstill inside")].into_iter(), None)
+            .expect_err("a longer opener needs a longer closer");
+        assert_eq!(err.details()["fence"], "````");
+    }
+
+    #[test]
+    fn a_closed_fence_around_headings_is_admitted_unchanged() {
+        // Criterion 2, both halves. A guard that refuses every fenced `##`
+        // fails, and so does one that refuses content whose fence closes
+        // later in the same body.
+        validate_section_content(
+            [(
+                "body",
+                "prose\n\n```md\n## Not A Section\n# Nor This\n```\n\nmore prose",
+            )]
+            .into_iter(),
+            None,
+        )
+        .expect("a closed fence containing heading lines is ordinary content");
+        // The closer arriving late in the body is still a closer.
+        validate_section_content([("body", "```\n## Hidden\n```")].into_iter(), None)
+            .expect("closed is closed, wherever the closer sits");
+        // A fence inside a container the next column-0 line closes implicitly.
+        validate_section_content([("body", "> ```\n> quoted")].into_iter(), None)
+            .expect("a blockquote's fence cannot reach past the quote");
+    }
+
+    #[test]
+    fn an_ordinary_body_is_untouched_by_the_fence_guard() {
+        // Criterion 7 at this tier: no fence characters, no new refusal.
+        validate_section_content(
+            [("body", "plain prose\nwith lines\n\nand a paragraph")].into_iter(),
+            None,
+        )
+        .expect("content with no fence at all cannot trip a fence guard");
+    }
+
     #[test]
     fn an_empty_undeclared_heading_is_refused_at_the_write() {
         let declared = ["Body", "Notes"];

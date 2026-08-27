@@ -170,6 +170,7 @@ pub fn export_mem(
     let size_bytes = fs::metadata(output_path)?.len();
 
     Ok(MemExportResult {
+        unterminated_fence_entities: Vec::new(),
         archive_path: output_path.display().to_string(),
         name: out.name,
         version: out.version,

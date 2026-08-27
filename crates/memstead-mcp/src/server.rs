@@ -771,6 +771,17 @@ fn engine_err_unified(
         // Block-tier declared-constraint refusals — code and recovery
         // payload come from the error itself (`code()` / `details()`),
         // so the envelope stays aligned with the CLI `--json` shape.
+        // 04/02, criterion 5: code and payload from the error itself, so the
+        // buried-section list reaches the agent identically on both surfaces.
+        E::UnterminatedFenceInStoredBody { .. } => tool_error_with_payload(
+            "UNTERMINATED_FENCE_IN_STORED_BODY",
+            &message,
+            envelope(
+                "UNTERMINATED_FENCE_IN_STORED_BODY",
+                message.clone(),
+                e.details(),
+            ),
+        ),
         E::ConstraintUnsatisfied { .. }
         | E::RequiredOutgoingUnsatisfied { .. }
         | E::SectionFormatRefused { .. } => tool_error_with_payload(

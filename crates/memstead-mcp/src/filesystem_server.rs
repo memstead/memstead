@@ -295,6 +295,12 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
     // doing so in-arm.
     let display = err.to_string();
     match err {
+        // 04/02, criterion 5: the parity twin of the mem-repo server's arm.
+        EngineError::UnterminatedFenceInStoredBody { .. } => tool_error_with_details(
+            "UNTERMINATED_FENCE_IN_STORED_BODY",
+            &err.prose_render(),
+            Some(err.details()),
+        ),
         EngineError::UnknownType {
             name,
             schema_ref,

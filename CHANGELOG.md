@@ -8,6 +8,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **An unterminated code fence can no longer swallow the rest of an entity in
+  silence.** A fence opened and never closed runs to end of text in CommonMark,
+  so every section heading after it was masked and absorbed into the opening
+  section's body. The sections then read as empty, the entity read as healthy,
+  and the next write appended the closing fence AFTER the absorbed bytes,
+  sealing them inside a legitimately fenced block where nothing could tell them
+  from prose the author meant to fence.
+
+  Three changes close it. `UNTERMINATED_FENCE` refuses caller-supplied section
+  content that would hide a following delimiter. The health conformance axis
+  reports an entity already in that state, naming the absorbing section and the
+  declared sections buried inside it, and every entity read carries
+  `_unread_sections` beside them, so a section that reads as empty because a
+  fence swallowed it is never mistaken for one the author left blank.
+  `UNTERMINATED_FENCE_IN_STORED_BODY` refuses a write that would freeze the
+  absorption; replacing the absorbing section in the same call is the way out,
+  so the condition stays recoverable through the engine. Export and archive
+  packaging decline the affected entity rather than baking the freeze into a
+  `.mem` that would read as clean wherever it is installed.
+
+  Heading recognition is unchanged and nothing is auto-repaired: guessing where
+  an author meant to close a fence would rewrite their content. The oracle is
+  the markdown referee's existing sentinel probe, not a second fence model.
+
 - **An entity body that carries content its type does not declare is now
   visible as exactly that.** Write an entity by hand with a heading the schema
   does not declare, or a frontmatter key the type does not carry, and the engine

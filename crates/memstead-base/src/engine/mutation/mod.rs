@@ -56,6 +56,46 @@ pub const RELATIONSHIP_CYCLE_PATH_CAP: usize = 20;
 /// `UnknownEntityType` recovery payload so MCP envelopes carry the
 /// same `name` / `schema_ref` / `declared` / `suggestion` keys
 /// regardless of which engine served the call.
+/// Render an entity for a write, refusing the one state the generator would
+/// silently make permanent.
+///
+/// **This is the mutation path's only way to bytes.** Calling
+/// `generate_markdown` directly from a mutation verb bypasses the guard, and
+/// the first version of this fix did exactly that: the check lived in
+/// `update_entity`, so `memstead relate` against the same entity walked
+/// straight past it and froze the absorption anyway (04/02, criterion 5,
+/// found by the plan's grade). A guard a new verb can miss by following the
+/// local idiom is not a guard; making the guarded call BE the idiom is.
+///
+/// The condition: a section whose stored body ends inside an unterminated
+/// fence has already absorbed every section after it, and the generator
+/// appends its closer AFTER those bytes. One write seals them inside a
+/// legitimately fenced block where nothing can tell them from prose the
+/// author meant to fence. It is refused rather than warned about because it
+/// is unrecoverable once it lands.
+///
+/// The way out needs no special case: a caller who replaces the absorbing
+/// section hands us an entity whose fence is closed, so the guard simply
+/// does not fire.
+pub(crate) fn render_for_write(
+    entity: &Entity,
+    type_def: &memstead_schema::TypeDefinition,
+) -> Result<String, EngineError> {
+    for (key, value) in &entity.sections {
+        if let Some(fence) = crate::markdown::closing_fence_if_unterminated(value.trim()) {
+            return Err(EngineError::UnterminatedFenceInStoredBody {
+                id: entity.id.to_string(),
+                section: key.clone(),
+                fence,
+                swallowed: crate::ops::integrity::swallowed_declared_sections(value, type_def),
+            });
+        }
+    }
+    Ok(crate::entity::generator::generate_markdown(
+        entity, type_def,
+    ))
+}
+
 pub(crate) fn unknown_type_error(schema: &memstead_schema::Schema, attempted: &str) -> EngineError {
     let mut declared: Vec<String> = schema.types.keys().cloned().collect();
     declared.sort();

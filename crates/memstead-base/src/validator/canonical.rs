@@ -84,6 +84,23 @@ pub fn canonical_bytes(
                     entity.entity_type
                 ))
             })?;
+        // The archive is the third way to bytes, after the mutation verbs and
+        // the export writer, and it is the worst place to freeze an
+        // absorption: the archive travels, gets installed elsewhere, and reads
+        // clean on the far side because the buried sections are inside a
+        // legitimately closed fence by then (04/02, criterion 5, found by the
+        // plan's final grade via `export --format mem` then `install`).
+        if let Some((section, fence)) = entity.sections.iter().find_map(|(k, v)| {
+            crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
+        }) {
+            return Err(ValidationError::GraphConstructionFailed(format!(
+                "entity {} section '{section}' ends inside an unterminated `{fence}` code fence: \
+                 packaging it would bury the sections that fence absorbed, and the archive would \
+                 read as clean wherever it is installed. Repair the entity through the engine \
+                 first (replace section '{section}' with a corrected body), then re-run.",
+                entity.id.as_ref(),
+            )));
+        }
         let md = generate_markdown(entity, &schema);
         let lf = normalize_lf(&md);
         let path = id_to_file_path(&entity.id);

@@ -39,6 +39,7 @@ pub fn export_markdown(
 ) -> ExportResult {
     let mut written = 0;
     let mut unchanged = 0;
+    let mut refused: Vec<crate::ops::RefusedEntity> = Vec::new();
 
     for entity in store.all_entities() {
         // Skip stubs
@@ -65,8 +66,20 @@ pub fn export_markdown(
         };
 
         if needs_write {
-            let _ = write_entity(entity, mem_dir, schema);
-            written += 1;
+            match write_entity(entity, mem_dir, schema) {
+                Ok(_) => written += 1,
+                // Writing this entity would bury the sections its open fence
+                // absorbed. Name it and carry on, so one poisoned entity does
+                // not strand the export (04/02, criterion 5).
+                Err(e @ crate::entity::writer::WriteError::UnterminatedFence { .. }) => {
+                    refused.push(crate::ops::RefusedEntity {
+                        id: entity.id.to_string(),
+                        reason: "UNTERMINATED_FENCE_IN_STORED_BODY".to_string(),
+                        detail: e.to_string(),
+                    });
+                }
+                Err(_) => {}
+            }
         } else {
             unchanged += 1;
         }
@@ -76,6 +89,7 @@ pub fn export_markdown(
         written,
         unchanged,
         skipped_mounts: Vec::new(),
+        refused_entities: refused,
     }
 }
 
@@ -107,12 +121,14 @@ pub fn export_entity(
     if needs_write {
         write_entity(entity, mem_dir, schema).map_err(|e| e.to_string())?;
         Ok(ExportResult {
+            refused_entities: Vec::new(),
             written: 1,
             unchanged: 0,
             skipped_mounts: Vec::new(),
         })
     } else {
         Ok(ExportResult {
+            refused_entities: Vec::new(),
             written: 0,
             unchanged: 1,
             skipped_mounts: Vec::new(),
@@ -184,6 +200,7 @@ pub fn export_mem_from_branch(
 
     let size_bytes = fs::metadata(output_path)?.len();
     Ok(MemExportResult {
+        unterminated_fence_entities: Vec::new(),
         archive_path: output_path.display().to_string(),
         name: out.name,
         version: out.version,

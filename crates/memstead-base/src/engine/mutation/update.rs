@@ -5,7 +5,6 @@ use std::path::Path;
 
 use crate::engine_fallback_type;
 use crate::entity::EntityId;
-use crate::entity::generator::generate_markdown;
 use crate::entity::parser::parse_markdown;
 use crate::entity::store_builder::push_entities_into_store;
 use crate::ops::{ModifiedMetadata, ModifiedSections, WarningHint};
@@ -802,7 +801,7 @@ impl Engine {
         // and return with `last_modified` preserved at its pre-call
         // value. Real changes fall through; we stamp + regenerate
         // below.
-        let markdown_pre_stamp = generate_markdown(&next, type_def.as_ref());
+        let markdown_pre_stamp = super::render_for_write(&next, type_def.as_ref())?;
 
         // Whether the user-visible content (sections, user-set metadata,
         // declared relations) is byte-identical to the on-disk entity —
@@ -888,7 +887,7 @@ impl Engine {
         if !content_unchanged {
             super::auto_stamp_timestamps(&mut next, type_def.as_ref(), &today);
         }
-        let markdown = generate_markdown(&next, type_def.as_ref());
+        let markdown = super::render_for_write(&next, type_def.as_ref())?;
 
         let mut warnings: Vec<WarningHint> = Vec::new();
 
@@ -2734,6 +2733,249 @@ mod tests {
             body.contains("appended tail."),
             "appended body missing: {body:?}"
         );
+    }
+
+    /// Criteria 5 and 6. The state is reproduced the way it actually arrives:
+    /// a hand-edited file on disk, reloaded. The engine cannot author it, so a
+    /// fixture that went through `update_entity` would prove nothing.
+    fn engine_with_open_fence(tmp: &TempDir) -> (Engine, crate::EntityId) {
+        let (_engine, seeded) = engine_with_seed(tmp, "Fenced");
+        let id = seeded.id.clone();
+        let path = tmp.path().join(&seeded.file_path);
+        let raw = std::fs::read_to_string(&path).expect("seeded file");
+        // Open a fence inside `identity`. In CommonMark its range runs to end
+        // of text, so `## Purpose` below is masked and absorbed into it.
+        let doctored = raw.replace("fixture identity body", "intro\n\n```rust\nfn main() {}");
+        assert_ne!(doctored, raw, "the seeded body must be there to doctor");
+        std::fs::write(&path, doctored).unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        drop(seeded);
+        (engine, id)
+    }
+
+    #[test]
+    fn a_write_that_does_not_resolve_an_open_fence_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, id) = engine_with_open_fence(&tmp);
+        let (actor, client) = cli_actor();
+        // The absorption is real before the write is attempted, and this is
+        // the exact shape criterion 4 names: `purpose` is present and EMPTY
+        // while its content sits verbatim inside `identity`. A surface that
+        // reports "empty section" here is telling the truth about the parse
+        // and a lie about the entity.
+        let stored = engine.get_entity(&id).expect("entity loads");
+        assert!(
+            stored
+                .sections
+                .get("purpose")
+                .is_some_and(|v| v.trim().is_empty()),
+            "purpose should read as empty: {:?}",
+            stored.sections.get("purpose")
+        );
+        assert!(
+            stored.sections["identity"].contains("## Purpose"),
+            "its content is inside identity: {:?}",
+            stored.sections.get("identity")
+        );
+        let hash = stored.content_hash.clone();
+
+        let err = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: id.clone(),
+                    expected_hash: Some(hash),
+                    sections: IndexMap::from_iter([(
+                        "purpose".to_string(),
+                        "a new purpose".to_string(),
+                    )]),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: Vec::new(),
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        match err {
+            EngineError::UnterminatedFenceInStoredBody {
+                ref section,
+                ref fence,
+                ref swallowed,
+                ..
+            } => {
+                assert_eq!(section, "identity");
+                assert_eq!(fence, "```");
+                // Every declared section after the open fence, not just the
+                // first: the fence's range reaches end of text, so it took
+                // all of them.
+                assert_eq!(
+                    swallowed,
+                    &vec![
+                        "Purpose".to_string(),
+                        "Specifies".to_string(),
+                        "Constraints".to_string(),
+                        "Rationale".to_string(),
+                    ]
+                );
+            }
+            other => panic!("expected UnterminatedFenceInStoredBody, got {other:?}"),
+        }
+        assert_eq!(err.code(), "UNTERMINATED_FENCE_IN_STORED_BODY");
+    }
+
+    #[test]
+    fn replacing_the_absorbing_section_is_the_way_out() {
+        // Criterion 6. The refusal above strands nothing: the caller lifts the
+        // swallowed content back out in the same call, and editing the file
+        // directly is forbidden by the workspace rule, so this route has to
+        // exist through the engine.
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, id) = engine_with_open_fence(&tmp);
+        let (actor, client) = cli_actor();
+        let hash = engine.get_entity(&id).unwrap().content_hash.clone();
+        let outcome = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: id.clone(),
+                    expected_hash: Some(hash),
+                    sections: IndexMap::from_iter([
+                        (
+                            "identity".to_string(),
+                            "intro\n\n```rust\nfn main() {}\n```".to_string(),
+                        ),
+                        ("purpose".to_string(), "the recovered purpose".to_string()),
+                    ]),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: Vec::new(),
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("a corrected body for the absorbing section is admitted");
+        assert!(
+            outcome
+                .modified_sections
+                .replaced
+                .contains(&"identity".to_string())
+        );
+        let fixed = engine.get_entity(&id).unwrap();
+        assert_eq!(
+            fixed.sections.get("purpose").map(String::as_str),
+            Some("the recovered purpose"),
+            "the swallowed section is a section again"
+        );
+        assert!(
+            crate::markdown::closing_fence_if_unterminated(fixed.sections.get("identity").unwrap())
+                .is_none()
+        );
+    }
+
+    /// The bypass the first version of this fix left open. The gate lived in
+    /// `update_entity`, so every OTHER verb that regenerates the file walked
+    /// past it and froze the absorption anyway. `relate` is the cheapest
+    /// witness; `rename` reaches the same render. The gate now sits at the
+    /// render itself, so this holds for any verb that writes bytes.
+    #[test]
+    fn every_verb_that_regenerates_the_file_is_gated_not_only_update() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, id) = engine_with_open_fence(&tmp);
+        let (actor, client) = cli_actor();
+        let before =
+            std::fs::read_to_string(tmp.path().join(&engine.get_entity(&id).unwrap().file_path))
+                .unwrap();
+        let hash = engine.get_entity(&id).unwrap().content_hash.clone();
+
+        let err = engine
+            .relate_entity(
+                RelateEntityArgs {
+                    source: id.clone(),
+                    expected_hash: Some(hash),
+                    rel_type: "USES".to_string(),
+                    target: crate::EntityId::new("specs", "some-target"),
+                    remove: false,
+                    description: None,
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("relate must not be able to freeze the absorption");
+        assert_eq!(err.code(), "UNTERMINATED_FENCE_IN_STORED_BODY");
+
+        let err = engine
+            .rename_entity(
+                crate::engine::RenameEntityArgs {
+                    id: id.clone(),
+                    new_title: "Renamed Fenced".to_string(),
+                    expected_hash: Some(engine.get_entity(&id).unwrap().content_hash.clone()),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect_err("rename must not be able to freeze the absorption either");
+        assert_eq!(err.code(), "UNTERMINATED_FENCE_IN_STORED_BODY");
+
+        // And nothing was written: a refused mutation leaves the file alone.
+        let after =
+            std::fs::read_to_string(tmp.path().join(&engine.get_entity(&id).unwrap().file_path))
+                .unwrap();
+        assert_eq!(before, after, "a refused write must not touch the file");
+    }
+
+    #[test]
+    fn an_entity_with_no_open_fence_updates_exactly_as_before() {
+        // Criterion 7 at the write tier: the new gate is invisible to every
+        // entity that does not carry the condition.
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Ordinary");
+        let (actor, client) = cli_actor();
+        engine
+            .update_entity(
+                UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: seeded.id.clone(),
+                    expected_hash: Some(seeded.content_hash.clone()),
+                    sections: IndexMap::from_iter([(
+                        "purpose".to_string(),
+                        "a new purpose".to_string(),
+                    )]),
+                    append_sections: IndexMap::new(),
+                    patch_sections: IndexMap::new(),
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: Vec::new(),
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("an ordinary update is untouched by the fence gate");
     }
 
     /// Item 02: `memstead_update` against a stub must surface a typed

@@ -3406,6 +3406,22 @@ pub struct ExportResult {
     /// Empty on the happy path (every mount is folder-backed).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped_mounts: Vec<SkippedMount>,
+    /// Entities the export declined to regenerate because their stored body
+    /// ends inside an unterminated code fence: writing them would seal the
+    /// sections that fence absorbed (04/02, criterion 5). Skipping one entity
+    /// is the non-stranding half of that refusal — the rest of the export
+    /// still lands, and the entity is named rather than silently passed over.
+    /// Empty on the happy path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused_entities: Vec<RefusedEntity>,
+}
+
+/// One entity `export_markdown` declined, with the condition that stopped it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RefusedEntity {
+    pub id: String,
+    pub reason: String,
+    pub detail: String,
 }
 
 /// One mount declined by `export_markdown` because the active
@@ -3436,6 +3452,14 @@ pub struct MemExportResult {
     /// export.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dangling_cross_mem_edges: Vec<crate::validator::DanglingCrossMemEdge>,
+    /// Ids in the exported slice whose stored body ends inside an
+    /// unterminated code fence. `install` refuses the archive for each one
+    /// (the repack would bury the sections that fence absorbed), so the
+    /// condition is surfaced here for the same reason the dangling edges
+    /// above are: the operator should see the install-time failure before
+    /// sharing, not after. One predicate, two postures.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unterminated_fence_entities: Vec<String>,
 }
 
 /// Result of `Engine::set_mem_version`. Carries the (mem,
