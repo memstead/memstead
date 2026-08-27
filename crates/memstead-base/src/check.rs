@@ -6,8 +6,9 @@
 //! absent from markdown and `content_hash`, and it produces no mem
 //! commit — checking-touches-nothing is what makes check-staleness
 //! computable. Records are append-only JSONL under the workspace
-//! store (`.memstead/state/checks/checks.jsonl`); a newer check
-//! supersedes older ones for state derivation but never erases them.
+//! store (`.memstead/state/checks/checks.jsonl`); a newer check of
+//! the same kind supersedes older ones for state derivation but
+//! never erases them (kinds derive independently, see [`CheckKind`]).
 //!
 //! Unlike the friction ledger next door, recording here is NOT
 //! best-effort: a check the ledger failed to persist must refuse —
@@ -27,6 +28,10 @@
 //! - hash differs         → `check_stale` (whatever the verdict was,
 //!   it no longer speaks to the current content — stated, never
 //!   silently carried forward)
+//!
+//! A `conformance` record additionally carries the mem's schema pin
+//! and goes stale when the pin moves ([`derive_state_pinned`]): the
+//! prose it judged against is no longer the prose in force.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

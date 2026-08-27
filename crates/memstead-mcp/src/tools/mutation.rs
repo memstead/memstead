@@ -377,7 +377,7 @@ pub struct RenameParams {
 
 /// Parameters for `memstead_check` — the check operation
 /// (agent-trust plan 14). Deliberately minimal: entity, verdict,
-/// optional method note, optional role.
+/// optional method note, optional role, optional kind.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CheckParams {
     #[schemars(description = "Full entity id (`mem--slug`) of the entity that was checked")]
