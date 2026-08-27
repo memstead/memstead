@@ -3713,6 +3713,13 @@ fn human_report_opens_with_verdict_and_actions() {
         text.contains("**Do next:**"),
         "the rollup carries top concrete actions: {text}"
     );
+    // The coverage rule (consistency-sweep 04/08, found by the plan's
+    // grade): human mode must carry the stamp the JSON envelope
+    // carries, or the human reader gets a verdict with no coverage.
+    assert!(
+        text.contains("**Verdict coverage:** examined=projection,anchors; not_examined="),
+        "human mode carries the verdict-coverage stamp: {text}"
+    );
 }
 
 /// The machine payload carries the pinned version marker, in the house style

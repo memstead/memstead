@@ -2257,10 +2257,18 @@ remove the sidecar and re-run",
                  verifies adjudicate them deterministically.\n"
             )
         };
+        // The coverage rule: the axes the rollup verdict answers for,
+        // in the human rendering too (the JSON envelope stamps above;
+        // memstead_base::ops::coverage).
+        let coverage_note = crate::coverage::PROJECTION_VERIFY
+            .axis_coverage()
+            .map(|cov| format!("\n**Verdict coverage:** {}\n", cov.wire_line()))
+            .unwrap_or_default();
         print_markdown(&format!(
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             render_full_resync_note(&outcome.full_resync),
             rendered.markdown,
+            coverage_note,
             backfill_note,
             baseline_note
         ));
