@@ -1133,6 +1133,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "schemas",
             "overview_mode",
             "_overview_mode",
+            // The coverage rule (04/08): stamped by the composer.
+            "_verdict_coverage",
             "budget",
             "total_entities",
             "hints",
@@ -1562,6 +1564,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "schema_ref",
         ],
         "memstead_health" => &[
+            // The coverage rule (04/08): the axes the verdict answers
+            // for, stamped into the payload.
+            "verdict_coverage",
             // The folder-mem ledger axis and the warning that makes it
             // necessary (04/04). This surface serves folder mems, so it is
             // the one where both matter.
