@@ -29,11 +29,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the repo-hygiene lane beside its sibling declared-set gates, with a
   `--self-test` whose fixtures run through the same walk the tree does, so a
   rule that stops working fails the self-test rather than passing it by
-  re-implementation. **What it does not do:** it reads shell statically, so it
-  cannot prove what a script reaches at runtime. It accounts for every call
-  site it can see and requires an unresolvable one to be declared; a network
-  tool outside its verb list, or a classifier reached through a variable, is
-  outside its reach and named as such in its own docstring.
+  re-implementation. Every command a shell subject invokes must also be
+  classified as local or as reaching a host, so a tool outside the verb list
+  (`ssh`, `rsync`, `aws`) fails as unclassified rather than passing unseen.
+  **What it does not do:** it reads shell statically, so it cannot prove what a
+  script reaches at runtime. A command or a classifier reached through a
+  variable or `eval`, and a `.mjs`/`.py` subject reaching a host through a
+  library call, are outside its reach and named as such in its own docstring.
 - **Semantic conformance is now a recordable, schema-bound check.** Every schema
   carries two halves: the structural half the write gate validates, and the
   semantic half (each type's `write_rules` / `writing_guidance` prose) that no
