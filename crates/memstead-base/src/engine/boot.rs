@@ -539,8 +539,17 @@ impl Engine {
         // backend serves the mem.
         let mem_router = build_mem_router_from_mounts(&mounted);
 
+        // The baseline a later `persist_state` diffs against: the roster
+        // as handed to this constructor. A mount quarantined before this
+        // point is deliberately absent from it, so the merge treats its
+        // on-disk record as "not ours to remove" and leaves it standing —
+        // degrade, never disappear.
+        let mounts_baseline =
+            std::cell::RefCell::new(mounted.iter().map(|m| m.mount.clone()).collect::<Vec<_>>());
+
         Ok(Self {
             mounts: mounted,
+            mounts_baseline,
             store,
             schemas,
             workspace_schemas,

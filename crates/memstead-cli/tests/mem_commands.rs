@@ -3377,7 +3377,42 @@ fn link_attaches_the_registry_mem_on_every_layout() {
     link(receiver.path());
     assert_linked(receiver.path(), cache.path());
 
-    // Layout 4: two writable mems, no mem named on the command line.
+    // Layout 4: a multi-mem FILESYSTEM workspace — two folder mems, each
+    // with its own `.memstead/config.json`, neither at the workspace
+    // root, and no mem-repo anywhere. This is the shape the old `link`
+    // could not see: its hardcoded `<workspace_root>/.memstead/config.json`
+    // read has nothing to find here.
+    let fs_multi = TempDir::new().unwrap();
+    {
+        let store = fs_multi.path().join(".memstead");
+        fs::create_dir_all(store.join("state")).unwrap();
+        fs::write(
+            store.join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mut wire = String::from("{\n  \"format\": \"memstead-mounts-3\",\n  \"mounts\": [\n");
+        for (i, name) in ["mem-one", "mem-two"].iter().enumerate() {
+            let dir = fs_multi.path().join(name);
+            fs::create_dir_all(dir.join(".memstead")).unwrap();
+            fs::write(
+                dir.join(".memstead").join("config.json"),
+                r#"{ "format": 1, "version": "0.1.0", "schema": "default@1.0.0" }"#,
+            )
+            .unwrap();
+            wire.push_str(&format!(
+                "    {{\n      \"mem\": \"{name}\",\n      \"schema\": \"default@1.0.0\",\n      \"storage\": {{ \"type\": \"folder\", \"path\": \"{name}\" }},\n      \"capability\": \"write\",\n      \"lifecycle\": \"eager\",\n      \"cross_linkable\": true\n    }}{}\n",
+                if i == 0 { "," } else { "" }
+            ));
+        }
+        wire.push_str("  ]\n}\n");
+        fs::write(store.join("state").join("mounts.json"), wire).unwrap();
+    }
+    link(fs_multi.path());
+    assert_linked(fs_multi.path(), cache.path());
+
+    // Layout 5: two writable mems in a mem-repo, no mem named on the
+    // command line.
     // A registry attachment binds to the workspace, not to a host mem,
     // so there is nothing to disambiguate — the call succeeds rather
     // than refusing for ambiguity.
@@ -3427,4 +3462,114 @@ fn link_rejects_a_malformed_reference() {
         .assert()
         .failure()
         .stdout(contains("INVALID_INPUT"));
+}
+
+/// Criterion 7: a declaration written by one process is not silently
+/// reverted by the next engine-mediated state write of a long-lived
+/// server. The in-process engine here stands in for the MCP server: it
+/// boots (taking its cached roster), a genuinely separate `memstead
+/// link` process registers the archive mount, and only then does the
+/// long-lived engine perform its own state write. Its write must
+/// publish its own changes without republishing its stale view over the
+/// sibling's registration.
+///
+/// A check run from a fresh command-line process cannot observe this —
+/// such a process re-reads the file first. The long-lived engine is the
+/// whole point of the test.
+#[test]
+fn a_long_lived_engine_state_write_keeps_a_sibling_processs_link() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = export_sender_archive(sender.path(), &sender_mem);
+    let registry = spawn_fixture_registry("fixture", "published", fs::read(&archive).unwrap());
+
+    // The long-lived process boots FIRST and holds its roster.
+    let long_lived = memstead_base::Engine::from_workspace_root(receiver.path())
+        .expect("receiver workspace boots");
+    assert!(
+        long_lived.mount("sender-mem").is_none(),
+        "the long-lived engine must boot before the link, or the test proves nothing"
+    );
+
+    // A separate process registers the attachment.
+    memstead()
+        .current_dir(receiver.path())
+        .args(["link", "fixture/published", "--registry", &registry.base])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+    let after_link =
+        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    assert!(
+        after_link.contains(r#""sender-mem""#),
+        "link must have registered the mount; got:\n{after_link}"
+    );
+
+    // The long-lived engine now performs its own state write, from the
+    // roster it cached at boot.
+    long_lived.persist_state().expect("state write succeeds");
+
+    let after_write =
+        fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    assert!(
+        after_write.contains(r#""sender-mem""#),
+        "the sibling process's attachment must survive the long-lived engine's \
+         state write; got:\n{after_write}"
+    );
+    assert!(
+        after_write.contains(r#""receiver-mem""#),
+        "the long-lived engine's own mount must still be there; got:\n{after_write}"
+    );
+
+    // And it is a real mount, not just a surviving line: a fresh boot
+    // serves the linked mem.
+    memstead()
+        .current_dir(receiver.path())
+        .args(["search", "Alpha"])
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success()
+        .stdout(contains("sender-mem"));
+}
+
+/// The other half of the same contract: the merge is a delta, not a
+/// union. A mount the long-lived engine itself unregisters is gone
+/// after its state write — a merge that blindly kept everything on disk
+/// would resurrect it.
+#[test]
+fn a_state_write_still_removes_what_the_writer_unregistered() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let sender_mem = make_sender_mem(sender.path());
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    let archive = export_sender_archive(sender.path(), &sender_mem);
+
+    memstead()
+        .current_dir(receiver.path())
+        .arg("install")
+        .arg(&archive)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .assert()
+        .success();
+
+    let mut engine = memstead_base::Engine::from_workspace_root(receiver.path())
+        .expect("receiver workspace boots");
+    engine
+        .unregister_read_mount("sender-mem")
+        .expect("unregister succeeds");
+    engine.persist_state().expect("state write succeeds");
+
+    let after = fs::read_to_string(receiver.path().join(".memstead/state/mounts.json")).unwrap();
+    assert!(
+        !after.contains(r#""sender-mem""#),
+        "an unregistered mount must not be resurrected by the merge; got:\n{after}"
+    );
 }

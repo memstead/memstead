@@ -269,6 +269,13 @@ pub struct Engine {
     /// context (e.g. [`Self::health`]'s outer-repo .gitignore
     /// check).
     workspace_root: Option<PathBuf>,
+    /// The mount roster as this engine last read or last wrote it —
+    /// the baseline [`Engine::persist_state`] diffs against so a state
+    /// write publishes THIS engine's changes without republishing its
+    /// whole cached view over whatever a sibling process has since
+    /// registered. Interior mutability because `persist_state` takes
+    /// `&self`; the engine is already `!Sync`.
+    mounts_baseline: std::cell::RefCell<Vec<crate::workspace::Mount>>,
     /// Typed warnings surfaced during mem load — drift findings
     /// like [`WarningHint::SuspiciousNestedPrefix`] and
     /// [`WarningHint::DuplicateSectionHeading`] that the loader

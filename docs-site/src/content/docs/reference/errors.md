@@ -86,7 +86,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `INVALID_VERSION` | CLI | `crates/memstead-cli/src/commands/publish.rs:144` |
 | `INVALID_WIKI_LINK_TARGET` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1290`<br>`crates/memstead-mcp/src/filesystem_server.rs:685`<br>`crates/memstead-mcp/src/server.rs:1358` |
 | `IO_ERROR` | CLI | `crates/memstead-cli/src/commands/export.rs:697`<br>`crates/memstead-cli/src/commands/export.rs:811`<br>`crates/memstead-cli/src/commands/schema.rs:276`<br>`crates/memstead-cli/src/commands/schema.rs:285`<br>`crates/memstead-cli/src/commands/schema.rs:310`<br>`crates/memstead-cli/src/commands/schema.rs:322`<br>`crates/memstead-cli/src/commands/schema.rs:1121`<br>`crates/memstead-cli/src/commands/schema.rs:1130` |
-| `LEGACY_WORKSPACE_LAYOUT` | engine | `crates/memstead-base/src/workspace_store.rs:161` |
+| `LEGACY_WORKSPACE_LAYOUT` | engine | `crates/memstead-base/src/workspace_store.rs:165` |
 | `LIMIT_CLAMPED` | engine | `crates/memstead-base/src/ops/mod.rs:1901` |
 | `LOCAL_DIVERGENCE` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1256`<br>`crates/memstead-mcp/src/server.rs:908` |
 | `LOCAL_INVALID_STATE` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1258`<br>`crates/memstead-mcp/src/server.rs:930` |
@@ -152,7 +152,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `PROJECTION_OP_ALREADY_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1510` |
 | `PROJECTION_QUARANTINED` | CLI | `crates/memstead-cli/src/commands/projection.rs:1075` |
 | `PROJECTION_SCOPE_UNINTERPRETABLE` | CLI | `crates/memstead-cli/src/commands/projection.rs:598`<br>`crates/memstead-cli/src/commands/projection.rs:1734` |
-| `PROJECTION_STORE_LEGACY` | engine | `crates/memstead-base/src/workspace_store.rs:162` |
+| `PROJECTION_STORE_LEGACY` | engine | `crates/memstead-base/src/workspace_store.rs:166` |
 | `PROJECTION_SYNC_NOT_ENABLED` | CLI | `crates/memstead-cli/src/commands/projection.rs:550` |
 | `PROJECTION_VERIFY_BACKFILL_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:2284` |
 | `PROJECTION_VERIFY_BASELINE_FAILED` | CLI | `crates/memstead-cli/src/commands/projection.rs:2296` |
@@ -211,7 +211,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `TITLE_TRIMMED` | engine | `crates/memstead-base/src/ops/mod.rs:1942` |
 | `TOOL_DISABLED` | MCP | `crates/memstead-mcp/src/server.rs:255` |
 | `UNDECLARED_RELATIONSHIP_OPEN` | engine | `crates/memstead-base/src/ops/mod.rs:1897` |
-| `UNKNOWN_BINDING_VERSION` | engine | `crates/memstead-base/src/workspace_store.rs:163` |
+| `UNKNOWN_BINDING_VERSION` | engine | `crates/memstead-base/src/workspace_store.rs:167` |
 | `UNKNOWN_ENTITY_TYPE` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1264`<br>`crates/memstead-cli/src/commands/type_cmd.rs:54`<br>`crates/memstead-mcp/src/filesystem_server.rs:331`<br>`crates/memstead-mcp/src/filesystem_server.rs:2068`<br>`crates/memstead-mcp/src/server.rs:983`<br>`crates/memstead-mcp/src/server.rs:2628` |
 | `UNKNOWN_FILTER_KEY` | engine | `crates/memstead-base/src/ops/mod.rs:1919` |
 | `UNKNOWN_INCLUDE_KEY` | engine | `crates/memstead-base/src/ops/mod.rs:1900` |
@@ -222,7 +222,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `UNKNOWN_REMOTE` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1255`<br>`crates/memstead-mcp/src/server.rs:899` |
 | `UNKNOWN_SECTION` | engine | `crates/memstead-base/src/runtime_validator.rs:240` |
 | `UNSUPPORTED_PARAM` | MCP | `crates/memstead-mcp/src/filesystem_server.rs:289` |
-| `UNSUPPORTED_WORKSPACE_SHAPE` | engine | `crates/memstead-base/src/workspace_store.rs:861` |
+| `UNSUPPORTED_WORKSPACE_SHAPE` | engine | `crates/memstead-base/src/workspace_store.rs:1023` |
 | `UNTERMINATED_FENCE` | engine | `crates/memstead-base/src/runtime_validator.rs:248` |
 | `UNTERMINATED_FENCE_IN_STORED_BODY` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1300`<br>`crates/memstead-mcp/src/filesystem_server.rs:316`<br>`crates/memstead-mcp/src/server.rs:791` |
 | `UPDATE_NOOP` | engine | `crates/memstead-base/src/ops/mod.rs:1904` |
@@ -230,8 +230,8 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `WORKSPACE_ALREADY_EXISTS_ABOVE` | CLI | `crates/memstead-cli/src/lib.rs:50` |
 | `WORKSPACE_ALREADY_INITIALISED` | CLI | `crates/memstead-cli/src/commands/quickstart.rs:633` |
 | `WORKSPACE_CONFIG_READ_FAILED` | CLI | `crates/memstead-cli/src/commands/workspace.rs:539` |
-| `WORKSPACE_NOT_INITIALISED` | engine, CLI | `crates/memstead-base/src/engine/error.rs:2257`<br>`crates/memstead-base/src/workspace_store.rs:157`<br>`crates/memstead-cli/src/commands/changes.rs:250`<br>`crates/memstead-cli/src/commands/publish.rs:497`<br>`crates/memstead-cli/src/setup.rs:41` |
-| `WORKSPACE_STORE_ERROR` | engine | `crates/memstead-base/src/workspace_store.rs:164` |
-| `WORKSPACE_STORE_FORMAT_MISMATCH` | engine | `crates/memstead-base/src/workspace_store.rs:160` |
-| `WORKSPACE_STORE_IO` | engine | `crates/memstead-base/src/workspace_store.rs:158` |
-| `WORKSPACE_STORE_PARSE` | engine | `crates/memstead-base/src/workspace_store.rs:159` |
+| `WORKSPACE_NOT_INITIALISED` | engine, CLI | `crates/memstead-base/src/engine/error.rs:2257`<br>`crates/memstead-base/src/workspace_store.rs:161`<br>`crates/memstead-cli/src/commands/changes.rs:250`<br>`crates/memstead-cli/src/commands/publish.rs:497`<br>`crates/memstead-cli/src/setup.rs:41` |
+| `WORKSPACE_STORE_ERROR` | engine | `crates/memstead-base/src/workspace_store.rs:168` |
+| `WORKSPACE_STORE_FORMAT_MISMATCH` | engine | `crates/memstead-base/src/workspace_store.rs:164` |
+| `WORKSPACE_STORE_IO` | engine | `crates/memstead-base/src/workspace_store.rs:162` |
+| `WORKSPACE_STORE_PARSE` | engine | `crates/memstead-base/src/workspace_store.rs:163` |

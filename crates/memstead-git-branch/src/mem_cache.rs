@@ -134,48 +134,16 @@ pub enum InstallError {
 
 /// Short content-address for an installed archive: the first 16 hex chars
 /// of `sha256(canonical_bytes)`. Used as the cache-file key
-/// (`<name>-<key>.mem`) and recorded in the `readMems` registration so
-/// the loader resolves the right file. 64 bits is ample collision
-/// resistance for a per-user cache; the same convention (truncated SHA-256
-/// hex) the entity content-hash uses.
+/// (`<name>-<key>.mem`) and carried on the archive mount so the loader
+/// resolves the right file. 64 bits is ample collision resistance for a
+/// per-user cache; the same convention (truncated SHA-256 hex) the
+/// entity content-hash uses.
 fn content_cache_key(canonical_bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(canonical_bytes);
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Install a sealed mem archive into the global cache and register
-/// it in a writable mem's config. Accepts the `.mem` archive format.
-///
-/// Two independent side effects, both idempotent:
-///
-/// 1. If the content-addressed cache file does not exist: run the submitted bytes
-///    through `validate_and_normalize_archive` and write the
-///    validator's `canonical_bytes` via a `.tmp` sibling + atomic
-///    rename. A mid-write crash leaves the temp file behind, never a
-///    partial cache file. Existing cache files are left untouched —
-///    overwrite-on-newer-version is an app-level update flow, not a
-///    CLI install semantic. Users who want to force-replace can delete
-///    the cache file first.
-/// 2. If the target mem's config does not already list this mem
-///    under `readMems`, add an entry with `source: { type: "local" }`.
-///    Existing entries are left untouched so re-running install never
-///    clobbers a `type: "url"` (etc.) source the user configured by hand.
-///
-/// The `target` parameter selects where the registration lands:
-/// - `TargetMem::Disk(mem_dir)` writes the updated config back to
-///   `<mem_dir>/.memstead/config.json` (legacy disk shape).
-/// - `TargetMem::MemRepo { workspace_root, mem_name }` commits the
-///   updated `configs/<mem_name>.json` to `mem-repo-git:main` (post-
-///   cutover shape).
-///
-/// `ctx` and `commit_message` are used only by the `MemRepo` arm —
-/// the disk arm rewrites the file via the existing config-update path
-/// which has its own (file-mtime-based) provenance trail.
-///
-/// Returns an `InstallOutcome` describing which effects fired. The
-/// authoritative mem name comes from the validator's approved
-/// config, not from the submitted filename or caller argument.
 /// Outcome of [`install_to_cache`] — the cache-side half of an
 /// install, with everything the caller needs to register the archive
 /// as a workspace-level read-only mount.

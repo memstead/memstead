@@ -544,10 +544,8 @@ pub fn commit_refs_at_gitdir(gitdir: &Path, specs: &[RefSpec]) -> Result<(), Mem
 /// unchanged — the engine's `&mut self` discipline keeps the gap
 /// academic in current single-process usage.
 ///
-/// Used by:
-/// - `memstead_install` to update an existing mem's `readMems` field
-///   (RMW the same blob).
-/// - `mem_cache::register_read_mem_in_mem_repo` (same RMW shape).
+/// Used by the engine's config writers to read-modify-write a mem's
+/// `config.json` blob (version, description, schema pin, sync state).
 ///
 /// Workspace-rooted convenience wrapper around [`commit_config_at_gitdir`].
 pub fn commit_config(

@@ -357,6 +357,9 @@ pub fn init_filesystem_mem_at(
 
     let memstead_dir = root.join(crate::WORKSPACE_STORE_DIR);
     std::fs::create_dir_all(memstead_dir.join("cache"))?;
+    // Seeded but unread since the tier-3 archive resolver was removed
+    // (2026-08-27). Kept because retiring it changes what `init` and
+    // `quickstart` produce, which is its own change.
     std::fs::create_dir_all(memstead_dir.join("memstead-io"))?;
     // Two-layer file adapter marker — `from_workspace_root` recognises a
     // workspace by `.memstead/workspace.toml`. One folder mount carries

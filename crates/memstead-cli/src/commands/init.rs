@@ -3,12 +3,17 @@
 //! filesystem-mem is the single-mem, history-free, filesystem-backed product
 //! surface. After `memstead init` the folder contains:
 //!
-//! - `.memstead/config.json` — workspace shape (mem name, schema pin,
-//!   empty deps list). Pinned via [`memstead_base::filesystem::config`].
+//! - `.memstead/config.json` — workspace shape (schema pin, version;
+//!   the mem name is path-derived). Pinned via
+//!   [`memstead_base::filesystem::config`].
 //! - `.memstead/cache/` — empty placeholder for any engine-managed cache
 //!   data the workspace acquires later (e.g. resolved schema bytes).
-//! - `.memstead/memstead-io/` — workspace-local archive scratch directory
-//!   seeded by the engine's mem initialiser.
+//! - `.memstead/memstead-io/` — empty directory the engine's mem
+//!   initialiser seeds. Nothing reads it: it held the cache the tier-3
+//!   archive resolver walked, and that resolver was removed on
+//!   2026-08-27 when registry attachments moved to the mount roster.
+//!   Retiring the directory is a change to what `init` creates and is
+//!   deliberately not folded in here.
 //!
 //! No `.gitignore` is written — filesystem-mem does not assume a surrounding
 //! git repo, and writing one would surprise users who *do* track the

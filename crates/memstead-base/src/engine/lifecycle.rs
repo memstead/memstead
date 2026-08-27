@@ -1091,13 +1091,68 @@ impl Engine {
         let Some(root) = self.workspace_root.as_ref() else {
             return Ok(());
         };
-        let workspace = crate::workspace::Workspace {
-            mounts: self.mounts.iter().map(|m| m.mount.clone()).collect(),
-            settings: self.settings.clone(),
-        };
+        use crate::workspace_store::WorkspaceStoreAdapter as _;
         let store = crate::FileWorkspaceStore::new();
-        crate::workspace_store::WorkspaceStoreAdapter::save_state(&store, root, &workspace)
-            .map_err(|e| EngineError::Mem(format!("persist workspace state: {e}")))
+        let map = |e: crate::workspace_store::StoreError| {
+            EngineError::Mem(format!("persist workspace state: {e}"))
+        };
+
+        // Publish THIS engine's changes, not its whole cached view. An
+        // earlier version serialized `self.mounts` wholesale, so a
+        // long-lived process silently dropped every mount a sibling
+        // process had registered since the cache was taken — the same
+        // condition the mem-config writers close by re-reading, reaching
+        // the workspace roster through the one writer they did not cover.
+        // The delta is computed against `mounts_baseline` (what this
+        // engine last read or wrote) rather than against a clock: a
+        // single-writer workspace has an identical on-disk roster, so
+        // the merge is a no-op there.
+        // The roster this engine speaks for is the attached mounts PLUS
+        // the quarantined ones: a quarantined mem's retained Mount is
+        // what lets `reload` re-attempt the attach after a repair, and
+        // dropping it from the file is how "degrade, never disappear"
+        // turns into "disappear". It is also the record the
+        // quarantine-repair path repins before asking for a state write.
+        let ours: Vec<crate::workspace::Mount> = self
+            .mounts
+            .iter()
+            .map(|m| m.mount.clone())
+            .chain(self.quarantined.iter().map(|q| q.mount.clone()))
+            .collect();
+
+        for attempt in 0..8 {
+            let expected = store.read_state_bytes(root).map_err(map)?;
+            let on_disk: Vec<crate::workspace::Mount> = match expected.as_deref() {
+                Some(bytes) => store.parse_state_bytes(root, bytes).map_err(map)?,
+                None => Vec::new(),
+            };
+
+            let merged = {
+                let baseline = self.mounts_baseline.borrow();
+                merge_mount_rosters(&baseline, &ours, on_disk)
+            };
+            let workspace = crate::workspace::Workspace {
+                mounts: merged,
+                settings: self.settings.clone(),
+            };
+
+            if store
+                .save_state_cas(root, &workspace, expected.as_deref())
+                .map_err(map)?
+            {
+                *self.mounts_baseline.borrow_mut() = ours;
+                return Ok(());
+            }
+            if attempt == 7 {
+                return Err(EngineError::Mem(
+                    "workspace state is being written concurrently: eight compare-and-set \
+                     attempts all lost the race. Retry, or find the writer that is not \
+                     backing off."
+                        .to_string(),
+                ));
+            }
+        }
+        unreachable!("the loop returns on success and on exhaustion")
     }
     /// Set a mem's schema pin — the conformance-gated schema-migration
     /// trigger. Behaviour per the pinned contract:
@@ -2873,6 +2928,56 @@ pub fn bump_backend_schema_pin(
         .write_mem_config(&new_bytes)
         .map_err(|e| EngineError::Mem(format!("write mem config for pin update: {e}")))?;
     Ok(Some(value))
+}
+
+/// Three-way merge of a mount roster for a state write.
+///
+/// `baseline` is what the writing engine last read or wrote, `ours` is
+/// its roster now, `on_disk` is what the file holds at this instant.
+/// The result keeps every on-disk mount the writer did not touch (so a
+/// sibling's registration survives), drops the ones the writer removed
+/// since its baseline, and applies the ones it added or changed.
+///
+/// A mount present in `ours` unchanged since the baseline does NOT
+/// overwrite the on-disk record of the same name: if a sibling edited
+/// it and we did not, the sibling's edit is the newer statement about
+/// it, and republishing our stale copy is exactly the loss this merge
+/// exists to prevent.
+fn merge_mount_rosters(
+    baseline: &[crate::workspace::Mount],
+    ours: &[crate::workspace::Mount],
+    on_disk: Vec<crate::workspace::Mount>,
+) -> Vec<crate::workspace::Mount> {
+    use std::collections::{HashMap, HashSet};
+
+    let ours_names: HashSet<&str> = ours.iter().map(|m| m.mem.as_str()).collect();
+    let removed_by_us: HashSet<&str> = baseline
+        .iter()
+        .map(|m| m.mem.as_str())
+        .filter(|n| !ours_names.contains(n))
+        .collect();
+    let baseline_by_name: HashMap<&str, &crate::workspace::Mount> =
+        baseline.iter().map(|m| (m.mem.as_str(), m)).collect();
+
+    let mut merged: Vec<crate::workspace::Mount> = on_disk
+        .into_iter()
+        .filter(|m| !removed_by_us.contains(m.mem.as_str()))
+        .collect();
+
+    for mount in ours {
+        let untouched_by_us = baseline_by_name
+            .get(mount.mem.as_str())
+            .is_some_and(|b| *b == mount);
+        match merged.iter_mut().find(|d| d.mem == mount.mem) {
+            Some(slot) => {
+                if !untouched_by_us {
+                    *slot = mount.clone();
+                }
+            }
+            None => merged.push(mount.clone()),
+        }
+    }
+    merged
 }
 
 #[cfg(test)]

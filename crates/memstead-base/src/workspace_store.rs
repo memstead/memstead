@@ -56,8 +56,12 @@ use crate::workspace::{
 };
 
 /// The engine-managed workspace store directory under the workspace
-/// root — `<workspace_root>/.memstead/` holds `workspace.toml`,
-/// `state/mounts.json`, and the tier-3 install cache. Distinct from
+/// root — `<workspace_root>/.memstead/` holds `workspace.toml` and
+/// `state/mounts.json`, the roster of everything this workspace
+/// mounts. (It also carries an empty `memstead-io/` directory the mem
+/// initialiser seeds; nothing reads it since the tier-3 archive
+/// resolver was removed on 2026-08-27, and retiring the directory
+/// itself is a separate change to what `init` creates.) Distinct from
 /// the per-mem meta directory
 /// ([`memstead_schema::MEM_META_DIR`], re-exported as
 /// `crate::mem::MEM_META_DIR`) and from the literal `".memstead/..."`
@@ -184,7 +188,39 @@ pub trait WorkspaceStoreAdapter: Send + Sync {
     /// share one file with operator content must not overwrite it
     /// here. The two-layer file adapter writes only
     /// `state/mounts.json`.
+    ///
+    /// Last-writer-wins. Prefer [`Self::save_state_cas`] whenever the
+    /// caller can name what it read: a long-lived process that dumps
+    /// its cached roster over this call drops every mount a sibling
+    /// process registered since the dump was taken.
     fn save_state(&self, workspace_root: &Path, workspace: &Workspace) -> Result<(), StoreError>;
+
+    /// Raw bytes of the engine-managed state file, or `None` when it
+    /// does not exist yet. The compare token for
+    /// [`Self::save_state_cas`].
+    fn read_state_bytes(&self, workspace_root: &Path) -> Result<Option<Vec<u8>>, StoreError>;
+
+    /// Parse state bytes previously returned by
+    /// [`Self::read_state_bytes`] into the mount roster they carry.
+    fn parse_state_bytes(
+        &self,
+        workspace_root: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Mount>, StoreError>;
+
+    /// Compare-and-set counterpart of [`Self::save_state`]: write only
+    /// when the on-disk state still equals `expected`, and report a
+    /// mismatch as `Ok(false)` rather than an error so the caller can
+    /// re-read, re-merge and retry. The check and the write are one
+    /// step under the adapter's own lock — a caller that reads, then
+    /// compares, then writes leaves exactly the window this exists to
+    /// close.
+    fn save_state_cas(
+        &self,
+        workspace_root: &Path,
+        workspace: &Workspace,
+        expected: Option<&[u8]>,
+    ) -> Result<bool, StoreError>;
 }
 
 /// Two-layer file adapter — the default. Reads
@@ -360,39 +396,7 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
         // file as "zero mounts".
         let mounts_path = Self::mounts_json_path(workspace_root);
         let mounts: Vec<Mount> = match std::fs::read_to_string(&mounts_path) {
-            Ok(text) => {
-                // Probe the format field before the full parse: a
-                // pre-rename file fails record deserialisation (old
-                // unit-noun field name), and the typed LegacyLayout
-                // refusal must win over that generic parse error.
-                let probe: MountsFormatProbe =
-                    serde_json::from_str(&text).map_err(|e| StoreError::Parse {
-                        path: mounts_path.clone(),
-                        message: e.to_string(),
-                    })?;
-                if MOUNTS_JSON_FORMAT_LEGACY.contains(&probe.format.as_str()) {
-                    return Err(StoreError::LegacyLayout {
-                        path: mounts_path,
-                        found: probe.format,
-                    });
-                }
-                if probe.format != MOUNTS_JSON_FORMAT_V3 {
-                    return Err(StoreError::FormatMismatch {
-                        path: mounts_path,
-                        expected: MOUNTS_JSON_FORMAT_V3.to_string(),
-                        found: probe.format,
-                    });
-                }
-                let doc: MountsJsonDoc =
-                    serde_json::from_str(&text).map_err(|e| StoreError::Parse {
-                        path: mounts_path.clone(),
-                        message: e.to_string(),
-                    })?;
-                doc.mounts
-                    .into_iter()
-                    .map(|w| w.into_mount(workspace_root))
-                    .collect()
-            }
+            Ok(text) => parse_mounts_text(&text, &mounts_path, workspace_root)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => {
                 return Err(StoreError::Io {
@@ -415,30 +419,188 @@ impl WorkspaceStoreAdapter for FileWorkspaceStore {
 
     fn save_state(&self, workspace_root: &Path, workspace: &Workspace) -> Result<(), StoreError> {
         let mounts_path = Self::mounts_json_path(workspace_root);
-        if let Some(parent) = mounts_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| StoreError::Io {
-                path: parent.to_path_buf(),
-                source: e,
-            })?;
-        }
-        let doc = MountsJsonDoc {
-            format: MOUNTS_JSON_FORMAT_V3.to_string(),
-            mounts: workspace
-                .mounts
-                .iter()
-                .map(|m| MountWire::from_mount(m, workspace_root))
-                .collect(),
-        };
-        let text = serde_json::to_string_pretty(&doc).map_err(|e| StoreError::Parse {
-            path: mounts_path.clone(),
-            message: e.to_string(),
-        })?;
+        ensure_state_dir(&mounts_path)?;
+        let text = render_mounts_text(workspace, workspace_root, &mounts_path)?;
         std::fs::write(&mounts_path, text).map_err(|e| StoreError::Io {
             path: mounts_path,
             source: e,
         })?;
         Ok(())
     }
+
+    fn read_state_bytes(&self, workspace_root: &Path) -> Result<Option<Vec<u8>>, StoreError> {
+        let mounts_path = Self::mounts_json_path(workspace_root);
+        match std::fs::read(&mounts_path) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(StoreError::Io {
+                path: mounts_path,
+                source: e,
+            }),
+        }
+    }
+
+    fn parse_state_bytes(
+        &self,
+        workspace_root: &Path,
+        bytes: &[u8],
+    ) -> Result<Vec<Mount>, StoreError> {
+        let mounts_path = Self::mounts_json_path(workspace_root);
+        let text = std::str::from_utf8(bytes).map_err(|e| StoreError::Parse {
+            path: mounts_path.clone(),
+            message: e.to_string(),
+        })?;
+        parse_mounts_text(text, &mounts_path, workspace_root)
+    }
+
+    fn save_state_cas(
+        &self,
+        workspace_root: &Path,
+        workspace: &Workspace,
+        expected: Option<&[u8]>,
+    ) -> Result<bool, StoreError> {
+        let mounts_path = Self::mounts_json_path(workspace_root);
+        ensure_state_dir(&mounts_path)?;
+        let text = render_mounts_text(workspace, workspace_root, &mounts_path)?;
+
+        // Same lockfile shape the folder backend's config compare-and-set
+        // uses: hold an exclusive marker, compare, write, release on every
+        // exit path. 50 x 10ms, then the holder is presumed dead — a state
+        // write is milliseconds of work, so half a second of contention is
+        // not a busy writer.
+        let lock_path = mounts_path.with_extension("json.lock");
+        let mut held = None;
+        for attempt in 0..50 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(f) => {
+                    held = Some(f);
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if attempt == 49 {
+                        let _ = std::fs::remove_file(&lock_path);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => {
+                    return Err(StoreError::Io {
+                        path: lock_path,
+                        source: e,
+                    });
+                }
+            }
+        }
+        let _lock = match held {
+            Some(f) => f,
+            None => std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&lock_path)
+                .map_err(|e| StoreError::Io {
+                    path: lock_path.clone(),
+                    source: e,
+                })?,
+        };
+        let release = || {
+            let _ = std::fs::remove_file(&lock_path);
+        };
+
+        let current = match std::fs::read(&mounts_path) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                release();
+                return Err(StoreError::Io {
+                    path: mounts_path,
+                    source: e,
+                });
+            }
+        };
+        if current.as_deref() != expected {
+            release();
+            return Ok(false);
+        }
+        let result = std::fs::write(&mounts_path, text).map_err(|e| StoreError::Io {
+            path: mounts_path,
+            source: e,
+        });
+        release();
+        result.map(|_| true)
+    }
+}
+
+/// Create the `state/` directory the mounts file lives in.
+fn ensure_state_dir(mounts_path: &Path) -> Result<(), StoreError> {
+    if let Some(parent) = mounts_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| StoreError::Io {
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
+    }
+    Ok(())
+}
+
+/// Render a workspace's mount roster as `mounts.json` text.
+fn render_mounts_text(
+    workspace: &Workspace,
+    workspace_root: &Path,
+    mounts_path: &Path,
+) -> Result<String, StoreError> {
+    let doc = MountsJsonDoc {
+        format: MOUNTS_JSON_FORMAT_V3.to_string(),
+        mounts: workspace
+            .mounts
+            .iter()
+            .map(|m| MountWire::from_mount(m, workspace_root))
+            .collect(),
+    };
+    serde_json::to_string_pretty(&doc).map_err(|e| StoreError::Parse {
+        path: mounts_path.to_path_buf(),
+        message: e.to_string(),
+    })
+}
+
+/// Parse `mounts.json` text into the roster it carries, enforcing the
+/// format pin. Probes the format field before the full parse: a
+/// pre-rename file fails record deserialisation (old unit-noun field
+/// name), and the typed `LegacyLayout` refusal must win over that
+/// generic parse error.
+fn parse_mounts_text(
+    text: &str,
+    mounts_path: &Path,
+    workspace_root: &Path,
+) -> Result<Vec<Mount>, StoreError> {
+    let probe: MountsFormatProbe = serde_json::from_str(text).map_err(|e| StoreError::Parse {
+        path: mounts_path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    if MOUNTS_JSON_FORMAT_LEGACY.contains(&probe.format.as_str()) {
+        return Err(StoreError::LegacyLayout {
+            path: mounts_path.to_path_buf(),
+            found: probe.format,
+        });
+    }
+    if probe.format != MOUNTS_JSON_FORMAT_V3 {
+        return Err(StoreError::FormatMismatch {
+            path: mounts_path.to_path_buf(),
+            expected: MOUNTS_JSON_FORMAT_V3.to_string(),
+            found: probe.format,
+        });
+    }
+    let doc: MountsJsonDoc = serde_json::from_str(text).map_err(|e| StoreError::Parse {
+        path: mounts_path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    Ok(doc
+        .mounts
+        .into_iter()
+        .map(|w| w.into_mount(workspace_root))
+        .collect())
 }
 
 /// On-disk shape of `workspace.toml`. Operator-edited; engine never

@@ -128,8 +128,10 @@ pub struct CommunityOverride {
     pub seed: Option<u32>,
 }
 
-/// One entry in `MemConfig.read_mems` — a read-only sealed mem
-/// archive attached to the primary mem as reference material.
+/// One entry in the legacy `MemConfig.read_mems` map — a read-only
+/// sealed mem archive that a pre-2026-08 install attached to a host
+/// mem. Retained only for the one-way boot migration into the mount
+/// roster; no live path writes one.
 ///
 /// The engine resolves each entry to a cache file: when `cache_key` is
 /// present, `<mem_cache_dir>/<name>-<cache_key>.mem` (content-addressed
@@ -436,11 +438,15 @@ pub struct MemConfig {
     pub publish: Option<PublishConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
-    /// Read-only sealed-archive mems attached to this mem as reference
-    /// material. Key is the mem name (matches the archive's
-    /// config name). Engine resolves each entry to
-    /// `<mem_cache_dir>/<name>.mem` at init time. An empty or omitted
-    /// map means no attached mems — a graph with no reference material.
+    /// **Legacy since 2026-08.** A read-only sealed-archive mem attaches
+    /// to the WORKSPACE mount roster (`.memstead/state/mounts.json`), not
+    /// to a host mem's config. Nothing writes this field any more; it
+    /// survives on the struct so the one-way boot migration
+    /// (`migrate_legacy_read_mems`) can recognise a pre-cutover
+    /// registration, turn it into a mount, and strip the key. An empty or
+    /// omitted map is the healthy state.
+    ///
+    /// Key is the mem name (matching the archive's config name).
     ///
     /// `BTreeMap` (not `HashMap`) so iteration and serialization order
     /// are stable — reproducible log output and diff-friendly config on

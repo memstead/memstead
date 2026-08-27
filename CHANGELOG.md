@@ -87,6 +87,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   cache resolver is removed. `link` is a mem-repo-feature command now, like
   `install` and `uninstall`; the lean `--no-default-features` build no longer
   carries it.
+- **A workspace state write no longer republishes a stale roster over a sibling
+  process's registration.** `Engine::persist_state` serialized its cached mount
+  list wholesale, so a long-lived process (the MCP server) silently dropped
+  every mount another process had registered since that cache was taken: run
+  `memstead link` or `memstead install` beside a running server and the
+  attachment vanished at the server's next state write, with no warning. The
+  write is now a three-way merge against the roster this engine last read or
+  wrote, committed through a compare-and-set on `state/mounts.json` (the same
+  lockfile shape the folder backend's config compare-and-set uses) with a
+  bounded retry, so a mount the writer never touched keeps whatever the file
+  says and a mount the writer removed still goes. This is the condition the
+  mem-config writers already close by re-reading, reaching the one writer that
+  fix did not cover. Quarantined mems are now part of what a state write
+  publishes, so a quarantined mount's retained record survives instead of being
+  dropped from the file.
 - **`DANGLING_LINK` split into the three conditions it was fusing.** One code
   covered a body link whose target has no file, a body link to a written
   entity that the referrer does not relate to, and a relationship row naming
