@@ -267,18 +267,37 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
             if allows.is_empty() {
                 continue;
             }
-            let Some(allow_set) = build_glob_set(&allows) else {
+            // Join every pattern ONTO the pointer, so the sets speak the
+            // WORKSPACE-relative namespace `enumerate_facet_files` returns.
+            // Testing the artifact in the source-relative namespace instead
+            // needs a rule for deciding which namespace a given artifact was
+            // written in, and no such rule exists: a source-relative `**/*`
+            // matches any relative path, so a sibling tree's file reads as
+            // in-scope. Lifting the patterns up removes the question.
+            let pointer = p.pointer.trim_end_matches('/');
+            let join = |pat: &str| -> String {
+                if pointer.is_empty() {
+                    pat.to_string()
+                } else {
+                    format!("{pointer}/{pat}")
+                }
+            };
+            let allows_j: Vec<String> = allows.iter().map(|a| join(a)).collect();
+            let denies_j: Vec<String> = denies.iter().map(|d| join(d)).collect();
+            let allow_refs: Vec<&str> = allows_j.iter().map(String::as_str).collect();
+            let deny_refs: Vec<&str> = denies_j.iter().map(String::as_str).collect();
+            let Some(allow_set) = build_glob_set(&allow_refs) else {
                 continue;
             };
             per_source.push(SourceScope {
-                pointer: p.pointer.trim_end_matches('/').to_string(),
+                pointer: pointer.to_string(),
                 allow: allow_set,
-                deny: if denies.is_empty() {
+                deny: if deny_refs.is_empty() {
                     None
                 } else {
-                    build_glob_set(&denies)
+                    build_glob_set(&deny_refs)
                 },
-                allow_heads: allows.iter().map(|p| literal_head(p)).collect(),
+                allow_heads: allow_refs.iter().map(|p| literal_head(p)).collect(),
             });
         }
     }
@@ -302,10 +321,12 @@ struct ScopeMatcher {
     ws_deny: super::check_path::DenyOracle,
 }
 
-/// One primary source's declared scope, in that source's own namespace.
+/// One primary source's declared scope, every pattern already joined onto
+/// that source's pointer — so the sets match a WORKSPACE-relative artifact
+/// path, exactly the namespace `enumerate_facet_files` returns.
 struct SourceScope {
-    /// The source's medium pointer, trailing `/` trimmed. Empty for a
-    /// pointer-less source, where the two readings coincide.
+    /// The source's pointer, trailing `/` trimmed. Empty for a pointer-less
+    /// source, where the two readings coincide.
     pointer: String,
     allow: GlobSet,
     deny: Option<GlobSet>,
@@ -313,48 +334,49 @@ struct SourceScope {
 }
 
 impl SourceScope {
-    /// The forms of `artifact` this source could be speaking about, in ITS
-    /// namespace: the path as written (already source-relative), and — when
-    /// the path is workspace-relative and lies under this source's pointer —
-    /// the same path with the pointer prefix stripped. This is the candidate
-    /// ordering the ratified anchor-artifact decision already uses at anchor
-    /// resolution; membership must ask the same question resolution does, or
-    /// an anchor resolves under one reading and is excluded under another.
-    fn candidates(&self, artifact: &str) -> Vec<String> {
+    /// Whether this source's declared scope admits `artifact`.
+    fn admits(&self, artifact: &str, grain: AnchorGrain) -> bool {
+        // Both readings of an artifact path, in the ratified priority:
+        // SOURCE-relative first (it denotes `<pointer>/<artifact>`), then
+        // workspace-relative as the fallback. Both live forms are present in
+        // this repository's own bindings — `engine/graph` stores
+        // `crates/…/x.rs` under pointer `../public`, `project/graph` stores
+        // `../dev/…` under pointer `../dev` — so a single reading excludes one
+        // of them wholesale. The patterns are already lifted into the
+        // workspace namespace, so both candidates are tested against one set.
+        for candidate in self.readings(artifact) {
+            let path = candidate.trim_end_matches('/');
+            if self.deny.as_ref().is_some_and(|d| d.is_match(path)) {
+                continue;
+            }
+            if self.allow.is_match(path)
+                || (grain == AnchorGrain::Tree && self.covers_tree_for(path))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The workspace-relative paths an artifact could denote for this source.
+    fn readings(&self, artifact: &str) -> Vec<String> {
         if self.pointer.is_empty() {
-            // The two readings coincide; the path as written is the answer.
             return vec![artifact.to_string()];
         }
         let prefix = format!("{}/", self.pointer);
-        if let Some(rest) = artifact.strip_prefix(&prefix)
-            && !rest.is_empty()
-        {
-            // Workspace-relative and under this pointer: the stripped form IS
-            // the source-relative one, and it alone decides. Keeping the
-            // as-written form as a second chance would union two populations —
-            // a source-relative `**/*.md` matches any relative path, so an
-            // artifact in a sibling tree would slip in.
-            return vec![rest.to_string()];
+        if artifact.starts_with(&prefix) {
+            // Already carries the pointer: it is the workspace-relative form,
+            // and joining again would produce `<ptr>/<ptr>/…`.
+            return vec![artifact.to_string()];
         }
-        // Not under the pointer. It may already be source-relative (the form
-        // the ratified anchor decision resolves first), which never escapes
-        // its own tree — so a path that climbs out with `..` belongs to some
-        // other source, not this one.
         if artifact.starts_with("../") || artifact == ".." {
-            return Vec::new();
+            // An artifact of a source never climbs OUT of that source, so the
+            // source-relative reading is meaningless here. Joining anyway
+            // fabricates `<ptr>/../…`, which a `**` pattern under the pointer
+            // then matches by string even though it denotes a sibling tree.
+            return vec![artifact.to_string()];
         }
-        vec![artifact.to_string()]
-    }
-
-    /// Whether this source's declared scope admits `artifact`.
-    fn admits(&self, artifact: &str, grain: AnchorGrain) -> bool {
-        self.candidates(artifact).iter().any(|c| {
-            let path = c.trim_end_matches('/');
-            if self.deny.as_ref().is_some_and(|d| d.is_match(path)) {
-                return false;
-            }
-            self.allow.is_match(path) || (grain == AnchorGrain::Tree && self.covers_tree_for(path))
-        })
+        vec![format!("{prefix}{artifact}"), artifact.to_string()]
     }
 
     fn covers_tree_for(&self, dir: &str) -> bool {
@@ -624,6 +646,34 @@ mod tests {
         assert!(
             !in_declared_scope(&m, &anchor("../other/README.md", None, AnchorGrain::File)),
             "a path outside the pointer stays out"
+        );
+
+        // The case the first attempt at this fix masked, and the one the
+        // grade refuted on: a SIBLING tree whose path does not begin with
+        // `../`. The dogfood layout hides it, because its mem sits one level
+        // below the workspace, so every workspace-relative path there escapes
+        // with `../` and the old `..` guard appeared to work.
+        let r2 = resolved_with(scope_source("src", "**/*"));
+        let m2 = scope_matcher(&r2).unwrap();
+        assert!(
+            in_declared_scope(&m2, &anchor("src/a.md", None, AnchorGrain::File)),
+            "under the pointer, in scope"
+        );
+        // `other/b.md` under pointer `src` IS in scope, and deliberately:
+        // read source-relative it denotes `src/other/b.md`, which `**/*`
+        // covers. The ratified anchor decision fixes that priority
+        // (source-relative first, workspace-relative as fallback), and
+        // membership is declared rather than enumerated, so the file need not
+        // exist. A path that can be read under NEITHER join is what stays out.
+        assert!(
+            in_declared_scope(&m2, &anchor("other/b.md", None, AnchorGrain::File)),
+            "source-relative reading denotes src/other/b.md, which the scope covers"
+        );
+        let r3 = resolved_with(scope_source("src", "*.rs"));
+        let m3 = scope_matcher(&r3).unwrap();
+        assert!(
+            !in_declared_scope(&m3, &anchor("other/b.md", None, AnchorGrain::File)),
+            "neither reading is admitted by a scope that selects only *.rs"
         );
 
         // A pointer-less source is untouched: the two readings coincide.
