@@ -167,6 +167,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     let mut result = json!({
+        // The coverage rule (memstead_base::ops::coverage): the axes
+        // this surface's verdict answers for, straight from the CLI's
+        // registry row so output and declaration cannot diverge.
+        "verdict_coverage": crate::coverage::HEALTH
+            .axis_coverage()
+            .expect("health is a verdict surface")
+            .wire_line(),
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),
@@ -528,6 +535,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let mut lines = Vec::new();
     lines.push("# Graph health".to_string());
     lines.push(String::new());
+    // The coverage rule: the axes the strict verdict answers for, in
+    // the output itself (memstead_base::ops::coverage).
+    if let Some(cov) = crate::coverage::HEALTH.axis_coverage() {
+        lines.push(format!("**Verdict coverage:** {}", cov.wire_line()));
+        lines.push(String::new());
+    }
     lines.push(format!("- Entities: {real_count}"));
     if orphans_by_schema.len() > 1 {
         // Attribute the orphan headline per schema so by-design isolates

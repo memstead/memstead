@@ -31,82 +31,20 @@ const VERIFY_SCOPE: &str = "the binding-scoped fidelity report answers for one \
 #[cfg(feature = "mem-repo")]
 const DUMP_SCOPE: &str = "the dump is a configuration and roster snapshot; graph \
      axes belong to health";
-const OVERVIEW_SCOPE: &str = "overview is a descriptive composition; its only \
-     all-clear claim is that the roster it renders is complete and its mounts serve";
 
 /// `memstead health` under `--strict`: exit 0 is the clean verdict,
 /// and it answers exactly for the promoted set, always-on
 /// configuration and mount axes plus the include-gated promotions.
 /// Everything advisory by the strict contract is excluded by name.
-const HEALTH: SurfaceCoverage = SurfaceCoverage {
+pub const HEALTH: SurfaceCoverage = SurfaceCoverage {
     surface: "health",
-    disposition: CoverageDisposition::Verdict(AxisCoverage {
-        examined: &[
-            "dangling_links",
-            "missing_required_outgoing",
-            "constraints",
-            "signals",
-            "integrity",
-            "config",
-            "mounts",
-        ],
-        excluded: &[
-            (
-                "orphans",
-                "descriptive list; strict polices orphan stubs through the integrity findings",
-            ),
-            (
-                "stubs",
-                "descriptive list; strict polices orphan stubs through the integrity findings",
-            ),
-            (
-                "most_connected",
-                "descriptive ranking with no pass/fail semantics",
-            ),
-            (
-                "missing_fields",
-                "advisory count, outside the strict contract by design",
-            ),
-            (
-                "stale",
-                "advisory freshness, outside the strict contract by design",
-            ),
-            (
-                "tags",
-                "descriptive distribution with no pass/fail semantics",
-            ),
-            (
-                "labelling",
-                "advisory labelling audit, outside the strict contract by design",
-            ),
-            (
-                "conformance",
-                "reported per entity beside the verdict; deliberately not promoted into strict",
-            ),
-            (
-                "anchors",
-                "drifted anchors stay advisory by the strict contract; verify-anchors is the drift statement",
-            ),
-            ("friction", "descriptive ledger counts"),
-            ("open_questions", "descriptive listing of open questions"),
-            (
-                "stale_derivations",
-                "advisory freshness of derived artifacts",
-            ),
-            (
-                "checks",
-                "check states are derived views; the verdicts in them belong to their recording callers",
-            ),
-            ("ledger", "descriptive view of the check ledger"),
-            (
-                "projection",
-                "projection fidelity is answered by status and projection verify",
-            ),
-        ],
-    }),
+    // Shared content (memstead_base::ops::coverage::HEALTH_COVERAGE):
+    // the same declaration the MCP composer stamps, so the CLI's
+    // strict verdict and the composed report cannot diverge.
+    disposition: CoverageDisposition::Verdict(memstead_base::ops::coverage::HEALTH_COVERAGE),
 };
 
-const STATUS: SurfaceCoverage = SurfaceCoverage {
+pub const STATUS: SurfaceCoverage = SurfaceCoverage {
     surface: "status",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["projection"],
@@ -138,37 +76,13 @@ const STATUS: SurfaceCoverage = SurfaceCoverage {
 
 const OVERVIEW: SurfaceCoverage = SurfaceCoverage {
     surface: "overview",
-    disposition: CoverageDisposition::Verdict(AxisCoverage {
-        examined: &["mounts", "config"],
-        excluded: &[
-            ("orphans", OVERVIEW_SCOPE),
-            ("stubs", OVERVIEW_SCOPE),
-            ("most_connected", OVERVIEW_SCOPE),
-            ("missing_fields", OVERVIEW_SCOPE),
-            ("stale", OVERVIEW_SCOPE),
-            (
-                "dangling_links",
-                "rendered on request as a listing; the verdict over them is health's",
-            ),
-            ("tags", OVERVIEW_SCOPE),
-            ("missing_required_outgoing", OVERVIEW_SCOPE),
-            ("constraints", OVERVIEW_SCOPE),
-            ("signals", OVERVIEW_SCOPE),
-            ("labelling", OVERVIEW_SCOPE),
-            ("conformance", OVERVIEW_SCOPE),
-            ("integrity", OVERVIEW_SCOPE),
-            ("anchors", OVERVIEW_SCOPE),
-            ("friction", OVERVIEW_SCOPE),
-            ("open_questions", OVERVIEW_SCOPE),
-            ("stale_derivations", OVERVIEW_SCOPE),
-            ("checks", OVERVIEW_SCOPE),
-            ("ledger", OVERVIEW_SCOPE),
-            ("projection", OVERVIEW_SCOPE),
-        ],
-    }),
+    // The content is the shared constant the composer itself stamps
+    // into the overview frontmatter, so registry and output cannot
+    // diverge.
+    disposition: CoverageDisposition::Verdict(memstead_base::ops::coverage::OVERVIEW_COVERAGE),
 };
 
-const VERIFY_ANCHORS: SurfaceCoverage = SurfaceCoverage {
+pub const VERIFY_ANCHORS: SurfaceCoverage = SurfaceCoverage {
     surface: "verify-anchors",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["anchors"],
@@ -198,7 +112,7 @@ const VERIFY_ANCHORS: SurfaceCoverage = SurfaceCoverage {
     }),
 };
 
-const PROJECTION_VERIFY: SurfaceCoverage = SurfaceCoverage {
+pub const PROJECTION_VERIFY: SurfaceCoverage = SurfaceCoverage {
     surface: "projection verify",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["projection", "anchors"],
@@ -228,7 +142,7 @@ const PROJECTION_VERIFY: SurfaceCoverage = SurfaceCoverage {
 };
 
 #[cfg(feature = "mem-repo")]
-const WORKSPACE_DUMP: SurfaceCoverage = SurfaceCoverage {
+pub const WORKSPACE_DUMP: SurfaceCoverage = SurfaceCoverage {
     surface: "workspace dump",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["mounts", "config"],

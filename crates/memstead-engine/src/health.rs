@@ -346,6 +346,11 @@ pub fn compose_health(
 
     let mut result = serde_json::json!({
         "mem": mem_filter,
+        // The coverage rule (memstead_base::ops::coverage): the axes
+        // this report's defect statement answers for, stamped by the
+        // composer itself so every consumer of the composition
+        // carries the same declaration.
+        "verdict_coverage": memstead_base::ops::coverage::HEALTH_COVERAGE.wire_line(),
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),

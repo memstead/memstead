@@ -1267,6 +1267,13 @@ pub fn compose_overview(
     if let Some(ref s) = policy_flow {
         extra_frontmatter.push(("_policy".to_string(), s.clone()));
     }
+    // The coverage rule (ops::coverage): the overview's only all-clear
+    // claim is the roster, and the stamp says so in the output itself,
+    // on every surface that renders this composition.
+    extra_frontmatter.push((
+        "_verdict_coverage".to_string(),
+        crate::ops::coverage::OVERVIEW_COVERAGE.wire_line(),
+    ));
 
     Ok(OverviewOutput {
         markdown: md,

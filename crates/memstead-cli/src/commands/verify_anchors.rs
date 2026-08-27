@@ -83,6 +83,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             })
         });
         print_json(&json!({
+            // The coverage rule (memstead_base::ops::coverage): this
+            // surface answers for anchors alone and says so.
+            "verdict_coverage": crate::coverage::VERIFY_ANCHORS
+                .axis_coverage()
+                .expect("verify-anchors is a verdict surface")
+                .wire_line(),
             "mem": report.mem,
             "resolved": report.resolved,
             "drifted": report.drifted,
@@ -113,6 +119,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             report.dangling,
             report.population_statement(),
         );
+        // The coverage rule: the one axis this verdict answers for,
+        // in the output itself (memstead_base::ops::coverage).
+        if let Some(cov) = crate::coverage::VERIFY_ANCHORS.axis_coverage() {
+            out.push_str(&format!("- Verdict coverage: {}\n", cov.wire_line()));
+        }
         // Stated both ways (consistency-sweep 03/02): a dangling count of
         // zero means "reconciled, none found" only when the reconciliation
         // ran, and four clean counts over a mem whose entity end was never

@@ -1937,10 +1937,24 @@ impl FilesystemMcpServer {
             if wants_labelling {
                 value["labelling"] = engine.health_labelling_axis(mem_scope);
             }
+            if let Some(cov) = crate::coverage::HEALTH.axis_coverage() {
+                value["verdict_coverage"] = serde_json::json!(cov.wire_line());
+            }
             return json_response(&value);
         }
 
-        json_response(&health)
+        // The coverage rule (memstead_base::ops::coverage): the axes
+        // this surface's defect statement answers for ride the
+        // payload on both exits, straight from the registry row the
+        // gate test holds.
+        let mut value = match serde_json::to_value(&health) {
+            Ok(v) => v,
+            Err(e) => return tool_error("INTERNAL", &format!("serialize health: {e}")),
+        };
+        if let Some(cov) = crate::coverage::HEALTH.axis_coverage() {
+            value["verdict_coverage"] = serde_json::json!(cov.wire_line());
+        }
+        json_response(&value)
     }
 
     #[tool(

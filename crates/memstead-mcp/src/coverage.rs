@@ -9,97 +9,32 @@
 //! separate registries because their rosters differ, and each is
 //! held against its own router's walk.
 
-use memstead_base::ops::coverage::{AxisCoverage, CoverageDisposition, SurfaceCoverage};
+use memstead_base::ops::coverage::{CoverageDisposition, SurfaceCoverage};
 
 const READS_DATA: &str = "returns data, not a verdict; an empty result is an empty \
      result, never an all-clear";
 const MUTATION: &str = "mutation surface: reports what it did, never an all-clear \
      over unexamined state";
 
-const HEALTH_SCOPE: &str = "descriptive or advisory in the health report; the \
-     report's defect statement does not answer for this axis";
-const OVERVIEW_SCOPE: &str = "overview is a descriptive composition; its only \
-     all-clear claim is that the roster it renders is complete and its mounts serve";
-
 /// `memstead_health`: the report treats these axes' findings as
 /// defects (warnings, integrity findings, configuration and mount
 /// conditions), so an empty defect statement reads as an all-clear
 /// exactly over them. Everything descriptive or advisory is excluded
 /// by name.
-const HEALTH: SurfaceCoverage = SurfaceCoverage {
+pub const HEALTH: SurfaceCoverage = SurfaceCoverage {
     surface: "memstead_health",
-    disposition: CoverageDisposition::Verdict(AxisCoverage {
-        examined: &[
-            "dangling_links",
-            "missing_required_outgoing",
-            "constraints",
-            "signals",
-            "integrity",
-            "config",
-            "mounts",
-        ],
-        excluded: &[
-            ("orphans", HEALTH_SCOPE),
-            ("stubs", HEALTH_SCOPE),
-            ("most_connected", HEALTH_SCOPE),
-            ("missing_fields", HEALTH_SCOPE),
-            ("stale", HEALTH_SCOPE),
-            ("tags", HEALTH_SCOPE),
-            ("labelling", HEALTH_SCOPE),
-            (
-                "conformance",
-                "reported per entity beside the defect statement, never folded into it",
-            ),
-            (
-                "anchors",
-                "drifted anchors stay advisory; the verify surfaces carry the drift statement",
-            ),
-            ("friction", HEALTH_SCOPE),
-            ("open_questions", HEALTH_SCOPE),
-            ("stale_derivations", HEALTH_SCOPE),
-            (
-                "checks",
-                "check states are derived views; the verdicts in them belong to their recording callers",
-            ),
-            ("ledger", HEALTH_SCOPE),
-            (
-                "projection",
-                "projection fidelity is answered by the CLI status and projection verify surfaces",
-            ),
-        ],
-    }),
+    // Shared content (memstead_base::ops::coverage::HEALTH_COVERAGE):
+    // the composer stamps the same declaration into the payload, so
+    // registry and output cannot diverge.
+    disposition: CoverageDisposition::Verdict(memstead_base::ops::coverage::HEALTH_COVERAGE),
 };
 
 const OVERVIEW: SurfaceCoverage = SurfaceCoverage {
     surface: "memstead_overview",
-    disposition: CoverageDisposition::Verdict(AxisCoverage {
-        examined: &["mounts", "config"],
-        excluded: &[
-            ("orphans", OVERVIEW_SCOPE),
-            ("stubs", OVERVIEW_SCOPE),
-            ("most_connected", OVERVIEW_SCOPE),
-            ("missing_fields", OVERVIEW_SCOPE),
-            ("stale", OVERVIEW_SCOPE),
-            (
-                "dangling_links",
-                "rendered on request as a listing; the verdict over them is health's",
-            ),
-            ("tags", OVERVIEW_SCOPE),
-            ("missing_required_outgoing", OVERVIEW_SCOPE),
-            ("constraints", OVERVIEW_SCOPE),
-            ("signals", OVERVIEW_SCOPE),
-            ("labelling", OVERVIEW_SCOPE),
-            ("conformance", OVERVIEW_SCOPE),
-            ("integrity", OVERVIEW_SCOPE),
-            ("anchors", OVERVIEW_SCOPE),
-            ("friction", OVERVIEW_SCOPE),
-            ("open_questions", OVERVIEW_SCOPE),
-            ("stale_derivations", OVERVIEW_SCOPE),
-            ("checks", OVERVIEW_SCOPE),
-            ("ledger", OVERVIEW_SCOPE),
-            ("projection", OVERVIEW_SCOPE),
-        ],
-    }),
+    // The content is the shared constant the composer itself stamps
+    // into the overview frontmatter, so registry and output cannot
+    // diverge.
+    disposition: CoverageDisposition::Verdict(memstead_base::ops::coverage::OVERVIEW_COVERAGE),
 };
 
 fn no_verdict(surface: &'static str, reason: &'static str) -> SurfaceCoverage {

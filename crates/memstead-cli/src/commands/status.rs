@@ -31,6 +31,9 @@ struct TypeCount<'a> {
 /// and freshness; the graph counts and `projections` are the drill-down.
 #[derive(Serialize)]
 struct StatusPayload<'a> {
+    /// The coverage rule (memstead_base::ops::coverage): the axes the
+    /// rollup verdict answers for, from the CLI's registry row.
+    verdict_coverage: String,
     rollup: Rollup,
     mems: Vec<MemDurability>,
     total_nodes: usize,
@@ -156,6 +159,10 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
 
     if ctx.json {
         let payload = StatusPayload {
+            verdict_coverage: crate::coverage::STATUS
+                .axis_coverage()
+                .expect("status is a verdict surface")
+                .wire_line(),
             rollup,
             mems,
             total_nodes: total,
@@ -196,6 +203,11 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
         rollup.verdict.as_wire(),
         rollup.subject,
     ));
+    // The coverage rule: the axes the verdict answers for, in the
+    // output itself (memstead_base::ops::coverage).
+    if let Some(cov) = crate::coverage::STATUS.axis_coverage() {
+        lines.push(format!("**Verdict coverage:** {}", cov.wire_line()));
+    }
 
     // What the engine could not establish, named rather than left to the
     // reader's assumption. A mem whose durability IS established says so and

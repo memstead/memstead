@@ -977,6 +977,13 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
 
     let document = serde_json::json!({
         "format": DUMP_FORMAT,
+        // The coverage rule (memstead_base::ops::coverage): the dump
+        // answers for the mount roster and configuration, nothing
+        // else, and says so in the envelope.
+        "verdict_coverage": crate::coverage::WORKSPACE_DUMP
+            .axis_coverage()
+            .expect("workspace dump is a verdict surface")
+            .wire_line(),
         "workspace_root": workspace_root,
         "mems": mems,
         "schemas": schemas,

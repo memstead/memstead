@@ -106,7 +106,143 @@ impl AxisCoverage {
     pub fn excluded_wire(&self) -> Vec<(&'static str, &'static str)> {
         self.excluded.to_vec()
     }
+
+    /// The declaration as it is stamped into surface output: one
+    /// compact line naming both axis sets, the same form on JSON,
+    /// markdown, and frontmatter surfaces. Axis names only: the
+    /// per-axis exclusion reasons stay a registry fact the gate test
+    /// enforces, because stamping static prose into every response
+    /// would tax each call's token budget, and the reader's question
+    /// the stamp answers is WHICH axes the verdict covers.
+    pub fn wire_line(&self) -> String {
+        let not_examined: Vec<&str> = self.excluded.iter().map(|(a, _)| *a).collect();
+        format!(
+            "examined={}; not_examined={}",
+            self.examined.join(","),
+            not_examined.join(",")
+        )
+    }
 }
+
+impl SurfaceCoverage {
+    /// The verdict declaration, when this row carries one; the
+    /// stamping sites use it so a surface can only stamp what its
+    /// registry row declares.
+    pub fn axis_coverage(&self) -> Option<&AxisCoverage> {
+        match &self.disposition {
+            CoverageDisposition::Verdict(c) => Some(c),
+            CoverageDisposition::NoVerdict(_) => None,
+        }
+    }
+}
+
+/// The health surface's coverage claim, shared by every consumer
+/// that renders a health report (the CLI command, the full MCP
+/// server's composer, and the lean server's own assembly): the axes
+/// whose findings the report treats as defects, so an empty defect
+/// statement reads as an all-clear exactly over them. Everything
+/// descriptive or advisory is excluded by name.
+pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
+    examined: &[
+        "dangling_links",
+        "missing_required_outgoing",
+        "constraints",
+        "signals",
+        "integrity",
+        "config",
+        "mounts",
+    ],
+    excluded: &[
+        (
+            "orphans",
+            "descriptive list; the defect verdict polices orphan stubs through the integrity findings",
+        ),
+        (
+            "stubs",
+            "descriptive list; the defect verdict polices orphan stubs through the integrity findings",
+        ),
+        (
+            "most_connected",
+            "descriptive ranking with no pass/fail semantics",
+        ),
+        (
+            "missing_fields",
+            "advisory count, never part of the defect verdict",
+        ),
+        (
+            "stale",
+            "advisory freshness, never part of the defect verdict",
+        ),
+        (
+            "tags",
+            "descriptive distribution with no pass/fail semantics",
+        ),
+        (
+            "labelling",
+            "advisory audit, never part of the defect verdict",
+        ),
+        (
+            "conformance",
+            "reported per entity beside the verdict, never folded into it",
+        ),
+        (
+            "anchors",
+            "drifted anchors stay advisory; the verify surfaces carry the drift statement",
+        ),
+        ("friction", "descriptive ledger counts"),
+        ("open_questions", "descriptive listing of open questions"),
+        (
+            "stale_derivations",
+            "advisory freshness of derived artifacts",
+        ),
+        (
+            "checks",
+            "check states are derived views; the verdicts in them belong to their recording callers",
+        ),
+        ("ledger", "descriptive view of the check ledger"),
+        (
+            "projection",
+            "projection fidelity is answered by status and projection verify",
+        ),
+    ],
+};
+
+/// The overview surface's coverage claim, shared by every consumer
+/// that renders the composed overview (the CLI command and both MCP
+/// servers), and stamped into the composed frontmatter by
+/// `compose_overview` itself so the declaration and the output cannot
+/// diverge.
+pub const OVERVIEW_COVERAGE: AxisCoverage = AxisCoverage {
+    examined: &["mounts", "config"],
+    excluded: &[
+        ("orphans", OVERVIEW_SCOPE),
+        ("stubs", OVERVIEW_SCOPE),
+        ("most_connected", OVERVIEW_SCOPE),
+        ("missing_fields", OVERVIEW_SCOPE),
+        ("stale", OVERVIEW_SCOPE),
+        (
+            "dangling_links",
+            "rendered on request as a listing; the verdict over them is health's",
+        ),
+        ("tags", OVERVIEW_SCOPE),
+        ("missing_required_outgoing", OVERVIEW_SCOPE),
+        ("constraints", OVERVIEW_SCOPE),
+        ("signals", OVERVIEW_SCOPE),
+        ("labelling", OVERVIEW_SCOPE),
+        ("conformance", OVERVIEW_SCOPE),
+        ("integrity", OVERVIEW_SCOPE),
+        ("anchors", OVERVIEW_SCOPE),
+        ("friction", OVERVIEW_SCOPE),
+        ("open_questions", OVERVIEW_SCOPE),
+        ("stale_derivations", OVERVIEW_SCOPE),
+        ("checks", OVERVIEW_SCOPE),
+        ("ledger", OVERVIEW_SCOPE),
+        ("projection", OVERVIEW_SCOPE),
+    ],
+};
+
+const OVERVIEW_SCOPE: &str = "overview is a descriptive composition; its only \
+     all-clear claim is that the roster it renders is complete and its mounts serve";
 
 /// Hold a registry against the axis vocabulary and a mechanically
 /// discovered surface roster. Returns one finding per defect; an

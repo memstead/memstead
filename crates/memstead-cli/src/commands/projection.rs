@@ -2198,6 +2198,13 @@ remove the sidecar and re-run",
             // future shape change fails loudly instead of misparsing. This
             // payload is external contract — see the verify-in-CI guide.
             "format": JSON_VERIFY_FORMAT,
+            // The coverage rule (memstead_base::ops::coverage): the
+            // axes the rollup verdict answers for; the per-run
+            // blind-spots inside `rollup` are the refinement.
+            "verdict_coverage": crate::coverage::PROJECTION_VERIFY
+                .axis_coverage()
+                .expect("projection verify is a verdict surface")
+                .wire_line(),
             "rollup": rollup,
             "binding": outcome.binding,
             "key": {

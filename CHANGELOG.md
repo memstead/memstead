@@ -8,6 +8,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Every clean verdict now declares the axes it answers for, and a gate keeps
+  it that way.** A sweep found eight instances of one shape: a surface reporting
+  clean over state it never examined. The fixes landed one by one; this closes
+  the class. A workspace axis vocabulary (the health include keys plus
+  `projection` and `mounts`) and per-consumer registries now declare, for every
+  CLI subcommand and every MCP tool, either the axes its verdict examined, with
+  a stated reason per excluded axis, or why the surface emits no verdict at all
+  (`memstead check` stands declared outside the rule: its verdict belongs to the
+  caller). Gate tests walk the live clap tree and both MCP tool routers, so a
+  new surface fails until it declares and a new axis fails every declaration
+  that has not met it. The declaration also rides the output: `health`,
+  `status`, `overview`, `workspace dump`, `verify-anchors`, and
+  `projection verify` carry a compact `verdict_coverage` line
+  (`examined=...; not_examined=...`) in their JSON, markdown, or frontmatter, so
+  a reader sees which axes a verdict covers without reading the source.
+
 - **A cross-mem edge whose grant was revoked is now reported, and fails a strict
   run.** Cross-mem links are default-deny and gated on write. Revoke the grant
   afterwards and every edge written under it stayed exactly where it was, loaded
