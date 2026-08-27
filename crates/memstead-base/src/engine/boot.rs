@@ -398,13 +398,15 @@ impl Engine {
             // SCOPED TO PATH-BACKED STORAGE, and the exception is a dispute
             // with the plan's own criterion 9 rather than an oversight. For a
             // git-branch mount, "the ref does not exist" is ALSO the normal
-            // state of a mem never pushed or never cloned, and quarantining it
-            // removes the mount from the serving set. Making the transport
-            // verbs quarantine-aware was tried and is not enough: the
-            // pre-push schema validation needs the mem's resolved schema and
-            // `pull` needs its store index, and quarantine removes both. The
-            // recovery paths assume a serving mount at three levels, not one.
-            // Recorded in the session log for the operator.
+            // state of a mem never pushed or never cloned, and quarantine
+            // removes the mount from the serving set. Parity was attempted
+            // twice. Each attempt cleared one blocker and uncovered the next:
+            // the mount lookup (a line), the pre-push gate's schema-before-ref
+            // ordering (fixed here, and worth fixing on its own), and finally
+            // `pull`'s pre-fast-forward validation, which needs a resolved
+            // schema a quarantined mem does not have. That last one is a
+            // semantic decision about what validation means for a mem being
+            // cloned, not plumbing. Recorded in the session log.
             let path_backed = matches!(
                 m.mount.storage,
                 crate::workspace::MountStorage::Folder { .. }

@@ -494,11 +494,6 @@ impl Engine {
             .iter()
             .position(|m| m.mount.mem == mem)
             .ok_or_else(|| self.unknown_mem_error(mem))?;
-
-        // Run the fetch step alone first so we can validate the
-        // prospective state against the schema before letting the
-        // pull's fast-forward land. Errors map to the typed surface
-        // just like a standalone `memstead_fetch` call.
         let (gitdir, branch) = match &self.mounts[mount_idx].mount.storage {
             MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
                 return Err(EngineError::InvalidInput(format!(
@@ -507,6 +502,11 @@ impl Engine {
             }
             MountStorage::GitBranch { gitdir, branch } => (gitdir.clone(), branch.clone()),
         };
+
+        // Run the fetch step alone first so we can validate the
+        // prospective state against the schema before letting the
+        // pull's fast-forward land. Errors map to the typed surface
+        // just like a standalone `memstead_fetch` call.
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
                 "git-branch pull hook not installed (full flavour not loaded)".to_string(),
@@ -713,6 +713,17 @@ impl Engine {
         mem: &str,
         ref_name: &str,
     ) -> Result<(), EngineError> {
+        // The REF first, then the schema. A branch that does not exist is the
+        // clearer answer, and asking for the schema first turned "that branch
+        // is not there" into "the schema pin did not resolve", which is true
+        // of a quarantined mem and tells the reader nothing about why their
+        // push failed (04/05).
+        let blobs = (hook.read_tree)(gitdir, ref_name).map_err(|e| match e {
+            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
+                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
+            }
+            other => EngineError::Backend(other),
+        })?;
         let schema = self
             .schemas
             .get(mem)
@@ -726,13 +737,6 @@ impl Engine {
                 install_hint: None,
             })?
             .clone();
-
-        let blobs = (hook.read_tree)(gitdir, ref_name).map_err(|e| match e {
-            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REF:") => {
-                EngineError::UnknownRef(msg.trim_start_matches("UNKNOWN_REF:").trim().to_string())
-            }
-            other => EngineError::Backend(other),
-        })?;
 
         let mut source_entries: Vec<crate::entity::source::SourceEntry> = Vec::new();
         for (rel_path, content) in blobs {
