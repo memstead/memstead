@@ -8,6 +8,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+
+- **A gate: no release path rests on a quota, and no gate reports a failed read
+  as a failure.** One exhausted anonymous GitHub quota on one shared address
+  produced two findings an hour apart — the first command a stranger runs, and
+  the script that verifies the release those strangers are about to get — with a
+  third instance recorded in a workflow comment. The two instances were repaired
+  earlier in this sweep; `scripts/check-release-external-deps.py` plus
+  `scripts/release-external-deps.json` stop the class returning. Every
+  release-path script's external hosts are declared, a script that contacts an
+  undeclared host fails, a declaration naming a host the script no longer
+  contacts fails, and a host marked quota-bound with no declared fallback fails.
+  Subjects are DISCOVERED by walking the release path rather than read off the
+  declaration, so a new script that declares nothing fails rather than passing
+  unseen. The second half checks classification: a verification script whose
+  read-failure branch renders a disagreement fails, while one that renders it
+  unmeasured passes. A declared fallback may name that third state rather than
+  credentials — the anonymous read is the measurement, so authenticating it
+  would change what is measured instead of bounding it. Runs as its own job in
+  the repo-hygiene lane beside its sibling declared-set gates, with a
+  `--self-test` whose fixtures run through the same walk the tree does, so a
+  rule that stops working fails the self-test rather than passing it by
+  re-implementation. **What it does not do:** it reads shell statically, so it
+  cannot prove what a script reaches at runtime. It accounts for every call
+  site it can see and requires an unresolvable one to be declared; a network
+  tool outside its verb list, or a classifier reached through a variable, is
+  outside its reach and named as such in its own docstring.
 - **Semantic conformance is now a recordable, schema-bound check.** Every schema
   carries two halves: the structural half the write gate validates, and the
   semantic half (each type's `write_rules` / `writing_guidance` prose) that no
