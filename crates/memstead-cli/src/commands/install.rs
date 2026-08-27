@@ -50,7 +50,15 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let mut engine = crate::setup::full_engine(ctx)?;
+    // The engine resolves the layout. `install` booted `full_engine` until
+    // 2026-08-27, which refuses a folder-shaped workspace outright — so the
+    // shape `memstead quickstart` produces had no working way to attach a
+    // published mem at all, since the `link` command that was supposed to
+    // serve it wrote into a void. A read-mem attaches to the workspace mount
+    // roster, which every shape carries, so there was never a reason for the
+    // gate.
+    let mut cli_engine = ctx.cli_engine()?;
+    let engine = cli_engine.base_mut();
 
     // The legacy `@scope/name` syntax is rejected, not silently treated as a
     // local path. Typed refusal — a user-triggerable input shape must
@@ -70,7 +78,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         let fetched = fetch_registry_archive(&scope, &name, args.registry.as_deref())?;
         return install_archive(
             ctx,
-            &mut engine,
+            engine,
             fetched.file.path(),
             Some(fetched.source_url),
             "Installed",
@@ -80,14 +88,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     // Local path install.
     let path = PathBuf::from(&args.source);
-    install_archive(
-        ctx,
-        &mut engine,
-        &path,
-        None,
-        "Installed",
-        "memstead install",
-    )
+    install_archive(ctx, engine, &path, None, "Installed", "memstead install")
 }
 
 /// A registry archive streamed to a tempfile, plus the canonical URL it
@@ -99,9 +100,8 @@ pub(crate) struct FetchedArchive {
 }
 
 /// Download `<scope>/<name>` from the registry into a tempfile. Shared
-/// by `memstead install <scope>/<name>` and `memstead link` — one
-/// registry-fetch path, one set of typed refusals, so the two commands
-/// cannot drift apart on what a 404 or a take-down looks like.
+/// One registry-fetch path with one set of typed refusals, so a 404 and a
+/// take-down read the same however the archive was asked for.
 pub(crate) fn fetch_registry_archive(
     scope: &str,
     name: &str,

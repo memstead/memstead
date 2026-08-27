@@ -156,10 +156,8 @@ pub enum Command {
     /// Install a sealed `.mem` mem — either a local file, or `<scope>/<name>`
     /// from the memstead.io registry. Registers it as a workspace-level
     /// read-only mount; `memstead uninstall` is the symmetric removal.
-    /// MEM-REPO WORKSPACES ONLY — refuses with
-    /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
-    /// `memstead quickstart` produces; bootstrap with
-    /// `memstead mem-repo init` instead when you intend to install mems.
+    /// Works on every workspace shape: a read-mem attaches to the workspace,
+    /// not to one of your mems.
     #[cfg(feature = "mem-repo")]
     Install(commands::install::Args),
 
@@ -174,15 +172,6 @@ pub enum Command {
     /// but records its findings store like any verify run.
     #[command(name = "verify-anchors")]
     VerifyAnchors(commands::verify_anchors::Args),
-
-    /// Attach a registry-published mem to this workspace as a
-    /// read-only mem. `memstead link <scope/name>` fetches the archive,
-    /// caches it, and registers it in the engine's mount roster — the
-    /// same effect `memstead install <scope>/<name>` has, on whatever
-    /// workspace shape the engine boots. `memstead uninstall <name>` is
-    /// the symmetric removal.
-    #[cfg(feature = "mem-repo")]
-    Link(commands::link::LinkArgs),
 
     /// Publish a `.mem` archive to the registry. Triggers GitHub
     /// Device Flow on first use; subsequent runs are silent.
@@ -431,8 +420,6 @@ impl Command {
             #[cfg(feature = "mem-repo")]
             Command::Uninstall(_) => "uninstall",
             Command::VerifyAnchors(_) => "verify-anchors",
-            #[cfg(feature = "mem-repo")]
-            Command::Link(_) => "link",
             Command::Publish(_) => "publish",
             Command::Unpublish(_) => "unpublish",
             Command::Domain { .. } => "domain",

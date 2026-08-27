@@ -25,7 +25,7 @@
 //!   (e.g. `"default@1.0.0"`) — bare-name pins are rejected at parse.
 //! - `deps` (retired 2026-08-27): cross-mem attachments live in the
 //!   engine's mount roster (`.memstead/state/mounts.json`), written by
-//!   `memstead link` / `memstead install`. The key is a hard tombstone
+//!   `memstead install`. The key is a hard tombstone
 //!   in [`memstead_schema::config::check_config`] — a config that still
 //!   carries it is rejected rather than silently half-honoured.
 //! - `version`, `description`, `authors`: optional fields used by

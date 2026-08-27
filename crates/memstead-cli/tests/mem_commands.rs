@@ -3234,7 +3234,7 @@ fn cli_kinded_check_records_and_refuses() {
 }
 
 // ---------------------------------------------------------------------------
-// `memstead link` — the layout-agnostic registry attach
+// `memstead install` — the layout-agnostic registry attach
 // ---------------------------------------------------------------------------
 
 /// Serve one fixture archive at `/api/mem/<scope>/<name>.mem` on an
@@ -3309,14 +3309,14 @@ fn assert_linked(root: &Path, cache: &Path) {
         .stdout(contains("sender-mem"));
 }
 
-/// Criteria 1, 2 and 3: `link` resolves the mem through the engine on
+/// Criteria 1, 2 and 3: `install` resolves the mem through the engine on
 /// every layout the project's own tools produce — the collapsed folder
 /// workspace `init` makes, the repo-overlapping one `quickstart --repo`
 /// makes, a multi-mem folder workspace, and a mem-repo workspace. No
 /// hardcoded workspace-root config path survives as a first attempt: the
 /// same call succeeds on all four.
 #[test]
-fn link_attaches_the_registry_mem_on_every_layout() {
+fn install_attaches_the_registry_mem_on_every_layout() {
     let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
     let sender = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
@@ -3324,14 +3324,14 @@ fn link_attaches_the_registry_mem_on_every_layout() {
     let archive = export_sender_archive(sender.path(), &sender_mem);
     let registry = spawn_fixture_registry("fixture", "published", fs::read(&archive).unwrap());
 
-    let link = |root: &Path| {
+    let install = |root: &Path| {
         memstead()
             .current_dir(root)
-            .args(["link", "fixture/published", "--registry", &registry.base])
+            .args(["install", "fixture/published", "--registry", &registry.base])
             .env("MEMSTEAD_MEM_CACHE", cache.path())
             .assert()
             .success()
-            .stdout(contains("Linked"));
+            .stdout(contains("Installed"));
     };
 
     // Layout 1: collapsed — `memstead init` puts the mem at the root.
@@ -3347,7 +3347,7 @@ fn link_attaches_the_registry_mem_on_every_layout() {
         ])
         .assert()
         .success();
-    link(collapsed.path());
+    install(collapsed.path());
     assert_linked(collapsed.path(), cache.path());
 
     // Layout 2: repo-overlapping — the workspace root is the repo and
@@ -3367,19 +3367,19 @@ fn link_attaches_the_registry_mem_on_every_layout() {
         ])
         .assert()
         .success();
-    link(overlapping.path());
+    install(overlapping.path());
     assert_linked(overlapping.path(), cache.path());
 
     // Layout 3: mem-repo — the fixture receiver workspace, one mem per
     // folder with its own config, none of it at the workspace root.
     let receiver = TempDir::new().unwrap();
     let _receiver_mem = make_receiver_mem(receiver.path());
-    link(receiver.path());
+    install(receiver.path());
     assert_linked(receiver.path(), cache.path());
 
     // Layout 4: a multi-mem FILESYSTEM workspace — two folder mems, each
     // with its own `.memstead/config.json`, neither at the workspace
-    // root, and no mem-repo anywhere. This is the shape the old `link`
+    // root, and no mem-repo anywhere. This is the shape the retired `link`
     // could not see: its hardcoded `<workspace_root>/.memstead/config.json`
     // read has nothing to find here.
     let fs_multi = TempDir::new().unwrap();
@@ -3408,7 +3408,7 @@ fn link_attaches_the_registry_mem_on_every_layout() {
         wire.push_str("  ]\n}\n");
         fs::write(store.join("state").join("mounts.json"), wire).unwrap();
     }
-    link(fs_multi.path());
+    install(fs_multi.path());
     assert_linked(fs_multi.path(), cache.path());
 
     // Layout 5: two writable mems in a mem-repo, no mem named on the
@@ -3433,35 +3433,21 @@ fn link_attaches_the_registry_mem_on_every_layout() {
             (&multi.path().join("mem-two"), "mem-two"),
         ],
     );
-    link(multi.path());
+    install(multi.path());
     assert_linked(multi.path(), cache.path());
 }
 
 /// Criterion 5's refusal complement: with no workspace anywhere up the
-/// tree, `link` still refuses, typed, naming what was looked for.
+/// tree, `install` still refuses, typed, naming what was looked for.
 #[test]
-fn link_without_a_workspace_refuses_typed() {
+fn install_without_a_workspace_refuses_typed() {
     let nowhere = TempDir::new().unwrap();
     memstead()
         .current_dir(nowhere.path())
-        .args(["--json", "link", "fixture/published"])
+        .args(["--json", "install", "fixture/published"])
         .assert()
         .failure()
         .stdout(contains("workspace.toml"));
-}
-
-/// Criterion 2's shape at the input boundary: a reference that is not
-/// `<scope>/<name>` refuses on validation, before any workspace or
-/// network work.
-#[test]
-fn link_rejects_a_malformed_reference() {
-    let nowhere = TempDir::new().unwrap();
-    memstead()
-        .current_dir(nowhere.path())
-        .args(["--json", "link", "not-a-scope-name"])
-        .assert()
-        .failure()
-        .stdout(contains("INVALID_INPUT"));
 }
 
 /// Criterion 7: a declaration written by one process is not silently
@@ -3477,7 +3463,7 @@ fn link_rejects_a_malformed_reference() {
 /// such a process re-reads the file first. The long-lived engine is the
 /// whole point of the test.
 #[test]
-fn a_long_lived_engine_state_write_keeps_a_sibling_processs_link() {
+fn a_long_lived_engine_state_write_keeps_a_sibling_processs_install() {
     let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
     let sender = TempDir::new().unwrap();
     let receiver = TempDir::new().unwrap();
@@ -3499,7 +3485,7 @@ fn a_long_lived_engine_state_write_keeps_a_sibling_processs_link() {
     // A separate process registers the attachment.
     memstead()
         .current_dir(receiver.path())
-        .args(["link", "fixture/published", "--registry", &registry.base])
+        .args(["install", "fixture/published", "--registry", &registry.base])
         .env("MEMSTEAD_MEM_CACHE", cache.path())
         .assert()
         .success();

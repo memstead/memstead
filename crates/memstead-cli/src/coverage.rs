@@ -259,7 +259,6 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         WORKSPACE_DUMP,
         no_verdict("install", MUTATION),
         no_verdict("uninstall", MUTATION),
-        no_verdict("link", MUTATION),
         no_verdict("batch-update", MUTATION),
         no_verdict("batch-create", MUTATION),
         no_verdict("batch-relate", MUTATION),

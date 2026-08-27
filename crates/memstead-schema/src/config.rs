@@ -743,8 +743,8 @@ const LEGACY_TOMBSTONE_KEYS: &[(&str, &str)] = &[
     (
         "deps",
         "Legacy `deps` field detected — a cross-mem attachment is a mount now, not a config \
-         list. Remove the field from `.memstead/config.json` and run `memstead link \
-         <scope>/<name>` (or `memstead install <scope>/<name>`) so the attachment lands in \
+         list. Remove the field from `.memstead/config.json` and run `memstead install \
+         <scope>/<name>` so the attachment lands in \
          `.memstead/state/mounts.json`, where the engine reads it.",
     ),
     (

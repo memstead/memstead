@@ -25,7 +25,12 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let mut engine = crate::setup::full_engine(ctx)?;
+    // Shape-agnostic, symmetric with `install`: a workspace that can attach a
+    // read-mem must be able to detach it. Booting the mem-repo-only engine
+    // here while `install` boots the shape-agnostic one would leave a folder
+    // workspace able to install and unable to uninstall.
+    let mut cli_engine = ctx.cli_engine()?;
+    let engine = cli_engine.base_mut();
 
     // Resolve, and refuse the two wrong-target shapes before any
     // mutation: unknown names, and writable mems (which have their own

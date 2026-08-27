@@ -25,7 +25,6 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead install`↴](#memstead-install)
 * [`memstead uninstall`↴](#memstead-uninstall)
 * [`memstead verify-anchors`↴](#memstead-verify-anchors)
-* [`memstead link`↴](#memstead-link)
 * [`memstead publish`↴](#memstead-publish)
 * [`memstead unpublish`↴](#memstead-unpublish)
 * [`memstead domain`↴](#memstead-domain)
@@ -151,10 +150,9 @@ Exit codes:
 * `export` — Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`)
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs
-* `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
+* `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. Works on every workspace shape: a read-mem attaches to the workspace, not to one of your mems
 * `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it. MEM-REPO WORKSPACES ONLY (see `install`)
 * `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Mutates no entity, but records its findings store like any verify run
-* `link` — Attach a registry-published mem to this workspace as a read-only mem. `memstead link <scope/name>` fetches the archive, caches it, and registers it in the engine's mount roster — the same effect `memstead install <scope>/<name>` has, on whatever workspace shape the engine boots. `memstead uninstall <name>` is the symmetric removal
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
 * `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
 * `domain` — Domain-authority publishing: generate the signing key for a domain you control and print the `.well-known` manifest to host. `publish --scope <domain>:<handle>` then signs with that key — no GitHub account needed
@@ -498,7 +496,7 @@ One-command cold start: workspace + default-schema mem + seed entity + MCP wirin
 
 ## `memstead install`
 
-Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
+Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. Works on every workspace shape: a read-mem attaches to the workspace, not to one of your mems
 
 **Usage:** `memstead install [OPTIONS] <PATH or SCOPE/NAME>`
 
@@ -533,22 +531,6 @@ Verify every anchor in a mem against its declared source — the standalone drif
 ###### **Options:**
 
 * `--mem <NAME>` — Which mem to verify (by name)
-
-
-
-## `memstead link`
-
-Attach a registry-published mem to this workspace as a read-only mem. `memstead link <scope/name>` fetches the archive, caches it, and registers it in the engine's mount roster — the same effect `memstead install <scope>/<name>` has, on whatever workspace shape the engine boots. `memstead uninstall <name>` is the symmetric removal
-
-**Usage:** `memstead link [OPTIONS] <SCOPE/NAME>`
-
-###### **Arguments:**
-
-* `<SCOPE/NAME>` — Registry-published mem in `scope/name` form (no `@` prefix — that syntax is retired)
-
-###### **Options:**
-
-* `--registry <URL>` — Override the registry URL. Falls back to `MEMSTEAD_REGISTRY` then the default `https://memstead.io`
 
 
 

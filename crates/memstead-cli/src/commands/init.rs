@@ -224,7 +224,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     }
     lines.extend([
         "- Drop `.md` entities into the workspace root.".to_string(),
-        "- `memstead link <scope/name>` to attach a registry-published mem \
+        "- `memstead install <scope>/<name>` to attach a registry-published mem \
          as a read-only mem."
             .to_string(),
         "- `memstead publish` to push the mem to the registry.".to_string(),

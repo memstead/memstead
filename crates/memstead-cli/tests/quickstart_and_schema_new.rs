@@ -1240,9 +1240,21 @@ fn mem_repo_only_subcommand_still_refuses_after_disclosure() {
         .assert()
         .success();
 
+    // `install` / `uninstall` deliberately stopped being shape-gated on
+    // 2026-08-27 — a read-mem attaches to the workspace roster, which every
+    // shape carries. `mem init` is still genuinely mem-repo-only (a second
+    // writable mem needs the multi-mem backend), so it carries the disclosure
+    // contract this test exists for.
     let assert = memstead()
         .current_dir(&root)
-        .args(["install", "acme/notes", "--json"])
+        .args([
+            "mem",
+            "init",
+            "second",
+            "--schema",
+            "default@1.0.0",
+            "--json",
+        ])
         .assert()
         .failure();
     let body = stdout_of(assert);
@@ -1250,7 +1262,7 @@ fn mem_repo_only_subcommand_still_refuses_after_disclosure() {
         serde_json::from_str(body.trim()).expect("--json refusal is JSON");
     assert_eq!(
         envelope["code"], "UNSUPPORTED_WORKSPACE_SHAPE",
-        "install must still refuse by shape; got: {envelope}",
+        "a mem-repo-only verb must still refuse by shape; got: {envelope}",
     );
     let message = envelope["message"].as_str().unwrap_or_default();
     assert!(

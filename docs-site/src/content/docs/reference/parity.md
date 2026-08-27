@@ -86,7 +86,6 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `export`
 - `init`
 - `install`
-- `link`
 - `login`
 - `logout`
 - `mem-repo`

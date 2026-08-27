@@ -69,6 +69,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that union is not reported.
 
 ### Changed
+- **`memstead link` is retired; `memstead install` is the one verb.** Both
+  fetched the same archive from the same registry URL and, since the pointer-join
+  fix, both landed it in the same mount roster — two names for one act, which is
+  what this campaign exists to remove. `install` keeps the name because it is the
+  one a newcomer types, and because `install` / `uninstall` is the honest verb
+  pair. **`memstead link <scope>/<name>` is gone; use `memstead install
+  <scope>/<name>`.**
+
+  The rename is the smaller half. `install` booted the mem-repo-only engine and
+  refused a folder-shaped workspace with `UNSUPPORTED_WORKSPACE_SHAPE`, so the
+  shape `memstead quickstart` produces had **no working way to attach a
+  published mem at all**: `install` refused it and `link` wrote into a void.
+  `install` now boots the shape-agnostic engine, which is correct on its own
+  terms — a read-mem attaches to the workspace mount roster, and every workspace
+  shape carries one. `memstead init`'s next-steps block points at `install`
+  accordingly.
 - **A binding's scope patterns resolve against its source's pointer, and a
   partial enumeration stops being reported as a percentage.** The facet walk
   honoured the source pointer for the walk and then matched every candidate by
