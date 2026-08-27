@@ -493,15 +493,20 @@ mod write_id_gloss_tests {
     fn no_cli_help_text_glosses_write_id_as_git_or_cursor() {
         // Each phrase would reintroduce one half of the defect: a git
         // identity claim, or cursor advice.
-        const BANNED: &[&str] = &[
-            "per-mem git",
-            "gitdir",
-            "commit SHA. Pass",
+        // Structural, matching the MCP guard. This was a list of eight
+        // literals until 2026-08-27, which its own name already
+        // contradicted: "the `write_id` is a per-mem commit identifier"
+        // passes a list built for "per-mem git", and that is the exact
+        // evasion `ops/mod.rs` was rewritten to close. A sentence naming
+        // the token and calling it a commit must also name WHICH backend
+        // produces one; no sentence naming it may invite polling.
+        const CURSOR_INVITES: &[&str] = &[
+            "polling",
+            "poll via",
+            "since cursor",
+            "as the `since`",
             "prior `write_id`",
             "`write_id` from a mutation",
-            "write_id from a mutation",
-            "as the `since`",
-            "since cursor",
         ];
 
         fn texts(cmd: &clap::Command, path: &str, out: &mut Vec<(String, String)>) {
@@ -542,12 +547,37 @@ mod write_id_gloss_tests {
             if !text.contains("write_id") {
                 continue;
             }
-            for phrase in BANNED {
-                if text.contains(phrase) {
+            // Judge EACH sentence naming the token on its own. Joining
+            // them first was the flaw in the first cut: a correct
+            // sentence later in the same help text excused a wrong one
+            // earlier, so "The `write_id` is a per-mem commit
+            // identifier" passed as long as some other sentence said
+            // "git-branch". Per-sentence also keeps a legitimate gitdir
+            // mention about something else out of scope without an
+            // allowlist, and allowlists are where the next drift hides.
+            for sentence in text.split(". ").filter(|s| s.contains("write_id")) {
+                let lower = sentence.to_lowercase();
+                if (lower.contains("commit") || lower.contains("sha"))
+                    && !lower.contains("git-branch")
+                {
                     violations.push(format!(
-                        "`memstead {where_}` help names `write_id` and still says \"{phrase}\" \
-                         — the token is an identity, not a git ref and not a change cursor"
+                        "`memstead {where_}` help calls `write_id` a commit without naming \
+                         which backend produces one — {sentence}"
                     ));
+                }
+                if lower.contains("gitdir") || lower.contains("include_config") {
+                    violations.push(format!(
+                        "`memstead {where_}` help points at a gitdir in a sentence about \
+                         `write_id` — the lookup errors on a backend without one"
+                    ));
+                }
+                for phrase in CURSOR_INVITES {
+                    if lower.contains(phrase) {
+                        violations.push(format!(
+                            "`memstead {where_}` help invites polling with `write_id` \
+                             (\"{phrase}\") — it is an identity, not a change cursor"
+                        ));
+                    }
                 }
             }
         }
@@ -587,6 +617,15 @@ mod write_id_gloss_tests {
                 }
             }
         }
+        // Vacuity floor for THIS half. The token half above asserts the
+        // token is mentioned somewhere; nothing asserted that any help
+        // text documents a relation entry at all, so if `--relation`
+        // stopped naming a shape this check would pass in silence.
+        assert!(
+            all.iter()
+                .any(|(_, t)| t.contains("REL_TYPE:") || t.contains("rel_type")),
+            "no CLI help documents a relation entry shape — this check has gone vacuous"
+        );
         assert!(
             edge_violations.is_empty(),
             "retired edge spelling in CLI help:\n  {}",
@@ -637,6 +676,12 @@ mod write_id_gloss_tests {
             let Ok(text) = std::fs::read_to_string(path) else {
                 continue;
             };
+            // Skip this module's own failure messages, which necessarily
+            // quote the vocabulary they forbid.
+            let text = text
+                .split_once("mod write_id_gloss_tests")
+                .map(|(before, _)| before.to_string())
+                .unwrap_or(text);
             let lines: Vec<&str> = text.lines().collect();
             for (i, line) in lines.iter().enumerate() {
                 let renders_token = line.contains("write_id");

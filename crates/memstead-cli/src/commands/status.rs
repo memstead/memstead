@@ -12,7 +12,9 @@ use crate::setup::{CliContext, CliEngine};
 
 #[derive(Serialize)]
 struct EdgeTypeCount<'a> {
-    #[serde(rename = "type")]
+    /// Spelled `rel_type`, like every other relation surface. The
+    /// sibling `TypeCount` below keeps `type` because ITS field is an
+    /// entity type — a different concept that owns the word.
     rel_type: &'a str,
     count: usize,
 }

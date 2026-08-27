@@ -4307,6 +4307,108 @@ mod write_id_doc_gloss_tests {
         );
     }
 
+    /// The edge spelling in EMITTED JSON, not just in prose.
+    ///
+    /// Every guard before this one read documentation. None read the
+    /// `json!` macros that build responses, which is how
+    /// `render_relations_json` kept emitting the relation type under
+    /// the bare key `"type"` through eight grades while
+    /// `memstead entity --json` next to it emitted `rel_type` — two CLI
+    /// commands, one concept, two spellings, on the same edge. Neither
+    /// enumerator could see it either: one pattern wanted `"to"` beside
+    /// `"type"`, and this shape pairs `"type"` with `"target"`.
+    ///
+    /// The rule is narrow on purpose: a line that writes a JSON key
+    /// `"type"` and mentions `rel_type` is emitting a relation type
+    /// under the retired name. An entity type or a content-block kind
+    /// legitimately owns the word `type` and never mentions `rel_type`,
+    /// so it does not match.
+    #[test]
+    fn no_emitted_json_spells_a_relation_type_as_bare_type() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut roots = vec![base.join("src")];
+        if let Some(ws) = base.parent().and_then(|p| p.parent()) {
+            for sibling in ["crates/memstead-cli/src", "crates/memstead-mcp/src"] {
+                let p = ws.join(sibling);
+                if p.is_dir() {
+                    roots.push(p);
+                }
+            }
+            if let Some(outer) = ws.parent() {
+                let p = outer.join("ui-api/src");
+                if p.is_dir() {
+                    roots.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        for r in &roots {
+            walk(r, &mut files);
+        }
+        assert!(
+            !files.is_empty(),
+            "found no sources — check has gone vacuous"
+        );
+
+        let mut violations = Vec::new();
+        let mut saw_a_relation_emit = false;
+        for path in &files {
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let t = line.trim_start();
+                if t.starts_with("//") {
+                    continue; // prose is the other guards' business
+                }
+                if line.contains("rel_type") && line.contains('"') {
+                    saw_a_relation_emit = true;
+                }
+                // The serde form splits the two tokens across lines:
+                //     #[serde(rename = "type")]
+                //     rel_type: &'a str,
+                // A same-line rule passed that in silence — a grader
+                // proved it by reintroducing exactly this on
+                // `EdgeTypeCount` and watching the check go green. So
+                // look at a small window, not one line.
+                let lo = i.saturating_sub(1);
+                let hi = (i + 2).min(lines.len());
+                let window = lines[lo..hi].join(" ");
+                if window.contains("\"type\"") && window.contains("rel_type") {
+                    violations.push(format!(
+                        "{}:{}: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        i + 1,
+                        t
+                    ));
+                }
+            }
+        }
+        assert!(
+            saw_a_relation_emit,
+            "no source mentions `rel_type` in a string context — check has gone vacuous"
+        );
+        assert!(
+            violations.is_empty(),
+            "emitted JSON spells a relation type as the retired bare `type`:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+
     /// The edge spelling, across the same crate. The canonical
     /// `CreateArgs::relations` doc named both retired keys at once, on
     /// a field whose own type is `{target, rel_type}`. Neither
@@ -4334,9 +4436,57 @@ mod write_id_doc_gloss_tests {
                 }
             }
         }
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // Reach past this crate. Round five's finding was a ui-api
+        // struct doc, and the guard installed in answer to it could not
+        // see the file that produced it. The sibling crates and the two
+        // private consumers all describe the same edge.
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut roots = vec![base.join("src")];
+        let mut private_ui_api_present = false;
+        let mut private_serve_present = false;
+        if let Some(ws) = base.parent().and_then(|p| p.parent()) {
+            for sibling in [
+                "crates/memstead-mcp/src",
+                "crates/memstead-cli/src",
+                "crates/memstead-engine/src",
+                "crates/memstead-schema/src",
+            ] {
+                let p = ws.join(sibling);
+                if p.is_dir() {
+                    roots.push(p);
+                }
+            }
+            // ui-api and serve live beside the `public/` submodule.
+            if let Some(outer) = ws.parent() {
+                for private in ["ui-api/src", "serve/src"] {
+                    let p = outer.join(private);
+                    if p.is_dir() {
+                        roots.push(p);
+                        if private == "ui-api/src" {
+                            private_ui_api_present = true;
+                        } else {
+                            private_serve_present = true;
+                        }
+                    }
+                }
+            }
+        }
+        // Pin the widening itself. `>= 5` was too loose: `ui-api/src`
+        // and `serve/src` could both silently drop out and this still
+        // passed, so the round that widened the reach did not actually
+        // fix it in place. Require every root that exists on disk.
+        let expected = 5 + usize::from(private_ui_api_present) + usize::from(private_serve_present);
+        assert_eq!(
+            roots.len(),
+            expected,
+            "expected {expected} roots (four sibling crates plus the private consumers \
+             present on disk), saw {} — the check has narrowed",
+            roots.len()
+        );
         let mut files = Vec::new();
-        walk(&src, &mut files);
+        for r in &roots {
+            walk(r, &mut files);
+        }
         assert!(
             !files.is_empty(),
             "found no sources — check has gone vacuous"

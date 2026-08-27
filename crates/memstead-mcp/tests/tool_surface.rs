@@ -2411,35 +2411,56 @@ fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
         // else — `memstead_mem_create` bootstraps one — and scanning the
         // whole blob would force an allowlist, which is where the next
         // drift would hide.
-        let about_token: String = desc
-            .split(". ")
-            .filter(|s| s.contains("write_id"))
-            .collect::<Vec<_>>()
-            .join(". ");
-        let lower = about_token.to_lowercase();
-        let claims_commit = lower.contains("commit") || lower.contains("sha");
-        let names_backend = lower.contains("git-branch");
-        if claims_commit && !names_backend {
-            violations.push(format!(
-                "{surface}/{name}: calls `write_id` a commit without naming which \
-                 backend produces one — {about_token}"
-            ));
-        }
-        for phrase in CURSOR_INVITES {
-            if lower.contains(phrase) {
+        // Each token-sentence is judged on its own: joining them lets a
+        // correct sentence excuse a wrong one elsewhere in the same
+        // description.
+        for sentence in desc.split(". ").filter(|s| s.contains("write_id")) {
+            let lower = sentence.to_lowercase();
+            if (lower.contains("commit") || lower.contains("sha")) && !lower.contains("git-branch")
+            {
                 violations.push(format!(
-                    "{surface}/{name}: invites polling with `write_id` (\"{phrase}\") — \
-                     it is an identity, not a change cursor"
+                    "{surface}/{name}: calls `write_id` a commit without naming which \
+                     backend produces one — {sentence}"
+                ));
+            }
+            for phrase in CURSOR_INVITES {
+                if lower.contains(phrase) {
+                    violations.push(format!(
+                        "{surface}/{name}: invites polling with `write_id` (\"{phrase}\") — \
+                         it is an identity, not a change cursor"
+                    ));
+                }
+            }
+            if lower.contains("gitdir") || lower.contains("include_config") {
+                violations.push(format!(
+                    "{surface}/{name}: points at a gitdir in a sentence about `write_id` — \
+                     the lookup errors on a backend without one"
                 ));
             }
         }
-        if lower.contains("gitdir") || lower.contains("include_config") {
-            violations.push(format!(
-                "{surface}/{name}: points at a gitdir in a sentence about `write_id` — \
-                 the lookup errors on a backend without one"
-            ));
-        }
     }
+    // Vacuity guards. The round-six rewrite of this check dropped the
+    // two positive assertions the earlier version carried, so it would
+    // have gone green in silence if every mutation description simply
+    // stopped naming the token — the loop `continue`s on any tool that
+    // does not mention it. The contract has to be asserted present, not
+    // merely un-violated.
+    let instr = server_instructions_text();
+    assert!(
+        instr.contains("write_id"),
+        "server instructions must name the token every mutation returns"
+    );
+    assert!(
+        instr.contains("NOT a change cursor"),
+        "server instructions must state that write_id is not a change cursor"
+    );
+    assert!(
+        descriptions()
+            .iter()
+            .any(|(_, name, desc)| MUTATION_TOOLS.contains(&name.as_str())
+                && desc.contains("write_id")),
+        "no mutation description names `write_id` — this check has gone vacuous"
+    );
     assert!(
         violations.is_empty(),
         "write_id gloss violations:\n  {}",

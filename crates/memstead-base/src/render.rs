@@ -332,7 +332,7 @@ pub fn render_relations_json(
         .iter()
         .map(|e| {
             serde_json::json!({
-                "type": e.rel_type,
+                "rel_type": e.rel_type,
                 "target": e.target.to_string(),
                 "source": format!("{:?}", e.source).to_lowercase(),
             })
@@ -343,7 +343,7 @@ pub fn render_relations_json(
         .iter()
         .map(|e| {
             serde_json::json!({
-                "type": e.rel_type,
+                "rel_type": e.rel_type,
                 "from": e.from.to_string(),
                 "source": format!("{:?}", e.source).to_lowercase(),
             })
@@ -1972,14 +1972,28 @@ pub fn build_schema_payload_scoped(
             // (this array); the lite projection below drops it by
             // allowlist, so the per-session skeleton stays unchanged.
             // Relation targets are placeholder slugs by contract.
+            //
+            // The relation entries are emitted in the MUTATION
+            // vocabulary (`target` / `rel_type`), not in the schema
+            // author's YAML spelling (`to:` / `type:`). Those are two
+            // different audiences: the YAML is a file format a schema
+            // author writes, while THIS payload is what an agent reads
+            // before writing an entity, and an agent that copies it
+            // into `memstead_create` must get a shape the write gate
+            // accepts. Until 2026-08-27 this emitted the YAML spelling
+            // and the copy was refused — the exact round-trip
+            // consistency-sweep 05-front-door/08 exists to remove. The
+            // authoring dialect stays as it is because shipped
+            // built-ins are byte-sealed; converging it needs new schema
+            // versions (filed in dev/backlog.md).
             if let Some(ex) = &td.exemplar {
                 let relations: Vec<serde_json::Value> = ex
                     .relations
                     .iter()
                     .map(|r| {
                         let mut o = serde_json::json!({
-                            "to": r.to,
-                            "type": r.rel_type,
+                            "target": r.to,
+                            "rel_type": r.rel_type,
                         });
                         if let Some(d) = &r.description {
                             o["description"] = serde_json::json!(d);
@@ -3865,8 +3879,8 @@ write_rules: []
         assert_eq!(ex["title"], "A Conforming Sample", "{full}");
         assert_eq!(ex["metadata"]["status"], "draft");
         assert_eq!(ex["sections"]["body"], "One canonical body paragraph.");
-        assert_eq!(ex["relations"][0]["to"], "parent-placeholder");
-        assert_eq!(ex["relations"][0]["type"], "PART_OF");
+        assert_eq!(ex["relations"][0]["target"], "parent-placeholder");
+        assert_eq!(ex["relations"][0]["rel_type"], "PART_OF");
 
         // FULL without an exemplar: no key (absent, not null).
         let full_plain = build_schema_payload(
