@@ -162,7 +162,7 @@ Exit codes:
 * `login` — Authenticate with a registry via GitHub Device Flow. Optional — `publish` auto-triggers the same flow on first use
 * `logout` — Remove stored credentials for a registry
 * `create` — Create a new entity. Provide `--title`, `--type`, and the required section fields, or pass `--from <file.json>` with the full payload
-* `update` — Modify an existing entity. `--expected-hash` is required unless `--auto-hash` (refetch before write) or `--force` (skip check) is given
+* `update` — Modify an existing entity. `--expected-hash` is required for an update that changes content, unless `--auto-hash` (refetch before write) or `--force` (skip check) is given; an anchors-only update needs none, since anchors sit outside the content hash
 * `relate` — Add or remove a typed relationship between two entities
 * `delete` — Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by design (no post-state to race on); race protection comes from `HAS_INCOMING_REFS` — and `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases
 * `rename` — Rename an entity (changes ID, file path, and every incoming wiki-link)
@@ -767,7 +767,7 @@ Slug derivation:
 
 ## `memstead update`
 
-Modify an existing entity. `--expected-hash` is required unless `--auto-hash` (refetch before write) or `--force` (skip check) is given
+Modify an existing entity. `--expected-hash` is required for an update that changes content, unless `--auto-hash` (refetch before write) or `--force` (skip check) is given; an anchors-only update needs none, since anchors sit outside the content hash
 
 **Usage:** `memstead update [OPTIONS] [ID]`
 
@@ -777,7 +777,7 @@ Modify an existing entity. `--expected-hash` is required unless `--auto-hash` (r
 
 ###### **Options:**
 
-* `--expected-hash <HASH>` — Hash from `memstead entity <id>` (the `_hash` field). Required unless `--auto-hash` or `--force` is given. With `--from`, this flag overrides the file's `expected_hash` field and enforces CAS exactly as on the inline path
+* `--expected-hash <HASH>` — Hash from `memstead entity <id>` (the `_hash` field). Required for any update that changes content, unless `--auto-hash` or `--force` is given. Not required for an anchors-only update (`--anchor` / `--anchor-unset` and nothing else), because anchors live outside the content hash and the token would compare a value the write cannot move. With `--from`, this flag overrides the file's `expected_hash` field and enforces CAS exactly as on the inline path
 * `--auto-hash` — Refetch the current hash immediately before writing. Convenient for interactive use; accepts the race window between the refetch and the write
 * `--force` — Skip the hash check entirely (explicit overwrite)
 * `--section <KEY=VALUE>` — Replace section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with

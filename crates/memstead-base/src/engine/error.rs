@@ -23,6 +23,29 @@ use crate::runtime_validator::{MissingRequiredField, ValidationError};
 /// to a constant prefix plus a count.
 pub const INLINE_LIST_CAP: usize = 3;
 
+/// Every payload key an update recognises as mutation content, in one place
+/// (consistency-sweep 03/04).
+///
+/// WHY a constant: four surfaces hand-copied this list and all four disagreed.
+/// The `EMPTY_UPDATE` message named seven keys, its own `details` payload
+/// named six (dropping `relations_unset`), the CLI's copy named six, and the
+/// MCP copies named eight after one of them was corrected. An agent recovering
+/// from the refusal was told, on the CLI, that `anchors` is not a recognised
+/// mutation key: false, and false about exactly the flow anchors exist for.
+/// The refusal now reads its own list, and so does every surface that repeats
+/// it.
+pub const RECOGNISED_MUTATION_KEYS: &[&str] = &[
+    "sections",
+    "append_sections",
+    "patch_sections",
+    "metadata",
+    "metadata_unset",
+    "declare_relations",
+    "relations_unset",
+    "anchors",
+    "anchors_unset",
+];
+
 /// One blocked-direction summary entry for
 /// [`EngineError::RenameBlockedByCrossMemPolicy`]. Pairs the
 /// referrer's mem with the renaming entity's mem (the edge's
@@ -460,7 +483,9 @@ pub enum EngineError {
     /// before any mutation work runs so a misspelled/omitted mutation
     /// key doesn't silently land as `succeeded: 1, commit_sha: ""`.
     #[error(
-        "no mutation content for {id} — payload carries an id but every mutation map is empty (recognised keys: sections, append_sections, patch_sections, metadata, metadata_unset, declare_relations, relations_unset)"
+        "no mutation content for {id}: payload carries an id but every mutation map is empty \
+         (recognised keys: {})",
+        RECOGNISED_MUTATION_KEYS.join(", ")
     )]
     EmptyUpdate { id: String },
     /// `memstead_rename` cannot proceed because one or more cross-mem
@@ -1584,10 +1609,7 @@ impl EngineError {
             EngineError::EmptyUpdate { id } => {
                 serde_json::json!({
                     "id": id,
-                    "recognised_keys": [
-                        "sections", "append_sections", "patch_sections",
-                        "metadata", "metadata_unset", "declare_relations", "relations_unset",
-                    ],
+                    "recognised_keys": RECOGNISED_MUTATION_KEYS,
                 })
             }
             EngineError::RenameBlockedByCrossMemPolicy {

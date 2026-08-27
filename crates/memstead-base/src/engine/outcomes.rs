@@ -205,6 +205,37 @@ pub struct UpdateEntityArgs {
     pub relations_unset: Vec<crate::ops::RelationUnsetArg>,
 }
 
+impl UpdateEntityArgs {
+    /// Whether this payload names anything that can move the entity's content
+    /// hash. Anchors are deliberately absent from the list: the sidecar lives
+    /// outside the hash.
+    ///
+    /// WHY it lives here rather than on each surface: MCP (both flavours), the
+    /// CLI and the HTTP layer all gate an update on a compare-and-swap token,
+    /// and on an anchors-only payload that token compares a value the write
+    /// provably cannot move. Exempting the shape is right; exempting it four
+    /// times, once per surface, is how surfaces come to disagree about whether
+    /// a write is safe, which is the drift class this campaign closes. One
+    /// predicate, one answer. The engine core does not consult it: it checks
+    /// the token only when a caller supplies one, and always has.
+    ///
+    /// A payload naming NOTHING changes no content either, and must fall
+    /// through to the empty-update refusal rather than be told it is missing a
+    /// token: that refusal names the recognised keys, which is what a caller
+    /// who typo'd a mutation key actually needs. A first version asked
+    /// "is this anchors-only" instead, and turned every empty payload into a
+    /// hash complaint; the plan's criterion 5 caught it.
+    pub fn changes_content(&self) -> bool {
+        !self.sections.is_empty()
+            || !self.append_sections.is_empty()
+            || !self.patch_sections.is_empty()
+            || !self.metadata.is_empty()
+            || !self.metadata_unset.is_empty()
+            || !self.declare_relations.is_empty()
+            || !self.relations_unset.is_empty()
+    }
+}
+
 /// Successful outcome of [`Engine::update_entity`].
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UpdateEntityOutcome {

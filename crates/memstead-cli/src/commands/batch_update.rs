@@ -49,6 +49,11 @@ pub struct Args {
 
 /// Recognised mutation-content keys on an `EntryPayload`. Centralised
 /// for the empty-mutation guard and the unknown-key suggestion hint.
+/// The engine's recognised mutation keys MINUS `relations_unset`, which
+/// `EntryPayload` does not accept. Taking the engine's list wholesale would
+/// advertise a key the parser (`deny_unknown_fields`) then rejects, which is
+/// the same lie in the other direction as the copies this const replaced.
+/// `batch_recognised_keys_are_a_subset_of_the_engines` pins the relationship.
 const RECOGNISED_MUTATION_KEYS: &[&str] = &[
     "sections",
     "append_sections",
@@ -207,7 +212,24 @@ fn build_update_args(
 ) -> anyhow::Result<(UpdateEntityArgs, Option<String>)> {
     let mode_count =
         entry.expected_hash.is_some() as u8 + entry.auto_hash as u8 + entry.force as u8;
-    if mode_count == 0 {
+    // An anchors-only entry needs no hash mode, for the reason every other
+    // update surface exempts one (consistency-sweep 03/04): the token would
+    // compare a value the write cannot move. Left in, this path refused an
+    // entry that `memstead update` accepts, which is the surface divergence
+    // the plan's criterion 4 is about.
+    // Hand-rolled rather than `UpdateEntityArgs::changes_content()` only
+    // because the args do not exist yet at this point: the hash mode has to be
+    // resolved before they can be built. `batch_entry_content_matches_the_engine_predicate`
+    // pins the two against each other so they cannot drift.
+    let changes_content = !entry.sections.is_empty()
+        || !entry.append_sections.is_empty()
+        || !entry.patch_sections.is_empty()
+        || !entry.metadata.is_empty()
+        || !entry.metadata_unset.is_empty()
+        || !entry.declare_relations.is_empty();
+    let anchors_only =
+        (!entry.anchors.is_empty() || !entry.anchors_unset.is_empty()) && !changes_content;
+    if mode_count == 0 && !anchors_only {
         return Err(CliError::new(
             ExitKind::Validation,
             "INVALID_INPUT",
@@ -241,6 +263,13 @@ fn build_update_args(
         // entry. Under atomic semantics that refuses the whole batch
         // (nothing commits) with this entry named in the result.
         engine.get_entity(&id).map(|e| e.content_hash.clone())
+    } else if anchors_only {
+        // An EMPTY token is no token on an anchors-only entry, as on
+        // `memstead update` and both MCP flavours: passed through, `""` reaches
+        // the engine and can never match a real hash, so the identical payload
+        // that the other three surfaces write refused HASH_MISMATCH here
+        // (consistency-sweep 03/04, criterion 4).
+        entry.expected_hash.filter(|h| !h.is_empty())
     } else {
         entry.expected_hash
     };
@@ -311,6 +340,8 @@ fn build_entry_parse_error(
         "metadata",
         "metadata_unset",
         "declare_relations",
+        "anchors",
+        "anchors_unset",
         "note",
     ]
     .into_iter()
@@ -385,6 +416,56 @@ fn shared_prefix_len(a: &str, b: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// The batch entry's own content predicate must answer as the engine's
+    /// does. It is hand-rolled because the hash mode is resolved before the
+    /// engine args exist, so drift between the two is possible and this is
+    /// what catches it: an entry whose only content is a section change must
+    /// be seen as content-changing by both.
+    #[test]
+    fn batch_entry_content_matches_the_engine_predicate() {
+        use memstead_base::UpdateEntityArgs;
+        let mut args = UpdateEntityArgs {
+            id: memstead_base::EntityId("m--e".into()),
+            expected_hash: None,
+            sections: Default::default(),
+            append_sections: Default::default(),
+            patch_sections: Default::default(),
+            metadata: Default::default(),
+            metadata_unset: Vec::new(),
+            dry_run: false,
+            declare_relations: Vec::new(),
+            anchors: Vec::new(),
+            anchors_unset: Vec::new(),
+            relations_unset: Vec::new(),
+        };
+        assert!(!args.changes_content(), "nothing named changes no content");
+        args.anchors.push(Default::default());
+        assert!(
+            !args.changes_content(),
+            "anchors are outside the content hash and must stay off this side"
+        );
+        args.sections.insert("purpose".into(), "x".into());
+        assert!(args.changes_content(), "a section change is content");
+    }
+
+    /// The batch surface may recognise FEWER keys than the engine (its entry
+    /// payload does not accept `relations_unset`), never more: advertising a
+    /// key the parser rejects is the same lie as omitting one it accepts.
+    #[test]
+    fn batch_recognised_keys_are_a_subset_of_the_engines() {
+        let engine_keys: std::collections::BTreeSet<&str> =
+            memstead_base::engine::error::RECOGNISED_MUTATION_KEYS
+                .iter()
+                .copied()
+                .collect();
+        for key in super::RECOGNISED_MUTATION_KEYS {
+            assert!(
+                engine_keys.contains(key),
+                "batch advertises `{key}`, which the engine does not recognise"
+            );
+        }
+    }
+
     use super::*;
 
     /// Per-entry deserialisation refusal carries `entry_index`,

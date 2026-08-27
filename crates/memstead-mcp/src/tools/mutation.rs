@@ -181,9 +181,10 @@ pub struct UpdateParams {
     #[schemars(description = "Full entity ID to update")]
     pub id: String,
     #[schemars(
-        description = "Hash from memstead_entity response (_hash field). Required — read the entity first. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash; pass dry_run=true to bypass the check as a recovery path."
+        description = "Hash from memstead_entity response (_hash field). Required for any update that changes content (sections, metadata, relations) — read the entity first. OMIT it for an anchors-only update (`anchors` / `anchors_unset` and nothing else): the anchors sidecar is outside `_hash` by design, so the token would compare a value the write cannot move, and requiring it taxed exactly the backfill flows anchors exist for. An update that changes content without it refuses `EXPECTED_HASH_REQUIRED`. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash; pass dry_run=true to bypass the check as a recovery path."
     )]
-    pub expected_hash: String,
+    #[serde(default)]
+    pub expected_hash: Option<String>,
     #[schemars(
         description = "Section fields to set (replaces content): { \"identity\": \"new content\" }"
     )]

@@ -233,6 +233,68 @@ fn update_requires_hash_by_default() {
         .stderr(contains("--expected-hash"));
 }
 
+/// Criteria 1, 3, 4 and 5 (consistency-sweep 03/04) on the CLI surface, which
+/// must answer exactly as MCP does: an anchors-only update needs no
+/// `--expected-hash`, a content change still does, and a payload naming
+/// neither is still an empty update rather than a hash complaint.
+#[test]
+fn an_anchors_only_update_needs_no_expected_hash_on_the_cli() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(tmp.path().join("src/lib.rs"), "fn main() {}\n").unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--title",
+            "Gated",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
+        ])
+        .assert()
+        .success();
+
+    // No --expected-hash, no prior read.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "cli-write--gated",
+            "--anchor",
+            r#"{"artifact":"src/lib.rs","grain":"file","class":"anchored","hash":"h1","hash_stability":"stable"}"#,
+        ])
+        .assert()
+        .success();
+
+    // A content change still demands it.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "cli-write--gated",
+            "--section",
+            "purpose=changed",
+            "--anchor",
+            r#"{"artifact":"src/lib.rs","grain":"span","class":"anchored","hash":"h2","hash_stability":"stable"}"#,
+        ])
+        .assert()
+        .code(5)
+        .stderr(contains("--expected-hash"));
+
+    // Neither anchors nor content: still the empty-update refusal.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["update", "cli-write--gated"])
+        .assert()
+        .failure()
+        .stderr(contains("EMPTY_UPDATE"));
+}
+
 #[test]
 fn update_wrong_hash_returns_exit_4() {
     let tmp = TempDir::new().unwrap();

@@ -1696,10 +1696,9 @@ fn engine_err_unified(
                 message.clone(),
                 serde_json::json!({
                     "id": id,
-                    "recognised_keys": [
-                        "sections", "append_sections", "patch_sections",
-                        "metadata", "metadata_unset", "declare_relations", "relations_unset",
-                    ],
+                    // The engine's own list, not a copy.
+                    "recognised_keys":
+                        memstead_base::engine::error::RECOGNISED_MUTATION_KEYS,
                 }),
             ),
         ),
@@ -2797,11 +2796,11 @@ impl McpServer {
             .into_iter()
             .map(|u| u.into_engine())
             .collect();
-        let args = memstead_base::UpdateEntityArgs {
+        let mut args = memstead_base::UpdateEntityArgs {
             anchors,
             anchors_unset,
             id: id.clone(),
-            expected_hash: Some(p.expected_hash.clone()),
+            expected_hash: p.expected_hash.clone(),
             sections: p.sections.unwrap_or_default(),
             append_sections: p.append_sections.unwrap_or_default(),
             patch_sections,
@@ -2819,6 +2818,44 @@ impl McpServer {
                 })
                 .collect(),
         };
+        // The compare-and-swap gate, enforced HERE rather than by the engine
+        // core, which has always checked only when a caller supplies a token
+        // (consistency-sweep 03/04). Content-changing updates still demand it;
+        // an anchors-only update does not, because the sidecar is outside
+        // `_hash` and the token would compare a value the write cannot move.
+        // `changes_content` is the engine's own predicate, so this surface and
+        // the CLI cannot come to disagree about whether a write is safe.
+        // An EMPTY token is no token on an anchors-only write, where the CLI
+        // already discards it: leaving it Some("") sent it to the engine,
+        // which compared "" against a real hash and refused HASH_MISMATCH for
+        // a write the CLI accepted (consistency-sweep 03/04, criterion 4).
+        //
+        // Narrowed to that shape on purpose. Normalizing unconditionally made
+        // this gate fire BEFORE the engine's existence and stub gates, so an
+        // empty token on a stub reported a missing hash instead of
+        // `STUB_NOT_UPDATABLE`, which is the more specific and more actionable
+        // refusal. A content-changing payload therefore keeps its empty token
+        // and keeps the engine's own ordering.
+        if !args.changes_content() {
+            args.expected_hash = args.expected_hash.filter(|h| !h.is_empty());
+        }
+        if args.expected_hash.is_none() && !args.dry_run && args.changes_content() {
+            let message = format!(
+                "`expected_hash` is required for an update that changes content. Read `{id}` \
+                 first and pass its `_hash`, or pass `dry_run: true` to preview. Only an \
+                 anchors-only update (`anchors` / `anchors_unset` and nothing else) may omit \
+                 it, because anchors are outside the content hash."
+            );
+            return tool_error_with_payload(
+                "EXPECTED_HASH_REQUIRED",
+                &message,
+                envelope(
+                    "EXPECTED_HASH_REQUIRED",
+                    message.clone(),
+                    serde_json::json!({ "field": "expected_hash", "id": id.to_string() }),
+                ),
+            );
+        }
         let client = self.client.get().cloned();
         match engine.update_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
@@ -4842,8 +4879,9 @@ mod tests {
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-                .to_string(),
+            expected_hash: Some(
+                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            ),
             sections: None,
             append_sections: None,
             patch_sections: None,
@@ -8026,7 +8064,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: entity_hash,
+            expected_hash: Some(entity_hash),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,
@@ -8080,7 +8118,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: "definitely-wrong".to_string(),
+            expected_hash: Some("definitely-wrong".to_string()),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,
@@ -8279,7 +8317,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: "definitely-wrong".to_string(),
+            expected_hash: Some("definitely-wrong".to_string()),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,
@@ -8354,6 +8392,110 @@ write_rules: []
             role: None,
         }));
         assert_text_carries_code(&dup, "ENTITY_ALREADY_EXISTS");
+    }
+
+    /// Criteria 1, 3 and 5 (consistency-sweep 03/04) on the full MCP surface.
+    /// An anchors-only update needs no compare-and-swap token, because the
+    /// token would compare a value the write provably cannot move; an update
+    /// that also changes content still needs one; and a payload with neither
+    /// anchors nor content is still an empty update.
+    #[test]
+    fn an_anchors_only_update_needs_no_expected_hash_but_a_content_change_does() {
+        let (server, _tmp) = setup_test_engine();
+        let create: CreateParams = serde_json::from_value(serde_json::json!({
+            "mem": "specs",
+            "title": "Hash Gate",
+            "entity_type": "spec",
+            "sections": { "identity": "id", "purpose": "purpose" },
+        }))
+        .unwrap();
+        let created = server.memstead_create(Parameters(create));
+        assert!(!created.is_error.unwrap_or(false));
+        let before = extract_text(&created);
+
+        // No `expected_hash` at all, and no read to obtain one.
+        let anchors_only: UpdateParams = serde_json::from_value(serde_json::json!({
+            "id": "specs--hash-gate",
+            "anchors": [{
+                "artifact": "src/lib.rs", "grain": "file", "class": "anchored",
+                "hash": "h1", "hash_stability": "stable"
+            }],
+        }))
+        .unwrap();
+        let out = server.memstead_update(Parameters(anchors_only));
+        assert!(
+            !out.is_error.unwrap_or(false),
+            "an anchors-only update must not demand a token for a value it cannot move: {:?}",
+            out.structured_content
+        );
+
+        // Criterion 2: the content hash did not move. Compared, not merely
+        // present: a first version captured `before` and threw it away, which
+        // asserted nothing about the property the criterion is about.
+        let hash_of = |t: &str| {
+            t.lines()
+                .find(|l| l.contains("_hash"))
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default()
+        };
+        let after = extract_text(&out);
+        assert!(!hash_of(&before).is_empty(), "the create stated a hash");
+        assert_eq!(
+            hash_of(&after),
+            hash_of(&before),
+            "an anchors-only update cannot move the content hash"
+        );
+
+        // Criterion 4: an EMPTY token is no token, not a token that can never
+        // match. Accepting it here while the CLI discards it made one surface
+        // refuse what the other wrote.
+        let empty_token: UpdateParams = serde_json::from_value(serde_json::json!({
+            "id": "specs--hash-gate",
+            "expected_hash": "",
+            "anchors": [{
+                "artifact": "src/other.rs", "grain": "file", "class": "anchored",
+                "hash": "h9", "hash_stability": "stable"
+            }],
+        }))
+        .unwrap();
+        let out_empty = server.memstead_update(Parameters(empty_token));
+        assert!(
+            !out_empty.is_error.unwrap_or(false),
+            "an empty token on an anchors-only update is no token: {:?}",
+            out_empty.structured_content
+        );
+
+        // Criterion 3: content plus anchors still demands the token.
+        let with_content: UpdateParams = serde_json::from_value(serde_json::json!({
+            "id": "specs--hash-gate",
+            "sections": { "purpose": "changed" },
+            "anchors": [{
+                "artifact": "src/other.rs", "grain": "file", "class": "anchored",
+                "hash": "h2", "hash_stability": "stable"
+            }],
+        }))
+        .unwrap();
+        let refused = server.memstead_update(Parameters(with_content));
+        assert!(
+            refused.is_error.unwrap_or(false),
+            "content change without a token must refuse"
+        );
+        assert!(
+            extract_text(&refused).contains("EXPECTED_HASH_REQUIRED"),
+            "and say which field: {}",
+            extract_text(&refused)
+        );
+
+        // Criterion 5: neither anchors nor content is still an empty update.
+        let empty: UpdateParams =
+            serde_json::from_value(serde_json::json!({ "id": "specs--hash-gate" })).unwrap();
+        let empty_out = server.memstead_update(Parameters(empty));
+        assert!(empty_out.is_error.unwrap_or(false));
+        assert!(
+            extract_text(&empty_out).contains("EMPTY_UPDATE"),
+            "an empty payload is EMPTY_UPDATE, not a hash refusal: {}",
+            extract_text(&empty_out)
+        );
     }
 
     /// E3a: create with `anchors[]` persists them, `memstead_entity`
@@ -8735,7 +8877,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--clean-carrier".to_string(),
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: Some(bad_update),
             append_sections: None,
             patch_sections: None,
@@ -9157,7 +9299,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: entity_hash,
+            expected_hash: Some(entity_hash),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,
@@ -11547,7 +11689,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: id.clone(),
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: Some(IndexMap::from_iter([(
                 "identity".to_string(),
                 "An updated entity".to_string(),
@@ -11788,7 +11930,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: None,
             append_sections: None,
             patch_sections: None,
@@ -11905,7 +12047,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: "specs--entity-a".to_string(),
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: None,
             append_sections: None,
             patch_sections: Some(patches),
@@ -12281,7 +12423,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id,
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: Some(IndexMap::from_iter([(
                 "identity".to_string(),
                 "replaced.".to_string(),
@@ -12415,7 +12557,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: id.clone(),
-            expected_hash: initial_hash.clone(),
+            expected_hash: Some(initial_hash.clone()),
             sections: Some(IndexMap::from_iter([(
                 "identity".to_string(),
                 "Dry-run preview content.".to_string(),
@@ -12464,7 +12606,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: id.clone(),
-            expected_hash: dry_current_hash,
+            expected_hash: Some(dry_current_hash),
             sections: Some(IndexMap::from_iter([(
                 "identity".to_string(),
                 "Dry-run preview content.".to_string(),
@@ -12520,7 +12662,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id: id.clone(),
-            expected_hash: stale.clone(),
+            expected_hash: Some(stale.clone()),
             sections: Some(IndexMap::from_iter([(
                 "identity".to_string(),
                 "Recovery preview.".to_string(),
@@ -12560,7 +12702,7 @@ write_rules: []
             relations_unset: None,
             anchors_unset: None,
             id,
-            expected_hash: recovered.to_string(),
+            expected_hash: Some(recovered.to_string()),
             sections: Some(IndexMap::from_iter([(
                 "identity".to_string(),
                 "Recovery preview.".to_string(),
@@ -14501,7 +14643,7 @@ write_rules: []
                 relations_unset: None,
                 anchors_unset: None,
                 id: "specs--entity-a".into(),
-                expected_hash: {
+                expected_hash: Some({
                     // Read the current hash so we don't have to hard-code it.
                     let entity = server.memstead_entity(Parameters(EntityParams {
                         id: "specs--entity-a".into(),
@@ -14520,7 +14662,7 @@ write_rules: []
                         .unwrap()
                         .trim_start_matches("_hash: ")
                         .to_string()
-                },
+                }),
                 sections: None,
                 append_sections: Some({
                     let mut m = IndexMap::new();
@@ -14715,7 +14857,7 @@ write_rules: []
                 relations_unset: None,
                 anchors_unset: None,
                 id: "specs--entity-a".to_string(),
-                expected_hash: expected_hash.to_string(),
+                expected_hash: Some(expected_hash.to_string()),
                 sections: Some(sections),
                 append_sections: None,
                 patch_sections: None,
@@ -14769,7 +14911,7 @@ write_rules: []
                 relations_unset: None,
                 anchors_unset: None,
                 id: "specs--entity-a".to_string(),
-                expected_hash: expected_hash.to_string(),
+                expected_hash: Some(expected_hash.to_string()),
                 sections: None,
                 append_sections: None,
                 patch_sections: None,
@@ -16704,7 +16846,7 @@ write_rules: []
                 relations_unset: None,
                 anchors_unset: None,
                 id: "specs--entity-a".to_string(),
-                expected_hash: hash,
+                expected_hash: Some(hash),
                 sections: None,
                 append_sections: None,
                 patch_sections: None,
@@ -16904,7 +17046,7 @@ write_rules: []
                 relations_unset: None,
                 anchors_unset: None,
                 id: "specs--entity-a".to_string(),
-                expected_hash: String::new(),
+                expected_hash: Some(String::new()),
                 sections: Some(update_sections),
                 append_sections: None,
                 patch_sections: None,
@@ -17195,7 +17337,7 @@ write_rules: []
                 relations_unset: None,
                 anchors_unset: None,
                 id: "specs--entity-x".to_string(),
-                expected_hash: stale_hash,
+                expected_hash: Some(stale_hash),
                 sections: Some(sections),
                 append_sections: None,
                 patch_sections: None,

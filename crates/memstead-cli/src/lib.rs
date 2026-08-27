@@ -780,10 +780,10 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "id": id,
-                    "recognised_keys": [
-                        "sections", "append_sections", "patch_sections",
-                        "metadata", "metadata_unset", "declare_relations",
-                    ],
+                    // The engine's own list, not a copy: four hand-copied
+                    // copies disagreed (consistency-sweep 03/04).
+                    "recognised_keys":
+                        memstead_base::engine::error::RECOGNISED_MUTATION_KEYS,
                 })),
             ),
             // A bad `--since` cursor surfaces the typed `INVALID_CURSOR` (via

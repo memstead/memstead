@@ -1004,10 +1004,9 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             &err.to_string(),
             Some(serde_json::json!({
                 "id": id,
-                "recognised_keys": [
-                    "sections", "append_sections", "patch_sections",
-                    "metadata", "metadata_unset", "declare_relations",
-                ],
+                // The engine's own list, not a copy.
+                "recognised_keys":
+                    memstead_base::engine::error::RECOGNISED_MUTATION_KEYS,
             })),
         ),
         // A bad `since` cursor on `memstead_changes_since`. The folder backend
@@ -1294,7 +1293,7 @@ impl FilesystemMcpServer {
             Err(resp) => return *resp,
         }
         let (actor, client) = self.actor_and_client();
-        let args = UpdateEntityArgs {
+        let mut args = UpdateEntityArgs {
             anchors: p
                 .anchors
                 .unwrap_or_default()
@@ -1317,7 +1316,7 @@ impl FilesystemMcpServer {
                 })
                 .collect(),
             id: EntityId(p.id),
-            expected_hash: Some(p.expected_hash),
+            expected_hash: p.expected_hash,
             sections: p.sections.unwrap_or_default(),
             // The filesystem-mem tool doesn't expose
             // append_sections / patch_sections on the wire yet;
@@ -1338,6 +1337,32 @@ impl FilesystemMcpServer {
                 .collect(),
             dry_run: false,
         };
+        // The same gate the full flavour applies, from the same engine-side
+        // predicate (consistency-sweep 03/04, criterion 4): a caller must not
+        // find an anchors-only update accepted on one surface and refused on
+        // the other. Content-changing updates keep the compare-and-swap token;
+        // an anchors-only one does not need it, because the anchors sidecar is
+        // outside the content hash and the token would compare a value the
+        // write cannot move.
+        // An empty token is no token on an anchors-only write, as on the full
+        // flavour, and narrowed to that shape for the same reason: an
+        // unconditional normalization preempts the engine's own stub gate.
+        if !args.changes_content() {
+            args.expected_hash = args.expected_hash.filter(|h| !h.is_empty());
+        }
+        if args.expected_hash.is_none() && args.changes_content() {
+            return tool_error_with_details(
+                "EXPECTED_HASH_REQUIRED",
+                "`expected_hash` is required for an update that changes content. Read the \
+                 entity first and pass its `_hash`. Only an anchors-only update (`anchors` / \
+                 `anchors_unset` and nothing else) may omit it, because anchors are outside \
+                 the content hash.",
+                Some(serde_json::json!({
+                    "field": "expected_hash",
+                    "id": args.id.to_string(),
+                })),
+            );
+        }
         match engine.update_entity(args, actor, client.as_ref(), p.note.as_deref()) {
             Ok(outcome) => {
                 let durable = mem_is_durable(&engine, outcome.id.mem());
@@ -2730,7 +2755,7 @@ mod tests {
         let base = || UpdateParams {
             anchors: None,
             id: "demo--anything".into(),
-            expected_hash: "deadbeef".into(),
+            expected_hash: Some("deadbeef".into()),
             sections: None,
             append_sections: None,
             patch_sections: None,
@@ -3097,7 +3122,7 @@ mod tests {
             relations_unset: None,
             anchors_unset: None,
             id: id.clone(),
-            expected_hash: hash.clone(),
+            expected_hash: Some(hash.clone()),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,
@@ -3127,7 +3152,7 @@ mod tests {
             relations_unset: None,
             anchors_unset: None,
             id,
-            expected_hash: "0000000000".into(),
+            expected_hash: Some("0000000000".into()),
             sections: None,
             append_sections: None,
             patch_sections: None,
@@ -3162,7 +3187,7 @@ mod tests {
                 relations_unset: None,
                 anchors_unset: None,
                 id: id.clone(),
-                expected_hash: hash.clone(),
+                expected_hash: Some(hash.clone()),
                 sections: None,
                 append_sections: None,
                 patch_sections: None,
@@ -3202,7 +3227,7 @@ mod tests {
                 relations_unset: None,
                 anchors_unset: None,
                 id: id.clone(),
-                expected_hash: hash.clone(),
+                expected_hash: Some(hash.clone()),
                 sections: None,
                 append_sections: None,
                 patch_sections: None,
@@ -3258,7 +3283,7 @@ mod tests {
             relations_unset: None,
             anchors_unset: None,
             id,
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,
@@ -4507,7 +4532,7 @@ mod tests {
             relations_unset: None,
             anchors_unset: None,
             id: id.clone(),
-            expected_hash: hash,
+            expected_hash: Some(hash),
             sections: Some(sections),
             append_sections: None,
             patch_sections: None,

@@ -216,8 +216,10 @@ pub enum Command {
     /// section fields, or pass `--from <file.json>` with the full payload.
     Create(commands::create::Args),
 
-    /// Modify an existing entity. `--expected-hash` is required unless
-    /// `--auto-hash` (refetch before write) or `--force` (skip check) is given.
+    /// Modify an existing entity. `--expected-hash` is required for an update
+    /// that changes content, unless `--auto-hash` (refetch before write) or
+    /// `--force` (skip check) is given; an anchors-only update needs none,
+    /// since anchors sit outside the content hash.
     Update(commands::update::Args),
 
     /// Add or remove a typed relationship between two entities.

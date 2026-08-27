@@ -11,7 +11,8 @@
 //!   constants in `memstead-base` are also indexed, for `code()` impls
 //!   that return a named constant instead of a literal (e.g.
 //!   `INVALID_ANCHOR_CODE` in `anchor.rs`).
-//! * `tool_error(...)` / `tool_error_with_payload(...)` callsites in
+//! * `tool_error(...)` / `tool_error_with_payload(...)` /
+//!   `tool_error_with_details(...)` callsites in
 //!   `memstead-mcp` — first positional argument.
 //! * `CliError::new(_, "...", _)`, `.with_code("...")`, and
 //!   `pub const ..._CODE: &str = "..."` constants in `memstead-cli`.
@@ -171,7 +172,12 @@ fn scan_mcp_codes(
     // Whole-file scan for the same reason as `scan_cli_codes`: rustfmt
     // may put the code literal on the line after `tool_error(`.
     let tool_re =
-        Regex::new(r#"\btool_error(?:_with_payload)?\(\s*"([A-Z][A-Z0-9_]+)"\s*,"#).unwrap();
+        // `_with_details` is the lean flavour's own payload-carrying form
+        // (`filesystem_server.rs`); omitting it hid every code only that
+        // server emits, so the reference under-reported where a refusal
+        // comes from (consistency-sweep 03/04 grading).
+        Regex::new(r#"\btool_error(?:_with_payload|_with_details)?\(\s*"([A-Z][A-Z0-9_]+)"\s*,"#)
+            .unwrap();
     for crate_dir in ["crates/memstead-mcp/src"] {
         let root = workspace_root.join(crate_dir);
         for path in rust_sources(&root)? {

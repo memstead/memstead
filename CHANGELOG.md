@@ -8,6 +8,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **An anchors-only update no longer demands a compare-and-swap token for a
+  value it cannot move.** Anchors live in a sidecar outside the entity's
+  content hash, by deliberate and documented design, so an update that touches
+  only anchors cannot change the hash it was being asked to present. Both
+  surfaces required one anyway, which cost a read or dry-run roundtrip per
+  entity and fell on exactly the backfill flows the anchor dialect exists to
+  make attractive.
+
+  `expected_hash` is now optional on `memstead_update` and `--expected-hash`
+  optional on `memstead update`, for an anchors-only payload. Any update that
+  changes content still requires it and still refuses a mismatch; a payload
+  naming neither anchors nor content is still an empty update, with the
+  recognised-key list that refusal carries now naming `anchors` and
+  `anchors_unset`, which the guard had always checked.
+
+  The requirement is enforced at the surfaces from ONE engine-side predicate,
+  so a caller cannot find a write accepted on MCP and refused on the CLI. The
+  engine core is unchanged: it has always checked the token only when a caller
+  supplies one, and this restores that posture at the edges rather than
+  inventing a new rule.
+
 - **A span anchor could be born pointing at lines a file does not have, and a
   re-pin could lose its drift baseline without saying so.** The read path
   handled spans; the write path accepted almost anything. It checked the
