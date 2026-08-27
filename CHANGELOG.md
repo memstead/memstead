@@ -8,6 +8,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **Every configured mount appears on every surface that lists mounts.** A
+  mount that could not serve was either missing from a roster or present on it
+  looking healthy, depending on how each surface built its list. Nine call
+  sites reached for a query whose contract is "mems WITH config" while wanting
+  to enumerate mounts, so a folder mount whose directory is gone was invisible
+  to all of them. `workspace dump`, `mem list`, the changes path, the publish
+  path and the export paths now ask for every mount, with config-derived
+  fields absent rather than the mount absent.
+
+  `workspace dump` carries a per-mem `serving` block naming why a mount serves
+  nothing, and its wire version moves `workspace-dump/v0` → `v1`. The change is
+  additive by the letter of the versioning rule, but the MEMBERSHIP of the
+  `mems` array changed, and a consumer that assumed every row carries a schema
+  pin is broken by that just as surely.
+
+  A folder or archive mount whose storage is gone now quarantines rather than
+  serving an empty graph, which ends an incoherence: the same broken mount used
+  to quarantine or serve empty depending on whether the mounts file happened to
+  carry a schema assertion, a detail unrelated to the breakage. `mem list`
+  renders the quarantine roster in both output forms, so quarantine does not
+  become a second way to disappear. A present-but-empty mem still only warns.
+
+  Git-branch mounts are deliberately not included: a missing ref is also the
+  normal state of a mem never pushed or never cloned, and quarantining it
+  strands push, fetch and pull behind the condition they repair.
+
 - **`status` and the change record answer for what they actually examined.**
   Three surfaces stated facts they had not established, and each is now
   either established or declared unestablished.
