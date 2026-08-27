@@ -2276,6 +2276,24 @@ impl FilesystemMcpServer {
                 Some(serde_json::json!({ "allowed": memstead_base::check::VERDICTS })),
             );
         };
+        let kind = match p.kind.as_deref() {
+            None => memstead_base::check::CheckKind::Verification,
+            Some(s) => match memstead_base::check::CheckKind::from_wire(s) {
+                Some(k) => k,
+                None => {
+                    return tool_error_with_details(
+                        "INVALID_CHECK_KIND",
+                        &format!(
+                            "unknown check kind {s:?} — the vocabulary is: {}",
+                            memstead_base::check::CHECK_KINDS.join(", ")
+                        ),
+                        Some(serde_json::json!({
+                            "allowed": memstead_base::check::CHECK_KINDS
+                        })),
+                    );
+                }
+            },
+        };
         let mut engine = crate::lock_engine!(self.engine);
         match resolve_role_lean(p.role.as_deref()) {
             Ok(r) => engine.set_role(r),
@@ -2287,12 +2305,21 @@ impl FilesystemMcpServer {
             id.mem(),
             id.as_ref(),
             verdict,
+            kind,
             p.method.as_deref(),
             actor,
             client.as_ref(),
         ) {
             Ok(record) => {
-                let (state, _) = match engine.entity_check_state(id.mem(), id.as_ref()) {
+                let state_result = match kind {
+                    memstead_base::check::CheckKind::Verification => {
+                        engine.entity_check_state(id.mem(), id.as_ref())
+                    }
+                    memstead_base::check::CheckKind::Conformance => {
+                        engine.entity_conformance_state(id.mem(), id.as_ref())
+                    }
+                };
+                let (state, _) = match state_result {
                     Ok(pair) => pair,
                     Err(e) => return engine_op_error(e),
                 };
@@ -2300,6 +2327,8 @@ impl FilesystemMcpServer {
                     "entity": record.entity,
                     "verdict": record.verdict,
                     "check_state": state.as_str(),
+                    "kind": record.kind.as_deref().unwrap_or("verification"),
+                    "schema_ref": record.schema_ref,
                     "role": record.role,
                     "ts": record.ts,
                     "method": record.method,

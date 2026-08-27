@@ -854,6 +854,12 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
         let _ = writeln!(s, "\n## Checks ({} mems)", obj.len());
         for (mem, c) in obj {
             let count = |key: &str| c.get(key).and_then(|x| x.as_u64()).unwrap_or(0);
+            let conf = |key: &str| {
+                c.get("conformance")
+                    .and_then(|g| g.get(key))
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0)
+            };
             let gate = |key: &str| {
                 c.get("independence")
                     .and_then(|g| g.get(key))
@@ -864,12 +870,18 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
             let _ = writeln!(
                 s,
                 "- `{mem}`: never_checked {}, checked_ok {}, check_failed {}, \
-                 check_stale {}; independence: self_checked {}, \
+                 check_stale {}; conformance: never_checked {}, \
+                 checked_ok {}, check_failed {}, check_stale {}; \
+                 independence: self_checked {}, \
                  confirmed_independent {}, unconfirmable {}",
                 count("never_checked"),
                 count("checked_ok"),
                 count("check_failed"),
                 count("check_stale"),
+                conf("never_checked"),
+                conf("checked_ok"),
+                conf("check_failed"),
+                conf("check_stale"),
                 gate("self_checked"),
                 gate("confirmed_independent"),
                 gate("unconfirmable"),
@@ -1084,6 +1096,10 @@ mod tests {
             "specs": {
                 "never_checked": 2, "checked_ok": 1,
                 "check_failed": 0, "check_stale": 0,
+                "conformance": {
+                    "never_checked": 3, "checked_ok": 0,
+                    "check_failed": 0, "check_stale": 0,
+                },
                 "independence": {
                     "self_checked": { "count": 0, "items": [] },
                     "confirmed_independent": { "count": 0, "items": [] },
@@ -1108,7 +1124,8 @@ mod tests {
         assert!(
             md.contains(
                 "- `specs`: never_checked 2, checked_ok 1, check_failed 0, \
-                 check_stale 0; independence: self_checked 0, \
+                 check_stale 0; conformance: never_checked 3, checked_ok 0, \
+                 check_failed 0, check_stale 0; independence: self_checked 0, \
                  confirmed_independent 0, unconfirmable 1"
             ),
             "{md}"

@@ -14,7 +14,7 @@
 //! [`crate::check::derive_state`] so surfaces and health share one
 //! implementation.
 
-use crate::check::{CheckLedger, CheckRecord, CheckState, Verdict, derive_state};
+use crate::check::{CheckKind, CheckLedger, CheckRecord, CheckState, Verdict, derive_state};
 use crate::vcs::{Actor, ClientId};
 
 use super::{Engine, error::EngineError};
@@ -27,11 +27,20 @@ impl Engine {
     /// unrecorded check landed is the exact dishonesty this tier
     /// removes. The declared role rides engine session state
     /// ([`Engine::set_role`]), same as every mutation.
+    ///
+    /// `kind` selects the closed check-kind vocabulary. A
+    /// `conformance` record is bound to the mem's schema pin, stamped
+    /// HERE from the mount — never caller-supplied, so a verdict
+    /// cannot claim a prose version the caller never read; a mem with
+    /// no pin refuses (`INVALID_INPUT`), because a semantic judgment
+    /// against no schema binds to nothing.
+    #[allow(clippy::too_many_arguments)] // the record's own fields, no natural grouping
     pub fn record_check(
         &mut self,
         mem_name: &str,
         entity_id: &str,
         verdict: Verdict,
+        kind: CheckKind,
         method: Option<&str>,
         actor: Actor,
         client: Option<&ClientId>,
@@ -44,6 +53,22 @@ impl Engine {
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
+        let schema_ref = match kind {
+            CheckKind::Verification => None,
+            CheckKind::Conformance => Some(
+                self.mounts[mount_idx]
+                    .mount
+                    .schema
+                    .as_ref()
+                    .map(|s| s.as_display())
+                    .ok_or_else(|| {
+                        EngineError::InvalidInput(format!(
+                            "a conformance check binds to the mem's schema pin, and mem \
+                             `{mem_name}` declares none"
+                        ))
+                    })?,
+            ),
+        };
         let entity_hash = self
             .store
             .all_entities()
@@ -77,6 +102,14 @@ impl Engine {
                 .as_trailer()
                 .unwrap_or("unspecified")
                 .to_string(),
+            // Verification records omit the kind entirely, so a
+            // kind-omitted caller's ledger lines stay byte-identical
+            // to the pre-kind shape.
+            kind: match kind {
+                CheckKind::Verification => None,
+                CheckKind::Conformance => Some(kind.as_str().to_string()),
+            },
+            schema_ref,
         };
         ledger
             .record(&record)
@@ -107,16 +140,87 @@ impl Engine {
         let latest = self
             .workspace_root()
             .map(CheckLedger::for_workspace)
-            .and_then(|l| l.latest_for(entity_id));
+            .and_then(|l| l.latest_for_kind(entity_id, CheckKind::Verification));
         Ok((derive_state(latest.as_ref(), &current_hash), latest))
+    }
+
+    /// Derive one entity's `conformance` state and newest conformance
+    /// record: hash staleness plus pin staleness (a re-pinned or
+    /// unpinned mem stales the verdict — the prose it judged against
+    /// is no longer the prose in force). Same refusals as
+    /// [`Self::entity_check_state`].
+    pub fn entity_conformance_state(
+        &self,
+        mem_name: &str,
+        entity_id: &str,
+    ) -> Result<(CheckState, Option<CheckRecord>), EngineError> {
+        let mount = self.find_mount(mem_name)?;
+        let current_pin = mount.mount.schema.as_ref().map(|s| s.as_display());
+        let current_hash = self
+            .store
+            .all_entities()
+            .find(|e| e.mem == mem_name && e.id.0 == entity_id)
+            .map(|e| e.content_hash.clone())
+            .ok_or_else(|| EngineError::NotFound {
+                id: entity_id.to_string(),
+            })?;
+        let latest = self
+            .workspace_root()
+            .map(CheckLedger::for_workspace)
+            .and_then(|l| l.latest_for_kind(entity_id, CheckKind::Conformance));
+        Ok((
+            crate::check::derive_state_pinned(
+                latest.as_ref(),
+                &current_hash,
+                current_pin.as_deref(),
+            ),
+            latest,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::check::Verdict;
+    use crate::check::{CheckKind, Verdict};
     use crate::vcs::Actor;
     use crate::workspace::MountCapability;
+
+    /// A conformance check binds to the mem's schema pin; a mem that
+    /// declares none cannot accept one. Today that refusal arrives as
+    /// the quarantine gate (an unpinned mem quarantines at boot and
+    /// serves nothing), which fires before the pin guard inside
+    /// `record_check`; the guard's own `INVALID_INPUT` remains as
+    /// defense in depth for any future backend that serves unpinned.
+    #[test]
+    fn conformance_refuses_without_a_schema_pin() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("anything.md"),
+            "---\nid: anything\ntitle: Anything\ntype: note\n---\n\nBody.\n",
+        )
+        .unwrap();
+        let mut mount = crate::engine::test_helpers::folder_mount("m", tmp.path().to_path_buf());
+        mount.schema = None;
+        let mut engine = crate::Engine::from_mounts(vec![(
+            mount,
+            Box::new(crate::storage::FilesystemMemWriter::new(
+                tmp.path().to_path_buf(),
+            )) as Box<dyn crate::backend::MemBackend>,
+        )])
+        .unwrap();
+        let err = engine
+            .record_check(
+                "m",
+                "m--anything",
+                Verdict::Ok,
+                CheckKind::Conformance,
+                None,
+                Actor::Cli,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "MEM_QUARANTINED");
+    }
 
     /// Criterion 5 complement: a read-only mount refuses a check
     /// typed (`READ_ONLY_MOUNT`) — capability gating runs before the
@@ -134,7 +238,15 @@ mod tests {
         )])
         .unwrap();
         let err = engine
-            .record_check("ro", "ro--anything", Verdict::Ok, None, Actor::Cli, None)
+            .record_check(
+                "ro",
+                "ro--anything",
+                Verdict::Ok,
+                crate::check::CheckKind::Verification,
+                None,
+                Actor::Cli,
+                None,
+            )
             .unwrap_err();
         assert_eq!(err.code(), "READ_ONLY_MOUNT");
     }

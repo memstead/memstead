@@ -3106,3 +3106,129 @@ fn quickstart_workspace_bare_publish_dry_run_assembles() {
         "dry run must assemble and stop: {text}"
     );
 }
+
+/// The kinded check contract on the CLI (criterion parity with MCP):
+/// an unknown `--kind` refuses `INVALID_CHECK_KIND` naming the
+/// vocabulary; `--kind conformance` records with the engine-stamped
+/// schema pin; kind omitted stays today's verification behaviour and
+/// the two kinds derive independently, visible in the health axis'
+/// per-kind counts.
+#[test]
+fn cli_kinded_check_records_and_refuses() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("kindws");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "--role",
+            "author",
+            "create",
+            "--title",
+            "Kind Probe",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Recorded.",
+            "--section",
+            "context=Kind test.",
+        ])
+        .assert()
+        .success();
+
+    // Unknown kind refuses typed, naming the vocabulary.
+    let refused = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "check",
+            "kindws--kind-probe",
+            "--verdict",
+            "ok",
+            "--kind",
+            "semantic",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let e = format!(
+        "{}{}",
+        String::from_utf8_lossy(&refused.stdout),
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(e.contains("INVALID_CHECK_KIND"), "{e}");
+    assert!(
+        e.contains("verification") && e.contains("conformance"),
+        "{e}"
+    );
+
+    // Conformance records with the engine-stamped pin.
+    let out = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "--role",
+            "checker",
+            "check",
+            "kindws--kind-probe",
+            "--verdict",
+            "failed",
+            "--kind",
+            "conformance",
+            "--method",
+            "judged against write_rules by test-model",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["kind"], "conformance", "{v}");
+    assert_eq!(v["check_state"], "check_failed", "{v}");
+    let pin = v["schema_ref"].as_str().expect("engine stamps the pin");
+    assert!(pin.contains('@'), "pin is name@version: {pin}");
+
+    // Kind omitted: verification, independent of the conformance
+    // verdict just recorded.
+    let out2 = memstead()
+        .current_dir(&ws)
+        .args([
+            "--json",
+            "--role",
+            "checker",
+            "check",
+            "kindws--kind-probe",
+            "--verdict",
+            "ok",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v2: serde_json::Value = serde_json::from_slice(&out2).unwrap();
+    assert_eq!(v2["kind"], "verification", "{v2}");
+    assert_eq!(v2["check_state"], "checked_ok", "{v2}");
+    assert!(v2["schema_ref"].is_null(), "{v2}");
+
+    // The health axis serves both kinds' counts.
+    let health = memstead()
+        .current_dir(&ws)
+        .args(["--json", "health", "--include", "checks"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let h: serde_json::Value = serde_json::from_slice(&health).unwrap();
+    let axis = &h["checks"]["kindws"];
+    assert_eq!(axis["checked_ok"], 1, "{h}");
+    assert_eq!(axis["conformance"]["check_failed"], 1, "{h}");
+}

@@ -97,12 +97,23 @@ pub fn health_checks_axis(
     let ledger = engine
         .workspace_root()
         .map(crate::check::CheckLedger::for_workspace);
-    // Newest record per entity, one ledger read for the whole axis.
+    // Newest record per (entity, kind), one ledger read for the whole
+    // axis. State is kind-scoped: a conformance record never
+    // supersedes a verification record, or the reverse.
     let mut latest: std::collections::BTreeMap<String, crate::check::CheckRecord> =
+        std::collections::BTreeMap::new();
+    let mut latest_conformance: std::collections::BTreeMap<String, crate::check::CheckRecord> =
         std::collections::BTreeMap::new();
     if let Some(l) = &ledger {
         for rec in l.all() {
-            latest.insert(rec.entity.clone(), rec);
+            match rec.resolved_kind() {
+                crate::check::CheckKind::Verification => {
+                    latest.insert(rec.entity.clone(), rec);
+                }
+                crate::check::CheckKind::Conformance => {
+                    latest_conformance.insert(rec.entity.clone(), rec);
+                }
+            }
         }
     }
 
@@ -121,6 +132,21 @@ pub fn health_checks_axis(
             ("check_failed", 0usize),
             ("check_stale", 0usize),
         ]);
+        // The `conformance` kind's counts, additively beside the
+        // verification counts. Pin-aware: a schema re-pin stales
+        // every conformance verdict recorded under the old pin. A
+        // workspace with no conformance records serves all
+        // `never_checked` — honestly empty, never absent.
+        let current_pin = engine
+            .mount(&mem)
+            .and_then(|m| m.schema.as_ref())
+            .map(|s| s.as_display());
+        let mut conformance_counts = std::collections::BTreeMap::from([
+            ("never_checked", 0usize),
+            ("checked_ok", 0usize),
+            ("check_failed", 0usize),
+            ("check_stale", 0usize),
+        ]);
         // Unreachable until a caller-declared identity exists (the
         // caller-identity follow-up, plan 15) — kept so the wire shape
         // states the categories explicitly rather than dropping them.
@@ -131,6 +157,12 @@ pub fn health_checks_axis(
             let id = e.id.0.clone();
             let state = crate::check::derive_state(latest.get(&id), &e.content_hash);
             *counts.entry(state.as_str()).or_insert(0) += 1;
+            let cstate = crate::check::derive_state_pinned(
+                latest_conformance.get(&id),
+                &e.content_hash,
+                current_pin.as_deref(),
+            );
+            *conformance_counts.entry(cstate.as_str()).or_insert(0) += 1;
             if state != crate::check::CheckState::CheckedOk {
                 continue;
             }
@@ -150,6 +182,11 @@ pub fn health_checks_axis(
         for (k, v) in counts {
             m.insert(k.to_string(), serde_json::json!(v));
         }
+        let mut c = serde_json::Map::new();
+        for (k, v) in conformance_counts {
+            c.insert(k.to_string(), serde_json::json!(v));
+        }
+        m.insert("conformance".into(), serde_json::Value::Object(c));
         m.insert(
             "independence".into(),
             serde_json::json!({

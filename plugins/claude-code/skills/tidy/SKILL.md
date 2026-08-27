@@ -54,6 +54,15 @@ Apply only the approved items, each through the Memstead tools:
 
 When you are done, re-run `memstead_health` and report what changed and what remains open.
 
+## The conformance pass (on request, or when the assess phase suggests it)
+
+Every schema carries two halves: a structural half the engine validates at the write gate, and a semantic half — each type's `write_rules` and `writing_guidance` prose — that no validator checks. The conformance pass judges entities against that prose and records the judgment, so any surface can later answer "was this entity ever judged against its type's prose, did it pass, and does that judgment still hold?" without another LLM call.
+
+1. **Worklist** — call `memstead_health` with `include: ["checks"]` and read the per-mem `conformance` counts: `never_checked` and `check_stale` entities are the worklist (a stale verdict means the content or the mem's schema pin moved since the judgment). Enumerate the concrete entities via `memstead_search` / `memstead_entity` as needed.
+2. **Judge** — for each entity, fetch its type's prose once per type with `memstead_schema` (`verbosity: "full"`, scoped with `types: ["<name>"]`), read the entity in full, and judge: does this entity satisfy what its type's `write_rules` and `writing_guidance` ask for? The verdict vocabulary is closed: `ok` | `failed`. Nuance (which rule missed, how far off) goes in the method note and in your report, never in new verdict values.
+3. **Record** — `memstead_check` with `kind: "conformance"`, `role: "checker"`, and a `method` note naming the judging model (e.g. `"judged against write_rules by <model>"`). The engine stamps the mem's current schema pin into the record; you cannot and must not supply it. The verdict goes stale automatically when the entity's content or the pin moves.
+4. **Report** — verdicts are **advisory**: nothing gates a write or a read on conformance state. Entities that failed go in the proposal list of Phase 2 (with the concrete fix), never into silent edits.
+
 ## Rules
 
 - **Graph only** — tidy never reads or writes whatever a mem was built from. It has no read, search, or shell access by design; everything happens through the Memstead tools.

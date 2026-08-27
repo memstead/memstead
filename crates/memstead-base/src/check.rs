@@ -37,6 +37,42 @@ use serde::{Deserialize, Serialize};
 /// in process-mem entities — never in new verdict values.
 pub const VERDICTS: [&str; 2] = ["ok", "failed"];
 
+/// The closed kind vocabulary. `verification` is the default and
+/// today's behaviour: "I checked this entity's content". `conformance`
+/// is the semantic judgment "this entity satisfies its type's
+/// schema prose (`write_rules` / `writing_guidance`)" — recorded with
+/// the mem's schema pin, stamped by the engine at record time, so the
+/// verdict's freshness against both the content AND the prose version
+/// stays computable. A third kind is a separate decision; closed
+/// kinds keep health aggregation well-defined, matching the closed
+/// verdict vocabulary.
+pub const CHECK_KINDS: [&str; 2] = ["verification", "conformance"];
+
+/// A check kind from the closed vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckKind {
+    Verification,
+    Conformance,
+}
+
+impl CheckKind {
+    /// Parse a wire value; `None` for anything outside the vocabulary.
+    pub fn from_wire(s: &str) -> Option<Self> {
+        match s {
+            "verification" => Some(Self::Verification),
+            "conformance" => Some(Self::Conformance),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Verification => "verification",
+            Self::Conformance => "conformance",
+        }
+    }
+}
+
 /// A check verdict from the closed vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -87,6 +123,31 @@ pub struct CheckRecord {
     /// honestly; downstream gates treat unspecified as
     /// cannot-confirm, never as any real role.
     pub role: String,
+    /// The check kind, from [`CHECK_KINDS`]. Absent on ledger lines
+    /// written before kinds existed AND on freshly recorded
+    /// `verification` checks — both read as `verification`, so an
+    /// existing ledger upgrades with no migration and a kind-omitted
+    /// caller's lines stay byte-identical to before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// For `conformance` records: the mem's schema pin
+    /// (`name@x.y.z`) as stamped by the engine at record time — never
+    /// caller-supplied, so a verdict cannot claim a prose version the
+    /// caller never read. Absent on `verification` records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_ref: Option<String>,
+}
+
+impl CheckRecord {
+    /// The record's kind, legacy lines included: an absent or
+    /// unrecognised kind reads as `verification`, which is exactly
+    /// what every pre-kind line was.
+    pub fn resolved_kind(&self) -> CheckKind {
+        self.kind
+            .as_deref()
+            .and_then(CheckKind::from_wire)
+            .unwrap_or(CheckKind::Verification)
+    }
 }
 
 /// Derived per-entity check state.
@@ -110,11 +171,33 @@ impl CheckState {
 }
 
 /// Derive the state from the newest record (if any) and the entity's
-/// current `content_hash`.
+/// current `content_hash`. Hash-only: this is the `verification`
+/// derivation, and stays the whole story for that kind — a schema
+/// re-pin never stales a verification verdict.
 pub fn derive_state(latest: Option<&CheckRecord>, current_hash: &str) -> CheckState {
+    derive_state_pinned(latest, current_hash, None)
+}
+
+/// Derive the state with schema-pin awareness: beyond the hash
+/// comparison, a record that carries a `schema_ref` (a `conformance`
+/// record) is stale when the mem's current pin differs from the
+/// recorded one — the prose the verdict judged against is no longer
+/// the prose in force. A mem that has since lost its pin entirely
+/// stales the verdict the same way. Records without a `schema_ref`
+/// (every `verification` record) are unaffected by the pin argument.
+pub fn derive_state_pinned(
+    latest: Option<&CheckRecord>,
+    current_hash: &str,
+    current_schema_ref: Option<&str>,
+) -> CheckState {
     match latest {
         None => CheckState::NeverChecked,
         Some(rec) if rec.entity_hash != current_hash => CheckState::CheckStale,
+        Some(rec)
+            if rec.schema_ref.is_some() && rec.schema_ref.as_deref() != current_schema_ref =>
+        {
+            CheckState::CheckStale
+        }
         Some(rec) if rec.verdict == "failed" => CheckState::CheckFailed,
         Some(_) => CheckState::CheckedOk,
     }
@@ -177,9 +260,21 @@ impl CheckLedger {
             .collect()
     }
 
-    /// The newest record for one entity, if any.
+    /// The newest record for one entity, of any kind. State
+    /// derivation is per (entity, kind) — use [`Self::latest_for_kind`]
+    /// there; this remains the "what happened last" accessor.
     pub fn latest_for(&self, entity: &str) -> Option<CheckRecord> {
         self.all().into_iter().rev().find(|r| r.entity == entity)
+    }
+
+    /// The newest record for one entity of one kind. A later check of
+    /// the OTHER kind never supersedes it: the two derivations answer
+    /// different questions.
+    pub fn latest_for_kind(&self, entity: &str, kind: CheckKind) -> Option<CheckRecord> {
+        self.all()
+            .into_iter()
+            .rev()
+            .find(|r| r.entity == entity && r.resolved_kind() == kind)
     }
 }
 
@@ -198,6 +293,8 @@ mod tests {
             actor: "cli".to_string(),
             client: None,
             role: "checker".to_string(),
+            kind: None,
+            schema_ref: None,
         }
     }
 
@@ -235,5 +332,89 @@ mod tests {
         assert!(Verdict::from_wire("failed").is_some());
         assert!(Verdict::from_wire("passed").is_none());
         assert!(Verdict::from_wire("OK").is_none());
+    }
+
+    fn conf(entity: &str, verdict: &str, hash: &str, pin: &str) -> CheckRecord {
+        CheckRecord {
+            kind: Some("conformance".to_string()),
+            schema_ref: Some(pin.to_string()),
+            ..rec(entity, verdict, hash)
+        }
+    }
+
+    #[test]
+    fn kind_vocabulary_is_closed() {
+        assert!(CheckKind::from_wire("verification").is_some());
+        assert!(CheckKind::from_wire("conformance").is_some());
+        assert!(CheckKind::from_wire("semantic").is_none());
+        assert!(CheckKind::from_wire("Conformance").is_none());
+    }
+
+    /// Criterion 5: a pre-kind ledger line (no `kind` field) parses
+    /// and derives as a `verification` record, byte-for-byte the old
+    /// shape on the write side too.
+    #[test]
+    fn legacy_lines_read_as_verification() {
+        let legacy = r#"{"ts":1,"entity":"m--e","verdict":"ok","entity_hash":"h1","actor":"cli","role":"checker"}"#;
+        let parsed: CheckRecord = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.resolved_kind(), CheckKind::Verification);
+        // A freshly built verification record serialises with no kind
+        // and no schema_ref key at all.
+        let fresh = rec("m--e", "ok", "h1");
+        let line = serde_json::to_string(&fresh).unwrap();
+        assert!(!line.contains("kind"));
+        assert!(!line.contains("schema_ref"));
+    }
+
+    /// Criterion 3: state derives per (entity, kind) — a later check
+    /// of the other kind does not supersede.
+    #[test]
+    fn latest_is_per_kind() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        ledger.record(&rec("m--a", "ok", "h1")).unwrap();
+        ledger
+            .record(&conf("m--a", "failed", "h1", "planning@1.0.0"))
+            .unwrap();
+        let v = ledger
+            .latest_for_kind("m--a", CheckKind::Verification)
+            .unwrap();
+        assert_eq!(v.verdict, "ok");
+        let c = ledger
+            .latest_for_kind("m--a", CheckKind::Conformance)
+            .unwrap();
+        assert_eq!(c.verdict, "failed");
+        assert_eq!(c.schema_ref.as_deref(), Some("planning@1.0.0"));
+    }
+
+    /// Criterion 4: a conformance verdict is stale on a content move
+    /// AND on a pin move; a verification verdict ignores pin moves.
+    #[test]
+    fn conformance_stales_on_pin_move_verification_does_not() {
+        let c = conf("m--e", "ok", "h1", "planning@1.0.0");
+        assert_eq!(
+            derive_state_pinned(Some(&c), "h1", Some("planning@1.0.0")),
+            CheckState::CheckedOk
+        );
+        assert_eq!(
+            derive_state_pinned(Some(&c), "h2", Some("planning@1.0.0")),
+            CheckState::CheckStale
+        );
+        assert_eq!(
+            derive_state_pinned(Some(&c), "h1", Some("planning@2.0.0")),
+            CheckState::CheckStale
+        );
+        // The mem losing its pin stales the verdict too.
+        assert_eq!(
+            derive_state_pinned(Some(&c), "h1", None),
+            CheckState::CheckStale
+        );
+        // Verification: unaffected by any pin argument.
+        let v = rec("m--e", "ok", "h1");
+        assert_eq!(
+            derive_state_pinned(Some(&v), "h1", Some("planning@9.0.0")),
+            CheckState::CheckedOk
+        );
+        assert_eq!(derive_state(Some(&v), "h1"), CheckState::CheckedOk);
     }
 }

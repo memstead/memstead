@@ -79,7 +79,7 @@ Per-mem commit-delta feed — reads the mem's own git repo (gitdir via `memstead
 
 **Flavour:** lean + full
 
-Record a check: "entity E checked, verdict ok | failed, via method M" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and mem commits are untouched; that non-mutation is what makes check-staleness computable). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger — a newer check supersedes older ones for state derivation but never erases them. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — stale means the entity changed after its last check, computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed in this response as `check_state`. Verdict vocabulary is closed (`ok` | `failed`) — nuance goes in `method` or in process-mem entities; an unknown verdict refuses `INVALID_VERDICT`. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), unknown/quarantined mems, read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED` — recording is never best-effort). A check with an unspecified role records honestly but cannot confirm independence downstream.
+Record a check: "entity E checked, verdict ok | failed, via method M" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and mem commits are untouched; that non-mutation is what makes check-staleness computable). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger — a newer check supersedes older ones for state derivation but never erases them. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — stale means the entity changed after its last check, computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed in this response as `check_state`. Verdict vocabulary is closed (`ok` | `failed`) — nuance goes in `method` or in process-mem entities; an unknown verdict refuses `INVALID_VERDICT`. The check `kind` vocabulary is closed too (`verification` | `conformance`; omitted = `verification`, exactly the prior behaviour): a `conformance` record is the semantic judgment "this entity satisfies its type's schema prose", carries the mem's schema pin as `schema_ref` stamped by the engine (never caller-supplied), and derives stale when the content hash OR the pin moves; state derives per (entity, kind), the kinds never supersede each other, and an unknown kind refuses `INVALID_CHECK_KIND` naming the vocabulary. Conformance verdicts are advisory — nothing gates a write or read on them. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), unknown/quarantined mems, read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED` — recording is never best-effort). A check with an unspecified role records honestly but cannot confirm independence downstream.
 
 **Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
 
@@ -92,6 +92,13 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — the en
     "entity": {
       "description": "Full entity id (`mem--slug`) of the entity that was checked",
       "type": "string"
+    },
+    "kind": {
+      "description": "The check kind, from the closed vocabulary `verification` | `conformance`. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, kind) — the kinds never supersede each other. An unknown value refuses `INVALID_CHECK_KIND` naming the vocabulary.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "method": {
       "description": "Optional free-text method note — how the check was performed (e.g. \"diffed against source spec\").",

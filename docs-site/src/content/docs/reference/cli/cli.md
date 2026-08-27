@@ -1020,7 +1020,8 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — an eng
 ###### **Options:**
 
 * `--verdict <VERDICT>` — The verdict: `ok` | `failed`. The vocabulary is closed — nuance goes in `--method` or in process-mem entities
-* `--method <METHOD>` — Free-text method note — how the check was performed
+* `--method <METHOD>` — Free-text method note — how the check was performed. For a conformance check, name the judging model here
+* `--kind <KIND>` — The check kind: `verification` (default — "I checked this entity's content") | `conformance` (a semantic judgment against the type's schema prose; the engine stamps the mem's schema pin into the record, and the verdict goes stale when the content hash moves OR the pin changes). The vocabulary is closed
 
 
 

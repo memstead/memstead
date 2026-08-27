@@ -12,7 +12,7 @@
 
 use clap::Parser;
 use memstead_base::EntityId;
-use memstead_base::check::{VERDICTS, Verdict};
+use memstead_base::check::{CHECK_KINDS, CheckKind, VERDICTS, Verdict};
 use memstead_base::vcs::Actor;
 
 use crate::CliError;
@@ -29,9 +29,19 @@ pub struct Args {
     #[arg(long)]
     pub verdict: String,
 
-    /// Free-text method note — how the check was performed.
+    /// Free-text method note — how the check was performed. For a
+    /// conformance check, name the judging model here.
     #[arg(long)]
     pub method: Option<String>,
+
+    /// The check kind: `verification` (default — "I checked this
+    /// entity's content") | `conformance` (a semantic judgment
+    /// against the type's schema prose; the engine stamps the mem's
+    /// schema pin into the record, and the verdict goes stale when
+    /// the content hash moves OR the pin changes). The vocabulary is
+    /// closed.
+    #[arg(long)]
+    pub kind: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -47,6 +57,19 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         )
         .into());
     };
+    let kind = match args.kind.as_deref() {
+        None => CheckKind::Verification,
+        Some(s) => CheckKind::from_wire(s).ok_or_else(|| {
+            CliError::new(
+                ExitKind::Validation,
+                "INVALID_CHECK_KIND",
+                format!(
+                    "unknown check kind {s:?} — the vocabulary is: {}",
+                    CHECK_KINDS.join(", ")
+                ),
+            )
+        })?,
+    };
     let id = EntityId::canonical(&args.id);
     let mut engine = ctx.cli_engine()?.into_base();
     let client = crate::setup::cli_client_id();
@@ -55,19 +78,24 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             id.mem(),
             id.as_ref(),
             verdict,
+            kind,
             args.method.as_deref(),
             Actor::Cli,
             Some(&client),
         )
         .map_err(CliError::from_engine_op)?;
-    let (state, _) = engine
-        .entity_check_state(id.mem(), id.as_ref())
-        .map_err(CliError::from_engine_op)?;
+    let (state, _) = match kind {
+        CheckKind::Verification => engine.entity_check_state(id.mem(), id.as_ref()),
+        CheckKind::Conformance => engine.entity_conformance_state(id.mem(), id.as_ref()),
+    }
+    .map_err(CliError::from_engine_op)?;
     if ctx.json {
         print_json(&serde_json::json!({
             "entity": record.entity,
             "verdict": record.verdict,
             "check_state": state.as_str(),
+            "kind": record.kind.as_deref().unwrap_or("verification"),
+            "schema_ref": record.schema_ref,
             "role": record.role,
             "ts": record.ts,
             "method": record.method,
@@ -75,8 +103,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         return Ok(());
     }
     print_markdown(&format!(
-        "Check recorded: `{}` — verdict **{}**, state `{}` (role: {})",
+        "Check recorded: `{}` — kind `{}`, verdict **{}**, state `{}` (role: {})",
         record.entity,
+        record.kind.as_deref().unwrap_or("verification"),
         record.verdict,
         state.as_str(),
         record.role

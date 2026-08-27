@@ -1554,6 +1554,12 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "ENTITY_NOT_FOUND",
             "READ_ONLY_MOUNT",
             "CHECK_NOT_RECORDED",
+            // The kind vocabulary and its refusal (kinded checks): a
+            // conformance record is schema-bound and engine-stamped.
+            "verification",
+            "conformance",
+            "INVALID_CHECK_KIND",
+            "schema_ref",
         ],
         "memstead_health" => &[
             // The folder-mem ledger axis and the warning that makes it
@@ -2151,6 +2157,8 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     "ENTITY_NOT_FOUND",
     "ENTITY_ALREADY_EXISTS",
     "UNKNOWN_MEM",
+    // Check kinds
+    "INVALID_CHECK_KIND",
     // Optimistic locking / structural
     "HASH_MISMATCH",
     "RELATIONSHIP_CYCLE",

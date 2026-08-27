@@ -8,6 +8,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Semantic conformance is now a recordable, schema-bound check.** Every schema
+  carries two halves: the structural half the write gate validates, and the
+  semantic half (each type's `write_rules` / `writing_guidance` prose) that no
+  validator reads. A conformance judgment ("does this entity satisfy its type's
+  prose") can now be recorded and its freshness computed without another LLM
+  call: `memstead_check` and `memstead check` accept `kind`
+  (`verification` | `conformance`; omitted stays exactly today's behaviour, and
+  pre-kind ledger lines read as `verification` with no migration). A
+  `conformance` record carries the mem's schema pin, stamped by the engine at
+  record time and never caller-supplied, and derives stale when the entity's
+  content hash moves OR the pin changes; `verification` staleness stays
+  hash-only. State derives per (entity, kind) — the kinds never supersede each
+  other. The entity provenance block serves `conformance_state` /
+  `last_conformance_check` beside the existing fields, the health `checks`
+  include serves per-kind counts (JSON and markdown), an unknown kind refuses
+  `INVALID_CHECK_KIND` naming the closed vocabulary, and the `/tidy` skill
+  documents the conformance pass (worklist from health, judgment against the
+  type's schema prose, verdict recorded with the judging model in the method
+  note). Verdicts are advisory: nothing gates a write or a read on conformance
+  state.
+
 - **Every clean verdict now declares the axes it answers for, and a gate keeps
   it that way.** A sweep found eight instances of one shape: a surface reporting
   clean over state it never examined. The fixes landed one by one; this closes

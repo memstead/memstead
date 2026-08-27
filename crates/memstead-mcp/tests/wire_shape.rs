@@ -3448,3 +3448,128 @@ fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
          mem loaded lazily:\n{h_text}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Kinded checks (semantic conformance) — the wire contract.
+// ---------------------------------------------------------------------------
+
+/// The kinded check contract on the wire: an omitted kind behaves as
+/// `verification` exactly as before; `conformance` records carry the
+/// engine-stamped schema pin (never caller-supplied — no parameter
+/// exists to supply one); state derives per (entity, kind), so a
+/// later check of the other kind supersedes nothing; an unknown kind
+/// refuses `INVALID_CHECK_KIND` naming the vocabulary; the health
+/// checks axis serves per-kind counts additively, with a
+/// no-conformance-records workspace reporting all `never_checked`;
+/// and the provenance block serves both kinds' states.
+#[test]
+fn kinded_checks_wire_contract() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
+    let mut harness = WireHarness::start(tmp.path());
+
+    let created = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Kinded Claim",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." },
+            "role": "author"
+        }),
+    );
+    assert!(created["isError"] != true, "{created}");
+
+    // Unknown kind refuses typed, naming the vocabulary.
+    let bad = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--kinded-claim", "verdict": "ok", "kind": "semantic" }),
+    );
+    assert_eq!(bad["isError"], true, "{bad}");
+    assert_eq!(
+        bad["structuredContent"]["code"], "INVALID_CHECK_KIND",
+        "{bad}"
+    );
+    let allowed = bad["structuredContent"]["details"]["allowed"].to_string();
+    assert!(
+        allowed.contains("verification") && allowed.contains("conformance"),
+        "{bad}"
+    );
+
+    // Kind omitted: today's behaviour, and the record carries no
+    // schema binding.
+    let v = harness.call_tool(
+        "memstead_check",
+        json!({ "entity": "specs--kinded-claim", "verdict": "ok", "role": "checker" }),
+    );
+    assert!(v["isError"] != true, "{v}");
+    assert_eq!(v["structuredContent"]["kind"], "verification", "{v}");
+    assert_eq!(v["structuredContent"]["check_state"], "checked_ok", "{v}");
+    assert!(v["structuredContent"]["schema_ref"].is_null(), "{v}");
+
+    // Before any conformance record: the axis serves the kind's
+    // counts honestly as never_checked, and provenance says so too.
+    let h0 = harness.call_tool("memstead_health", json!({ "include": ["checks"] }));
+    let axis0 = &h0["structuredContent"]["checks"]["specs"];
+    assert_eq!(axis0["conformance"]["never_checked"], 1, "{h0}");
+    assert_eq!(axis0["checked_ok"], 1, "{h0}");
+
+    // Conformance: failed verdict, engine stamps the pin.
+    let c = harness.call_tool(
+        "memstead_check",
+        json!({
+            "entity": "specs--kinded-claim",
+            "verdict": "failed",
+            "kind": "conformance",
+            "method": "judged against write_rules by test-model",
+            "role": "checker"
+        }),
+    );
+    assert!(c["isError"] != true, "{c}");
+    assert_eq!(c["structuredContent"]["kind"], "conformance", "{c}");
+    assert_eq!(c["structuredContent"]["schema_ref"], "default@1.3.0", "{c}");
+    assert_eq!(c["structuredContent"]["check_state"], "check_failed", "{c}");
+
+    // Per-kind derivation: the conformance record did not supersede
+    // the verification state, and the axis now counts both kinds.
+    let ent = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--kinded-claim", "include_provenance": true }),
+    );
+    let prov = &ent["structuredContent"]["mutation_provenance"];
+    assert_eq!(prov["check_state"], "checked_ok", "{ent}");
+    assert_eq!(prov["conformance_state"], "check_failed", "{ent}");
+    assert_eq!(
+        prov["last_conformance_check"]["schema_ref"], "default@1.3.0",
+        "{ent}"
+    );
+
+    let h1 = harness.call_tool("memstead_health", json!({ "include": ["checks"] }));
+    let axis1 = &h1["structuredContent"]["checks"]["specs"];
+    assert_eq!(axis1["checked_ok"], 1, "{h1}");
+    assert_eq!(axis1["conformance"]["check_failed"], 1, "{h1}");
+    assert_eq!(axis1["conformance"]["never_checked"], 0, "{h1}");
+
+    // A content edit stales BOTH kinds' verdicts (hash moved).
+    let hash = ent["structuredContent"]["_hash"]
+        .as_str()
+        .expect("entity serves _hash")
+        .to_string();
+    let upd = harness.call_tool(
+        "memstead_update",
+        json!({
+            "id": "specs--kinded-claim",
+            "sections": { "purpose": "P, revised." },
+            "expected_hash": hash,
+            "role": "author"
+        }),
+    );
+    assert!(upd["isError"] != true, "{upd}");
+    let ent2 = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--kinded-claim", "include_provenance": true }),
+    );
+    let prov2 = &ent2["structuredContent"]["mutation_provenance"];
+    assert_eq!(prov2["check_state"], "check_stale", "{ent2}");
+    assert_eq!(prov2["conformance_state"], "check_stale", "{ent2}");
+}

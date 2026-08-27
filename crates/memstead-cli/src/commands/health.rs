@@ -875,6 +875,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(format!("## Checks ({} mems)", axis.len()));
         for (mem, c) in axis {
             let count = |key: &str| c.get(key).and_then(|x| x.as_u64()).unwrap_or(0);
+            let conf = |key: &str| {
+                c.get("conformance")
+                    .and_then(|g| g.get(key))
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0)
+            };
             let gate = |key: &str| {
                 c.get("independence")
                     .and_then(|g| g.get(key))
@@ -884,12 +890,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             };
             lines.push(format!(
                 "- `{mem}`: never_checked {}, checked_ok {}, check_failed {}, \
-                 check_stale {}; independence: self_checked {}, \
+                 check_stale {}; conformance: never_checked {}, \
+                 checked_ok {}, check_failed {}, check_stale {}; \
+                 independence: self_checked {}, \
                  confirmed_independent {}, unconfirmable {}",
                 count("never_checked"),
                 count("checked_ok"),
                 count("check_failed"),
                 count("check_stale"),
+                conf("never_checked"),
+                conf("checked_ok"),
+                conf("check_failed"),
+                conf("check_stale"),
                 gate("self_checked"),
                 gate("confirmed_independent"),
                 gate("unconfirmable"),

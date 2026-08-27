@@ -3350,6 +3350,27 @@ impl McpServer {
                 ),
             );
         };
+        let kind = match p.kind.as_deref() {
+            None => memstead_base::check::CheckKind::Verification,
+            Some(s) => match memstead_base::check::CheckKind::from_wire(s) {
+                Some(k) => k,
+                None => {
+                    let msg = format!(
+                        "unknown check kind {s:?} — the vocabulary is: {}",
+                        memstead_base::check::CHECK_KINDS.join(", ")
+                    );
+                    return tool_error_with_payload(
+                        "INVALID_CHECK_KIND",
+                        &msg,
+                        envelope(
+                            "INVALID_CHECK_KIND",
+                            msg.clone(),
+                            serde_json::json!({ "allowed": memstead_base::check::CHECK_KINDS }),
+                        ),
+                    );
+                }
+            },
+        };
         let role = match self.resolve_role(p.role.as_deref()) {
             Ok(r) => r,
             Err(resp) => return *resp,
@@ -3364,12 +3385,21 @@ impl McpServer {
             id.mem(),
             id.as_ref(),
             verdict,
+            kind,
             p.method.as_deref(),
             Actor::Agent,
             client.as_ref(),
         ) {
             Ok(record) => {
-                let (state, _) = match engine.entity_check_state(id.mem(), id.as_ref()) {
+                let state_result = match kind {
+                    memstead_base::check::CheckKind::Verification => {
+                        engine.entity_check_state(id.mem(), id.as_ref())
+                    }
+                    memstead_base::check::CheckKind::Conformance => {
+                        engine.entity_conformance_state(id.mem(), id.as_ref())
+                    }
+                };
+                let (state, _) = match state_result {
                     Ok(pair) => pair,
                     Err(e) => return engine_err_unified(e, &engine),
                 };
@@ -3377,14 +3407,17 @@ impl McpServer {
                     "entity": record.entity,
                     "verdict": record.verdict,
                     "check_state": state.as_str(),
+                    "kind": record.kind.as_deref().unwrap_or("verification"),
+                    "schema_ref": record.schema_ref,
                     "role": record.role,
                     "ts": record.ts,
                     "method": record.method,
                 });
                 md_with_structured(
                     format!(
-                        "Check recorded: {} — verdict {}, state {}",
+                        "Check recorded: {} — kind {}, verdict {}, state {}",
                         record.entity,
+                        record.kind.as_deref().unwrap_or("verification"),
                         record.verdict,
                         state.as_str()
                     ),

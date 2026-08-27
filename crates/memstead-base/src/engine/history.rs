@@ -184,14 +184,23 @@ pub struct EntityProvenance {
     /// not the creation) — `created_by` is then absent.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub story_truncated: bool,
-    /// Derived check state (agent-trust plan 14): `never_checked` |
-    /// `checked_ok` | `check_failed` | `check_stale` — computed by
-    /// comparing the newest check record's entity-hash against the
-    /// current one, never stamped.
+    /// Derived `verification` check state (agent-trust plan 14):
+    /// `never_checked` | `checked_ok` | `check_failed` | `check_stale`
+    /// — computed by comparing the newest verification record's
+    /// entity-hash against the current one, never stamped. Kind-scoped:
+    /// a conformance record never supersedes it.
     pub check_state: String,
-    /// The newest check record, when one exists.
+    /// The newest `verification` record, when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_check: Option<crate::check::CheckRecord>,
+    /// Derived `conformance` state — the same four values, computed
+    /// against the newest conformance record with pin-awareness (a
+    /// schema re-pin stales it). `never_checked` when no conformance
+    /// record exists, which is every pre-kind workspace.
+    pub conformance_state: String,
+    /// The newest `conformance` record, when one exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_conformance_check: Option<crate::check::CheckRecord>,
 }
 
 fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
@@ -227,6 +236,8 @@ impl Engine {
         let oldest = report.touches.last().or(newest.as_ref()).cloned();
         let truncated = !matches!(report.story_start, StoryStart::Recorded);
         let (check_state, last_check) = self.entity_check_state(mem, entity_id)?;
+        let (conformance_state, last_conformance_check) =
+            self.entity_conformance_state(mem, entity_id)?;
         Ok(EntityProvenance {
             created_by: match (&oldest, truncated) {
                 (Some(t), false) => Some(touch_to_record(t)),
@@ -236,6 +247,8 @@ impl Engine {
             story_truncated: truncated,
             check_state: check_state.as_str().to_string(),
             last_check,
+            conformance_state: conformance_state.as_str().to_string(),
+            last_conformance_check,
         })
     }
 
