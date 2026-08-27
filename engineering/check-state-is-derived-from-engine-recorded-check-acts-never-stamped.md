@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-08T23:47:36Z
-last_modified: 2026-08-08T23:47:36Z
+last_modified: 2026-08-27T13:14:01Z
 status: accepted
 decided_on: 2026-08-09
 deciders: operator (agent-trust plan 14, bundle README decision 4)
@@ -22,6 +22,7 @@ Both field projects hand-built and could not keep honest the distinction "checke
 
 ## Relationships
 - **REFERENCES**: [[mutation-provenance-records-caller-declared-roles-tamper-evidently-in-append-only-history]]
+- **REFERENCES**: [[record-semantic-conformance-as-a-kinded-schema-bound-check]]
 
 ## Options
 
@@ -29,4 +30,4 @@ Check state as schema fields with engine blessing — rejected: the bundle's cor
 
 ## Notes
 
-
+Amended 2026-08-27 by [[record-semantic-conformance-as-a-kinded-schema-bound-check]]: checks now carry a closed kind vocabulary (`verification`, the default, and `conformance`), and supersession is per (entity, kind) rather than per entity — a newer check supersedes older ones OF THE SAME KIND for state derivation. A `conformance` record additionally carries the mem's engine-stamped schema pin and derives stale on a pin move as well as a hash move. Everything else in this decision (non-mutation, derived state, closed verdicts, never-best-effort recording) is unchanged and now holds per kind.
