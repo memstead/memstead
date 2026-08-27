@@ -2,8 +2,8 @@
 //! Boot smoke test for the lean MCP build (`memstead-mcp --no-default-features`).
 //!
 //! Spawns the binary as a subprocess against a tempdir workspace
-//! carrying the post-rebuild markers (`.memstead/workspace.toml`
-//! + `.memstead/state/mounts.json`). Sends one `initialize` JSON-RPC
+//! carrying the post-rebuild markers (`.memstead/workspace.toml` plus
+//! `.memstead/state/mounts.json`). Sends one `initialize` JSON-RPC
 //! request over stdin, reads the reply over stdout, asserts the
 //! envelope is well-formed.
 //!
