@@ -813,7 +813,7 @@ pub enum WarningHint {
     /// folder mount). Provenance means something WEAKER there than the
     /// headline "every mutation a reasoned commit": mutations ARE
     /// recorded — each lands in the folder backend's changelog ledger
-    /// (`.memstead/changelog.jsonl`) with its provenance note — but
+    /// (`.memstead/changes.jsonl`) with its provenance note — but
     /// there are no commits, the `write_id` every mutation returns
     /// is a synthetic token rather than a commit and is not a change
     /// cursor (poll with the last ledger entry's `ts`), and the
@@ -1772,7 +1772,7 @@ impl fmt::Display for WarningHint {
                 f,
                 "mem '{mem}' was created on folder storage with no \
                  version control. Provenance here is the changelog \
-                 ledger (`.memstead/changelog.jsonl`), which records \
+                 ledger (`.memstead/changes.jsonl`), which records \
                  every mutation with its note — but there are no \
                  commits: the `write_id` mutations return is a \
                  synthetic token rather than a commit, and it is not a \
@@ -2574,7 +2574,7 @@ impl WarningHint {
             }),
             Self::FolderMemProvenance { mem } => serde_json::json!({
                 "mem": mem,
-                "ledger": ".memstead/changelog.jsonl",
+                "ledger": ".memstead/changes.jsonl",
                 "write_id": "synthetic token, not a commit and not a change cursor (no version control)",
                 "change_cursor": "an RFC3339 timestamp — the `ts` of the last ledger entry",
                 "durability": "content persists only when the surrounding repository commits it",
@@ -2838,7 +2838,12 @@ pub struct RenameResult {
 /// Arguments for a relate/unrelate operation.
 #[derive(Debug, Clone)]
 pub struct RelateArg {
-    pub to: EntityId,
+    /// The far end of the edge. Named `target` rather than `to`
+    /// because the near end is implied by the call (the entity being
+    /// created or updated) — the rule the response shapes already
+    /// follow: a pair is `from`/`to`, an implied near end leaves
+    /// `target`.
+    pub target: EntityId,
     pub rel_type: String,
     /// Optional per-edge description text. Validated against the
     /// rel-type's `per_edge_description` posture at call time —

@@ -130,7 +130,7 @@ impl Engine {
                     || s.acyclic_set_containing(&r.rel_type).is_some()
             }) || self
                 .schemas
-                .get(r.to.mem())
+                .get(r.target.mem())
                 .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
         }) || self
             .schemas
@@ -1224,7 +1224,7 @@ impl Engine {
                         || s.acyclic_set_containing(&r.rel_type).is_some()
                 }) || self
                     .schemas
-                    .get(r.to.mem())
+                    .get(r.target.mem())
                     .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
             }) || self
                 .schemas
@@ -1613,12 +1613,12 @@ fn apply_declare_relations(
         let canonical = crate::entity::id::validate_rel_type(&rel.rel_type)
             .unwrap_or_else(|_| rel.rel_type.clone());
 
-        validate_relation_target_grammar(&rel.to)?;
+        validate_relation_target_grammar(&rel.target)?;
 
-        let target_mem = rel.to.mem().to_string();
+        let target_mem = rel.target.mem().to_string();
         // Grant + ReadOnly-missing-target checks both live in the
         // shared add-path funnel.
-        super::validate_cross_mem_add_policy(engine, source_mem, &rel.to)?;
+        super::validate_cross_mem_add_policy(engine, source_mem, &rel.target)?;
 
         // Rel-type + shape validation, routed through the engine's
         // cross-mem-aware edge validator. Cross-different-schema
@@ -1630,14 +1630,14 @@ fn apply_declare_relations(
         // pre-cross-mem behaviour).
         let target_type = engine
             .store
-            .get(&rel.to)
+            .get(&rel.target)
             .map(|e| e.entity_type.clone())
             .filter(|t| !t.is_empty());
         // Deferred-mem target (flywheel W7/02): the real type comes
         // from the one resolved blob, never from loading the mem.
         let target_type = match target_type {
             Some(t) => Some(t),
-            None => super::peek_deferred_target_type(engine, &rel.to)?,
+            None => super::peek_deferred_target_type(engine, &rel.target)?,
         };
         let _ = super::route_edge_validation(
             engine,
@@ -1647,7 +1647,7 @@ fn apply_declare_relations(
             source_mem,
             &target_mem,
             &next.id,
-            &rel.to,
+            &rel.target,
             /* check_shape = */ true,
         )?;
 
@@ -1664,12 +1664,16 @@ fn apply_declare_relations(
             source_mem,
             &target_mem,
             &next.id,
-            &rel.to,
+            &rel.target,
         )?;
         // declare_relations is an explicit-author
         // boundary too — gate on manual_authoring posture.
         super::validate_manual_authoring_posture(
-            engine, &canonical, source_mem, &next.id, &rel.to,
+            engine,
+            &canonical,
+            source_mem,
+            &next.id,
+            &rel.target,
         )?;
 
         // Cycle family — the same shared gate `memstead_relate` runs
@@ -1680,7 +1684,7 @@ fn apply_declare_relations(
             schema,
             &next.id,
             next.entity_type.as_str(),
-            &rel.to,
+            &rel.target,
             &canonical,
         )?;
 
@@ -1691,11 +1695,11 @@ fn apply_declare_relations(
         let exists = next
             .relationships
             .iter()
-            .any(|r| r.rel_type == canonical && r.target == rel.to);
+            .any(|r| r.rel_type == canonical && r.target == rel.target);
         if !exists {
             next.relationships.push(Relationship {
                 rel_type: canonical.clone(),
-                target: rel.to.clone(),
+                target: rel.target.clone(),
                 description: normalised_description,
             });
         }
@@ -1704,17 +1708,17 @@ fn apply_declare_relations(
         // `memstead_relate`'s relate path. ReadOnly cross-mem targets
         // were caught above; same-mem and cross-mem-to-Write
         // both fall through here.
-        let target_was_stubbed = !engine.store.contains(&rel.to);
+        let target_was_stubbed = !engine.store.contains(&rel.target);
         if target_was_stubbed && !exists {
-            let kind = super::deferred_verified_stub_kind(engine, &rel.to)?;
+            let kind = super::deferred_verified_stub_kind(engine, &rel.target)?;
             engine
                 .store
-                .upsert(rel.to.clone(), make_stub(&rel.to, kind));
+                .upsert(rel.target.clone(), make_stub(&rel.target, kind));
         }
 
         declared.push(RelationDeclared {
             rel_type: canonical,
-            target: rel.to.clone(),
+            target: rel.target.clone(),
             target_was_stubbed,
         });
     }
@@ -2364,7 +2368,7 @@ mod tests {
             metadata_unset: Vec::new(),
             declare_relations: vec![crate::ops::RelateArg {
                 rel_type: "USES".to_string(),
-                to: stub_target.clone(),
+                target: stub_target.clone(),
                 description: None,
             }],
             dry_run: false,
@@ -3293,7 +3297,7 @@ mod tests {
                     dry_run: false,
                     declare_relations: vec![RelateArg {
                         rel_type: "USES".to_string(),
-                        to: target.id.clone(),
+                        target: target.id.clone(),
                         description: None,
                     }],
                 },
@@ -3351,7 +3355,7 @@ mod tests {
                     dry_run: false,
                     declare_relations: vec![RelateArg {
                         rel_type: "USES".to_string(),
-                        to: absent_target.clone(),
+                        target: absent_target.clone(),
                         description: None,
                     }],
                 },
@@ -4141,7 +4145,7 @@ mod tests {
                     metadata_unset: Vec::new(),
                     declare_relations: vec![RelateArg {
                         rel_type: "USES".to_string(),
-                        to: target.id.clone(),
+                        target: target.id.clone(),
                         description: None,
                     }],
                     dry_run: false,
@@ -6238,7 +6242,7 @@ community:
         let declare = |rel_type: &str, from: &EntityId, to: &EntityId, hash: String| {
             let mut args = bare_args(from.clone(), Some(hash));
             args.declare_relations = vec![crate::ops::RelateArg {
-                to: to.clone(),
+                target: to.clone(),
                 rel_type: rel_type.to_string(),
                 description: None,
             }];

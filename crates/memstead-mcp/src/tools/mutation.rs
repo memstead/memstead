@@ -33,7 +33,7 @@ pub struct CreateParams {
     #[schemars(description = "Metadata overrides: { \"level\": \"M1\", \"tags\": \"a, b\" }")]
     pub metadata: Option<IndexMap<String, String>>,
     #[schemars(
-        description = "Initial relationships, wired in the same call that creates the entity. An entry is literally `{ \"to\": \"<mem>--<slug>\", \"type\": \"REL_TYPE\", \"description\": \"…\" }` — `description` optional, and there is no `from`: the entity being created is the source. The sibling surfaces spell the same edge differently — `memstead_relate` entries carry `{from, to, type, remove?, description?}`, and the CLI takes `--relation TYPE:target-id` — so read the shape here rather than carrying one over. An unresolved `to` auto-creates a stub."
+        description = "Initial relationships, wired in the same call that creates the entity. An entry is literally `{ \"target\": \"<mem>--<slug>\", \"rel_type\": \"REL_TYPE\", \"description\": \"…\" }` — `description` optional, and there is no `from`: the entity being created is the source, so the far end is `target`. (`memstead_relate` names both ends: `{from, to, rel_type, …}`.) An unresolved `target` auto-creates a stub."
     )]
     pub relations: Option<Vec<RelationInput>>,
     #[schemars(
@@ -161,12 +161,12 @@ impl AnchorInputParam {
 #[serde(deny_unknown_fields)]
 pub struct RelationInput {
     #[schemars(description = "Full target entity ID")]
-    pub to: String,
+    pub target: String,
     #[schemars(
         description = "Relationship type. Canonical form is UPPER_SNAKE_CASE (USES, PART_OF, DEPENDS_ON) and is what the engine stores; case-insensitive inputs (`uses`, `Part_Of`) are accepted and echoed back in the response as their canonical form. The JSON Schema `pattern` advertises `^[A-Za-z][A-Za-z_]*$` for client-side validators; the engine enforces the same character set independently — characters outside it return `INVALID_REL_TYPE` at the engine boundary regardless of whether the client pre-filters.",
         regex(pattern = r"^[A-Za-z][A-Za-z_]*$")
     )]
-    pub r#type: String,
+    pub rel_type: String,
     #[schemars(
         description = "Optional per-edge description text. Validated against the rel-type's `per_edge_description` posture in the pinned schema: `forbidden` (default) rejects a non-empty description with `DESCRIPTION_NOT_PERMITTED`; `required` rejects its absence with `MISSING_REQUIRED_DESCRIPTION`; `optional` accepts both. Empty / whitespace-only strings normalise to absent before validation. Surfaces on `memstead_entity` and round-trips through the `## Relationships` markdown via the canonical em-dash delimiter (` — `)."
     )]
@@ -206,7 +206,7 @@ pub struct UpdateParams {
     )]
     pub dry_run: Option<bool>,
     #[schemars(
-        description = "Atomic batched relation declarations applied before the section/metadata changes land. Each `{ to, type }` is validated like a `memstead_relate` call (schema-shape, cross-mem policy, target-id grammar) and appended to the entity's relations; absent Write-mem targets are auto-stubbed identically to the relate path. The strict wiki-link/relation validator then runs against the post-mutation state with the freshly-declared relations in place — so adding a `[[target]]` body wiki-link + declaring the backing `REFERENCES` relation can land in a single `memstead_update` call (without `declare_relations`, the post-migration strict validator would refuse the body link). Each successful entry is echoed in `relations_declared` on the response with `target_was_stubbed` flagging whether the target was absent at call time. Omit for mutations that don't introduce new relations."
+        description = "Atomic batched relation declarations applied before the section/metadata changes land. Each `{ target, rel_type }` is validated like a `memstead_relate` call (schema-shape, cross-mem policy, target-id grammar) and appended to the entity's relations; absent Write-mem targets are auto-stubbed identically to the relate path. The strict wiki-link/relation validator then runs against the post-mutation state with the freshly-declared relations in place — so adding a `[[target]]` body wiki-link + declaring the backing `REFERENCES` relation can land in a single `memstead_update` call (without `declare_relations`, the post-migration strict validator would refuse the body link). Each successful entry is echoed in `relations_declared` on the response with `target_was_stubbed` flagging whether the target was absent at call time. Omit for mutations that don't introduce new relations."
     )]
     pub declare_relations: Option<Vec<RelationInput>>,
     #[schemars(
@@ -306,7 +306,7 @@ pub struct RelateOpInput {
         description = "Relationship type. Canonical form is UPPER_SNAKE_CASE (USES, PART_OF, DEPENDS_ON) and is what the engine stores; case-insensitive inputs (`uses`, `Part_Of`) are accepted and echoed back in the response as their canonical form. The JSON Schema `pattern` advertises `^[A-Za-z][A-Za-z_]*$` for client-side validators; the engine enforces the same character set independently — characters outside it return `INVALID_REL_TYPE` at the engine boundary regardless of whether the client pre-filters.",
         regex(pattern = r"^[A-Za-z][A-Za-z_]*$")
     )]
-    pub r#type: String,
+    pub rel_type: String,
     #[schemars(description = "Set true to remove the relationship instead of creating it")]
     pub remove: Option<bool>,
     #[schemars(
@@ -322,7 +322,7 @@ pub struct RelateOpInput {
 #[serde(deny_unknown_fields)]
 pub struct RelateParams {
     #[schemars(
-        description = "Relation operations, applied atomically in order — all-or-nothing in one commit per touched mem. Each entry is `{from, to, type, remove?, description?}` with per-entry validation identical to a single call; later entries validate against the graph state produced by earlier ones (an acyclic check sees edges added earlier in the list). A single failing entry refuses the WHOLE list and the refusal reports every failing entry."
+        description = "Relation operations, applied atomically in order — all-or-nothing in one commit per touched mem. Each entry is `{from, to, rel_type, remove?, description?}` with per-entry validation identical to a single call; later entries validate against the graph state produced by earlier ones (an acyclic check sees edges added earlier in the list). A single failing entry refuses the WHOLE list and the refusal reports every failing entry."
     )]
     pub relations: Vec<RelateOpInput>,
     #[schemars(description = NOTE_PARAM_DESCRIPTION)]

@@ -123,10 +123,9 @@ struct PatchPayload {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RelationPayload {
-    /// Full target entity id.
-    to: String,
+    /// Far end of the edge; the near end is the entity being updated.
+    target: String,
     /// Rel-type (UPPER_SNAKE_CASE; engine canonicalises).
-    #[serde(rename = "type")]
     rel_type: String,
     #[serde(default)]
     description: Option<String>,
@@ -294,7 +293,7 @@ fn build_update_args(
         .into_iter()
         .map(|r| RelateArg {
             rel_type: r.rel_type,
-            to: EntityId::canonical(&r.to),
+            target: EntityId::canonical(&r.target),
             description: r.description,
         })
         .collect();
@@ -526,7 +525,7 @@ mod tests {
             "patch_sections": {"identity": {"old": "X", "new": "Y", "all": true}},
             "metadata": {"level": "M1"},
             "metadata_unset": ["tags"],
-            "declare_relations": [{"to": "specs--other", "type": "USES"}],
+            "declare_relations": [{"target": "specs--other", "rel_type": "USES"}],
             "note": "per-entry provenance",
         });
         let parsed = serde_json::from_value::<EntryPayload>(entry).expect("must parse");

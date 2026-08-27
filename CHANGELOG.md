@@ -70,6 +70,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **BREAKING (wire): one spelling for an edge on every input, matching the
+  outputs.** The same edge was spelled four ways depending on which door you
+  came through, and one surface spoke two of them. `memstead_create`'s
+  `relations` and `memstead_update`'s `declare_relations` took `{to, type}`;
+  `memstead_relate` entries took `{from, to, type}`; `memstead_update`'s
+  `relations_unset` already took `{rel_type, target}`; the CLI batch payloads
+  and the private HTTP layer each added their own variant. Outputs were already
+  consistent under a rule, so the inputs adopt it rather than the reverse: the
+  type is `rel_type` everywhere, both ends are `from`/`to` where both are
+  given, and the far end is `target` where the near end is implied by the call.
+  So `memstead_create` / `declare_relations` now take `{target, rel_type}`,
+  `memstead_relate` takes `{from, to, rel_type}`, and the CLI's
+  `--relation REL_TYPE:target-id` joins the same pair. **No alias:** the old
+  names are refused, not accepted as synonyms — an alias is the cheap migration
+  that makes the defect permanent by keeping both spellings alive in examples,
+  transcripts and agent memory. The wire-shape tests that pinned the old
+  asymmetry are updated, and a new pin asserts the retired spellings refuse.
+
 - **BREAKING (wire): every mutation's `commit_sha` is now `write_id`, and it is
   no longer documented as a change cursor.** The field was named for git on
   backends that have none: a folder or in-memory mem returns a synthetic opaque

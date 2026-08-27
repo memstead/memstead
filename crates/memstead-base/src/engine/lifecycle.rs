@@ -452,7 +452,7 @@ impl Engine {
                     ));
                 }
                 relations.push(crate::ops::RelateArg {
-                    to: crate::entity::EntityId::new(mem, &r.to),
+                    target: crate::entity::EntityId::new(mem, &r.to),
                     rel_type: r.rel_type.clone(),
                     description: r.description.clone(),
                 });

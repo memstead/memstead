@@ -371,7 +371,7 @@ In a `strict`-mode schema only declared relationship types are legal. Guess wron
     "relations": [
       {
         "from": "my-graph--optimistic-locking",
-        "type": "RELATES_TO",
+        "rel_type": "RELATES_TO",
         "to": "my-graph--idempotency"
       }
     ]
@@ -404,7 +404,7 @@ In a `strict`-mode schema only declared relationship types are legal. Guess wron
     "relations": [
       {
         "from": "my-graph--retry",
-        "type": "DEPENDS_ON",
+        "rel_type": "DEPENDS_ON",
         "to": "my-graph--idempotency"
       }
     ]

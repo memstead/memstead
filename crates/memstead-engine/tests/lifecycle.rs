@@ -1443,7 +1443,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
                 sections: seed_sections(),
                 metadata: Default::default(),
                 relations: vec![RelateArg {
-                    to: memstead_base::EntityId::canonical("b--target"),
+                    target: memstead_base::EntityId::canonical("b--target"),
                     rel_type: "DEPENDS_ON".to_string(),
                     description: None,
                 }],
@@ -1657,7 +1657,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         "a",
         "Source",
         vec![RelateArg {
-            to: memstead_base::EntityId::canonical("b--target"),
+            target: memstead_base::EntityId::canonical("b--target"),
             rel_type: "DEPENDS_ON".to_string(),
             description: None,
         }],
@@ -1668,7 +1668,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         "a",
         "Neighbour",
         vec![RelateArg {
-            to: memstead_base::EntityId::canonical("a--peer"),
+            target: memstead_base::EntityId::canonical("a--peer"),
             rel_type: "DEPENDS_ON".to_string(),
             description: None,
         }],
@@ -1812,7 +1812,7 @@ fn a_deferred_mems_ungranted_edges_are_found_not_silently_skipped() {
                 "a",
                 "Source",
                 vec![RelateArg {
-                    to: memstead_base::EntityId::canonical("b--target"),
+                    target: memstead_base::EntityId::canonical("b--target"),
                     rel_type: "DEPENDS_ON".to_string(),
                     description: None,
                 }],
@@ -1940,7 +1940,7 @@ fn an_ungranted_edge_can_still_be_removed_without_a_grant() {
             "a",
             "Source",
             vec![RelateArg {
-                to: memstead_base::EntityId::canonical("b--target"),
+                target: memstead_base::EntityId::canonical("b--target"),
                 rel_type: "DEPENDS_ON".to_string(),
                 description: None,
             }],
@@ -2082,7 +2082,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
                 sections: seed_sections(),
                 metadata: Default::default(),
                 relations: vec![RelateArg {
-                    to: memstead_base::EntityId::canonical("b--target"),
+                    target: memstead_base::EntityId::canonical("b--target"),
                     rel_type: "DEPENDS_ON".to_string(),
                     description: None,
                 }],
@@ -2673,7 +2673,7 @@ fn delete_mem_guard_sees_referrers_in_deferred_mems() {
                     sections: seed_sections(),
                     metadata: Default::default(),
                     relations: vec![RelateArg {
-                        to: memstead_base::EntityId::canonical("b--target"),
+                        target: memstead_base::EntityId::canonical("b--target"),
                         rel_type: "DEPENDS_ON".to_string(),
                         description: None,
                     }],

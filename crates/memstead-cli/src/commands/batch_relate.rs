@@ -11,10 +11,10 @@
 //!
 //! ```json
 //! { "relates": [
-//!     { "from": "specs--alpha", "type": "USES", "to": "specs--beta" },
-//!     { "from": "specs--alpha", "type": "USES", "to": "specs--gamma",
+//!     { "from": "specs--alpha", "rel_type": "USES", "target": "specs--beta" },
+//!     { "from": "specs--alpha", "rel_type": "USES", "target": "specs--gamma",
 //!       "remove": true, "note": "rehang: gamma superseded" },
-//!     { "from": "specs--beta", "type": "PART_OF", "to": "specs--suite",
+//!     { "from": "specs--beta", "rel_type": "PART_OF", "target": "specs--suite",
 //!       "description": "core member" }
 //! ] }
 //! ```
@@ -53,7 +53,6 @@ struct EntryPayload {
     /// Source entity id.
     from: String,
     /// Rel-type (UPPER_SNAKE_CASE; engine canonicalises).
-    #[serde(rename = "type")]
     rel_type: String,
     /// Target entity id.
     to: String,

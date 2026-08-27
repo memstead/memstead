@@ -106,7 +106,7 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
             # ---- step 3: relate + verify ------------------------------------
             relate = server.call(
                 "memstead_relate",
-                {"relations": [{"from": source_id, "to": target_id, "type": "USES"}]},
+                {"relations": [{"from": source_id, "to": target_id, "rel_type": "USES"}]},
             )
             assert_eq(relate.is_error, False, "relate")
 

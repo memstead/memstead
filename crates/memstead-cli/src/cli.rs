@@ -296,9 +296,13 @@ pub enum Command {
     /// committed as an attributed mutation.
     Conflicts(commands::conflicts::Args),
 
-    /// Diff a mem's HEAD against a commit SHA. Pass `--since` = a
-    /// prior `write_id` from a mutation, or the canonical empty-tree
-    /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
+    /// Report a mem's changes since a cursor. The cursor is
+    /// backend-specific and is never a mutation's `write_id`: on a
+    /// git-branch mem pass a commit SHA (the `head` a prior call
+    /// returned, or the canonical empty-tree hash
+    /// `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync);
+    /// on a folder mem pass an RFC3339 timestamp (the `ts` of the last
+    /// ledger entry you read, or empty for a first sync).
     Changes(commands::changes::Args),
 
     /// Record a check: "entity E checked, verdict ok | failed, via
@@ -462,5 +466,101 @@ impl Command {
             Command::Schema(_) => "schema",
             Command::Projection(_) => "projection",
         }
+    }
+}
+
+#[cfg(test)]
+mod write_id_gloss_tests {
+    use clap::CommandFactory;
+
+    /// The CLI twin of `memstead-mcp`'s
+    /// `no_mutation_description_glosses_write_id_as_git_or_cursor`.
+    ///
+    /// That guard walks the five MCP tool descriptions and nothing
+    /// else, so it was blind to the clap tree — and the clap tree is
+    /// exactly where the defect survived a sweep: `changes` kept an
+    /// about-text reading "Pass `--since` = a prior `write_id` from a
+    /// mutation" while its own `--since` help said the cursor is never
+    /// a `write_id`. One help screen, the wrong instruction and its
+    /// correction, both on screen at once. A rename that only replaces
+    /// the identifier and never re-reads the sentence around it
+    /// produces precisely that, so the check belongs where the
+    /// sentences are.
+    ///
+    /// Walks every help string in the tree: each command's about and
+    /// long-about, and every argument's help and long-help.
+    #[test]
+    fn no_cli_help_text_glosses_write_id_as_git_or_cursor() {
+        // Each phrase would reintroduce one half of the defect: a git
+        // identity claim, or cursor advice.
+        const BANNED: &[&str] = &[
+            "per-mem git",
+            "gitdir",
+            "commit SHA. Pass",
+            "prior `write_id`",
+            "`write_id` from a mutation",
+            "write_id from a mutation",
+            "as the `since`",
+            "since cursor",
+        ];
+
+        fn texts(cmd: &clap::Command, path: &str, out: &mut Vec<(String, String)>) {
+            let mut push = |s: Option<&clap::builder::StyledStr>| {
+                if let Some(v) = s {
+                    out.push((path.to_string(), v.to_string()));
+                }
+            };
+            push(cmd.get_about());
+            push(cmd.get_long_about());
+            for arg in cmd.get_arguments() {
+                if let Some(h) = arg.get_help() {
+                    out.push((format!("{path} --{}", arg.get_id()), h.to_string()));
+                }
+                if let Some(h) = arg.get_long_help() {
+                    out.push((format!("{path} --{}", arg.get_id()), h.to_string()));
+                }
+            }
+            for sub in cmd.get_subcommands() {
+                if sub.get_name() == "help" {
+                    continue;
+                }
+                let child = if path.is_empty() {
+                    sub.get_name().to_string()
+                } else {
+                    format!("{path} {}", sub.get_name())
+                };
+                texts(sub, &child, out);
+            }
+        }
+
+        let cmd = super::Cli::command();
+        let mut all = Vec::new();
+        texts(&cmd, "", &mut all);
+
+        let mut violations = Vec::new();
+        for (where_, text) in &all {
+            if !text.contains("write_id") {
+                continue;
+            }
+            for phrase in BANNED {
+                if text.contains(phrase) {
+                    violations.push(format!(
+                        "`memstead {where_}` help names `write_id` and still says \"{phrase}\" \
+                         — the token is an identity, not a git ref and not a change cursor"
+                    ));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "write_id gloss violations in CLI help:\n  {}",
+            violations.join("\n  ")
+        );
+        // Guard the guard: if the token ever stops appearing in CLI
+        // help at all, the loop above passes vacuously.
+        assert!(
+            all.iter().any(|(_, t)| t.contains("write_id")),
+            "no CLI help text mentions `write_id` — this check has gone vacuous"
+        );
     }
 }

@@ -719,13 +719,14 @@ fn lean_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 // ---------------------------------------------------------------------------
 
 /// Lean pin: create two entities, then relate them with `USES`.
-/// Lean emits a response with `from`, `to`, `type` (yes — the literal
-/// field name is `type`, not `rel_type`), `action: "added"`, plus
-/// `content_hash`. (REFERENCES would be refused under the default
-/// schema's `alias_target_rel_type` pointer; this test pins the
-/// wire shape, not the rel-type specifically.) The full flavor uses different field names — see
-/// `full_memstead_relate_returns_typed_success_envelope` for the
-/// inter-flavor drift recorded below.
+/// Lean emits `from`, `to`, `rel_type`, `action: "added"` and
+/// `content_hash` inside `results[]` — the same names the full flavour
+/// uses. (This comment once said the literal field name was `type`;
+/// that stopped being true with the plural relate envelope, and the
+/// input side stopped saying `type` in consistency-sweep
+/// 05-front-door/08.) REFERENCES would be refused under the default
+/// schema's `alias_target_rel_type` pointer, so this test pins the wire
+/// shape, not the rel-type specifically.
 #[test]
 fn lean_memstead_relate_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
@@ -737,7 +738,7 @@ fn lean_memstead_relate_returns_typed_success_envelope() {
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
+        json!({ "relations": [{ "from": from, "to": to, "rel_type": "USES" }] }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
@@ -966,7 +967,7 @@ fn lean_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": target, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": target, "rel_type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
 
@@ -1047,7 +1048,7 @@ fn lean_auto_stub_then_update_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "rel_type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
     let body = relate
@@ -1107,7 +1108,7 @@ fn lean_rename_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "rel_type": "USES" }] }),
     );
 
     let rename = harness.call_tool(
@@ -1150,12 +1151,12 @@ fn lean_relate_from_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "rel_type": "USES" }] }),
     );
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": stub_id, "to": source, "type": "USES" }] }),
+        json!({ "relations": [{ "from": stub_id, "to": source, "rel_type": "USES" }] }),
     );
     let is_error = result
         .get("isError")

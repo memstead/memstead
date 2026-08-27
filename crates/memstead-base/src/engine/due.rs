@@ -612,7 +612,7 @@ mod obligation_builtin_tests {
             ("status".to_string(), status.to_string()),
         ]);
         args.relations = vec![crate::ops::RelateArg {
-            to: crate::entity::EntityId::new(mem, "some-subject"),
+            target: crate::entity::EntityId::new(mem, "some-subject"),
             rel_type: "CONCERNS".to_string(),
             description: None,
         }];

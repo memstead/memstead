@@ -2682,8 +2682,8 @@ impl McpServer {
             .unwrap_or_default()
             .into_iter()
             .map(|r| memstead_base::ops::RelateArg {
-                to: EntityId(r.to),
-                rel_type: r.r#type,
+                target: EntityId(r.target),
+                rel_type: r.rel_type,
                 description: r.description,
             })
             .collect();
@@ -2804,8 +2804,8 @@ impl McpServer {
             .unwrap_or_default()
             .into_iter()
             .map(|r| memstead_base::ops::RelateArg {
-                to: EntityId(r.to),
-                rel_type: r.r#type,
+                target: EntityId(r.target),
+                rel_type: r.rel_type,
                 description: r.description,
             })
             .collect();
@@ -2989,7 +2989,7 @@ impl McpServer {
                     memstead_base::RelateEntityArgs {
                         source: EntityId::canonical(&op.from),
                         target: EntityId::canonical(&op.to),
-                        rel_type: op.r#type.clone(),
+                        rel_type: op.rel_type.clone(),
                         remove: op.remove.unwrap_or(false),
                         expected_hash: None,
                         description: op.description.clone(),
@@ -3096,7 +3096,7 @@ impl McpServer {
                         "index": i,
                         "from": op.from,
                         "to": op.to,
-                        "rel_type": op.r#type,
+                        "rel_type": op.rel_type,
                         "action": entry.action,
                     });
                     if let Some(err) = &entry.error {
@@ -3145,7 +3145,7 @@ impl McpServer {
             .map(|(entry, op)| {
                 let from = EntityId::canonical(&op.from);
                 let to = EntityId::canonical(&op.to);
-                let canonical_type = op.r#type.to_uppercase();
+                let canonical_type = op.rel_type.to_uppercase();
                 if entry.action == "noop" {
                     if op.remove.unwrap_or(false) {
                         warnings.push(memstead_base::ops::WarningHint::NoSuchRelationship {
@@ -3184,7 +3184,7 @@ impl McpServer {
                     .store()
                     .outgoing(&from)
                     .iter()
-                    .find(|e| e.target == to && e.rel_type.eq_ignore_ascii_case(&op.r#type))
+                    .find(|e| e.target == to && e.rel_type.eq_ignore_ascii_case(&op.rel_type))
                     .map(|e| match e.source {
                         memstead_base::EdgeSource::BodyLink => "body_link",
                         memstead_base::EdgeSource::Hierarchy => "hierarchy",
@@ -5230,7 +5230,7 @@ mod tests {
                 relations: vec![RelateOpInput {
                     from: from.to_string(),
                     to: to.to_string(),
-                    r#type: "USES".to_string(),
+                    rel_type: "USES".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -5383,7 +5383,7 @@ mod tests {
                 relations: vec![RelateOpInput {
                     from: from.to_string(),
                     to: to.to_string(),
-                    r#type: "USES".to_string(),
+                    rel_type: "USES".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -5532,7 +5532,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: "specs--a1".to_string(),
                 to: "specs--a2".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -8088,7 +8088,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "TOTALLY_MADE_UP_REL".to_string(),
+                rel_type: "TOTALLY_MADE_UP_REL".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -8393,7 +8393,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "TOTALLY_MADE_UP_REL".to_string(),
+                rel_type: "TOTALLY_MADE_UP_REL".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -8409,7 +8409,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--bad target with spaces!!".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -8635,7 +8635,7 @@ write_rules: []
             serde_json::from_value::<crate::tools::mutation::RelateParams>(serde_json::json!({
                 "from": "specs--anchored-spec",
                 "to": "specs--other",
-                "type": "REFERENCES",
+                "rel_type": "REFERENCES",
                 "anchors": [],
             }));
         assert!(
@@ -8691,7 +8691,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--body-link-source".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "REFERENCES".to_string(),
+                rel_type: "REFERENCES".to_string(),
                 remove: Some(true),
                 description: None,
             }],
@@ -9028,7 +9028,7 @@ write_rules: []
                 relations: vec![RelateOpInput {
                     from: "specs--entity-a".to_string(),
                     to: expected_id.clone(),
-                    r#type: "USES".to_string(),
+                    rel_type: "USES".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -9258,7 +9258,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -9293,7 +9293,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--ghost-x".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -9479,7 +9479,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: stub_id.to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -11094,7 +11094,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "bridge--beta-hub".to_string(),
                 to: "bridge--alpha-hub".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -11820,7 +11820,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "DEPENDS_ON".to_string(),
+                rel_type: "DEPENDS_ON".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -11849,7 +11849,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "DEPENDS_ON".to_string(),
+                rel_type: "DEPENDS_ON".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -11864,7 +11864,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-b".to_string(),
                 to: "specs--entity-a".to_string(),
-                r#type: "DEPENDS_ON".to_string(),
+                rel_type: "DEPENDS_ON".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -11907,7 +11907,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-a".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -11943,7 +11943,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "alpha--alpha-root".to_string(),
                 to: "beta--beta-root".to_string(),
-                r#type: "REFERENCES".to_string(),
+                rel_type: "REFERENCES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -12037,7 +12037,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--ghost-target".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -12052,7 +12052,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--ghost-target".to_string(),
                 to: "specs--entity-a".to_string(),
-                r#type: "USES".to_string(),
+                rel_type: "USES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -12154,7 +12154,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--bad@chars$here".to_string(),
-                r#type: "REFERENCES".to_string(),
+                rel_type: "REFERENCES".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -12242,7 +12242,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "software-mem--source-spec".to_string(),
                 to: "software-mem--target-spec".to_string(),
-                r#type: "OWNS".to_string(),
+                rel_type: "OWNS".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -12318,7 +12318,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "software-mem--legacy-spec".to_string(),
                 to: "software-mem--legacy-target".to_string(),
-                r#type: "OWNS".to_string(),
+                rel_type: "OWNS".to_string(),
                 remove: Some(true),
                 description: None,
             }],
@@ -12948,7 +12948,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "DEPENDS_ON".to_string(),
+                rel_type: "DEPENDS_ON".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -12979,7 +12979,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "DEPENDS_ON".to_string(),
+                rel_type: "DEPENDS_ON".to_string(),
                 remove: None,
                 description: None,
             }],
@@ -13016,7 +13016,7 @@ write_rules: []
             relations: vec![RelateOpInput {
                 from: "specs--entity-a".to_string(),
                 to: "specs--entity-b".to_string(),
-                r#type: "DEPENDS_ON".to_string(),
+                rel_type: "DEPENDS_ON".to_string(),
                 remove: Some(true),
                 description: None,
             }],
@@ -14992,8 +14992,8 @@ write_rules: []
                 note: None,
                 role: None,
                 declare_relations: Some(vec![crate::tools::mutation::RelationInput {
-                    to: "specs--entity-b".to_string(),
-                    r#type: "USES".to_string(),
+                    target: "specs--entity-b".to_string(),
+                    rel_type: "USES".to_string(),
                     description: None,
                 }]),
             }));
@@ -15025,7 +15025,7 @@ write_rules: []
                 relations: vec![RelateOpInput {
                     from: "specs--entity-a".to_string(),
                     to: "specs--entity-b".to_string(),
-                    r#type: "USES".to_string(),
+                    rel_type: "USES".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -15056,7 +15056,7 @@ write_rules: []
                     relations: vec![RelateOpInput {
                         from: "specs--entity-a".to_string(),
                         to: "specs--rehearsed-ghost".to_string(),
-                        r#type: "USES".to_string(),
+                        rel_type: "USES".to_string(),
                         remove: None,
                         description: None,
                     }],
@@ -15120,14 +15120,14 @@ write_rules: []
                     RelateOpInput {
                         from: "specs--entity-b".to_string(),
                         to: "specs--entity-a".to_string(),
-                        r#type: "USES".to_string(),
+                        rel_type: "USES".to_string(),
                         remove: None,
                         description: None,
                     },
                     RelateOpInput {
                         from: "specs--entity-b".to_string(),
                         to: "specs--batch-ghost".to_string(),
-                        r#type: "USES".to_string(),
+                        rel_type: "USES".to_string(),
                         remove: None,
                         description: None,
                     },
@@ -15210,7 +15210,7 @@ write_rules: []
                 relations: vec![RelateOpInput {
                     from: "specs--entity-a".to_string(),
                     to: "specs--stub-target".to_string(),
-                    r#type: "USES".to_string(),
+                    rel_type: "USES".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -16784,7 +16784,7 @@ write_rules: []
                 relations: vec![RelateOpInput {
                     from: "specs--entity-a".to_string(),
                     to: "specs--entity-b".to_string(),
-                    r#type: "PART_O".to_string(),
+                    rel_type: "PART_O".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -16821,7 +16821,7 @@ write_rules: []
                 relations: vec![RelateOpInput {
                     from: "specs--entity-a".to_string(),
                     to: "specs--entity-b".to_string(),
-                    r#type: "alt rel type".to_string(),
+                    rel_type: "alt rel type".to_string(),
                     remove: None,
                     description: None,
                 }],
@@ -17036,8 +17036,8 @@ write_rules: []
                 sections: Some(sections),
                 metadata: None,
                 relations: Some(vec![crate::tools::mutation::RelationInput {
-                    r#type: "USES".to_string(),
-                    to: "specs--ghost-target".to_string(),
+                    rel_type: "USES".to_string(),
+                    target: "specs--ghost-target".to_string(),
                     description: None,
                 }]),
                 dry_run: Some(true),
@@ -17084,8 +17084,8 @@ write_rules: []
                 sections: Some(create_sections),
                 metadata: None,
                 relations: Some(vec![crate::tools::mutation::RelationInput {
-                    r#type: "USES".to_string(),
-                    to: "specs--update-ghost".to_string(),
+                    rel_type: "USES".to_string(),
+                    target: "specs--update-ghost".to_string(),
                     description: None,
                 }]),
                 dry_run: Some(true),
@@ -17127,8 +17127,8 @@ write_rules: []
                 note: None,
                 role: None,
                 declare_relations: Some(vec![crate::tools::mutation::RelationInput {
-                    r#type: "USES".to_string(),
-                    to: "specs--update-ghost".to_string(),
+                    rel_type: "USES".to_string(),
+                    target: "specs--update-ghost".to_string(),
                     description: None,
                 }]),
             }));

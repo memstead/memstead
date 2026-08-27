@@ -1354,8 +1354,8 @@ impl FilesystemMcpServer {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|r| memstead_base::ops::RelateArg {
-                    rel_type: r.r#type,
-                    to: EntityId(r.to),
+                    rel_type: r.rel_type,
+                    target: EntityId(r.target),
                     description: r.description,
                 })
                 .collect(),
@@ -1509,7 +1509,7 @@ impl FilesystemMcpServer {
                     RelateEntityArgs {
                         source: EntityId::canonical(&op.from),
                         expected_hash: None,
-                        rel_type: op.r#type.clone(),
+                        rel_type: op.rel_type.clone(),
                         target: EntityId::canonical(&op.to),
                         remove: op.remove.unwrap_or(false),
                         description: op.description.clone(),
@@ -1593,7 +1593,7 @@ impl FilesystemMcpServer {
                         "index": i,
                         "from": op.from,
                         "to": op.to,
-                        "rel_type": op.r#type,
+                        "rel_type": op.rel_type,
                         "action": entry.action,
                     });
                     if let Some(err) = &entry.error {
@@ -1629,7 +1629,7 @@ impl FilesystemMcpServer {
             .map(|(entry, op)| {
                 let from = EntityId::canonical(&op.from);
                 let to = EntityId::canonical(&op.to);
-                let canonical_type = op.r#type.to_uppercase();
+                let canonical_type = op.rel_type.to_uppercase();
                 if entry.action == "noop" {
                     if op.remove.unwrap_or(false) {
                         warnings.push(memstead_base::ops::WarningHint::NoSuchRelationship {
@@ -1660,7 +1660,7 @@ impl FilesystemMcpServer {
                     .store()
                     .outgoing(&from)
                     .iter()
-                    .find(|e| e.target == to && e.rel_type.eq_ignore_ascii_case(&op.r#type))
+                    .find(|e| e.target == to && e.rel_type.eq_ignore_ascii_case(&op.rel_type))
                     .map(|e| match e.source {
                         memstead_base::EdgeSource::BodyLink => "body_link",
                         memstead_base::EdgeSource::Hierarchy => "hierarchy",
@@ -2847,8 +2847,8 @@ mod tests {
         // create + non-empty relations → refused, naming relations.
         let mut p = create_params("With Edges", None);
         p.relations = Some(vec![RelationInput {
-            to: "demo--target".into(),
-            r#type: "REFERENCES".into(),
+            target: "demo--target".into(),
+            rel_type: "REFERENCES".into(),
             description: None,
         }]);
         let r = server.memstead_create(Parameters(p));
@@ -2905,7 +2905,7 @@ mod tests {
                 relations: vec![crate::tools::mutation::RelateOpInput {
                     from: "demo--anything".into(),
                     to: "demo--other".into(),
-                    r#type: "REFERENCES".into(),
+                    rel_type: "REFERENCES".into(),
                     remove: None,
                     description: None,
                 }],
@@ -3446,7 +3446,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: from.clone(),
                 to: to.clone(),
-                r#type: "USES".into(),
+                rel_type: "USES".into(),
                 remove: None,
                 description: None,
             }],
@@ -3464,7 +3464,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: from.clone(),
                 to: to.clone(),
-                r#type: "USES".into(),
+                rel_type: "USES".into(),
                 remove: None,
                 description: None,
             }],
@@ -3500,7 +3500,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: from.clone(),
                 to: to.clone(),
-                r#type: "TOTALLY_MADE_UP".into(),
+                rel_type: "TOTALLY_MADE_UP".into(),
                 remove: None,
                 description: None,
             }],
@@ -3529,7 +3529,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: from.clone(),
                 to: "other--thing".into(),
-                r#type: "USES".into(),
+                rel_type: "USES".into(),
                 remove: None,
                 description: None,
             }],
@@ -4287,7 +4287,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: from.clone(),
                 to: to.clone(),
-                r#type: "USES".into(),
+                rel_type: "USES".into(),
                 remove: None,
                 description: None,
             }],
@@ -4576,7 +4576,7 @@ mod tests {
             relations: vec![RelateOpInput {
                 from: a.clone(),
                 to: b.clone(),
-                r#type: "USES".into(),
+                rel_type: "USES".into(),
                 remove: None,
                 description: None,
             }],

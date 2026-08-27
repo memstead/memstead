@@ -18,7 +18,7 @@
 //! { "creates": [
 //!     { "title": "Alpha", "entity_type": "spec",
 //!       "sections": { "identity": "..." },
-//!       "relations": [ { "to": "specs--beta", "type": "USES" } ],
+//!       "relations": [ { "target": "specs--beta", "rel_type": "USES" } ],
 //!       "note": "why alpha exists" },
 //!     { "title": "Beta", "entity_type": "spec",
 //!       "sections": { "identity": "..." } }
@@ -90,8 +90,8 @@ struct EntryPayload {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RelationPayload {
-    to: String,
-    #[serde(rename = "type")]
+    /// Far end of the edge; the near end is the entity being created.
+    target: String,
     rel_type: String,
     #[serde(default)]
     description: Option<String>,
@@ -229,7 +229,7 @@ fn build_create_args(
                 .relations
                 .into_iter()
                 .map(|r| RelateArg {
-                    to: EntityId::canonical(&r.to),
+                    target: EntityId::canonical(&r.target),
                     rel_type: r.rel_type,
                     description: r.description,
                 })

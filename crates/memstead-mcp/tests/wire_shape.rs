@@ -964,12 +964,11 @@ fn full_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 // `memstead_relate` success pins
 // ---------------------------------------------------------------------------
 
-/// Full pin: same flow, but the response field names differ from lean:
-/// full emits `rel_type` (not `type`), `source: "explicit"` (carries the
-/// edge source), `_mem_schema`, and `write_id` — but **omits**
-/// `action`. The lean surface has `type` and `action` instead. Both
-/// shapes are pinned per-flavor, pending reconciliation of which schema
-/// wins.
+/// Full pin: same flow. The two flavours agree on the edge names —
+/// `from`, `to`, `rel_type` inside `results[]` — and full additionally
+/// carries `source: "explicit"`, `_mem_schema` and `write_id`. The
+/// per-flavour divergence this comment used to record (lean saying
+/// `type`, full omitting `action`) is closed on both counts.
 #[test]
 fn full_memstead_relate_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
@@ -981,7 +980,7 @@ fn full_memstead_relate_returns_typed_success_envelope() {
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
+        json!({ "relations": [{ "from": from, "to": to, "rel_type": "USES" }] }),
     );
     let _ = assert_success_envelope(&result);
     let body = result
@@ -1001,10 +1000,13 @@ fn full_memstead_relate_returns_typed_success_envelope() {
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
-    // Full uses `rel_type` (not `type`). USES (not REFERENCES) — explicit
-    // author of REFERENCES is refused under the default schema's
-    // `alias_target_rel_type` pointer; this test pins the envelope
-    // shape, not the rel-type specifically.
+    // `rel_type` is the ONE spelling now — inputs and outputs, both
+    // flavours, since consistency-sweep 05-front-door/08. The bare
+    // `type` this once tolerated on the input side is gone; nothing
+    // accepts or emits it, and no alias bridges the two. USES (not
+    // REFERENCES) — explicit author of REFERENCES is refused under the
+    // default schema's `alias_target_rel_type` pointer; this test pins
+    // the envelope shape, not the rel-type specifically.
     assert_eq!(
         entry.get("rel_type").and_then(Value::as_str),
         Some("USES"),
@@ -1012,7 +1014,7 @@ fn full_memstead_relate_returns_typed_success_envelope() {
     );
     assert!(
         body.get("type").is_none(),
-        "full must not carry `type` (lean field name): {body}"
+        "no surface carries the bare `type` spelling any more: {body}"
     );
     // `action` rides the per-entry result, not the top level — the same
     // place the lean surface puts it. (This assertion once recorded
@@ -1210,7 +1212,7 @@ fn full_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": target, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": target, "rel_type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
 
@@ -1617,7 +1619,7 @@ fn full_memstead_entity_structured_relationships_carry_typed_shape() {
     let (to, _) = create_and_get_id_hash(&mut harness, "Rel Target");
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": from, "to": to, "type": "PART_OF" }] }),
+        json!({ "relations": [{ "from": from, "to": to, "rel_type": "PART_OF" }] }),
     );
 
     let result = harness.call_tool("memstead_entity", json!({ "id": from }));
@@ -1707,7 +1709,7 @@ fn full_auto_stub_then_update_emits_typed_envelope() {
 
     let relate = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "rel_type": "USES" }] }),
     );
     let _ = assert_success_envelope(&relate);
     let body = relate
@@ -1761,7 +1763,7 @@ fn full_rename_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "rel_type": "USES" }] }),
     );
 
     let rename = harness.call_tool(
@@ -1804,12 +1806,12 @@ fn full_relate_from_stub_emits_typed_envelope() {
 
     let _ = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": source, "to": stub_id, "type": "USES" }] }),
+        json!({ "relations": [{ "from": source, "to": stub_id, "rel_type": "USES" }] }),
     );
 
     let result = harness.call_tool(
         "memstead_relate",
-        json!({ "relations": [{ "from": stub_id, "to": source, "type": "USES" }] }),
+        json!({ "relations": [{ "from": stub_id, "to": source, "rel_type": "USES" }] }),
     );
     let is_error = result
         .get("isError")
@@ -2238,7 +2240,7 @@ fn full_memstead_relate_with_forbidden_description_emits_typed_envelope() {
         "memstead_relate",
         json!({ "relations": [{ "from": from,
             "to": to,
-            "type": "REFERENCES",
+            "rel_type": "REFERENCES",
             "description": "should be refused" }] }),
     );
     let is_error = result
@@ -3392,7 +3394,7 @@ fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {
         );
         let rel = harness.call_tool(
             "memstead_relate",
-            json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
+            json!({ "relations": [{ "from": from, "to": to, "rel_type": "USES" }] }),
         );
         assert!(
             rel["structuredContent"]["results"][0]["to"].is_string(),
@@ -3572,4 +3574,51 @@ fn kinded_checks_wire_contract() {
     let prov2 = &ent2["structuredContent"]["mutation_provenance"];
     assert_eq!(prov2["check_state"], "check_stale", "{ent2}");
     assert_eq!(prov2["conformance_state"], "check_stale", "{ent2}");
+}
+
+/// Criterion-5 pin (consistency-sweep 05-front-door/08): the retired
+/// spellings are REFUSED, not accepted as synonyms.
+///
+/// An alias is the cheapest migration and it makes the defect permanent:
+/// both spellings then live on in examples, transcripts and agent
+/// memory forever. So every input that once said `type` (and, where the
+/// near end is implied, `to`) must now refuse it — `deny_unknown_fields`
+/// on the param structs is what does the refusing, and this test is what
+/// notices if someone re-adds a `#[serde(alias = ...)]` to be helpful.
+#[test]
+fn retired_edge_spellings_are_refused_not_aliased() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("demo", "default@1.0.0")]);
+
+    let mut harness = WireHarness::start(tmp.path());
+    let (from, _) = create_and_get_id_hash(&mut harness, "Alias Source");
+    let (to, _) = create_and_get_id_hash(&mut harness, "Alias Target");
+
+    // relate: the pair keeps `from`/`to`, but `type` is retired.
+    let result = harness.call_tool(
+        "memstead_relate",
+        json!({ "relations": [{ "from": from, "to": to, "type": "USES" }] }),
+    );
+    assert_eq!(
+        result.get("isError").and_then(Value::as_bool),
+        Some(true),
+        "`type` must be refused on memstead_relate, never aliased: {result}"
+    );
+
+    // create: the near end is implied, so BOTH `to` and `type` are retired.
+    let result = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Alias Create",
+            "entity_type": "spec",
+            "mem": "demo",
+            "sections": { "identity": "i", "purpose": "p" },
+            "relations": [{ "to": to, "type": "USES" }],
+        }),
+    );
+    assert_eq!(
+        result.get("isError").and_then(Value::as_bool),
+        Some(true),
+        "`to`/`type` must be refused on memstead_create relations: {result}"
+    );
 }

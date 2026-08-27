@@ -418,7 +418,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .declare_relations
                 .iter()
                 .map(|r| memstead_base::ops::RelateArg {
-                    to: EntityId::canonical(&r.to),
+                    target: EntityId::canonical(&r.to),
                     rel_type: r.rel_type.clone(),
                     description: r.description.clone(),
                 })
@@ -553,7 +553,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .declare_relations
                 .iter()
                 .map(|r| memstead_base::ops::RelateArg {
-                    to: EntityId::canonical(&r.to),
+                    target: EntityId::canonical(&r.to),
                     rel_type: r.rel_type.clone(),
                     description: r.description.clone(),
                 })

@@ -1249,10 +1249,10 @@ fn make_rename_workspace(root: &Path) {
          "sections": {"identity": "First entity.", "purpose": "Rename fixture."}},
         {"title": "Two", "entity_type": "spec", "mem": "alpha",
          "sections": {"identity": "Second entity, see [[alpha--one]] full form.", "purpose": "Rename fixture."},
-         "relations": [{"type": "USES", "to": "alpha--one"}]},
+         "relations": [{"rel_type": "USES", "target": "alpha--one"}]},
         {"title": "Watcher", "entity_type": "spec", "mem": "beta",
          "sections": {"identity": "Watches [[alpha--one]] from beta.", "purpose": "Cross-mem referrer."},
-         "relations": [{"type": "DEPENDS_ON", "to": "alpha--two"}]},
+         "relations": [{"rel_type": "DEPENDS_ON", "target": "alpha--two"}]},
     ]});
     let corpus_path = root.join("corpus.json");
     fs::write(&corpus_path, serde_json::to_string(&corpus).unwrap()).unwrap();

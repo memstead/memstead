@@ -3626,7 +3626,7 @@ community:
                         sections: IndexMap::from_iter([("body".to_string(), "x".to_string())]),
                         metadata: IndexMap::new(),
                         relations: vec![crate::ops::RelateArg {
-                            to: crate::EntityId::new("tgt", "missing"),
+                            target: crate::EntityId::new("tgt", "missing"),
                             rel_type: "ADDRESSES".to_string(),
                             description: None,
                         }],

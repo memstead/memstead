@@ -170,7 +170,7 @@ Exit codes:
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped. MEM-REPO WORKSPACES ONLY (see `install`)
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `conflicts` — List and resolve git merge conflicts in folder-backed mems — the one sanctioned repair when a merge in the user's repo writes conflict markers into entity files. `conflicts list` shows conflicted entities; `conflicts resolve <id> --side ours|theirs` keeps one side, validated before it lands and committed as an attributed mutation
-* `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `write_id` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+* `changes` — Report a mem's changes since a cursor. The cursor is backend-specific and is never a mutation's `write_id`: on a git-branch mem pass a commit SHA (the `head` a prior call returned, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync); on a folder mem pass an RFC3339 timestamp (the `ts` of the last ledger entry you read, or empty for a first sync)
 * `check` — Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
 * `review-mark` — Read and move the per-mem review mark — the engine's one pointer per mem to the last human-approved state. `list` shows every mem's mark and head; `set`/`clear` move it (explicit target only); `diff` reports the unreviewed delta. Marks never gate writes
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
@@ -739,7 +739,7 @@ Slug derivation:
 * `--mem <MEM>` — Mem name. Defaults to the first writable mem
 * `--section <KEY=VALUE>` — Section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with
 * `--metadata <KEY=VALUE>` — Metadata override: repeatable `--metadata key=value`
-* `--relation <TYPE:TARGET>` — Initial relationship: repeatable `--relation TYPE:target-id`. Works on both workspace shapes. A target that does not exist yet is materialised as a forward-reference stub, same as on the MCP surface
+* `--relation <REL_TYPE:TARGET>` — Initial relationship: repeatable `--relation REL_TYPE:target-id` — the colon joins the same pair every other surface names as `rel_type` and `target`. Works on both workspace shapes. A target that does not exist yet is materialised as a forward-reference stub, same as on the MCP surface
 * `--anchor <JSON>` — Provenance anchor: repeatable `--anchor '<json>'`, each a JSON object of the anchor shape (`{ "artifact": "...", "grain": "file", "class": "anchored", "hash": "...", "hash_stability": "stable" }`). Written into the mem-branch anchors sidecar in the same commit as the entity. A malformed anchor refuses `INVALID_ANCHOR`. Ignored when `--from` is given (the file's `anchors[]` is authoritative)
 * `--from <FILE>` — JSON file matching the MCP `memstead_create` args shape. If set, all `--title` / `--type` / `--section` / `--metadata` / `--relation` / `--anchor` flags are ignored (the file is the single source of truth). `--note` still applies (winning over the file's `note`), and `--dry-run` ORs with the file's `dry_run` — same semantics as `update --from`, so one template feeds both commands. The JSON type field is `entity_type` (not `type`), matching the response envelopes — a previous `--json` response pipes back in unchanged
 * `--dry-run` — Preview only — validate and compute the result without writing to disk, mutating the store, or producing a commit. Response carries the prospective id / file_path / content_hash plus any warnings. MEM-REPO WORKSPACES ONLY — refused with `INVALID_INPUT` on the filesystem-mem workspace `memstead quickstart` produces
@@ -976,7 +976,7 @@ Resolve one conflicted entity to the chosen side. The chosen side is validated a
 
 ## `memstead changes`
 
-Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `write_id` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+Report a mem's changes since a cursor. The cursor is backend-specific and is never a mutation's `write_id`: on a git-branch mem pass a commit SHA (the `head` a prior call returned, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync); on a folder mem pass an RFC3339 timestamp (the `ts` of the last ledger entry you read, or empty for a first sync)
 
 **Usage:** `memstead changes [OPTIONS] --since <SINCE>`
 

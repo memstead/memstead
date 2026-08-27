@@ -127,7 +127,7 @@ impl Engine {
                     || s.acyclic_set_containing(&r.rel_type).is_some()
             }) || self
                 .schemas
-                .get(r.to.mem())
+                .get(r.target.mem())
                 .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
         }) || self
             .schemas
@@ -451,13 +451,13 @@ impl Engine {
         //     is impossible here — the source is the newly-created
         //     entity, always real-by-construction.
         for rel in &args.relations {
-            validate_relation_target_grammar(&rel.to)?;
-            let target_mem = rel.to.mem().to_string();
+            validate_relation_target_grammar(&rel.target)?;
+            let target_mem = rel.target.mem().to_string();
             // Cross-mem policy gate. The funnel
             // sits ahead of the rel-type / shape checks so the policy
             // refusal is identical in shape and ordering to
             // `memstead_relate` and `memstead_update.declare_relations`.
-            super::validate_cross_mem_add_policy(self, &args.mem, &rel.to)?;
+            super::validate_cross_mem_add_policy(self, &args.mem, &rel.target)?;
             // Target-type lookup mirrors the relate path: `None` for
             // not-yet-present targets so the target gate admits the
             // stub-bound case. The cross-mem router below consults
@@ -465,7 +465,7 @@ impl Engine {
             // shape checks.
             let target_type = self
                 .store
-                .get(&rel.to)
+                .get(&rel.target)
                 .map(|e| e.entity_type.clone())
                 .filter(|t| !t.is_empty());
             // Deferred-mem target (flywheel W7/02): the store cannot
@@ -474,7 +474,7 @@ impl Engine {
             // for non-deferred or absent targets, unchanged posture.
             let target_type = match target_type {
                 Some(t) => Some(t),
-                None => super::peek_deferred_target_type(self, &rel.to)?,
+                None => super::peek_deferred_target_type(self, &rel.target)?,
             };
             match route_edge_validation(
                 self,
@@ -484,7 +484,7 @@ impl Engine {
                 &args.mem,
                 &target_mem,
                 &id,
-                &rel.to,
+                &rel.target,
                 /* check_shape = */ true,
             )? {
                 EdgeRouteOutcome::Ok => {}
@@ -500,12 +500,18 @@ impl Engine {
                 &args.mem,
                 &target_mem,
                 &id,
-                &rel.to,
+                &rel.target,
             )?;
             // Explicit inline-relations path is an
             // explicit-author boundary — gate on the rel-type's
             // `manual_authoring` posture.
-            super::validate_manual_authoring_posture(self, &rel.rel_type, &args.mem, &id, &rel.to)?;
+            super::validate_manual_authoring_posture(
+                self,
+                &rel.rel_type,
+                &args.mem,
+                &id,
+                &rel.target,
+            )?;
             // Cycle family — the same shared gate `memstead_relate` runs
             // (self-loop on listed no-self-loop rel-types, long cycle
             // on acyclic ones), against the current store. A stub being promoted
@@ -523,7 +529,7 @@ impl Engine {
                 schema.as_ref(),
                 &id,
                 args.entity_type.as_str(),
-                &rel.to,
+                &rel.target,
                 &canonical,
             )?;
         }
@@ -539,7 +545,7 @@ impl Engine {
             .iter()
             .map(|r| Relationship {
                 rel_type: r.rel_type.clone(),
-                target: r.to.clone(),
+                target: r.target.clone(),
                 description: normalise_description(r.description.as_deref()),
             })
             .collect();
@@ -554,8 +560,8 @@ impl Engine {
             .iter()
             .map(|r| crate::engine::outcomes::RelationDeclared {
                 rel_type: r.rel_type.clone(),
-                target: r.to.clone(),
-                target_was_stubbed: !self.store.contains(&r.to),
+                target: r.target.clone(),
+                target_was_stubbed: !self.store.contains(&r.target),
             })
             .collect();
         let mut entity_for_render = Entity {
@@ -793,7 +799,7 @@ impl Engine {
             warnings,
             type_guidance,
             relations_declared,
-            relation_targets: args.relations.iter().map(|r| r.to.clone()).collect(),
+            relation_targets: args.relations.iter().map(|r| r.target.clone()).collect(),
             type_def,
         }))
     }
@@ -1054,7 +1060,7 @@ impl Engine {
                         || s.acyclic_set_containing(&r.rel_type).is_some()
                 }) || self
                     .schemas
-                    .get(r.to.mem())
+                    .get(r.target.mem())
                     .is_some_and(|s| s.types.values().any(|td| !td.signals.is_empty()))
             }) || self
                 .schemas
@@ -1862,7 +1868,7 @@ write_rules: []
             task_create_args(
                 "Child Task",
                 vec![crate::ops::RelateArg {
-                    to: crate::entity::EntityId("tasks--parent".to_string()),
+                    target: crate::entity::EntityId("tasks--parent".to_string()),
                     rel_type: "PART_OF".to_string(),
                     description: None,
                 }],
@@ -1969,7 +1975,7 @@ write_rules: []
                 task_create_args(
                     "Child Task",
                     vec![crate::ops::RelateArg {
-                        to: parent_id.clone(),
+                        target: parent_id.clone(),
                         rel_type: "PART_OF".to_string(),
                         description: None,
                     }],
@@ -2169,7 +2175,7 @@ write_rules: []
             checked_task_args(
                 "Checked Child",
                 vec![crate::ops::RelateArg {
-                    to: crate::entity::EntityId("tasks--parent".to_string()),
+                    target: crate::entity::EntityId("tasks--parent".to_string()),
                     rel_type: "PART_OF".to_string(),
                     description: None,
                 }],
@@ -2488,7 +2494,7 @@ write_rules: []
                 claim_args(
                     "Alpha",
                     vec![crate::ops::RelateArg {
-                        to: crate::entity::EntityId("arg--ghost".to_string()),
+                        target: crate::entity::EntityId("arg--ghost".to_string()),
                         rel_type: "GROUNDS".to_string(),
                         description: None,
                     }],
@@ -2503,7 +2509,7 @@ write_rules: []
                 claim_args(
                     "Ghost",
                     vec![crate::ops::RelateArg {
-                        to: crate::entity::EntityId("arg--alpha".to_string()),
+                        target: crate::entity::EntityId("arg--alpha".to_string()),
                         rel_type: "CONCLUDES".to_string(),
                         description: None,
                     }],
@@ -2541,7 +2547,7 @@ write_rules: []
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: vec![crate::ops::RelateArg {
-                        to: crate::entity::EntityId("arg--d".to_string()),
+                        target: crate::entity::EntityId("arg--d".to_string()),
                         rel_type: "CONCLUDES".to_string(),
                         description: None,
                     }],
@@ -3116,7 +3122,7 @@ community:
         let relations = rebuts
             .map(|to| {
                 vec![crate::ops::RelateArg {
-                    to: crate::entity::EntityId(to.to_string()),
+                    target: crate::entity::EntityId(to.to_string()),
                     rel_type: "REBUTS".to_string(),
                     description: None,
                 }]
@@ -3576,7 +3582,7 @@ community:
 
     fn rel(to: &str, rel_type: &str) -> crate::ops::RelateArg {
         crate::ops::RelateArg {
-            to: crate::entity::EntityId(to.to_string()),
+            target: crate::entity::EntityId(to.to_string()),
             rel_type: rel_type.to_string(),
             description: None,
         }
@@ -4157,7 +4163,7 @@ write_rules: []
                 task_create_args(
                     "Child Task",
                     vec![crate::ops::RelateArg {
-                        to: outcome.id.clone(),
+                        target: outcome.id.clone(),
                         rel_type: "PART_OF".to_string(),
                         description: None,
                     }],
@@ -4242,7 +4248,7 @@ write_rules: []
             &mut engine,
             &a.id,
             vec![crate::ops::RelateArg {
-                to: b.id.clone(),
+                target: b.id.clone(),
                 rel_type: "PART_OF".to_string(),
                 description: None,
             }],
@@ -4408,7 +4414,7 @@ write_rules: []
         let with_rel = |title: &str, to: &str| {
             let mut args = empty_create_args("specs", title);
             args.relations = vec![crate::ops::RelateArg {
-                to: crate::entity::EntityId::new("specs", to),
+                target: crate::entity::EntityId::new("specs", to),
                 rel_type: "USES".to_string(),
                 description: None,
             }];
@@ -4470,7 +4476,7 @@ write_rules: []
         let with_rel = |title: &str, to: &str| {
             let mut args = empty_create_args("specs", title);
             args.relations = vec![crate::ops::RelateArg {
-                to: crate::entity::EntityId::new("specs", to),
+                target: crate::entity::EntityId::new("specs", to),
                 rel_type: "USES".to_string(),
                 description: None,
             }];
@@ -5360,12 +5366,12 @@ write_rules: []
         let mut args = empty_create_args("specs", "Source With Relations");
         args.relations = vec![
             crate::ops::RelateArg {
-                to: existing.id.clone(),
+                target: existing.id.clone(),
                 rel_type: "USES".to_string(),
                 description: None,
             },
             crate::ops::RelateArg {
-                to: absent.clone(),
+                target: absent.clone(),
                 rel_type: "USES".to_string(),
                 description: None,
             },
@@ -5559,7 +5565,7 @@ write_rules: []
 
         let mut args = empty_create_args("specs", "Source");
         args.relations = vec![crate::ops::RelateArg {
-            to: crate::EntityId("specs--bad target with spaces!!".to_string()),
+            target: crate::EntityId("specs--bad target with spaces!!".to_string()),
             rel_type: "USES".to_string(),
             description: None,
         }];
@@ -5652,7 +5658,7 @@ write_rules: []
             ]),
             metadata: IndexMap::new(),
             relations: vec![crate::ops::RelateArg {
-                to: target.id.clone(),
+                target: target.id.clone(),
                 rel_type: "VIOLATES".to_string(),
                 description: None,
             }],
@@ -5678,7 +5684,7 @@ write_rules: []
 
         let mut args = empty_create_args("specs", "Source With Mixed Case Rel");
         args.relations = vec![crate::ops::RelateArg {
-            to: existing.id.clone(),
+            target: existing.id.clone(),
             rel_type: "uses".to_string(),
             description: None,
         }];
@@ -6322,7 +6328,7 @@ community:
                         ("status".to_string(), "open".to_string()),
                     ]),
                     relations: vec![crate::ops::RelateArg {
-                        to: crate::entity::EntityId::new("duties", "subject"),
+                        target: crate::entity::EntityId::new("duties", "subject"),
                         rel_type: "CONCERNS".to_string(),
                         description: None,
                     }],
@@ -6635,7 +6641,7 @@ community:
         let mut args = empty_create_args("other", "Source");
         args.relations = vec![RelateArg {
             rel_type: "IMPLEMENTS".to_string(),
-            to: target.id.clone(),
+            target: target.id.clone(),
             description: None,
         }];
         let err = engine
@@ -6686,7 +6692,7 @@ community:
         let mut args = empty_create_args("other", "Source");
         args.relations = vec![RelateArg {
             rel_type: "IMPLEMENTS".to_string(),
-            to: target.id.clone(),
+            target: target.id.clone(),
             description: None,
         }];
         let outcome = engine
@@ -6724,7 +6730,7 @@ community:
         let mut args = empty_create_args("test", "Source");
         args.relations = vec![RelateArg {
             rel_type: "USES".to_string(),
-            to: target.id.clone(),
+            target: target.id.clone(),
             description: None,
         }];
         let outcome = engine
@@ -6799,7 +6805,7 @@ community:
         let mut create_args = empty_create_args("other", "Source Two");
         create_args.relations = vec![RelateArg {
             rel_type: "IMPLEMENTS".to_string(),
-            to: target.id.clone(),
+            target: target.id.clone(),
             description: None,
         }];
         let create_err = engine
@@ -7280,7 +7286,7 @@ community:
     fn create_with_relation(mem: &str, title: &str, rel_type: &str, to: &str) -> CreateEntityArgs {
         let mut args = empty_create_args(mem, title);
         args.relations = vec![crate::ops::RelateArg {
-            to: crate::EntityId(to.to_string()),
+            target: crate::EntityId(to.to_string()),
             rel_type: rel_type.to_string(),
             description: None,
         }];
@@ -7468,7 +7474,7 @@ community:
                         metadata: IndexMap::new(),
                         metadata_unset: Vec::new(),
                         declare_relations: vec![crate::ops::RelateArg {
-                            to: crate::EntityId::new("specs", &format!("link-{last}")),
+                            target: crate::EntityId::new("specs", &format!("link-{last}")),
                             rel_type: "PART_OF".to_string(),
                             description: None,
                         }],

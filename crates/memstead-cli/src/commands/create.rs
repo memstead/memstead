@@ -3,7 +3,7 @@
 //! Mirrors `memstead_create` in the MCP surface. Two input modes:
 //!
 //! * **Flags.** `--title`, `--type` (required), plus repeatable
-//!   `--section key=value`, `--metadata key=value`, `--relation type:to`.
+//!   `--section key=value`, `--metadata key=value`, `--relation REL_TYPE:target`.
 //! * **JSON file.** `--from payload.json`. Same shape as `memstead_create`'s
 //!   `CreateParams`.
 
@@ -49,11 +49,13 @@ pub struct Args {
     #[arg(long = "metadata", value_name = "KEY=VALUE")]
     pub metadata: Vec<String>,
 
-    /// Initial relationship: repeatable `--relation TYPE:target-id`.
+    /// Initial relationship: repeatable `--relation REL_TYPE:target-id` — the
+    /// colon joins the same pair every other surface names as
+    /// `rel_type` and `target`.
     /// Works on both workspace shapes. A target that does not exist yet
     /// is materialised as a forward-reference stub, same as on the MCP
     /// surface.
-    #[arg(long = "relation", value_name = "TYPE:TARGET")]
+    #[arg(long = "relation", value_name = "REL_TYPE:TARGET")]
     pub relations: Vec<String>,
 
     /// Provenance anchor: repeatable `--anchor '<json>'`, each a JSON
@@ -151,8 +153,8 @@ struct CreatePayload {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct RelationPayload {
-    to: String,
-    #[serde(rename = "type")]
+    /// Far end of the edge; the near end is the entity being created.
+    target: String,
     rel_type: String,
     #[serde(default)]
     description: Option<String>,
@@ -267,7 +269,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     .relations
                     .into_iter()
                     .map(|r| RelateArg {
-                        to: EntityId::canonical(&r.to),
+                        target: EntityId::canonical(&r.target),
                         rel_type: r.rel_type,
                         description: r.description,
                     })
@@ -388,7 +390,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     .relations
                     .into_iter()
                     .map(|r| RelateArg {
-                        to: EntityId::canonical(&r.to),
+                        target: EntityId::canonical(&r.target),
                         rel_type: r.rel_type,
                         description: r.description,
                     })
@@ -489,12 +491,12 @@ fn parse_relation_list(items: &[String]) -> anyhow::Result<Vec<RelationPayload>>
             CliError::new(
                 ExitKind::Validation,
                 "INVALID_INPUT",
-                format!("--relation: expected TYPE:target-id, got `{raw}`"),
+                format!("--relation: expected REL_TYPE:target-id, got `{raw}`"),
             )
         })?;
         out.push(RelationPayload {
             rel_type: rel_type.to_string(),
-            to: to.to_string(),
+            target: to.to_string(),
             description: None,
         });
     }

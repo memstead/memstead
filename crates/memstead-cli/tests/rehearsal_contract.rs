@@ -469,7 +469,7 @@ fn batch_create_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
             "creates": [
                 { "title": "Alpha", "entity_type": "spec",
                   "sections": { "identity": "A.", "purpose": "P." },
-                  "relations": [ { "to": "cli-write--beta", "type": "USES" } ] },
+                  "relations": [ { "target": "cli-write--beta", "rel_type": "USES" } ] },
                 { "title": "Beta", "entity_type": "spec",
                   "sections": { "identity": "B.", "purpose": "P." } }
             ]
@@ -708,8 +708,8 @@ fn batch_relate_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         &batch_file,
         serde_json::json!({
             "relates": [
-                { "from": "cli-write--one", "type": "USES", "to": "cli-write--two" },
-                { "from": "cli-write--one", "type": "USES", "to": "cli-write--ghost" }
+                { "from": "cli-write--one", "rel_type": "USES", "to": "cli-write--two" },
+                { "from": "cli-write--one", "rel_type": "USES", "to": "cli-write--ghost" }
             ]
         })
         .to_string(),
@@ -786,7 +786,7 @@ fn batch_relate_rehearsal_refuses_identically_to_real() {
         &batch_file,
         serde_json::json!({
             "relates": [
-                { "from": "cli-write--one", "type": "USES", "to": "not a valid id" }
+                { "from": "cli-write--one", "rel_type": "USES", "to": "not a valid id" }
             ]
         })
         .to_string(),
