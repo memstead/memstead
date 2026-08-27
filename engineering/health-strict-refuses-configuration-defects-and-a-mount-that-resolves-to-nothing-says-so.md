@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T13:43:26Z
-last_modified: 2026-08-27T10:44:29Z
+last_modified: 2026-08-27T14:41:58Z
 status: accepted
 decided_on: 2026-08-23
 deciders: operator, implementing agent
@@ -41,3 +41,5 @@ On the 0.10.0 tree `health --strict` participated five axes (`missing_required_o
 ## Notes
 
 Fixtures: one CLI test per strict class and the advisory complement (`crates/memstead-cli/tests/health_strict_config.rs`), the probe's three reasons on the folder backend, `storage_present` on the git backend, both nested-prefix classes. The pre-repair state of the dogfood workspace is recorded as the workspace repo's pre-repair fixture.
+
+Quarantine posture settled 2026-08-27 (consistency sweep 04/05, operator ruling): a folder or archive mount whose storage is gone QUARANTINES rather than serving an empty graph, and every roster surface renders the quarantine roster; a git-branch mount whose ref does not exist keeps the loud `MOUNT_UNBACKED`/`missing_ref` warning and STAYS SERVING. The asymmetry is deliberate, not an omission: a missing ref is also the normal state of a mem that has never been pushed, and push/fetch/pull are the repair path a quarantine would strand (three transport layers assume a serving mount: the lookup, the pre-push schema resolution, and pull's pre-fast-forward validation, which has no resolved schema for a mem being cloned). The honesty obligation is carried by the warning, the roster flag and the strict-health refusal, which this decision already made always-on.
