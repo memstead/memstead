@@ -11,10 +11,10 @@
 //!
 //! ```json
 //! { "relates": [
-//!     { "from": "specs--alpha", "rel_type": "USES", "target": "specs--beta" },
-//!     { "from": "specs--alpha", "rel_type": "USES", "target": "specs--gamma",
+//!     { "from": "specs--alpha", "rel_type": "USES", "to": "specs--beta" },
+//!     { "from": "specs--alpha", "rel_type": "USES", "to": "specs--gamma",
 //!       "remove": true, "note": "rehang: gamma superseded" },
-//!     { "from": "specs--beta", "rel_type": "PART_OF", "target": "specs--suite",
+//!     { "from": "specs--beta", "rel_type": "PART_OF", "to": "specs--suite",
 //!       "description": "core member" }
 //! ] }
 //! ```
@@ -45,7 +45,7 @@ pub struct Args {
 }
 
 /// Per-entry payload — the `memstead relate` argument set, per entry:
-/// `from` / `type` / `to`, optional `remove` (default add), optional
+/// `from` / `rel_type` / `to`, optional `remove` (default add), optional
 /// per-edge `description` (add path only), optional per-entry `note`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

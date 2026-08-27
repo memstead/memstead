@@ -2375,19 +2375,28 @@ fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
         "memstead_delete",
         "memstead_rename",
         "memstead_relate",
+        // Returns `seed_write_id`, so it carries the same claim and
+        // was outside this list until 2026-08-27 — correct only by
+        // luck rather than by check.
+        "memstead_mem_create",
+        // Documents the cursor the token is not.
+        "memstead_changes_since",
     ];
-    // Each entry is a phrase that would reintroduce one half of the
-    // defect: a git identity claim, a gitdir pointer, or cursor advice.
-    const BANNED: &[&str] = &[
-        "per-mem git",
-        "gitdir",
-        "include_config",
-        "commit SHA",
-        "commit sha",
+    // Structural, not a banned-phrase list. An earlier version banned
+    // "commit SHA" outright and would have rejected the CORRECT wording
+    // ("a commit SHA on a git-branch mem, a synthetic token on a folder
+    // mem"), while a list built for one phrasing lets the next one
+    // through — `ops/mod.rs` learned that when "Per-mem commit
+    // identifier" walked past a list written for "Per-mem commit SHA".
+    // So: a sentence naming the token and calling it a commit must also
+    // name WHICH backend produces one, and no sentence naming the token
+    // may invite polling with it.
+    const CURSOR_INVITES: &[&str] = &[
         "polling",
         "poll via",
         "since cursor",
         "as the `since`",
+        "for memstead_changes_since",
     ];
     let mut violations = Vec::new();
     for (surface, name, desc) in descriptions() {
@@ -2397,26 +2406,40 @@ fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
         if !desc.contains("write_id") {
             continue; // tool doesn't mention it — not a violation
         }
-        for phrase in BANNED {
-            if desc.contains(phrase) {
+        // Judge only the sentences that talk about the token. A
+        // description may legitimately mention a gitdir about something
+        // else — `memstead_mem_create` bootstraps one — and scanning the
+        // whole blob would force an allowlist, which is where the next
+        // drift would hide.
+        let about_token: String = desc
+            .split(". ")
+            .filter(|s| s.contains("write_id"))
+            .collect::<Vec<_>>()
+            .join(". ");
+        let lower = about_token.to_lowercase();
+        let claims_commit = lower.contains("commit") || lower.contains("sha");
+        let names_backend = lower.contains("git-branch");
+        if claims_commit && !names_backend {
+            violations.push(format!(
+                "{surface}/{name}: calls `write_id` a commit without naming which \
+                 backend produces one — {about_token}"
+            ));
+        }
+        for phrase in CURSOR_INVITES {
+            if lower.contains(phrase) {
                 violations.push(format!(
-                    "{surface}/{name}: description names `write_id` and still says \
-                     \"{phrase}\" — the token is an identity, not a git ref and not a cursor"
+                    "{surface}/{name}: invites polling with `write_id` (\"{phrase}\") — \
+                     it is an identity, not a change cursor"
                 ));
             }
         }
+        if lower.contains("gitdir") || lower.contains("include_config") {
+            violations.push(format!(
+                "{surface}/{name}: points at a gitdir in a sentence about `write_id` — \
+                 the lookup errors on a backend without one"
+            ));
+        }
     }
-    // The contract the per-tool descriptions no longer restate must be
-    // stated once, where every mutation caller reads it.
-    let instr = server_instructions_text();
-    assert!(
-        instr.contains("write_id"),
-        "server instructions must name the token every mutation returns"
-    );
-    assert!(
-        instr.contains("NOT a change cursor"),
-        "server instructions must state that write_id is not a change cursor"
-    );
     assert!(
         violations.is_empty(),
         "write_id gloss violations:\n  {}",

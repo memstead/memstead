@@ -74,7 +74,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
         if !report.write_id.is_empty() {
             lines.push(String::new());
-            lines.push(format!("Last commit: `{}`", report.write_id));
+            lines.push(format!("Last write: `{}`", report.write_id));
         }
     }
     print_markdown(&lines.join("\n"));

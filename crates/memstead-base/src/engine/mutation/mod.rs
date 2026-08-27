@@ -441,7 +441,8 @@ impl super::Engine {
     /// best-effort: a failed stamp never fails the mutation that
     /// preceded it. On git-branch backends the config rides the
     /// `__MEMSTEAD` ref, so a stamp write never moves the mem branch
-    /// head — mutation `write_id` cursors stay valid.
+    /// head — so a git-branch mem's change cursor (the `head` a prior
+    /// `changes_since` returned) stays valid across a stamp write.
     pub(crate) fn stamp_mutation_versions(
         &mut self,
         mount_idx: usize,

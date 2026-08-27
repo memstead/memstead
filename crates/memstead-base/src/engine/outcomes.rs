@@ -71,8 +71,9 @@ pub struct CreateEntityOutcome {
     /// into a follow-up call.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-mem commit identifier returned by the backend's
-    /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
+    /// The identity the mem's backend minted for this write — a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder or
+    /// in-memory mem. An identity, never a change cursor. Wire-equivalent to
     /// full's `CreateResult.write_id`.
     pub write_id: String,
     /// ISO date string from the parsed entity's `created_date`
@@ -251,8 +252,9 @@ pub struct UpdateEntityOutcome {
     /// Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-mem commit identifier returned by the backend's
-    /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
+    /// The identity the mem's backend minted for this write — a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder or
+    /// in-memory mem. An identity, never a change cursor. Wire-equivalent to
     /// full's `UpdateResult.write_id`.
     pub write_id: String,
     /// ISO date string from the parsed entity's `modified_date`
@@ -347,8 +349,9 @@ pub struct DeleteEntityOutcome {
     /// pre-delete; both directions sum into one number for callers
     /// that need a single "how much did this delete cascade" signal.
     pub relations_removed: usize,
-    /// Per-mem commit identifier returned by the backend's
-    /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
+    /// The identity the mem's backend minted for this write — a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder or
+    /// in-memory mem. An identity, never a change cursor. Wire-equivalent to
     /// full's `DeleteResult.write_id`.
     pub write_id: String,
     /// Stub entities that became orphaned by this delete (their last
@@ -412,8 +415,9 @@ pub struct RelateEntityOutcome {
     /// refetching. Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-mem commit identifier returned by the backend's
-    /// [`crate::backend::MemBackend::commit`]. Empty on the no-op
+    /// The identity the mem's backend minted for this write — a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder or
+    /// in-memory mem. An identity, never a change cursor. Empty on the no-op
     /// paths ([`RelateAction::NoOpAlreadyPresent`],
     /// [`RelateAction::NoOpAbsent`]) — those branches skip the disk
     /// write so no commit happens. Wire-equivalent to the full
@@ -469,8 +473,9 @@ pub struct RenameEntityOutcome {
     /// Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-mem commit identifier returned by the backend's
-    /// [`crate::backend::MemBackend::commit`]. Empty on the
+    /// The identity the mem's backend minted for this write — a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder or
+    /// in-memory mem. An identity, never a change cursor. Empty on the
     /// slug-noop short-circuit (no disk write happened).
     /// Wire-equivalent to full's `RenameResult.write_id`.
     pub write_id: String,

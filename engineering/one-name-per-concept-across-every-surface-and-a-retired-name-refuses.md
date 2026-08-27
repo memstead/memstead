@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-27T19:26:52Z
-last_modified: 2026-08-27T19:26:59Z
+last_modified: 2026-08-27T20:26:28Z
 authority: accepted
 universality: domain-wide
 tags: wire-surface, naming, mcp, cli, ui-api, migration, engine
@@ -27,6 +27,9 @@ The cost is paid by the reader, not the writer. A relation edge was spelled four
 ## Exceptions
 
 Where a shape names both ends of a relation it uses the pair `from`/`to`; where the near end is implied by the call it names the far end `target`. That is not two names for one concept: the endpoint's role differs, and the pair form would be ambiguous without both. A surface may also keep a distinct serialization while sharing the vocabulary, as the CLI's `--relation REL_TYPE:target-id` joins the same two names with a colon.
+
+
+A projection built to a FOREIGN consumer's contract keeps that consumer's names, and this exception is stated rather than assumed because the tree already contains three: `serve/src/graph.rs`'s `GraphEdge` and `registry/src/serialize.rs` both serialize the relationship type as `type` with endpoints `source`/`target` for the shared graph.json payload (the registry mem documents that payload as its own contract), and `memstead-cli`'s `EdgeTypeCount` serializes `rel_type` as `type`. The first speaks a force-graph front end's vocabulary, the second is an aggregate count row rather than an edge a caller can write. Neither is a mutation input, so neither is reachable by an agent trying to author an edge, which is the reading this rule protects. The boundary that makes this an exception and not a loophole: a shape a caller SENDS, or one that describes what a caller may send, is governed; a shape rendered for a third-party renderer is not. A projection that starts accepting writes stops being exempt.
 
 ## Consequences
 

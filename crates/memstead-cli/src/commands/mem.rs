@@ -837,7 +837,7 @@ fn render_mem_create_markdown(r: &MemCreateResponse) -> String {
     let mut out = heading;
     out.push_str(&format!("- Location: `{}`\n", r.location.display()));
     out.push_str(&format!("- Schema: `{}`\n", r.schema_ref));
-    out.push_str(&format!("- Seed commit: `{}`\n", r.seed_write_id));
+    out.push_str(&format!("- Seed write: `{}`\n", r.seed_write_id));
     if !r.warnings.is_empty() {
         out.push_str("\n## Warnings\n\n");
         for w in &r.warnings {

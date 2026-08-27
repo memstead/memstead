@@ -134,7 +134,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "action": format!("{:?}", outcome.action),
             "_hash": outcome.content_hash,
             // Empty on rehearsals (the marker form) and no-op paths;
-            // the real commit's sha otherwise.
+            // otherwise the backend's identity for the write — a commit
+            // SHA on a git-branch mem, a synthetic token on a folder one.
             "write_id": outcome.write_id,
             "warnings": outcome.warnings,
             "orphan_stubs_removed": outcome

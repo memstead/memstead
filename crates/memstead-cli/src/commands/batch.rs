@@ -81,7 +81,7 @@ pub(crate) fn render_batch_markdown(
     }
     if result.applied && !result.write_id.is_empty() {
         lines.push(String::new());
-        lines.push(format!("Commit: `{}`", result.write_id));
+        lines.push(format!("Write: `{}`", result.write_id));
     }
     lines.join("\n")
 }

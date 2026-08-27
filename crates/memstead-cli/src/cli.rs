@@ -262,7 +262,7 @@ pub enum Command {
     /// Apply many edge changes in one atomic call. Input is a JSON
     /// file with a top-level `relates: [...]` array mixing additions
     /// and removals, applied in order — each entry mirrors `relate`
-    /// (`from` / `type` / `to`, optional `remove`, `description`,
+    /// (`from` / `rel_type` / `to`, optional `remove`, `description`,
     /// per-entry `note`). All-or-nothing: any invalid entry refuses
     /// the whole batch and names EVERY failing entry. One commit per
     /// touched mem.
@@ -561,6 +561,119 @@ mod write_id_gloss_tests {
         assert!(
             all.iter().any(|(_, t)| t.contains("write_id")),
             "no CLI help text mentions `write_id` — this check has gone vacuous"
+        );
+
+        // Second half: the edge spelling. The loop above only inspects
+        // text that names `write_id`, so it was blind to help that
+        // documents a relation entry with the retired bare `type` —
+        // which `batch-relate`'s about-text did, describing a shape its
+        // own `deny_unknown_fields` parser refuses. A door documenting
+        // what it rejects is worse than one saying nothing.
+        const RETIRED_EDGE_SHAPES: &[&str] = &[
+            "`from` / `type` / `to`",
+            "`from`/`type`/`to`",
+            "{from, to, type}",
+            "{to, type}",
+        ];
+        let mut edge_violations = Vec::new();
+        for (where_, text) in &all {
+            for shape in RETIRED_EDGE_SHAPES {
+                if text.contains(shape) {
+                    edge_violations.push(format!(
+                        "`memstead {where_}` help documents a relation entry as {shape} — \
+                         the type is `rel_type` on every surface and the parser refuses \
+                         the retired spelling"
+                    ));
+                }
+            }
+        }
+        assert!(
+            edge_violations.is_empty(),
+            "retired edge spelling in CLI help:\n  {}",
+            edge_violations.join("\n  ")
+        );
+    }
+
+    /// Third surface class: what the CLI PRINTS, as opposed to what it
+    /// documents.
+    ///
+    /// The guard above walks the clap tree, which is help text only. It
+    /// could not see `mem init`'s receipt rendering the token under the
+    /// label "Seed commit" on a folder mem — three lines above a warning
+    /// saying the same value is not a commit. The rename had replaced
+    /// the identifier in the format argument and left the label beside
+    /// it, which is this plan's recurring failure in its third costume.
+    ///
+    /// Walks the crate's own sources for a format string that labels a
+    /// write-token value with git vocabulary. Deliberately allowlist-free:
+    /// every label was made backend-neutral instead, so an exemption list
+    /// would be the first place the next drift hides.
+    #[test]
+    fn no_rendered_cli_output_labels_a_write_id_as_a_commit() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&src, &mut files);
+        assert!(
+            !files.is_empty(),
+            "found no sources — check has gone vacuous"
+        );
+
+        let mut violations = Vec::new();
+        let mut saw_a_render = false;
+        for path in &files {
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let renders_token = line.contains("write_id");
+                if renders_token && (line.contains("format!") || line.contains("push_str")) {
+                    saw_a_render = true;
+                }
+                if !renders_token {
+                    continue;
+                }
+                // Widen to a small window, not just this line. A label
+                // sits on the line above its value whenever the
+                // `format!` is wrapped, and a same-line-only rule is
+                // blind to exactly the costume the defect wore here.
+                let lo = i.saturating_sub(2);
+                let hi = (i + 3).min(lines.len());
+                let window = lines[lo..hi].join(" ").to_lowercase();
+                let renders = lines[lo..hi]
+                    .iter()
+                    .any(|l| l.contains("format!") || l.contains("push_str"));
+                if (window.contains("commit") || window.contains(" sha")) && renders {
+                    violations.push(format!(
+                        "{}:{}: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        i + 1,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+        assert!(
+            saw_a_render,
+            "no CLI source renders a write token — this check has gone vacuous"
+        );
+        assert!(
+            violations.is_empty(),
+            "rendered CLI output labels a write token with git vocabulary:\n  {}",
+            violations.join("\n  ")
         );
     }
 }

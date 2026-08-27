@@ -649,7 +649,7 @@ fn unique_suffix() -> String {
 }
 
 /// `pub(crate)` so the in-memory backend mints the same synthetic
-/// commit-id shape (UNIX-nanos + counter, hex) the folder backend
+/// write-id shape (UNIX-nanos + counter, hex) the folder backend
 /// produces — both are history-free backends and must hand callers an
 /// identically-shaped opaque cursor.
 pub(crate) fn make_commit_id() -> CommitId {

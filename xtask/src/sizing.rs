@@ -270,12 +270,12 @@ fn corpus_json(n: usize) -> String {
         let mut relations = Vec::new();
         if i > 2 {
             relations.push(serde_json::json!({
-                "type": "USES",
-                "to": format!("bench--topic-{}", i - 1),
+                "rel_type": "USES",
+                "target": format!("bench--topic-{}", i - 1),
             }));
             relations.push(serde_json::json!({
-                "type": "DEPENDS_ON",
-                "to": format!("bench--topic-{}", i - 2),
+                "rel_type": "DEPENDS_ON",
+                "target": format!("bench--topic-{}", i - 2),
             }));
         }
         creates.push(serde_json::json!({

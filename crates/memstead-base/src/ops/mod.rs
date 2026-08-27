@@ -103,7 +103,7 @@ pub struct CreateArgs {
     pub sections: IndexMap<String, String>,
     /// Metadata overrides: `{ "<field-key>": "value" }`.
     pub metadata: IndexMap<String, String>,
-    /// Relationships to create: `[{ to: EntityId, type: "USES" }]`.
+    /// Relationships to create: `[{ target: EntityId, rel_type: "USES" }]`.
     pub relations: Vec<RelateArg>,
     /// When true, validate and compute the result but do not write to
     /// disk, mutate the store, create edges, or commit. Response carries
@@ -204,9 +204,13 @@ pub struct UpdateResult {
     /// shape for callers that ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prospective_hash: Option<String>,
-    /// Per-mem commit SHA produced by this mutation. Agents remember it
-    /// and feed it to `memstead_changes_since` to pick up incremental updates.
-    /// Empty for dry runs (no commit happens).
+    /// The identity the mem's backend minted for this write: a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder
+    /// or in-memory mem. It is an identity and NOT a change cursor —
+    /// `memstead_changes_since` takes a commit SHA on a git-branch mem
+    /// and an RFC3339 ledger timestamp on a folder mem, and feeding it
+    /// this token silently replays a folder mem's whole history.
+    /// Empty for dry runs (no write happens).
     #[serde(default)]
     pub write_id: String,
     /// Typed non-fatal issues — same shape as `CreateResult::warnings`.
@@ -1144,8 +1148,10 @@ impl ParseRecoveryEntry {
 pub struct ParseRecoveryReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<ParseRecoveryEntry>,
-    /// Last successful commit sha across all per-source re-renders
-    /// the bulk-fix performed. Empty when no recovery wrote to disk
+    /// The backend's identity for the last successful per-source
+    /// re-render the bulk-fix performed — a commit SHA on a git-branch
+    /// mem, a synthetic token on a folder mem, and never a change
+    /// cursor. Empty when no recovery wrote to disk
     /// (workspace already clean, only read-only warnings, or every
     /// writable attempt failed).
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -2727,7 +2733,8 @@ pub struct CreateResult {
     /// same inputs would produce. Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-mem commit SHA — see `UpdateResult::write_id`. Empty under
+    /// The backend's identity for this write, never a cursor — see
+    /// `UpdateResult::write_id`. Empty under
     /// `dry_run`.
     #[serde(default)]
     pub write_id: String,
@@ -2792,7 +2799,8 @@ pub fn project_incoming(edges: &[crate::store::InEdge]) -> Vec<IncomingRef> {
 pub struct DeleteResult {
     pub id: EntityId,
     pub relations_removed: usize,
-    /// Per-mem commit SHA — see `UpdateResult::write_id`.
+    /// The backend's identity for this write, never a cursor — see
+    /// `UpdateResult::write_id`.
     #[serde(default)]
     pub write_id: String,
     /// Stub entities that became orphaned by this delete (their last
@@ -2822,7 +2830,8 @@ pub struct RenameResult {
     /// Wire key `_hash`.
     #[serde(default, rename = "_hash", skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
-    /// Per-mem commit SHA — see `UpdateResult::write_id`. Empty on the
+    /// The backend's identity for this write, never a cursor — see
+    /// `UpdateResult::write_id`. Empty on the
     /// no-op same-title rename (no file change, no commit).
     #[serde(default)]
     pub write_id: String,
@@ -2880,7 +2889,8 @@ pub struct RelateResult {
     /// the source — no `memstead_entity` re-read required. Wire key `_hash`.
     #[serde(default, rename = "_hash", skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
-    /// Per-mem commit SHA — see `UpdateResult::write_id`.
+    /// The backend's identity for this write, never a cursor — see
+    /// `UpdateResult::write_id`.
     #[serde(default)]
     pub write_id: String,
     /// Typed non-fatal issues — open-mode schema admissions, duplicate-add
@@ -2949,9 +2959,10 @@ pub struct BatchResult {
     /// that removed nothing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub orphan_stubs_removed: Vec<EntityId>,
-    /// The single batch commit SHA when the batch applied and produced
-    /// at least one write — an honest `memstead_changes_since` cursor /
-    /// revert handle for the whole batch. Empty when the batch was
+    /// The backend's identity for the batch's write — a commit SHA on
+    /// a git-branch mem, a synthetic token on a folder mem, and never a
+    /// change cursor. Present when the batch applied and produced at
+    /// least one write. Empty when the batch was
     /// refused, when it was empty, or when every item was a no-op (no
     /// commit happens). For a batch spanning multiple mems this names
     /// the last mem committed; single-mem batches (the common case)
@@ -4170,6 +4181,193 @@ mod tests {
             v.as_object().unwrap().len(),
             3,
             "envelope has exactly 3 top-level keys"
+        );
+    }
+}
+
+#[cfg(test)]
+mod write_id_doc_gloss_tests {
+    /// The rustdoc guard, for the whole crate rather than one file.
+    ///
+    /// Two earlier versions of this check were too narrow and each let a
+    /// real defect through. The first read only `ops/mod.rs`, so five
+    /// copies of the gloss in `engine/outcomes.rs` — the lean flavour's
+    /// public outcome types, on a crates.io-published crate, hence
+    /// docs.rs — were invisible. The second was a phrase-exact banned
+    /// list built for "Per-mem commit SHA", which "Per-mem commit
+    /// identifier" walked straight past. A list of forbidden sentences
+    /// is only ever as good as the sentences someone already wrote.
+    ///
+    /// So the rule is structural and positive instead. Every documented
+    /// `write_id` field must say WHICH backend produces a commit and
+    /// must say the value is not a cursor. Prose that calls the token a
+    /// commit without qualification fails whatever words it uses,
+    /// because it cannot satisfy the qualifier requirement.
+    #[test]
+    fn every_write_id_doc_qualifies_the_backend_and_denies_the_cursor() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&src, &mut files);
+        assert!(
+            !files.is_empty(),
+            "found no sources — check has gone vacuous"
+        );
+
+        let mut documented = 0usize;
+        let mut violations = Vec::new();
+        for path in &files {
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let t = line.trim_start();
+                if !(t.starts_with("pub write_id:") || t.starts_with("pub seed_write_id:")) {
+                    continue;
+                }
+                // Collect the contiguous doc block above the field,
+                // skipping attributes like #[serde(default)].
+                let mut block = Vec::new();
+                let mut j = i;
+                while j > 0 {
+                    j -= 1;
+                    let prev = lines[j].trim_start();
+                    if prev.starts_with("#[") {
+                        continue;
+                    }
+                    if prev.starts_with("///") {
+                        block.push(prev.trim_start_matches("///").trim());
+                        continue;
+                    }
+                    break;
+                }
+                if block.is_empty() {
+                    continue; // undocumented: nothing to gloss
+                }
+                documented += 1;
+                block.reverse();
+                let doc = block.join(" ");
+                let lower = doc.to_lowercase();
+                // Judge the DEFINING sentence, not every later mention.
+                // "Empty on the no-op rename (no file change, no commit)"
+                // is a true statement about a path, not a claim that the
+                // token is a commit; only the summary sentence defines
+                // the field, and it is what docs.rs renders as such.
+                let definition = lower.split_once(". ").map(|(a, _)| a).unwrap_or(&lower);
+                let claims_commit = definition.contains("commit") || definition.contains("sha");
+                let names_backend = lower.contains("git-branch");
+                let denies_cursor = lower.contains("not a change cursor")
+                    || lower.contains("never a change cursor")
+                    || lower.contains("not a cursor")
+                    || lower.contains("never a cursor");
+                let inherits = lower.contains("see `updateresult::write_id`")
+                    || lower.contains("wire-equivalent to full's");
+                if inherits && !claims_commit {
+                    continue; // documented by pointer at a doc this check governs
+                }
+                if claims_commit && !names_backend {
+                    violations.push(format!(
+                        "{}:{}: calls the token a commit without naming which backend produces one — {}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        i + 1,
+                        doc
+                    ));
+                } else if !denies_cursor && !inherits {
+                    violations.push(format!(
+                        "{}:{}: documents the token without stating it is not a change cursor — {}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        i + 1,
+                        doc
+                    ));
+                }
+            }
+        }
+        assert!(
+            documented >= 5,
+            "expected the crate to document several write_id fields, saw {documented} — \
+             this check has gone vacuous"
+        );
+        assert!(
+            violations.is_empty(),
+            "write_id docs that gloss the token as a git commit or omit the non-cursor statement:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+
+    /// The edge spelling, across the same crate. The canonical
+    /// `CreateArgs::relations` doc named both retired keys at once, on
+    /// a field whose own type is `{target, rel_type}`. Neither
+    /// enumerator matches that prose form, which is why this exists.
+    #[test]
+    fn no_doc_comment_spells_a_relation_entry_the_retired_way() {
+        const RETIRED_EDGE_SHAPES: &[&str] = &[
+            "to: EntityId, type:",
+            "{ to, type }",
+            "{to, type}",
+            "{from, to, type}",
+            "`from` / `type` / `to`",
+            "(`from`/`to`/`type`)",
+        ];
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&src, &mut files);
+        assert!(
+            !files.is_empty(),
+            "found no sources — check has gone vacuous"
+        );
+
+        let mut violations = Vec::new();
+        for path in &files {
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            for (i, line) in text.lines().enumerate() {
+                let t = line.trim_start();
+                if !t.starts_with("///") && !t.starts_with("//!") {
+                    continue;
+                }
+                for shape in RETIRED_EDGE_SHAPES {
+                    if line.contains(shape) {
+                        violations.push(format!(
+                            "{}:{}: {}",
+                            path.file_name().unwrap_or_default().to_string_lossy(),
+                            i + 1,
+                            t
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "doc comments still spell a relation entry the retired way:\n  {}",
+            violations.join("\n  ")
         );
     }
 }
