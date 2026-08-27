@@ -1585,6 +1585,12 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // why that check could not run when it could not.
             "dangling",
             "entity_end_unreconciled",
+            // The measured failure and the absent measurement, split
+            // (consistency-sweep 03/05), and the statement every figure
+            // travels with.
+            "unobserved",
+            "population",
+            "fully_adjudicated",
             "memstead verify-anchors",
             "writable_mems",
             "default_writable_mem",

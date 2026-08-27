@@ -236,6 +236,13 @@ ones it excluded, with the reason. So two reports on one mem are two different
 measurements, and neither is the mem's total. If you gate on the anchor figures,
 gate per binding.
 
+**A clean anchor axis means every counted row was adjudicated.** If any row
+could not be (unobserved, a span never checked, an entity end nobody
+reconciled), the verdict is inconclusive and the blind spot is named, so a gate
+reading the verdict rather than the exit code sees it. Excluded rows are not
+blind spots: an anchor outside this binding's scope is a correct answer, not a
+gap.
+
 **An anchor whose entity vanished is reported, not counted.** If something
 wrote the mem from outside the engine and removed an entity, the sidecar row
 naming it is reported as dangling and excluded from every anchor figure. It is

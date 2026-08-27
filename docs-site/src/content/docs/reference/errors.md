@@ -52,13 +52,13 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `FIELD_NOT_RANGE_FILTERABLE` | engine | `crates/memstead-base/src/ops/mod.rs:1886` |
 | `FILTER_TYPE_SCOPED` | engine | `crates/memstead-base/src/ops/mod.rs:1867` |
 | `FILTER_VALUE_MULTI_MEMBER` | engine | `crates/memstead-base/src/ops/mod.rs:1871` |
-| `FINDINGS_STORE_ERROR` | CLI | `crates/memstead-cli/src/commands/verify_anchors.rs:58` |
+| `FINDINGS_STORE_ERROR` | CLI | `crates/memstead-cli/src/commands/verify_anchors.rs:69` |
 | `FOLDER_MEM_PROVENANCE` | engine | `crates/memstead-base/src/ops/mod.rs:1912` |
 | `FOREIGN_MEMSTEAD_DIR` | CLI | `crates/memstead-cli/src/commands/quickstart.rs:645` |
 | `HASH_FLAG_REQUIRED` | CLI | `crates/memstead-cli/src/lib.rs:33` |
 | `HASH_MISMATCH` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1241`<br>`crates/memstead-mcp/src/server.rs:786` |
 | `HAS_INCOMING_REFS` | engine | `crates/memstead-base/src/engine/error.rs:1242` |
-| `HEALTH_STRICT_VIOLATIONS` | CLI | `crates/memstead-cli/src/commands/health.rs:1380` |
+| `HEALTH_STRICT_VIOLATIONS` | CLI | `crates/memstead-cli/src/commands/health.rs:1408` |
 | `IGNORED_READONLY_FIELD` | engine | `crates/memstead-base/src/ops/mod.rs:1891` |
 | `INLINE_WIKI_LINK_AUTO_STUBBED` | engine | `crates/memstead-base/src/ops/mod.rs:1839` |
 | `INTERNAL` | CLI, MCP | `crates/memstead-cli/src/lib.rs:28`<br>`crates/memstead-mcp/src/filesystem_server.rs:1844`<br>`crates/memstead-mcp/src/filesystem_server.rs:1909` |

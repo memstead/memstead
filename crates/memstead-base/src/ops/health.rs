@@ -292,8 +292,8 @@ pub fn health_open_questions_axis(
         //
         // `entity_end_unreconciled` rides along both ways: an empty dangling
         // bucket means "none found" only when the check could run at all.
-        let (mut recheck, mut unresolvable, mut dangling_rows) =
-            (Vec::new(), Vec::new(), Vec::new());
+        let (mut recheck, mut unresolvable, mut unobserved, mut dangling_rows) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut entity_end_unreconciled: Option<String> = None;
         if let Ok(report) = engine.verify_mem_anchors(mem) {
             entity_end_unreconciled = report.unreconciled.clone();
@@ -306,6 +306,7 @@ pub fn health_open_questions_axis(
                 match a.state.as_str() {
                     "recheck" => recheck.push(item),
                     "unresolvable" => unresolvable.push(item),
+                    "unobserved" => unobserved.push(item),
                     "dangling" => dangling_rows.push(item),
                     _ => {}
                 }
@@ -419,6 +420,7 @@ pub fn health_open_questions_axis(
         let total_open = stubs["count"].as_u64().unwrap_or(0)
             + recheck.len() as u64
             + unresolvable.len() as u64
+            + unobserved.len() as u64
             + dangling_rows.len() as u64
             + constraints["count"].as_u64().unwrap_or(0)
             + dangling["count"].as_u64().unwrap_or(0)
@@ -431,6 +433,10 @@ pub fn health_open_questions_axis(
         entry.insert("stubs".into(), stubs);
         entry.insert("anchors_recheck".into(), capped(recheck));
         entry.insert("anchors_unresolvable".into(), capped(unresolvable));
+        // Its own bucket here too. The comment above argues that folding two
+        // anchor conditions together reproduces the collapse the axis refuses,
+        // and a first version then did exactly that eight lines further down.
+        entry.insert("anchors_unobserved".into(), capped(unobserved));
         entry.insert("anchors_dangling".into(), capped(dangling_rows));
         if let Some(why) = entity_end_unreconciled {
             entry.insert("entity_end_unreconciled".into(), serde_json::json!(why));
@@ -469,13 +475,22 @@ pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value 
                 "resolved": report.resolved,
                 "drifted": report.drifted,
                 "recheck": report.recheck,
+                // Split from `unresolvable` (03/05, criterion 2): the artifact
+                // being gone is a measurement, the pass not reaching it is the
+                // absence of one, and this is the surface a reader arrives at
+                // without a binding in hand.
                 "unresolvable": report.unresolvable,
+                "unobserved": report.unobserved,
                 // The entity end (03/02). Carried here too, both ways: four
                 // counts over a mem whose sidecar has outlived its entities
                 // read as a healthy axis, and so does a zero over a mem whose
                 // entity end was never reconciled.
                 "dangling": report.dangling,
                 "entity_end_unreconciled": report.unreconciled,
+                // The figures never travel without what they were computed
+                // over (03/05, criteria 1 and 3).
+                "population": report.population_statement(),
+                "fully_adjudicated": report.fully_adjudicated(),
             }),
         );
     }

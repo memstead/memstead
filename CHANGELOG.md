@@ -8,6 +8,38 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **An anchor resolution figure never renders without the population it
+  covers, and two checks keep it that way.** A resolution percentage is read by
+  gates and by people as health. Every finding this campaign's anchor bundle
+  fixed made that percentage mean less than a reader assumes, and not one made
+  it wrong in a way anyone could see: the figure was correct over whatever
+  happened to be in the sidecar.
+
+  Every surface reporting a figure now states what it was computed over and how
+  much of it could not be adjudicated, and the figure and its statement render
+  as ONE unit, so a compact or budget-reduced rendering cannot carry the number
+  and drop the caveat. Rows the axis could not adjudicate (unobserved, spans
+  never checked against their artifact, an entity end nobody reconciled) make
+  the verdict inconclusive rather than clean, through the blind-spot mechanism
+  that already existed. Exclusions deliberately do not: an out-of-scope or
+  other-binding anchor is a complete, correct answer about a row this binding
+  does not answer for, and treating it as an unknown would be the same collapse
+  this release repairs elsewhere.
+
+  The standalone anchor surface and the health axis stop collapsing two
+  conditions into one bucket. An artifact that is GONE is a measured failure; an
+  anchor the pass could not observe at all is the absence of a measurement, and
+  the repairs differ. They now have their own counts, on the surface a reader
+  reaches without a binding in hand.
+
+  Two permanent checks in the repo-hygiene lane, running without anyone choosing
+  to run them: one fails on a rendering that shows a resolution count without
+  saying what it covered, or on a rendering site nobody declared, so a NEW
+  surface starts red rather than starting the cycle again; the other derives the
+  anchor-state vocabulary from the enum and fails until a written-down list is
+  edited, because adding a state compiles once its match arms are supplied and
+  reaches a fully green suite otherwise.
+
 - **An anchors-only update no longer demands a compare-and-swap token for a
   value it cannot move.** Anchors live in a sidecar outside the entity's
   content hash, by deliberate and documented design, so an update that touches

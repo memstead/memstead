@@ -443,6 +443,34 @@ impl FidelityReport {
                     .to_string(),
             );
         }
+        // Rows the axis could not adjudicate (consistency-sweep 03/05,
+        // criterion 4). These EXTEND the existing blind-spot mechanism rather
+        // than adding a parallel one, so an axis that measured only part of
+        // its population reaches the inconclusive verdict the three-valued
+        // rollup already provides.
+        //
+        // EXCLUSIONS ARE DELIBERATELY ABSENT from this list. An out-of-scope
+        // or other-binding anchor is legal, excluded and named: a complete,
+        // correct answer about a row this binding does not answer for. Folding
+        // it in here would be the same collapse criterion 2 repairs on the
+        // standalone surface, treating a known exclusion as an unknown.
+        if self.anchors.unobserved > 0 {
+            blind_spots.push(format!(
+                "{} counted anchor(s) could not be observed at all this pass, so their state is unknown rather than clean",
+                self.anchors.unobserved
+            ));
+        }
+        if self.anchors.span_unvalidated > 0 {
+            blind_spots.push(format!(
+                "{} counted span anchor(s) were never checked against their artifact, so the span they name is unverified even where the hash resolves",
+                self.anchors.span_unvalidated
+            ));
+        }
+        if let Some(why) = &self.anchors.unreconciled {
+            blind_spots.push(format!(
+                "the entity end of these anchors was not reconciled ({why}), so a row naming an entity the mem no longer holds would not have been detected"
+            ));
+        }
         // A facet is change-blind if EITHER its medium cannot signal change
         // or the binding resolved that medium to no strategy. The two are
         // different: a `codebase` medium reports `change_signal: true` while
@@ -835,19 +863,24 @@ fn render_hard_required(report: &FidelityReport) -> String {
         "- `authored` bucket (excluded from coverage/accuracy denominators): {}\n",
         report.anchors.authored
     ));
+    // The figure and the population it was computed over render as ONE unit
+    // (consistency-sweep 03/05, criteria 1 and 3). Separate bullets were the
+    // defect: a budget-reduced or excerpted rendering could carry the
+    // percentage and drop the caveat, and a percentage alone is read as
+    // health. `scripts/check-anchor-figure-sites.py` fails on a rendering that
+    // shows a resolution count without saying what it covered.
     md.push_str(&format!(
-        "- resolution (non-`authored`, observed): resolves {}, drifted {}, recheck {}, orphaned {}\n",
+        "- resolution (non-`authored`, observed): resolves {}, drifted {}, recheck {}, \
+         orphaned {}; **anchor-resolution %:** {} over {} counted row(s) on {} distinct \
+         artifact(s), with {} unobserved this pass (state unavailable, never scored as \
+         resolved)\n",
         report.anchors.resolves,
         report.anchors.drifted,
         report.anchors.recheck,
-        report.anchors.orphaned
-    ));
-    md.push_str(&format!(
-        "- **anchor-resolution %:** {}\n",
-        ratio(report.anchors.resolves, report.anchors.observed)
-    ));
-    md.push_str(&format!(
-        "- unobserved this pass (state unavailable, never scored as resolved): {}\n",
+        report.anchors.orphaned,
+        ratio(report.anchors.resolves, report.anchors.observed),
+        report.anchors.counted_rows,
+        report.anchors.distinct_artifacts,
         report.anchors.unobserved
     ));
     // What the denominator counted, stated rather than left to be assumed
@@ -2409,6 +2442,87 @@ mod rollup_tests {
             disposed_excluded: 0,
             disposed_excluded_rationales: Vec::new(),
             degradations: Vec::new(),
+        }
+    }
+
+    /// Criterion 4 (consistency-sweep 03/05): rows the axis could not
+    /// adjudicate make it inconclusive, not clean. And the complement that
+    /// gives the criterion its teeth: EXCLUSIONS do not, because an
+    /// out-of-scope or other-binding anchor is a complete, correct answer
+    /// about a row this binding does not answer for.
+    #[test]
+    fn unadjudicated_rows_block_clean_but_exclusions_do_not() {
+        let mut r = clean_report();
+        assert_eq!(
+            r.rollup().verdict,
+            RollupVerdict::Clean,
+            "the baseline is clean"
+        );
+
+        // An exclusion is legal and named; it is not an unknown.
+        r.anchors.excluded_out_of_scope = 3;
+        r.anchors.excluded_other_binding = 2;
+        r.anchors.excluded_artifacts = vec!["src/a.rs (out-of-scope)".into()];
+        assert_eq!(
+            r.rollup().verdict,
+            RollupVerdict::Clean,
+            "excluding a row this binding does not answer for is an ANSWER, not a blind spot"
+        );
+
+        // A row that could not be observed is an unknown.
+        let mut unobserved = r.clone();
+        unobserved.anchors.unobserved = 1;
+        let roll = unobserved.rollup();
+        assert_eq!(roll.verdict, RollupVerdict::Inconclusive);
+        assert!(
+            roll.blind_spots
+                .iter()
+                .any(|b| b.contains("could not be observed")),
+            "and it names itself: {:?}",
+            roll.blind_spots
+        );
+
+        // A span never checked against its artifact is an unknown.
+        let mut span = r.clone();
+        span.anchors.span_unvalidated = 2;
+        assert_eq!(span.rollup().verdict, RollupVerdict::Inconclusive);
+
+        // An entity end nobody reconciled is an unknown.
+        let mut ent = r.clone();
+        ent.anchors.unreconciled = Some("the mem's lazy entity load has not run".into());
+        assert_eq!(ent.rollup().verdict, RollupVerdict::Inconclusive);
+    }
+
+    /// Criterion 7: each condition plans 01, 02 and 03 introduce is REACHABLE
+    /// in the rendered report. Reachable means expressible and rendered, not
+    /// failing: none of the five is a finding, which is exactly why criterion
+    /// 4 has the axis report honestly over them rather than cleanly.
+    #[test]
+    fn all_five_conditions_are_reachable_in_the_report() {
+        let mut r = clean_report();
+        r.anchors.excluded_out_of_scope = 1;
+        r.anchors.excluded_other_binding = 1;
+        r.anchors.excluded_artifacts = vec![
+            "src/a.rs (out-of-scope)".into(),
+            "src/b.rs (other-binding)".into(),
+        ];
+        r.anchors.dangling = 1;
+        r.anchors.dangling_rows = vec!["engine--gone → src/c.rs".into()];
+        r.anchors.span_unvalidated = 1;
+        r.anchors.hash_from_backfill = 1;
+
+        let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+        for (needle, condition) in [
+            ("outside this binding's declared scope", "scope-excluded"),
+            ("written by another binding", "other-binding"),
+            ("no longer holds", "dangling entity"),
+            ("never checked against their artifact", "span not validated"),
+            ("inferred by backfill", "baseline established by backfill"),
+        ] {
+            assert!(
+                md.contains(needle),
+                "{condition} is not reachable in the report; looked for {needle:?} in:\n{md}"
+            );
         }
     }
 

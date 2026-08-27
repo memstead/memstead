@@ -723,9 +723,17 @@ impl Engine {
                     report.recheck += 1;
                     "recheck"
                 }
-                Some(crate::anchor::AnchorState::Orphaned) | None => {
+                Some(crate::anchor::AnchorState::Orphaned) => {
                     report.unresolvable += 1;
                     "unresolvable"
+                }
+                // Split from `unresolvable` (03/05, criterion 2): the artifact
+                // being GONE is a measurement; the pass not reaching the
+                // artifact at all is the absence of one, and the repairs
+                // differ.
+                None => {
+                    report.unobserved += 1;
+                    "unobserved"
                 }
             };
             report.anchors.push(VerifiedAnchor {
@@ -2497,10 +2505,18 @@ pub struct MemAnchorVerification {
     /// Hash differs under `unstable` stability, or a hash is missing on
     /// either side — flagged for re-examination, never called drift.
     pub recheck: usize,
-    /// Source absent, or a grain/medium the mechanism does not reach.
+    /// Source absent: a MEASURED failure. The artifact the anchor names is
+    /// not there.
     pub unresolvable: usize,
+    /// The anchor could not be observed at all this pass, so nothing about it
+    /// was measured (consistency-sweep 03/05, criterion 2). Its own count,
+    /// because `unresolvable` used to swallow it: a reader on the surface you
+    /// reach WITHOUT a binding could not tell a measured failure from an
+    /// absent measurement, which is the one distinction that surface exists to
+    /// make.
+    pub unobserved: usize,
     /// Rows whose ENTITY is gone (consistency-sweep 03/02). Its own class,
-    /// counted apart from the four above: those describe the artifact end,
+    /// counted apart from the states above: those describe the artifact end,
     /// and a vanished entity says nothing about the source. Folding it into
     /// `unresolvable` would name the wrong repair.
     pub dangling: usize,
@@ -2510,6 +2526,53 @@ pub struct MemAnchorVerification {
     pub anchors: Vec<VerifiedAnchor>,
 }
 
+impl MemAnchorVerification {
+    /// The population statement that must accompany this report's figures
+    /// (consistency-sweep 03/05, criteria 1 and 3): what the figures were
+    /// computed over, and how much of it the pass could not adjudicate.
+    ///
+    /// A resolution figure alone is read as health. Every W3 finding made that
+    /// figure mean less than a reader assumes, and none of them made it wrong
+    /// in a way anyone could see. Rendering the figure and its population as
+    /// ONE unit is what stops the next such finding being invisible: a surface
+    /// cannot show the number and omit the caveat, because it gets both from
+    /// here or neither.
+    pub fn population_statement(&self) -> String {
+        // `recheck` belongs on ONE side of this sentence. A first version put
+        // it in both: counted as adjudicated and then reported as not, so the
+        // same rows appeared twice and the two numbers could not be reconciled
+        // by a reader. A recheck row is a row whose drift could NOT be
+        // asserted, which is the definition of unadjudicated.
+        let adjudicated = self.resolved + self.drifted + self.unresolvable;
+        let unadjudicated = self.recheck + self.unobserved;
+        let mut s = format!(
+            "over {} counted row(s): {adjudicated} adjudicated, {unadjudicated} not (recheck {}, unobserved {})",
+            adjudicated + unadjudicated,
+            self.recheck,
+            self.unobserved
+        );
+        if self.dangling > 0 {
+            s.push_str(&format!(
+                "; {} row(s) excluded, naming an entity the mem no longer holds",
+                self.dangling
+            ));
+        }
+        if let Some(why) = &self.unreconciled {
+            s.push_str(&format!(
+                "; the entity end was NOT reconciled ({why}), so dangling rows would not have been detected"
+            ));
+        }
+        s
+    }
+
+    /// Whether this axis adjudicated everything it counted. False means the
+    /// figures above rest on an incomplete measurement, which is not the same
+    /// as a failed one.
+    pub fn fully_adjudicated(&self) -> bool {
+        self.recheck == 0 && self.unobserved == 0 && self.unreconciled.is_none()
+    }
+}
+
 /// One anchor's verification row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VerifiedAnchor {
@@ -2517,7 +2580,11 @@ pub struct VerifiedAnchor {
     pub artifact: String,
     pub grain: String,
     pub class: String,
-    /// `resolved` | `drifted` | `recheck` | `unresolvable`.
+    /// `resolved` | `drifted` | `recheck` | `unresolvable` (artifact gone) |
+    /// `unobserved` (not measured this pass) | `dangling` (the entity is
+    /// gone). The wire vocabulary of this field, which is NOT the engine's
+    /// `AnchorState` enum: that has four variants describing the artifact
+    /// end, and the last two here are conditions beside them.
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observed_hash: Option<String>,

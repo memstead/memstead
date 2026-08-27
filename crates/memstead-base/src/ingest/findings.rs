@@ -380,6 +380,15 @@ pub fn record_standalone_findings(
         .anchors
         .iter()
         .filter_map(|a| {
+            // `unobserved` is deliberately absent (consistency-sweep 03/05).
+            // A finding asserts a MEASURED condition, and an unobserved row is
+            // the absence of a measurement: recording it as
+            // `UnresolvableAnchor` claimed the artifact was gone when nobody
+            // had looked, which is the collapse criterion 2 removes. It is not
+            // dropped silently either — the population statement and
+            // `fully_adjudicated` on this same surface report it, and the
+            // binding report raises it as a blind spot that blocks a clean
+            // verdict.
             let class = match a.state.as_str() {
                 "drifted" => FindingClass::Drifted,
                 "unresolvable" => FindingClass::UnresolvableAnchor,

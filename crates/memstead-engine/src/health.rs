@@ -767,18 +767,27 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
         }
     }
 
-    // Anchors axis — an object (mem → four counts), not an array, so it
-    // renders its own compact section.
+    // Anchors axis — an object (mem → counts plus the population they cover),
+    // not an array, so it renders its own compact section. The figure and the
+    // population render together (consistency-sweep 03/05, criteria 1 and 3):
+    // this is the MCP text channel, so it is what a cold agent reads, and it
+    // used to print four numbers and stop.
     if let Some(obj) = v.get("anchors").and_then(|x| x.as_object()) {
         let _ = writeln!(s, "\n## Anchors ({} mems)", obj.len());
         for (mem, counts) in obj {
             let _ = writeln!(
                 s,
-                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable {}",
+                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable (artifact gone) \
+                 {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
                 counts["resolved"].as_u64().unwrap_or(0),
                 counts["drifted"].as_u64().unwrap_or(0),
                 counts["recheck"].as_u64().unwrap_or(0),
                 counts["unresolvable"].as_u64().unwrap_or(0),
+                counts["unobserved"].as_u64().unwrap_or(0),
+                counts["dangling"].as_u64().unwrap_or(0),
+                counts["population"]
+                    .as_str()
+                    .unwrap_or("population not stated"),
             );
         }
     }

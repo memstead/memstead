@@ -118,6 +118,34 @@ a file that failed to parse) no row is called dangling and the report says why
 instead. A clean anchor axis over an entity end nobody examined would be exactly
 the false assurance this contract exists to prevent.
 
+## A figure never travels without its population
+
+Anchor resolution is reported as a percentage, and a percentage is read as
+health. That is the number a CI gate branches on and the number a person scans
+for. It is also the number that can be perfectly correct and still mean almost
+nothing: correct over whatever happened to be in the sidecar, over rows nobody
+managed to look at, over spans nobody checked.
+
+So every surface that reports the figure reports the population it was computed
+over in the same breath: how many rows, over how many distinct artifacts, what
+was excluded and why, and how much could not be adjudicated. Figure and
+statement render as one unit, so a compact or budget-trimmed rendering cannot
+carry the number and drop the caveat.
+
+**Rows that could not be adjudicated make the verdict inconclusive, not clean.**
+An anchor the pass could not observe, a span never checked against its artifact,
+an entity end nobody reconciled: each is an absence of measurement, and an axis
+resting on one has not earned a clean verdict. **Exclusions do not**, and the
+difference is the point. An out-of-scope or other-binding anchor is a complete,
+correct answer about a row this binding does not answer for. Treating a known
+exclusion as an unknown would destroy exactly the distinction this contract is
+built on.
+
+The same distinction runs through the standalone anchor surface, which is where
+a reader arrives without a binding in hand. An artifact that is **gone** is a
+measured failure; an anchor that could not be **observed** is the absence of a
+measurement. They used to share one bucket.
+
 ## Three tiers of scrutiny
 
 Not every check costs the same, so verification is layered — cheap deterministic

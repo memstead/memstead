@@ -20,16 +20,20 @@ pub struct Args {
     /// most_connected, missing_fields, stale, dangling_links, tags,
     /// missing_required_outgoing, constraints (standing violations of
     /// declared schema constraints), conformance, integrity, config,
-    /// anchors (per-mem counts of the four standalone
-    /// anchor-verification states), friction (the workspace-local
+    /// anchors (per-mem counts of the standalone anchor-verification
+    /// states, with `unresolvable` meaning the artifact is GONE and
+    /// `unobserved` meaning the pass could not measure it, plus the
+    /// population those counts cover), friction (the workspace-local
     /// refusal ledger's summary — counts per typed refusal code and
     /// per verb, with per-code reason breakdowns where the code
     /// carries a closed engine-owned discriminator, whole-ledger plus
     /// a recent 24h window; local-only, values drawn from closed
     /// engine-defined vocabularies only), open_questions (per-mem
     /// composed worklist of
-    /// what the holding does not know: stubs, recheck/unresolvable
-    /// anchors, unsatisfied constraints, dangling links, and a paired
+    /// what the holding does not know: stubs, anchors that are recheck,
+    /// unresolvable (artifact gone), unobserved (not measured) or
+    /// dangling (entity gone), unsatisfied constraints, dangling links,
+    /// and a paired
     /// process mem's open entries — negative findings separated as
     /// already-searched; capped per kind with an explicit `more`
     /// count), stale_derivations (per-mem derivation edges whose
@@ -672,12 +676,25 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     if let Some(axis) = anchors_axis.as_ref().and_then(|a| a.as_object()) {
         lines.push(format!("## Anchors ({} mems)", axis.len()));
         for (mem, counts) in axis {
+            // The figure and its population in one rendering
+            // (consistency-sweep 03/05, criteria 1 and 3). This is the
+            // human-readable half of the health axis, and it used to print
+            // four numbers and stop: no unobserved count, no population, no
+            // statement of what was adjudicated. It reads its counts out of a
+            // `serde_json::Value` by index, which is how it stayed invisible
+            // to the figure check until that check learned the form.
             lines.push(format!(
-                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable {}",
+                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable (artifact gone) \
+                 {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
                 counts["resolved"].as_u64().unwrap_or(0),
                 counts["drifted"].as_u64().unwrap_or(0),
                 counts["recheck"].as_u64().unwrap_or(0),
                 counts["unresolvable"].as_u64().unwrap_or(0),
+                counts["unobserved"].as_u64().unwrap_or(0),
+                counts["dangling"].as_u64().unwrap_or(0),
+                counts["population"]
+                    .as_str()
+                    .unwrap_or("population not stated"),
             ));
         }
         lines.push(String::new());
@@ -696,6 +713,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 "stubs",
                 "anchors_recheck",
                 "anchors_unresolvable",
+                // The bucket the axis inserts and counts into `total_open`,
+                // which this list did not print, so a hole the axis had
+                // measured never reached the reader (consistency-sweep 03/05).
+                "anchors_unobserved",
+                // Its sibling from 03/02, omitted for the same reason and
+                // with the same effect: the axis counts it into `total_open`,
+                // so a dangling row raised the total with nothing in the human
+                // rendering saying why.
+                "anchors_dangling",
                 "unsatisfied_constraints",
                 "dangling_links",
             ] {
@@ -1003,7 +1029,9 @@ struct GatheredHealth {
     /// otherwise — absence of the key means "not requested".
     config_entries: Option<serde_json::Map<String, serde_json::Value>>,
     /// `Some(...)` when the caller asked for `--include anchors`: the
-    /// per-mem four-state counts from the shared
+    /// per-mem anchor-verification counts (with `unresolvable` meaning the
+    /// artifact is gone and `unobserved` meaning the pass could not measure
+    /// it) plus the population they cover, from the shared
     /// `health_anchors_axis` helper (same axis MCP renders). `None`
     /// otherwise — absence of the key means "not requested".
     anchors_axis: Option<serde_json::Value>,
@@ -1154,7 +1182,7 @@ fn fill_config_projection(
     }
 }
 
-/// Engine-aware step for `--include anchors` — the per-mem four-state
+/// Engine-aware step for `--include anchors` — the per-mem anchor-verification
 /// counts from the shared axis helper.
 /// Engine-aware step for `--include open_questions` — the composed
 /// what-don't-we-know worklist (agent-trust plan 11), one shared

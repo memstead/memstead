@@ -2436,7 +2436,15 @@ mod tests {
             "an unknown preparation yields no observation"
         );
         assert_eq!(plain, Some(AnchorState::Drifted));
-        assert_eq!((report.unresolvable, report.drifted), (1, 1));
+        // The unknown-preparation anchor yields NO observation, so it is
+        // `unobserved`, not `unresolvable` (consistency-sweep 03/05,
+        // criterion 2). Before the split this assertion read `(1, 1)` on
+        // `unresolvable`, which is the collapse itself: the pass not reaching
+        // an artifact was reported as the artifact being gone.
+        assert_eq!(
+            (report.unresolvable, report.unobserved, report.drifted),
+            (0, 1, 1)
+        );
     }
 
     /// Touchpoint B's order is a property of the units, not of discovery: a

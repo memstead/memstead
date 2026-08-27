@@ -14,19 +14,30 @@ use crate::setup::CliContext;
 /// Verify every anchor in a mem against its declared source. Per
 /// anchor: `resolved` (source present, hash matches), `drifted`
 /// (present, hash differs, stability says drifted), `recheck` (hash
-/// differs under `unstable`, or a hash is missing on either side), or
-/// `unresolvable` (source absent, or a grain the mechanism does not
-/// reach) — honestly, never fabricating a state. Works on a
-/// hand-authored mem with no binding at all; on a binding-backed mem it
-/// reports the same states the binding verify sees (one shared
-/// resolution mechanism). No entity changes; findings are recorded.
+/// differs under `unstable`, or a hash is missing on either side),
+/// `unresolvable` (the source artifact is GONE: a measured failure), or
+/// `unobserved` (the pass could not observe the anchor at all, so
+/// nothing about it was measured) — honestly, never fabricating a
+/// state. The last two shared one bucket until consistency-sweep 03/05,
+/// which is why this surface, the one you reach without a binding,
+/// could not tell a measured failure from an absent measurement. Works
+/// on a hand-authored mem with no binding at all; on a binding-backed
+/// mem it reports the same states the binding verify sees (one shared
+/// resolution mechanism). No entity changes; findings are recorded for
+/// the measured conditions only, since a finding asserts something that
+/// was measured.
 ///
 /// A row whose ENTITY the mem no longer holds is reported as `dangling`,
-/// its own class beside the four above: those describe the artifact end,
-/// and a vanished entity says nothing about the source. Nothing repairs
-/// it. Where the entity end could not be reconciled at all, the output
-/// says so rather than showing four clean counts over state it never
+/// its own class beside the states above: those describe the artifact
+/// end, and a vanished entity says nothing about the source. Nothing
+/// repairs it. Where the entity end could not be reconciled at all, the
+/// output says so rather than showing clean counts over state it never
 /// examined.
+///
+/// The counts never travel alone: every rendering states the
+/// `population` they were computed over and whether the axis was
+/// `fully_adjudicated`, because a resolution figure read on its own is
+/// read as health.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Which mem to verify (by name).
@@ -77,20 +88,30 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "drifted": report.drifted,
             "recheck": report.recheck,
             "unresolvable": report.unresolvable,
+            "unobserved": report.unobserved,
             "dangling": report.dangling,
+            "population": report.population_statement(),
+            "fully_adjudicated": report.fully_adjudicated(),
             "entity_end_unreconciled": report.unreconciled,
             "anchors": report.anchors,
             "findings": findings,
         }))?;
     } else {
+        // The figures and the population they were computed over render as ONE
+        // unit (consistency-sweep 03/05, criteria 1 and 3): a count shown
+        // without what it could not adjudicate is read as health.
         let mut out = format!(
-            "# Anchor verification — `{}`\n\n- Resolved: {}\n- Drifted: {}\n- Recheck: {}\n- Unresolvable: {}\n- Dangling (entity gone): {}\n",
+            "# Anchor verification — `{}`\n\n- Resolved: {}\n- Drifted: {}\n- Recheck: {}\n\
+             - Unresolvable (artifact gone): {}\n- Unobserved (not measured this pass): {}\n\
+             - Dangling (entity gone): {}\n- Population: {}\n",
             report.mem,
             report.resolved,
             report.drifted,
             report.recheck,
             report.unresolvable,
+            report.unobserved,
             report.dangling,
+            report.population_statement(),
         );
         // Stated both ways (consistency-sweep 03/02): a dangling count of
         // zero means "reconciled, none found" only when the reconciliation

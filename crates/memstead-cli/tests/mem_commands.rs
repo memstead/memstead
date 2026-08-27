@@ -2574,7 +2574,8 @@ fn verify_anchors_reports_four_states_without_binding() {
 
 /// Criterion 3: a mem whose bindings span multiple media no longer
 /// nulls — path anchors resolve against their own recorded paths, and a
-/// grain the mechanism does not reach reports `unresolvable`.
+/// grain the mechanism does not reach reports `unobserved` (the pass could
+/// not measure it), distinct from `unresolvable` (the artifact is gone).
 #[test]
 fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     let tmp = TempDir::new().unwrap();
@@ -2624,8 +2625,20 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     assert_eq!(v["resolved"], 1, "{v}");
     assert_eq!(v["drifted"], 1, "{v}");
     assert_eq!(v["recheck"], 1, "{v}");
-    // src-d (deleted) + the url anchor.
-    assert_eq!(v["unresolvable"], 2, "{v}");
+    // src-d is DELETED: a measured failure. The url anchor was never observed
+    // at all: the absence of a measurement. They used to share one bucket, and
+    // the surface a reader reaches without a binding could not tell them apart
+    // (consistency-sweep 03/05, criterion 2).
+    assert_eq!(v["unresolvable"], 1, "{v}");
+    assert_eq!(v["unobserved"], 1, "{v}");
+    // And the figures never travel without the population they cover.
+    assert!(
+        v["population"]
+            .as_str()
+            .is_some_and(|p| p.contains("adjudicated") && p.contains("counted row(s)")),
+        "{v}"
+    );
+    assert_eq!(v["fully_adjudicated"], false, "{v}");
 }
 
 /// Field feedback on the agent-trust plan 14 gate: transport is not
@@ -2833,7 +2846,7 @@ fn verify_anchors_health_axis_and_refusals() {
         "anchors axis must be include-gated: {plain}"
     );
 
-    // With the include: per-mem four-state counts.
+    // With the include: per-mem anchor-verification counts plus their population.
     let with = memstead()
         .current_dir(root)
         .args(["--json", "health", "--include", "anchors"])

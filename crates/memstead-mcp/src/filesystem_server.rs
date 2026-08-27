@@ -1816,7 +1816,7 @@ impl FilesystemMcpServer {
             health.findings = Some(findings);
         }
 
-        // `include=["anchors"]` (per-mem four-state counts),
+        // `include=["anchors"]` (per-mem anchor-verification counts plus the population they cover),
         // `include=["constraints"]` (standing declared-constraint
         // violations), and `include=["friction"]` (the refusal
         // ledger's summary — agent-trust plan 08) — from the shared
