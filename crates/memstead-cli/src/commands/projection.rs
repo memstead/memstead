@@ -61,7 +61,7 @@ use crate::output::{ExitKind, print_json, print_markdown};
 /// Version marker on `projection verify --json`. External contract: bump the
 /// `vN` when the payload's shape changes so a consumer asserting it fails
 /// loudly instead of misparsing. House style — see `memstead-export/v1`
-/// (`commands/export.rs`) and `workspace-dump/v0` (`commands/workspace.rs`).
+/// (`commands/export.rs`) and `workspace-dump/v1` (`commands/workspace.rs`).
 pub const JSON_VERIFY_FORMAT: &str = "memstead-verify/v1";
 use crate::setup::{CliContext, workspace_not_initialised_error};
 
@@ -2194,7 +2194,7 @@ remove the sidecar and re-run",
     if ctx.json {
         print_json(&json!({
             // Version marker in the house style (`memstead-export/v1`,
-            // `workspace-dump/v0`): consumers assert it before parsing, so a
+            // `workspace-dump/v1`): consumers assert it before parsing, so a
             // future shape change fails loudly instead of misparsing. This
             // payload is external contract — see the verify-in-CI guide.
             "format": JSON_VERIFY_FORMAT,

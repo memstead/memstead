@@ -134,7 +134,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 }
 
 /// Version marker on the `--format json` document, following the
-/// `workspace-dump/v0` convention: consumers assert the marker before
+/// `workspace-dump/v1` convention: consumers assert the marker before
 /// parsing so a future shape change fails loudly instead of silently.
 const JSON_EXPORT_FORMAT: &str = "memstead-export/v1";
 
@@ -194,9 +194,10 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // The authoritative schema pin lives in the mem's own config;
         // carried once at the group level rather than per entity.
         let schema_pin = engine
-            .mem_configs_named()
+            .mounts_with_optional_config()
             .find(|(name, _)| name == mem_name)
-            .and_then(|(_, c)| c.schema.as_ref())
+            .and_then(|(_, c)| c)
+            .and_then(|c| c.schema.as_ref())
             .map(|s| s.to_string());
 
         let mut entities: Vec<&memstead_base::Entity> = engine
@@ -308,6 +309,11 @@ fn run_markdown(
 #[cfg(feature = "mem-repo")]
 fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyhow::Result<()> {
     let mem_name = resolve_mem_name(engine, args.mem_name)?;
+    // Deliberately the config-keyed query: a mem-archive export cannot be
+    // built without the config it packages, so "no config" is a genuine
+    // refusal here rather than a mount to enumerate (04/05, criterion 8 —
+    // the criterion is that no consumer SILENTLY skips, and this one refuses
+    // by name).
     let config = engine
         .mem_configs_named()
         .find(|(name, _)| *name == mem_name)
@@ -475,8 +481,11 @@ fn resolve_mem_name(
     if let Some(name) = explicit {
         return Ok(name);
     }
+    // Every mount (04/05, criterion 8): a broken mem is still a writable mem
+    // for the purpose of "is the target unambiguous", and omitting it turns an
+    // ambiguous workspace into a silently-resolved one.
     let writable: Vec<String> = engine
-        .mem_configs_named()
+        .mounts_with_optional_config()
         .filter(|(name, _)| engine.mem_router().is_writable(name))
         .map(|(name, _)| name.to_string())
         .collect();

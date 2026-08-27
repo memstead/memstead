@@ -1111,6 +1111,27 @@ impl Engine {
             .filter_map(|m| m.mem_config.as_ref().map(|c| (m.mount.mem.as_str(), c)))
     }
 
+    /// Every configured mount, with its config when one was readable.
+    ///
+    /// The counterpart to [`Self::mem_configs_named`], whose contract is "mems
+    /// WITH config" and which is therefore right to omit the rest. The trouble
+    /// was that callers wanting to enumerate mounts reached for it anyway: a
+    /// folder mount whose directory is gone returns no config rather than an
+    /// error, boot stores none, and the mount became invisible to every one of
+    /// them. Nine call sites shared that blind spot, and the omission was a
+    /// side effect of config readability rather than anything about the mount
+    /// (04/05, criteria 1 and 8).
+    ///
+    /// Callers that genuinely want only configured mems keep using the other
+    /// one; drivers that want every mount ask for every mount.
+    pub fn mounts_with_optional_config(
+        &self,
+    ) -> impl Iterator<Item = (&str, Option<&memstead_schema::config::MemConfig>)> {
+        self.mounts
+            .iter()
+            .map(|m| (m.mount.mem.as_str(), m.mem_config.as_ref()))
+    }
+
     /// Resolved `Arc<Schema>` for a writable mem by name. `None`
     /// when the name is not a registered mount.
     ///

@@ -158,13 +158,41 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
             )
         })
         .collect();
+    // Storage that is GONE now quarantines rather than serving empty
+    // (04/05): the mount is configured and cannot serve, which is what
+    // quarantine means, and all three backends reach the same outcome for the
+    // same condition (criterion 9). It is reported there, not as an unbacked
+    // warning, and the quarantine roster is rendered wherever mems are listed
+    // so the mount does not simply vanish (criterion 7).
+    let quarantined: Vec<(&str, &str)> = json["quarantined"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|q| {
+                    (
+                        q["mem"].as_str().unwrap_or(""),
+                        q["reason_code"].as_str().unwrap_or(""),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // `ghost` is git-branch backed and stays a WARNING, not a quarantine: a
+    // ref that does not exist is also the normal state of a mem never pushed,
+    // and quarantining it would break the push that creates it. This departs
+    // from criterion 9's literal parity and is recorded in the session log.
     assert!(
         unbacked.contains(&("ghost", "missing_ref")),
-        "a branch that was never created: {unbacked:?}"
+        "a never-created branch still warns: {unbacked:?}"
     );
     assert!(
-        unbacked.contains(&("gone", "missing_path")),
-        "a folder that is gone: {unbacked:?}"
+        quarantined.contains(&("gone", "MOUNT_UNBACKED")),
+        "a folder that is gone quarantines: {quarantined:?}"
+    );
+    // And neither is reported as merely unbacked any more.
+    assert!(
+        !unbacked.iter().any(|(m, _)| *m == "gone"),
+        "a gone folder is quarantined, not warned: {unbacked:?}"
     );
     assert!(
         unbacked.contains(&("hollow", "empty")),
@@ -174,10 +202,14 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
         !unbacked.iter().any(|(m, _)| *m == "hold"),
         "the healthy mount is silent: {unbacked:?}"
     );
-    assert_eq!(unbacked.len(), 3);
+    // One, not three: the two gone-storage mounts moved to quarantine, and
+    // `hollow` (present but holding nothing) is the only genuine unbacked
+    // case left. A legitimately empty mem is never quarantined (criterion 5).
+    // The empty-but-present folder and the never-created branch.
+    assert_eq!(unbacked.len(), 2);
     assert_eq!(code, 1, "strict refuses with no include needed\n{envelope}");
     assert!(
-        envelope.contains("mount_unbacked: 3"),
+        envelope.contains("mount_unbacked: 2"),
         "the envelope names the class and count: {envelope}"
     );
 
@@ -193,19 +225,24 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
             .stdout,
     )
     .unwrap();
+    // Gone storage is on the quarantine roster, which overview renders as
+    // part of the one dashboard. The binding constraint of 04/05 is that
+    // quarantine must not become a second way to disappear, so a mount that
+    // left the mem roster has to be findable here, with its reason.
     assert!(
-        overview.contains("- **Unbacked:** missing_ref (refs/heads/ghost)"),
-        "the ghost mount names its reason on the roster:\n{overview}"
+        overview.contains("## Quarantined Mems"),
+        "the quarantine roster is rendered:\n{overview}"
     );
     assert!(
-        overview.contains("- **Unbacked:** missing_path ("),
-        "{overview}"
+        overview.contains("### gone"),
+        "the gone mount is listed rather than vanished:\n{overview}"
     );
+    assert!(
+        overview.contains("MOUNT_UNBACKED"),
+        "and names why:\n{overview}"
+    );
+    // The present-but-empty mount stays on the ordinary roster, warned.
     assert!(overview.contains("- **Unbacked:** empty ("), "{overview}");
-    assert!(
-        overview.contains("**MOUNT_UNBACKED**"),
-        "the warning rides the overview:\n{overview}"
-    );
     let hold_entry = overview
         .split("### hold")
         .nth(1)

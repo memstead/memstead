@@ -1419,9 +1419,9 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for name in engine.mem_names() {
         let cfg = engine
-            .mem_configs_named()
+            .mounts_with_optional_config()
             .find(|(n, _)| *n == name)
-            .map(|(_, c)| c);
+            .and_then(|(_, c)| c);
         let entity_count = engine
             .store()
             .all_entities()
@@ -1444,8 +1444,28 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
         }));
     }
 
+    // The quarantine roster, on the surface that names itself a mem list
+    // (04/05, criterion 7). A quarantined mount is held out of the mounted
+    // set, so before this it did not degrade here — it vanished, and a fix
+    // that quarantines without rendering this would trade a mount that looks
+    // healthy for one that is simply gone, which is the worse failure.
+    let quarantined: Vec<serde_json::Value> = engine
+        .quarantined_mems()
+        .iter()
+        .map(|q| {
+            serde_json::json!({
+                "name": q.mount.mem,
+                "reason_code": q.reason_code,
+                "reason": q.reason_message,
+            })
+        })
+        .collect();
+
     if ctx.json {
-        crate::output::print_json(&serde_json::json!({ "mems": rows }))?;
+        crate::output::print_json(&serde_json::json!({
+            "mems": rows,
+            "quarantined": quarantined,
+        }))?;
         return Ok(());
     }
 
@@ -1472,6 +1492,24 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
                 line.push_str(&format!(" — {desc}"));
             }
             lines.push(line);
+        }
+    }
+    if !quarantined.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("## Quarantined ({})", quarantined.len()));
+        lines.push(String::new());
+        lines.push(
+            "Configured but not serving. These are NOT in the list above, so a roster \
+             without this section is not a complete list of what the workspace declares."
+                .to_string(),
+        );
+        for q in &quarantined {
+            lines.push(format!(
+                "- `{}` [{}] — {}",
+                q["name"].as_str().unwrap_or("?"),
+                q["reason_code"].as_str().unwrap_or("?"),
+                q["reason"].as_str().unwrap_or(""),
+            ));
         }
     }
     crate::output::print_markdown(&lines.join("\n"));

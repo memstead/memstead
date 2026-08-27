@@ -225,7 +225,11 @@ fn run_with_root(
                     Ok(cli_engine) => {
                         let engine = cli_engine.into_base();
                         let writable: Vec<String> = engine
-                            .mem_configs_named()
+                            // Every mount (04/05, criterion 8). Counting only
+                            // config-readable mems could report exactly one
+                            // writable mem while a second, broken one exists,
+                            // and silently publish the wrong one.
+                            .mounts_with_optional_config()
                             .filter(|(name, _)| engine.mem_router().is_writable(name))
                             .map(|(name, _)| name.to_string())
                             .collect();

@@ -80,7 +80,7 @@ fn dump_format_is_v0() {
         .stdout
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
-    assert_eq!(parsed["format"], "workspace-dump/v0");
+    assert_eq!(parsed["format"], "workspace-dump/v1");
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn dump_accepts_local_json_flag() {
         .stdout
         .clone();
     let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
-    assert_eq!(parsed["format"], "workspace-dump/v0");
+    assert_eq!(parsed["format"], "workspace-dump/v1");
 }
 
 #[test]

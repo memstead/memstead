@@ -56,7 +56,11 @@ fn run_mem_repo(ctx: &CliContext, engine: memstead_base::Engine, args: Args) -> 
     let mem = match args.mem {
         Some(v) => v,
         None => engine
-            .mem_configs_named()
+            // Every mount, not only those with a readable config: a mem
+            // whose config is unreadable is still the workspace's only
+            // writable mem, and picking "none" there is a worse answer than
+            // picking it (04/05, criterion 8).
+            .mounts_with_optional_config()
             .find(|(name, _)| engine.mem_router().is_writable(name))
             .map(|(name, _)| name.to_string())
             .ok_or_else(|| {

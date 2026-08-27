@@ -381,9 +381,59 @@ impl Engine {
                     continue;
                 }
             };
-            // A mount that resolves to nothing says so: a missing branch
-            // or folder lists as empty exactly like an empty one, and
-            // until 2026-08-23 both sat in the writable roster silently.
+            // Storage that is GONE quarantines rather than serving an empty
+            // graph (04/05). "Configured but cannot serve" is exactly what
+            // quarantine already means, its three sibling causes already
+            // quarantine, and this ends an incoherence: the same broken mount
+            // used to quarantine or serve empty depending on whether the
+            // mounts file happened to carry a schema assertion, which is
+            // unrelated to the breakage. A mem that answers reads with an
+            // empty graph is a worse default than one that refuses by name
+            // with a reason.
+            //
+            // The quarantine roster is rendered on every roster surface, which
+            // is what keeps this from trading a mount that looks healthy for a
+            // mount that is simply gone.
+            //
+            // SCOPED TO PATH-BACKED STORAGE, and the exception is a dispute
+            // with the plan's own criterion 9 rather than an oversight. For a
+            // git-branch mount, "the ref does not exist" is ALSO the normal
+            // state of a mem that has never been pushed, and quarantining it
+            // removes the mount from the serving set, which breaks
+            // `memstead push` — the very operation that would create the
+            // branch. Symmetric treatment would need the transport paths to
+            // reach quarantined mounts, which is a larger change than this
+            // plan scopes. Recorded in the session log for the operator.
+            let path_backed = matches!(
+                m.mount.storage,
+                crate::workspace::MountStorage::Folder { .. }
+                    | crate::workspace::MountStorage::Archive { .. }
+            );
+            if path_backed && !m.backend.storage_present().unwrap_or(true) {
+                let location = match &m.mount.storage {
+                    crate::workspace::MountStorage::GitBranch { branch, .. } => branch.clone(),
+                    crate::workspace::MountStorage::Folder { path }
+                    | crate::workspace::MountStorage::Archive { path } => {
+                        path.display().to_string()
+                    }
+                    crate::workspace::MountStorage::InMemory => String::new(),
+                };
+                quarantined.push(crate::engine::QuarantinedMem {
+                    mount: m.mount.clone(),
+                    reason_code: "MOUNT_UNBACKED".to_string(),
+                    reason_message: format!(
+                        "the mount's storage is gone ({location}); it is configured but cannot \
+                         serve, so it is held out of the roster rather than answering reads \
+                         with an empty graph"
+                    ),
+                });
+                quarantined_idx.insert(m_idx);
+                schemas.remove(&m.mount.mem);
+                continue;
+            }
+            // A mount that is PRESENT but holds nothing still only warns: an
+            // empty mem is a legitimate state and must never be reported as
+            // unbacked or quarantined (criterion 5).
             if let Some(w) =
                 unbacked_mount_warning(&m.mount, m.backend.as_ref(), Some(entries.len()))
             {

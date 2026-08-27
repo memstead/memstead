@@ -5,7 +5,7 @@
 //! - `dump` — emit a JSON document describing every writable mem, the
 //!   schema each is pinned to, and per-mem opaque snapshot tokens.
 //!   Storage-agnostic contract consumed by the Claude-Code ingest
-//!   plugin; versioned (`format = "workspace-dump/v0"`).
+//!   plugin; versioned (`format = "workspace-dump/v1"`).
 //! - `allow-create / revoke-create / allow-delete / revoke-delete /
 //!   grant-cross-link / revoke-cross-link / set-mutations` — write
 //!   surface for `.memstead/workspace.toml`'s engine-bound sections.
@@ -654,14 +654,71 @@ fn set_mutations(ctx: &CliContext, args: SetMutationsArgs) -> anyhow::Result<()>
 /// Format string emitted into the `format` field of the dump.
 ///
 /// Plugin gates on this exact value. Any structurally-breaking change
-/// (renamed key, dropped key, changed value type) must bump to
-/// `workspace-dump/v1` and the consumer's gate must be widened to
-/// accept the new value as part of the same change set.
-const DUMP_FORMAT: &str = "workspace-dump/v0";
+/// (renamed key, dropped key, changed value type) must bump the version and
+/// the consumer's gate must be widened to accept the new value as part of the
+/// same change set.
+///
+/// **v0 → v1 (2026-08-27, consistency-sweep 04/05).** The `mems` array is
+/// driven off the MOUNT list rather than the config-keyed query, so it now
+/// enumerates mounts a consumer never saw before: one whose config could not
+/// be read appears with its config-derived fields absent instead of being
+/// dropped. No key was renamed or retyped, so by the letter of the rule above
+/// this is additive — but the MEMBERSHIP of the collection changed, and a
+/// consumer that assumed every row carries a schema pin is broken by it just
+/// as surely. Membership is part of a collection's contract. Each such row
+/// additionally carries `serving`, absent when the mount serves.
+const DUMP_FORMAT: &str = "workspace-dump/v1";
+
+/// Why an enumerated mount serves nothing, or `None` when it serves.
+///
+/// The dump had no warnings channel at all (04/05, criterion 3), so even an
+/// enumerated broken mount would have been a bare row the reader had to
+/// interpret. This is per-mem rather than a workspace-level list, because the
+/// reader's question is about the row in front of them.
+#[derive(Serialize)]
+struct ServingState {
+    /// `quarantined` or `unbacked`.
+    state: &'static str,
+    reason_code: String,
+    reason: String,
+}
+
+/// The serving state of `name`, or `None` when the mount serves normally.
+fn serving_state(engine: &memstead_base::Engine, name: &str) -> Option<ServingState> {
+    if let Some(q) = engine
+        .quarantined_mems()
+        .iter()
+        .find(|q| q.mount.mem == name)
+    {
+        return Some(ServingState {
+            state: "quarantined",
+            reason_code: q.reason_code.clone(),
+            reason: q.reason_message.clone(),
+        });
+    }
+    engine
+        .health()
+        .warnings
+        .iter()
+        .find(|w| {
+            matches!(
+                w,
+                memstead_base::ops::WarningHint::MountUnbacked { mem, .. } if mem == name
+            )
+        })
+        .map(|w| ServingState {
+            state: "unbacked",
+            reason_code: w.code().to_string(),
+            reason: w.to_string(),
+        })
+}
 
 #[derive(Serialize)]
 struct DumpMem {
     name: String,
+    /// Absent when the mount serves. Present, with a reason, when it does not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    serving: Option<ServingState>,
     /// Mount capability — `"writable"` or `"read_only"`. RO mounts
     /// have no gitdir / snapshot_token; consumers branch on this to
     /// know which conditional fields are populated.
@@ -746,7 +803,12 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
     let mut mems: Vec<DumpMem> = Vec::new();
     let mut schemas: Map<String, Value> = Map::new();
 
-    for (name, config) in engine.mem_configs_named() {
+    // Driven off the MOUNT list, not the config-keyed query (04/05, criteria
+    // 1 and 2). A folder mount whose directory is gone yields no config, and
+    // the dump used to lose the mount entirely rather than showing it with its
+    // config-derived fields absent. A mount missing from this dump is now
+    // missing from the workspace configuration, and nothing else.
+    for (name, config) in engine.mounts_with_optional_config() {
         // F24: branch on mount capability. Git-branch (writable)
         // mounts emit the gitdir-derived snapshot token; folder and
         // archive (RO) mounts omit the token entirely. Calling
@@ -784,8 +846,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         };
 
         let schema_pin = config
-            .schema
-            .as_ref()
+            .and_then(|c| c.schema.as_ref())
             .map(|p| {
                 serde_json::to_value(p)
                     .ok()
@@ -794,7 +855,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
             .unwrap_or(None);
 
         let mut write_guidance = Map::new();
-        for (k, v) in &config.write_guidance {
+        for (k, v) in config.iter().flat_map(|c| c.write_guidance.iter()) {
             write_guidance.insert(k.clone(), v.clone());
         }
 
@@ -802,7 +863,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         // as JSON string values. The consumer (ingest loop) owns their
         // interpretation per medium type.
         let mut sync_state = Map::new();
-        for (k, v) in &config.sync_state {
+        for (k, v) in config.iter().flat_map(|c| c.sync_state.iter()) {
             sync_state.insert(k.clone(), Value::String(v.clone()));
         }
 
@@ -810,7 +871,8 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
             name: name.to_string(),
             capability,
             schema: schema_pin.clone(),
-            description: config.description.clone(),
+            description: config.and_then(|c| c.description.clone()),
+            serving: serving_state(&engine, name),
             write_guidance,
             snapshot_token,
             sync_state,
