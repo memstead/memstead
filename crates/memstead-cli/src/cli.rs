@@ -175,9 +175,13 @@ pub enum Command {
     #[command(name = "verify-anchors")]
     VerifyAnchors(commands::verify_anchors::Args),
 
-    /// Link a filesystem mem to a registry-published dependency.
-    /// `memstead link <scope/name>` fetches the archive into the
-    /// workspace and records the dependency in the workspace config.
+    /// Attach a registry-published mem to this workspace as a
+    /// read-only mem. `memstead link <scope/name>` fetches the archive,
+    /// caches it, and registers it in the engine's mount roster — the
+    /// same effect `memstead install <scope>/<name>` has, on whatever
+    /// workspace shape the engine boots. `memstead uninstall <name>` is
+    /// the symmetric removal.
+    #[cfg(feature = "mem-repo")]
     Link(commands::link::LinkArgs),
 
     /// Publish a `.mem` archive to the registry. Triggers GitHub
@@ -427,6 +431,7 @@ impl Command {
             #[cfg(feature = "mem-repo")]
             Command::Uninstall(_) => "uninstall",
             Command::VerifyAnchors(_) => "verify-anchors",
+            #[cfg(feature = "mem-repo")]
             Command::Link(_) => "link",
             Command::Publish(_) => "publish",
             Command::Unpublish(_) => "unpublish",

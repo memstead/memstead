@@ -7,8 +7,8 @@
 //!   empty deps list). Pinned via [`memstead_base::filesystem::config`].
 //! - `.memstead/cache/` — empty placeholder for any engine-managed cache
 //!   data the workspace acquires later (e.g. resolved schema bytes).
-//! - `.memstead/memstead-io/` — empty placeholder for cross-mem dependency
-//!   archives populated by `memstead link`.
+//! - `.memstead/memstead-io/` — workspace-local archive scratch directory
+//!   seeded by the engine's mem initialiser.
 //!
 //! No `.gitignore` is written — filesystem-mem does not assume a surrounding
 //! git repo, and writing one would surprise users who *do* track the
@@ -219,7 +219,9 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     }
     lines.extend([
         "- Drop `.md` entities into the workspace root.".to_string(),
-        "- `memstead link <scope/name>` to add a cross-mem dependency.".to_string(),
+        "- `memstead link <scope/name>` to attach a registry-published mem \
+         as a read-only mem."
+            .to_string(),
         "- `memstead publish` to push the mem to the registry.".to_string(),
         String::new(),
         format!(
@@ -364,7 +366,6 @@ mod tests {
         let cfg = read_workspace_config(&root).unwrap();
         assert_eq!(cfg.name, "demo"); // filled from the basename, not config.json
         assert_eq!(cfg.schema.as_display(), "default@1.0.0");
-        assert!(cfg.deps.is_empty());
 
         // The persisted config carries no `name` (path-derived; the schema
         // validator tombstones a stray one).

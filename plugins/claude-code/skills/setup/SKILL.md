@@ -106,7 +106,7 @@ Handle its outcomes:
 - **Mem-name derivation failure** (folder name is not slug-shaped `^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`) — re-run with an explicit name: `memstead quickstart --agent claude-code --name <slug>`. Ask the user for the name; suggest a slugified form of the folder name.
 - **Any other error** — surface the message verbatim and stop.
 
-If the user wants a schema other than the default, point them at `memstead link <scope/name>` (registry-published schemas) after setup — quickstart always pins the current built-in `default` generation (`default@1.3.0` in this release), the 10-type schema.
+If the user wants a schema other than the default, point them at `memstead schema install` after setup — quickstart always pins the current built-in `default` generation (`default@1.3.0` in this release), the 10-type schema.
 
 For scripted / CI use the strict variant is `memstead init` — this skill only reaches for it in the pre-`quickstart` fallback above; quickstart is the interactive path.
 

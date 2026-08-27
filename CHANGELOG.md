@@ -69,6 +69,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that union is not reported.
 
 ### Changed
+- **`memstead link` attaches a registry mem through the engine, on any workspace
+  layout.** It used to walk for the workspace root itself and then read
+  `.memstead/config.json` from that root, which only exists in the collapsed
+  single-mem layout `memstead init` produces; every repo-overlapping, multi-mem
+  and mem-repo workspace refused with `WORKSPACE_CONFIG_READ_FAILED`. The
+  command now owns no layout knowledge at all: it boots the engine, which
+  resolves whatever shape it is standing in, and hands the fetched archive to
+  the same cache-plus-mount path `memstead install <scope>/<name>` uses. The
+  attachment lands in the mount roster (`.memstead/state/mounts.json`), so what
+  `link` records is what the next boot mounts, and a re-link refreshes it. The
+  old success was also inert: the reference went into a `deps` list in
+  `.memstead/config.json` that no engine path read, and the archive into a
+  workspace-local cache whose only resolver had no callers. Both are gone.
+  `deps` is now a hard tombstone in config validation (`LEGACY_FIELD_PRESENT`),
+  pointing at `memstead link` / `memstead install`, and the dead Tier 3
+  cache resolver is removed. `link` is a mem-repo-feature command now, like
+  `install` and `uninstall`; the lean `--no-default-features` build no longer
+  carries it.
 - **`DANGLING_LINK` split into the three conditions it was fusing.** One code
   covered a body link whose target has no file, a body link to a written
   entity that the referrer does not relate to, and a relationship row naming

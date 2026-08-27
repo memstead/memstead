@@ -17,11 +17,11 @@ The setup flow:
 
 - **Absolute path, not `PATH`.** `.mcp.json` carries the resolved binary path so the agent-spawned MCP server doesn't need `memstead-mcp` on the parent shell's environment.
 - **Strict empty.** Don't silently overwrite existing `.memstead/` or `.mcp.json`. Detect re-init scenarios and ask before touching them.
-- **Recommend the default schema.** First-time users don't know the schema landscape. the current built-in `default` generation is the always-correct starting point; custom schemas come later via `memstead link`.
+- **Recommend the default schema.** First-time users don't know the schema landscape. the current built-in `default` generation is the always-correct starting point; custom schemas come later via `memstead schema install`.
 - **Don't try to verify the MCP server is reachable.** Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs. `/reload-plugins` reaches plugin skills, never a freshly wired server, so telling the user to restart is the correct closing move.
 
 ## Out of scope
 
-- Resolving custom schemas via `memstead link` (that's its own command — the user runs it after `setup` if they want a non-default schema).
+- Resolving custom schemas via `memstead schema install` (that's its own command — the user runs it after `setup` if they want a non-default schema).
 - Bootstrapping mem-repo workspaces (`memstead mem-repo init` is a separate, full-only path).
 - Verifying the MCP server is wired correctly post-setup (only runs at next session start).

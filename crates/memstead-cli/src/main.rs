@@ -139,6 +139,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         #[cfg(feature = "mem-repo")]
         Command::Uninstall(args) => commands::uninstall::run(&ctx, args),
         Command::VerifyAnchors(args) => commands::verify_anchors::run(&ctx, args),
+        #[cfg(feature = "mem-repo")]
         Command::Link(args) => commands::link::run(&ctx, args),
         Command::Publish(args) => commands::publish::run(&ctx, args),
         Command::Unpublish(args) => commands::unpublish::run(&ctx, args),

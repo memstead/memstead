@@ -475,8 +475,7 @@ fn emit_dry_run(
 
 /// Walk upward from cwd looking for the first ancestor that carries
 /// `.memstead/workspace.toml` — the post-rebuild workspace marker.
-/// Mirrors `memstead link`'s resolver and the MCP binary's walker; keep
-/// them in sync.
+/// Mirrors the MCP binary's walker; keep the two in sync.
 fn find_filesystem_workspace_root() -> anyhow::Result<PathBuf> {
     let cwd = std::env::current_dir().map_err(|e| {
         CliError::new(

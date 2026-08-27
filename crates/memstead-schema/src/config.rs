@@ -718,8 +718,10 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
 /// Each entry pairs the rejected key with an actionable error message.
 /// New tombstones land here when a top-level key migrates from
 /// "deprecated but tolerated" to "must not be re-authored". The table
-/// holds entries for `name` (the field is now path-derived) and
-/// `types: [...]` (the pre-existing tombstone, preserved verbatim).
+/// holds entries for `name` (the field is now path-derived),
+/// `types: [...]` (the pre-existing tombstone, preserved verbatim),
+/// `belongsTo` (cross-mem authorization moved to the workspace file),
+/// and `deps` (cross-mem attachments moved to the mount roster).
 const LEGACY_TOMBSTONE_KEYS: &[(&str, &str)] = &[
     (
         "types",
@@ -731,6 +733,13 @@ const LEGACY_TOMBSTONE_KEYS: &[(&str, &str)] = &[
         "Legacy `name` field detected — the mem leaf folder under `__MEMSTEAD:mems/` (or the \
          disk basename on the legacy disk path) is path-derived under the unified layout; \
          remove the field from `.memstead/config.json`.",
+    ),
+    (
+        "deps",
+        "Legacy `deps` field detected — a cross-mem attachment is a mount now, not a config \
+         list. Remove the field from `.memstead/config.json` and run `memstead link \
+         <scope>/<name>` (or `memstead install <scope>/<name>`) so the attachment lands in \
+         `.memstead/state/mounts.json`, where the engine reads it.",
     ),
     (
         "belongsTo",

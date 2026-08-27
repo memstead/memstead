@@ -154,7 +154,7 @@ Exit codes:
 * `install` — Install a sealed `.mem` mem — either a local file, or `<scope>/<name>` from the memstead.io registry. Registers it as a workspace-level read-only mount; `memstead uninstall` is the symmetric removal. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; bootstrap with `memstead mem-repo init` instead when you intend to install mems
 * `uninstall` — Remove an installed read-mem's workspace-level mount. The global cache copy survives by default; re-`install` re-registers it. MEM-REPO WORKSPACES ONLY (see `install`)
 * `verify-anchors` — Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Mutates no entity, but records its findings store like any verify run
-* `link` — Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
+* `link` — Attach a registry-published mem to this workspace as a read-only mem. `memstead link <scope/name>` fetches the archive, caches it, and registers it in the engine's mount roster — the same effect `memstead install <scope>/<name>` has, on whatever workspace shape the engine boots. `memstead uninstall <name>` is the symmetric removal
 * `publish` — Publish a `.mem` archive to the registry. Triggers GitHub Device Flow on first use; subsequent runs are silent
 * `unpublish` — Unpublish (hard-delete) `<scope>/<name>` from the registry. Permitted to the original uploader and to admins. The same `<scope>/<name>` becomes immediately re-publishable
 * `domain` — Domain-authority publishing: generate the signing key for a domain you control and print the `.well-known` manifest to host. `publish --scope <domain>:<handle>` then signs with that key — no GitHub account needed
@@ -538,13 +538,13 @@ Verify every anchor in a mem against its declared source — the standalone drif
 
 ## `memstead link`
 
-Link a filesystem mem to a registry-published dependency. `memstead link <scope/name>` fetches the archive into the workspace and records the dependency in the workspace config
+Attach a registry-published mem to this workspace as a read-only mem. `memstead link <scope/name>` fetches the archive, caches it, and registers it in the engine's mount roster — the same effect `memstead install <scope>/<name>` has, on whatever workspace shape the engine boots. `memstead uninstall <name>` is the symmetric removal
 
 **Usage:** `memstead link [OPTIONS] <SCOPE/NAME>`
 
 ###### **Arguments:**
 
-* `<SCOPE/NAME>` — Cross-mem dependency in `scope/name` form (no `@` prefix — that is the `memstead install` shape). Tier 3 wiki-links use the same form, so the input here matches what users will type inside `[[scope/name:slug]]`
+* `<SCOPE/NAME>` — Registry-published mem in `scope/name` form (no `@` prefix — that syntax is retired)
 
 ###### **Options:**
 

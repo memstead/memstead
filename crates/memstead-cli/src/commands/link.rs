@@ -1,36 +1,39 @@
-//! `memstead link <scope/name>` — fetch a published mem from the
-//! registry, cache it locally, and record the dependency in the filesystem
-//! workspace config.
+//! `memstead link <scope/name>` — attach a registry-published mem to
+//! this workspace as a read-only mem.
 //!
-//! Re-fetch is the refresh: invoking `memstead link <same-ref>` again
-//! re-downloads the archive and overwrites the cached file. The
-//! workspace-config dep entry is idempotent — `WorkspaceConfig::add_dep`
-//! deduplicates on `==`, so repeated invocations do not accumulate
-//! duplicate entries.
+//! The command owns no layout knowledge. It boots the engine, which
+//! resolves whatever workspace shape it is standing in (collapsed
+//! single-mem folder, repo-overlapping folder, multi-mem folder, or
+//! mem-repo), and hands the fetched archive to the same cache-plus-mount
+//! path `memstead install <scope>/<name>` uses. The declaration lands in
+//! the engine's mount roster (`.memstead/state/mounts.json`) — the one
+//! place the engine reads cross-mem attachments from — so what `link`
+//! records is what the next boot mounts.
 //!
-//! Cache layout: `<workspace_root>/.memstead/memstead-io/<scope>/<name>.mem`.
-//! The Tier 3 wiki-link resolver consumes the cached archive at this
-//! exact path (criterion 7 of the plan, gated on filesystem engine
-//! context).
-
-use std::path::{Path, PathBuf};
+//! Re-invoking `memstead link <same-ref>` re-fetches: the cache is
+//! content-addressed, so identical bytes resolve to the same file and
+//! changed bytes refresh the mount.
+//!
+//! Historical note: until 2026-08-27 this command walked for the
+//! workspace root itself, read `.memstead/config.json` from that root
+//! (a layout the project left behind), and appended the reference to a
+//! `deps` list no engine path ever read. Both halves are gone — the
+//! layout walk because the engine already knows the layout, and the
+//! `deps` list because the mount roster is the single vocabulary for a
+//! cross-mem attachment.
 
 use clap::Args;
-use memstead_base::filesystem::config::{DepRef, read_workspace_config, write_workspace_config};
-use serde_json::json;
 
 use crate::CliError;
-use crate::output::{ExitKind, print_json, print_markdown};
-use crate::registry::{self, DownloadError};
+use crate::output::ExitKind;
+use crate::registry;
 use crate::setup::CliContext;
 
 /// `memstead link` arguments.
 #[derive(Args, Debug)]
 pub struct LinkArgs {
-    /// Cross-mem dependency in `scope/name` form (no `@` prefix —
-    /// that is the `memstead install` shape). Tier 3 wiki-links use the
-    /// same form, so the input here matches what users will type
-    /// inside `[[scope/name:slug]]`.
+    /// Registry-published mem in `scope/name` form (no `@` prefix —
+    /// that syntax is retired).
     #[arg(value_name = "SCOPE/NAME")]
     pub dep: String,
 
@@ -41,382 +44,34 @@ pub struct LinkArgs {
 }
 
 pub fn run(ctx: &CliContext, args: LinkArgs) -> anyhow::Result<()> {
-    run_with_root(ctx, args, None)
-}
-
-/// Inner seam: `root_override` replaces the cwd walk — used by tests
-/// (the CLI-level workspace override is the ROOT command's global
-/// `--workspace` / `MEMSTEAD_WORKSPACE`, applied before dispatch; no
-/// subcommand-level flag exists).
-fn run_with_root(
-    ctx: &CliContext,
-    args: LinkArgs,
-    root_override: Option<std::path::PathBuf>,
-) -> anyhow::Result<()> {
-    let dep: DepRef = args.dep.parse().map_err(|e: String| CliError {
-        code: "INVALID_INPUT",
-        message: format!(
-            "invalid dependency reference {value:?}: {e} (expected 'scope/name')",
-            value = args.dep
-        ),
-        kind: ExitKind::Validation,
-        details: None,
-    })?;
-
-    let workspace_root = match root_override {
-        Some(p) => p,
-        None => find_filesystem_workspace_root()?,
+    let Some((scope, name)) = registry::parse_ref(&args.dep) else {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "invalid mem reference {value:?} — expected `<scope>/<name>`, \
+                 for example `anthropic/core`",
+                value = args.dep
+            ),
+        )
+        .into());
     };
 
-    let mut config = read_workspace_config(&workspace_root).map_err(|e| CliError {
-        code: "WORKSPACE_CONFIG_READ_FAILED",
-        message: format!("read workspace config: {e}"),
-        kind: ExitKind::Generic,
-        details: None,
-    })?;
+    // The engine resolves the layout. `link` keeps no second layout
+    // rule and no first-attempt path of its own: an absent workspace
+    // refuses here, from the shared boot seam, naming what was looked
+    // for and where.
+    let mut engine = ctx.cli_engine()?;
 
-    let cache_dir = workspace_root
-        .join(memstead_base::WORKSPACE_STORE_DIR)
-        .join("memstead-io")
-        .join(&dep.scope);
-    std::fs::create_dir_all(&cache_dir).map_err(|e| CliError {
-        code: crate::INTERNAL_CODE,
-        message: format!("create cache dir {}: {e}", cache_dir.display()),
-        kind: ExitKind::Generic,
-        details: None,
-    })?;
-    let cache_path = cache_dir.join(format!(
-        "{}.{}",
-        dep.name,
-        memstead_schema::ARCHIVE_EXTENSION
-    ));
+    let fetched =
+        crate::commands::install::fetch_registry_archive(&scope, &name, args.registry.as_deref())?;
 
-    let base = registry::registry_base(args.registry.as_deref());
-    let client = registry::build_http()?;
-    let bytes = registry::download_mem(&client, &base, &dep.scope, &dep.name, &cache_path)
-        .map_err(|e| {
-            let (msg, kind, code): (String, ExitKind, &'static str) = match e {
-                DownloadError::NotFound => (
-                    format!(
-                        "registry has no mem {}/{} — check the spelling or `memstead publish` it first",
-                        dep.scope, dep.name
-                    ),
-                    ExitKind::NotFound,
-                    "REGISTRY_NOT_FOUND",
-                ),
-                DownloadError::Gone => (
-                    format!(
-                        "mem {}/{} has been unpublished from the registry",
-                        dep.scope, dep.name
-                    ),
-                    ExitKind::NotFound,
-                    "GONE",
-                ),
-                other => (
-                    format!("download from registry: {other}"),
-                    ExitKind::Generic,
-                    "REGISTRY_ERROR",
-                ),
-            };
-            CliError {
-                code,
-                message: msg,
-                kind,
-                details: None,
-            }
-        })?;
-
-    let added = config.add_dep(dep.clone());
-    write_workspace_config(&workspace_root, &config).map_err(|e| CliError {
-        code: crate::INTERNAL_CODE,
-        message: format!("update workspace config: {e}"),
-        kind: ExitKind::Generic,
-        details: None,
-    })?;
-
-    if ctx.json {
-        let payload = json!({
-            "scope": dep.scope,
-            "name": dep.name,
-            "cached_at": cache_path.display().to_string(),
-            "bytes": bytes,
-            "registry": base,
-            "newly_recorded": added,
-            "deps_total": config.deps.len(),
-        });
-        return print_json(&payload);
-    }
-
-    let action = if added { "Linked" } else { "Re-fetched" };
-    let lines = [
-        format!("# {} `{}`", action, dep.as_display()),
-        String::new(),
-        format!("- Cached:   `{}`", cache_path.display()),
-        format!("- Bytes:    {bytes}"),
-        format!("- Registry: {base}"),
-        format!("- Total deps in this workspace: {}", config.deps.len()),
-    ];
-    print_markdown(&lines.join("\n"));
-    Ok(())
-}
-
-/// Walk upward from `cwd` looking for the first ancestor that
-/// carries `.memstead/workspace.toml` — the post-rebuild workspace
-/// marker. Mirrors the resolver in `memstead-cli/src/setup.rs` and the
-/// MCP binary's walker; keep them in sync.
-fn find_filesystem_workspace_root() -> Result<PathBuf, CliError> {
-    let cwd = std::env::current_dir().map_err(|e| CliError {
-        code: crate::INTERNAL_CODE,
-        message: format!("read cwd: {e}"),
-        kind: ExitKind::Generic,
-        details: None,
-    })?;
-
-    let mut current: &Path = &cwd;
-    loop {
-        if memstead_base::is_workspace_root(current) {
-            return Ok(current.to_path_buf());
-        }
-        match current.parent() {
-            Some(p) => current = p,
-            None => {
-                return Err(CliError {
-                    code: "WORKSPACE_NOT_INITIALISED",
-                    message: format!(
-                        "no workspace found from {} or any ancestor (missing \
-                         .memstead/workspace.toml) — run `memstead init` first or \
-                         pass --workspace <path>",
-                        cwd.display()
-                    ),
-                    kind: ExitKind::NotFound,
-                    details: None,
-                });
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use memstead_base::filesystem::config::{FILESYSTEM_WORKSPACE_FORMAT, WorkspaceConfig};
-    use memstead_schema::SchemaRef;
-    use tempfile::TempDir;
-
-    fn write_minimal_workspace(tmp: &TempDir) {
-        // Lay down the post-rebuild marker `.memstead/workspace.toml` so
-        // the link command's walk-up resolves. The legacy
-        // `.memstead/config.json` still holds the `deps` list and lands
-        // alongside via `write_workspace_config`.
-        let memstead_dir = tmp.path().join(".memstead");
-        std::fs::create_dir_all(&memstead_dir).unwrap();
-        std::fs::write(
-            memstead_dir.join("workspace.toml"),
-            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
-        )
-        .unwrap();
-        let pin: SchemaRef = "default@1.0.0".parse().unwrap();
-        let cfg = WorkspaceConfig::new("demo", pin);
-        write_workspace_config(tmp.path(), &cfg).unwrap();
-    }
-
-    /// Spin up a tiny axum server that serves a single fixture archive
-    /// at `/api/mem/<scope>/<name>.mem`. Returns the bound base
-    /// URL (e.g. `http://127.0.0.1:54321`) and a `JoinHandle` the
-    /// caller drops to shut the server down.
-    async fn spawn_fixture_registry(
-        scope: &'static str,
-        name: &'static str,
-        body: Vec<u8>,
-    ) -> (String, tokio::task::JoinHandle<()>) {
-        use axum::{Router, extract::Path as AxumPath, http::StatusCode, routing::get};
-        use std::sync::Arc;
-
-        let body = Arc::new(body);
-        let app: Router = Router::new().route(
-            "/api/mem/{scope_at}/{name_memstead}",
-            get({
-                let body = body.clone();
-                move |AxumPath((scope_at, name_memstead)): AxumPath<(String, String)>| {
-                    let body = body.clone();
-                    async move {
-                        let want_scope = scope.to_string();
-                        let want_name = format!("{name}.mem");
-                        if scope_at == want_scope && name_memstead == want_name {
-                            (StatusCode::OK, (*body).clone())
-                        } else {
-                            (StatusCode::NOT_FOUND, vec![])
-                        }
-                    }
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        (format!("http://{addr}"), handle)
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn link_downloads_archive_and_records_dep() {
-        let tmp = TempDir::new().unwrap();
-        write_minimal_workspace(&tmp);
-
-        let archive_bytes = b"fake-memstead-archive-bytes".to_vec();
-        let (base, handle) =
-            spawn_fixture_registry("anthropic", "core", archive_bytes.clone()).await;
-
-        // Run on a blocking thread because `registry::download_mem`
-        // is `reqwest::blocking`.
-        let workspace = tmp.path().to_path_buf();
-        let base_clone = base.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let ctx = CliContext {
-                json: false,
-                quiet: false,
-                role: Default::default(),
-            };
-            run_with_root(
-                &ctx,
-                LinkArgs {
-                    dep: "anthropic/core".to_string(),
-                    registry: Some(base_clone),
-                },
-                Some(workspace),
-            )
-        })
-        .await
-        .unwrap();
-        handle.abort();
-        result.unwrap();
-
-        // Cached archive lands at the expected path with the expected bytes.
-        let cache = tmp
-            .path()
-            .join(".memstead")
-            .join("memstead-io")
-            .join("anthropic")
-            .join("core.mem");
-        assert!(
-            cache.is_file(),
-            "cached archive must exist at {}",
-            cache.display()
-        );
-        assert_eq!(std::fs::read(&cache).unwrap(), archive_bytes);
-
-        // Workspace config records the dep.
-        let cfg = read_workspace_config(tmp.path()).unwrap();
-        assert_eq!(cfg.format, FILESYSTEM_WORKSPACE_FORMAT);
-        assert_eq!(cfg.deps.len(), 1);
-        assert_eq!(cfg.deps[0].as_display(), "anthropic/core");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn link_is_idempotent_on_repeat() {
-        let tmp = TempDir::new().unwrap();
-        write_minimal_workspace(&tmp);
-
-        let archive_bytes = b"v1".to_vec();
-        let (base, handle) =
-            spawn_fixture_registry("anthropic", "core", archive_bytes.clone()).await;
-
-        let workspace = tmp.path().to_path_buf();
-        let base_clone = base.clone();
-        for _ in 0..2 {
-            let workspace = workspace.clone();
-            let base_clone = base_clone.clone();
-            tokio::task::spawn_blocking(move || {
-                let ctx = CliContext {
-                    json: false,
-                    quiet: false,
-                    role: Default::default(),
-                };
-                run_with_root(
-                    &ctx,
-                    LinkArgs {
-                        dep: "anthropic/core".to_string(),
-                        registry: Some(base_clone),
-                    },
-                    Some(workspace),
-                )
-                .unwrap();
-            })
-            .await
-            .unwrap();
-        }
-        handle.abort();
-
-        let cfg = read_workspace_config(tmp.path()).unwrap();
-        assert_eq!(
-            cfg.deps.len(),
-            1,
-            "repeated link must not duplicate the dep entry"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn link_404_is_typed_and_actionable() {
-        // Server only knows about `anthropic/core`; we ask for a
-        // different name and expect a `NotFound` exit code.
-        let tmp = TempDir::new().unwrap();
-        write_minimal_workspace(&tmp);
-
-        let (base, handle) = spawn_fixture_registry("anthropic", "core", b"".to_vec()).await;
-        let workspace = tmp.path().to_path_buf();
-        let base_clone = base.clone();
-        let err = tokio::task::spawn_blocking(move || {
-            let ctx = CliContext {
-                json: false,
-                quiet: false,
-                role: Default::default(),
-            };
-            run_with_root(
-                &ctx,
-                LinkArgs {
-                    dep: "anthropic/missing".to_string(),
-                    registry: Some(base_clone),
-                },
-                Some(workspace),
-            )
-            .unwrap_err()
-        })
-        .await
-        .unwrap();
-        handle.abort();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("registry has no mem"),
-            "expected actionable 404 message, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn link_rejects_invalid_dep_ref() {
-        let tmp = TempDir::new().unwrap();
-        write_minimal_workspace(&tmp);
-        let ctx = CliContext {
-            json: false,
-            quiet: false,
-            role: Default::default(),
-        };
-        let err = run_with_root(
-            &ctx,
-            LinkArgs {
-                dep: "not-a-scope-name".to_string(),
-                registry: None,
-            },
-            Some(tmp.path().to_path_buf()),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("invalid dependency reference"));
-    }
-
-    // The former `link_rejects_missing_workspace` test exercised the
-    // per-subcommand `--workspace` validation, which was folded into
-    // the root command's global override (validated in `main` before
-    // dispatch, refusing with the tried path). The binary-level
-    // refusal is covered by
-    // `read_commands::workspace_override_flag_env_precedence_and_refusal`.
+    crate::commands::install::install_archive(
+        ctx,
+        engine.base_mut(),
+        fetched.file.path(),
+        Some(fetched.source_url),
+        "Linked",
+        "memstead link",
+    )
 }

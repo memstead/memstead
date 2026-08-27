@@ -67,70 +67,104 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     // Registry install path: "<scope>/<name>".
     if let Some((scope, name)) = registry::parse_ref(&args.source) {
-        let base = registry::registry_base(args.registry.as_deref());
-        let client = registry::build_http()?;
-
-        // Stream the archive into a tempfile; the cache helper reads
-        // from a path, so a tempfile is the cheapest bridge.
-        // Typed, not INTERNAL: a full or unwritable temp directory is
-        // an environment condition the user can act on, and no leaf of
-        // the install flow may collapse into the generic sentinel.
-        let tmp = tempfile::NamedTempFile::new().map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                "INTERNAL_IO_ERROR",
-                format!(
-                    "could not create a temporary file to download into ({e}) — check that the \
-                     system temp directory is writable and has free space"
-                ),
-            )
-        })?;
-        registry::download_mem(&client, &base, &scope, &name, tmp.path()).map_err(|e| {
-            let msg = match &e {
-                DownloadError::NotFound => {
-                    format!("{scope}/{name} not found on {base}")
-                }
-                DownloadError::Gone => {
-                    format!("{scope}/{name} has been taken down")
-                }
-                _ => format!("download failed: {e}"),
-            };
-            let code: &'static str = match &e {
-                DownloadError::NotFound => "REGISTRY_NOT_FOUND",
-                DownloadError::Gone => "GONE",
-                _ => "REGISTRY_ERROR",
-            };
-            CliError::new(
-                match e {
-                    DownloadError::NotFound => ExitKind::NotFound,
-                    _ => ExitKind::Generic,
-                },
-                code,
-                msg,
-            )
-        })?;
-
-        let source_url = format!(
-            "{base}/api/mem/{scope}/{name}.mem",
-            base = base,
-            scope = scope,
-            name = name
+        let fetched = fetch_registry_archive(&scope, &name, args.registry.as_deref())?;
+        return install_archive(
+            ctx,
+            &mut engine,
+            fetched.file.path(),
+            Some(fetched.source_url),
+            "Installed",
+            "memstead install",
         );
-        return install_archive(ctx, &mut engine, tmp.path(), Some(source_url));
     }
 
     // Local path install.
     let path = PathBuf::from(&args.source);
-    install_archive(ctx, &mut engine, &path, None)
+    install_archive(
+        ctx,
+        &mut engine,
+        &path,
+        None,
+        "Installed",
+        "memstead install",
+    )
+}
+
+/// A registry archive streamed to a tempfile, plus the canonical URL it
+/// came from. The tempfile is held by the caller so it outlives the
+/// install; dropping it removes the download.
+pub(crate) struct FetchedArchive {
+    pub file: tempfile::NamedTempFile,
+    pub source_url: String,
+}
+
+/// Download `<scope>/<name>` from the registry into a tempfile. Shared
+/// by `memstead install <scope>/<name>` and `memstead link` — one
+/// registry-fetch path, one set of typed refusals, so the two commands
+/// cannot drift apart on what a 404 or a take-down looks like.
+pub(crate) fn fetch_registry_archive(
+    scope: &str,
+    name: &str,
+    registry_override: Option<&str>,
+) -> anyhow::Result<FetchedArchive> {
+    let base = registry::registry_base(registry_override);
+    let client = registry::build_http()?;
+
+    // Stream the archive into a tempfile; the cache helper reads
+    // from a path, so a tempfile is the cheapest bridge.
+    // Typed, not INTERNAL: a full or unwritable temp directory is
+    // an environment condition the user can act on, and no leaf of
+    // the install flow may collapse into the generic sentinel.
+    let tmp = tempfile::NamedTempFile::new().map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "INTERNAL_IO_ERROR",
+            format!(
+                "could not create a temporary file to download into ({e}) — check that the \
+                 system temp directory is writable and has free space"
+            ),
+        )
+    })?;
+    registry::download_mem(&client, &base, scope, name, tmp.path()).map_err(|e| {
+        let msg = match &e {
+            DownloadError::NotFound => {
+                format!("{scope}/{name} not found on {base}")
+            }
+            DownloadError::Gone => {
+                format!("{scope}/{name} has been taken down")
+            }
+            _ => format!("download failed: {e}"),
+        };
+        let code: &'static str = match &e {
+            DownloadError::NotFound => "REGISTRY_NOT_FOUND",
+            DownloadError::Gone => "GONE",
+            _ => "REGISTRY_ERROR",
+        };
+        CliError::new(
+            match e {
+                DownloadError::NotFound => ExitKind::NotFound,
+                _ => ExitKind::Generic,
+            },
+            code,
+            msg,
+        )
+    })?;
+
+    Ok(FetchedArchive {
+        file: tmp,
+        source_url: format!("{base}/api/mem/{scope}/{name}.mem"),
+    })
 }
 
 /// The shared back half of both install shapes: cache the archive,
 /// then register (or refresh) the workspace-level read-only mount.
-fn install_archive(
+pub(crate) fn install_archive(
     ctx: &CliContext,
     engine: &mut memstead_base::Engine,
     archive: &Path,
     source_url: Option<String>,
+    verb: &str,
+    by_tool: &'static str,
 ) -> anyhow::Result<()> {
     // The shadow gate runs against the writable roster — an archive
     // whose internal name collides with a writable mem refuses before
@@ -146,13 +180,13 @@ fn install_archive(
     let outcome =
         mem_cache::install_to_cache(archive, &writable_refs).map_err(install_err_to_cli)?;
 
-    let mount_state = mem_cache::register_cached_archive(engine, &outcome, "memstead install")
-        .map_err(engine_err_to_cli)?;
+    let mount_state =
+        mem_cache::register_cached_archive(engine, &outcome, by_tool).map_err(engine_err_to_cli)?;
     if mount_state != mem_cache::MountRegistration::AlreadyRegistered {
         engine.persist_state().map_err(engine_err_to_cli)?;
     }
 
-    emit_outcome(ctx, outcome, mount_state, source_url)
+    emit_outcome(ctx, outcome, mount_state, source_url, verb)
 }
 
 fn emit_outcome(
@@ -160,6 +194,7 @@ fn emit_outcome(
     outcome: CacheInstallOutcome,
     mount_state: MountRegistration,
     source_url: Option<String>,
+    verb: &str,
 ) -> anyhow::Result<()> {
     let mount_status_wire = match mount_state {
         MountRegistration::Registered => "registered",
@@ -195,8 +230,8 @@ fn emit_outcome(
             }
         };
         let mut body = format!(
-            "# Installed `{}`\n\n- Archive: {}\n- Mount: {}",
-            outcome.mem_name, cache_status, mount_status,
+            "# {} `{}`\n\n- Archive: {}\n- Mount: {}",
+            verb, outcome.mem_name, cache_status, mount_status,
         );
         if let Some(url) = source_url {
             body.push_str(&format!("\n- Source: {url}"));

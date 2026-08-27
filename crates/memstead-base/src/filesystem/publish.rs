@@ -286,7 +286,6 @@ mod tests {
         let mut cfg = WorkspaceConfig::new(name, versioned("default", "1.0.0"));
         if with_version {
             cfg.description = Some("test mem".into());
-            cfg.add_dep("anthropic/core".parse().unwrap());
         } else {
             cfg.version = None;
         }

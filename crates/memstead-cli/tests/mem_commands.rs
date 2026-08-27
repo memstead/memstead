@@ -3232,3 +3232,199 @@ fn cli_kinded_check_records_and_refuses() {
     assert_eq!(axis["checked_ok"], 1, "{h}");
     assert_eq!(axis["conformance"]["check_failed"], 1, "{h}");
 }
+
+// ---------------------------------------------------------------------------
+// `memstead link` — the layout-agnostic registry attach
+// ---------------------------------------------------------------------------
+
+/// Serve one fixture archive at `/api/mem/<scope>/<name>.mem` on an
+/// ephemeral port. Returns the base URL and a guard whose drop stops the
+/// server. Runs its own multi-thread runtime on a background thread so
+/// the surrounding `assert_cmd` tests stay synchronous.
+struct FixtureRegistry {
+    base: String,
+    _runtime: tokio::runtime::Runtime,
+}
+
+fn spawn_fixture_registry(
+    scope: &'static str,
+    name: &'static str,
+    body: Vec<u8>,
+) -> FixtureRegistry {
+    use axum::{Router, extract::Path as AxumPath, http::StatusCode, routing::get};
+    use std::sync::Arc;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let body = Arc::new(body);
+    let base = runtime.block_on(async move {
+        let app: Router = Router::new().route(
+            "/api/mem/{scope}/{file}",
+            get({
+                let body = body.clone();
+                move |AxumPath((got_scope, got_file)): AxumPath<(String, String)>| {
+                    let body = body.clone();
+                    async move {
+                        if got_scope == scope && got_file == format!("{name}.mem") {
+                            (StatusCode::OK, (*body).clone())
+                        } else {
+                            (StatusCode::NOT_FOUND, vec![])
+                        }
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    });
+
+    FixtureRegistry {
+        base,
+        _runtime: runtime,
+    }
+}
+
+/// Assert that the workspace rooted at `root` now carries `sender-mem`
+/// as an archive-backed read-only mount, whatever its layout.
+fn assert_linked(root: &Path, cache: &Path) {
+    let mounts = fs::read_to_string(root.join(".memstead/state/mounts.json"))
+        .unwrap_or_else(|e| panic!("mounts.json must exist at {}: {e}", root.display()));
+    assert!(
+        mounts.contains(r#""sender-mem""#) && mounts.contains(r#""archive""#),
+        "link must record the attachment in the mount roster; got:\n{mounts}"
+    );
+    memstead()
+        .current_dir(root)
+        .args(["search", "Alpha"])
+        .env("MEMSTEAD_MEM_CACHE", cache)
+        .assert()
+        .success()
+        .stdout(contains("sender-mem"));
+}
+
+/// Criteria 1, 2 and 3: `link` resolves the mem through the engine on
+/// every layout the project's own tools produce — the collapsed folder
+/// workspace `init` makes, the repo-overlapping one `quickstart --repo`
+/// makes, a multi-mem folder workspace, and a mem-repo workspace. No
+/// hardcoded workspace-root config path survives as a first attempt: the
+/// same call succeeds on all four.
+#[test]
+fn link_attaches_the_registry_mem_on_every_layout() {
+    let _guard = cache_guard().lock().unwrap_or_else(|e| e.into_inner());
+    let sender = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+    let sender_mem = make_sender_mem(sender.path());
+    let archive = export_sender_archive(sender.path(), &sender_mem);
+    let registry = spawn_fixture_registry("fixture", "published", fs::read(&archive).unwrap());
+
+    let link = |root: &Path| {
+        memstead()
+            .current_dir(root)
+            .args(["link", "fixture/published", "--registry", &registry.base])
+            .env("MEMSTEAD_MEM_CACHE", cache.path())
+            .assert()
+            .success()
+            .stdout(contains("Linked"));
+    };
+
+    // Layout 1: collapsed — `memstead init` puts the mem at the root.
+    let collapsed = TempDir::new().unwrap();
+    memstead()
+        .current_dir(collapsed.path())
+        .args([
+            "init",
+            "--name",
+            "collapsed-mem",
+            "--schema",
+            "default@1.0.0",
+        ])
+        .assert()
+        .success();
+    link(collapsed.path());
+    assert_linked(collapsed.path(), cache.path());
+
+    // Layout 2: repo-overlapping — the workspace root is the repo and
+    // the mem lives in its own folder underneath.
+    let overlapping = TempDir::new().unwrap();
+    fs::create_dir_all(overlapping.path().join(".git")).unwrap();
+    memstead()
+        .current_dir(overlapping.path())
+        .args([
+            "quickstart",
+            "--name",
+            "overlapping-mem",
+            "--repo",
+            ".",
+            "--agent",
+            "claude-code",
+        ])
+        .assert()
+        .success();
+    link(overlapping.path());
+    assert_linked(overlapping.path(), cache.path());
+
+    // Layout 3: mem-repo — the fixture receiver workspace, one mem per
+    // folder with its own config, none of it at the workspace root.
+    let receiver = TempDir::new().unwrap();
+    let _receiver_mem = make_receiver_mem(receiver.path());
+    link(receiver.path());
+    assert_linked(receiver.path(), cache.path());
+
+    // Layout 4: two writable mems, no mem named on the command line.
+    // A registry attachment binds to the workspace, not to a host mem,
+    // so there is nothing to disambiguate — the call succeeds rather
+    // than refusing for ambiguity.
+    let multi = TempDir::new().unwrap();
+    for name in ["mem-one", "mem-two"] {
+        let dir = multi.path().join(name);
+        fs::create_dir_all(dir.join(".memstead")).unwrap();
+        fs::write(
+            dir.join(".memstead").join("config.json"),
+            r#"{ "version": "0.1.0", "schema": "default@1.0.0" }"#,
+        )
+        .unwrap();
+    }
+    init_real_mem_repo_from_disk(
+        multi.path(),
+        &[
+            (&multi.path().join("mem-one"), "mem-one"),
+            (&multi.path().join("mem-two"), "mem-two"),
+        ],
+    );
+    link(multi.path());
+    assert_linked(multi.path(), cache.path());
+}
+
+/// Criterion 5's refusal complement: with no workspace anywhere up the
+/// tree, `link` still refuses, typed, naming what was looked for.
+#[test]
+fn link_without_a_workspace_refuses_typed() {
+    let nowhere = TempDir::new().unwrap();
+    memstead()
+        .current_dir(nowhere.path())
+        .args(["--json", "link", "fixture/published"])
+        .assert()
+        .failure()
+        .stdout(contains("workspace.toml"));
+}
+
+/// Criterion 2's shape at the input boundary: a reference that is not
+/// `<scope>/<name>` refuses on validation, before any workspace or
+/// network work.
+#[test]
+fn link_rejects_a_malformed_reference() {
+    let nowhere = TempDir::new().unwrap();
+    memstead()
+        .current_dir(nowhere.path())
+        .args(["--json", "link", "not-a-scope-name"])
+        .assert()
+        .failure()
+        .stdout(contains("INVALID_INPUT"));
+}

@@ -1,19 +1,17 @@
 //! Workspace-shape `.memstead/config.json` for filesystem mems.
 //!
 //! Distinct from the archive-shape config in
-//! [`super::super::validator::config`]: the workspace shape adds a
-//! `deps` list (cross-mem dependencies on registry-published mems)
-//! and pins `format` to a different version namespace so a workspace
-//! file accidentally fed to the archive validator (or vice versa)
-//! surfaces as a typed mismatch rather than a generic serde error.
+//! [`super::super::validator::config`]: the workspace shape pins
+//! `format` to a different version namespace so a workspace file
+//! accidentally fed to the archive validator (or vice versa) surfaces
+//! as a typed mismatch rather than a generic serde error.
 //!
 //! ## Shape (as written to disk)
 //!
 //! ```json
 //! {
 //!   "format": 1,
-//!   "schema": "default@1.0.0",
-//!   "deps": ["anthropic/core"]
+//!   "schema": "default@1.0.0"
 //! }
 //! ```
 //!
@@ -25,9 +23,11 @@
 //!   validator tombstones a stray `name` in `config.json`.
 //! - `schema`: mem schema pin in exact `<name>@<version>` form
 //!   (e.g. `"default@1.0.0"`) — bare-name pins are rejected at parse.
-//! - `deps`: cross-mem dependencies, each in `scope/name` form. The
-//!   list ordering is preserved on round-trip; duplicates are
-//!   rejected at parse time.
+//! - `deps` (retired 2026-08-27): cross-mem attachments live in the
+//!   engine's mount roster (`.memstead/state/mounts.json`), written by
+//!   `memstead link` / `memstead install`. The key is a hard tombstone
+//!   in [`memstead_schema::config::check_config`] — a config that still
+//!   carries it is rejected rather than silently half-honoured.
 //! - `version`, `description`, `authors`: optional fields used by
 //!   `memstead publish` to populate the archive shape. Carried through
 //!   so the workspace remains the source of truth for publish
@@ -36,12 +36,11 @@
 //! ## Publish projection
 //!
 //! [`Self::to_published`] converts the workspace shape to a strict
-//! [`PublishedMemConfig`] for `memstead publish`, dropping `deps` and
-//! enforcing the archive's stricter requirements (versioned schema,
+//! [`PublishedMemConfig`] for `memstead publish`, enforcing the
+//! archive's stricter requirements (versioned schema,
 //! present `version` field). Errors surface via
 //! [`PublishConversionError`] from `memstead-schema`.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use memstead_schema::{
@@ -52,67 +51,12 @@ use serde::{Deserialize, Serialize};
 
 /// Format integer for the filesystem workspace `.memstead/config.json`. Bumped
 /// on breaking shape changes; current consumers (`memstead init`,
-/// `memstead link`, `memstead publish`, the filesystem engine) all check this
+/// `memstead publish`, the filesystem engine) all check this
 /// before parsing the rest. Distinct from
 /// [`memstead_schema::PUBLISHED_MEM_FORMAT`] so a misfiled archive
 /// config inside a workspace surfaces as
 /// [`WorkspaceConfigError::UnsupportedFormat`].
 pub const FILESYSTEM_WORKSPACE_FORMAT: u32 = 1;
-
-/// Cross-mem dependency entry. Mirrors the Tier 3 wiki-link
-/// addressing scheme `[[scope/name:slug]]` and the `memstead link
-/// <scope>/<name>` CLI shorthand.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DepRef {
-    pub scope: String,
-    pub name: String,
-}
-
-impl DepRef {
-    /// Round-trip display form used in `deps`: `<scope>/<name>`.
-    pub fn as_display(&self) -> String {
-        format!("{}/{}", self.scope, self.name)
-    }
-}
-
-impl std::fmt::Display for DepRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.as_display())
-    }
-}
-
-impl std::str::FromStr for DepRef {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let trimmed = s.trim();
-        if trimmed.is_empty() {
-            return Err("dep ref must not be empty (expected \"scope/name\")".into());
-        }
-        let (scope, name) = trimmed
-            .split_once('/')
-            .ok_or_else(|| format!("dep ref '{trimmed}' must be in 'scope/name' form"))?;
-        check_slug(scope, "scope")?;
-        check_slug(name, "name")?;
-        Ok(DepRef {
-            scope: scope.to_string(),
-            name: name.to_string(),
-        })
-    }
-}
-
-impl Serialize for DepRef {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.as_display())
-    }
-}
-
-impl<'de> Deserialize<'de> for DepRef {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse::<DepRef>().map_err(serde::de::Error::custom)
-    }
-}
 
 /// Workspace-shape `.memstead/config.json` for a filesystem mem. Distinct
 /// from [`PublishedMemConfig`] (the archive shape).
@@ -154,10 +98,6 @@ pub struct WorkspaceConfig {
     /// Optional author list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
-    /// Cross-mem dependencies. Order preserved; duplicates rejected
-    /// at parse time.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deps: Vec<DepRef>,
     /// Engine-owned runtime fields this shape does not model
     /// (`syncState`, `writeGuidance`, …) — carried verbatim so a
     /// read-modify-write round-trip never destroys them.
@@ -167,8 +107,8 @@ pub struct WorkspaceConfig {
 
 impl WorkspaceConfig {
     /// Build a fresh workspace config with `format` set to
-    /// [`FILESYSTEM_WORKSPACE_FORMAT`], the engine default `version`
-    /// (`0.1.0`), and an empty deps list. Convenience for `memstead init`.
+    /// [`FILESYSTEM_WORKSPACE_FORMAT`] and the engine default `version`
+    /// (`0.1.0`). Convenience for `memstead init`.
     /// F1: every mem carries a populated `version` from creation
     /// onward — operators bump via `memstead mem set-version` before
     /// publishing.
@@ -182,25 +122,12 @@ impl WorkspaceConfig {
             title: None,
             subject: None,
             authors: None,
-            deps: Vec::new(),
             extra: serde_json::Map::new(),
         }
     }
 
-    /// Add a dep entry to the list. Idempotent — re-adding an existing
-    /// dep is a no-op so `memstead link` can be invoked twice in a row
-    /// without producing a duplicate. Returns `true` when the entry
-    /// was newly added, `false` when it was already present.
-    pub fn add_dep(&mut self, dep: DepRef) -> bool {
-        if self.deps.iter().any(|d| d == &dep) {
-            return false;
-        }
-        self.deps.push(dep);
-        true
-    }
-
     /// Project the workspace config to the strict archive shape used
-    /// by sealed `.mem` archives. Drops `deps` and applies the same
+    /// by sealed `.mem` archives. Applies the same
     /// requirements as [`memstead_schema::published_config_from`]
     /// (versioned schema, present `version`).
     pub fn to_published(&self) -> Result<PublishedMemConfig, PublishConversionError> {
@@ -241,8 +168,6 @@ pub enum WorkspaceConfigError {
     UnsupportedFormat { got: u32, expected: u32 },
     #[error("workspace config invalid name: {0}")]
     InvalidName(String),
-    #[error("workspace config has duplicate dep: {0}")]
-    DuplicateDep(String),
 }
 
 fn name_regex() -> &'static Regex {
@@ -275,7 +200,7 @@ pub fn config_path(workspace_root: &Path) -> PathBuf {
 }
 
 /// Parse workspace config bytes, enforcing the format pin, the name
-/// shape, and the deps-uniqueness invariant.
+/// shape, and the retired-`deps` tombstone.
 pub fn parse_workspace_config(bytes: &[u8]) -> Result<WorkspaceConfig, WorkspaceConfigError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|e| WorkspaceConfigError::Malformed(e.to_string()))?;
@@ -307,16 +232,6 @@ pub fn parse_workspace_config(bytes: &[u8]) -> Result<WorkspaceConfig, Workspace
     // that `read_workspace_config` fills from the workspace-root basename.
     if !config.name.is_empty() {
         check_slug(&config.name, "name").map_err(WorkspaceConfigError::InvalidName)?;
-    }
-
-    // Reject duplicate deps at parse time so the on-disk file matches
-    // the in-memory invariant `add_dep` upholds.
-    let mut seen: BTreeSet<String> = BTreeSet::new();
-    for dep in &config.deps {
-        let key = dep.as_display();
-        if !seen.insert(key.clone()) {
-            return Err(WorkspaceConfigError::DuplicateDep(key));
-        }
     }
 
     Ok(config)
@@ -366,7 +281,7 @@ pub fn write_workspace_config(
     }
 
     // Serialize in struct-field order (format, schema, version?, description?,
-    // authors?, deps). `name` is path-derived and intentionally omitted.
+    // authors?). `name` is path-derived and intentionally omitted.
     let mut bytes = serde_json::to_vec_pretty(config)
         .map_err(|e| WorkspaceConfigError::Malformed(format!("serialise: {e}")))?;
     bytes.push(b'\n');
@@ -588,7 +503,6 @@ mod tests {
         assert_eq!(cfg.format, FILESYSTEM_WORKSPACE_FORMAT);
         assert_eq!(cfg.name, "demo-mem");
         assert_eq!(cfg.schema.as_display(), "default@1.0.0");
-        assert!(cfg.deps.is_empty());
         assert!(cfg.version.is_none());
     }
 
@@ -601,12 +515,8 @@ mod tests {
             "version": "0.1.0",
             "description": "demo",
             "authors": ["alice"],
-            "deps": ["anthropic/core", "anthropic/agents"],
         });
         let cfg = parse(v).unwrap();
-        assert_eq!(cfg.deps.len(), 2);
-        assert_eq!(cfg.deps[0].as_display(), "anthropic/core");
-        assert_eq!(cfg.deps[1].as_display(), "anthropic/agents");
         assert_eq!(cfg.version.unwrap().to_string(), "0.1.0");
         assert_eq!(cfg.authors.unwrap(), vec!["alice".to_string()]);
     }
@@ -684,54 +594,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_dep_without_scope() {
-        let mut v = ok_config_value();
-        v["deps"] = serde_json::json!(["just-a-name"]);
-        let err = parse(v).unwrap_err();
-        assert!(matches!(err, WorkspaceConfigError::Malformed(_)));
-    }
-
-    #[test]
-    fn rejects_duplicate_deps_on_disk() {
-        let mut v = ok_config_value();
-        v["deps"] = serde_json::json!(["anthropic/core", "anthropic/core"]);
-        let err = parse(v).unwrap_err();
-        assert!(matches!(err, WorkspaceConfigError::DuplicateDep(_)));
-    }
-
-    #[test]
-    fn add_dep_is_idempotent() {
-        let mut cfg = WorkspaceConfig::new("demo", versioned("default", "1.0.0"));
-        let dep = DepRef {
-            scope: "anthropic".into(),
-            name: "core".into(),
-        };
-        assert!(cfg.add_dep(dep.clone()));
-        assert!(!cfg.add_dep(dep.clone()));
-        assert_eq!(cfg.deps.len(), 1);
-    }
-
-    #[test]
-    fn round_trip_through_disk_preserves_dep_order() {
-        let tmp = TempDir::new().unwrap();
-        let mut cfg = WorkspaceConfig::new("demo", versioned("default", "1.0.0"));
-        cfg.add_dep("anthropic/core".parse().unwrap());
-        cfg.add_dep("anthropic/agents".parse().unwrap());
-        cfg.add_dep("openai/sdk".parse().unwrap());
-
-        write_workspace_config(tmp.path(), &cfg).unwrap();
-        let read = read_workspace_config(tmp.path()).unwrap();
-        assert_eq!(
-            read.deps.iter().map(|d| d.as_display()).collect::<Vec<_>>(),
-            vec![
-                "anthropic/core".to_string(),
-                "anthropic/agents".to_string(),
-                "openai/sdk".to_string(),
-            ]
-        );
-    }
-
-    #[test]
     fn read_missing_config_returns_not_found() {
         let tmp = TempDir::new().unwrap();
         let err = read_workspace_config(tmp.path()).unwrap_err();
@@ -786,19 +648,26 @@ mod tests {
         assert!(tmp.path().join(".memstead").join("config.json").is_file());
     }
 
+    /// `deps` is retired: the workspace shape no longer models it, so
+    /// a fresh config never emits the key and the struct carries no
+    /// second spelling of a cross-mem attachment. The hard refusal for
+    /// a config that still carries it lives in the schema validator's
+    /// tombstone table (`check_config`).
     #[test]
-    fn to_published_drops_deps() {
+    fn fresh_config_emits_no_deps_key() {
         let mut cfg = WorkspaceConfig::new("demo", versioned("default", "1.0.0"));
         cfg.version = Some(semver::Version::parse("0.1.0").unwrap());
-        cfg.add_dep("anthropic/core".parse().unwrap());
+        let serialised = serde_json::to_value(&cfg).unwrap();
+        assert!(
+            serialised.get("deps").is_none(),
+            "retired `deps` must not be written: {serialised}"
+        );
 
         let published = cfg.to_published().unwrap();
         assert_eq!(published.format, PUBLISHED_MEM_FORMAT);
         assert_eq!(published.name, "demo");
         assert_eq!(published.version.to_string(), "0.1.0");
         assert_eq!(published.schema.name, "default");
-        // PublishedMemConfig has no `deps` field — the projection
-        // simply drops them. Verify it still serialises clean.
         let serialised = serde_json::to_value(&published).unwrap();
         assert!(serialised.get("deps").is_none());
     }
@@ -813,31 +682,5 @@ mod tests {
         cfg.version = None;
         let err = cfg.to_published().unwrap_err();
         assert!(matches!(err, PublishConversionError::MissingVersion));
-    }
-
-    #[test]
-    fn dep_ref_roundtrip_via_serde() {
-        let dep = DepRef {
-            scope: "scope".into(),
-            name: "name".into(),
-        };
-        let s = serde_json::to_string(&dep).unwrap();
-        assert_eq!(s, "\"scope/name\"");
-        let back: DepRef = serde_json::from_str(&s).unwrap();
-        assert_eq!(back, dep);
-    }
-
-    #[test]
-    fn dep_ref_rejects_uppercase() {
-        let err: Result<DepRef, _> = "Scope/name".parse();
-        assert!(err.is_err());
-    }
-
-    #[test]
-    fn dep_ref_rejects_empty_segments() {
-        let err: Result<DepRef, _> = "/name".parse();
-        assert!(err.is_err());
-        let err: Result<DepRef, _> = "scope/".parse();
-        assert!(err.is_err());
     }
 }

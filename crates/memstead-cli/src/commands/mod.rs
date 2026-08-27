@@ -215,7 +215,6 @@ pub mod entity;
 pub mod export;
 pub mod health;
 pub mod init;
-pub mod link;
 pub mod list;
 pub mod login;
 pub mod logout;
@@ -250,6 +249,8 @@ pub mod batch_update;
 pub mod branch_reset;
 #[cfg(feature = "mem-repo")]
 pub mod install;
+#[cfg(feature = "mem-repo")]
+pub mod link;
 #[cfg(feature = "mem-repo")]
 pub mod mem;
 #[cfg(feature = "mem-repo")]
