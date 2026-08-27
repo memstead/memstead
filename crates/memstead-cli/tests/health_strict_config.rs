@@ -178,9 +178,10 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
         })
         .unwrap_or_default();
     // `ghost` is git-branch backed and stays a WARNING, not a quarantine: a
-    // ref that does not exist is also the normal state of a mem never pushed,
-    // and quarantining it would break the push that creates it. This departs
-    // from criterion 9's literal parity and is recorded in the session log.
+    // ref that does not exist is also the normal state of a mem never pushed
+    // or never cloned, and quarantining it strands push, fetch and pull. This
+    // departs from criterion 9's literal parity; the session log records what
+    // the attempt at parity found.
     assert!(
         unbacked.contains(&("ghost", "missing_ref")),
         "a never-created branch still warns: {unbacked:?}"
@@ -205,7 +206,8 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
     // One, not three: the two gone-storage mounts moved to quarantine, and
     // `hollow` (present but holding nothing) is the only genuine unbacked
     // case left. A legitimately empty mem is never quarantined (criterion 5).
-    // The empty-but-present folder and the never-created branch.
+    // The empty-but-present folder and the never-created branch. A
+    // legitimately empty mem is never quarantined (criterion 5).
     assert_eq!(unbacked.len(), 2);
     assert_eq!(code, 1, "strict refuses with no include needed\n{envelope}");
     assert!(
