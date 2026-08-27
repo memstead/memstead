@@ -786,6 +786,15 @@ pub fn compose_overview(
     md.push_str(&format!("_budget_requested: {budget}\n"));
     md.push_str(&format!("_budget_used: {used}\n"));
     md.push_str(&format!("_cluster_count: {cluster_count}\n"));
+    // The coverage rule (ops::coverage): the axes this composition's
+    // all-clear answers for, in the markdown's OWN frontmatter so the
+    // single-chunk path of every consumer serves it (the
+    // extra_frontmatter copy below only reaches chunked heads, and
+    // the lean server returns the markdown verbatim).
+    md.push_str(&format!(
+        "_verdict_coverage: {}\n",
+        crate::ops::coverage::OVERVIEW_COVERAGE.wire_line()
+    ));
     md.push_str(&format!("_entity_count: {entity_count_total}\n"));
     md.push_str(&format!("_modularity: {mod_str}\n"));
     // Absolute workspace root of the serving engine — the one place a

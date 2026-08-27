@@ -1792,3 +1792,29 @@ fn html_export_cli_wiring() {
         .failure()
         .stderr(contains("UNKNOWN_MEM"));
 }
+
+/// The coverage rule's regression hole (04/08, found by the plan's
+/// grade): the `_verdict_coverage` stamp rode only `extra_frontmatter`,
+/// which the single-chunk path drops, so the common one-chunk overview
+/// served no stamp at all. The composer now writes it into the
+/// markdown's own frontmatter; this pins the single-chunk output.
+#[test]
+fn overview_single_chunk_carries_the_verdict_coverage_stamp() {
+    let tmp = TempDir::new().unwrap();
+    seed_filesystem_mem(&tmp);
+
+    let out = memstead()
+        .current_dir(tmp.path())
+        .arg("overview")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    assert!(
+        md.contains("_verdict_coverage: examined=mounts,config; not_examined="),
+        "single-chunk overview must carry the coverage stamp in its own \
+         frontmatter:\n{md}"
+    );
+}
