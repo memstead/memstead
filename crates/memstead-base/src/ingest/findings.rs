@@ -1626,6 +1626,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         }
     }
 
@@ -2188,6 +2190,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
@@ -2395,6 +2399,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
@@ -2608,6 +2614,8 @@ mod tests {
             },
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         };
         use AnchorHashStability::{Stable, Unstable};
         // The entity the sidecar is keyed to. Written, because it exists:
@@ -2888,6 +2896,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
@@ -3547,6 +3557,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)

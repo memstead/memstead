@@ -2107,6 +2107,8 @@ mod tests {
             at_version: None,
             derived_from: Vec::new(),
             hash_stability: crate::anchor::AnchorHashStability::Stable,
+            span_unvalidated: false,
+            hash_source: None,
         };
 
         let mut sidecar = AnchorSidecar::default();
@@ -2179,6 +2181,8 @@ mod tests {
                 at_version: None,
                 derived_from: Vec::new(),
                 hash_stability: crate::anchor::AnchorHashStability::Stable,
+                span_unvalidated: false,
+                hash_source: None,
             }],
         );
         std::fs::write(
@@ -2358,6 +2362,8 @@ mod tests {
             at_version: None,
             derived_from: Vec::new(),
             hash_stability: crate::anchor::AnchorHashStability::Stable,
+            span_unvalidated: false,
+            hash_source: None,
         };
         // Two holders so the two anchors over one artifact stay distinct rows.
         std::fs::write(
@@ -2746,6 +2752,8 @@ mod tests {
             at_version: None,
             derived_from: Vec::new(),
             hash_stability: crate::anchor::AnchorHashStability::Stable,
+            span_unvalidated: false,
+            hash_source: None,
         };
         let b_file_hash =
             crate::anchor::prepared_content_hash(&std::fs::read(corpus.join("b.md")).unwrap());
@@ -3008,6 +3016,8 @@ mod tests {
             at_version: None,
             derived_from: Vec::new(),
             hash_stability: crate::anchor::AnchorHashStability::Stable,
+            span_unvalidated: false,
+            hash_source: None,
         };
         let plain_raw = crate::anchor::prepared_content_hash(b"export const N = 1\n");
         let mut sidecar = AnchorSidecar::default();

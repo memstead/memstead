@@ -183,6 +183,16 @@ pub struct AnchorComposition {
     /// not. An empty `dangling` means "none found" only when this is `None`;
     /// otherwise it means "not looked for", and the report says which.
     pub unreconciled: Option<String>,
+    /// Counted `span`-grain rows whose locator was never checked against the
+    /// artifact (consistency-sweep 03/03). The write path reads no source, so
+    /// a span written without content in hand is unverified; stating it here
+    /// stops the axis reporting such a row as adjudicated.
+    pub span_unvalidated: usize,
+    /// Counted rows whose hash baseline the engine inferred by backfill
+    /// rather than an author pinning it. A baseline nobody chose is weaker
+    /// evidence of fidelity than one somebody did, and the difference used to
+    /// be invisible.
+    pub hash_from_backfill: usize,
 }
 
 /// One facet's capability-matrix row + resolved change signal (B1 capability
@@ -902,6 +912,25 @@ fn render_hard_required(report: &FidelityReport) -> String {
             }
         }
     }
+    // What the axis could not adjudicate, and whose baseline it is
+    // (consistency-sweep 03/03). Both are always-ships aggregates: a
+    // resolution figure resting on unverified spans or on baselines the
+    // engine inferred means less than a reader assumes, and the difference
+    // was invisible until it was counted.
+    if report.anchors.span_unvalidated > 0 {
+        md.push_str(&format!(
+            "- {} counted span row(s) were never checked against their artifact, so their \
+             span is unverified even where the hash resolves\n",
+            report.anchors.span_unvalidated
+        ));
+    }
+    if report.anchors.hash_from_backfill > 0 {
+        md.push_str(&format!(
+            "- {} counted row(s) carry a baseline the engine inferred by backfill rather than \
+             one an author pinned\n",
+            report.anchors.hash_from_backfill
+        ));
+    }
     if report.anchors.counted_without_provenance > 0 {
         md.push_str(&format!(
             "- {} counted anchor(s) record no producing binding and are included by the \
@@ -1329,6 +1358,18 @@ pub fn compute_fidelity_report(
             .map(|d| format!("{} → {}", d.entity, d.artifact))
             .collect(),
         unreconciled: population.unreconciled.map(str::to_string),
+        span_unvalidated: population
+            .included
+            .iter()
+            .filter(|(_, r)| r.anchor.span_unvalidated)
+            .count(),
+        hash_from_backfill: population
+            .included
+            .iter()
+            .filter(|(_, r)| {
+                r.anchor.hash_source == Some(crate::anchor::AnchorHashSource::Backfill)
+            })
+            .count(),
         ..Default::default()
     };
     for (_eid, resolved_anchor) in population.included {
@@ -2017,6 +2058,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)

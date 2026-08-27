@@ -8,6 +8,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **A span anchor could be born pointing at lines a file does not have, and a
+  re-pin could lose its drift baseline without saying so.** The read path
+  handled spans; the write path accepted almost anything. It checked the
+  artifact's BASE path, truncating the reference at the first locator
+  separator, so the span itself was never looked at.
+
+  A `span` locator that can never address anything is now refused at write
+  (`INVALID_ANCHOR`): an empty locator, and a line range that contradicts
+  itself (`L0`, `L9-L2`, half a range). Where the caller supplied the content,
+  a range beyond the artifact's end refuses too. Where the write path holds no
+  content it does not read the source to find out, and the row records that its
+  span is unverified instead, so no later surface reports it as adjudicated. A
+  reference with no locator addresses the whole file and stays legal, which is
+  what a span's hash covers anyway.
+
+  A re-pin that omits `hash` now keeps the baseline already stored. It used to
+  drop it, and the next verify's backfill then re-established one silently, so
+  drift became unfalsifiable with nothing recording that the history had been
+  lost. Supplying a hash still replaces it, and unsetting the row before
+  writing it fresh is the explicit way to clear it. Every hash now records
+  whether an author pinned it or the backfill inferred it, and the fidelity
+  report counts both the unverified spans and the inferred baselines.
+
+  A payload naming one `(artifact, grain, class)` triple twice is refused
+  rather than collapsed to its last occurrence: that triple is the sidecar's
+  merge identity, so the earlier rows used to disappear and the caller was
+  never told. The merge identity itself is unchanged, so the same artifact at
+  file grain and at span grain is still two rows.
+
 - **An anchor is an edge with two ends, and the engine checked one of them.** A
   mem whose entity files were gone, but whose sidecar still named them, verified
   clean at a hundred percent: every row resolved against a source that was fine,

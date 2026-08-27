@@ -5593,6 +5593,74 @@ community:
         assert_eq!(anchors[1].hash.as_deref(), Some("h-a-fresh"));
     }
 
+    /// Criterion 9 (consistency-sweep 03/03): one payload naming the same
+    /// `(artifact, grain, class)` triple twice is refused. That triple is the
+    /// sidecar's merge identity, so the repeats used to collapse to the last
+    /// occurrence and the caller was never told an anchor it sent had gone.
+    /// Criterion 10's complement rides along: the same artifact at two grains
+    /// is two rows and still writes.
+    #[test]
+    fn a_payload_naming_one_triple_twice_is_refused() {
+        let (mut engine, _tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+
+        let mut args = anchor_args(id.clone(), Some(hash.clone()));
+        args.anchors = vec![
+            anchor_input("a.rs", "h-first"),
+            anchor_input("a.rs", "h-second"),
+        ];
+        let err = engine
+            .update_entity(args, actor, Some(&client), None)
+            .expect_err("the repeated triple must refuse");
+        assert_eq!(err.code(), crate::anchor::INVALID_ANCHOR_CODE);
+        assert!(
+            format!("{err}").contains("more than once"),
+            "the refusal names the collapse: {err}"
+        );
+
+        // Refused before any state change: the stored rows are untouched.
+        assert_eq!(engine.entity_anchors(&id).len(), 2);
+
+        // The same artifact at a different grain is a different row, and
+        // still writes in one payload.
+        let mut span = anchor_input("a.rs", "h-span");
+        span.grain = Some("span".to_string());
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.anchors = vec![anchor_input("a.rs", "h-file"), span];
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .expect("two grains on one artifact are two rows");
+        assert_eq!(engine.entity_anchors(&id).len(), 3);
+    }
+
+    /// Criterion 5 through the real write surface: a later call carrying the
+    /// same triple with no hash keeps the stored baseline, rather than
+    /// dropping it for the next verify to silently re-establish.
+    #[test]
+    fn a_re_pin_without_a_hash_keeps_the_stored_baseline() {
+        let (mut engine, _tmp, id, hash) = anchored_engine();
+        let (actor, client) = cli_actor();
+
+        let mut hashless = anchor_input("a.rs", "");
+        hashless.hash = None;
+        let mut args = anchor_args(id.clone(), Some(hash));
+        args.anchors = vec![hashless];
+        engine
+            .update_entity(args, actor, Some(&client), None)
+            .unwrap();
+
+        let kept = engine
+            .entity_anchors(&id)
+            .into_iter()
+            .find(|a| a.artifact == "a.rs")
+            .expect("the row is still there");
+        assert_eq!(
+            kept.hash.as_deref(),
+            Some("h-a"),
+            "the baseline the re-pin did not mention survives it"
+        );
+    }
+
     /// An anchor-write update never moves `_hash`, and an unset-only
     /// update is a real commit (not a no-op) that leaves the entity bytes
     /// untouched.

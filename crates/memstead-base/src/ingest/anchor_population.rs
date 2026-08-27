@@ -357,6 +357,8 @@ mod tests {
             derived_from: vec![],
             binding: binding.map(str::to_string),
             source: Some("src".to_string()),
+            span_unvalidated: false,
+            hash_source: None,
         }
     }
 

@@ -322,6 +322,119 @@ pub struct Anchor {
     /// still resolves in the workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// A `span`-grain row whose locator could NOT be checked against the
+    /// artifact at write time (consistency-sweep 03/03). The write path
+    /// deliberately reads no source content, so the check is possible only
+    /// where the caller supplied `content`; elsewhere the anchor is accepted
+    /// and this records that its span is unverified, rather than letting a
+    /// later surface report it as adjudicated. Never set on a non-`span`
+    /// grain. Serialized only when true, so an existing sidecar is unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub span_unvalidated: bool,
+    /// Who established this row's [`Self::hash`] baseline. `None` on every
+    /// row written before the field existed, which is honest: the baseline's
+    /// origin was not recorded then and guessing it would be worse than
+    /// admitting it. Set at write and at backfill from then on, so a reader
+    /// can tell an author-pinned baseline from an engine-inferred one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash_source: Option<AnchorHashSource>,
+}
+
+/// Who established an anchor's hash baseline (consistency-sweep 03/03,
+/// criterion 8). A baseline that resets with no trace makes drift
+/// unfalsifiable, so the origin is recorded rather than inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnchorHashSource {
+    /// The writer supplied the hash, or the content the engine hashed.
+    Author,
+    /// A completed verify filled a hash-less row from what it observed.
+    Backfill,
+}
+
+impl AnchorHashSource {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            AnchorHashSource::Author => "author",
+            AnchorHashSource::Backfill => "backfill",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Span locators
+// ---------------------------------------------------------------------------
+
+/// What a `span` anchor's locator (everything after the first `#`) selects.
+///
+/// Two forms are legal and the distinction is not cosmetic. A LINE RANGE is
+/// checkable against content the write path already holds; a UNIT KEY is a
+/// delivery preparation's own key (`dated-entries` writes
+/// `<path>#<iso-stamp>`), whose validity only that preparation can judge, and
+/// which the existing unit-absent refusal already covers where content is
+/// supplied. Anything the engine can check, it checks; anything it cannot, it
+/// records as unchecked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpanLocator<'a> {
+    /// `L<start>` or `L<start>-L<end>`, 1-based and inclusive.
+    Lines { start: usize, end: usize },
+    /// A preparation's delivery-unit key, opaque here.
+    Unit(&'a str),
+}
+
+/// Parse a `span` artifact reference's locator, or say why it cannot be one.
+/// `Ok(None)` means the reference carries no locator at all.
+///
+/// **No locator is not a refusal**, and that is a deliberate line. A
+/// `span`-grain reference naming a bare path addresses its whole file, which
+/// is what a span's hash covers anyway with no preparation declared, and such
+/// anchors are written today. Refusing them would be a new wall across a
+/// working flow, which the plan's own criterion 4 forbids.
+///
+/// The refusals are the shapes that can never address anything: an EMPTY
+/// locator (`path#`, which announces a span and then names none), and a
+/// locator that announces itself as a line range by its `L` prefix and then
+/// contradicts itself (no digits, a zero line, an end before its start). A
+/// locator that does not look like a line range is a unit key and is accepted
+/// here, because this function cannot know a preparation's key grammar and
+/// refusing what it cannot judge would break every `dated-entries` anchor.
+pub fn parse_span_locator(artifact: &str) -> Result<Option<SpanLocator<'_>>, &'static str> {
+    let locator = match artifact.split_once('#') {
+        None => return Ok(None),
+        Some((_, loc)) if loc.trim().is_empty() => {
+            return Err("the span locator after `#` is empty");
+        }
+        Some((_, loc)) => loc,
+    };
+    // Only an `L`-prefixed locator claims to be a line range. Everything else
+    // is a unit key and is not this function's to judge.
+    let looks_like_lines = locator.starts_with('L')
+        && locator[1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit());
+    if !looks_like_lines {
+        return Ok(Some(SpanLocator::Unit(locator)));
+    }
+    let (start_raw, end_raw) = match locator.split_once('-') {
+        None => (locator, locator),
+        Some((a, b)) => (a, b),
+    };
+    let num = |part: &str| -> Option<usize> {
+        part.strip_prefix('L')
+            .filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit()))
+            .and_then(|d| d.parse::<usize>().ok())
+    };
+    let (Some(start), Some(end)) = (num(start_raw), num(end_raw)) else {
+        return Err("a line-range span locator must read `L<start>` or `L<start>-L<end>`");
+    };
+    if start == 0 {
+        return Err("line numbers are 1-based, so `L0` addresses nothing");
+    }
+    if end < start {
+        return Err("a line-range span locator ends before it starts");
+    }
+    Ok(Some(SpanLocator::Lines { start, end }))
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +609,39 @@ pub enum AnchorValidationError {
          yield; supply the whole file's content, or address a unit it contains"
     )]
     UnitAbsentFromContent { artifact: String },
+    /// A `span`-grain anchor whose locator is missing, empty, or announces a
+    /// line range and then contradicts itself. Refused at write: such a row
+    /// can never address anything, and accepting it produces an anchor that
+    /// is unadjudicable from birth.
+    #[error("anchor artifact {artifact:?} is not a usable span reference: {reason}")]
+    SpanLocatorUnusable {
+        artifact: String,
+        reason: &'static str,
+    },
+    /// A `span`-grain anchor whose line range lies outside the content the
+    /// caller supplied. Only fires where content is in hand — the write path
+    /// reads no source, and where it cannot check, the row records that
+    /// instead (`span_unvalidated`).
+    #[error(
+        "anchor artifact {artifact:?} names lines the supplied `content` does not have \
+         (it has {lines} line(s)); address a range the artifact contains"
+    )]
+    SpanOutsideContent { artifact: String, lines: usize },
+    /// One payload named the same `(artifact, grain, class)` triple twice.
+    /// That triple is the sidecar's merge identity, so the later occurrence
+    /// silently replaced the earlier one and the caller was never told an
+    /// anchor it wrote had gone missing. A LATER call replacing the stored
+    /// row is unaffected: the unit of this refusal is one payload.
+    #[error(
+        "the anchors payload names {artifact:?} at grain `{grain}` and class `{class}` more \
+         than once; that triple is one row, so the repeats would silently collapse to the \
+         last one: send it once, or vary the grain or class"
+    )]
+    DuplicateAnchorTriple {
+        artifact: String,
+        grain: &'static str,
+        class: &'static str,
+    },
     /// A `source` was supplied but is empty after trimming — a source
     /// name, when present, must be one of the producing binding's
     /// declared names, and an empty string can never be one.
@@ -603,6 +749,33 @@ impl AnchorValidationError {
             AnchorValidationError::UnitAbsentFromContent { artifact } => {
                 d.insert("field".into(), "content".into());
                 d.insert("got".into(), serde_json::json!(artifact));
+            }
+            AnchorValidationError::SpanLocatorUnusable { artifact, reason } => {
+                d.insert("field".into(), "artifact".into());
+                d.insert("got".into(), serde_json::json!(artifact));
+                d.insert("expected".into(), serde_json::json!(reason));
+            }
+            AnchorValidationError::SpanOutsideContent { artifact, lines } => {
+                d.insert("field".into(), "artifact".into());
+                d.insert("got".into(), serde_json::json!(artifact));
+                d.insert("content_lines".into(), serde_json::json!(lines));
+            }
+            AnchorValidationError::DuplicateAnchorTriple {
+                artifact,
+                grain,
+                class,
+            } => {
+                d.insert("field".into(), "anchors".into());
+                d.insert(
+                    "got".into(),
+                    serde_json::json!({ "artifact": artifact, "grain": grain, "class": class }),
+                );
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!(
+                        "each (artifact, grain, class) triple at most once per payload"
+                    ),
+                );
             }
             AnchorValidationError::ArtifactUnresolvable {
                 artifact,
@@ -734,6 +907,41 @@ impl AnchorInput {
             }
         };
 
+        // The span itself (consistency-sweep 03/03). A locator that can never
+        // address anything is refused here, context-free, because no medium
+        // context can rescue it. Where the caller supplied content, a line
+        // range is checked against it; where they did not, the row carries
+        // `span_unvalidated` so no later surface reports it as adjudicated.
+        let mut span_unvalidated = false;
+        if grain == AnchorGrain::Span {
+            let locator = parse_span_locator(&artifact).map_err(|reason| {
+                AnchorValidationError::SpanLocatorUnusable {
+                    artifact: artifact.clone(),
+                    reason,
+                }
+            })?;
+            match (locator, self.content.as_deref()) {
+                (Some(SpanLocator::Lines { end, .. }), Some(content)) => {
+                    let lines = content.lines().count();
+                    if end > lines {
+                        return Err(AnchorValidationError::SpanOutsideContent {
+                            artifact: artifact.clone(),
+                            lines,
+                        });
+                    }
+                }
+                // A unit key with content in hand is the existing
+                // unit-absent refusal's business, at the seam that knows the
+                // source's preparation; a check here would have to guess it.
+                (Some(SpanLocator::Unit(_)), Some(_)) => {}
+                // No locator addresses the whole artifact, and the existence
+                // gate already checks that the artifact is there. Nothing is
+                // left unchecked, so nothing is recorded as unchecked.
+                (None, _) => {}
+                (Some(_), None) => span_unvalidated = true,
+            }
+        }
+
         // Grain must be expressible in the medium's namespace.
         if let Some((medium_type, namespace)) = medium
             && !grain.supported_by_namespace(namespace)
@@ -774,6 +982,9 @@ impl AnchorInput {
             grain,
             class,
             at_version: self.at_version.clone(),
+            // A hash present at this point came from the writer, directly or
+            // as content the engine hashed. The backfill stamps its own.
+            hash_source: hash.is_some().then_some(AnchorHashSource::Author),
             hash,
             hash_stability,
             derived_from: self.derived_from.clone().unwrap_or_default(),
@@ -784,6 +995,7 @@ impl AnchorInput {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
             source,
+            span_unvalidated,
         })
     }
 }
@@ -1058,11 +1270,28 @@ impl AnchorSidecar {
     pub fn merge(&mut self, entity_id: &str, unsets: &[AnchorUnset], incoming: Vec<Anchor>) {
         let mut row = self.entities.remove(entity_id).unwrap_or_default();
         row.retain(|a| !unsets.iter().any(|u| u.matches(a)));
-        for anchor in incoming {
+        for mut anchor in incoming {
             match row.iter_mut().find(|e| {
                 e.artifact == anchor.artifact && e.grain == anchor.grain && e.class == anchor.class
             }) {
-                Some(existing) => *existing = anchor,
+                Some(existing) => {
+                    // Carry the stored baseline forward when the incoming row
+                    // does not mention one (consistency-sweep 03/03,
+                    // criterion 5). A re-pin usually exists to update the
+                    // artifact reference, and dropping the hash made the next
+                    // verify re-baseline silently, so drift became
+                    // unfalsifiable with nothing recording that it had. A
+                    // caller who supplies a hash still replaces it, and one
+                    // who means to CLEAR a baseline unsets the row and writes
+                    // it fresh — unsets are applied above, before this merge.
+                    if anchor.hash.is_none()
+                        && let Some(kept) = existing.hash.clone()
+                    {
+                        anchor.hash = Some(kept);
+                        anchor.hash_source = existing.hash_source;
+                    }
+                    *existing = anchor;
+                }
                 None => row.push(anchor),
             }
         }
@@ -1159,6 +1388,8 @@ mod tests {
                     derived_from: vec![],
                     binding: Some("bhash".into()),
                     source: Some("source-tree".into()),
+                    span_unvalidated: false,
+                    hash_source: None,
                 },
                 Anchor {
                     artifact: "docs/summary.md".into(),
@@ -1170,6 +1401,8 @@ mod tests {
                     derived_from: vec!["notes/a.md".into(), "notes/b.md".into()],
                     binding: None,
                     source: None,
+                    span_unvalidated: false,
+                    hash_source: None,
                 },
             ],
         );
@@ -1216,6 +1449,8 @@ mod tests {
                 derived_from: vec![],
                 binding: None,
                 source: None,
+                span_unvalidated: false,
+                hash_source: None,
             }],
         );
         assert!(sidecar.validate_artifact_references().is_err());
@@ -1233,6 +1468,8 @@ mod tests {
                 derived_from: vec!["  ".into()],
                 binding: None,
                 source: None,
+                span_unvalidated: false,
+                hash_source: None,
             }],
         );
         assert!(sidecar.validate_artifact_references().is_err());
@@ -1310,6 +1547,175 @@ mod tests {
             hash: Some("abc123".into()),
             ..Default::default()
         }
+    }
+
+    fn span_input(artifact: &str) -> AnchorInput {
+        AnchorInput {
+            artifact: Some(artifact.into()),
+            grain: Some("span".into()),
+            class: Some("anchored".into()),
+            ..Default::default()
+        }
+    }
+
+    /// Criterion 1 (consistency-sweep 03/03): a locator that can never
+    /// address anything is refused at the moment of writing. Each of these
+    /// used to write successfully and could then never be adjudicated.
+    #[test]
+    fn a_span_locator_that_addresses_nothing_is_refused() {
+        for artifact in [
+            "src/lib.rs#",      // announces a span, names none
+            "src/lib.rs#   ",   // the same, in whitespace
+            "src/lib.rs#L0",    // lines are 1-based
+            "src/lib.rs#L0-L4", // and so is a range's start
+            "src/lib.rs#L9-L2", // ends before it starts
+            "src/lib.rs#L4-L",  // half a range
+            "src/lib.rs#L4-x",  // a range that stops being one
+        ] {
+            let err = span_input(artifact)
+                .validate(Some(("codebase", "path")))
+                .expect_err(artifact);
+            assert!(
+                matches!(err, AnchorValidationError::SpanLocatorUnusable { .. }),
+                "{artifact} refused as {err:?}"
+            );
+            assert_eq!(err.code(), INVALID_ANCHOR_CODE);
+            assert!(err.detail().contains_key("expected"), "carries the repair");
+        }
+    }
+
+    /// Criterion 4's first half: a span that names something real still
+    /// writes. `Lx` forms within the artifact, a preparation's unit key, and
+    /// a bare path (which addresses the whole file, and is what a span's hash
+    /// covers anyway) are all legal.
+    #[test]
+    fn a_usable_span_locator_still_writes() {
+        for artifact in [
+            "src/lib.rs",
+            "src/lib.rs#L1",
+            "src/lib.rs#L4-L7",
+            "logs/ops.md#2026-08-25T00:00:00",
+        ] {
+            span_input(artifact)
+                .validate(Some(("codebase", "path")))
+                .unwrap_or_else(|e| panic!("{artifact} refused: {e}"));
+        }
+    }
+
+    /// Criterion 2: where the content is already in hand, a range beyond the
+    /// artifact's end is refused rather than stored as an anchor pointing at
+    /// lines the file does not have.
+    #[test]
+    fn a_span_beyond_supplied_content_is_refused() {
+        let mut i = span_input("src/lib.rs#L2-L9");
+        i.content = Some(
+            "one
+two
+three
+"
+            .into(),
+        );
+        let err = i.validate(Some(("codebase", "path"))).unwrap_err();
+        match err {
+            AnchorValidationError::SpanOutsideContent { lines, .. } => assert_eq!(lines, 3),
+            other => panic!("wrong refusal: {other:?}"),
+        }
+
+        let mut ok = span_input("src/lib.rs#L2-L3");
+        ok.content = Some(
+            "one
+two
+three
+"
+            .into(),
+        );
+        let a = ok.validate(Some(("codebase", "path"))).unwrap();
+        assert!(
+            !a.span_unvalidated,
+            "a span checked against content is not unvalidated"
+        );
+    }
+
+    /// Criterion 3: where the write path holds no content, the span cannot be
+    /// checked without a read it deliberately does not perform. The anchor is
+    /// accepted and the row says the span is unverified, so no later surface
+    /// reports it as adjudicated.
+    #[test]
+    fn an_uncheckable_span_is_accepted_and_recorded_as_unchecked() {
+        let a = span_input("src/lib.rs#L4-L7")
+            .validate(Some(("codebase", "path")))
+            .unwrap();
+        assert!(a.span_unvalidated);
+
+        let whole_file = span_input("src/lib.rs")
+            .validate(Some(("codebase", "path")))
+            .unwrap();
+        assert!(
+            !whole_file.span_unvalidated,
+            "no locator addresses the whole artifact, which the existence gate checks"
+        );
+
+        let file_grain = valid_input().validate(Some(("codebase", "path"))).unwrap();
+        assert!(!file_grain.span_unvalidated, "never set off the span grain");
+    }
+
+    /// Criterion 8: a hash the writer supplied is recorded as theirs, so a
+    /// reader can later tell it from one the backfill inferred.
+    #[test]
+    fn an_authored_hash_records_that_the_author_pinned_it() {
+        let a = valid_input().validate(Some(("codebase", "path"))).unwrap();
+        assert_eq!(a.hash_source, Some(AnchorHashSource::Author));
+
+        let mut hashless = valid_input();
+        hashless.hash = None;
+        let b = hashless.validate(Some(("codebase", "path"))).unwrap();
+        assert_eq!(b.hash_source, None, "no baseline, no origin to record");
+    }
+
+    /// Criteria 5 and 6: a re-pin that says nothing about the hash keeps the
+    /// baseline it did not mention, one that supplies a hash replaces it, and
+    /// unsetting the row first is the explicit way to clear it.
+    #[test]
+    fn a_re_pin_keeps_the_baseline_it_did_not_mention() {
+        let mut sc = AnchorSidecar::default();
+        let mut pinned = file_anchor("src/a.rs", "h-original");
+        pinned.hash_source = Some(AnchorHashSource::Author);
+        sc.set("m--e", vec![pinned]);
+
+        let mut repin = file_anchor("src/a.rs", "");
+        repin.hash = None;
+        repin.hash_source = None;
+        sc.merge("m--e", &[], vec![repin]);
+        let row = &sc.entities["m--e"][0];
+        assert_eq!(
+            row.hash.as_deref(),
+            Some("h-original"),
+            "the baseline the caller did not mention survives"
+        );
+        assert_eq!(row.hash_source, Some(AnchorHashSource::Author));
+
+        sc.merge("m--e", &[], vec![file_anchor("src/a.rs", "h-new")]);
+        assert_eq!(
+            sc.entities["m--e"][0].hash.as_deref(),
+            Some("h-new"),
+            "a supplied hash still replaces"
+        );
+
+        // The explicit clear: unset the row, then write it fresh. Unsets are
+        // applied before the merge, so the old row is gone first.
+        let unset = AnchorUnset {
+            artifact: "src/a.rs".into(),
+            grain: None,
+            class: None,
+        };
+        let mut fresh = file_anchor("src/a.rs", "");
+        fresh.hash = None;
+        fresh.hash_source = None;
+        sc.merge("m--e", &[unset], vec![fresh]);
+        assert_eq!(
+            sc.entities["m--e"][0].hash, None,
+            "unset-then-write is how a caller clears a baseline"
+        );
     }
 
     #[test]
@@ -1587,6 +1993,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         }
     }
 
@@ -1682,6 +2090,8 @@ mod tests {
                 derived_from: Vec::new(),
                 binding: None,
                 source: None,
+                span_unvalidated: false,
+                hash_source: None,
             },
             Anchor {
                 artifact: "src/".into(),
@@ -1693,6 +2103,8 @@ mod tests {
                 derived_from: vec!["a.rs".into(), "b.rs".into()],
                 binding: None,
                 source: None,
+                span_unvalidated: false,
+                hash_source: None,
             },
         ];
         let comp = compose_entity_anchors(&anchors);
@@ -1745,6 +2157,8 @@ mod tests {
             derived_from: Vec::new(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         }
     }
 

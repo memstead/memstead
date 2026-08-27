@@ -447,6 +447,8 @@ mod tests {
             derived_from: derived_from.into_iter().map(str::to_string).collect(),
             binding: None,
             source: None,
+            span_unvalidated: false,
+            hash_source: None,
         }
     }
 

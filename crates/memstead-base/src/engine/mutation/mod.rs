@@ -133,6 +133,30 @@ impl super::Engine {
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
             .collect::<Result<_, _>>()?;
 
+        // One payload, one row per triple (consistency-sweep 03/03,
+        // criterion 9). `(artifact, grain, class)` is the sidecar's merge
+        // identity, so a payload naming it twice used to collapse to the last
+        // occurrence and the caller was never told an anchor it wrote had
+        // vanished. The unit is THIS payload: the same triple arriving in a
+        // later call still replaces the stored row, which is what the
+        // carry-forward depends on.
+        {
+            let mut seen: std::collections::HashSet<(&str, &str, &str)> =
+                std::collections::HashSet::new();
+            for a in &anchors {
+                let key = (a.artifact.as_str(), a.grain.as_wire(), a.class.as_wire());
+                if !seen.insert(key) {
+                    return Err(EngineError::from(
+                        crate::anchor::AnchorValidationError::DuplicateAnchorTriple {
+                            artifact: a.artifact.clone(),
+                            grain: a.grain.as_wire(),
+                            class: a.class.as_wire(),
+                        },
+                    ));
+                }
+            }
+        }
+
         // Supplied `content` under the source's preparation: the context-free
         // validator hashed the bytes under the default canonicalization; the
         // seam knows the anchor's source and re-hashes through the registry's
@@ -327,6 +351,11 @@ impl super::Engine {
             for a in anchors {
                 if a.class.is_hash_bearing() && a.hash.is_none() && a.artifact == obs.artifact {
                     a.hash = Some(obs.hash.clone());
+                    // Stamp the origin (consistency-sweep 03/03, criterion 8):
+                    // this baseline is the engine's inference from what it
+                    // observed, not something an author pinned, and a reader
+                    // comparing drift needs to know which.
+                    a.hash_source = Some(crate::anchor::AnchorHashSource::Backfill);
                     written += 1;
                 }
             }
