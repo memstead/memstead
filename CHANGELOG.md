@@ -69,6 +69,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that union is not reported.
 
 ### Changed
+- **`memstead type` says when the schema it prints is not the workspace's own.**
+  Its schema resolution had three silent fallbacks to the engine built-in
+  default: no workspace at all, no writable mem loaded, and a resolved mem
+  carrying no schema entry. The second is what a **quarantined** mem produces,
+  so a workspace whose only mem the engine had correctly refused to load got
+  the default schema's name, version and entire type catalogue printed over it
+  with no mention of the quarantine — a loud, correct refusal turned into a
+  quiet wrong answer three surfaces later. Each fallback now states its own
+  condition above the catalogue, and the quarantine case carries the engine's
+  own typed reason and repair command rather than restating them. `--json`
+  gains a `fallback` field (`code` plus `detail`) on both the success and the
+  refusal envelopes, `null` whenever the answer is genuinely the mem's own — a
+  stable shape, so branch on the value rather than on the key's presence. The
+  refusal arm carries it too: without that, a user whose own schema declares the
+  type is told it does not exist, attributed to a schema that is not theirs.
+  The cold-start probe outside a workspace is
+  deliberately unchanged and silent: there the built-in default IS the answer,
+  and a warning on the healthy path teaches readers to ignore warnings.
 - **`memstead link` is retired; `memstead install` is the one verb.** Both
   fetched the same archive from the same registry URL and, since the pointer-join
   fix, both landed it in the same mount roster — two names for one act, which is

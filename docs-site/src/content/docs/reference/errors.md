@@ -11,7 +11,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | Code | Surfaces | Source locations |
 |------|----------|------------------|
 | `AMBIGUOUS_DESCRIPTION_DELIMITER` | engine | `crates/memstead-base/src/ops/mod.rs:1972` |
-| `AMBIGUOUS_MEM` | CLI | `crates/memstead-cli/src/commands/export.rs:503`<br>`crates/memstead-cli/src/commands/publish.rs:242`<br>`crates/memstead-cli/src/commands/type_cmd.rs:152` |
+| `AMBIGUOUS_MEM` | CLI | `crates/memstead-cli/src/commands/export.rs:503`<br>`crates/memstead-cli/src/commands/publish.rs:242`<br>`crates/memstead-cli/src/commands/type_cmd.rs:216` |
 | `AMBIGUOUS_QUERY` | CLI | `crates/memstead-cli/src/commands/context.rs:67` |
 | `ANCHORS_SIDECAR_UNREADABLE` | CLI | `crates/memstead-cli/src/commands/projection.rs:2085` |
 | `ARCHIVE_ASSEMBLY_FAILED` | CLI | `crates/memstead-cli/src/commands/publish.rs:267`<br>`crates/memstead-cli/src/commands/publish.rs:341` |
@@ -212,7 +212,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `TOOL_DISABLED` | MCP | `crates/memstead-mcp/src/server.rs:255` |
 | `UNDECLARED_RELATIONSHIP_OPEN` | engine | `crates/memstead-base/src/ops/mod.rs:1897` |
 | `UNKNOWN_BINDING_VERSION` | engine | `crates/memstead-base/src/workspace_store.rs:167` |
-| `UNKNOWN_ENTITY_TYPE` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1264`<br>`crates/memstead-cli/src/commands/type_cmd.rs:54`<br>`crates/memstead-mcp/src/filesystem_server.rs:331`<br>`crates/memstead-mcp/src/filesystem_server.rs:2068`<br>`crates/memstead-mcp/src/server.rs:983`<br>`crates/memstead-mcp/src/server.rs:2628` |
+| `UNKNOWN_ENTITY_TYPE` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1264`<br>`crates/memstead-cli/src/commands/type_cmd.rs:79`<br>`crates/memstead-mcp/src/filesystem_server.rs:331`<br>`crates/memstead-mcp/src/filesystem_server.rs:2068`<br>`crates/memstead-mcp/src/server.rs:983`<br>`crates/memstead-mcp/src/server.rs:2628` |
 | `UNKNOWN_FILTER_KEY` | engine | `crates/memstead-base/src/ops/mod.rs:1919` |
 | `UNKNOWN_INCLUDE_KEY` | engine | `crates/memstead-base/src/ops/mod.rs:1900` |
 | `UNKNOWN_MEM` | engine, CLI, MCP | `crates/memstead-base/src/engine/error.rs:1252`<br>`crates/memstead-cli/src/commands/changes.rs:229`<br>`crates/memstead-cli/src/commands/create.rs:351`<br>`crates/memstead-cli/src/commands/export.rs:174`<br>`crates/memstead-cli/src/commands/export.rs:324`<br>`crates/memstead-cli/src/commands/export.rs:536`<br>`crates/memstead-cli/src/commands/uninstall.rs:41`<br>`crates/memstead-mcp/src/filesystem_server.rs:2006`<br>`crates/memstead-mcp/src/filesystem_server.rs:2391`<br>`crates/memstead-mcp/src/server.rs:829`<br>`crates/memstead-mcp/src/server.rs:2396`<br>`crates/memstead-mcp/src/server.rs:2502`<br>`crates/memstead-mcp/src/server.rs:3600` |

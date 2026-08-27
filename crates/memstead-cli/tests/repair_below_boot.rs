@@ -297,3 +297,164 @@ fn projection_migrate_defers_cursor_seeding_when_boot_fails() {
         "bootable workspace consumes and retires the cursor file as today"
     );
 }
+
+/// Criteria 1 and 4: a workspace whose only mem is quarantined no longer
+/// gets the built-in default's catalogue presented as its own. The command
+/// names the quarantine and carries the engine's own reason and repair
+/// rather than restating them in different words.
+#[test]
+fn type_names_the_quarantine_instead_of_printing_a_default_over_it() {
+    let tmp = TempDir::new().unwrap();
+    let ws = quarantined_workspace(&tmp);
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "type"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&out).expect("--json is JSON");
+
+    assert_eq!(
+        body["fallback"]["code"], "ALL_MEMS_QUARANTINED",
+        "the condition must be machine-readable; got: {body}"
+    );
+    let detail = body["fallback"]["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("plenum") && detail.contains("SCHEMA_NOT_FOUND"),
+        "the quarantined mem and the engine's typed reason must be named; got: {detail}"
+    );
+    assert!(
+        detail.contains("memstead schema install"),
+        "the engine's own repair command must be surfaced, not restated; got: {detail}"
+    );
+    let md = body["markdown"].as_str().unwrap_or_default();
+    assert!(
+        md.starts_with("**No mem is serving in this workspace**"),
+        "the reader must meet the condition before the catalogue; got: {md}"
+    );
+}
+
+/// Criterion 3, the arm the first attempt missed: the REFUSAL path needs
+/// the condition more than the success paths do. Without it a user whose
+/// own schema declares the type is told it does not exist, attributed to a
+/// schema that is not theirs, with the quarantine unmentioned on both
+/// channels.
+#[test]
+fn type_refusal_over_a_quarantine_states_the_condition_too() {
+    let tmp = TempDir::new().unwrap();
+    let ws = quarantined_workspace(&tmp);
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "type", "no-such-type"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&out).expect("--json refusal is JSON");
+    assert_eq!(body["code"], "UNKNOWN_ENTITY_TYPE");
+    assert_eq!(
+        body["details"]["fallback"]["code"], "ALL_MEMS_QUARANTINED",
+        "the refusal must carry the condition machine-readably; got: {body}"
+    );
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("plenum") && message.contains("not this workspace's own"),
+        "the human message must name the quarantine too; got: {message}"
+    );
+
+    // The healthy refusal is unchanged: a real schema, no condition.
+    let healthy = tmp.path().join("healthy");
+    memstead()
+        .args([
+            "init",
+            healthy.to_str().unwrap(),
+            "--name",
+            "healthy-mem",
+            "--schema",
+            "default@1.0.0",
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(&healthy)
+        .args(["--json", "type", "no-such-type"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        body["details"]["fallback"].is_null(),
+        "a healthy refusal carries no condition; got: {body}"
+    );
+}
+
+/// Criterion 2's refusal complement: the genuine cold-start probe, run
+/// where there is no workspace at all, still answers from the built-in
+/// default with no warning. Here the default IS the answer, not a
+/// stand-in, and a warning on the healthy path teaches readers to ignore
+/// warnings.
+#[test]
+fn type_outside_a_workspace_stays_a_silent_cold_start_probe() {
+    let tmp = TempDir::new().unwrap();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "type"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        body["fallback"].is_null(),
+        "the cold-start probe must carry no fallback notice; got: {body}"
+    );
+    assert!(
+        !body["markdown"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("built-in default, not"),
+        "no condition line belongs on the healthy cold-start path"
+    );
+}
+
+/// Criterion 5's refusal complement: a workspace with a healthy writable
+/// mem is untouched — its own schema, and no notice.
+#[test]
+fn type_on_a_healthy_workspace_reports_its_own_schema_silently() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("healthy");
+    memstead()
+        .args([
+            "init",
+            ws.to_str().unwrap(),
+            "--name",
+            "healthy-mem",
+            "--schema",
+            "default@1.0.0",
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "type"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(
+        body["fallback"].is_null(),
+        "a healthy workspace carries no fallback notice; got: {body}"
+    );
+    assert_eq!(body["schema"], "default@1.0.0");
+}
