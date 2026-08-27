@@ -294,6 +294,12 @@ pub struct FidelityReport {
     /// marks the resolved case so a reader never mistakes a resolution
     /// for an author's assertion.
     pub coverage_semantics_declared: bool,
+    /// Scope patterns still written in the retired workspace-relative dialect,
+    /// each as `` `<pattern>` in facet `<facet>` ``. Reported whether or not
+    /// the walk came up empty: a MIXED scope enumerates fine and silently
+    /// omits whatever the old-dialect patterns would have selected, which is
+    /// precisely the case a reader cannot see from the numbers.
+    pub legacy_dialect_patterns: Vec<String>,
     /// Per-facet capability rows (B1 capability block).
     pub capabilities: Vec<FacetCapability>,
     /// Per-facet freshness (B1/B2).
@@ -452,6 +458,15 @@ impl FidelityReport {
                  percentage is reported below"
             )),
             DenominatorBasis::Enumerated { .. } => {}
+        }
+        if !self.legacy_dialect_patterns.is_empty() {
+            blind_spots.push(format!(
+                "scope pattern(s) are still written against the workspace root rather than the \
+                 source pointer and select nothing under the pointer join, so whatever they \
+                 were meant to cover is absent from the denominator: {}. Rewrite them relative \
+                 to the source's pointer",
+                self.legacy_dialect_patterns.join(", ")
+            ));
         }
         if self.anchors.observed == 0 {
             blind_spots.push(
@@ -1295,6 +1310,12 @@ pub fn compute_fidelity_report(
     // be blamed on the author having scoped nothing.
     let mut malformed_patterns: Vec<String> = Vec::new();
     let mut legacy_patterns: Vec<String> = Vec::new();
+    // Either cause makes the denominator partial. A malformed pattern was
+    // skipped; a legacy-dialect pattern selects nothing under the pointer
+    // join. Both leave the surviving set short of the population, and the
+    // mixed case is the dangerous one: it enumerates, so the subset looks
+    // whole.
+    let mut partiality_reasons: Vec<String> = Vec::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
             let caps = medium_capabilities(p.medium_type);
@@ -1316,21 +1337,21 @@ pub fn compute_fidelity_report(
             for note in &walked.legacy_dialect {
                 legacy_patterns.push(format!("`{}` in facet `{}`", note.pattern, p.name));
             }
+            if let Some(reason) = walked.partiality_reason() {
+                partiality_reasons.push(format!("facet `{}`: {reason}", p.name));
+            }
             s_d.extend(walked.files);
         }
     }
     s_d.sort();
     s_d.dedup();
 
-    let denominator = if !malformed_patterns.is_empty() {
+    let denominator = if !partiality_reasons.is_empty() {
         // Known-incomplete beats every other basis: whatever the surviving
         // patterns enumerated, the population is not known.
         DenominatorBasis::Partial {
             count: s_d.len(),
-            reason: format!(
-                "scope pattern(s) that would not compile were skipped: {}",
-                malformed_patterns.join(", ")
-            ),
+            reason: partiality_reasons.join("; "),
         }
     } else if !s_d.is_empty() {
         DenominatorBasis::Enumerated { count: s_d.len() }
@@ -1604,6 +1625,7 @@ pub fn compute_fidelity_report(
     let effective_coverage = crate::binding::effective_coverage_semantics(binding);
 
     FidelityReport {
+        legacy_dialect_patterns: legacy_patterns,
         binding: binding_id,
         destination_mem: dest,
         adopt,
@@ -1664,6 +1686,7 @@ mod tests {
 
     fn base_report() -> FidelityReport {
         FidelityReport {
+            legacy_dialect_patterns: Vec::new(),
             binding: "engine/graph".to_string(),
             destination_mem: "engine".to_string(),
             adopt: false,
@@ -2459,6 +2482,7 @@ mod rollup_tests {
     /// one axis from here, so a failure names the axis that moved.
     fn clean_report() -> FidelityReport {
         FidelityReport {
+            legacy_dialect_patterns: Vec::new(),
             binding: "engine/graph".to_string(),
             destination_mem: "engine".to_string(),
             adopt: false,

@@ -240,58 +240,124 @@ pub fn population_for(
 /// version made it vanish instead: a test that expected orphan plus drifted
 /// caught it. A deleted file is still in scope; its absence is the finding.
 fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
-    let mut allows: Vec<&str> = Vec::new();
-    let mut denies: Vec<&str> = Vec::new();
+    // ONE matcher per primary source, each in ITS OWN namespace. A source's
+    // scope patterns are source-relative (they join onto its `pointer`), so
+    // pooling every source's raw patterns into one set — which is what this
+    // did until 2026-08-27 — answers membership in a namespace no source
+    // speaks. The observable cost was real: after the dogfood bindings were
+    // migrated to the source-relative dialect, `project/graph`'s five anchors
+    // moved from in-population to `excluded_out_of_scope` with no report, and
+    // the same run's coverage denominator still counted the files those
+    // anchors name. Two readings of one scope inside one report.
+    let mut per_source: Vec<SourceScope> = Vec::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
+            let mut allows: Vec<&str> = Vec::new();
+            let mut denies: Vec<&str> = Vec::new();
             for rule in &p.scope {
                 match rule.mode {
                     PatternMode::Allow => allows.push(rule.path.as_str()),
                     PatternMode::Deny => denies.push(rule.path.as_str()),
                 }
             }
+            // No allow patterns at all is an UNSCOPED facet, which has no
+            // opinion — it contributes no matcher rather than an empty allow
+            // set, which would exclude every anchor (the "silently drops" half
+            // of the posture rather than the "excludes and names" half).
+            if allows.is_empty() {
+                continue;
+            }
+            let Some(allow_set) = build_glob_set(&allows) else {
+                continue;
+            };
+            per_source.push(SourceScope {
+                pointer: p.pointer.trim_end_matches('/').to_string(),
+                allow: allow_set,
+                deny: if denies.is_empty() {
+                    None
+                } else {
+                    build_glob_set(&denies)
+                },
+                allow_heads: allows.iter().map(|p| literal_head(p)).collect(),
+            });
         }
     }
-    for dp in &resolved.deny_paths {
-        denies.push(dp.as_str());
-    }
-    // No allow patterns at all is an UNSCOPED facet, which has no opinion.
-    // Building an empty allow set instead would exclude every anchor, which is
-    // the "silently drops" half of the posture rather than the "excludes and
-    // names" half.
-    if allows.is_empty() {
+    if per_source.is_empty() {
         return None;
     }
-    let allow_set = build_glob_set(&allows)?;
-    let deny_set = if denies.is_empty() {
-        None
-    } else {
-        build_glob_set(&denies)
-    };
+    // Binding-level denies stay in the WORKSPACE namespace and go through the
+    // resolver that enforces them, so a path hidden from the ingest agent is
+    // also outside the population.
+    let ws_deny = super::check_path::DenyOracle::new(&resolved.deny_paths);
     Some(ScopeMatcher {
-        allow: allow_set,
-        deny: deny_set,
-        allow_heads: allows.iter().map(|p| literal_head(p)).collect(),
+        per_source,
+        ws_deny,
     })
 }
 
 /// The declared scope, as the two glob sets plus the literal head of each
 /// allow pattern (see [`ScopeMatcher::covers_tree`]).
 struct ScopeMatcher {
+    per_source: Vec<SourceScope>,
+    ws_deny: super::check_path::DenyOracle,
+}
+
+/// One primary source's declared scope, in that source's own namespace.
+struct SourceScope {
+    /// The source's medium pointer, trailing `/` trimmed. Empty for a
+    /// pointer-less source, where the two readings coincide.
+    pointer: String,
     allow: GlobSet,
     deny: Option<GlobSet>,
     allow_heads: Vec<String>,
 }
 
-impl ScopeMatcher {
-    /// A `tree`-grain anchor names a DIRECTORY, which no file glob matches:
-    /// `src/**/*.rs` matches no path ending in `/`. So a directory is in scope
-    /// when the scope could contain something beneath it, decided by comparing
-    /// it with each allow pattern's literal head (`src/**/*.rs` heads at
-    /// `src/`). Synthesising a filename under the directory and matching that
-    /// was the first attempt, and it failed on exactly this pattern, because
-    /// no invented name satisfies an extension filter.
-    fn covers_tree(&self, dir: &str) -> bool {
+impl SourceScope {
+    /// The forms of `artifact` this source could be speaking about, in ITS
+    /// namespace: the path as written (already source-relative), and — when
+    /// the path is workspace-relative and lies under this source's pointer —
+    /// the same path with the pointer prefix stripped. This is the candidate
+    /// ordering the ratified anchor-artifact decision already uses at anchor
+    /// resolution; membership must ask the same question resolution does, or
+    /// an anchor resolves under one reading and is excluded under another.
+    fn candidates(&self, artifact: &str) -> Vec<String> {
+        if self.pointer.is_empty() {
+            // The two readings coincide; the path as written is the answer.
+            return vec![artifact.to_string()];
+        }
+        let prefix = format!("{}/", self.pointer);
+        if let Some(rest) = artifact.strip_prefix(&prefix)
+            && !rest.is_empty()
+        {
+            // Workspace-relative and under this pointer: the stripped form IS
+            // the source-relative one, and it alone decides. Keeping the
+            // as-written form as a second chance would union two populations —
+            // a source-relative `**/*.md` matches any relative path, so an
+            // artifact in a sibling tree would slip in.
+            return vec![rest.to_string()];
+        }
+        // Not under the pointer. It may already be source-relative (the form
+        // the ratified anchor decision resolves first), which never escapes
+        // its own tree — so a path that climbs out with `..` belongs to some
+        // other source, not this one.
+        if artifact.starts_with("../") || artifact == ".." {
+            return Vec::new();
+        }
+        vec![artifact.to_string()]
+    }
+
+    /// Whether this source's declared scope admits `artifact`.
+    fn admits(&self, artifact: &str, grain: AnchorGrain) -> bool {
+        self.candidates(artifact).iter().any(|c| {
+            let path = c.trim_end_matches('/');
+            if self.deny.as_ref().is_some_and(|d| d.is_match(path)) {
+                return false;
+            }
+            self.allow.is_match(path) || (grain == AnchorGrain::Tree && self.covers_tree_for(path))
+        })
+    }
+
+    fn covers_tree_for(&self, dir: &str) -> bool {
         let dir = format!("{}/", dir.trim_end_matches('/'));
         self.allow_heads
             .iter()
@@ -320,12 +386,18 @@ fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> 
         return true;
     }
     let path = anchor.artifact.trim_end_matches('/');
-    if let Some(deny) = &matcher.deny
-        && deny.is_match(path)
-    {
+    // A binding-level deny is workspace-namespaced and hides the path from the
+    // ingest agent, so it is outside the population whatever any source says.
+    if matcher.ws_deny.is_denied(path) {
         return false;
     }
-    matcher.allow.is_match(path) || (anchor.grain == AnchorGrain::Tree && matcher.covers_tree(path))
+    // In scope when ANY primary source's own scope admits it. A binding with
+    // several sources declares a union, and an anchor belongs to the source
+    // whose namespace it reads in.
+    matcher
+        .per_source
+        .iter()
+        .any(|s| s.admits(&anchor.artifact, anchor.grain))
 }
 
 #[cfg(test)]
@@ -485,6 +557,82 @@ mod tests {
         let engine = Engine::from_workspace_root(&root).unwrap();
         let resolved = resolve_binding_run("engine/src", &binding).unwrap();
         (engine, resolved)
+    }
+
+    /// Membership must ask each source in ITS namespace. A pointer-bearing
+    /// source whose scope is source-relative (the dialect since 2026-08-27)
+    /// still holds anchors written workspace-relative, which is the fallback
+    /// form the ratified anchor decision resolves through. Pooling raw
+    /// patterns answered in a namespace no source speaks, so migrating a
+    /// binding's scope silently moved its anchors to `excluded_out_of_scope`
+    /// while the same report's denominator still counted the files they name.
+    #[test]
+    fn membership_joins_each_source_scope_onto_its_pointer() {
+        let scope_source = |pointer: &str, pattern: &str| Source {
+            name: "src".to_string(),
+            medium_type: MediumType::Filesystem,
+            pointer: pointer.to_string(),
+            change_detection: None,
+            scope: vec![PatternEntry {
+                path: pattern.to_string(),
+                mode: PatternMode::Allow,
+            }],
+            engagement: None,
+            preparation: None,
+        };
+        let resolved_with = |source: Source| {
+            let binding = Binding {
+                version: BINDING_VERSION,
+                intent: None,
+                sources: vec![source],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: None,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: Some(BuildOperation {
+                        mode: BuildMode::Discovery,
+                        trigger: IngestTrigger::Loop,
+                        batch_size: 20,
+                        post_actions: None,
+                    }),
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            };
+            resolve_binding_run("engine/src", &binding).unwrap()
+        };
+
+        // The shape the dogfood bindings actually have: pointer `../dev`,
+        // scope source-relative, anchor stored workspace-relative.
+        let r = resolved_with(scope_source("../dev", "**/*.md"));
+        let m = scope_matcher(&r).expect("a scoped source yields a matcher");
+        assert!(
+            in_declared_scope(
+                &m,
+                &anchor("../dev/institute/CHARTER.md", None, AnchorGrain::File)
+            ),
+            "an anchor under the pointer is in scope after the join"
+        );
+        assert!(
+            !in_declared_scope(&m, &anchor("../other/README.md", None, AnchorGrain::File)),
+            "a path outside the pointer stays out"
+        );
+
+        // A pointer-less source is untouched: the two readings coincide.
+        let r0 = resolved_with(scope_source("", "dev/**/*.md"));
+        let m0 = scope_matcher(&r0).unwrap();
+        assert!(in_declared_scope(
+            &m0,
+            &anchor("dev/notes.md", None, AnchorGrain::File)
+        ));
     }
 
     /// Criterion 1 and 3: two bindings on one mem see different populations,

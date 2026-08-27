@@ -1237,20 +1237,62 @@ fn run_verify(
         for source in &resolved.sources {
             if let ResolvedSource::Primary(p) = source
                 && medium_capabilities(p.medium_type).enumerable
-                && enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root)
-                    .is_empty()
             {
+                let walked = super::cursor::enumerate_source_artifacts_reported(
+                    engine,
+                    p,
+                    &resolved.deny_paths,
+                    workspace_root,
+                );
                 let medium_type = medium_type_wire(p.medium_type);
-                return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
-                    facet: p.name.clone(),
-                    medium_type: medium_type.clone(),
-                    reason: format!(
-                        "medium type '{medium_type}' claims to be enumerable, but this facet's \
-                         enumeration yielded no artifacts — a full measurement over an empty \
-                         walk would report complete coverage of nothing. Check that its scope \
-                         patterns actually select something"
-                    ),
-                }));
+                // A PARTIAL walk is the case the empty-check above cannot
+                // see: some patterns resolved, so the facet is non-empty and
+                // the gate waved it through, and `--full` then reported
+                // complete coverage over a denominator missing whatever the
+                // skipped patterns would have contributed. A full measurement
+                // promises complete figures; a known-incomplete enumeration
+                // cannot deliver one.
+                if let Some(why) = walked.partiality_reason() {
+                    return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
+                        facet: p.name.clone(),
+                        medium_type: medium_type.clone(),
+                        reason: format!(
+                            "this facet's enumeration is incomplete — {why} — so a full \
+                             measurement would claim complete coverage over a denominator \
+                             that is not the population. Fix those patterns first"
+                        ),
+                    }));
+                }
+                if walked.files.is_empty() {
+                    // The remedy text has to name the real cause. "Check that
+                    // its scope patterns actually select something" is wrong
+                    // advice when the patterns DO select artifacts and merely
+                    // speak the retired workspace-relative dialect.
+                    let remedy = if walked.legacy_dialect.is_empty() {
+                        "Check that its scope patterns actually select something".to_string()
+                    } else {
+                        format!(
+                            "its scope pattern(s) are still written against the workspace root \
+                             rather than the source pointer ({}), so they select nothing under \
+                             the pointer join — rewrite them relative to the pointer",
+                            walked
+                                .legacy_dialect
+                                .iter()
+                                .map(|n| n.pattern.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+                    return Err(FindingsError::FullWalkNonEnumerable(FullResyncRefusal {
+                        facet: p.name.clone(),
+                        medium_type: medium_type.clone(),
+                        reason: format!(
+                            "medium type '{medium_type}' claims to be enumerable, but this \
+                             facet's enumeration yielded no artifacts — a full measurement over \
+                             an empty walk would report complete coverage of nothing. {remedy}"
+                        ),
+                    }));
+                }
             }
         }
     }

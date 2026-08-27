@@ -228,7 +228,7 @@
           ]
         },
         "scope": {
-          "description": "Allow/deny selection over the source. A source with no allow patterns is unscoped — a typed refusal at run time, not \"everything\"; a source that truly wants everything writes `**/*`.",
+          "description": "Allow/deny selection over the source. Patterns are SOURCE-relative: each resolves against this source's `pointer`, so a scope is written as the paths beneath the pointer, exactly as the rendered brief presents them (`deny_paths` at the binding level are workspace-relative instead \u2014 they span every source, so they have no single pointer). A source with no allow patterns is unscoped \u2014 a typed refusal at run time, not \"everything\"; a source that truly wants everything writes `**/*`. A pattern that will not compile as a glob is refused at binding validation, naming it.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/patternEntry"

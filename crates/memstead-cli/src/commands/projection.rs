@@ -193,7 +193,7 @@ pub enum ProjectionCommand {
     /// binding's `deny_paths`? Evaluates each candidate against the named
     /// binding — or, with `--binding` omitted, the ACTIVE binding (the one
     /// whose brief was last consumed) — using the engine's own deny dialect:
-    /// the facet-scope glob grammar resolved against the workspace root, plus
+    /// the facet-scope glob grammar, resolved against the workspace root (an ingest deny spans every source, so it has no pointer to be relative to), plus
     /// the literal-base directory-prefix rule (`dev/**` also blocks a read of
     /// `dev` itself). Single-path form takes the candidate as an argument;
     /// `--batch` reads `{"cwd": "<dir>", "paths": ["...", ...]}` from stdin

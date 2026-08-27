@@ -7190,8 +7190,18 @@ community:
         // Two identical creates — one anchored, one not — produce the same
         // `_hash`: the anchors sidecar lives under `.memstead/` and never
         // enters content hashing.
+        //
+        // Both engines run on ONE frozen clock. The schema auto-stamps
+        // `created_date` / `last_modified` at second granularity, so without
+        // this the assertion also silently depended on both creates landing
+        // inside the same second — true on an idle machine, false under a
+        // loaded one, where the two entities differ in frontmatter and the
+        // hashes diverge for a reason that has nothing to do with anchors.
         let (mut anchored, _t1) = folder_engine("specs");
         let (mut plain, _t2) = folder_engine("specs");
+        let frozen = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_754_000_000);
+        anchored.set_mutation_clock(std::sync::Arc::new(move || frozen));
+        plain.set_mutation_clock(std::sync::Arc::new(move || frozen));
         let (actor, client) = cli_actor();
 
         let mut a = empty_create_args("specs", "Same Title");

@@ -69,6 +69,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that union is not reported.
 
 ### Changed
+- **A binding's scope patterns resolve against its source's pointer, and a
+  partial enumeration stops being reported as a percentage.** The facet walk
+  honoured the source pointer for the walk and then matched every candidate by
+  its *workspace*-relative path, with no join. The two readings coincide only
+  for an empty pointer — the shape the scaffolder writes and the only shape the
+  enumeration test covered — so under a real pointer a prefix-anchored pattern
+  or a bare literal matched nothing, a `**`-prefixed one matched regardless,
+  and a scope mixing the two produced a silently truncated denominator that
+  coverage, verify sampling, refinement, the exclusion gate and the change
+  cursor all computed over. Scope is now source-relative in both the mtime walk
+  and the git strategy, which is the convention the anchor artifact decision
+  already ratified and the one the rendered brief teaches. Ingest-level
+  `deny_paths` stay workspace-relative, deliberately: an ingest deny spans every
+  source in a binding, so it has no single pointer to be relative to.
+
+  Three silent degradations went with it. A malformed scope pattern used to
+  take the whole glob set with it — one bad allow emptied the enumeration, one
+  bad deny disabled every deny — so `memstead projection init` and every other
+  binding write now refuse a scope pattern that will not compile, naming it,
+  and the enumerator reports rather than drops what it skipped. A partial
+  enumeration now reports counts with no percentage and names the patterns that
+  were skipped, instead of reducing a truncated set to a ratio. And the deny
+  oracle behind `memstead projection check-path` shared a glob library with the
+  enumeration but not the two rules that extend it (a literal-base
+  directory-prefix block and a malformed-entry fallback), so a path could be
+  denied at the hook and still counted in the denominator; one resolver now
+  answers both.
+
+  `projection verify --full` refuses a facet whose enumeration is
+  known-incomplete rather than reporting complete coverage over it, and its
+  empty-walk remedy text now names the retired dialect as the cause where that
+  is the cause, instead of telling an author to check patterns that do select
+  artifacts. **Existing bindings with prefixed scope patterns must be rewritten
+  relative to their source pointer**; the fidelity report names every pattern
+  still in the old dialect, whether or not the walk came up empty.
 - **`memstead link` attaches a registry mem through the engine, on any workspace
   layout.** It used to walk for the workspace root itself and then read
   `.memstead/config.json` from that root, which only exists in the collapsed

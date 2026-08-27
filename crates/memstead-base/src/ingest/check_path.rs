@@ -1,9 +1,16 @@
 //! Deny-path verdicts for tool-call candidates — the engine half of the
 //! plugin's PreToolUse deny hook, and the one home of the deny dialect.
 //!
-//! A binding's `deny_paths` are **workspace-relative glob patterns** (the
-//! facet-scope grammar), resolved here with the *same* `globset` machinery the
-//! enumeration path uses — one dialect, one implementation. The plugin hook
+//! A binding's `deny_paths` are **workspace-relative glob patterns**, resolved
+//! here by [`DenyOracle`] — the one deny resolver, used verbatim by the `S(D)`
+//! enumeration and by the git strategy's post-diff filter, so a path denied at
+//! the hook is denied everywhere. Sharing the `globset` library alone was not
+//! enough: the two rules below extend the raw match, and until 2026-08-27 the
+//! enumeration did not have them.
+//!
+//! Their resolution root is the WORKSPACE, while a facet's own `scope`
+//! patterns resolve against their source's `pointer`. Two namespaces for two
+//! questions: an ingest deny spans every source in the binding. The plugin hook
 //! used to re-implement these semantics in JavaScript against an
 //! engine-written deny-list cache; both are retired. The hook now asks the
 //! engine (`memstead projection check-path`), and the only cross-process
@@ -68,30 +75,12 @@ pub fn check_deny_paths(
     let cwd = canonicalize_existing_prefix(cwd);
     let workspace_root = canonicalize_existing_prefix(workspace_root);
     let (cwd, workspace_root) = (cwd.as_path(), workspace_root.as_path());
-    // Compile each entry once per call: the glob matcher (skipped when the
-    // entry is malformed — the prefix rule below still applies) and the
-    // literal base for the directory-prefix rule.
-    let entries: Vec<(&String, Option<globset::GlobMatcher>, String)> = deny_paths
-        .iter()
-        .filter(|e| !e.is_empty())
-        .map(|e| {
-            let matcher = Glob::new(e).ok().map(|g| g.compile_matcher());
-            (e, matcher, literal_base(e))
-        })
-        .collect();
-
+    let oracle = DenyOracle::new(deny_paths);
     candidates
         .iter()
         .map(|candidate| {
             let rel = workspace_relative(candidate, cwd, workspace_root);
-            let matched = entries
-                .iter()
-                .find(|(_, matcher, base)| {
-                    matcher.as_ref().is_some_and(|m| m.is_match(&rel))
-                        || (!base.is_empty()
-                            && (rel == *base || rel.starts_with(&format!("{base}/"))))
-                })
-                .map(|(entry, _, _)| (*entry).clone());
+            let matched = oracle.matched_entry(&rel).map(str::to_string);
             PathVerdict {
                 path: candidate.clone(),
                 denied: matched.is_some(),
@@ -99,6 +88,76 @@ pub fn check_deny_paths(
             }
         })
         .collect()
+}
+
+/// The one deny resolver — the glob dialect **plus** the two rules that
+/// extend it — shared verbatim by the path-check command and by the
+/// enumeration that computes `S(D)`.
+///
+/// Sharing the `globset` library was never enough: the oracle also applied a
+/// literal-base directory-prefix rule and a malformed-entry fallback that the
+/// enumerator did not have, so the module's claim of "one dialect, one
+/// implementation" was true of the library and false of the resolution rules.
+/// A path could be denied at the hook and still counted in the denominator.
+/// One type now answers both.
+#[derive(Debug, Default)]
+pub struct DenyOracle {
+    entries: Vec<DenyEntry>,
+}
+
+#[derive(Debug)]
+struct DenyEntry {
+    /// The entry as written — what a verdict names.
+    raw: String,
+    /// Compiled glob, absent when the entry is malformed. A malformed entry
+    /// never disables enforcement: its literal-base prefix rule still applies.
+    matcher: Option<globset::GlobMatcher>,
+    /// Literal prefix before the first glob metacharacter, trailing `/`
+    /// trimmed. Empty when the entry opens with a metacharacter.
+    base: String,
+}
+
+impl DenyOracle {
+    /// Compile a deny list once. Empty entries are dropped.
+    pub fn new(deny_paths: &[String]) -> Self {
+        Self {
+            entries: deny_paths
+                .iter()
+                .filter(|e| !e.is_empty())
+                .map(|e| DenyEntry {
+                    raw: e.clone(),
+                    matcher: Glob::new(e).ok().map(|g| g.compile_matcher()),
+                    base: literal_base(e),
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether this list denies nothing (default-open).
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The first entry (declaration order) denying `rel` — a
+    /// `/`-separated workspace-relative path — or `None`.
+    pub fn matched_entry(&self, rel: &str) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|e| {
+                e.matcher.as_ref().is_some_and(|m| m.is_match(rel))
+                    // Directory-prefix rule: `dev/**` also blocks `dev` itself,
+                    // which the glob alone lets through, and a legacy bare name
+                    // (`dev`) degrades to the same prefix block.
+                    || (!e.base.is_empty()
+                        && (rel == e.base || rel.starts_with(&format!("{}/", e.base))))
+            })
+            .map(|e| e.raw.as_str())
+    }
+
+    /// Whether `rel` is denied.
+    pub fn is_denied(&self, rel: &str) -> bool {
+        self.matched_entry(rel).is_some()
+    }
 }
 
 /// The candidate's workspace-relative path in `/`-separated form. Absolute

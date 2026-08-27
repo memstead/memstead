@@ -32,9 +32,19 @@
 //! entities (entity-granular), so a file-path glob can never select one. This
 //! exemption is designed, not an omission.
 //!
-//! **One deny dialect.** A `deny_paths` entry is a **workspace-relative glob**
-//! — the exact grammar and resolution root as a facet-scope entry, resolved by
-//! the same [`build_glob_set`] / `:(glob,exclude)` machinery. The plugin's
+//! **One deny dialect.** A `deny_paths` entry is a **workspace-relative glob**,
+//! resolved by [`super::check_path::DenyOracle`] — the glob match plus the
+//! literal-base directory-prefix rule plus the malformed-entry fallback — the
+//! same resolver the path-check command answers with. The git strategy pushes
+//! what git's own pathspec dialect can express and filters its diff through
+//! the oracle afterwards, so the two strategies agree even on the entries
+//! pathspecs cannot express.
+//!
+//! Note that a `deny_paths` entry's resolution root is the WORKSPACE, while a
+//! facet-scope entry's is its source's `pointer` (since 2026-08-27). Those are
+//! two namespaces for two questions, not two dialects for one: an ingest deny
+//! spans every source in the binding, so it has no single pointer to be
+//! relative to. The plugin's
 //! PreToolUse deny hook enforces the *identical* dialect against the ingest
 //! agent's Read/Glob/Grep by asking the engine itself: `projection
 //! check-path` answers through [`super::check_path::check_deny_paths`], which
@@ -462,7 +472,17 @@ pub fn enumerate_facet_files_reported(
     let (allow_set, mut malformed) = build_glob_set_reporting(&allows);
     let (scope_deny_set, deny_malformed) = build_glob_set_reporting(&scope_denies);
     malformed.extend(deny_malformed);
-    let (ws_deny_set, _) = build_glob_set_reporting(&ws_denies);
+    // The ingest-level denies go through the SAME resolver the path-check
+    // command answers with — glob plus the literal-base directory-prefix rule
+    // plus the malformed-entry fallback — so a path denied at the hook can
+    // never be counted in the denominator. Sharing the glob library alone left
+    // the two disagreeing on exactly those extra rules.
+    let ws_oracle = super::check_path::DenyOracle::new(
+        &ws_denies
+            .iter()
+            .map(|d| (*d).to_string())
+            .collect::<Vec<_>>(),
+    );
     let Some(allow_set) = allow_set else {
         return ScopeEnumeration {
             malformed,
@@ -513,7 +533,7 @@ pub fn enumerate_facet_files_reported(
                 let denied = scope_deny_set
                     .as_ref()
                     .is_some_and(|d| d.is_match(&src_rel))
-                    || ws_deny_set.as_ref().is_some_and(|d| d.is_match(&rel));
+                    || ws_oracle.is_denied(&rel);
                 if allow_set.is_match(&src_rel) && !denied {
                     out.push(rel);
                 }
@@ -553,8 +573,39 @@ impl ScopeEnumeration {
     /// Whether this enumeration is known to be incomplete. A partial
     /// enumeration must not be reduced to a percentage: the denominator is
     /// not the population.
+    ///
+    /// BOTH causes count. A malformed pattern was skipped, so its share never
+    /// entered the walk; a pattern still in the retired workspace-relative
+    /// dialect selects nothing under the pointer join, so its share is
+    /// likewise absent. The second is the more dangerous of the two, because a
+    /// MIXED scope still enumerates and the surviving subset looks like a
+    /// population.
     pub fn is_partial(&self) -> bool {
-        !self.malformed.is_empty()
+        !self.malformed.is_empty() || !self.legacy_dialect.is_empty()
+    }
+
+    /// Why this enumeration is incomplete, naming the offending patterns, or
+    /// `None` when it is whole.
+    pub fn partiality_reason(&self) -> Option<String> {
+        let mut causes = Vec::new();
+        if !self.malformed.is_empty() {
+            causes.push(format!(
+                "scope pattern(s) that would not compile were skipped: {}",
+                self.malformed.join(", ")
+            ));
+        }
+        if !self.legacy_dialect.is_empty() {
+            causes.push(format!(
+                "scope pattern(s) are still written against the workspace root rather than the \
+                 source pointer, so they select nothing under the pointer join: {}",
+                self.legacy_dialect
+                    .iter()
+                    .map(|n| n.pattern.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        (!causes.is_empty()).then(|| causes.join("; "))
     }
 }
 
@@ -720,6 +771,22 @@ fn compute_git_slice(
     };
     let text = String::from_utf8_lossy(&out.stdout);
 
+    // The exclude pathspecs above are git's own glob dialect and cannot
+    // express the two rules that extend the engine's deny resolution: the
+    // literal-base directory-prefix block, and the fallback that keeps a
+    // MALFORMED entry blocking by its literal prefix rather than dropping it.
+    // Pushing what git understands and then filtering the result through the
+    // same `DenyOracle` the mtime enumeration and the path-check command use
+    // is what makes deny enforcement genuinely strategy-invariant — before
+    // this, a `broken[` entry excluded a file from `S(D)` and left it in the
+    // git slice.
+    let ws_oracle = super::check_path::DenyOracle::new(
+        &ws_denies
+            .iter()
+            .map(|d| (*d).to_string())
+            .collect::<Vec<_>>(),
+    );
+
     let mut slice = Slice::default();
     for line in text.lines() {
         if line.trim().is_empty() {
@@ -731,6 +798,9 @@ fn compute_git_slice(
         let ws_path = relative_path(workspace_root, &normalize_lexical(&git_root.join(git_path)))
             .to_string_lossy()
             .to_string();
+        if ws_oracle.is_denied(&ws_path) {
+            continue;
+        }
         match status.chars().next() {
             Some('A') => slice.added.push(ws_path),
             Some('D') => slice.deleted.push(ws_path),
@@ -1143,9 +1213,14 @@ fn walk_tree_bounded(base: &Path, workspace_root: &Path, cap: usize) -> Option<V
 /// deny is never a silent no-op. Resolution base is the medium's git project
 /// root (so a cross-medium workspace-relative deny like `../dev/**`, whose
 /// target lives outside a sub-medium, still resolves against real files),
-/// falling back to the workspace root. Uses the *same* [`build_glob_set`]
-/// matcher the strategies use, so "does this deny select anything" is answered
-/// with the identical dialect. Best-effort: if the tree can't be enumerated
+/// falling back to the workspace root. Answers through the *same*
+/// [`super::check_path::DenyOracle`] the strategies and the path-check command
+/// use, so "does this deny select anything" is decided by the resolution that
+/// actually enforces it — including the literal-base directory-prefix rule and
+/// the malformed-entry fallback. Answering with the raw glob alone told an
+/// author that a working bare-name entry (`dev`) matched nothing and invited
+/// them to delete it, which would have raised the denominator.
+/// Best-effort: if the tree can't be enumerated
 /// (walk cap hit, no readable base) nothing is reported — a warning is only
 /// ever raised on a confirmed zero-match.
 ///
@@ -1172,12 +1247,13 @@ fn dead_deny_entries(resolved: &ResolvedIngest, workspace_root: &Path) -> Vec<St
         if crate::binding::DEFAULT_SCAFFOLD_DENY_PATHS.contains(&entry.as_str()) {
             continue;
         }
-        let Some(set) = build_glob_set(&[entry.as_str()]) else {
-            // A malformed glob can't be resolved either way — not a confirmed
+        let oracle = super::check_path::DenyOracle::new(std::slice::from_ref(entry));
+        if oracle.is_empty() {
+            // An empty entry resolves to nothing either way — not a confirmed
             // zero-match, so it is not reported here.
             continue;
-        };
-        if !files.iter().any(|f| set.is_match(f)) {
+        }
+        if !files.iter().any(|f| oracle.is_denied(f)) {
             dead.push(entry.clone());
         }
     }
@@ -2128,6 +2204,144 @@ mod tests {
         assert_eq!(
             enumerate_facet_files(&source, &[], root),
             vec!["docs/a.md".to_string()]
+        );
+    }
+
+    /// The enumerator and the path-check oracle agree on the rules that
+    /// EXTEND the glob, not merely on the glob library: a bare-name deny
+    /// (which degrades to a directory-prefix block) and a malformed deny
+    /// (whose literal base still blocks) must exclude from `S(D)` exactly
+    /// what they deny at the hook. Before the shared resolver these two
+    /// shapes were denied at the hook and still counted in the denominator.
+    #[test]
+    fn the_enumerator_applies_the_oracle_extra_rules_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        for dir in ["bare", "broken"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("f.rs"), "").unwrap();
+        }
+        std::fs::write(root.join("keep.rs"), "").unwrap();
+
+        // `bare` is a legacy bare name (no metacharacter at all); `broken[`
+        // will not compile, so only its literal base can block.
+        let denies = vec!["bare".to_string(), "broken[".to_string()];
+        let source = primary(vec![PatternEntry {
+            path: "**/*.rs".to_string(),
+            mode: PatternMode::Allow,
+        }]);
+        let enumerated = enumerate_facet_files(&source, &denies, root);
+        assert_eq!(
+            enumerated,
+            vec!["keep.rs".to_string()],
+            "both extra rules must exclude from S(D)"
+        );
+
+        // The same entries, answered by the hook's own surface.
+        let verdicts = super::super::check_path::check_deny_paths(
+            &denies,
+            &[
+                "bare/f.rs".to_string(),
+                "broken/f.rs".to_string(),
+                "keep.rs".to_string(),
+            ],
+            root,
+            root,
+        );
+        let denied: Vec<bool> = verdicts.iter().map(|v| v.denied).collect();
+        assert_eq!(
+            denied,
+            vec![true, true, false],
+            "the hook and the enumerator must agree path for path"
+        );
+    }
+
+    /// The dead-deny lint must answer with the resolution that ENFORCES a
+    /// deny, not with the raw glob. A bare-name entry (`dev`) blocks through
+    /// the literal-base directory-prefix rule, so it is live — reporting it as
+    /// matching nothing told the author to delete an entry whose removal would
+    /// have raised the denominator, while the same binding's slice and the
+    /// path-check command both proved it working.
+    #[test]
+    fn the_dead_deny_lint_agrees_with_the_resolution_that_enforces() {
+        use crate::binding::BuildMode;
+        use crate::pipeline::IngestTrigger;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("bare")).unwrap();
+        std::fs::write(root.join("bare/f.md"), "").unwrap();
+        std::fs::write(root.join("keep.md"), "").unwrap();
+
+        let live = super::super::check_path::DenyOracle::new(&["bare".to_string()]);
+        assert!(
+            live.is_denied("bare/f.md"),
+            "the enforcing resolution blocks a bare name by its literal base"
+        );
+
+        let resolved = ResolvedIngest {
+            name: "ing".to_string(),
+            mode: BuildMode::Discovery,
+            trigger: IngestTrigger::Loop,
+            batch_size: 50,
+            deny_paths: vec!["bare".to_string(), "nothing-here/**".to_string()],
+            projection_ref: "m/p".to_string(),
+            projection_mem: "m".to_string(),
+            projection_name: "p".to_string(),
+            intent: None,
+            sources: vec![ResolvedSource::Primary(primary(vec![PatternEntry {
+                path: "**/*.md".to_string(),
+                mode: PatternMode::Allow,
+            }]))],
+            destination_mem: "m".to_string(),
+            rules: None,
+            post_actions: None,
+        };
+        let dead = dead_deny_entries(&resolved, root);
+        assert_eq!(
+            dead,
+            vec!["nothing-here/**".to_string()],
+            "only the genuinely dead entry is reported; got {dead:?}"
+        );
+    }
+
+    /// Partiality has two causes, not one. A malformed pattern is the obvious
+    /// one; a pattern still in the retired workspace-relative dialect is the
+    /// dangerous one, because a MIXED scope still enumerates and the surviving
+    /// subset looks like a population. Both must make `is_partial` true, or a
+    /// coverage percentage gets computed over a set that is provably short.
+    #[test]
+    fn a_legacy_dialect_pattern_makes_the_enumeration_partial() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "").unwrap();
+        std::fs::write(root.join("src/b.md"), "").unwrap();
+
+        let mut source = primary(vec![
+            PatternEntry {
+                path: "**/*.rs".to_string(),
+                mode: PatternMode::Allow,
+            },
+            // Written against the workspace root, not the pointer: it selects
+            // nothing now, and its share of the population is missing.
+            PatternEntry {
+                path: "src/b.md".to_string(),
+                mode: PatternMode::Allow,
+            },
+        ]);
+        source.pointer = "src".to_string();
+
+        let got = enumerate_facet_files_reported(&source, &[], root);
+        assert_eq!(got.files, vec!["src/a.rs".to_string()]);
+        assert!(got.malformed.is_empty(), "nothing here fails to compile");
+        assert!(
+            got.is_partial(),
+            "a legacy-dialect pattern truncates the set just as a malformed one does"
+        );
+        let why = got.partiality_reason().expect("a reason is stated");
+        assert!(
+            why.contains("src/b.md") && why.contains("pointer"),
+            "the reason must name the pattern and the cause: {why}"
         );
     }
 
