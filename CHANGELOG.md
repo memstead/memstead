@@ -8,6 +8,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **A binding's fidelity report answers for that binding's anchors.** The anchor
+  axis had no notion of the population it covered, so it covered everything in
+  the destination mem: a binding's report scored anchors another binding wrote,
+  and anchors pointing at artifacts its own scope excludes, and narrowing a
+  binding's scope until it matched nothing left its anchors still scoring. Three
+  separately reported problems were this one defect. The report, the findings
+  pass and the prune proposal now answer for one binding's population;
+  provenance decides membership where an anchor records it, the binding's
+  declared scope decides where it does not.
+
+  Excluded anchors are named in the report with the reason, never deleted,
+  rewritten or silently dropped, and an excluded anchor can no longer raise a
+  finding against a binding that did not write it. The report states what its
+  denominator counted, giving the distinct-artifact count beside the row count
+  so several rows on one artifact cannot read as several artifacts, and says so
+  when anchors recording no producing binding are included by the
+  pre-provenance fallback. That fallback is deliberate: filtering on the field
+  strictly would empty the axis for every mem written before it existed, and an
+  empty report reads as success.
+
 - **memstead.ai's playground derives its live session graph from the engine's
   shared topology.** The server behind the playground carried its own
   coordinate-free projection, written when reaching the engine's types meant

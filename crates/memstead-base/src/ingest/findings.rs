@@ -1489,11 +1489,25 @@ fn run_verify(
             .map(|b| b.files)
             .unwrap_or_default()
     };
+    // Filtered by BINDING, not merely by mem (consistency-sweep 03/01,
+    // criterion 7). The report's coverage lookup was scoped first and this one
+    // was missed, which is the worse of the two: this decides whether an
+    // `Uncovered` finding is RECORDED and whether a prior one stays open, so a
+    // mem filter here let another binding's anchor mark a file covered in the
+    // durable store. An anchor with no recorded binding still counts, by the
+    // same pre-provenance fallback the population uses.
+    let this_binding = binding_hash_of(binding, resolved);
     let covered_now = |artifact: &str| {
         engine
             .anchors_referencing_artifact(artifact)
             .iter()
-            .any(|(eid, _)| eid.mem() == resolved.destination_mem.as_str())
+            .any(|(eid, a)| {
+                eid.mem() == resolved.destination_mem.as_str()
+                    && a.binding
+                        .as_deref()
+                        .map(|b| b == this_binding.as_str())
+                        .unwrap_or(true)
+            })
     };
     for file in &sample_files {
         if !covered_now(file) {

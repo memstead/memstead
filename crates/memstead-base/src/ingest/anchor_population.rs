@@ -133,7 +133,10 @@ pub fn population_for(
                 });
                 continue;
             }
-            (None, _) => out.without_provenance += 1,
+            // NOT counted here: the scope test below can still exclude this
+            // anchor, and a count taken at this point would report an anchor
+            // as kept by the fallback while the population excluded it. A
+            // grade reproduced exactly that: included 0, without_provenance 1.
             _ => {}
         }
 
@@ -154,6 +157,9 @@ pub fn population_for(
             continue;
         }
 
+        if anchor.binding.is_none() {
+            out.without_provenance += 1;
+        }
         out.included.push((eid, resolved_anchor));
     }
 
@@ -528,6 +534,75 @@ mod tests {
         assert_eq!(pop.included[0].1.anchor.artifact, "src/sub/");
         assert_eq!(pop.excluded.len(), 1);
         assert_eq!(pop.excluded[0].artifact, "docs/");
+    }
+
+    /// Criterion 7's asymmetry, at the population level: an anchor another
+    /// binding wrote is not this binding's evidence of coverage either. The
+    /// report's coverage filter carries the same rule; this pins the shared
+    /// premise, that provenance decides membership on both axes rather than
+    /// only on the resolution one.
+    #[test]
+    fn another_bindings_anchor_is_not_this_bindings_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("src/a.rs", Some("theirs"), AnchorGrain::File)],
+        );
+        let pop = population_for(&engine, &r, Some("ours"));
+        assert!(
+            pop.included.is_empty(),
+            "the covering anchor belongs to the other binding"
+        );
+        assert_eq!(pop.excluded.len(), 1);
+        assert_eq!(pop.excluded[0].reason, ExclusionReason::OtherBinding);
+    }
+
+    /// The fallback counter reports what was KEPT. Counting at the provenance
+    /// branch credited anchors the scope test then excluded, so a report could
+    /// say one anchor was included by the fallback over an empty population.
+    #[test]
+    fn the_fallback_counter_counts_only_what_survived_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![anchor("docs/b.md", None, AnchorGrain::File)],
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert!(pop.included.is_empty());
+        assert_eq!(
+            pop.without_provenance, 0,
+            "an excluded anchor was never kept by the fallback"
+        );
+    }
+
+    /// Rows and artifacts must stay comparable. The row count is the
+    /// population's own size, not a sum of the state buckets: deriving it as
+    /// observed plus authored omitted the unobserved rows and printed fewer
+    /// rows than artifacts.
+    #[test]
+    fn the_row_count_is_the_populations_own_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![
+                anchor("src/a.rs", Some("h"), AnchorGrain::File),
+                anchor("src/a.rs", Some("h"), AnchorGrain::Span),
+                anchor("src/b.rs", Some("h"), AnchorGrain::File),
+            ],
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert_eq!(pop.included.len(), 3);
+        assert_eq!(pop.distinct_artifacts(), 2);
+        assert!(
+            pop.included.len() >= pop.distinct_artifacts(),
+            "rows can never be fewer than the artifacts they cover"
+        );
     }
 
     /// A source declaring no allow patterns is unscoped and has no opinion,

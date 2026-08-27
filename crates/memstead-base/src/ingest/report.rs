@@ -123,10 +123,11 @@ pub struct GrainCoverage {
 /// from the resolution (coverage/accuracy) tally.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct AnchorComposition {
-    /// Count per provenance-class wire string across **all** the mem's anchors
-    /// (the full transparency breakdown, including `authored`).
+    /// Count per provenance-class wire string across **this binding's
+    /// population** (the full transparency breakdown, including `authored`).
+    /// Mem-wide until consistency-sweep 03/01 scoped the axis.
     pub by_class: BTreeMap<String, usize>,
-    /// Count per grain wire string across all the mem's anchors.
+    /// Count per grain wire string across this binding's population.
     pub by_grain: BTreeMap<String, usize>,
     /// `authored`-class anchors — the own bucket, excluded from the resolution
     /// denominator below.
@@ -144,6 +145,12 @@ pub struct AnchorComposition {
     /// Non-`authored` anchors that could **not** be observed this pass (state
     /// `None`) — reported honestly, never counted as resolved.
     pub unobserved: usize,
+    /// Anchor ROWS in this binding's population, whatever their state. The
+    /// figures above partition it; this is its size, so `rows` and
+    /// `distinct_artifacts` are always comparable. Deriving it as
+    /// `observed + authored` omitted the unobserved rows and printed fewer
+    /// rows than artifacts.
+    pub counted_rows: usize,
     /// Distinct artifacts among the counted anchors. One artifact legitimately
     /// carries several rows at different grains or classes, and a reader reads
     /// the figures above as being about artifacts, so the two are stated side
@@ -817,9 +824,52 @@ fn render_hard_required(report: &FidelityReport) -> String {
         ratio(report.anchors.resolves, report.anchors.observed)
     ));
     md.push_str(&format!(
-        "- unobserved this pass (state unavailable, never scored as resolved): {}\n\n",
+        "- unobserved this pass (state unavailable, never scored as resolved): {}\n",
         report.anchors.unobserved
     ));
+    // What the denominator counted, stated rather than left to be assumed
+    // (consistency-sweep 03/01, criterion 5). Rows and artifacts differ
+    // whenever one artifact carries several legitimate rows at different
+    // grains or classes, and a reader reads the figures above as being about
+    // artifacts.
+    md.push_str(&format!(
+        "- the figures above count anchor ROWS: {} row(s) over {} distinct artifact(s)\n",
+        report.anchors.counted_rows, report.anchors.distinct_artifacts
+    ));
+    // The population, and what is outside it. Named, never merely counted: a
+    // number a reader cannot act on reproduces the defect one level up.
+    if report.anchors.excluded_other_binding > 0 || report.anchors.excluded_out_of_scope > 0 {
+        md.push_str(&format!(
+            "- excluded from this binding's population: {} written by another binding, \
+             {} outside this binding's declared scope (legal, reported here, never deleted)\n",
+            report.anchors.excluded_other_binding, report.anchors.excluded_out_of_scope
+        ));
+        // Capped inside the always-ships section. Its analogue,
+        // `uncovered_artifacts`, is a budget-gated heavy list; an unbounded
+        // list here would inflate the hard cost past `--budget` on the very
+        // multi-binding mem this plan was written for and flip the whole
+        // report to overbudget, suppressing every heavy section. The counts
+        // above are always complete; the names are a sample when long.
+        const NAMED_CAP: usize = 10;
+        for a in report.anchors.excluded_artifacts.iter().take(NAMED_CAP) {
+            md.push_str(&format!("  - {a}\n"));
+        }
+        if report.anchors.excluded_artifacts.len() > NAMED_CAP {
+            md.push_str(&format!(
+                "  - …and {} more (counts above are complete)\n",
+                report.anchors.excluded_artifacts.len() - NAMED_CAP
+            ));
+        }
+    }
+    if report.anchors.counted_without_provenance > 0 {
+        md.push_str(&format!(
+            "- {} counted anchor(s) record no producing binding and are included by the \
+             pre-provenance fallback, so this population rests partly on that fallback \
+             rather than wholly on provenance\n",
+            report.anchors.counted_without_provenance
+        ));
+    }
+    md.push('\n');
 
     // --- Findings + backlog (B1) ---
     md.push_str("## Findings\n\n");
@@ -1148,10 +1198,23 @@ pub fn compute_fidelity_report(
     let mut uncovered: Vec<String> = Vec::new();
     let mut tree_fanout: BTreeMap<(String, String), usize> = BTreeMap::new();
     for file in &s_d {
+        // Filtered by BINDING, not merely by mem (consistency-sweep 03/01,
+        // criterion 7). The mem filter alone let an anchor written by one
+        // binding mark a file covered for another, which is the same
+        // population defect the resolution figures had, one axis over. An
+        // anchor with no recorded binding still counts, by the same
+        // pre-provenance fallback the population uses: a mem whose anchors
+        // predate the field must not read as wholly uncovered on upgrade.
         let refs = engine.anchors_referencing_artifact(file);
         let mine: Vec<&(crate::EntityId, crate::anchor::Anchor)> = refs
             .iter()
-            .filter(|(eid, _)| eid.mem() == dest.as_str())
+            .filter(|(eid, a)| {
+                eid.mem() == dest.as_str()
+                    && a.binding
+                        .as_deref()
+                        .map(|b| b == key.binding_hash.as_str())
+                        .unwrap_or(true)
+            })
             .collect();
         if mine.is_empty() {
             uncovered.push(file.clone());
@@ -1198,6 +1261,7 @@ pub fn compute_fidelity_report(
         Some(key.binding_hash.as_str()),
     );
     let mut anchors = AnchorComposition {
+        counted_rows: population.included.len(),
         distinct_artifacts: population.distinct_artifacts(),
         excluded_other_binding: population
             .excluded_count(crate::ingest::anchor_population::ExclusionReason::OtherBinding),

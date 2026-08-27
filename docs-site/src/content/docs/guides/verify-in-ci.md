@@ -230,6 +230,12 @@ mem-repo workspace, that is a commit. On CI's ephemeral checkout this is
 harmless and nothing needs pushing back. Do not run it in a working tree
 you need to stay pristine.
 
+**The anchor figures answer for this binding only.** On a mem carrying
+several bindings, each binding's report counts its own anchors and names the
+ones it excluded, with the reason. So two reports on one mem are two different
+measurements, and neither is the mem's total. If you gate on the anchor figures,
+gate per binding.
+
 **A medium with no change signal cannot show drift.** If a facet's
 capability row reports `change_signal: false`, drift on it is
 unobservable — not absent. The verdict degrades to `inconclusive` and

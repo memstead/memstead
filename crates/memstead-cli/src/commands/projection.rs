@@ -170,6 +170,16 @@ pub enum ProjectionCommand {
     /// capability-matrix block, and the tier-3 backlog depth — aggregates always
     /// ship; heavy per-artifact lists greedy-fill under `--budget` and drop to
     /// hints (forced back in with `--include`).
+    ///
+    /// The anchor figures answer for THIS BINDING'S population only: anchors
+    /// another binding wrote, and anchors pointing outside this binding's
+    /// declared scope, are excluded from every figure and named in the report
+    /// rather than dropped. They are never deleted or rewritten: exclusion is
+    /// a reporting decision. The report states what its denominator counted
+    /// (anchor rows, with the distinct-artifact count beside them, since one
+    /// artifact legitimately carries several rows), and says so when anchors
+    /// recording no producing binding are included by the pre-provenance
+    /// fallback.
     Verify(VerifyArgs),
     /// Answer deny verdicts: is a path (or Glob/Grep pattern) hidden by a
     /// binding's `deny_paths`? Evaluates each candidate against the named

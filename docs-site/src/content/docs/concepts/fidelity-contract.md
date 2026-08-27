@@ -63,6 +63,33 @@ reported as its own bucket. Measuring authored prose against a source it was nev
 meant to reproduce would manufacture false drift; the contract refuses to do that,
 and says so where the excluded bucket appears.
 
+## The population a report answers for
+
+A mem can carry several bindings, and the anchors in it are not all the same
+binding's business. A report answers for exactly one population: the anchors the
+binding under verification is responsible for. Membership is decided by what the
+anchor records about its own origin where it records one, and by the binding's
+declared scope where it does not, so an anchor pointing at an artifact this
+binding's scope does not cover is not counted against it.
+
+Excluded anchors are **named, never dropped**. The report states how many were
+excluded because another binding wrote them and how many because they sit outside
+this binding's scope, and lists the artifacts. Exclusion is a reporting decision:
+nothing is deleted, rewritten, or marked invalid, and an excluded anchor cannot
+raise a finding against a binding that does not answer for it.
+
+The report also states **what its denominator counted**. One artifact legitimately
+carries several anchors at different grains or classes, so the row count and the
+distinct-artifact count are printed side by side rather than the rows being merged
+into one figure a reader would misread as artifacts.
+
+Anchors written before anchors recorded their producing binding carry no such
+record. Those are **counted**, not discarded: filtering them out strictly would
+empty the axis for every mem written before the field existed, and an empty report
+reads as success. The report says how many anchors it counted on that basis, so a
+population established by provenance is distinguishable from one resting on the
+fallback.
+
 ## Three tiers of scrutiny
 
 Not every check costs the same, so verification is layered — cheap deterministic
