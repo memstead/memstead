@@ -262,7 +262,7 @@ impl Engine {
         )?;
 
         self.record_self_write(prepared.mount_idx, &commit_sha);
-        self.stamp_mutation_versions(prepared.mount_idx);
+        let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
 
         let content_hash = self.apply_prepared_relate_to_store(&prepared)?;
 
@@ -300,6 +300,8 @@ impl Engine {
             mut warnings,
             ..
         } = prepared;
+
+        warnings.extend(stamp_warnings);
 
         // Signal crossings ride the out-of-band warning channel beside
         // the success payload — never error-shaped, never changing the
@@ -386,7 +388,12 @@ impl Engine {
             &ctx,
         )?;
         self.record_self_write(mount_idx, &commit_sha);
-        self.stamp_mutation_versions(mount_idx);
+        // `relate_entity` returns early into this path, so the stamp call on
+        // the ordinary path never runs and its report has to be collected
+        // here (04/03, criterion 3, found by the plan's re-grade).
+        outcome
+            .warnings
+            .extend(self.stamp_mutation_versions(mount_idx));
         outcome.commit_sha = commit_sha;
         outcome
             .warnings
@@ -1045,6 +1052,7 @@ impl Engine {
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if relates.is_empty() {
             return Ok(crate::ops::BatchResult {
+                warnings: Vec::new(),
                 orphan_stubs_removed: Vec::new(),
                 errors_suppressed: 0,
                 applied: true,
@@ -1230,6 +1238,7 @@ impl Engine {
                 })
                 .collect();
             return Ok(crate::ops::BatchResult {
+                warnings: Vec::new(),
                 orphan_stubs_removed: Vec::new(),
                 errors_suppressed: suppressed,
                 applied: false,
@@ -1269,6 +1278,7 @@ impl Engine {
                 })
                 .collect();
             return Ok(crate::ops::BatchResult {
+                warnings: Vec::new(),
                 orphan_stubs_removed,
                 errors_suppressed: 0,
                 applied: true,
@@ -1338,6 +1348,7 @@ impl Engine {
         }
 
         // Provenance per entry, self-write markers per mount.
+        let mut batch_warnings: Vec<WarningHint> = Vec::new();
         for (p, note) in prepared.iter().zip(notes.iter()) {
             let commit_sha = mount_commits
                 .iter()
@@ -1356,7 +1367,7 @@ impl Engine {
                 .with_role(self.current_role),
             )?;
             self.record_self_write(p.mount_idx, &commit_sha);
-            self.stamp_mutation_versions(p.mount_idx);
+            batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
         }
 
         // Orphan-stub GC over every removed edge's target — same
@@ -1391,6 +1402,7 @@ impl Engine {
             .collect();
 
         Ok(crate::ops::BatchResult {
+            warnings: batch_warnings,
             orphan_stubs_removed,
             errors_suppressed: 0,
             applied: true,

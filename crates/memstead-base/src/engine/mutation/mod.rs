@@ -418,7 +418,11 @@ impl super::Engine {
             &ctx,
         )?;
         self.record_self_write(mount_idx, &commit_sha);
-        self.stamp_mutation_versions(mount_idx);
+        // Anchor-hash backfill returns a count, not an agent-facing response,
+        // so an intervention report has nowhere to ride. Discarded knowingly:
+        // the merge itself still happened, so nothing was lost — only the
+        // notice that someone else had written (04/03, criterion 3).
+        let _intervention_has_no_channel_here = self.stamp_mutation_versions(mount_idx);
         Ok(written)
     }
 
@@ -438,13 +442,16 @@ impl super::Engine {
     /// preceded it. On git-branch backends the config rides the
     /// `__MEMSTEAD` ref, so a stamp write never moves the mem branch
     /// head — mutation `commit_sha` cursors stay valid.
-    pub(crate) fn stamp_mutation_versions(&mut self, mount_idx: usize) {
+    pub(crate) fn stamp_mutation_versions(
+        &mut self,
+        mount_idx: usize,
+    ) -> Vec<crate::ops::WarningHint> {
         let Some(state) = self.mounts.get(mount_idx) else {
-            return;
+            return Vec::new();
         };
         let mem = state.mount.mem.clone();
         let Some(schema) = self.schemas.get(&mem) else {
-            return;
+            return Vec::new();
         };
         let (name, version) = schema.id();
         // Full build version (semver + git build sha when present) so
@@ -454,29 +461,45 @@ impl super::Engine {
             engine_version: crate::build_info::full_version().to_string(),
             schema: format!("{name}@{version}"),
         };
-        let Some(state) = self.mounts.get_mut(mount_idx) else {
-            return;
-        };
         // A mem with no loaded config has nowhere to carry the stamp;
         // skip silently (in-memory sketches, minimal fixtures).
-        let Some(config) = state.mem_config.as_ref() else {
-            return;
+        let Some(config) = self
+            .mounts
+            .get(mount_idx)
+            .and_then(|s| s.mem_config.as_ref())
+        else {
+            return Vec::new();
         };
         if config.mutation_stamp.as_ref() == Some(&stamp) {
-            return;
+            return Vec::new();
         }
-        let mut updated = config.clone();
-        updated.mutation_stamp = Some(stamp);
-        let Ok(mut bytes) = serde_json::to_vec_pretty(&updated) else {
-            return;
-        };
-        bytes.push(b'\n');
-        if state
-            .backend
-            .write_mem_config_with_note(&bytes, Some("engine version stamp"))
-            .is_ok()
-        {
-            state.mem_config = Some(updated);
+        // Through the shared writer like the seven lifecycle setters
+        // (04/03, criterion 7). This one is why the damage looked
+        // spontaneous: it rides ordinary create/update/relate/rename/delete,
+        // so an operator saw a config field vanish during an innocuous entity
+        // write with no lifecycle call in sight. It stays exactly as dormant
+        // as before, because the equality guard above still decides whether
+        // to write at all; what changed is only what it writes over.
+        // The intervention rides the ENTITY mutation's own response: this
+        // writer has no response of its own, and the operator who sees a
+        // config field move during an innocuous entity write is owed the
+        // reason there (04/03, criterion 3, found by the plan's grade —
+        // an earlier draft discarded this with `let _`).
+        match self.write_mem_config_merged(
+            mount_idx,
+            &mem,
+            Some("engine version stamp"),
+            &move |c: &mut memstead_schema::config::MemConfig| {
+                c.mutation_stamp = Some(stamp.clone());
+            },
+        ) {
+            Ok((_, intervened)) if !intervened.is_empty() => {
+                vec![crate::ops::WarningHint::ConfigWriteIntervened {
+                    mem,
+                    fields: intervened,
+                }]
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -1689,6 +1712,171 @@ mod tests {
             .unwrap();
         let again = disk_stamp(&mem_dir).expect("stamp survives");
         assert_eq!(again, stamp);
+    }
+
+    /// The reported damage, reproduced (04/03, criteria 7 and 8): a
+    /// long-lived engine boots, a sibling writes the config out of band, and
+    /// the engine's next ENTITY mutation stamps the version. Before the fix
+    /// that stamp serialized the boot-time struct and the sibling's write was
+    /// gone. No lifecycle call is involved anywhere in this test, which is why
+    /// the loss looked spontaneous to the operator who reported it.
+    ///
+    /// The divergent stamp is written to disk rather than injected, because
+    /// the running binary's version is a compile-time constant with no runtime
+    /// seam; this is how the existing skew coverage reaches the condition too.
+    #[test]
+    fn a_sibling_config_write_survives_the_next_entity_mutation() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        // Seed a stamp that disagrees with this binary, so the stamp writer is
+        // live rather than dormant: that is the two-binary topology the report
+        // came from.
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: "0.0.1-other".to_string(),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+
+        // The long-lived engine boots and caches the config as it is now.
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+
+        // A sibling process sets a description. The engine never learns:
+        // a config-only write advances no entity head and appends no change
+        // log line, so the staleness probe cannot see it.
+        let path = mem_dir
+            .join(memstead_schema::MEM_META_DIR)
+            .join("config.json");
+        let mut sibling: memstead_schema::MemConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        sibling.description = Some("written by the sibling".to_string());
+        std::fs::write(&path, serde_json::to_vec_pretty(&sibling).unwrap()).unwrap();
+
+        // An ordinary entity write. Nothing about it mentions config.
+        engine
+            .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
+            .unwrap();
+
+        let after: memstead_schema::MemConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            after.description.as_deref(),
+            Some("written by the sibling"),
+            "the sibling's description must survive an entity mutation"
+        );
+        assert_eq!(
+            after.mutation_stamp.map(|s| s.engine_version),
+            Some(crate::build_info::full_version().to_string()),
+            "and the stamp this engine came to write must still land"
+        );
+    }
+
+    /// Criterion 3 for the stamp writer: the intervention reaches the ENTITY
+    /// mutation's own response. The stamp has no response of its own, and an
+    /// earlier draft discarded the report with `let _`, so an operator whose
+    /// config moved during an innocuous entity write was told nothing.
+    #[test]
+    fn the_stamps_intervention_rides_the_entity_mutations_response() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: "0.0.1-other".to_string(),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+
+        let path = mem_dir
+            .join(memstead_schema::MEM_META_DIR)
+            .join("config.json");
+        let mut sibling: memstead_schema::MemConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        sibling.description = Some("theirs".to_string());
+        std::fs::write(&path, serde_json::to_vec_pretty(&sibling).unwrap()).unwrap();
+
+        let outcome = engine
+            .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
+            .unwrap();
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| w.code() == "CONFIG_WRITE_INTERVENED"),
+            "the entity mutation must report the config intervention: {:?}",
+            outcome.warnings
+        );
+    }
+
+    /// Criterion 5: the folder backend's config write is a compare-and-set,
+    /// not check-then-write. A write whose `expected` no longer matches the
+    /// file must refuse rather than overwrite.
+    #[test]
+    fn the_folder_config_write_refuses_a_stale_expectation() {
+        use crate::backend::MemBackend;
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(&mem_dir, None);
+        let backend = FilesystemMemWriter::new(mem_dir.clone());
+        let observed = backend.read_mem_config().unwrap().expect("config exists");
+
+        // Someone else writes.
+        let path = mem_dir
+            .join(memstead_schema::MEM_META_DIR)
+            .join("config.json");
+        std::fs::write(&path, br#"{"schema": "default@1.0.0", "title": "theirs"}"#).unwrap();
+
+        // A write against the stale expectation is refused, not applied.
+        let wrote = backend
+            .write_mem_config_cas(Some(&observed), b"{\"schema\": \"default@1.0.0\"}", None)
+            .unwrap();
+        assert!(!wrote, "a stale expectation must not overwrite");
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("theirs"),
+            "their write survived: {on_disk}"
+        );
+
+        // And against the current bytes it lands.
+        let current = backend.read_mem_config().unwrap().unwrap();
+        assert!(
+            backend
+                .write_mem_config_cas(Some(&current), b"{\"schema\": \"default@1.0.0\"}", None)
+                .unwrap(),
+            "a current expectation writes"
+        );
+    }
+
+    /// Criterion 7's complement: the stamp does not become a busy writer. With
+    /// a stamp that already agrees, an entity mutation must not touch the
+    /// config at all, so a sibling's write is untouched for the boring reason
+    /// rather than the interesting one.
+    #[test]
+    fn a_matching_stamp_still_writes_no_config_at_all() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        write_config(
+            &mem_dir,
+            Some(memstead_schema::MutationStamp {
+                engine_version: crate::build_info::full_version().to_string(),
+                schema: "default@1.0.0".to_string(),
+            }),
+        );
+        let mut engine = stamped_engine_fixture(mem_dir.clone());
+        let path = mem_dir
+            .join(memstead_schema::MEM_META_DIR)
+            .join("config.json");
+        let before = std::fs::read(&path).unwrap();
+        engine
+            .create_entity_with_ctx(spec_create_args("Seed"), &CommitContext::internal())
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "a mutation whose stamp already matches must write no config"
+        );
     }
 
     /// Criterion 3/4 (agent-trust plan 02): boot under a different

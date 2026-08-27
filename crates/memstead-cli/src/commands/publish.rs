@@ -184,9 +184,15 @@ fn run_with_root(
             if let Some(ver) = target_version.clone()
                 && !args.dry_run
             {
-                engine
+                let bumped = engine
                     .set_mem_version(mem_name, ver, Some("version bump for registry publish"))
                     .map_err(CliError::from_engine_op)?;
+                // Publish is about to ship this mem outward, so a config that
+                // moved under us is exactly what the operator needs to see
+                // before the archive leaves (04/03, criterion 3).
+                for w in &bumped.warnings {
+                    crate::output::print_markdown(&format!("> {w}"));
+                }
             }
             resolved_version = target_version.as_ref().map(|v| v.to_string()).or_else(|| {
                 engine

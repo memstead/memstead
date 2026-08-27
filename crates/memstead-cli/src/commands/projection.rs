@@ -1156,15 +1156,19 @@ fn consume_reconcile_cursors(
                         && pointer_resolves_to(root, &p.pointer, abs_path)
                     {
                         let key = format!("{binding_id}/{}#synced", p.name);
-                        if engine
-                            .set_mem_sync_state(
-                                &resolved.destination_mem,
-                                &key,
-                                sha,
-                                Some("projection migrate: seeded from reconcile-cursors.json"),
-                            )
-                            .is_ok()
-                        {
+                        // `.is_ok()` dropped the outcome and with it any
+                        // report that a sibling had moved the config
+                        // (04/03, criterion 3). A seeding pass that silently
+                        // merged over someone is worth one line of output.
+                        if let Ok(outcome) = engine.set_mem_sync_state(
+                            &resolved.destination_mem,
+                            &key,
+                            sha,
+                            Some("projection migrate: seeded from reconcile-cursors.json"),
+                        ) {
+                            for w in &outcome.warnings {
+                                crate::output::print_markdown(&format!("> {w}"));
+                            }
                             seeded.push(key);
                         }
                     }

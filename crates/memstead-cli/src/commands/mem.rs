@@ -1081,6 +1081,20 @@ pub struct SetInternalArgs {
     pub note: Option<String>,
 }
 
+/// Warnings as a markdown block, or empty when there are none.
+///
+/// Shared because three setters rendered warnings in `--json` only and stayed
+/// silent in human mode, which is where an operator would actually read
+/// `CONFIG_WRITE_INTERVENED` (04/03, criterion 3, found by the plan's
+/// re-grade). One renderer, so the next setter cannot forget it.
+fn warning_block(warnings: &[memstead_base::ops::WarningHint]) -> String {
+    if warnings.is_empty() {
+        return String::new();
+    }
+    let rendered: Vec<String> = warnings.iter().map(ToString::to_string).collect();
+    format!("\n\n> warnings:\n> - {}", rendered.join("\n> - "))
+}
+
 pub fn run_set_title(ctx: &CliContext, args: SetTitleArgs) -> anyhow::Result<()> {
     let new_title = {
         let trimmed = args.title.trim();
@@ -1106,8 +1120,11 @@ pub fn run_set_title(ctx: &CliContext, args: SetTitleArgs) -> anyhow::Result<()>
         let old = outcome.old_title.as_deref().unwrap_or("<none>");
         let new = outcome.new_title.as_deref().unwrap_or("<cleared>");
         crate::output::print_markdown(&format!(
-            "# Mem `{}` title updated\n\n- Old: {}\n- New: {}",
-            outcome.mem, old, new,
+            "# Mem `{}` title updated\n\n- Old: {}\n- New: {}{}",
+            outcome.mem,
+            old,
+            new,
+            warning_block(&outcome.warnings),
         ));
     }
     Ok(())
@@ -1161,10 +1178,11 @@ pub fn run_set_subject(ctx: &CliContext, args: SetSubjectArgs) -> anyhow::Result
             ),
         };
         crate::output::print_markdown(&format!(
-            "# Mem `{}` subject updated\n\n- Old: {}\n- New: {}",
+            "# Mem `{}` subject updated\n\n- Old: {}\n- New: {}{}",
             outcome.mem,
             describe(&outcome.old_subject),
             describe(&outcome.new_subject),
+            warning_block(&outcome.warnings),
         ));
     }
     Ok(())
@@ -1184,20 +1202,30 @@ pub fn run_set_internal(ctx: &CliContext, args: SetInternalArgs) -> anyhow::Resu
             .map_err(crate::CliError::from_engine_op)?,
     };
 
+    let internal_applied = applied.internal;
     if ctx.json {
-        crate::output::print_json(&serde_json::json!({ "mem": args.name, "internal": applied }))?;
+        crate::output::print_json(&serde_json::json!({
+            "mem": args.name,
+            "internal": internal_applied,
+            "warnings": applied
+                .warnings
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+        }))?;
     } else {
         crate::output::print_markdown(&format!(
             "# Mem `{}` {}\n\nHidden from the default overview: **{}**. Inspect with \
-             `memstead overview --mem {}`.",
+             `memstead overview --mem {}`.{}",
             args.name,
-            if applied {
+            if internal_applied {
                 "marked internal"
             } else {
                 "un-marked internal"
             },
-            applied,
+            internal_applied,
             args.name,
+            warning_block(&applied.warnings),
         ));
     }
     Ok(())

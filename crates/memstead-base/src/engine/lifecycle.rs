@@ -1300,6 +1300,122 @@ impl Engine {
     /// preserved verbatim. Config-absent mems (no `config.json`) keep
     /// `Mount.schema` as their settled pin, so there is nothing to update
     /// — a clean no-op.
+    /// **The one way this engine writes a mem config.** Every config-writing
+    /// operation goes through it; none serializes its cached struct
+    /// (consistency-sweep 04/03, criteria 1 and 2).
+    ///
+    /// The defect it removes: a long-lived MCP server reads each mem's config
+    /// once at boot and holds it for days. Eight operations used to clone that
+    /// cached struct, set one field, and write the whole thing back, so
+    /// anything a sibling process changed in between was gone. The
+    /// reload-before-operation invariant did not save them, because the
+    /// staleness probe watches the entity branch (git-branch) or the change
+    /// log (folder) and a config-only write advances neither.
+    ///
+    /// What this does instead is what the schema-pin writer next door already
+    /// did: read the config the backend HAS, mutate the one field on that
+    /// JSON, write it back. A field this call did not set cannot be reverted,
+    /// because this call never had an opinion about it.
+    ///
+    /// `apply` receives the freshly-read config, PARSED. It deliberately does
+    /// not receive raw JSON: an earlier draft handed out the `Value` and each
+    /// closure wrote its own key name, which put `review_mark` in the file
+    /// where the struct reads `reviewMark` and lost the field on the next
+    /// read. Serde owns the wire names; the closures must not restate them.
+    /// Unknown fields survive because `MemConfig` flattens them into `extra`.
+    ///
+    /// `apply` runs again on a re-read if the file moved between the read and
+    /// the write, so it must be a pure function of the config it is handed,
+    /// never of the engine's cache.
+    ///
+    /// Returns the parsed new config plus, when the stored config had moved on
+    /// from what this engine last observed, the fields the intervening writer
+    /// had changed. The caller rides that on its own response as
+    /// `CONFIG_WRITE_INTERVENED`.
+    pub(crate) fn write_mem_config_merged(
+        &mut self,
+        mount_idx: usize,
+        mem_name: &str,
+        note: Option<&str>,
+        apply: &dyn Fn(&mut memstead_schema::config::MemConfig),
+    ) -> Result<(memstead_schema::config::MemConfig, Vec<String>), EngineError> {
+        let backend = self.mounts[mount_idx].backend.as_ref();
+        let read = |b: &dyn crate::backend::MemBackend| -> Result<Vec<u8>, EngineError> {
+            b.read_mem_config()
+                .map_err(|e| EngineError::Mem(format!("read mem config for update: {e}")))?
+                .ok_or_else(|| {
+                    EngineError::InvalidInput(format!(
+                        "mem '{mem_name}' has no stored MemConfig (initialize the mem via \
+                         `memstead init` or `memstead mem create` first)"
+                    ))
+                })
+        };
+
+        let stored = read(backend)?;
+        // What the intervening writer changed, if anyone did. Compared against
+        // the engine's cached copy, never against a clock: criterion 6 forbids
+        // reacting to cache age, and a single-writer workspace has an
+        // identical cache, so this is empty there (criterion 4).
+        let intervened = match self.mounts[mount_idx].mem_config.as_ref() {
+            Some(cached) => changed_config_fields(cached, &stored),
+            None => Vec::new(),
+        };
+
+        let render =
+            |raw: &[u8]| -> Result<(memstead_schema::config::MemConfig, Vec<u8>), EngineError> {
+                let value: serde_json::Value = serde_json::from_slice(raw)
+                    .map_err(|e| EngineError::Mem(format!("parse mem config for update: {e}")))?;
+                let mut cfg = memstead_schema::config::parse_mem_config(&value)
+                    .map_err(|e| EngineError::Mem(format!("parse mem config for update: {e}")))?;
+                apply(&mut cfg);
+                let mut bytes = serde_json::to_vec_pretty(&cfg)
+                    .map_err(|e| EngineError::Mem(format!("serialize mem config: {e}")))?;
+                bytes.push(b'\n');
+                Ok((cfg, bytes))
+            };
+        let (mut parsed, mut bytes) = render(&stored)?;
+
+        // Compare-and-set, done by the backend so the check and the write are
+        // one step. An earlier draft re-read here and then wrote, which is
+        // check-then-write and leaves exactly the window criterion 5 names
+        // open. On a mismatch the loop re-reads, re-applies onto what is
+        // there, and retries: the intervening writer's change is merged, never
+        // overwritten. Bounded, because an unbounded retry against a hot
+        // writer is a hang, and reaching the bound is a real contention
+        // problem the caller should hear about rather than a state to spin in.
+        let mut expected = stored;
+        for attempt in 0..8 {
+            let wrote = self.mounts[mount_idx].backend.write_mem_config_cas(
+                Some(&expected),
+                &bytes,
+                note,
+            )?;
+            if wrote {
+                break;
+            }
+            if attempt == 7 {
+                return Err(EngineError::Mem(format!(
+                    "mem '{mem_name}' config is being written concurrently: eight \
+                     compare-and-set attempts all lost the race. Retry, or find the \
+                     writer that is not backing off."
+                )));
+            }
+            expected = read(self.mounts[mount_idx].backend.as_ref())?;
+            let rendered = render(&expected)?;
+            parsed = rendered.0;
+            bytes = rendered.1;
+        }
+
+        let mounted = &mut self.mounts[mount_idx];
+        mounted.mem_config = Some(parsed.clone());
+        // Refresh the head cursor so the next drift probe does not surface
+        // MEM_RELOADED for the commit this call just produced.
+        if let Some(sha) = mounted.backend.current_head().ok().flatten() {
+            mounted.last_known_head = Some(sha);
+        }
+        Ok((parsed, intervened))
+    }
+
     fn persist_mem_schema_pin(
         &mut self,
         mount_idx: usize,
@@ -1638,32 +1754,27 @@ impl Engine {
             warnings.push(w);
         }
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — \
-                     cannot set version (initialize the mem via `memstead init` \
-                     or `memstead mem create` first)"
-            ))
-        })?;
-        let old_version = config.version.clone();
-        config.version = Some(new_version.clone());
-
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        // Refresh the head cursor so the next drift probe doesn't
-        // surface MEM_RELOADED for the commit we just produced
-        // (the git-branch backend's `write_mem_config` writes a
-        // commit on `__MEMSTEAD`; folder backends carry no head and the
-        // refresh is a no-op).
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
+        // The old value is read from the STORED config, not the cache: the
+        // cache may be days stale, and reporting a version the file has not
+        // held since boot would be its own small lie.
+        let old_version = self.mounts[mount_idx]
+            .mem_config
+            .as_ref()
+            .and_then(|c| c.version.clone());
+        let target = new_version.clone();
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &move |c: &mut memstead_schema::config::MemConfig| {
+                c.version = Some(target.clone());
+            },
+        )?;
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
         Ok(crate::ops::SetMemVersionOutcome {
@@ -1700,27 +1811,24 @@ impl Engine {
             warnings.push(w);
         }
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — \
-                     cannot set description (initialize the mem via `memstead init` \
-                     or `memstead mem create` first)"
-            ))
-        })?;
-        let old_description = config.description.clone();
-        config.description = new_description.clone();
-
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
+        let old_description = self.mounts[mount_idx]
+            .mem_config
+            .as_ref()
+            .and_then(|c| c.description.clone());
+        let target = new_description.clone();
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &move |c: &mut memstead_schema::config::MemConfig| {
+                c.description = target.clone();
+            },
+        )?;
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
         Ok(crate::ops::SetMemDescriptionOutcome {
@@ -1755,25 +1863,24 @@ impl Engine {
             warnings.push(w);
         }
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — cannot set title"
-            ))
-        })?;
-        let old_title = config.title.clone();
-        config.title = new_title.clone();
-
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
+        let old_title = self.mounts[mount_idx]
+            .mem_config
+            .as_ref()
+            .and_then(|c| c.title.clone());
+        let target = new_title.clone();
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &move |c: &mut memstead_schema::config::MemConfig| {
+                c.title = target.clone();
+            },
+        )?;
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
         Ok(crate::ops::SetMemTitleOutcome {
@@ -1807,25 +1914,24 @@ impl Engine {
             warnings.push(w);
         }
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — cannot set subject"
-            ))
-        })?;
-        let old_subject = config.subject.clone();
-        config.subject = new_subject.clone();
-
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
+        let old_subject = self.mounts[mount_idx]
+            .mem_config
+            .as_ref()
+            .and_then(|c| c.subject.clone());
+        let target = new_subject.clone();
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &move |c: &mut memstead_schema::config::MemConfig| {
+                c.subject = target.clone();
+            },
+        )?;
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
         Ok(crate::ops::SetMemSubjectOutcome {
@@ -1852,7 +1958,7 @@ impl Engine {
         mem_name: &str,
         internal: bool,
         note: Option<&str>,
-    ) -> Result<bool, EngineError> {
+    ) -> Result<crate::ops::SetMemInternalOutcome, EngineError> {
         let mount_idx = self
             .mounts
             .iter()
@@ -1864,33 +1970,36 @@ impl Engine {
 
         let _ = self.reload_if_stale(Some(mem_name));
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — initialize the mem first"
-            ))
-        })?;
-        if internal {
-            config
-                .extra
-                .insert("internal".to_string(), serde_json::Value::Bool(true));
-        } else {
-            config.extra.remove("internal");
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &move |c: &mut memstead_schema::config::MemConfig| {
+                if internal {
+                    c.extra
+                        .insert("internal".to_string(), serde_json::Value::Bool(true));
+                } else {
+                    c.extra.remove("internal");
+                }
+            },
+        )?;
+        // This one used to return a bare `bool` and so had nowhere to put the
+        // intervention report: it was dropped, not even logged (04/03,
+        // criterion 3, found by the plan's grade). A writer whose signature
+        // cannot carry a warning is a writer that silently will not.
+        let mut warnings = Vec::new();
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
-        }
-
-        Ok(internal)
+        Ok(crate::ops::SetMemInternalOutcome {
+            mem: mem_name.to_string(),
+            internal,
+            warnings,
+        })
     }
 
     /// Set (or clear) one opaque sync-state token in a mem's per-mem
@@ -1943,40 +2052,36 @@ impl Engine {
             warnings.push(w);
         }
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — \
-                 cannot set sync state (initialize the mem via `memstead init` \
-                 or `memstead mem create` first)"
-            ))
-        })?;
-
-        // Empty token clears the baseline; otherwise insert/overwrite.
-        // `removed` distinguishes a no-op clear (key absent) from a real
-        // one so the outcome is honest.
-        let removed;
-        let previous;
-        if token.is_empty() {
-            previous = config.sync_state.remove(key);
-            removed = previous.is_some();
-        } else {
-            previous = config.sync_state.insert(key.to_string(), token.to_string());
-            removed = false;
-        }
-
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        // Refresh the head cursor so the next drift probe doesn't surface
-        // MEM_RELOADED for the commit we just produced.
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
+        // `previous` has to come from the config this write actually lands
+        // on, not from the cache: a sibling ingest pass may have moved the
+        // very token this call is replacing, and reporting the cached value
+        // would name a baseline that has not been current since boot. The
+        // cell is written by each `apply` pass, so after a compare-and-set
+        // retry it holds what was really overwritten.
+        let seen: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+        let key_owned = key.to_string();
+        let token_owned = token.to_string();
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &|c: &mut memstead_schema::config::MemConfig| {
+                *seen.borrow_mut() = if token_owned.is_empty() {
+                    c.sync_state.remove(&key_owned)
+                } else {
+                    c.sync_state.insert(key_owned.clone(), token_owned.clone())
+                };
+            },
+        )?;
+        let previous = seen.into_inner();
+        // `removed` distinguishes a no-op clear (key absent) from a real one
+        // so the outcome is honest.
+        let removed = token.is_empty() && previous.is_some();
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
         Ok(crate::ops::SetMemSyncStateOutcome {
@@ -2722,6 +2827,33 @@ impl Engine {
 /// (`Engine::persist_mem_schema_pin`) and the below-boot repair path
 /// (memstead-git-branch) — the two must never fork: a pin written by
 /// repair must be byte-shaped exactly as one written by the engine.
+/// Field names on which the stored config differs from `cached`.
+///
+/// Compared as JSON so the comparison covers every field the struct models
+/// without a hand-written field list that a new field would silently escape.
+/// A parse failure yields no fields rather than a false report: the write
+/// itself will surface the malformed config.
+fn changed_config_fields(
+    cached: &memstead_schema::config::MemConfig,
+    stored_bytes: &[u8],
+) -> Vec<String> {
+    let (Ok(a), Ok(b)) = (
+        serde_json::to_value(cached),
+        serde_json::from_slice::<serde_json::Value>(stored_bytes),
+    ) else {
+        return Vec::new();
+    };
+    let (Some(a), Some(b)) = (a.as_object(), b.as_object()) else {
+        return Vec::new();
+    };
+    let mut keys: std::collections::BTreeSet<&String> = a.keys().collect();
+    keys.extend(b.keys());
+    keys.into_iter()
+        .filter(|k| a.get(*k) != b.get(*k))
+        .map(|k| k.to_string())
+        .collect()
+}
+
 pub fn bump_backend_schema_pin(
     backend: &dyn crate::backend::MemBackend,
     target: &memstead_schema::SchemaRef,
@@ -5311,5 +5443,146 @@ community:
                 other => panic!("{setter} must refuse ReadOnlyMount, got {other:?}"),
             }
         }
+    }
+
+    /// 04/03, criteria 1 and 2, on the folder backend. Every one of the
+    /// lifecycle setters, each against a config a sibling moved after boot.
+    /// The loop is the point: the criterion is the whole set behind one
+    /// implementation, so a test that exercised one setter would pass while
+    /// the other six stayed broken.
+    #[test]
+    fn no_config_setter_reverts_a_siblings_write() {
+        type Setter = fn(&mut Engine) -> Result<(), EngineError>;
+        let setters: Vec<(&str, Setter)> = vec![
+            ("version", |e| {
+                e.set_mem_version("specs", semver::Version::new(9, 0, 0), None)
+                    .map(|_| ())
+            }),
+            ("description", |e| {
+                e.set_mem_description("specs", Some("mine".into()), None)
+                    .map(|_| ())
+            }),
+            ("title", |e| {
+                e.set_mem_title("specs", Some("Mine".into()), None)
+                    .map(|_| ())
+            }),
+            ("internal", |e| {
+                e.set_mem_internal("specs", true, None).map(|_| ())
+            }),
+            ("sync_state", |e| {
+                e.set_mem_sync_state("specs", "src/facet", "tok", None)
+                    .map(|_| ())
+            }),
+            // Cleared rather than set: the mark validates against a real
+            // commit cursor, and the clear path writes config just the same,
+            // which is what this test is about.
+            ("review_mark", |e| {
+                e.set_review_mark("specs", None, None).map(|_| ())
+            }),
+        ];
+
+        for (name, set) in setters {
+            let tmp = TempDir::new().unwrap();
+            let mem_dir = tmp.path().to_path_buf();
+            let meta = mem_dir.join(memstead_schema::MEM_META_DIR);
+            std::fs::create_dir_all(&meta).unwrap();
+            let path = meta.join("config.json");
+            std::fs::write(
+                &path,
+                br#"{"schema": "default@1.0.0", "version": "0.1.0"}"#.as_slice(),
+            )
+            .unwrap();
+
+            let writer = FilesystemMemWriter::new(mem_dir.clone());
+            let mut engine = Engine::from_mounts(vec![(
+                folder_mount("specs", mem_dir.clone()),
+                Box::new(writer) as Box<dyn MemBackend>,
+            )])
+            .unwrap();
+            // The review-mark setter validates its cursor against a real
+            // entity, so seed one before the sibling write.
+            engine
+                .create_entity(
+                    crate::engine::test_helpers::empty_create_args("specs", "Seed"),
+                    crate::vcs::Actor::Cli,
+                    None,
+                    None,
+                )
+                .unwrap();
+
+            // A sibling writes a field this engine has never seen.
+            let mut sibling: memstead_schema::MemConfig =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            sibling
+                .extra
+                .insert("siblingMark".into(), serde_json::json!("kept"));
+            std::fs::write(&path, serde_json::to_vec_pretty(&sibling).unwrap()).unwrap();
+
+            set(&mut engine).unwrap_or_else(|e| panic!("{name} setter failed: {e}"));
+
+            let after: memstead_schema::MemConfig =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                after.extra.get("siblingMark"),
+                Some(&serde_json::json!("kept")),
+                "the {name} setter reverted a field it never set"
+            );
+        }
+    }
+
+    /// Criterion 3, and its complement 4: the intervention is reported on the
+    /// operation's own response, and only when there was one.
+    #[test]
+    fn intervention_is_reported_on_the_response_and_only_when_real() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let meta = mem_dir.join(memstead_schema::MEM_META_DIR);
+        std::fs::create_dir_all(&meta).unwrap();
+        let path = meta.join("config.json");
+        std::fs::write(&path, br#"{"schema": "default@1.0.0"}"#.as_slice()).unwrap();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+
+        // Single writer: no report. This is the ordinary path, and a fix that
+        // cried intervention here would be worse than the bug.
+        let quiet = engine
+            .set_mem_description("specs", Some("first".into()), None)
+            .unwrap();
+        assert!(
+            !quiet
+                .warnings
+                .iter()
+                .any(|w| w.code() == "CONFIG_WRITE_INTERVENED"),
+            "single-writer workspace must stay silent: {:?}",
+            quiet.warnings
+        );
+
+        // A sibling intervenes; the next write says so, naming the field.
+        let mut sibling: memstead_schema::MemConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        sibling.title = Some("theirs".into());
+        std::fs::write(&path, serde_json::to_vec_pretty(&sibling).unwrap()).unwrap();
+
+        let loud = engine
+            .set_mem_description("specs", Some("second".into()), None)
+            .unwrap();
+        let hint = loud
+            .warnings
+            .iter()
+            .find(|w| w.code() == "CONFIG_WRITE_INTERVENED")
+            .expect("intervention must be reported on the response");
+        assert!(
+            format!("{hint}").contains("title"),
+            "the report names what they changed: {hint}"
+        );
+        // And theirs survived, which is the point of reporting rather than refusing.
+        let after: memstead_schema::MemConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(after.title.as_deref(), Some("theirs"));
+        assert_eq!(after.description.as_deref(), Some("second"));
     }
 }

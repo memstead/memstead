@@ -102,29 +102,26 @@ impl Engine {
             warnings.push(w);
         }
 
-        let mounted = &mut self.mounts[mount_idx];
-        let mut config = mounted.mem_config.clone().ok_or_else(|| {
-            EngineError::InvalidInput(format!(
-                "mem '{mem_name}' has no loaded MemConfig — cannot set a review mark \
-                 (initialize the mem via `memstead init` or `memstead mem create` first)"
-            ))
-        })?;
-
-        let previous = config.review_mark.clone();
-        config.review_mark = target.map(str::to_string);
-
-        let mut bytes = serde_json::to_vec_pretty(&config).map_err(|e| {
-            EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
-        })?;
-        bytes.push(b'\n');
-        mounted.backend.write_mem_config_with_note(&bytes, note)?;
-        mounted.mem_config = Some(config);
-
-        // Refresh the head cursor so the next drift probe doesn't
-        // surface MEM_RELOADED for the commit we just produced.
-        let new_head = mounted.backend.current_head().ok().flatten();
-        if let Some(sha) = new_head {
-            mounted.last_known_head = Some(sha);
+        // `previous` comes from the config this write lands on, not the
+        // cache: a sibling reviewer may have moved the mark since boot, and
+        // reporting the cached value would name a mark nobody is at.
+        let seen: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+        let target_owned = target.map(str::to_string);
+        let (_, intervened) = self.write_mem_config_merged(
+            mount_idx,
+            mem_name,
+            note,
+            &|c: &mut memstead_schema::config::MemConfig| {
+                *seen.borrow_mut() = c.review_mark.clone();
+                c.review_mark = target_owned.clone();
+            },
+        )?;
+        let previous = seen.into_inner();
+        if !intervened.is_empty() {
+            warnings.push(crate::ops::WarningHint::ConfigWriteIntervened {
+                mem: mem_name.to_string(),
+                fields: intervened,
+            });
         }
 
         Ok(SetReviewMarkOutcome {

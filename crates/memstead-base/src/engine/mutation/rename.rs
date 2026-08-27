@@ -477,7 +477,8 @@ impl Engine {
         )?;
 
         self.record_self_write(mount_idx, &commit_sha);
-        self.stamp_mutation_versions(mount_idx);
+        let stamp_warnings = self.stamp_mutation_versions(mount_idx);
+        let mut peer_stamp_warnings: Vec<WarningHint> = Vec::new();
 
         // ----- Apply: cross-mem peer mems (parent-pinned) -----
         // Snapshot every peer mem's current head before any peer
@@ -553,7 +554,10 @@ impl Engine {
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
             self.record_self_write(plan.mount_idx, &peer_commit_sha);
-            self.stamp_mutation_versions(plan.mount_idx);
+            // Per peer mount, not only the source mem: a rename touches every
+            // pinned peer, and each one's config write can meet its own
+            // intervening writer.
+            peer_stamp_warnings.extend(self.stamp_mutation_versions(plan.mount_idx));
             committed_mems.push(plan.mem.clone());
         }
 
@@ -594,6 +598,8 @@ impl Engine {
         // When no ReadOnly referrers exist, the old entry is
         // removed cleanly (the existing Write-path behaviour).
         let mut outcome_warnings: Vec<WarningHint> = Vec::new();
+        outcome_warnings.extend(stamp_warnings);
+        outcome_warnings.extend(peer_stamp_warnings);
         // Reload-before-operation drift notice, surfaced first.
         outcome_warnings.append(&mut drift_warnings);
         // Title↔slug divergence of the NEW title — same visibility

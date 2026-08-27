@@ -388,6 +388,83 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
         std::fs::write(&config_path, bytes).map_err(BackendError::Io)
     }
 
+    /// Compare-and-set under an exclusive lock file, which is what makes the
+    /// check and the write one step (04/03, criterion 5). `create_new` on the
+    /// lock is the atomic primitive: exactly one process wins it, so no other
+    /// engine can slip a write between this one's compare and its write.
+    ///
+    /// A stale lock (a process killed mid-write) is broken after a short wait
+    /// rather than blocking forever: a config write that hangs is its own
+    /// outage, and the compare inside still refuses to overwrite content it
+    /// did not observe. A hand edit made in that window is still detected,
+    /// because the compare reads the file, not the lock.
+    fn write_mem_config_cas(
+        &self,
+        expected: Option<&[u8]>,
+        bytes: &[u8],
+        _note: Option<&str>,
+    ) -> Result<bool, BackendError> {
+        let memstead_dir = self.root.join(crate::mem::MEM_META_DIR);
+        std::fs::create_dir_all(&memstead_dir).map_err(BackendError::Io)?;
+        let config_path = memstead_dir.join("config.json");
+        let lock_path = memstead_dir.join("config.json.lock");
+
+        let mut held = None;
+        for attempt in 0..50 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(f) => {
+                    held = Some(f);
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // 50 x 10ms. Past that the holder is presumed dead: a
+                    // config write is milliseconds of work, so half a second
+                    // of contention is not a busy writer.
+                    if attempt == 49 {
+                        let _ = std::fs::remove_file(&lock_path);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => return Err(BackendError::Io(e)),
+            }
+        }
+        let _lock = match held {
+            Some(f) => f,
+            None => std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&lock_path)
+                .map_err(BackendError::Io)?,
+        };
+        // Release on every exit path, including the mismatch return.
+        let release = || {
+            let _ = std::fs::remove_file(&lock_path);
+        };
+
+        let current = match std::fs::read(&config_path) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                release();
+                return Err(BackendError::Io(e));
+            }
+        };
+        if let Some(expected) = expected
+            && current.as_deref() != Some(expected)
+        {
+            release();
+            return Ok(false);
+        }
+        let result = std::fs::write(&config_path, bytes).map_err(BackendError::Io);
+        release();
+        result.map(|_| true)
+    }
+
     fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
         // Read via the entity path so a staged (pending) sidecar write is
         // visible before its commit, symmetric with the other backends.

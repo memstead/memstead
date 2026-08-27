@@ -608,6 +608,19 @@ pub enum WarningHint {
         new_head: String,
         entities_loaded: usize,
     },
+    /// A config write found the stored config had moved on from what this
+    /// engine last observed: another writer changed it in between
+    /// (consistency-sweep 04/03, criterion 3).
+    ///
+    /// The write still lands. It is applied to the CONFIG THAT IS THERE, not
+    /// to the engine's cached copy, so the intervening writer's fields
+    /// survive; `fields` names what they had changed. The warning exists
+    /// because a caller who set one field and finds three different is owed
+    /// the explanation on the response that did it, not in a log.
+    ///
+    /// Never fires in a single-writer workspace: the cached copy equals the
+    /// file there, so there is nothing to report.
+    ConfigWriteIntervened { mem: String, fields: Vec<String> },
     /// `memstead_relate` add path landed on a not-yet-real target id and
     /// the engine materialised a stub at that id (in-memory upsert; the
     /// file lands when a follow-up `memstead_create` promotes the stub).
@@ -1540,6 +1553,13 @@ impl fmt::Display for WarningHint {
                  and dropped the rest. The next read-modify-write will \
                  collapse the markdown to one heading."
             ),
+            WarningHint::ConfigWriteIntervened { mem, fields } => write!(
+                f,
+                "mem '{mem}' config had changed since this engine last read it: another writer \
+                 set {}. This write was applied on top of theirs, so nothing of theirs was \
+                 lost.",
+                fields.join(", "),
+            ),
             WarningHint::MemReloaded {
                 mem,
                 old_head,
@@ -1895,6 +1915,7 @@ impl WarningHint {
             Self::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
+            Self::ConfigWriteIntervened { .. } => "CONFIG_WRITE_INTERVENED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::MountUnbacked { .. } => "MOUNT_UNBACKED",
             Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
@@ -2150,6 +2171,10 @@ impl WarningHint {
                 heading: "Realization".into(),
                 occurrences: 3,
             },
+            WarningHint::ConfigWriteIntervened {
+                mem: "test-mem-plugin".into(),
+                fields: vec!["description".into()],
+            },
             WarningHint::MemReloaded {
                 mem: "test-mem-plugin".into(),
                 old_head: "abc123".into(),
@@ -2226,6 +2251,10 @@ impl WarningHint {
 
     fn details_payload(&self) -> serde_json::Value {
         match self {
+            Self::ConfigWriteIntervened { mem, fields } => serde_json::json!({
+                "mem": mem,
+                "fields": fields,
+            }),
             Self::MissingRequiredSection {
                 entity_type,
                 key,
@@ -2835,6 +2864,12 @@ fn is_zero(n: &usize) -> bool {
 /// to the pre-call state.
 #[derive(Debug, Clone, Serialize)]
 pub struct BatchResult {
+    /// Batch-level warnings. Today this carries `CONFIG_WRITE_INTERVENED`
+    /// when the mutation version stamp merged over another writer's config
+    /// change (04/03, criterion 3): the batch is the operation, so the batch
+    /// result is where its report belongs. Empty on the ordinary path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
     /// `true` when every item applied (one commit); `false` when the
     /// batch was refused (a single item failed → nothing committed).
     pub applied: bool,
@@ -3460,6 +3495,17 @@ pub struct MemExportResult {
     /// sharing, not after. One predicate, two postures.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unterminated_fence_entities: Vec<String>,
+}
+
+/// Result of `Engine::set_mem_internal`. Carries `warnings` for the same
+/// reason every other config setter does: without a channel the
+/// `CONFIG_WRITE_INTERVENED` report has nowhere to go.
+#[derive(Debug, Clone, Serialize)]
+pub struct SetMemInternalOutcome {
+    pub mem: String,
+    pub internal: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningHint>,
 }
 
 /// Result of `Engine::set_mem_version`. Carries the (mem,

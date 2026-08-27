@@ -259,7 +259,7 @@ impl Engine {
             .with_role(self.current_role),
         )?;
         self.record_self_write(prepared.mount_idx, &commit_sha);
-        self.stamp_mutation_versions(prepared.mount_idx);
+        let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
 
         let applied = self.apply_prepared_to_store(&prepared)?;
 
@@ -273,6 +273,7 @@ impl Engine {
         // enforcement point. Only reached on the real-commit path; the
         // no-op and dry-run prepare outcomes never demand a note.
         let mut warnings = prepared.warnings;
+        warnings.extend(stamp_warnings);
         // Signal crossings — out-of-band beside the success payload,
         // never error-shaped.
         warnings.extend(crate::ops::signals::crossing_warnings(
@@ -1184,6 +1185,7 @@ impl Engine {
     ) -> Result<crate::ops::BatchResult, EngineError> {
         if updates.is_empty() {
             return Ok(crate::ops::BatchResult {
+                warnings: Vec::new(),
                 orphan_stubs_removed: Vec::new(),
                 errors_suppressed: 0,
                 applied: true,
@@ -1324,6 +1326,7 @@ impl Engine {
                 })
                 .collect();
             return Ok(crate::ops::BatchResult {
+                warnings: Vec::new(),
                 orphan_stubs_removed: Vec::new(),
                 errors_suppressed: suppressed,
                 applied: false,
@@ -1356,6 +1359,7 @@ impl Engine {
                 })
                 .collect();
             return Ok(crate::ops::BatchResult {
+                warnings: Vec::new(),
                 orphan_stubs_removed: Vec::new(),
                 errors_suppressed: 0,
                 applied: true,
@@ -1476,6 +1480,7 @@ impl Engine {
         // Provenance + store application per item, now that the commits
         // landed. `record_self_write` marks the commit as engine-self
         // so drift detection ignores it.
+        let mut batch_warnings: Vec<WarningHint> = Vec::new();
         for (p, note) in prepared.iter().zip(notes.iter()) {
             let commit_sha = mount_commits
                 .iter()
@@ -1494,7 +1499,7 @@ impl Engine {
                 .with_role(self.current_role),
             )?;
             self.record_self_write(p.mount_idx, &commit_sha);
-            self.stamp_mutation_versions(p.mount_idx);
+            batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
             self.apply_prepared_to_store(p)?;
         }
 
@@ -1522,6 +1527,7 @@ impl Engine {
             .collect();
 
         Ok(crate::ops::BatchResult {
+            warnings: batch_warnings,
             orphan_stubs_removed: Vec::new(),
             errors_suppressed: 0,
             applied: true,

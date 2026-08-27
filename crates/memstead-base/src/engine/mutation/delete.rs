@@ -234,12 +234,14 @@ impl Engine {
             .with_role(self.current_role),
         )?;
 
+        let mut stamp_warnings: Vec<WarningHint> = Vec::new();
         if !commit_sha.is_empty() {
             self.record_self_write(mount_idx, &commit_sha);
-            self.stamp_mutation_versions(mount_idx);
+            stamp_warnings = self.stamp_mutation_versions(mount_idx);
         }
 
         let mut warnings: Vec<WarningHint> = Vec::new();
+        warnings.extend(std::mem::take(&mut stamp_warnings));
         // Reload-before-operation drift notice, surfaced first.
         warnings.append(&mut drift_warnings);
         let orphan_stubs_removed = if demote_to_stub {

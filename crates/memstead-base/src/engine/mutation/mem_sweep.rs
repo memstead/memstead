@@ -185,7 +185,10 @@ impl Engine {
                 Err(e) => return Err(e.into()),
             };
             self.record_self_write(mount_idx, &commit_sha);
-            self.stamp_mutation_versions(mount_idx);
+            // Same as the anchor backfill: a sweep has no per-operation
+            // response to carry the notice. The merge still protects the
+            // other writer's fields.
+            let _intervention_has_no_channel_here = self.stamp_mutation_versions(mount_idx);
             rewritten_mems.push(mem_name);
         }
 

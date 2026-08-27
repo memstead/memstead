@@ -266,6 +266,33 @@ pub trait MemBackend: Send + Sync {
         self.write_mem_config(bytes)
     }
 
+    /// Compare-and-set the mem config: write `bytes` only if the stored
+    /// config is still byte-identical to `expected`. Returns `false` without
+    /// writing when it is not, so the caller can re-read, re-apply, and retry.
+    ///
+    /// WHY the trait carries this rather than the engine doing read-then-write
+    /// itself: on the git-branch backend the ref update already lands under a
+    /// compare-and-set against the observed tip, so a sibling's commit
+    /// survives. The folder backend had no such protection, and a plain
+    /// `fs::write` between another writer's read and its write is silent loss
+    /// with no history to recover from (consistency-sweep 04/03, criterion 5).
+    /// Closing that needs the check and the write to be one indivisible step,
+    /// which only the backend can arrange.
+    ///
+    /// `expected` of `None` means "write unconditionally" (a mem that has no
+    /// stored config yet). The default implementation delegates to the
+    /// note-carrying write and reports success, which is correct for backends
+    /// whose write is already atomic against concurrent writers.
+    fn write_mem_config_cas(
+        &self,
+        _expected: Option<&[u8]>,
+        bytes: &[u8],
+        note: Option<&str>,
+    ) -> Result<bool, BackendError> {
+        self.write_mem_config_with_note(bytes, note)?;
+        Ok(true)
+    }
+
     /// Record provenance for a pipeline-config edit (mediums / facets /
     /// projections / ingests). The canonical pipeline config is a plain
     /// JSON file under `.memstead/` on the workspace root — it has no

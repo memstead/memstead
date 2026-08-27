@@ -2005,6 +2005,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "INVALID_INPUT",
         ],
         "memstead_mem_configure" => &[
+            // A config-only write advances neither the entity head nor the
+            // change log, so MEM_RELOADED cannot see it; the config writer
+            // detects the intervention itself and reports it here (04/03).
+            "CONFIG_WRITE_INTERVENED",
+            "details",
             // Response-shape fields.
             "mem",
             "warnings",
@@ -2025,6 +2030,11 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "mem_management",
         ],
         "memstead_mem_set_version" => &[
+            // A config-only write advances neither the entity head nor the
+            // change log, so MEM_RELOADED cannot see it; the config writer
+            // detects the intervention itself and reports it here (04/03).
+            "CONFIG_WRITE_INTERVENED",
+            "details",
             // Response-shape fields.
             "mem",
             "old_version",

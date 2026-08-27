@@ -78,6 +78,11 @@ pub struct ResolveConflictOutcome {
     /// The side that was kept (`"ours"` / `"theirs"`).
     pub side: &'static str,
     pub commit_sha: String,
+    /// Carries `CONFIG_WRITE_INTERVENED` when the mutation version stamp this
+    /// resolution triggered merged over another writer's config change
+    /// (04/03, criterion 3). Empty on the ordinary path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<crate::ops::WarningHint>,
 }
 
 /// Extract one side of a git merge conflict from raw file content.
@@ -335,7 +340,7 @@ impl Engine {
             .with_role(self.current_role),
         )?;
         self.record_self_write(mount_idx, &commit_sha);
-        self.stamp_mutation_versions(mount_idx);
+        let stamp_warnings = self.stamp_mutation_versions(mount_idx);
 
         // Reload so the resolved entity enters the store and the
         // conflict load-error clears — the caller's next read sees a
@@ -343,6 +348,7 @@ impl Engine {
         self.reload_each_writable_mem()?;
 
         Ok(ResolveConflictOutcome {
+            warnings: stamp_warnings,
             id: id.clone(),
             side: side.as_wire(),
             commit_sha,

@@ -8,6 +8,32 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Changed
+- **A long-lived server can no longer write its boot-time config over a
+  sibling's work.** Each mem's config was read once at boot and held for the
+  life of the process, which for an MCP server is days. Eight operations cloned
+  that cached struct, set one field, and wrote the whole thing back, so anything
+  another process had changed in between was gone. The reload-before-operation
+  invariant did not help: the staleness probe watches the entity branch on a
+  git-branch mem and the change log on a folder mem, and a config-only write
+  advances neither.
+
+  All eight now go through one writer that reads the config the backend HAS,
+  changes the one field on it, and writes that back. A field a call did not set
+  cannot be reverted by it, because the call never had an opinion about it. The
+  folder backend's write, which had no compare-and-set and no history to recover
+  from, now re-reads before writing and re-applies onto whatever is there.
+
+  When the stored config had moved on since the engine last read it, the
+  operation says so on its own response as `CONFIG_WRITE_INTERVENED`, naming the
+  fields the other writer had changed. Nothing is refused: the write lands on
+  top of theirs. A single-writer workspace never sees the warning.
+
+  The eighth writer is why the damage looked spontaneous: the mutation version
+  stamp rides ordinary create, update, relate, rename and delete, so an operator
+  saw a config field vanish during an innocuous entity write with no lifecycle
+  call in sight. It is covered by the same guarantee and stays exactly as
+  dormant as before.
+
 - **An unterminated code fence can no longer swallow the rest of an entity in
   silence.** A fence opened and never closed runs to end of text in CommonMark,
   so every section heading after it was masked and absorbed into the opening
