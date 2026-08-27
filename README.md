@@ -18,6 +18,8 @@ Memstead is part of the 2026 agent-memory wave — alongside mem0, Zep/Graphiti,
 
 Get from nothing to your own graph in a few minutes. (The [getting-started guide](docs-site/src/content/docs/guides/getting-started.md) is the full tutorial version of this section.)
 
+To look before installing anything, [memstead.ai](https://memstead.ai) serves this project's own graph and hands an agent a writable sketch mem over MCP; see [Two hosted surfaces](#reference) below.
+
 **1. Install the binaries.** The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries — `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
 ```bash
@@ -31,6 +33,8 @@ brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
 ```
 
 Or build from source: with the [Rust toolchain](https://rustup.rs) installed, run `./build-engine.sh` from a clone of this repo — it compiles the workspace and installs both binaries to `~/.cargo/bin`. Whichever path you took, `memstead --version` should now work.
+
+To program *against* the engine rather than run it, the crates are published on crates.io: [`memstead-base`](https://crates.io/crates/memstead-base) (engine core), [`memstead-schema`](https://crates.io/crates/memstead-schema), [`memstead-git-branch`](https://crates.io/crates/memstead-git-branch) (the git-branch backend), [`memstead-engine`](https://crates.io/crates/memstead-engine), [`memstead-mcp`](https://crates.io/crates/memstead-mcp) and [`memstead-cli`](https://crates.io/crates/memstead-cli). They ride the engine's version line, so a set pinned to one version works together. The binaries above stay the supported way to *install* Memstead.
 
 **2. Bootstrap a workspace.** Either in a fresh directory:
 
@@ -160,6 +164,10 @@ Auto-generated API reference for every callable surface — MCP tools, CLI, WASM
 **[memstead.com/dev](https://memstead.com/dev)**
 
 Generated from source on every push; the [parity matrix](https://memstead.com/dev/reference/parity/) shows at a glance which operations exist on which surface.
+
+The browser surface ships as [`@memstead/wasm`](https://www.npmjs.com/package/@memstead/wasm) on npm, published from the `memstead-wasm` crate on the engine's version line.
+
+**Two hosted surfaces, with nothing installed.** [memstead.ai](https://memstead.ai) serves Memstead's own graph read-only over plain HTTP: every page is readable with no tools at all, and `GET https://memstead.ai/llms.txt` is the agent runbook for it. That HTML surface has no search, which is what the second surface is for. Attaching the MCP endpoint at `https://memstead.ai/mcp` to Claude Code, Codex, Cursor or any MCP client mounts the same graph read-only beside a private, ephemeral sketch mem minted per connection: your agent's reads span both, its writes reach only the sketch. Restart the agent session afterwards (one already running does not attach a server added while it runs).
 
 ## How it works
 
