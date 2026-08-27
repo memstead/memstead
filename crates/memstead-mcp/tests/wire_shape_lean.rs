@@ -412,7 +412,7 @@ fn lean_memstead_schema_unknown_name_emits_entity_not_found() {
 //
 // Success path: the create response carries a JSON body on
 // `structured_content` whose `id` field is the slugified id, plus
-// `title`, `mem`, `content_hash`, `commit_sha`, and `warnings`. The
+// `title`, `mem`, `content_hash`, `write_id`, and `warnings`. The
 // pins assert on field PRESENCE + the deterministic `id` slug; the
 // hashes / commit shas are content-derived and pinning them would
 // couple the suite to the markdown render exactly.

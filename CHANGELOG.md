@@ -69,6 +69,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   that union is not reported.
 
 ### Changed
+
+- **BREAKING (wire): every mutation's `commit_sha` is now `write_id`, and it is
+  no longer documented as a change cursor.** The field was named for git on
+  backends that have none: a folder or in-memory mem returns a synthetic opaque
+  token, and every tool description glossed it as "per-mem git; gitdir via
+  `memstead_health include_config=true`" while the gitdir lookup errors for that
+  storage kind and the health projection omits the field, so the pointer
+  resolved to nothing on exactly the workspace shape `memstead quickstart`
+  produces. The field is renamed rather than removed: it must exist on
+  git-branch responses, and omitting it elsewhere would make the response shape
+  depend on the backend. `memstead_mem_create`'s `seed_commit_sha` becomes
+  `seed_write_id` on the same grounds. The git-branch backend's value is
+  unchanged — still the commit SHA of the commit that write produced.
+  Consumers reading the old key must rename; there is no alias.
+- **The mutation token is no longer advertised as a polling cursor, on any
+  backend.** `memstead_changes_since` takes a backend-specific cursor and a
+  `write_id` was never one of them on a folder mem: the folder cursor is an
+  RFC3339 timestamp and the token is minted from a nanosecond clock as
+  fixed-width hex, so it sorts below every ledger timestamp and passing it back
+  silently replayed the entire history instead of a delta, with no error. The
+  tool description, the CLI `--since` help, the MCP parameter description, the
+  server instructions, the `INVALID_CURSOR` message and the folder-mem
+  provenance warning now each name the value that IS a cursor: the `head` a
+  prior call returned on a git-branch mem, the `ts` of the last ledger entry on
+  a folder mem (empty for a first sync; a folder mem returns no `head`).
 - **`memstead type` says when the schema it prints is not the workspace's own.**
   Its schema resolution had three silent fallbacks to the engine built-in
   default: no workspace at all, no writable mem loaded, and a resolved mem

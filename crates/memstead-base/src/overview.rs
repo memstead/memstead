@@ -1088,13 +1088,13 @@ pub fn compose_overview(
                 }
             }
             // Flag ephemeral storage loudly; durable-on-disk mems (the
-            // ordinary case) keep their lines unchanged. `commit_sha` on
+            // ordinary case) keep their lines unchanged. `write_id` on
             // an ephemeral mem looks like a git SHA but denotes nothing
             // that survives restart / session-TTL eviction.
             if v["durable"].as_bool() == Some(false) {
                 let storage = v["storage"].as_str().unwrap_or("in-memory");
                 md.push_str(&format!(
-                    "- **Storage:** {storage} (ephemeral — writes are volatile, evicted on restart/TTL; `commit_sha` is not durable)\n"
+                    "- **Storage:** {storage} (ephemeral — writes are volatile, evicted on restart/TTL; `write_id` is not durable)\n"
                 ));
             }
             if let Some(ver) = version {

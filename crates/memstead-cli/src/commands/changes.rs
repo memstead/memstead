@@ -16,10 +16,13 @@ pub struct Args {
     #[arg(long)]
     pub mem: Option<String>,
 
-    /// Commit SHA to diff against. Pass a prior mutation's `commit_sha`,
-    /// or the git canonical empty-tree hash
-    /// `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client
-    /// first sync.
+    /// Change cursor to diff against. Backend-specific, and never a
+    /// mutation's `write_id`: on a git-branch mem a commit SHA (the
+    /// `head` a prior call returned, or the git canonical empty-tree
+    /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a
+    /// fresh-client first sync); on a folder mem an RFC3339 timestamp
+    /// (the `ts` of the last entry you received, or empty for a first
+    /// sync).
     #[arg(long)]
     pub since: String,
 

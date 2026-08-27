@@ -585,7 +585,7 @@ fn full_schema_unscoped_over_budget_degrades_visibly() {
 //
 // Success path: the create response carries a JSON body on
 // `structured_content` whose `id` field is the slugified id, plus
-// `title`, `mem`, `content_hash`, `commit_sha`, and `warnings`. The
+// `title`, `mem`, `content_hash`, `write_id`, and `warnings`. The
 // pins assert on field PRESENCE + the deterministic `id` slug; the
 // hashes / commit shas are content-derived and pinning them would
 // couple the suite to the markdown render exactly.
@@ -905,7 +905,7 @@ fn full_memstead_update_stale_hash_emits_typed_envelope() {
 }
 
 /// Full pin: same. Full response shape may differ subtly (extra fields
-/// like commit_sha) — the pin only requires the rotated hash.
+/// like write_id) — the pin only requires the rotated hash.
 #[test]
 fn full_memstead_update_succeeds_and_rotates_hash() {
     let tmp = TempDir::new().unwrap();
@@ -966,7 +966,7 @@ fn full_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 
 /// Full pin: same flow, but the response field names differ from lean:
 /// full emits `rel_type` (not `type`), `source: "explicit"` (carries the
-/// edge source), `_mem_schema`, and `commit_sha` — but **omits**
+/// edge source), `_mem_schema`, and `write_id` — but **omits**
 /// `action`. The lean surface has `type` and `action` instead. Both
 /// shapes are pinned per-flavor, pending reconciliation of which schema
 /// wins.
@@ -1318,10 +1318,10 @@ fn full_memstead_changes_since_wide_window_uses_authoritative_rename_map() {
         .expect("entity text must carry _hash");
 
     // Step 2: capture cursor SHA by recording the most recent
-    // create's commit_sha — that's the workspace head right after
+    // create's write_id — that's the workspace head right after
     // the last seed entity landed, so it's the boundary between
     // "pre-window" and "in-window" commits. The agent contract
-    // is to keep `commit_sha` from every mutation response and pass
+    // is to keep `write_id` from every mutation response and pass
     // it back as `since` for the next poll.
     let last_seed_create = harness.call_tool("memstead_entity", json!({ "id": other_b }));
     let _ = assert_success_envelope(&last_seed_create);
@@ -2832,7 +2832,7 @@ fn check_operation_records_derives_state_and_mutates_nothing() {
         .as_str()
         .unwrap()
         .to_string();
-    let commit_before = created["structuredContent"]["commit_sha"]
+    let commit_before = created["structuredContent"]["write_id"]
         .as_str()
         .unwrap()
         .to_string();

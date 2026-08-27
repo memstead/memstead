@@ -46,7 +46,7 @@ sections:
     required: false
     search_weight: 10.0
     write_rules:
-      - "Return shape. For mutation tools, include the typed payload (e.g. content_hash, commit_sha) the calling node will need. Read-only tools may omit this if the response is markdown."
+      - "Return shape. For mutation tools, include the typed payload (e.g. content_hash, write_id) the calling node will need. Read-only tools may omit this if the response is markdown."
   - key: preconditions
     heading: Preconditions
     required: false

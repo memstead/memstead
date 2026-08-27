@@ -246,7 +246,7 @@ impl Engine {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let commit_sha = backend.commit(&commit_subject, &ctx)?;
+        let write_id = backend.commit(&commit_subject, &ctx)?;
         backend.append_provenance(
             &Provenance::new(
                 std::time::SystemTime::now(),
@@ -258,7 +258,7 @@ impl Engine {
             )
             .with_role(self.current_role),
         )?;
-        self.record_self_write(prepared.mount_idx, &commit_sha);
+        self.record_self_write(prepared.mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
 
         let applied = self.apply_prepared_to_store(&prepared)?;
@@ -290,7 +290,7 @@ impl Engine {
             title: applied.title,
             file_path: prepared.file_path,
             content_hash: applied.content_hash,
-            commit_sha,
+            write_id,
             modified_date: prepared.modified_date,
             orphan_stubs_removed: applied.orphan_stubs_removed,
             modified_sections: prepared.modified_sections,
@@ -400,7 +400,7 @@ impl Engine {
         // mutation work runs so a misspelled or omitted mutation
         // key (which deserialised to empty defaults under the
         // lenient pre-fix posture) doesn't silently land as
-        // `succeeded: N, action: "updated", commit_sha: ""`.
+        // `succeeded: N, action: "updated", write_id: ""`.
         // Distinct from `UPDATE_NOOP` (a warning that fires when
         // mutation content was provided but matched the current
         // entity state) — the two are different states and ship
@@ -823,7 +823,7 @@ impl Engine {
         // Skip the disk write, the commit, the provenance append,
         // and the store re-parse. Mirrors `relate.rs`'s
         // `NoOpAlreadyPresent` / `NoOpAbsent` and `rename.rs`'s
-        // slug-noop short-circuits: empty `commit_sha`, unchanged
+        // slug-noop short-circuits: empty `write_id`, unchanged
         // `content_hash`, preserved `last_modified`, typed
         // `UpdateNoop` warning. Skipped on the dry_run path because
         // the dry_run preview semantics document a separate
@@ -854,11 +854,11 @@ impl Engine {
                     title: next.title.clone(),
                     file_path,
                     content_hash: next.content_hash.clone(),
-                    commit_sha: String::new(),
+                    write_id: String::new(),
                     modified_date,
                     // No-op: the prospective hash equals the on-disk hash,
                     // so nothing landed. `modified_*` report the *applied*
-                    // delta (empty), consistent with the empty `commit_sha`
+                    // delta (empty), consistent with the empty `write_id`
                     // and unchanged hash — not the request-derived keys,
                     // which would claim a change that did not happen
                     // (F1). The request vecs
@@ -1060,7 +1060,7 @@ impl Engine {
                 title: next.title.clone(),
                 file_path,
                 content_hash: current_hash,
-                commit_sha: String::new(),
+                write_id: String::new(),
                 modified_date,
                 modified_sections: ModifiedSections {
                     replaced: modified_sections,
@@ -1152,19 +1152,19 @@ impl Engine {
     /// `errors_suppressed` counting the rest) and every valid item
     /// marked `"not_applied"`, so one repair cycle fixes the file.
     ///
-    /// On success the returned `commit_sha` is the single batch commit
+    /// On success the returned `write_id` is the single batch commit
     /// — an honest `memstead_changes_since` cursor / revert handle. Each
     /// item's per-entry note rides into its own provenance record.
     ///
     /// Empty batches return `applied: true` with zero counts and no
     /// commit. A batch where every item is a no-op (content unchanged)
-    /// likewise applies with an empty `commit_sha`.
+    /// likewise applies with an empty `write_id`.
     ///
     /// **Rehearsal** (`dry_run: true`): the FULL per-item validation
     /// pass runs — identical refusals, identical report-all envelope —
     /// then the batch stops before any write or commit. A legal batch
     /// returns the would-be receipt (`applied: true`, per-entry
-    /// actions) with the marker form's empty `commit_sha`; an illegal
+    /// actions) with the marker form's empty `write_id`; an illegal
     /// one returns the same refusal a real call would. Nothing is
     /// staged, committed, or stamped.
     ///
@@ -1192,7 +1192,7 @@ impl Engine {
                 results: Vec::new(),
                 succeeded: 0,
                 failed: 0,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1333,7 +1333,7 @@ impl Engine {
                 results,
                 succeeded: 0,
                 failed,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1341,7 +1341,7 @@ impl Engine {
         // one a real batch runs), nothing failed — stop before any
         // write. Roll back the prepare pass's store effects, discard
         // any pending buffers, and return the would-be receipt with
-        // the marker form's empty `commit_sha`.
+        // the marker form's empty `write_id`.
         if dry_run {
             self.store = store_snapshot;
             self.discard_all_pending();
@@ -1366,7 +1366,7 @@ impl Engine {
                 results,
                 succeeded,
                 failed: 0,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1482,7 +1482,7 @@ impl Engine {
         // so drift detection ignores it.
         let mut batch_warnings: Vec<WarningHint> = Vec::new();
         for (p, note) in prepared.iter().zip(notes.iter()) {
-            let commit_sha = mount_commits
+            let write_id = mount_commits
                 .iter()
                 .find(|(m, _)| *m == p.mount_idx)
                 .map(|(_, s)| s.clone())
@@ -1498,7 +1498,7 @@ impl Engine {
                 )
                 .with_role(self.current_role),
             )?;
-            self.record_self_write(p.mount_idx, &commit_sha);
+            self.record_self_write(p.mount_idx, &write_id);
             batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
             self.apply_prepared_to_store(p)?;
         }
@@ -1508,7 +1508,7 @@ impl Engine {
 
         // Single-mem batches name their one commit; multi-mem names
         // the last mem committed (see the method docstring).
-        let commit_sha = mount_commits
+        let write_id = mount_commits
             .last()
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
@@ -1534,7 +1534,7 @@ impl Engine {
             results,
             succeeded,
             failed: 0,
-            commit_sha,
+            write_id,
         })
     }
 
@@ -1790,7 +1790,7 @@ mod tests {
         };
 
         let outcome = update_identity(&mut engine, "new text.");
-        assert!(!outcome.commit_sha.is_empty(), "the mutation still commits");
+        assert!(!outcome.write_id.is_empty(), "the mutation still commits");
         let divergences: Vec<_> = outcome
             .warnings
             .iter()
@@ -1835,7 +1835,7 @@ mod tests {
     #[test]
     fn batch_update_empty_batch_returns_zero_counts() {
         // No updates → BatchResult with zero counts + empty
-        // commit_sha. No engine mutation happens.
+        // write_id. No engine mutation happens.
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
@@ -1852,7 +1852,7 @@ mod tests {
         assert_eq!(result.results.len(), 0);
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed, 0);
-        assert_eq!(result.commit_sha, "");
+        assert_eq!(result.write_id, "");
     }
 
     #[test]
@@ -1860,7 +1860,7 @@ mod tests {
         // Atomic semantics: a 2-item batch where item 1 is valid and
         // item 2 targets a missing id refuses the WHOLE batch. Nothing
         // is committed — item 1 is NOT applied (its section change does
-        // not land), `applied` is false, `commit_sha` is empty, the
+        // not land), `applied` is false, `write_id` is empty, the
         // missing item carries the typed ENTITY_NOT_FOUND envelope, and
         // the valid item is marked `not_applied`.
         let tmp = TempDir::new().unwrap();
@@ -1933,7 +1933,7 @@ mod tests {
         assert_eq!(result.results.len(), 2);
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed, 1);
-        assert_eq!(result.commit_sha, "", "refused batch must not commit");
+        assert_eq!(result.write_id, "", "refused batch must not commit");
         // First entry: the valid item, marked not_applied (the batch
         // was refused before it could land).
         assert_eq!(result.results[0].action, "not_applied");
@@ -1965,7 +1965,7 @@ mod tests {
     fn batch_update_applies_all_valid_items_as_one_commit() {
         // A 2-item batch where both items are valid
         // applies both and produces exactly one commit; the response's
-        // commit_sha names it and both entries report "updated".
+        // write_id names it and both entries report "updated".
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
@@ -2025,7 +2025,7 @@ mod tests {
         assert_eq!(result.succeeded, 2);
         assert_eq!(result.failed, 0);
         assert!(
-            !result.commit_sha.is_empty(),
+            !result.write_id.is_empty(),
             "applied batch carries the commit"
         );
         assert!(result.results.iter().all(|e| e.action == "updated"));
@@ -2052,7 +2052,7 @@ mod tests {
 
     /// Rehearsal contract (agent-trust plan 07): `batch_update` with
     /// `dry_run: true` runs the full per-item validation, reports the
-    /// would-be receipt with the marker form's empty `commit_sha`, and
+    /// would-be receipt with the marker form's empty `write_id`, and
     /// persists NOTHING — on-disk bodies and hashes stay untouched.
     /// The follow-up real call with the SAME expected hashes succeeds,
     /// proving both the identical-validation contract and the
@@ -2115,10 +2115,7 @@ mod tests {
             .unwrap();
         assert!(rehearsed.applied, "{rehearsed:?}");
         assert_eq!(rehearsed.succeeded, 2);
-        assert!(
-            rehearsed.commit_sha.is_empty(),
-            "marker form: empty commit_sha"
-        );
+        assert!(rehearsed.write_id.is_empty(), "marker form: empty write_id");
         assert!(rehearsed.results.iter().all(|e| e.action == "updated"));
         // Nothing persisted: body and hash unchanged.
         let a_now = engine.get_entity(&a.id).unwrap();
@@ -2133,7 +2130,7 @@ mod tests {
             .batch_update(batch(), Actor::Cli, None, false)
             .unwrap();
         assert!(real.applied, "{real:?}");
-        assert!(!real.commit_sha.is_empty());
+        assert!(!real.write_id.is_empty());
         assert_eq!(
             engine
                 .get_entity(&a.id)
@@ -2298,7 +2295,7 @@ mod tests {
             .unwrap();
         assert!(!result.applied);
         assert_eq!(result.failed, 2, "{result:?}");
-        assert_eq!(result.commit_sha, "");
+        assert_eq!(result.write_id, "");
         let codes: Vec<(usize, &str)> = result
             .results
             .iter()
@@ -3485,13 +3482,13 @@ mod tests {
             .unwrap();
 
         // Wire shape: content_hash = current; prospective_hash =
-        // what the write would produce; commit_sha empty.
+        // what the write would produce; write_id empty.
         assert_eq!(outcome.content_hash, original_hash);
         let prospective = outcome
             .prospective_hash
             .expect("prospective_hash populated on dry_run");
         assert_ne!(prospective, original_hash);
-        assert!(outcome.commit_sha.is_empty());
+        assert!(outcome.write_id.is_empty());
         // Store entity unchanged.
         let store_entity = engine.get_entity(&seeded.id).unwrap();
         assert_eq!(store_entity.content_hash, original_hash);
@@ -3709,7 +3706,7 @@ mod tests {
     }
 
     #[test]
-    fn update_entity_returns_commit_sha_title_modified_date_warnings_shape() {
+    fn update_entity_returns_write_id_title_modified_date_warnings_shape() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, seeded) = engine_with_seed(&tmp, "Subject");
         let (actor, client) = cli_actor();
@@ -3741,8 +3738,8 @@ mod tests {
 
         // Folder backend produces a synthetic CommitId.
         assert!(
-            !outcome.commit_sha.is_empty(),
-            "commit_sha must be populated on a real update"
+            !outcome.write_id.is_empty(),
+            "write_id must be populated on a real update"
         );
         // Title echoed from the parsed entity post-write.
         assert_eq!(outcome.title, "Subject");
@@ -3814,7 +3811,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(outcome.commit_sha, "", "no-op must not commit");
+        assert_eq!(outcome.write_id, "", "no-op must not commit");
         assert_eq!(
             outcome.content_hash, seeded.content_hash,
             "no-op must not advance content_hash",
@@ -3829,7 +3826,7 @@ mod tests {
         );
         // The applied delta is empty on a
         // no-op — `modified_sections` must not claim `identity` was
-        // replaced when nothing landed (matching the empty commit_sha
+        // replaced when nothing landed (matching the empty write_id
         // and unchanged hash above).
         assert!(
             outcome.modified_sections.replaced.is_empty()
@@ -3939,7 +3936,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(outcome.commit_sha, "");
+        assert_eq!(outcome.write_id, "");
         assert_eq!(outcome.content_hash, seeded.content_hash);
         let codes: Vec<&str> = outcome.warnings.iter().map(|w| w.code()).collect();
         assert!(
@@ -3983,7 +3980,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(outcome.commit_sha, "");
+        assert_eq!(outcome.write_id, "");
         assert_eq!(outcome.content_hash, seeded.content_hash);
         assert!(
             outcome.warnings.iter().any(|w| w.code() == "UPDATE_NOOP"),
@@ -4022,7 +4019,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(!real.commit_sha.is_empty());
+        assert!(!real.write_id.is_empty());
         assert_ne!(real.content_hash, seeded.content_hash);
     }
 
@@ -4030,7 +4027,7 @@ mod tests {
     /// metadata key to its current value no-ops, and the response's
     /// `modified_metadata` reports the applied delta (empty), not the
     /// requested key. Pre-fix the no-op short-circuit echoed
-    /// `set: ["level"]` while `commit_sha` was empty and the hash
+    /// `set: ["level"]` while `write_id` was empty and the hash
     /// unchanged — a self-contradictory response.
     #[test]
     fn update_entity_noop_setting_metadata_to_current_value_reports_empty_delta() {
@@ -4064,7 +4061,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(outcome.commit_sha, "", "no-op must not commit");
+        assert_eq!(outcome.write_id, "", "no-op must not commit");
         assert_eq!(
             outcome.content_hash, seeded.content_hash,
             "no-op must not advance hash"
@@ -4155,7 +4152,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(outcome.commit_sha, "");
+        assert_eq!(outcome.write_id, "");
         assert_eq!(outcome.content_hash, after_relate.content_hash);
         assert!(
             outcome.warnings.iter().any(|w| w.code() == "UPDATE_NOOP"),
@@ -4173,7 +4170,7 @@ mod tests {
     fn update_entity_real_change_still_commits_and_advances_hash() {
         // Regression: the no-op short-circuit must not short-circuit
         // real changes. A section replacement still produces a
-        // non-empty `commit_sha`, advances `content_hash`, and does
+        // non-empty `write_id`, advances `content_hash`, and does
         // NOT surface UPDATE_NOOP.
         let tmp = TempDir::new().unwrap();
         let (mut engine, seeded) = engine_with_seed(&tmp, "Real Change Subject");
@@ -4204,7 +4201,7 @@ mod tests {
             )
             .unwrap();
 
-        assert!(!outcome.commit_sha.is_empty(), "real change must commit");
+        assert!(!outcome.write_id.is_empty(), "real change must commit");
         assert_ne!(
             outcome.content_hash, seeded.content_hash,
             "real change must advance content_hash",
@@ -4253,7 +4250,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
-            assert_eq!(outcome.commit_sha, "");
+            assert_eq!(outcome.write_id, "");
             assert_eq!(outcome.content_hash, seeded.content_hash);
         }
 
@@ -4285,7 +4282,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(!real.commit_sha.is_empty());
+        assert!(!real.write_id.is_empty());
         assert_ne!(real.content_hash, seeded.content_hash);
     }
 
@@ -5931,7 +5928,7 @@ community:
             .update_entity(args, actor, Some(&client), None)
             .unwrap();
         assert!(
-            !out.commit_sha.is_empty(),
+            !out.write_id.is_empty(),
             "unset-only update commits the sidecar"
         );
         assert_eq!(out.content_hash, hash, "anchors never move `_hash`");
@@ -5982,7 +5979,7 @@ community:
         let out = engine
             .update_entity(args, actor, Some(&client), None)
             .unwrap();
-        assert!(!out.commit_sha.is_empty(), "anchor-only update commits");
+        assert!(!out.write_id.is_empty(), "anchor-only update commits");
         assert_eq!(
             out.content_hash, restamped.content_hash,
             "anchors never move `_hash`, even across a second boundary"
@@ -6106,7 +6103,7 @@ community:
         let out = engine
             .update_entity(args, actor, Some(&client), None)
             .expect("reserved-key unset is the sanctioned repair");
-        assert!(!out.commit_sha.is_empty(), "repair is a real commit");
+        assert!(!out.write_id.is_empty(), "repair is a real commit");
         assert_eq!(
             out.modified_metadata.unset,
             vec!["mem".to_string(), "id".to_string()]
@@ -6167,7 +6164,7 @@ community:
                 .update_entity(args, actor, Some(&client), None)
                 .unwrap_or_else(|e| panic!("unset '{key}' on a healthy entity must no-op: {e:?}"));
             assert!(
-                out.commit_sha.is_empty(),
+                out.write_id.is_empty(),
                 "unset '{key}' on a healthy entity is a no-op, not a commit"
             );
             assert!(

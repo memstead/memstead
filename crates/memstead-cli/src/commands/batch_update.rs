@@ -41,7 +41,7 @@ pub struct Args {
     pub from: PathBuf,
     /// Rehearse the whole batch: run the full per-entry validation
     /// (identical refusals, report-all) and report the would-be
-    /// receipt, committing nothing. `commit_sha` stays empty (the
+    /// receipt, committing nothing. `write_id` stays empty (the
     /// rehearsal marker).
     #[arg(long = "dry-run")]
     pub dry_run: bool,

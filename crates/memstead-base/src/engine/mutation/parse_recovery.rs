@@ -115,13 +115,13 @@ impl Engine {
             ));
         }
 
-        let mut last_commit_sha = String::new();
+        let mut last_write_id = String::new();
         for (source_id, drop_indices) in writable_by_source {
             let outcome = self.rewrite_for_parse_recovery(&source_id, actor, client, note);
             match outcome {
-                Ok(commit_sha) => {
-                    if !commit_sha.is_empty() {
-                        last_commit_sha = commit_sha;
+                Ok(write_id) => {
+                    if !write_id.is_empty() {
+                        last_write_id = write_id;
                     }
                     for idx in drop_indices {
                         result_per_drop[idx] =
@@ -164,7 +164,7 @@ impl Engine {
 
         Ok(ParseRecoveryReport {
             entries,
-            commit_sha: last_commit_sha,
+            write_id: last_write_id,
         })
     }
 
@@ -173,7 +173,7 @@ impl Engine {
     /// rewrite anchor — section content stays identical, but the
     /// full re-render flushes the parse-time relation drops out of
     /// the auto-managed `## Relationships` section. Returns the
-    /// resulting `commit_sha` on success.
+    /// resulting `write_id` on success.
     ///
     /// Section-anchor seeding (instead of an empty payload) keeps
     /// this internal rewrite path on the public `update_entity`
@@ -216,7 +216,7 @@ impl Engine {
             anchors_unset: Vec::new(),
         };
         let outcome = self.update_entity(args, actor, client, note)?;
-        Ok(outcome.commit_sha)
+        Ok(outcome.write_id)
     }
 }
 
@@ -276,7 +276,7 @@ mod tests {
             );
             assert!(entry.reason.is_none());
         }
-        assert!(!report.commit_sha.is_empty(), "recovery must commit");
+        assert!(!report.write_id.is_empty(), "recovery must commit");
 
         let post: Vec<_> = engine
             .load_warnings()
@@ -376,10 +376,7 @@ mod tests {
             entry.reason.as_deref(),
             Some(ParseRecoveryEntry::REASON_READONLY_MOUNT),
         );
-        assert!(
-            report.commit_sha.is_empty(),
-            "readonly path commits nothing"
-        );
+        assert!(report.write_id.is_empty(), "readonly path commits nothing");
 
         let post: Vec<_> = engine
             .load_warnings()
@@ -416,7 +413,7 @@ mod tests {
             first.entries[0].outcome,
             ParseRecoveryEntry::OUTCOME_REMOVED
         );
-        assert!(!first.commit_sha.is_empty());
+        assert!(!first.write_id.is_empty());
 
         let second = engine
             .apply_parse_recovery(actor, Some(&client), None)
@@ -426,7 +423,7 @@ mod tests {
             "second call must be no-op, got {:?}",
             second.entries
         );
-        assert!(second.commit_sha.is_empty());
+        assert!(second.write_id.is_empty());
     }
 
     /// Mixed writable + readonly drops land in a single report.
@@ -487,7 +484,7 @@ mod tests {
             skipped[0].reason.as_deref(),
             Some(ParseRecoveryEntry::REASON_READONLY_MOUNT),
         );
-        assert!(!report.commit_sha.is_empty());
+        assert!(!report.write_id.is_empty());
     }
 
     /// A drop whose source still has an unresolved body wiki-link to

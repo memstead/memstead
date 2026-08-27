@@ -241,10 +241,10 @@ fn memstead_mem_init_json_mode_emits_structured_envelope() {
     );
     assert!(
         parsed
-            .get("seed_commit_sha")
+            .get("seed_write_id")
             .and_then(|v| v.as_str())
             .is_some(),
-        "--json envelope must carry `seed_commit_sha`",
+        "--json envelope must carry `seed_write_id`",
     );
 }
 
@@ -544,7 +544,7 @@ fn memstead_mem_delete_rejects_legacy_delete_files_flag() {
 /// `memstead mem unregister` followed by `memstead mem init
 /// <same-name>` in a fresh CLI process reattaches the preserved
 /// storage. The reattach path emits no new seed commit — pinned via
-/// the `--json` envelope's empty `seed_commit_sha`. Guards against
+/// the `--json` envelope's empty `seed_write_id`. Guards against
 /// silent resurrection for the
 /// deliberate-operator path (the operator's unregister stamped the
 /// `unregistered_at` tombstone on the config blob; the re-init
@@ -563,9 +563,9 @@ fn memstead_mem_init_reattaches_after_unregister() {
     let initial_stdout = String::from_utf8(initial.get_output().stdout.clone()).unwrap();
     let initial_envelope: serde_json::Value =
         serde_json::from_str(&initial_stdout).expect("--json envelope parses");
-    let initial_seed = initial_envelope["seed_commit_sha"]
+    let initial_seed = initial_envelope["seed_write_id"]
         .as_str()
-        .expect("initial create must carry a non-empty seed_commit_sha")
+        .expect("initial create must carry a non-empty seed_write_id")
         .to_string();
     assert!(
         !initial_seed.is_empty(),
@@ -587,7 +587,7 @@ fn memstead_mem_init_reattaches_after_unregister() {
     // `preserved`), encounters the storage residue at
     // `refs/heads/preserved`, reads the `unregistered_at` tombstone,
     // and routes to the reattach recovery action. The response
-    // signal is an empty `seed_commit_sha` — the existing branch's
+    // signal is an empty `seed_write_id` — the existing branch's
     // history is preserved.
     let reattach = memstead()
         .current_dir(&workspace)
@@ -597,12 +597,12 @@ fn memstead_mem_init_reattaches_after_unregister() {
     let reattach_stdout = String::from_utf8(reattach.get_output().stdout.clone()).unwrap();
     let reattach_envelope: serde_json::Value =
         serde_json::from_str(&reattach_stdout).expect("--json envelope parses");
-    let reattach_seed = reattach_envelope["seed_commit_sha"]
+    let reattach_seed = reattach_envelope["seed_write_id"]
         .as_str()
-        .expect("reattach response must carry seed_commit_sha (even if empty)");
+        .expect("reattach response must carry seed_write_id (even if empty)");
     assert!(
         reattach_seed.is_empty(),
-        "reattach must skip the seed commit — empty `seed_commit_sha` is the \
+        "reattach must skip the seed commit — empty `seed_write_id` is the \
          contract signal that the existing branch was adopted; got {reattach_seed:?}",
     );
     // The reattach branch surfaces a `MEM_REATTACHED_AFTER_UNREGISTER`
@@ -682,7 +682,7 @@ fn memstead_mem_init_accepts_explicit_reattach_flag() {
 
 /// `--force-overwrite` against residue prunes the existing
 /// branch + `__MEMSTEAD` config blob and proceeds with a fresh create.
-/// The post-state signal is a NEW `seed_commit_sha` distinct from
+/// The post-state signal is a NEW `seed_write_id` distinct from
 /// the pre-overwrite mem's seed (proves the branch was recreated,
 /// not adopted). The prior session's entities are gone by design —
 /// `force-overwrite` is the explicit destructive recovery path.
@@ -700,7 +700,7 @@ fn memstead_mem_init_force_overwrite_prunes_and_recreates() {
     let initial_envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8(initial.get_output().stdout.clone()).unwrap())
             .unwrap();
-    let initial_seed = initial_envelope["seed_commit_sha"]
+    let initial_seed = initial_envelope["seed_write_id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -716,7 +716,7 @@ fn memstead_mem_init_force_overwrite_prunes_and_recreates() {
 
     // Re-init with --force-overwrite — prunes the existing branch
     // and produces a fresh seed commit. The contract signal is a
-    // non-empty `seed_commit_sha` (the reattach path returns empty);
+    // non-empty `seed_write_id` (the reattach path returns empty);
     // assert that, plus the mount manifest shows the mem again.
     //
     // Note: the new seed SHA can be byte-identical to the prior one
@@ -743,9 +743,9 @@ fn memstead_mem_init_force_overwrite_prunes_and_recreates() {
     let overwrite_envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8(overwritten.get_output().stdout.clone()).unwrap())
             .unwrap();
-    let new_seed = overwrite_envelope["seed_commit_sha"]
+    let new_seed = overwrite_envelope["seed_write_id"]
         .as_str()
-        .expect("overwrite must produce a non-null seed_commit_sha")
+        .expect("overwrite must produce a non-null seed_write_id")
         .to_string();
     assert!(
         !new_seed.is_empty(),
@@ -838,7 +838,7 @@ fn memstead_mem_init_residue_isolation_is_path_aware() {
     let envelope: serde_json::Value =
         serde_json::from_str(&String::from_utf8(output.get_output().stdout.clone()).unwrap())
             .unwrap();
-    let seed = envelope["seed_commit_sha"].as_str().unwrap_or("");
+    let seed = envelope["seed_write_id"].as_str().unwrap_or("");
     assert!(
         !seed.is_empty(),
         "fresh create at `team-b/shared` must produce a real seed commit — \

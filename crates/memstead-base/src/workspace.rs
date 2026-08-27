@@ -190,7 +190,7 @@ impl MountStorage {
     /// survive process restart / session-TTL eviction. `Folder`,
     /// `GitBranch`, and `Archive` all live on disk and persist; only
     /// `InMemory` is volatile — its state is dropped with the engine,
-    /// so a `commit_sha` it returns denotes nothing durable. This is the
+    /// so a `write_id` it returns denotes nothing durable. This is the
     /// fact the durability marker projects: derived from the storage
     /// *kind*, not from `current_head()` (which is `None` for both
     /// `Folder` and `InMemory` and so cannot tell them apart).

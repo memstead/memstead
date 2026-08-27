@@ -42,7 +42,7 @@ pub struct CreateEntityArgs {
     /// When `true`, validate and compute the prospective hash but
     /// do not write to disk, mutate the store, create edges, or
     /// commit. Outcome carries `content_hash` = the prospective
-    /// hash and `commit_sha` empty — wire-equivalent to full's
+    /// hash and `write_id` empty — wire-equivalent to full's
     /// `CreateArgs.dry_run` semantics.
     pub dry_run: bool,
 }
@@ -73,8 +73,8 @@ pub struct CreateEntityOutcome {
     pub content_hash: String,
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
-    /// full's `CreateResult.commit_sha`.
-    pub commit_sha: String,
+    /// full's `CreateResult.write_id`.
+    pub write_id: String,
     /// ISO date string from the parsed entity's `created_date`
     /// metadata. Today's date when the schema's auto-stamp filled
     /// it in; the existing value when re-materialising a stub with
@@ -253,8 +253,8 @@ pub struct UpdateEntityOutcome {
     pub content_hash: String,
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
-    /// full's `UpdateResult.commit_sha`.
-    pub commit_sha: String,
+    /// full's `UpdateResult.write_id`.
+    pub write_id: String,
     /// ISO date string from the parsed entity's `modified_date`
     /// metadata. Populated when the schema auto-stamps the field
     /// on update; empty when the schema doesn't declare it. Wire-
@@ -349,8 +349,8 @@ pub struct DeleteEntityOutcome {
     pub relations_removed: usize,
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Wire-equivalent to
-    /// full's `DeleteResult.commit_sha`.
-    pub commit_sha: String,
+    /// full's `DeleteResult.write_id`.
+    pub write_id: String,
     /// Stub entities that became orphaned by this delete (their last
     /// incoming edge disappeared with this entity) and were
     /// garbage-collected. Empty on deletes that didn't sever a
@@ -384,7 +384,7 @@ pub struct RelateEntityArgs {
     /// Rehearsal mode (agent-trust plan 07): run the FULL validation
     /// stage — identical refusals, identical warnings (including the
     /// would-be `AUTO_STUB_CREATED`) — then stop before any write.
-    /// The response carries the marker form: empty `commit_sha` with
+    /// The response carries the marker form: empty `write_id` with
     /// `_hash` set to the PROSPECTIVE post-write hash. Nothing is
     /// staged, committed, or stubbed.
     pub dry_run: bool,
@@ -417,8 +417,8 @@ pub struct RelateEntityOutcome {
     /// paths ([`RelateAction::NoOpAlreadyPresent`],
     /// [`RelateAction::NoOpAbsent`]) — those branches skip the disk
     /// write so no commit happens. Wire-equivalent to the full
-    /// `RelateResult.commit_sha`.
-    pub commit_sha: String,
+    /// `RelateResult.write_id`.
+    pub write_id: String,
     /// Edge provenance label — always `"explicit"` for relate-call
     /// outcomes. Wire-equivalent to full's `RelateResult.source` field;
     /// reserved for future inline-link-derived edge surfacing.
@@ -472,8 +472,8 @@ pub struct RenameEntityOutcome {
     /// Per-mem commit identifier returned by the backend's
     /// [`crate::backend::MemBackend::commit`]. Empty on the
     /// slug-noop short-circuit (no disk write happened).
-    /// Wire-equivalent to full's `RenameResult.commit_sha`.
-    pub commit_sha: String,
+    /// Wire-equivalent to full's `RenameResult.write_id`.
+    pub write_id: String,
     /// Typed non-fatal issues. The slug-noop short-circuit
     /// ([`WarningHint::TitleNormalizedToSlugNoop`]) surfaces here
     /// when a requested title normalises to the existing slug — the
@@ -501,7 +501,7 @@ mod tests {
             mem: "v".to_string(),
             file_path: "v/e.md".to_string(),
             content_hash: "h".to_string(),
-            commit_sha: "sha".to_string(),
+            write_id: "sha".to_string(),
             created_date: "2026-05-11".to_string(),
             warnings: Vec::new(),
             type_guidance: std::collections::BTreeMap::new(),
@@ -516,7 +516,7 @@ mod tests {
             title: "t".to_string(),
             file_path: "v/e.md".to_string(),
             content_hash: "h".to_string(),
-            commit_sha: "sha".to_string(),
+            write_id: "sha".to_string(),
             modified_date: "2026-05-11".to_string(),
             modified_sections: ModifiedSections::default(),
             modified_metadata: ModifiedMetadata::default(),
@@ -531,7 +531,7 @@ mod tests {
             id: EntityId("v--e".to_string()),
             file_path: "v/e.md".to_string(),
             removed_incoming: Vec::new(),
-            commit_sha: "sha".to_string(),
+            write_id: "sha".to_string(),
             relations_removed: 0,
             orphan_stubs_removed: Vec::new(),
             warnings: Vec::new(),
@@ -544,7 +544,7 @@ mod tests {
             rel_type: "PART_OF".to_string(),
             action: RelateAction::Added,
             content_hash: "h".to_string(),
-            commit_sha: "sha".to_string(),
+            write_id: "sha".to_string(),
             source: "explicit".to_string(),
             warnings: Vec::new(),
             orphan_stubs_removed: Vec::new(),
@@ -557,7 +557,7 @@ mod tests {
             old_path: "v/a.md".to_string(),
             new_path: "v/b.md".to_string(),
             content_hash: "h".to_string(),
-            commit_sha: "sha".to_string(),
+            write_id: "sha".to_string(),
             warnings: Vec::new(),
         };
         let rename_json = serde_json::to_string(&rename).unwrap();

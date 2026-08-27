@@ -498,11 +498,11 @@ fn attach_mem_changed(body: &mut serde_json::Value, notices: Vec<MemChangedNotic
 
 /// Attach the target mem's durability marker to a mutation response.
 /// `durable: false` means the mem's storage is volatile (in-memory) —
-/// the accompanying `commit_sha` is shaped like a git SHA but denotes
+/// the accompanying `write_id` is shaped like a git SHA but denotes
 /// nothing that survives process restart or session-TTL eviction. This is
 /// the per-write echo of the same per-mem marker `overview` / `health`
 /// carry, derived from the same `MountStorage::is_durable()`; it is
-/// orthogonal to `commit_sha.is_empty()` (which says only whether a commit
+/// orthogonal to `write_id.is_empty()` (which says only whether a commit
 /// happened), so an agent never has to conflate "no commit" with "commit
 /// in RAM". Defaults to `false` for an unresolvable mem — the engine
 /// never claims a durability it cannot vouch for.
@@ -2716,7 +2716,7 @@ impl McpServer {
                     "file_path": outcome.file_path,
                     "created_date": outcome.created_date,
                     "_hash": outcome.content_hash,
-                    "commit_sha": outcome.commit_sha,
+                    "write_id": outcome.write_id,
                     "warnings": outcome.warnings,
                     "type_guidance": outcome.type_guidance,
                 });
@@ -2895,7 +2895,7 @@ impl McpServer {
                     "modified_metadata": outcome.modified_metadata,
                     "modified_date": outcome.modified_date,
                     "_hash": outcome.content_hash,
-                    "commit_sha": outcome.commit_sha,
+                    "write_id": outcome.write_id,
                     "warnings": outcome.warnings,
                     // Orphan-stub GC: removing a body wiki-link that was
                     // a stub target's last referrer GC's the stub and
@@ -3034,7 +3034,7 @@ impl McpServer {
                             "source": outcome.source,
                             "_hash": outcome.content_hash,
                         }],
-                        "commit_sha": outcome.commit_sha,
+                        "write_id": outcome.write_id,
                         "warnings": outcome.warnings,
                         "orphan_stubs_removed": outcome
                             .orphan_stubs_removed
@@ -3213,7 +3213,7 @@ impl McpServer {
 
         let mut body = serde_json::json!({
             "results": entries,
-            "commit_sha": result.commit_sha,
+            "write_id": result.write_id,
             "warnings": warnings,
             "orphan_stubs_removed": result
                 .orphan_stubs_removed
@@ -3277,7 +3277,7 @@ impl McpServer {
                 let mut body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "relations_removed": outcome.relations_removed,
-                    "commit_sha": outcome.commit_sha,
+                    "write_id": outcome.write_id,
                 });
                 // Full skip-serialises empty `orphan_stubs_removed`;
                 // mirror by only adding the field when populated.
@@ -3470,7 +3470,7 @@ impl McpServer {
                     "old_path": outcome.old_path,
                     "new_path": outcome.new_path,
                     "_hash": outcome.content_hash,
-                    "commit_sha": outcome.commit_sha,
+                    "write_id": outcome.write_id,
                     "warnings": outcome.warnings,
                 });
                 attach_durability(&mut body, &engine, id.mem());
@@ -4163,7 +4163,7 @@ impl McpServer {
                     "name": response.name,
                     "location": response.location,
                     "schema_ref": response.schema_ref.to_string(),
-                    "seed_commit_sha": response.seed_commit_sha,
+                    "seed_write_id": response.seed_write_id,
                 });
                 // The engine ships the
                 // `MEM_REATTACHED_AFTER_UNREGISTER` warning on the
@@ -4583,8 +4583,8 @@ mod tests {
     /// produce a `<tmp>/mem-repo/.git/` with a branch
     /// `refs/heads/<mem>` per disk mem. Mutations through this
     /// engine variant land as real commits on the mem-repo
-    /// gitdir, producing 40-char hex `commit_sha` /
-    /// `seed_commit_sha` values that lifecycle / commit-body tests
+    /// gitdir, producing 40-char hex `write_id` /
+    /// `seed_write_id` values that lifecycle / commit-body tests
     /// assert on.
     fn setup_unified_test_engine_git_branch(
         workspace_root: &std::path::Path,
@@ -7118,7 +7118,7 @@ community:
         assert!(text.contains("\"name\""));
         assert!(text.contains("\"location\""));
         assert!(text.contains("\"schema_ref\""));
-        assert!(text.contains("\"seed_commit_sha\""));
+        assert!(text.contains("\"seed_write_id\""));
         // The new mem's name surfaces.
         assert!(text.contains("alpha"));
         // Schema priming payload is folded in.
@@ -9229,7 +9229,7 @@ write_rules: []
 
     /// `memstead_relate` end-to-end through the unified engine. Wire
     /// JSON shape (no `action` field — consumers branch on
-    /// `commit_sha.is_empty()`).
+    /// `write_id.is_empty()`).
     #[test]
     fn test_memstead_relate_via_unified_engine_path() {
         let tmp = setup_test_workspace();
@@ -9272,13 +9272,13 @@ write_rules: []
             extract_text(&result)
         );
         let text = extract_text(&result);
-        // Full-shape wire fields: from/to/rel_type/source/content_hash/commit_sha.
+        // Full-shape wire fields: from/to/rel_type/source/content_hash/write_id.
         assert!(text.contains("\"from\""));
         assert!(text.contains("\"to\""));
         assert!(text.contains("\"rel_type\""));
         assert!(text.contains("\"source\": \"explicit\""));
         assert!(text.contains("\"_hash\""));
-        assert!(text.contains("\"commit_sha\""));
+        assert!(text.contains("\"write_id\""));
         // Schema anchor injected via mem_schema_ref_unified.
         assert!(text.contains("\"_mem_schema\""));
 
@@ -9376,7 +9376,7 @@ write_rules: []
         let text = extract_text(&result);
         // Full-shape wire fields: id, title, nested
         // modified_sections/modified_metadata, content_hash,
-        // commit_sha, _mem_schema.
+        // write_id, _mem_schema.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"title\""));
         assert!(text.contains("\"modified_sections\""));
@@ -9384,7 +9384,7 @@ write_rules: []
         assert!(text.contains("\"identity\""));
         assert!(text.contains("\"modified_metadata\""));
         assert!(text.contains("\"_hash\""));
-        assert!(text.contains("\"commit_sha\""));
+        assert!(text.contains("\"write_id\""));
         assert!(text.contains("\"_mem_schema\""));
         // Empty append/patch slots stripped to match full's
         // skip_serializing_if convention.
@@ -9448,14 +9448,14 @@ write_rules: []
         );
         let text = extract_text(&result);
         // Full-shape wire fields: id, title, mem, file_path,
-        // created_date, content_hash, commit_sha, _mem_schema.
+        // created_date, content_hash, write_id, _mem_schema.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"title\": \"Brand New Spec\""));
         assert!(text.contains("\"mem\": \"specs\""));
         assert!(text.contains("\"file_path\": \"brand-new-spec.md\""));
         assert!(text.contains("\"created_date\""));
         assert!(text.contains("\"_hash\""));
-        assert!(text.contains("\"commit_sha\""));
+        assert!(text.contains("\"write_id\""));
         assert!(text.contains("\"_mem_schema\""));
         // Greenfield: incoming_count + incoming skip-serialised.
         assert!(
@@ -9515,7 +9515,7 @@ write_rules: []
     }
 
     /// `memstead_delete` end-to-end through the unified engine. Wire
-    /// JSON ships `id` / `relations_removed` / `commit_sha` and
+    /// JSON ships `id` / `relations_removed` / `write_id` and
     /// skips `file_path` / `removed_incoming`.
     #[test]
     fn test_memstead_delete_via_unified_engine_path() {
@@ -9561,10 +9561,10 @@ write_rules: []
             extract_text(&result)
         );
         let text = extract_text(&result);
-        // Full-shape wire fields: id + relations_removed + commit_sha.
+        // Full-shape wire fields: id + relations_removed + write_id.
         assert!(text.contains("\"id\""));
         assert!(text.contains("\"relations_removed\""));
-        assert!(text.contains("\"commit_sha\""));
+        assert!(text.contains("\"write_id\""));
         // Unified-only fields stay engine-side, not wire.
         assert!(
             !text.contains("\"file_path\""),
@@ -9639,13 +9639,13 @@ write_rules: []
         );
         let text = extract_text(&result);
         // Full-shape wire fields: old_id/new_id/old_path/new_path/
-        // content_hash/commit_sha. Schema anchor present.
+        // content_hash/write_id. Schema anchor present.
         assert!(text.contains("\"old_id\""));
         assert!(text.contains("\"new_id\""));
         assert!(text.contains("\"old_path\""));
         assert!(text.contains("\"new_path\""));
         assert!(text.contains("\"_hash\""));
-        assert!(text.contains("\"commit_sha\""));
+        assert!(text.contains("\"write_id\""));
         assert!(text.contains("\"_mem_schema\""));
         // The new title's slug should appear in the new id/path.
         assert!(text.contains("renamed-entity-a"));
@@ -9670,9 +9670,9 @@ write_rules: []
         }));
         assert!(!noop.is_error.unwrap_or(false), "{}", extract_text(&noop));
         let noop_text = extract_text(&noop);
-        // Slug-noop wire shape: old_id == new_id, commit_sha empty,
+        // Slug-noop wire shape: old_id == new_id, write_id empty,
         // warnings carries TITLE_NORMALIZED_TO_SLUG_NOOP.
-        assert!(noop_text.contains("\"commit_sha\": \"\""));
+        assert!(noop_text.contains("\"write_id\": \"\""));
         assert!(noop_text.contains("TITLE_NORMALIZED_TO_SLUG_NOOP"));
     }
 
@@ -11401,7 +11401,7 @@ write_rules: []
         // diacritics (`Große Änderung` → `große-änderung`) instead
         // of transliterating to `grosse-aenderung`.
         assert_eq!(json["id"].as_str().unwrap(), "specs--große-änderung");
-        assert_eq!(json["commit_sha"].as_str().unwrap(), "");
+        assert_eq!(json["write_id"].as_str().unwrap(), "");
         // Engine's compute_hash truncates SHA-256 to 16 hex chars — MCP
         // serialises that directly.
         assert_eq!(json["_hash"].as_str().unwrap().len(), 16);
@@ -13238,7 +13238,7 @@ write_rules: []
     /// need to exercise both flat and hierarchical layouts under
     /// gitignore-style matching.
     fn setup_lifecycle_server(tmp: &TempDir) -> McpServer {
-        // The engine produces real 40-char hex `seed_commit_sha`
+        // The engine produces real 40-char hex `seed_write_id`
         // values when mounted on a mem-repo (backend factory +
         // storage heuristic). Use the git-branch test-engine helper
         // so memstead_mem_create asserts against real commit shas.
@@ -13299,11 +13299,11 @@ write_rules: []
             serde_json::from_str(&extract_text(&result)).expect("response must be JSON");
         assert_eq!(json["name"], "fresh");
         assert!(
-            json["seed_commit_sha"]
+            json["seed_write_id"]
                 .as_str()
                 .is_some_and(|s| s.len() == 40),
-            "seed_commit_sha must be a 40-char hex string: {}",
-            json["seed_commit_sha"]
+            "seed_write_id must be a 40-char hex string: {}",
+            json["seed_write_id"]
         );
         assert!(
             json.get("belongs_to").is_none(),
@@ -15046,7 +15046,7 @@ write_rules: []
 
         /// Rehearsal marker form (agent-trust plan 07), single-op path:
         /// `dry_run: true` reports the would-be edge and would-be stub
-        /// with an EMPTY `commit_sha`, creates nothing, and the
+        /// with an EMPTY `write_id`, creates nothing, and the
         /// follow-up real call succeeds with a non-empty one.
         #[test]
         fn memstead_relate_dry_run_single_carries_marker_and_creates_nothing() {
@@ -15072,7 +15072,7 @@ write_rules: []
                 extract_text(&rehearsed)
             );
             let body = payload(&rehearsed);
-            assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+            assert_eq!(body["write_id"], "", "marker form: empty write_id");
             assert_eq!(body["results"][0]["action"], "added");
             let warnings = serde_json::to_string(&body["warnings"]).unwrap();
             assert!(
@@ -15098,7 +15098,7 @@ write_rules: []
             let real = call(None);
             assert!(!real.is_error.unwrap_or(false), "{}", extract_text(&real));
             let real_body = payload(&real);
-            assert_ne!(real_body["commit_sha"], "", "the real relate commits");
+            assert_ne!(real_body["write_id"], "", "the real relate commits");
             // No cross-call hash-equality assertion: the auto-stamped
             // `last_modified` (second-resolution wall clock) enters
             // `_hash`, so rehearsed vs real legitimately diverge when
@@ -15108,7 +15108,7 @@ write_rules: []
 
         /// Rehearsal marker form, batch path: a multi-op `dry_run`
         /// list reports every would-be action with an empty
-        /// `commit_sha`, reports (never creates) would-be stubs, and
+        /// `write_id`, reports (never creates) would-be stubs, and
         /// the follow-up real list succeeds.
         #[test]
         fn memstead_relate_dry_run_batch_carries_marker_and_creates_nothing() {
@@ -15145,7 +15145,7 @@ write_rules: []
                 extract_text(&rehearsed)
             );
             let body = payload(&rehearsed);
-            assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+            assert_eq!(body["write_id"], "", "marker form: empty write_id");
             assert_eq!(body["results"][0]["action"], "added");
             assert_eq!(body["results"][1]["action"], "added");
             let warnings = serde_json::to_string(&body["warnings"]).unwrap();
@@ -15174,7 +15174,7 @@ write_rules: []
                 dry_run: None,
             }));
             assert!(!real.is_error.unwrap_or(false), "{}", extract_text(&real));
-            assert_ne!(payload(&real)["commit_sha"], "", "the real batch commits");
+            assert_ne!(payload(&real)["write_id"], "", "the real batch commits");
         }
 
         /// Markdown frontmatter on `memstead_entity` carries the anchor as the

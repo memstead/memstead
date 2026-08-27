@@ -206,7 +206,7 @@ fn json_response<T: serde::Serialize>(data: &T) -> CallToolResult {
 /// session-TTL eviction), derived from its mount's `MountStorage` kind.
 /// On the ephemeral in-memory sketch this returns `false` — the per-write
 /// `durable` echo on every mutation response is how an agent learns its
-/// `commit_sha` denotes nothing durable. Defaults to `false` for an
+/// `write_id` denotes nothing durable. Defaults to `false` for an
 /// unresolvable mem: the engine never claims a durability it can't vouch
 /// for.
 fn mem_is_durable(engine: &memstead_base::Engine, mem: &str) -> bool {
@@ -1260,7 +1260,7 @@ impl FilesystemMcpServer {
             Ok(outcome) => {
                 // WarningHint's Serialize impl produces the same
                 // `{code, message, details}` envelope the manual
-                // synthesis used to emit. commit_sha + title +
+                // synthesis used to emit. write_id + title +
                 // mem are now first-class on the outcome.
                 let durable = mem_is_durable(&engine, &outcome.mem);
                 let durability_basis = mem_durability_basis(&engine, &outcome.mem);
@@ -1270,7 +1270,7 @@ impl FilesystemMcpServer {
                     "mem": outcome.mem,
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
-                    "commit_sha": outcome.commit_sha,
+                    "write_id": outcome.write_id,
                     "durable": durable,
                     "durability_basis": durability_basis,
                     "warnings": outcome.warnings,
@@ -1547,7 +1547,7 @@ impl FilesystemMcpServer {
                             "source": outcome.source,
                             "_hash": outcome.content_hash,
                         }],
-                        "commit_sha": outcome.commit_sha,
+                        "write_id": outcome.write_id,
                         "durable": durable,
                     "durability_basis": durability_basis,
                         "warnings": outcome.warnings,
@@ -1685,7 +1685,7 @@ impl FilesystemMcpServer {
 
         let body = serde_json::json!({
             "results": entries,
-            "commit_sha": result.commit_sha,
+            "write_id": result.write_id,
             "durable": durable,
             "warnings": warnings,
             "orphan_stubs_removed": result

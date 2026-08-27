@@ -62,7 +62,7 @@ pub struct Args {
     /// Rehearse the relate: run the full validation (identical
     /// refusals and warnings) and report the would-be edge — including
     /// a would-be auto-stub, which is reported, never created —
-    /// without writing anything. `commit_sha` stays empty (the
+    /// without writing anything. `write_id` stays empty (the
     /// rehearsal marker); `_hash` is the prospective post-write hash.
     #[arg(long = "dry-run")]
     pub dry_run: bool,
@@ -135,7 +135,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "_hash": outcome.content_hash,
             // Empty on rehearsals (the marker form) and no-op paths;
             // the real commit's sha otherwise.
-            "commit_sha": outcome.commit_sha,
+            "write_id": outcome.write_id,
             "warnings": outcome.warnings,
             "orphan_stubs_removed": outcome
                 .orphan_stubs_removed

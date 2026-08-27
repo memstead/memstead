@@ -48,7 +48,7 @@ pub struct Args {
     /// Rehearse the whole batch: run the full validation pass
     /// (intra-batch references resolve, identical refusals,
     /// report-all) and report the would-be receipt, creating nothing.
-    /// `commit_sha` stays empty (the rehearsal marker).
+    /// `write_id` stays empty (the rehearsal marker).
     #[arg(long = "dry-run")]
     pub dry_run: bool,
 }

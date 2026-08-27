@@ -173,7 +173,7 @@ impl Engine {
             };
             let commit_result =
                 backend.commit_with_expected_parent(&subject, &ctx, head_snapshot.as_deref());
-            let commit_sha = match commit_result {
+            let write_id = match commit_result {
                 Ok(sha) => sha,
                 Err(crate::backend::BackendError::ParentMismatch { .. }) => {
                     return Err(EngineError::RenamePartialFailure {
@@ -184,7 +184,7 @@ impl Engine {
                 }
                 Err(e) => return Err(e.into()),
             };
-            self.record_self_write(mount_idx, &commit_sha);
+            self.record_self_write(mount_idx, &write_id);
             // Same as the anchor backfill: a sweep has no per-operation
             // response to carry the notice. The merge still protects the
             // other writer's fields.

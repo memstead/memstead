@@ -287,7 +287,7 @@ The engine validates every write against the schema. A refusal is not a dead end
   "_hash": "2027b9e3bed49f5a",
   "_mem_schema": "default@1.3.0",
   "created_date": "2026-07-02T21:15:35Z",
-  "commit_sha": "000000000000000018be958d21f850000000000000000000",
+  "write_id": "000000000000000018be958d21f850000000000000000000",
   "durable": true,
   "type_guidance": {},
   "warnings": []
@@ -347,7 +347,7 @@ Before retrying with `details.current`, re-read the entity when your edit depend
   "modified_date": "2026-07-02T21:16:17Z",
   "modified_sections": { "replaced": ["significance"] },
   "modified_metadata": {},
-  "commit_sha": "000000000000000018be9596cf886a800000000000000000",
+  "write_id": "000000000000000018be9596cf886a800000000000000000",
   "durable": true,
   "orphan_stubs_removed": [],
   "warnings": []
@@ -424,7 +424,7 @@ In a `strict`-mode schema only declared relationship types are legal. Guess wron
       "_hash": "f559cb6a71019a85"
     }
   ],
-  "commit_sha": "000000000000000018be959d068d4dd80000000000000000",
+  "write_id": "000000000000000018be959d068d4dd80000000000000000",
   "warnings": [],
   "orphan_stubs_removed": [],
   "_mem_schema": "default@1.3.0",

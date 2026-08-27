@@ -900,7 +900,7 @@ pub struct MemCreateResponse {
     /// backend type. Empty string (`""`) signals the reattach branch
     /// was taken — pair with the `MEM_REATTACHED_AFTER_UNREGISTER`
     /// warning surfaced via [`Self::warnings`] for full context.
-    pub seed_commit_sha: String,
+    pub seed_write_id: String,
     /// Non-fatal findings emitted during the create / reattach
     /// pipeline. Today populated only by the reattach branch with a
     /// `MEM_REATTACHED_AFTER_UNREGISTER` warning carrying
@@ -1475,7 +1475,7 @@ pub fn create_mem(
                         name: params.name,
                         location: canonical,
                         schema_ref: canonical_schema_ref,
-                        seed_commit_sha: String::new(),
+                        seed_write_id: String::new(),
                         warnings,
                     });
                 }
@@ -1662,7 +1662,7 @@ pub fn create_mem(
                         name: params.name,
                         location: canonical,
                         schema_ref: canonical_schema_ref,
-                        seed_commit_sha: String::new(),
+                        seed_write_id: String::new(),
                         warnings,
                     });
                 }
@@ -1734,7 +1734,7 @@ pub fn create_mem(
             .write_mem_config(&config_bytes)
             .map_err(|e| memstead_base::EngineError::Mem(format!("write mem config: {e}")))?;
     }
-    let seed_commit_sha = backend
+    let seed_write_id = backend
         .commit(&format!("memstead: create mem {}", params.name), &seed_ctx)
         .map_err(|e| memstead_base::EngineError::Mem(format!("seed commit: {e}")))?;
     let origin = memstead_base::MemOrigin::RuntimeCreated {
@@ -1776,7 +1776,7 @@ pub fn create_mem(
         name: params.name,
         location: canonical,
         schema_ref: canonical_schema_ref,
-        seed_commit_sha,
+        seed_write_id,
         warnings,
     })
 }

@@ -522,7 +522,7 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
             "name": response.name,
             "location": response.location,
             "schema_ref": response.schema_ref.to_string(),
-            "seed_commit_sha": response.seed_commit_sha,
+            "seed_write_id": response.seed_write_id,
             // The reattach branch surfaces `MEM_REATTACHED_AFTER_UNREGISTER`
             // through the response envelope rather than dropping it on
             // the floor. Fresh-create ships an empty array.
@@ -821,7 +821,7 @@ fn render_mem_create_markdown(r: &MemCreateResponse) -> String {
     // The reattach
     // branch surfaces a `MEM_REATTACHED_AFTER_UNREGISTER` warning on
     // the response. Adjust the heading so an operator picking up an
-    // empty `seed_commit_sha` plus the reattach warning learns the
+    // empty `seed_write_id` plus the reattach warning learns the
     // branch tip kept its prior history rather than starting fresh.
     let reattached = r.warnings.iter().any(|w| {
         matches!(
@@ -837,7 +837,7 @@ fn render_mem_create_markdown(r: &MemCreateResponse) -> String {
     let mut out = heading;
     out.push_str(&format!("- Location: `{}`\n", r.location.display()));
     out.push_str(&format!("- Schema: `{}`\n", r.schema_ref));
-    out.push_str(&format!("- Seed commit: `{}`\n", r.seed_commit_sha));
+    out.push_str(&format!("- Seed commit: `{}`\n", r.seed_write_id));
     if !r.warnings.is_empty() {
         out.push_str("\n## Warnings\n\n");
         for w in &r.warnings {

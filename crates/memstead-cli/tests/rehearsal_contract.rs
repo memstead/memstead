@@ -4,7 +4,7 @@
 //! validation the real call runs (same typed refusals, same details),
 //! is observably side-effect-free (every byte under the workspace —
 //! git refs, working tree, `.memstead/` — identical before and after),
-//! and marks itself with the marker form (empty `commit_sha` plus the
+//! and marks itself with the marker form (empty `write_id` plus the
 //! prospective fields).
 //!
 //! Coverage: the pre-existing single-verb dry-run (create, update) is
@@ -179,7 +179,7 @@ fn create_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
         .stdout
         .clone();
     let body = parse_json(&out);
-    assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+    assert_eq!(body["write_id"], "", "marker form: empty write_id");
     assert_eq!(body["id"], "cli-write--alpha", "prospective id reported");
     let after = tree_digest(tmp.path());
     assert_trees_identical(&before, &after);
@@ -205,7 +205,7 @@ fn create_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
         .stdout
         .clone();
     let real_body = parse_json(&out);
-    assert_ne!(real_body["commit_sha"], "", "the real create commits");
+    assert_ne!(real_body["write_id"], "", "the real create commits");
     // No cross-call hash-equality assertion: the auto-stamped
     // `created_date` (second-resolution wall clock) enters `_hash`,
     // so the rehearsed and real hashes diverge whenever a second
@@ -299,7 +299,7 @@ fn update_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
         .stdout
         .clone();
     let body = parse_json(&out);
-    assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+    assert_eq!(body["write_id"], "", "marker form: empty write_id");
     assert_eq!(
         body["_hash"].as_str().unwrap(),
         hash,
@@ -333,7 +333,7 @@ fn update_rehearsal_refuses_identically_and_leaves_workspace_byte_identical() {
         .stdout
         .clone();
     let real_body = parse_json(&out);
-    assert_ne!(real_body["commit_sha"], "");
+    assert_ne!(real_body["write_id"], "");
     assert_ne!(
         real_body["_hash"].as_str().unwrap(),
         hash,
@@ -412,7 +412,7 @@ fn relate_rehearsal_reports_would_be_stub_and_leaves_workspace_byte_identical() 
         .stdout
         .clone();
     let body = parse_json(&out);
-    assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+    assert_eq!(body["write_id"], "", "marker form: empty write_id");
     let warnings = serde_json::to_string(&body["warnings"]).unwrap();
     assert!(
         warnings.contains("AUTO_STUB_CREATED"),
@@ -443,7 +443,7 @@ fn relate_rehearsal_reports_would_be_stub_and_leaves_workspace_byte_identical() 
         .stdout
         .clone();
     let real_body = parse_json(&out);
-    assert_ne!(real_body["commit_sha"], "", "the real relate commits");
+    assert_ne!(real_body["write_id"], "", "the real relate commits");
     // No cross-call hash equality: the relate re-stamps
     // `last_modified` into the hash, so rehearsed vs real diverge
     // across a second tick (the clock-pinned engine test asserts
@@ -495,7 +495,7 @@ fn batch_create_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         .clone();
     let body = parse_json(&out);
     assert_eq!(body["applied"], true, "{body}");
-    assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+    assert_eq!(body["write_id"], "", "marker form: empty write_id");
     assert_eq!(body["succeeded"], 2);
     assert_eq!(body["results"][0]["action"], "created");
     assert_eq!(body["results"][0]["id"], "cli-write--alpha");
@@ -518,7 +518,7 @@ fn batch_create_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         .clone();
     let real_body = parse_json(&out);
     assert_eq!(real_body["applied"], true);
-    assert_ne!(real_body["commit_sha"], "", "the real batch commits");
+    assert_ne!(real_body["write_id"], "", "the real batch commits");
 }
 
 #[test]
@@ -609,7 +609,7 @@ fn batch_update_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         .clone();
     let body = parse_json(&out);
     assert_eq!(body["applied"], true, "{body}");
-    assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+    assert_eq!(body["write_id"], "", "marker form: empty write_id");
     assert!(
         body["results"]
             .as_array()
@@ -633,7 +633,7 @@ fn batch_update_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         .clone();
     let real_body = parse_json(&out);
     assert_eq!(real_body["applied"], true);
-    assert_ne!(real_body["commit_sha"], "");
+    assert_ne!(real_body["write_id"], "");
 }
 
 #[test]
@@ -728,7 +728,7 @@ fn batch_relate_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         .clone();
     let body = parse_json(&out);
     assert_eq!(body["applied"], true, "{body}");
-    assert_eq!(body["commit_sha"], "", "marker form: empty commit_sha");
+    assert_eq!(body["write_id"], "", "marker form: empty write_id");
     assert!(
         body["results"]
             .as_array()
@@ -757,7 +757,7 @@ fn batch_relate_rehearsal_reports_receipt_and_leaves_workspace_byte_identical() 
         .clone();
     let real_body = parse_json(&out);
     assert_eq!(real_body["applied"], true);
-    assert_ne!(real_body["commit_sha"], "");
+    assert_ne!(real_body["write_id"], "");
 }
 
 #[test]

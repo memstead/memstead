@@ -38,7 +38,7 @@ pub struct Args {
     pub from: PathBuf,
     /// Rehearse the whole batch: run the full in-order validation
     /// (identical refusals, report-all) and report the would-be
-    /// receipt, committing nothing — no edge, no stub. `commit_sha`
+    /// receipt, committing nothing — no edge, no stub. `write_id`
     /// stays empty (the rehearsal marker).
     #[arg(long = "dry-run")]
     pub dry_run: bool,

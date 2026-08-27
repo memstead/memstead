@@ -481,7 +481,7 @@ pub enum EngineError {
     /// provided but matched the current state): `EMPTY_UPDATE` is
     /// keyed on "no mutation content provided at all", and refuses
     /// before any mutation work runs so a misspelled/omitted mutation
-    /// key doesn't silently land as `succeeded: 1, commit_sha: ""`.
+    /// key doesn't silently land as `succeeded: 1, write_id: ""`.
     #[error(
         "no mutation content for {id}: payload carries an id but every mutation map is empty \
          (recognised keys: {})",
@@ -1054,7 +1054,7 @@ pub enum EngineError {
     /// empty-tree sentinel; `MEM_ERROR` → genuine backend fault.
     /// `details.since` carries the offending cursor untruncated.
     #[error(
-        "commit cursor '{since}' is not a known commit in mem '{mem}' — pass a commit_sha from a prior mutation, or the empty-tree sentinel to re-seed"
+        "commit cursor '{since}' is not a known commit in mem '{mem}' — pass the `head` a prior memstead_changes_since call returned, or the empty-tree sentinel to re-seed. A mutation's `write_id` is an identity, not a cursor"
     )]
     InvalidChangesCursor { mem: String, since: String },
     /// `review_mark_diff` was called on a mem with no review mark set.

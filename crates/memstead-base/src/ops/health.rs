@@ -1895,7 +1895,7 @@ pub fn config_projection(
 ) -> serde_json::Map<String, serde_json::Value> {
     // Per-mem storage backend → durability marker, derived from the
     // mount's `MountStorage` kind. Lives alongside `vcs` so an agent
-    // reading per-mem config learns whether a `commit_sha` this mem
+    // reading per-mem config learns whether a `write_id` this mem
     // returns is durable-on-disk or volatile-in-RAM.
     let backend_by_mem: std::collections::HashMap<&str, (&'static str, bool)> = engine
         .mounts()

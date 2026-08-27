@@ -1024,7 +1024,7 @@ fn batch_update_json_success_unchanged_exits_zero() {
         "success path keeps the bare BatchResult shape: {parsed}"
     );
     assert_eq!(parsed["succeeded"], 1);
-    assert!(parsed["commit_sha"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(parsed["write_id"].as_str().is_some_and(|s| !s.is_empty()));
 }
 
 /// CLI F13: a `--include-notes` read of a batch-update commit names every

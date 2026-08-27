@@ -55,7 +55,7 @@ pub(super) struct PreparedRelate {
 pub(super) enum RelatePrepareOutcome {
     /// No-op path (idempotent re-add / absent remove): the complete
     /// outcome, with its typed no-op warning and an empty
-    /// `commit_sha` — nothing to write or commit.
+    /// `write_id` — nothing to write or commit.
     Done(RelateEntityOutcome),
     /// A real edge change, validated and ready to stage.
     Prepared(PreparedRelate),
@@ -164,7 +164,7 @@ impl Engine {
         // Rehearsal: the full validation stage ran (identical refusals
         // and warnings, would-be stub included via the prepared
         // AUTO_STUB_CREATED warning) — stop before any write. `_hash`
-        // reports the PROSPECTIVE post-write hash; `commit_sha` stays
+        // reports the PROSPECTIVE post-write hash; `write_id` stays
         // empty (the marker form). Nothing staged, committed, or
         // stubbed.
         if dry_run {
@@ -188,7 +188,7 @@ impl Engine {
                 rel_type: prepared.rel_type,
                 action: prepared.action,
                 content_hash: parse_result.entity.content_hash,
-                commit_sha: String::new(),
+                write_id: String::new(),
                 source: "explicit".to_string(),
                 orphan_stubs_removed: Vec::new(),
                 warnings,
@@ -247,7 +247,7 @@ impl Engine {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let commit_sha = backend.commit(&commit_subject, &ctx)?;
+        let write_id = backend.commit(&commit_subject, &ctx)?;
 
         backend.append_provenance(
             &Provenance::new(
@@ -261,7 +261,7 @@ impl Engine {
             .with_role(self.current_role),
         )?;
 
-        self.record_self_write(prepared.mount_idx, &commit_sha);
+        self.record_self_write(prepared.mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
 
         let content_hash = self.apply_prepared_relate_to_store(&prepared)?;
@@ -315,7 +315,7 @@ impl Engine {
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-commit path
         // (Added / Removed); the NoOpAlreadyPresent / NoOpAbsent branches
-        // return early above with an empty `commit_sha` and never demand
+        // return early above with an empty `write_id` and never demand
         // a note (nothing landed to attribute).
         if let Some(w) = self.note_missing_warning("relate_entity", note) {
             warnings.push(w);
@@ -327,7 +327,7 @@ impl Engine {
             rel_type,
             action,
             content_hash,
-            commit_sha,
+            write_id,
             source: "explicit".to_string(),
             warnings,
             orphan_stubs_removed,
@@ -383,18 +383,18 @@ impl Engine {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let commit_sha = backend.commit(
+        let write_id = backend.commit(
             &format!("memstead: derivation re-baseline {}", outcome.from),
             &ctx,
         )?;
-        self.record_self_write(mount_idx, &commit_sha);
+        self.record_self_write(mount_idx, &write_id);
         // `relate_entity` returns early into this path, so the stamp call on
         // the ordinary path never runs and its report has to be collected
         // here (04/03, criterion 3, found by the plan's re-grade).
         outcome
             .warnings
             .extend(self.stamp_mutation_versions(mount_idx));
-        outcome.commit_sha = commit_sha;
+        outcome.write_id = write_id;
         outcome
             .warnings
             .push(WarningHint::DerivationBaselineRefreshed {
@@ -925,7 +925,7 @@ impl Engine {
                 rel_type: args.rel_type,
                 action,
                 content_hash: entity.content_hash.clone(),
-                commit_sha: String::new(),
+                write_id: String::new(),
                 source: "explicit".to_string(),
                 warnings,
                 // No-op branch: nothing changed in the graph, so the
@@ -1040,7 +1040,7 @@ impl Engine {
     /// envelope — then the batch stops before any commit and rolls the
     /// staged state back. A legal batch returns the would-be receipt
     /// (per-entry actions, would-be `orphan_stubs_removed` computed on
-    /// the staged state) with the marker form's empty `commit_sha`; an
+    /// the staged state) with the marker form's empty `write_id`; an
     /// illegal one returns the same refusal a real call would. No
     /// edge, stub, or commit lands.
     pub fn batch_relate(
@@ -1059,7 +1059,7 @@ impl Engine {
                 results: Vec::new(),
                 succeeded: 0,
                 failed: 0,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1245,7 +1245,7 @@ impl Engine {
                 results,
                 succeeded: 0,
                 failed,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1285,7 +1285,7 @@ impl Engine {
                 results,
                 succeeded,
                 failed: 0,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1350,7 +1350,7 @@ impl Engine {
         // Provenance per entry, self-write markers per mount.
         let mut batch_warnings: Vec<WarningHint> = Vec::new();
         for (p, note) in prepared.iter().zip(notes.iter()) {
-            let commit_sha = mount_commits
+            let write_id = mount_commits
                 .iter()
                 .find(|(m, _)| *m == p.mount_idx)
                 .map(|(_, s)| s.clone())
@@ -1366,7 +1366,7 @@ impl Engine {
                 )
                 .with_role(self.current_role),
             )?;
-            self.record_self_write(p.mount_idx, &commit_sha);
+            self.record_self_write(p.mount_idx, &write_id);
             batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
         }
 
@@ -1383,7 +1383,7 @@ impl Engine {
         self.invalidate_communities();
         self.invalidate_search_indexes();
 
-        let commit_sha = mount_commits
+        let write_id = mount_commits
             .last()
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
@@ -1409,7 +1409,7 @@ impl Engine {
             results,
             succeeded,
             failed: 0,
-            commit_sha,
+            write_id,
         })
     }
 
@@ -1616,7 +1616,7 @@ mod tests {
     }
 
     #[test]
-    fn relate_entity_returns_commit_sha_on_real_write() {
+    fn relate_entity_returns_write_id_on_real_write() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "Source");
         let (actor, client) = cli_actor();
@@ -1649,13 +1649,13 @@ mod tests {
         // Wire-equivalent to full's commit SHA: agents reading the field
         // get a usable cursor regardless of which backend served the write.
         assert!(
-            !outcome.commit_sha.is_empty(),
-            "commit_sha must be populated on a real write"
+            !outcome.write_id.is_empty(),
+            "write_id must be populated on a real write"
         );
     }
 
     #[test]
-    fn relate_entity_no_op_paths_carry_typed_warnings_and_empty_commit_sha() {
+    fn relate_entity_no_op_paths_carry_typed_warnings_and_empty_write_id() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, source) = engine_with_seed(&tmp, "S");
         let (actor, client) = cli_actor();
@@ -1682,7 +1682,7 @@ mod tests {
             .unwrap();
 
         // Duplicate-add — typed DuplicateRelationship warning, empty
-        // commit_sha (no disk write happened).
+        // write_id (no disk write happened).
         let dup = engine
             .relate_entity(
                 RelateEntityArgs {
@@ -1700,7 +1700,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(dup.action, RelateAction::NoOpAlreadyPresent);
-        assert!(dup.commit_sha.is_empty());
+        assert!(dup.write_id.is_empty());
         assert_eq!(dup.warnings.len(), 1);
         assert!(matches!(
             dup.warnings[0],
@@ -1708,7 +1708,7 @@ mod tests {
         ));
 
         // Remove a non-existent edge — typed NoSuchRelationship warning,
-        // empty commit_sha.
+        // empty write_id.
         let no_such = engine
             .relate_entity(
                 RelateEntityArgs {
@@ -1726,7 +1726,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(no_such.action, RelateAction::NoOpAbsent);
-        assert!(no_such.commit_sha.is_empty());
+        assert!(no_such.write_id.is_empty());
         assert_eq!(no_such.warnings.len(), 1);
         assert!(matches!(
             no_such.warnings[0],
@@ -3833,7 +3833,7 @@ community:
         assert!(result.applied, "{result:?}");
         assert_eq!(result.succeeded, 3);
         assert_eq!(result.failed, 0);
-        assert!(!result.commit_sha.is_empty(), "one real commit");
+        assert!(!result.write_id.is_empty(), "one real commit");
         let actions: Vec<&str> = result.results.iter().map(|r| r.action.as_str()).collect();
         assert_eq!(
             actions,
@@ -3851,7 +3851,7 @@ community:
     /// Rehearsal contract (agent-trust plan 07) — single relate:
     /// `dry_run: true` runs the FULL validation, reports the would-be
     /// edge and the would-be auto-stub (reported, never created) with
-    /// the marker form's empty `commit_sha`, and writes nothing. The
+    /// the marker form's empty `write_id`, and writes nothing. The
     /// follow-up real call succeeds and lands EXACTLY the rehearsed
     /// prospective `_hash` — the strongest identical-validation
     /// observable.
@@ -3883,10 +3883,7 @@ community:
             .relate_entity(args(true), actor, Some(&client), None)
             .unwrap();
         assert_eq!(rehearsed.action, RelateAction::Added);
-        assert!(
-            rehearsed.commit_sha.is_empty(),
-            "marker form: empty commit_sha"
-        );
+        assert!(rehearsed.write_id.is_empty(), "marker form: empty write_id");
         assert!(
             rehearsed.warnings.iter().any(
                 |w| matches!(w, crate::ops::WarningHint::AutoStubCreated { stub_id, pending: true } if *stub_id == absent)
@@ -3923,7 +3920,7 @@ community:
         let real = engine
             .relate_entity(args(false), actor, Some(&client), None)
             .unwrap();
-        assert!(!real.commit_sha.is_empty(), "the real relate commits");
+        assert!(!real.write_id.is_empty(), "the real relate commits");
         assert_eq!(
             real.content_hash, rehearsed.content_hash,
             "prospective hash must equal the real post-write hash"
@@ -3982,7 +3979,7 @@ community:
     /// Rehearsal — batch relate: `dry_run: true` validates the whole
     /// list in order (a remove of an edge added earlier in the SAME
     /// batch reports `"removed"` — the in-order proof), reports the
-    /// would-be receipt with empty `commit_sha`, and commits nothing:
+    /// would-be receipt with empty `write_id`, and commits nothing:
     /// no edge, no stub, no head movement. The follow-up real batch
     /// succeeds.
     #[test]
@@ -4033,10 +4030,7 @@ community:
             .batch_relate(batch(), actor, Some(&client), true)
             .unwrap();
         assert!(rehearsed.applied, "{rehearsed:?}");
-        assert!(
-            rehearsed.commit_sha.is_empty(),
-            "marker form: empty commit_sha"
-        );
+        assert!(rehearsed.write_id.is_empty(), "marker form: empty write_id");
         let actions: Vec<&str> = rehearsed
             .results
             .iter()
@@ -4069,7 +4063,7 @@ community:
             .batch_relate(batch(), actor, Some(&client), false)
             .unwrap();
         assert!(real.applied, "{real:?}");
-        assert!(!real.commit_sha.is_empty());
+        assert!(!real.write_id.is_empty());
     }
 
     /// Rehearsal refusal parity — batch relate: a failing list refuses
@@ -4237,7 +4231,7 @@ community:
             .unwrap();
         assert!(!result.applied);
         assert_eq!(result.failed, 2, "{result:?}");
-        assert!(result.commit_sha.is_empty());
+        assert!(result.write_id.is_empty());
         let codes: Vec<(usize, &str)> = result
             .results
             .iter()
@@ -4503,7 +4497,7 @@ write_rules: []
         assert_eq!(refreshed.action, RelateAction::NoOpAlreadyPresent);
         assert_eq!(refreshed.content_hash, hash_before, "_hash unchanged");
         assert!(
-            !refreshed.commit_sha.is_empty(),
+            !refreshed.write_id.is_empty(),
             "the sidecar refresh persists via a real commit"
         );
         assert!(
@@ -4522,7 +4516,7 @@ write_rules: []
         );
 
         // Undeclared rel-type: duplicate-add keeps today's EXACT
-        // no-op — empty commit_sha, no refresh warning.
+        // no-op — empty write_id, no refresh warning.
         engine
             .relate_entity(
                 relate_args(&source.id, "SUPPORTS", &target.id),
@@ -4540,7 +4534,7 @@ write_rules: []
             )
             .unwrap();
         assert_eq!(noop.action, RelateAction::NoOpAlreadyPresent);
-        assert!(noop.commit_sha.is_empty(), "undeclared no-op stays bare");
+        assert!(noop.write_id.is_empty(), "undeclared no-op stays bare");
         assert!(
             !noop
                 .warnings

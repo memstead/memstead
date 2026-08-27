@@ -9,7 +9,7 @@
 //!
 //! Output:
 //! - JSON (default with `--json` global): the raw
-//!   `ParseRecoveryReport` shape — `{ entries: [...], commit_sha }`.
+//!   `ParseRecoveryReport` shape — `{ entries: [...], write_id }`.
 //! - Markdown: counts header + one bullet per entry with
 //!   outcome / reason / id.
 
@@ -72,9 +72,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 entry.entity_id, entry.rel_type, entry.target, entry.outcome, reason,
             ));
         }
-        if !report.commit_sha.is_empty() {
+        if !report.write_id.is_empty() {
             lines.push(String::new());
-            lines.push(format!("Last commit: `{}`", report.commit_sha));
+            lines.push(format!("Last commit: `{}`", report.write_id));
         }
     }
     print_markdown(&lines.join("\n"));
@@ -114,7 +114,7 @@ fn recovery_counts(report: &memstead_base::ops::ParseRecoveryReport) -> (usize, 
 /// distinguishable from a serialization failure or an unrecognised
 /// command (the raw report serialises to `{}` when clean because both
 /// its fields skip-serialise when empty). Mirrors the markdown channel's
-/// counter summary. `commit_sha` stays omitted when no recovery wrote.
+/// counter summary. `write_id` stays omitted when no recovery wrote.
 fn recovery_json_envelope(report: &memstead_base::ops::ParseRecoveryReport) -> serde_json::Value {
     let (removed, skipped, failed) = recovery_counts(report);
     let mut obj = serde_json::json!({
@@ -123,8 +123,8 @@ fn recovery_json_envelope(report: &memstead_base::ops::ParseRecoveryReport) -> s
         "failed": failed,
         "entries": report.entries,
     });
-    if !report.commit_sha.is_empty() {
-        obj["commit_sha"] = serde_json::json!(report.commit_sha);
+    if !report.write_id.is_empty() {
+        obj["write_id"] = serde_json::json!(report.write_id);
     }
     obj
 }
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn recovery_json_envelope_clean_workspace_carries_zero_counters_and_empty_entries() {
         // A clean workspace yields a default report (no entries, empty
-        // commit_sha). The envelope must be the unambiguous zero-counter
+        // write_id). The envelope must be the unambiguous zero-counter
         // object, not `{}`.
         let report = memstead_base::ops::ParseRecoveryReport::default();
         let json = recovery_json_envelope(&report);
@@ -144,9 +144,9 @@ mod tests {
         assert_eq!(json["skipped"], 0);
         assert_eq!(json["failed"], 0);
         assert_eq!(json["entries"], serde_json::json!([]));
-        // `commit_sha` omitted when nothing wrote — the clean shape is
+        // `write_id` omitted when nothing wrote — the clean shape is
         // exactly the four documented keys.
-        assert!(json.get("commit_sha").is_none());
+        assert!(json.get("write_id").is_none());
         assert_ne!(json, serde_json::json!({}), "must not be the empty object");
     }
 }

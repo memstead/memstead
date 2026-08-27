@@ -748,7 +748,7 @@ impl Engine {
         //     entity and return without touching disk, store, or
         //     edges. Mirrors full's `CreateArgs.dry_run` semantics —
         //     `content_hash` carries the prospective hash since
-        //     there's no current to differentiate from. `commit_sha`
+        //     there's no current to differentiate from. `write_id`
         //     is empty. Stub creation is also skipped (no
         //     in-memory side effects).
         if args.dry_run {
@@ -772,7 +772,7 @@ impl Engine {
                 mem: args.mem,
                 file_path,
                 content_hash: prospective_hash,
-                commit_sha: String::new(),
+                write_id: String::new(),
                 created_date,
                 warnings,
                 type_guidance,
@@ -876,7 +876,7 @@ impl Engine {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let commit_sha = backend.commit(&commit_subject, &ctx)?;
+        let write_id = backend.commit(&commit_subject, &ctx)?;
 
         // 9. Append provenance. Folder writes a JSONL line; git-branch
         //    no-ops (the commit object already carries the data).
@@ -895,7 +895,7 @@ impl Engine {
         // Self-write bookkeeping: jump `last_known_head` to the SHA
         // we just produced so the next read doesn't surface
         // `MEM_RELOADED` for our own commit.
-        self.record_self_write(mount_idx, &commit_sha);
+        self.record_self_write(mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(mount_idx);
 
         // 10. Update the in-memory store via re-parse so the store
@@ -972,7 +972,7 @@ impl Engine {
             mem,
             file_path,
             content_hash,
-            commit_sha,
+            write_id,
             created_date,
             warnings,
             type_guidance,
@@ -1010,7 +1010,7 @@ impl Engine {
     /// refusals — then the batch stops before any write. A legal batch
     /// returns the would-be receipt (`applied: true`, per-entry
     /// `"created"` with the prospective ids) with the marker form's
-    /// empty `commit_sha`; an illegal one returns the same refusal a
+    /// empty `write_id`; an illegal one returns the same refusal a
     /// real call would. Nothing is written, committed, or stubbed.
     pub fn batch_create(
         &mut self,
@@ -1030,7 +1030,7 @@ impl Engine {
                 results: Vec::new(),
                 succeeded: 0,
                 failed: 0,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1234,7 +1234,7 @@ impl Engine {
                 results,
                 succeeded: 0,
                 failed,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1242,7 +1242,7 @@ impl Engine {
         // graph state (skeletons made intra-batch targets real) and
         // nothing failed — stop before any write. Roll back the
         // skeleton staging and return the would-be receipt with the
-        // marker form's empty `commit_sha`.
+        // marker form's empty `write_id`.
         if dry_run {
             self.store = store_snapshot;
             self.discard_all_pending();
@@ -1263,7 +1263,7 @@ impl Engine {
                 results,
                 succeeded,
                 failed: 0,
-                commit_sha: String::new(),
+                write_id: String::new(),
             });
         }
 
@@ -1370,7 +1370,7 @@ impl Engine {
         let fallback = engine_fallback_type();
         let mut batch_warnings: Vec<WarningHint> = Vec::new();
         for (p, note) in prepared.iter().zip(notes.iter()) {
-            let commit_sha = mount_commits
+            let write_id = mount_commits
                 .iter()
                 .find(|(m, _)| *m == p.mount_idx)
                 .map(|(_, s)| s.clone())
@@ -1386,7 +1386,7 @@ impl Engine {
                 )
                 .with_role(self.current_role),
             )?;
-            self.record_self_write(p.mount_idx, &commit_sha);
+            self.record_self_write(p.mount_idx, &write_id);
             batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));
             let parse_result =
                 parse_markdown(&p.markdown, &p.file_path, p.type_def.as_ref(), &p.mem)
@@ -1414,7 +1414,7 @@ impl Engine {
         self.invalidate_communities();
         self.invalidate_search_indexes();
 
-        let commit_sha = mount_commits
+        let write_id = mount_commits
             .last()
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
@@ -1435,7 +1435,7 @@ impl Engine {
             results,
             succeeded,
             failed: 0,
-            commit_sha,
+            write_id,
         })
     }
 
@@ -1719,7 +1719,7 @@ write_rules: []
                 None,
             )
             .unwrap();
-        assert!(!outcome.commit_sha.is_empty(), "warn tier never blocks");
+        assert!(!outcome.write_id.is_empty(), "warn tier never blocks");
         let violation = outcome
             .warnings
             .iter()
@@ -1921,7 +1921,7 @@ write_rules: []
             )
             .unwrap();
         let outcome = set_checked(&mut engine, &a.id).unwrap();
-        assert!(!outcome.commit_sha.is_empty());
+        assert!(!outcome.write_id.is_empty());
         assert!(
             outcome
                 .warnings
@@ -2202,7 +2202,7 @@ write_rules: []
                 None,
             )
             .expect("warn tier lands the write");
-        assert!(!outcome.commit_sha.is_empty());
+        assert!(!outcome.write_id.is_empty());
         let block = outcome
             .warnings
             .iter()
@@ -2277,7 +2277,7 @@ write_rules: []
             )
             .unwrap();
         let outcome = flip_to_checked(&mut engine, &b.id).unwrap();
-        assert!(!outcome.commit_sha.is_empty());
+        assert!(!outcome.write_id.is_empty());
         assert!(
             outcome
                 .warnings
@@ -2846,7 +2846,7 @@ cross_mem_relationships:
                 None,
             )
             .expect("updating a defeated entity succeeds");
-        assert!(!outcome.commit_sha.is_empty());
+        assert!(!outcome.write_id.is_empty());
         lab_relate(&mut engine, "arg--f", "REBUTS", "arg--b");
 
         // In-process invalidation: a fresh unattacked attacker flips
@@ -3320,7 +3320,7 @@ community:
                 None,
             )
             .unwrap();
-        assert!(!outcome.commit_sha.is_empty(), "success shape kept");
+        assert!(!outcome.write_id.is_empty(), "success shape kept");
         let crossings = crossing_warnings_of(&outcome.warnings);
         assert!(
             crossings.contains(&(
@@ -3405,7 +3405,7 @@ community:
 
         // 0 → 1: none → notice (upward), on the TARGET of the edge.
         let outcome = relate(&mut engine, "arg--obj-a", false);
-        assert!(!outcome.commit_sha.is_empty());
+        assert!(!outcome.write_id.is_empty());
         let crossings = crossing_warnings_of(&outcome.warnings);
         assert!(
             crossings.contains(&(
@@ -4126,7 +4126,7 @@ write_rules: []
             )
             .unwrap();
         assert!(
-            !outcome.commit_sha.is_empty(),
+            !outcome.write_id.is_empty(),
             "the warning never blocks the mutation"
         );
         let blocks = missing_outgoing_of(&outcome.warnings);
@@ -4231,7 +4231,7 @@ write_rules: []
         // Section-only update on an unsatisfied entity: warning fires,
         // mutation commits.
         let outcome = update(&mut engine, &a.id, vec![]);
-        assert!(!outcome.commit_sha.is_empty());
+        assert!(!outcome.write_id.is_empty());
         assert_eq!(
             missing_outgoing_of(&outcome.warnings),
             vec![(vec!["PART_OF".to_string()], "at_least_one".to_string())]
@@ -4429,7 +4429,7 @@ write_rules: []
             .unwrap();
         assert!(result.applied, "{result:?}");
         assert_eq!(result.succeeded, 3);
-        assert!(!result.commit_sha.is_empty(), "one real commit");
+        assert!(!result.write_id.is_empty(), "one real commit");
         assert!(
             result.results.iter().all(|r| r.action == "created"),
             "{result:?}"
@@ -4453,7 +4453,7 @@ write_rules: []
     /// Rehearsal contract (agent-trust plan 07): `batch_create` with
     /// `dry_run: true` validates the whole batch — intra-batch
     /// references included — and reports the would-be receipt with the
-    /// marker form's empty `commit_sha`, writing NOTHING. The
+    /// marker form's empty `write_id`, writing NOTHING. The
     /// follow-up real call on the unchanged mem succeeds.
     #[test]
     fn batch_create_dry_run_reports_receipt_and_writes_nothing() {
@@ -4489,10 +4489,7 @@ write_rules: []
             .unwrap();
         assert!(rehearsed.applied, "{rehearsed:?}");
         assert_eq!(rehearsed.succeeded, 3);
-        assert!(
-            rehearsed.commit_sha.is_empty(),
-            "marker form: empty commit_sha"
-        );
+        assert!(rehearsed.write_id.is_empty(), "marker form: empty write_id");
         assert!(rehearsed.results.iter().all(|r| r.action == "created"));
         // The receipt names the prospective ids; nothing landed.
         for name in ["alpha", "beta", "gamma"] {
@@ -4513,7 +4510,7 @@ write_rules: []
             .batch_create(batch(), actor, Some(&client), false)
             .unwrap();
         assert!(real.applied, "{real:?}");
-        assert!(!real.commit_sha.is_empty(), "the real batch commits");
+        assert!(!real.write_id.is_empty(), "the real batch commits");
         assert_eq!(real.succeeded, 3);
     }
 
@@ -4598,7 +4595,7 @@ write_rules: []
             .unwrap();
         assert!(!result.applied);
         assert_eq!(result.failed, 3, "{result:?}");
-        assert!(result.commit_sha.is_empty());
+        assert!(result.write_id.is_empty());
         let codes: Vec<(usize, &str)> = result
             .results
             .iter()
@@ -4794,7 +4791,7 @@ write_rules: []
     }
 
     #[test]
-    fn create_entity_returns_commit_sha_title_mem_on_real_write() {
+    fn create_entity_returns_write_id_title_mem_on_real_write() {
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().to_path_buf();
         let writer = FilesystemMemWriter::new(mem_dir.clone());
@@ -4817,8 +4814,8 @@ write_rules: []
         // Folder backend produces a synthetic CommitId — wire-equiv
         // to full's commit SHA.
         assert!(
-            !outcome.commit_sha.is_empty(),
-            "commit_sha must be populated on a real create"
+            !outcome.write_id.is_empty(),
+            "write_id must be populated on a real create"
         );
         // title + mem echoed from args (full CreateResult parity).
         assert_eq!(outcome.title, "Rich Shape");
@@ -5720,13 +5717,13 @@ write_rules: []
             .create_entity(args, actor, Some(&client), None)
             .unwrap();
 
-        // Wire shape: content_hash = prospective hash; commit_sha empty.
+        // Wire shape: content_hash = prospective hash; write_id empty.
         assert_eq!(outcome.id.to_string(), "specs--preview-only");
         assert!(
             !outcome.content_hash.is_empty(),
             "prospective hash populated"
         );
-        assert!(outcome.commit_sha.is_empty(), "no commit on dry_run");
+        assert!(outcome.write_id.is_empty(), "no commit on dry_run");
         // No store entry — the engine didn't push.
         assert!(
             engine.store().get(&outcome.id).is_none(),
@@ -7005,7 +7002,7 @@ community:
             "the warning names the engine-level verb",
         );
         assert!(
-            !created.commit_sha.is_empty(),
+            !created.write_id.is_empty(),
             "create still commits (nudge, not block)"
         );
 
@@ -7038,7 +7035,7 @@ community:
             1,
             "update emits NOTE_MISSING"
         );
-        assert!(!updated.commit_sha.is_empty(), "update still commits");
+        assert!(!updated.write_id.is_empty(), "update still commits");
 
         // --- relate, no note: NOTE_MISSING + commit landed ---
         let target = engine
@@ -7070,7 +7067,7 @@ community:
             1,
             "relate emits NOTE_MISSING"
         );
-        assert!(!related.commit_sha.is_empty(), "relate still commits");
+        assert!(!related.write_id.is_empty(), "relate still commits");
 
         // --- with a note: suppressed ---
         let with_note = engine
@@ -7657,7 +7654,7 @@ write_rules: []
                 None,
             )
             .unwrap();
-        assert!(!outcome.commit_sha.is_empty(), "warn tier never refuses");
+        assert!(!outcome.write_id.is_empty(), "warn tier never refuses");
 
         // Absent-as-empty: omitting the block-tier section refuses
         // exactly like an explicit empty body — the generator renders

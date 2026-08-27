@@ -77,7 +77,7 @@ pub struct ResolveConflictOutcome {
     pub id: EntityId,
     /// The side that was kept (`"ours"` / `"theirs"`).
     pub side: &'static str,
-    pub commit_sha: String,
+    pub write_id: String,
     /// Carries `CONFIG_WRITE_INTERVENED` when the mutation version stamp this
     /// resolution triggered merged over another writer's config change
     /// (04/03, criterion 3). Empty on the ordinary path.
@@ -324,7 +324,7 @@ impl Engine {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let commit_sha = backend.commit(
+        let write_id = backend.commit(
             &format!("memstead: resolve-conflict {id} (side: {})", side.as_wire()),
             &ctx,
         )?;
@@ -339,7 +339,7 @@ impl Engine {
             )
             .with_role(self.current_role),
         )?;
-        self.record_self_write(mount_idx, &commit_sha);
+        self.record_self_write(mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(mount_idx);
 
         // Reload so the resolved entity enters the store and the
@@ -351,7 +351,7 @@ impl Engine {
             warnings: stamp_warnings,
             id: id.clone(),
             side: side.as_wire(),
-            commit_sha,
+            write_id,
         })
     }
 }

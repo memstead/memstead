@@ -2,9 +2,11 @@
 //! SHA and the mem's current HEAD, with rename detection tunable via
 //! `rename_similarity` (default 60%).
 //!
-//! Agents remember the `commit_sha` returned by every mutation and feed it
-//! back through this op to pick up incremental deltas without re-scanning
-//! the whole mem. The response is a flat list of [`ChangeEnvelope`]s —
+//! Agents remember the `head` this feed returns and pass it back as the
+//! next `since` to pick up incremental deltas without re-scanning the
+//! whole mem. A mutation's `write_id` is an identity, not a cursor.
+//!
+//! The response is a flat list of [`ChangeEnvelope`]s —
 //! one per touched entity — with renames surfaced as a single event rather
 //! than a removed + added pair (at the selected similarity threshold).
 //!

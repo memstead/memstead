@@ -108,7 +108,7 @@ pub struct CreateArgs {
     /// When true, validate and compute the result but do not write to
     /// disk, mutate the store, create edges, or commit. Response carries
     /// the prospective `id`, `file_path`, `content_hash`, and any
-    /// `warnings` — `commit_sha` is empty.
+    /// `warnings` — `write_id` is empty.
     pub dry_run: bool,
 }
 
@@ -208,7 +208,7 @@ pub struct UpdateResult {
     /// and feed it to `memstead_changes_since` to pick up incremental updates.
     /// Empty for dry runs (no commit happens).
     #[serde(default)]
-    pub commit_sha: String,
+    pub write_id: String,
     /// Typed non-fatal issues — same shape as `CreateResult::warnings`.
     /// Pre-Bug-4 this was `Vec<String>` and unused; now carries
     /// `WarningHint` so e.g. `INLINE_WIKI_LINK_AUTO_STUBBED` from update
@@ -319,7 +319,7 @@ pub enum WarningHint {
     /// section, metadata value, relation, or auto-timestamp actually
     /// changed. The op is a successful no-op: no disk write, no
     /// commit, `content_hash` unchanged. Surfaced so autonomous skills
-    /// branching on `commit_sha != ""` see an explicit signal, and
+    /// branching on `write_id != ""` see an explicit signal, and
     /// `expected_hash`-based polling stays stable across the no-op.
     /// Mirrors `TitleNormalizedToSlugNoop` for the rename surface.
     UpdateNoop { id: EntityId },
@@ -814,9 +814,11 @@ pub enum WarningHint {
     /// headline "every mutation a reasoned commit": mutations ARE
     /// recorded — each lands in the folder backend's changelog ledger
     /// (`.memstead/changelog.jsonl`) with its provenance note — but
-    /// there are no commits, the `commit_sha` every mutation returns
-    /// is a synthetic placeholder, and the content is not durable
-    /// until the surrounding repository commits it. Emitted once, at
+    /// there are no commits, the `write_id` every mutation returns
+    /// is a synthetic token rather than a commit and is not a change
+    /// cursor (poll with the last ledger entry's `ts`), and the
+    /// content is not durable until the surrounding repository
+    /// commits it. Emitted once, at
     /// creation, to whoever is actually acting; never a refusal —
     /// folder mems are a supported storage class.
     FolderMemProvenance { mem: String },
@@ -1147,7 +1149,7 @@ pub struct ParseRecoveryReport {
     /// (workspace already clean, only read-only warnings, or every
     /// writable attempt failed).
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub commit_sha: String,
+    pub write_id: String,
 }
 
 impl fmt::Display for WarningHint {
@@ -1772,9 +1774,11 @@ impl fmt::Display for WarningHint {
                  version control. Provenance here is the changelog \
                  ledger (`.memstead/changelog.jsonl`), which records \
                  every mutation with its note — but there are no \
-                 commits: the `commit_sha` mutations return is a \
-                 synthetic placeholder, and the content is not durable \
-                 until the surrounding repository commits it."
+                 commits: the `write_id` mutations return is a \
+                 synthetic token rather than a commit, and it is not a \
+                 change cursor — poll this mem with the `ts` of the last \
+                 ledger entry you read. The content is not durable until \
+                 the surrounding repository commits it."
             ),
             WarningHint::SchemaAuthoringSourceMissing {
                 schema_ref,
@@ -2571,7 +2575,8 @@ impl WarningHint {
             Self::FolderMemProvenance { mem } => serde_json::json!({
                 "mem": mem,
                 "ledger": ".memstead/changelog.jsonl",
-                "commit_sha": "synthetic placeholder (no version control)",
+                "write_id": "synthetic token, not a commit and not a change cursor (no version control)",
+                "change_cursor": "an RFC3339 timestamp — the `ts` of the last ledger entry",
                 "durability": "content persists only when the surrounding repository commits it",
             }),
             Self::SchemaAuthoringSourceMissing {
@@ -2722,10 +2727,10 @@ pub struct CreateResult {
     /// same inputs would produce. Wire key `_hash`.
     #[serde(rename = "_hash")]
     pub content_hash: String,
-    /// Per-mem commit SHA — see `UpdateResult::commit_sha`. Empty under
+    /// Per-mem commit SHA — see `UpdateResult::write_id`. Empty under
     /// `dry_run`.
     #[serde(default)]
-    pub commit_sha: String,
+    pub write_id: String,
     /// Typed non-fatal issues — missing required sections (with writing
     /// guidance) and open-mode relationship admissions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2787,9 +2792,9 @@ pub fn project_incoming(edges: &[crate::store::InEdge]) -> Vec<IncomingRef> {
 pub struct DeleteResult {
     pub id: EntityId,
     pub relations_removed: usize,
-    /// Per-mem commit SHA — see `UpdateResult::commit_sha`.
+    /// Per-mem commit SHA — see `UpdateResult::write_id`.
     #[serde(default)]
-    pub commit_sha: String,
+    pub write_id: String,
     /// Stub entities that became orphaned by this delete (their last
     /// incoming edge disappeared with this entity) and were garbage-
     /// collected. Empty vec is serde-omitted.
@@ -2817,10 +2822,10 @@ pub struct RenameResult {
     /// Wire key `_hash`.
     #[serde(default, rename = "_hash", skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
-    /// Per-mem commit SHA — see `UpdateResult::commit_sha`. Empty on the
+    /// Per-mem commit SHA — see `UpdateResult::write_id`. Empty on the
     /// no-op same-title rename (no file change, no commit).
     #[serde(default)]
-    pub commit_sha: String,
+    pub write_id: String,
     /// Typed non-fatal issues. The slug-noop short-circuit
     /// (`TitleNormalizedToSlugNoop`) surfaces here when a requested title
     /// normalises to the existing slug — the op stays a silent no-op on
@@ -2870,9 +2875,9 @@ pub struct RelateResult {
     /// the source — no `memstead_entity` re-read required. Wire key `_hash`.
     #[serde(default, rename = "_hash", skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
-    /// Per-mem commit SHA — see `UpdateResult::commit_sha`.
+    /// Per-mem commit SHA — see `UpdateResult::write_id`.
     #[serde(default)]
-    pub commit_sha: String,
+    pub write_id: String,
     /// Typed non-fatal issues — open-mode schema admissions, duplicate-add
     /// no-ops (`DuplicateRelationship`), remove-nonexistent no-ops
     /// (`NoSuchRelationship`). Previously silent edge cases now surface here.
@@ -2881,7 +2886,7 @@ pub struct RelateResult {
     /// True if the op wrote to disk (real add or real remove). False on
     /// duplicate-add and remove-nonexistent-edge. Internal signal — the
     /// wrapper gates reindex + vcs_commit on this; the MCP wire relies on
-    /// `commit_sha.is_empty()` as the external no-op indicator.
+    /// `write_id.is_empty()` as the external no-op indicator.
     #[serde(skip)]
     pub disk_changed: bool,
     /// Stub entities that became orphaned by an edge removal (their last
@@ -2947,7 +2952,7 @@ pub struct BatchResult {
     /// the last mem committed; single-mem batches (the common case)
     /// name their one commit.
     #[serde(default)]
-    pub commit_sha: String,
+    pub write_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

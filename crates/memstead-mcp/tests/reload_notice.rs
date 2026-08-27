@@ -109,7 +109,7 @@ fn anchor_only_update_commits_with_distinct_anchor_verb() {
             None,
         )
         .expect("create succeeds");
-    let c1 = created.commit_sha.clone();
+    let c1 = created.write_id.clone();
 
     // Anchor-only update. Anchors are excluded from `_hash`, so the
     // content hash is unchanged even though a real commit lands. The
@@ -129,7 +129,7 @@ fn anchor_only_update_commits_with_distinct_anchor_verb() {
             None,
         )
         .expect("anchor-only update succeeds");
-    let c2 = a.commit_sha.clone();
+    let c2 = a.write_id.clone();
     assert!(!c2.is_empty(), "anchor-only update lands a real commit");
     assert_ne!(c1, c2, "anchor-only update produced a distinct commit");
     assert_eq!(
@@ -178,7 +178,7 @@ fn anchor_only_update_commits_with_distinct_anchor_verb() {
             None,
         )
         .expect("content update succeeds");
-    let c3 = u.commit_sha.clone();
+    let c3 = u.write_id.clone();
     assert_ne!(c3, c2);
     let across_update = e
         .changes_since("specs", &c2, None)
@@ -649,7 +649,7 @@ fn batch_per_entry_notes_survive_on_git_branch() {
             None,
         )
         .expect("baseline create")
-        .commit_sha;
+        .write_id;
 
     // --- batch_create: one noted entry, one un-noted.
     let r = e

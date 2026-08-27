@@ -1254,7 +1254,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNSUPPORTED_PARAM",
             "details.params",
             "warnings",
-            "commit_sha",
+            "write_id",
             "id",
             "file_path",
             "_hash",
@@ -1323,7 +1323,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details",
             "prospective_hash",
             "_hash",
-            "commit_sha",
+            "write_id",
             // Error-envelope code + details field referenced literally.
             "HASH_MISMATCH",
             "details.current",
@@ -1353,7 +1353,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "MISSING_REQUIRED_OUTGOING",
             "required_outgoing",
             "memstead_relate",
-            // Bytes-identical no-op short-circuit — empty commit_sha,
+            // Bytes-identical no-op short-circuit — empty write_id,
             // unchanged content_hash, UPDATE_NOOP warning. Anchors the
             // `expected_hash` caching contract probe campaigns expose.
             "UPDATE_NOOP",
@@ -1372,7 +1372,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         ],
         "memstead_delete" => &[
             "relations_removed",
-            "commit_sha",
+            "write_id",
             "warnings",
             // Error-envelope code + details field referenced literally.
             "HASH_MISMATCH",
@@ -1395,7 +1395,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_rename" => &[
             "old_id",
             "new_id",
-            "commit_sha",
+            "write_id",
             "warnings",
             // Warning code referenced literally in the description.
             "TITLE_NORMALIZED_TO_SLUG_NOOP",
@@ -1454,7 +1454,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "DESCRIPTION_NOT_PERMITTED",
             "MISSING_REQUIRED_DESCRIPTION",
             "warnings",
-            "commit_sha",
+            "write_id",
             // Warning codes referenced literally in the description.
             "DUPLICATE_RELATIONSHIP",
             "NO_SUCH_RELATIONSHIP",
@@ -1807,7 +1807,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "HEAD",
         ],
         "memstead_changes_since" => &[
-            "commit_sha",
+            "write_id",
+            // The folder-mem cursor: each ledger entry carries `ts`
+            // (RFC3339), and the last one read is the next `since`.
+            "ts",
             "renamed",
             "from_id",
             "to_id",
@@ -1886,8 +1889,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         ],
         "memstead_mem_create" => &[
             // Response-shape fields.
-            "seed_commit_sha",
-            "commit_sha",
+            "seed_write_id",
+            "write_id",
             "schema_ref",
             // Schema-payload fields — the full schema catalogue ships
             // under `schema`, gated behind `include_schema: true`. The
@@ -2345,19 +2348,27 @@ fn every_error_code_appears_in_a_description() {
         "Structured error code(s) not referenced by any tool description: {missing:?}"
     );
 }
-
-/// Every mutation that mentions `commit_sha` must qualify it with the
-/// per-mem git storage location and point agents at the canonical
-/// discovery path (`memstead_health { include_config: true }`) so they don't
-/// try `git log <sha>` at the project root. Misinterpretation of the SHA
-/// origin was the #1 source of agent confusion before this lock.
+/// A mutation description that names `write_id` must not gloss it as
+/// git, must not point at a gitdir, and must not invite a caller to use
+/// it as a change cursor.
 ///
-/// The discovery qualifier is `memstead_health` with `include_config` — the
-/// gitdir location is per-mem configurable (see vcs-config.md Phase 1)
-/// and the `memstead_health.vcs` subobject is the LLM-facing discovery
-/// surface.
+/// This test replaces `every_mutation_description_clarifies_commit_sha_origin`,
+/// which asserted the OPPOSITE: it required every mention to carry the
+/// "per-mem git" qualifier and the `memstead_health include_config=true`
+/// gitdir pointer. That qualifier was false on a folder or in-memory mem
+/// (the gitdir lookup errors for that storage kind and the health
+/// projection omits the field), and the cursor advice was worse than
+/// false — the token sorts below every folder-ledger timestamp, so a
+/// caller who followed it silently received the whole history instead of
+/// a delta. What the old test pinned was the defect, so it is inverted
+/// rather than deleted: the banned-phrase list is the shape of the bug.
+///
+/// The positive half stays in the shared server `instructions`, which
+/// state the token's origin per backend and its non-cursor status once
+/// for every mutation (the truncation-ceiling rule keeps shared contract
+/// out of per-tool descriptions).
 #[test]
-fn every_mutation_description_clarifies_commit_sha_origin() {
+fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
     const MUTATION_TOOLS: &[&str] = &[
         "memstead_create",
         "memstead_update",
@@ -2365,32 +2376,50 @@ fn every_mutation_description_clarifies_commit_sha_origin() {
         "memstead_rename",
         "memstead_relate",
     ];
+    // Each entry is a phrase that would reintroduce one half of the
+    // defect: a git identity claim, a gitdir pointer, or cursor advice.
+    const BANNED: &[&str] = &[
+        "per-mem git",
+        "gitdir",
+        "include_config",
+        "commit SHA",
+        "commit sha",
+        "polling",
+        "poll via",
+        "since cursor",
+        "as the `since`",
+    ];
     let mut violations = Vec::new();
     for (surface, name, desc) in descriptions() {
         if !MUTATION_TOOLS.contains(&name.as_str()) {
             continue;
         }
-        if !desc.contains("commit_sha") {
+        if !desc.contains("write_id") {
             continue; // tool doesn't mention it — not a violation
         }
-        let has_per_mem = desc.contains("per-mem git");
-        let has_discovery = desc.contains("memstead_health") && desc.contains("include_config");
-        // The shared mutation contract in the server `instructions`
-        // carries the per-mem-git qualifier and the gitdir discovery
-        // pointer once for every mutation — a description that points
-        // there satisfies the invariant without restating it.
-        let has_contract_pointer = desc.contains("server instructions");
-        if !(has_contract_pointer || (has_per_mem && has_discovery)) {
-            violations.push(format!(
-                "{surface}/{name}: description mentions `commit_sha` but omits the \
-                 per-mem-git qualifier or the \
-                 `memstead_health include_config=true` discovery pointer"
-            ));
+        for phrase in BANNED {
+            if desc.contains(phrase) {
+                violations.push(format!(
+                    "{surface}/{name}: description names `write_id` and still says \
+                     \"{phrase}\" — the token is an identity, not a git ref and not a cursor"
+                ));
+            }
         }
     }
+    // The contract the per-tool descriptions no longer restate must be
+    // stated once, where every mutation caller reads it.
+    let instr = server_instructions_text();
+    assert!(
+        instr.contains("write_id"),
+        "server instructions must name the token every mutation returns"
+    );
+    assert!(
+        instr.contains("NOT a change cursor"),
+        "server instructions must state that write_id is not a change cursor"
+    );
     assert!(
         violations.is_empty(),
-        "commit_sha origin-drift violations:\n  {}",
+        "write_id gloss violations:\n  {}",
         violations.join("\n  ")
     );
 }
@@ -2491,8 +2520,8 @@ fn memstead_relate_description_names_warning_codes() {
 fn memstead_relate_description_names_empty_commit_convention() {
     let desc = description_of("memstead_relate");
     assert!(
-        desc.contains("commit_sha") && desc.contains("empty"),
-        "memstead_relate must document the empty-`commit_sha` no-op convention \
+        desc.contains("write_id") && desc.contains("empty"),
+        "memstead_relate must document the empty-`write_id` no-op convention \
          (duplicate-add / remove-nonexistent)."
     );
 }

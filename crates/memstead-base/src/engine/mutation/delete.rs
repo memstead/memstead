@@ -201,7 +201,7 @@ impl Engine {
         // for stubs; provenance still records the explicit drop so
         // memstead_changes_since consumers see the event.
         let backend = self.mounts[mount_idx].backend.as_ref();
-        let commit_sha = if entity_is_stub {
+        let write_id = if entity_is_stub {
             String::new()
         } else {
             backend.delete_entity(Path::new(&file_path))?;
@@ -235,8 +235,8 @@ impl Engine {
         )?;
 
         let mut stamp_warnings: Vec<WarningHint> = Vec::new();
-        if !commit_sha.is_empty() {
-            self.record_self_write(mount_idx, &commit_sha);
+        if !write_id.is_empty() {
+            self.record_self_write(mount_idx, &write_id);
             stamp_warnings = self.stamp_mutation_versions(mount_idx);
         }
 
@@ -257,7 +257,7 @@ impl Engine {
                 make_stub(
                     id,
                     crate::entity::StubKind::Residual {
-                        since_commit: commit_sha.clone(),
+                        since_commit: write_id.clone(),
                         readonly_referrers: readonly_referrers.clone(),
                     },
                 ),
@@ -289,9 +289,9 @@ impl Engine {
 
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Gated on a landed commit: a stub delete
-        // skips the backend write (empty `commit_sha`, nothing to
+        // skips the backend write (empty `write_id`, nothing to
         // attribute), so it doesn't demand a note.
-        if !commit_sha.is_empty()
+        if !write_id.is_empty()
             && let Some(w) = self.note_missing_warning("delete_entity", note)
         {
             warnings.push(w);
@@ -302,7 +302,7 @@ impl Engine {
             file_path,
             removed_incoming,
             relations_removed,
-            commit_sha,
+            write_id,
             orphan_stubs_removed,
             warnings,
         })
@@ -638,8 +638,8 @@ mod tests {
         assert_eq!(outcome.id, stub_id);
         // Backend write was skipped — no commit grain for a stub.
         assert!(
-            outcome.commit_sha.is_empty(),
-            "stub deletes skip the backend write; commit_sha is empty"
+            outcome.write_id.is_empty(),
+            "stub deletes skip the backend write; write_id is empty"
         );
         // In-memory store no longer carries the stub.
         assert!(
@@ -717,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_entity_returns_commit_sha_and_relations_removed() {
+    fn delete_entity_returns_write_id_and_relations_removed() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, target) = engine_with_seed(&tmp, "Target");
         let (actor, client) = cli_actor();
@@ -764,8 +764,8 @@ mod tests {
 
         // Real write — folder backend produces a synthetic CommitId.
         assert!(
-            !outcome.commit_sha.is_empty(),
-            "commit_sha must be populated on a real delete"
+            !outcome.write_id.is_empty(),
+            "write_id must be populated on a real delete"
         );
         // Zero incoming + one outgoing edge removed.
         assert_eq!(outcome.relations_removed, 1);

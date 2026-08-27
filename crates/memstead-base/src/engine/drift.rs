@@ -181,8 +181,8 @@ impl Engine {
     /// relate). Backends that don't track a head (folder, archive)
     /// leave `last_known_head` at `None` and still no-op via the
     /// drift-check's `cached: None` branch.
-    pub(crate) fn record_self_write(&mut self, mount_idx: usize, commit_sha: &str) {
-        if commit_sha.is_empty() {
+    pub(crate) fn record_self_write(&mut self, mount_idx: usize, write_id: &str) {
+        if write_id.is_empty() {
             return;
         }
         // Capture the pre-write head + mem name so the
@@ -210,15 +210,15 @@ impl Engine {
             .mounts
             .get(mount_idx)
             .and_then(|state| state.backend.current_head().ok().flatten())
-            .unwrap_or_else(|| commit_sha.to_string());
+            .unwrap_or_else(|| write_id.to_string());
         if let Some(state) = self.mounts.get_mut(mount_idx) {
             state.last_known_head = Some(recorded.clone());
         }
         // Skip emit when no SHA actually advanced — folder backends
         // (and archive backends) carry `last_known_head: None` and
-        // pass `commit_sha = ""` in some paths; the early-return at
+        // pass `write_id = ""` in some paths; the early-return at
         // the top already catches the explicit empty case, but
-        // `previous == commit_sha` covers idempotent re-writes that
+        // `previous == write_id` covers idempotent re-writes that
         // pass through the same write path (e.g. a relate that
         // re-applies the same edge). Skipping keeps the event stream
         // a stream of *changes* rather than a stream of *writes*.

@@ -297,7 +297,7 @@ pub enum Command {
     Conflicts(commands::conflicts::Args),
 
     /// Diff a mem's HEAD against a commit SHA. Pass `--since` = a
-    /// prior `commit_sha` from a mutation, or the canonical empty-tree
+    /// prior `write_id` from a mutation, or the canonical empty-tree
     /// hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync.
     Changes(commands::changes::Args),
 

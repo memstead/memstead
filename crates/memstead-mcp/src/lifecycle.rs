@@ -124,7 +124,7 @@ pub struct MemCreateParams {
     )]
     pub recovery: Option<RecoveryActionInput>,
     #[schemars(
-        description = "Inline the resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)` at the same verbosity). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_commit_sha`. Set to `true` for first-time-schema callers that want one round-trip instead of two; the schema is workspace-stable, so for the agent's second+ mem on the same schema the omitted default is the right call."
+        description = "Inline the resolved schema body on the response (byte-identical to `memstead_schema(name=<resolved-schema>)` at the same verbosity). Default `false` — the response carries only `schema_ref`, `name`, `location`, and `seed_write_id`. Set to `true` for first-time-schema callers that want one round-trip instead of two; the schema is workspace-stable, so for the agent's second+ mem on the same schema the omitted default is the right call."
     )]
     #[serde(default)]
     pub include_schema: bool,

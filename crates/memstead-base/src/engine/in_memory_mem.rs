@@ -270,7 +270,7 @@ fn full_lifecycle_round_trips_in_memory() {
 
     // Edge actually committed (a real relate, not a no-op).
     assert!(
-        !relate.commit_sha.is_empty(),
+        !relate.write_id.is_empty(),
         "relate must produce a commit id"
     );
 }

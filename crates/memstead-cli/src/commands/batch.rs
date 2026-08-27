@@ -20,7 +20,7 @@ pub(crate) fn render_batch_markdown(
     // A rehearsal must never read as an applied batch: `--dry-run`
     // validates everything and writes nothing, and the human-facing
     // markdown has to say so as plainly as the JSON envelope's empty
-    // `commit_sha` does (cold-start 0-8-0, F5).
+    // `write_id` does (cold-start 0-8-0, F5).
     let header = if result.applied && dry_run {
         format!(
             "# Batch {command} rehearsed — {} item(s) valid, nothing written",
@@ -79,9 +79,9 @@ pub(crate) fn render_batch_markdown(
             result.errors_suppressed
         ));
     }
-    if result.applied && !result.commit_sha.is_empty() {
+    if result.applied && !result.write_id.is_empty() {
         lines.push(String::new());
-        lines.push(format!("Commit: `{}`", result.commit_sha));
+        lines.push(format!("Commit: `{}`", result.write_id));
     }
     lines.join("\n")
 }

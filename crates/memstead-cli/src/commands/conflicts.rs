@@ -109,7 +109,7 @@ fn dispatch(ctx: &CliContext, mut engine: memstead_base::Engine, args: Args) -> 
                 print_json(&serde_json::json!({
                     "id": outcome.id.as_ref(),
                     "side": outcome.side,
-                    "commit_sha": outcome.commit_sha,
+                    "write_id": outcome.write_id,
                 }))?;
             } else {
                 print_markdown(&format!(

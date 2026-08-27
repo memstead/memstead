@@ -213,8 +213,8 @@ fn create_mem_succeeds_with_wildcard_rule() {
     // git-branch backends produce a 40-char hex sha. Either way,
     // the cursor is non-empty.
     assert!(
-        !response.seed_commit_sha.is_empty(),
-        "seed_commit_sha should be a non-empty cursor (synthetic for folder backend, real sha for git-branch)",
+        !response.seed_write_id.is_empty(),
+        "seed_write_id should be a non-empty cursor (synthetic for folder backend, real sha for git-branch)",
     );
     // Mem is now visible + writable.
     assert!(engine.mem_router().is_writable("alpha"));
@@ -236,8 +236,14 @@ fn create_mem_succeeds_with_wildcard_rule() {
     let msg = notice.message();
     assert!(msg.contains("changelog"), "names the ledger: {msg}");
     assert!(
-        msg.contains("placeholder"),
-        "names the placeholder sha: {msg}"
+        msg.contains("synthetic token"),
+        "names the token as synthetic rather than a commit: {msg}"
+    );
+    // The warning is where a folder caller first meets the token, so it
+    // is also where the cursor confusion is cheapest to prevent.
+    assert!(
+        msg.contains("not a change cursor"),
+        "warns the token is not a change cursor: {msg}"
     );
     assert!(
         msg.contains("durable"),
@@ -445,7 +451,7 @@ fn create_mem_with_hierarchical_name_matches_path_rule() {
     .unwrap();
 
     assert_eq!(response.name, "planning/alpha");
-    assert!(!response.seed_commit_sha.is_empty());
+    assert!(!response.seed_write_id.is_empty());
     // The full hierarchical path IS the router key.
     assert!(engine.mem_router().is_writable("planning/alpha"));
     assert!(!engine.mem_router().is_writable("alpha"));

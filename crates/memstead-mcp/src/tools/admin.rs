@@ -92,7 +92,7 @@ pub struct ChangesSinceParams {
     #[schemars(description = "Writable mem name. Call memstead_health for the list.")]
     pub mem: String,
     #[schemars(
-        description = "Commit SHA to diff against. Pass the `commit_sha` returned by a prior mutation, or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` to get every entity as `added` (fresh-client first sync)."
+        description = "Change cursor to diff against. Backend-specific, and never a mutation's `write_id`: on a git-branch mem a commit SHA (pass the `head` a prior call returned, or the canonical git empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` to get every entity as `added` on a fresh-client first sync); on a folder mem an RFC3339 timestamp (the `ts` of the last entry you received, or empty for a first sync)."
     )]
     pub since: String,
     #[schemars(

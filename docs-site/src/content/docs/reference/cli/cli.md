@@ -170,7 +170,7 @@ Exit codes:
 * `recover` — Apply parse-time-drift recovery across writable mems. Walks `PARSED_RELATION_INVALID` warnings, re-renders affected source entities to drop the stale rows, and reports per-entry outcomes. Read-only-origin drops surface as skipped. MEM-REPO WORKSPACES ONLY (see `install`)
 * `anchors` — Read provenance anchors (E3a): `memstead anchors <id>` lists an entity's anchors + composition; `memstead anchors --artifact <path>` reverse-looks-up every entity whose anchor references that path (the query the check-realization hook consumes)
 * `conflicts` — List and resolve git merge conflicts in folder-backed mems — the one sanctioned repair when a merge in the user's repo writes conflict markers into entity files. `conflicts list` shows conflicted entities; `conflicts resolve <id> --side ours|theirs` keeps one side, validated before it lands and committed as an attributed mutation
-* `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+* `changes` — Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `write_id` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
 * `check` — Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
 * `review-mark` — Read and move the per-mem review mark — the engine's one pointer per mem to the last human-approved state. `list` shows every mem's mark and head; `set`/`clear` move it (explicit target only); `diff` reports the unreviewed delta. Marks never gate writes
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
@@ -797,7 +797,7 @@ Add or remove a typed relationship between two entities
 * `--remove` — Remove the relationship instead of creating it
 * `--description <DESCRIPTION>` — Per-edge description applied on add. Validated against the rel-type's `per_edge_description` posture; rel-types declared `forbidden` reject this flag, `required` reject its absence
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
-* `--dry-run` — Rehearse the relate: run the full validation (identical refusals and warnings) and report the would-be edge — including a would-be auto-stub, which is reported, never created — without writing anything. `commit_sha` stays empty (the rehearsal marker); `_hash` is the prospective post-write hash
+* `--dry-run` — Rehearse the relate: run the full validation (identical refusals and warnings) and report the would-be edge — including a would-be auto-stub, which is reported, never created — without writing anything. `write_id` stays empty (the rehearsal marker); `_hash` is the prospective post-write hash
 
 
 
@@ -874,7 +874,7 @@ Update many entities in one atomic call. Input is a JSON file with a top-level `
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `updates: [...]` array
-* `--dry-run` — Rehearse the whole batch: run the full per-entry validation (identical refusals, report-all) and report the would-be receipt, committing nothing. `commit_sha` stays empty (the rehearsal marker)
+* `--dry-run` — Rehearse the whole batch: run the full per-entry validation (identical refusals, report-all) and report the would-be receipt, committing nothing. `write_id` stays empty (the rehearsal marker)
 
 
 
@@ -887,7 +887,7 @@ Create many entities in one atomic call. Input is a JSON file with a top-level `
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `creates: [...]` array
-* `--dry-run` — Rehearse the whole batch: run the full validation pass (intra-batch references resolve, identical refusals, report-all) and report the would-be receipt, creating nothing. `commit_sha` stays empty (the rehearsal marker)
+* `--dry-run` — Rehearse the whole batch: run the full validation pass (intra-batch references resolve, identical refusals, report-all) and report the would-be receipt, creating nothing. `write_id` stays empty (the rehearsal marker)
 
 
 
@@ -900,7 +900,7 @@ Apply many edge changes in one atomic call. Input is a JSON file with a top-leve
 ###### **Options:**
 
 * `--from <FILE>` — JSON file with a top-level `relates: [...]` array
-* `--dry-run` — Rehearse the whole batch: run the full in-order validation (identical refusals, report-all) and report the would-be receipt, committing nothing — no edge, no stub. `commit_sha` stays empty (the rehearsal marker)
+* `--dry-run` — Rehearse the whole batch: run the full in-order validation (identical refusals, report-all) and report the would-be receipt, committing nothing — no edge, no stub. `write_id` stays empty (the rehearsal marker)
 
 
 
@@ -976,14 +976,14 @@ Resolve one conflicted entity to the chosen side. The chosen side is validated a
 
 ## `memstead changes`
 
-Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `commit_sha` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
+Diff a mem's HEAD against a commit SHA. Pass `--since` = a prior `write_id` from a mutation, or the canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a first sync
 
 **Usage:** `memstead changes [OPTIONS] --since <SINCE>`
 
 ###### **Options:**
 
 * `--mem <MEM>` — Writable mem name. Defaults to the first loaded mem
-* `--since <SINCE>` — Commit SHA to diff against. Pass a prior mutation's `commit_sha`, or the git canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync
+* `--since <SINCE>` — Change cursor to diff against. Backend-specific, and never a mutation's `write_id`: on a git-branch mem a commit SHA (the `head` a prior call returned, or the git canonical empty-tree hash `4b825dc642cb6eb9a060e54bf8d69288fbee4904` for a fresh-client first sync); on a folder mem an RFC3339 timestamp (the `ts` of the last entry you received, or empty for a first sync)
 * `--rename-similarity <RENAME_SIMILARITY>` — Rename detection threshold in [0.1, 1.0]; mirrors the MCP `rename_similarity` parameter. Default 0.6. Engine-authored renames pair via commit-note provenance and bypass this threshold; the value drives the rename-similarity fallback for non-engine renames (external `git mv`, pre-provenance migrations). Lower widens the recall window at the cost of false-positive pairing on that path
 * `--include-notes` — Fold per-commit agent-notes (subject, note, actor, tool, client) and the workspace-level schema/registry ref tip (unified schemas + per-mem configs) into the response. Default off — entity- delta only. Commit-mirroring clients turn this on so they get notes + the registry-ref sha in one round-trip without re-walking the gitdir
 

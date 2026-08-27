@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-08-23T14:48:18Z
+last_modified: 2026-08-27T19:00:34Z
 status: accepted
 decided_on: 2026-07-06
 deciders: memstead-core
@@ -12,7 +12,7 @@ tags: mcp, tool-surface, agent-ergonomics, truncation, primary-client, pre-relea
 # Fit MCP tool descriptions to the primary-client truncation ceiling
 
 ## Decision
-Every MCP tool description is engineered to fit the primary client's tool-description truncation ceiling — Claude Code's 2,048 bytes — rather than written to a generic, client-agnostic budget. Teaching content that does not fit is relocated, not truncated: the shared cross-tool contract (the mutation `note` / `NOTE_MISSING` nudge, `commit_sha` polling via `memstead_changes_since`, schema-conformance recovery-payload shapes, the post-`memstead_relate` `_hash` advance, the health-warning-code glosses) is stated once in the server `instructions` string; per-mem structural detail lives on the [[engine--schema-describe-projection-surface]] lite/full path. A meta-test guard (`descriptions_fit_primary_client_truncation`, ≤2048 bytes measured against the built router output, with an empty over-limit allowlist) locks the ceiling so a later wording edit cannot silently reintroduce a chopped description.
+Every MCP tool description is engineered to fit the primary client's tool-description truncation ceiling — Claude Code's 2,048 bytes — rather than written to a generic, client-agnostic budget. Teaching content that does not fit is relocated, not truncated: the shared cross-tool contract (the mutation `note` / `NOTE_MISSING` nudge, the `write_id` a mutation returns and the backend-specific cursor `memstead_changes_since` actually takes, schema-conformance recovery-payload shapes, the post-`memstead_relate` `_hash` advance, the health-warning-code glosses) is stated once in the server `instructions` string; per-mem structural detail lives on the [[engine--schema-describe-projection-surface]] lite/full path. A meta-test guard (`descriptions_fit_primary_client_truncation`, ≤2048 bytes measured against the built router output, with an empty over-limit allowlist) locks the ceiling so a later wording edit cannot silently reintroduce a chopped description.
 
 ## Context
 Claude Code — the primary MCP consumer through the pre-release window — silently truncates any tool description past 2,048 characters, cutting the agent contract mid-sentence at the exact consumer it is written for. Nine tools were over the limit at the time of the change (`memstead_health` worst at 2,619 bytes). A truncated description costs the agent precisely the teaching it most needs (recovery payloads, the mutation contract) with no error signal that anything was lost. Reshaping consumer-visible contract text is a breaking change: cheap to make now, before an announcement pins external expectations, and expensive afterwards. This choice sharpens the project-wide [[engineering--agent-first-surface-design]] stance into a concrete sizing rule on the [[engine--mcp-tool-surface]].

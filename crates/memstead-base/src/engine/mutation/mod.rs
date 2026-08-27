@@ -413,11 +413,11 @@ impl super::Engine {
             logical_operation_id: None,
             entity_ids: None,
         };
-        let commit_sha = backend.commit(
+        let write_id = backend.commit(
             &format!("memstead: anchor-hash backfill ({written} anchor(s))"),
             &ctx,
         )?;
-        self.record_self_write(mount_idx, &commit_sha);
+        self.record_self_write(mount_idx, &write_id);
         // Anchor-hash backfill returns a count, not an agent-facing response,
         // so an intervention report has nowhere to ride. Discarded knowingly:
         // the merge itself still happened, so nothing was lost — only the
@@ -441,7 +441,7 @@ impl super::Engine {
     /// best-effort: a failed stamp never fails the mutation that
     /// preceded it. On git-branch backends the config rides the
     /// `__MEMSTEAD` ref, so a stamp write never moves the mem branch
-    /// head — mutation `commit_sha` cursors stay valid.
+    /// head — mutation `write_id` cursors stay valid.
     pub(crate) fn stamp_mutation_versions(
         &mut self,
         mount_idx: usize,
@@ -1632,7 +1632,7 @@ mod tests {
         };
         let updated = engine.update_entity_with_ctx(update_args, &ctx).unwrap();
         assert!(
-            !updated.commit_sha.is_empty()
+            !updated.write_id.is_empty()
                 || (updated.modified_sections.replaced.is_empty()
                     && updated.modified_sections.appended.is_empty()
                     && updated.modified_sections.patched.is_empty())

@@ -116,7 +116,7 @@ impl Engine {
                 old_path: entity.file_path.clone(),
                 new_path: entity.file_path.clone(),
                 content_hash: entity.content_hash.clone(),
-                commit_sha: String::new(),
+                write_id: String::new(),
                 warnings: vec![WarningHint::TitleNormalizedToSlugNoop {
                     requested_title: args.new_title.clone(),
                     current_slug: id.name().to_string(),
@@ -461,7 +461,7 @@ impl Engine {
             logical_operation_id: Some(logical_op_id.as_str()),
             entity_ids: None,
         };
-        let commit_sha = backend.commit(&commit_subject, &ctx)?;
+        let write_id = backend.commit(&commit_subject, &ctx)?;
 
         backend.append_provenance(
             &Provenance::new(
@@ -476,7 +476,7 @@ impl Engine {
             .with_logical_operation_id(logical_op_id.clone()),
         )?;
 
-        self.record_self_write(mount_idx, &commit_sha);
+        self.record_self_write(mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(mount_idx);
         let mut peer_stamp_warnings: Vec<WarningHint> = Vec::new();
 
@@ -530,7 +530,7 @@ impl Engine {
                 &peer_ctx,
                 expected.as_deref(),
             );
-            let peer_commit_sha = match peer_commit_result {
+            let peer_write_id = match peer_commit_result {
                 Ok(sha) => sha,
                 Err(crate::backend::BackendError::ParentMismatch { .. }) => {
                     return Err(EngineError::RenamePartialFailure {
@@ -553,7 +553,7 @@ impl Engine {
                 .with_role(self.current_role)
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
-            self.record_self_write(plan.mount_idx, &peer_commit_sha);
+            self.record_self_write(plan.mount_idx, &peer_write_id);
             // Per peer mount, not only the source mem: a rename touches every
             // pinned peer, and each one's config write can meet its own
             // intervening writer.
@@ -624,7 +624,7 @@ impl Engine {
                 make_stub(
                     id,
                     crate::entity::StubKind::Residual {
-                        since_commit: commit_sha.clone(),
+                        since_commit: write_id.clone(),
                         readonly_referrers: readonly_referrers.clone(),
                     },
                 ),
@@ -657,7 +657,7 @@ impl Engine {
         // `require_notes` provenance nudge — single engine-level
         // enforcement point. Only reached on the real-rename path; the
         // slug-noop short-circuit returns early above with an empty
-        // `commit_sha` and never demands a note.
+        // `write_id` and never demands a note.
         if let Some(w) = self.note_missing_warning("rename_entity", note) {
             outcome_warnings.push(w);
         }
@@ -668,7 +668,7 @@ impl Engine {
             old_path: old_file_path,
             new_path: new_file_path,
             content_hash,
-            commit_sha,
+            write_id,
             warnings: outcome_warnings,
         })
     }
@@ -810,11 +810,11 @@ mod tests {
             .unwrap();
         // Wire-shape parity with full: slug-noop is Ok+warning, not
         // an error. Old/new IDs are equal; old/new paths are equal;
-        // commit_sha is empty (no disk write); warnings carries the
+        // write_id is empty (no disk write); warnings carries the
         // typed TitleNormalizedToSlugNoop hint.
         assert_eq!(outcome.old_id, outcome.new_id);
         assert_eq!(outcome.old_path, outcome.new_path);
-        assert!(outcome.commit_sha.is_empty());
+        assert!(outcome.write_id.is_empty());
         assert_eq!(outcome.warnings.len(), 1);
         assert!(matches!(
             outcome.warnings[0],
@@ -823,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_entity_returns_commit_sha_on_real_rename() {
+    fn rename_entity_returns_write_id_on_real_rename() {
         let tmp = TempDir::new().unwrap();
         let (mut engine, seeded) = engine_with_seed(&tmp, "Old Name");
         let (actor, client) = cli_actor();
@@ -839,12 +839,12 @@ mod tests {
                 None,
             )
             .unwrap();
-        // Real rename: commit_sha non-empty (folder backend produces
+        // Real rename: write_id non-empty (folder backend produces
         // a synthetic CommitId), warnings empty, IDs differ.
         assert_ne!(outcome.old_id, outcome.new_id);
         assert!(
-            !outcome.commit_sha.is_empty(),
-            "commit_sha must be populated on a real rename"
+            !outcome.write_id.is_empty(),
+            "write_id must be populated on a real rename"
         );
         assert!(outcome.warnings.is_empty());
     }

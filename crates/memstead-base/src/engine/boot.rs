@@ -3609,7 +3609,7 @@ write_rules: []
                 None,
             )
             .expect("a write against a sealed-violator mem must NOT be refused");
-        assert!(!outcome.commit_sha.is_empty(), "the write commits");
+        assert!(!outcome.write_id.is_empty(), "the write commits");
         assert!(
             outcome
                 .warnings

@@ -77,10 +77,10 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
     )
     .expect("heuristic create yields git-branch mem");
     assert_eq!(
-        plans.seed_commit_sha.len(),
+        plans.seed_write_id.len(),
         40,
         "heuristic git-branch create produces a real 40-hex sha, got {:?}",
-        plans.seed_commit_sha
+        plans.seed_write_id
     );
     // Refusal complement (plan 10): a git-backed mem has real
     // commits — creating it carries NO folder-provenance notice.
@@ -118,17 +118,17 @@ fn explicit_folder_create_lands_beside_git_branch_mems() {
 
     // Seed cursor is a non-empty synthetic id, not a 40-hex sha.
     assert!(
-        !response.seed_commit_sha.is_empty(),
+        !response.seed_write_id.is_empty(),
         "seed cursor must be non-empty"
     );
     assert!(
-        !(response.seed_commit_sha.len() == 40
+        !(response.seed_write_id.len() == 40
             && response
-                .seed_commit_sha
+                .seed_write_id
                 .chars()
                 .all(|c| c.is_ascii_hexdigit())),
         "folder seed cursor must be synthetic, got a 40-hex sha: {:?}",
-        response.seed_commit_sha
+        response.seed_write_id
     );
 
     // The folder create — storage without version control — carries
