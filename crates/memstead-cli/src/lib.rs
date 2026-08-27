@@ -11,6 +11,7 @@
 pub mod auth;
 pub mod cli;
 pub mod commands;
+pub mod coverage;
 #[cfg(feature = "mem-repo")]
 pub mod outer_gitignore;
 pub mod output;

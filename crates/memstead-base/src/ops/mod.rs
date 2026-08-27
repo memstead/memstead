@@ -17,6 +17,7 @@ pub mod agent_notes;
 pub mod branch_reset;
 pub mod changes;
 pub mod commit_envelope;
+pub mod coverage;
 pub mod diff;
 pub mod export;
 pub mod health;
