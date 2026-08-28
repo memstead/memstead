@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-28
+
 ### Fixed
 
 - **A quarantined mem can no longer disappear from `status`, and `type --mem`
@@ -3858,7 +3860,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/memstead/memstead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/memstead/memstead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/memstead/memstead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/memstead/memstead/compare/v0.8.1...v0.10.0
