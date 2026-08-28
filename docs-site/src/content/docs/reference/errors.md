@@ -63,7 +63,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | `HASH_FLAG_REQUIRED` | CLI | `crates/memstead-cli/src/lib.rs:34` |
 | `HASH_MISMATCH` | engine, MCP | `crates/memstead-base/src/engine/error.rs:1284`<br>`crates/memstead-mcp/src/server.rs:811` |
 | `HAS_INCOMING_REFS` | engine | `crates/memstead-base/src/engine/error.rs:1285` |
-| `HEALTH_STRICT_VIOLATIONS` | CLI | `crates/memstead-cli/src/commands/health.rs:1583` |
+| `HEALTH_STRICT_VIOLATIONS` | CLI | `crates/memstead-cli/src/commands/health.rs:1670` |
 | `IGNORED_READONLY_FIELD` | engine | `crates/memstead-base/src/ops/mod.rs:1956` |
 | `INLINE_WIKI_LINK_AUTO_STUBBED` | engine | `crates/memstead-base/src/ops/mod.rs:1904` |
 | `INTERNAL` | CLI, MCP | `crates/memstead-cli/src/lib.rs:29`<br>`crates/memstead-mcp/src/filesystem_server.rs:1893`<br>`crates/memstead-mcp/src/filesystem_server.rs:1956`<br>`crates/memstead-mcp/src/filesystem_server.rs:1986` |

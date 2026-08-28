@@ -7,7 +7,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`memstead health` markdown form now serves conformance data it gathers.**
+  `--include conformance` was accepted, documented at length in `--help`, and
+  had no effect on the default markdown rendering: the `--json` form returned a
+  populated `findings` array while the human form printed only the six-line
+  summary, so an operator diagnosing a mem by eye was told nothing about
+  content the engine was holding and reporting. The markdown rendering now
+  carries `## Conformance findings` (with an explicit zero when requested and
+  clean, so silence never reads as not-served), `## Body observations`,
+  `## Constraint violations` (the same gap one include over), and schema
+  format defects. Pinned by an integration test on the folder-workspace shape
+  the defect was found on.
+
 ### Added
+
+- **A gate: an advertised response field must exist in the emitting source.**
+  The tool-description lint checked backticked references against a
+  hand-maintained allowlist, so adding a token to that list was
+  indistinguishable from shipping the field: a description once advertised
+  `body_observations` on `memstead_health`, the generated reference carried it,
+  and the suite stayed green while no server emitted the key. A new meta-test
+  (`every_response_shape_ref_exists_in_emitting_source`, in
+  `memstead-mcp/tests/tool_surface.rs`) holds every allowlisted token to
+  existence as a bounded identifier or literal in the source of the crates that
+  compose responses; its first run caught and removed one stale entry
+  (`details.missing_targets`, referenced by nothing and emitted by nothing). It
+  is an existence check, not a per-tool emission proof: that stronger gate
+  needs a response-coverage harness and stays tracked.
 
 - **A gate: no release path rests on a quota, and no gate reports a failed read
   as a failure.** One exhausted anonymous GitHub quota on one shared address

@@ -1919,7 +1919,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Error-envelope `details` field references — both
             // envelopes (path + schema) carry these.
             "details.source",
-            "details.missing_targets",
             "details.candidate",
             "details.patterns",
             "details.reason",
@@ -2095,6 +2094,112 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         ],
         _ => &[],
     }
+}
+
+/// Every allowlisted response-shape token must exist in the emitting
+/// source. Adding a token to `response_shape_refs` used to be
+/// indistinguishable from shipping the field: 04/01 advertised
+/// `body_observations` on `memstead_health`, regenerated the docs, and
+/// this suite stayed green while no server emitted the key. This gate
+/// holds each token to existence as a bounded identifier or literal in
+/// the source of the crates that compose responses (`memstead-mcp` plus
+/// the engine-side crates, and `memstead-cli` for the CLI commands
+/// descriptions point at). A token no source mentions is a never-shipped
+/// field or a stale allowlist entry, and both are red.
+///
+/// This is an existence check, not a per-tool emission proof: a key
+/// emitted only by a different tool still passes. The stronger gate —
+/// exercising every tool and requiring each advertised key in an actual
+/// response — needs a response-coverage harness and stays a backlog item.
+#[test]
+fn every_response_shape_ref_exists_in_emitting_source() {
+    fn collect_rs(dir: &std::path::Path, corpus: &mut String) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs(&path, corpus);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(text) = std::fs::read_to_string(&path)
+            {
+                corpus.push_str(&text);
+                corpus.push('\n');
+            }
+        }
+    }
+
+    /// The needle appears with non-identifier characters (or the text
+    /// boundary) on both sides — so `hash` inside `expected_hash` does
+    /// not count, while `"first-party"` inside a string literal does.
+    fn appears_bounded(corpus: &str, needle: &str) -> bool {
+        let bytes = corpus.as_bytes();
+        let is_ident = |b: u8| b == b'_' || b.is_ascii_alphanumeric();
+        let mut start = 0;
+        while let Some(pos) = corpus[start..].find(needle) {
+            let abs = start + pos;
+            let end = abs + needle.len();
+            let before_ok = abs == 0 || !is_ident(bytes[abs - 1]);
+            let after_ok = end >= bytes.len() || !is_ident(bytes[end]);
+            if before_ok && after_ok {
+                return true;
+            }
+            start = end;
+        }
+        false
+    }
+
+    let crates_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("memstead-mcp sits under crates/");
+    let mut corpus = String::new();
+    for krate in [
+        "memstead-mcp",
+        "memstead-engine",
+        "memstead-base",
+        "memstead-git-branch",
+        "memstead-schema",
+        "memstead-cli",
+    ] {
+        collect_rs(&crates_root.join(krate).join("src"), &mut corpus);
+    }
+    assert!(
+        !corpus.is_empty(),
+        "no emitting source collected under {}",
+        crates_root.display()
+    );
+
+    let mut untraceable = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for tool in McpServer::tool_router().list_all() {
+        for token in response_shape_refs(&tool.name) {
+            // Normalise the way `is_allowed_reference` reads tokens: a
+            // dotted path or a spaced command is checked by its most
+            // specific segment; `[]` and `/` decorations are stripped.
+            let tail = token
+                .split_whitespace()
+                .last()
+                .unwrap_or(token)
+                .split('.')
+                .next_back()
+                .unwrap_or(token)
+                .trim_end_matches("[]")
+                .trim_end_matches('/');
+            if tail.is_empty() || !seen.insert(tail.to_string()) {
+                continue;
+            }
+            if !appears_bounded(&corpus, tail) {
+                untraceable.push(format!("{}: `{token}` (checked as `{tail}`)", tool.name));
+            }
+        }
+    }
+    assert!(
+        untraceable.is_empty(),
+        "response_shape_refs tokens with no trace in any emitting crate's source — \
+         either the field never shipped or the allowlist entry is stale:\n  {}",
+        untraceable.join("\n  ")
+    );
 }
 
 // --- Drift-guard tests + load-bearing substring invariants ---------------

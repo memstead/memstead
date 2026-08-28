@@ -680,6 +680,93 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
         lines.push(String::new());
     }
+    // Conformance / integrity findings — the include was accepted and the
+    // data gathered, so the human rendering must serve it: the JSON form
+    // carried a populated `findings` array while this path printed only
+    // the summary, and an operator diagnosing a mem by eye was told
+    // nothing about content the engine was holding and reporting
+    // (consistency-sweep 04/02's closing grade). An explicit zero is
+    // rendered too, so "requested and clean" never reads as "not served".
+    if let Some(v) = obj.get("findings").and_then(|v| v.as_array()) {
+        lines.push(format!("## Conformance findings ({})", v.len()));
+        if v.is_empty() {
+            lines.push("- none".to_string());
+        }
+        for item in v {
+            let mut line = format!(
+                "- [{}] {} (axis {})",
+                item["code"].as_str().unwrap_or("?"),
+                item["id"].as_str().unwrap_or(""),
+                item["axis"].as_str().unwrap_or("?"),
+            );
+            for key in ["field", "heading", "section"] {
+                if let Some(val) = item["detail"][key].as_str() {
+                    line.push_str(&format!(" — {key} `{val}`"));
+                }
+            }
+            lines.push(line);
+        }
+        lines.push(String::new());
+    }
+    if let Some(v) = obj.get("body_observations").and_then(|v| v.as_array())
+        && !v.is_empty()
+    {
+        lines.push(format!("## Body observations ({})", v.len()));
+        for item in v {
+            let mut line = format!(
+                "- [{}] {} — {}",
+                item["code"].as_str().unwrap_or("?"),
+                item["id"].as_str().unwrap_or(""),
+                item["fate"].as_str().unwrap_or("?"),
+            );
+            for key in ["heading", "key"] {
+                if let Some(val) = item["detail"][key].as_str() {
+                    line.push_str(&format!(", {key} `{val}`"));
+                }
+            }
+            lines.push(line);
+        }
+        lines.push(String::new());
+    }
+    // Same gap one include over: `--include constraints` filled the JSON
+    // and the strict tally while this rendering said nothing.
+    if let Some(v) = obj.get("constraints").and_then(|v| v.as_array()) {
+        lines.push(format!("## Constraint violations ({})", v.len()));
+        if v.is_empty() {
+            lines.push("- none".to_string());
+        }
+        for item in v {
+            let mut kinds: Vec<String> = item["violations"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x["kind"].as_str())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if item["format_violations"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty())
+            {
+                kinds.push("section_format".to_string());
+            }
+            lines.push(format!(
+                "- {} — {} ({})",
+                item["id"].as_str().unwrap_or(""),
+                item["title"].as_str().unwrap_or(""),
+                kinds.join(", "),
+            ));
+        }
+        lines.push(String::new());
+    }
+    if let Some(v) = obj.get("schema_format_defects").and_then(|v| v.as_array()) {
+        lines.push(format!("## Schema format defects ({})", v.len()));
+        for item in v {
+            lines.push(format!("- {}", item));
+        }
+        lines.push(String::new());
+    }
     if let Some(v) = obj.get("dangling_links").and_then(|v| v.as_array()) {
         lines.push("## Dangling links".to_string());
         for item in v {
