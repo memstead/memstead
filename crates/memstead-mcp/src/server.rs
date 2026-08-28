@@ -339,8 +339,8 @@ impl McpServer {
 /// server `instructions` direct agents to call first. Without this,
 /// agents pay an extra `ToolSearch` round-trip before they can reach
 /// overview.
-fn always_load_meta() -> rmcp::model::Meta {
-    let mut m = rmcp::model::Meta::new();
+fn always_load_meta() -> rmcp::model::MetaObject {
+    let mut m = rmcp::model::MetaObject::new();
     m.0.insert(
         "anthropic/alwaysLoad".to_string(),
         serde_json::Value::Bool(true),
@@ -4464,11 +4464,7 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult {
-            tools: self.filtered_tool_list(),
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(ListToolsResult::with_all_items(self.filtered_tool_list()))
     }
 
     /// `get_tool` short-circuits on disabled names to `None` so rmcp's
@@ -4498,16 +4494,16 @@ impl ServerHandler for McpServer {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let verb = request.name.to_string();
         if self.disabled_tools.contains(request.name.as_ref()) {
             let resp = self.tool_disabled_response(request.name.as_ref());
             self.record_friction(&verb, &resp);
-            return Ok(resp);
+            return Ok(resp.into());
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let result = Self::tool_router().call(tcc).await;
-        if let Ok(r) = &result {
+        if let Ok(rmcp::model::CallToolResponse::Complete(r)) = &result {
             self.record_friction(&verb, r);
         }
         result

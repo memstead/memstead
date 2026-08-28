@@ -155,7 +155,7 @@ pub fn branch_reset_in_gitdir(
     // window — a sibling advancing between this check and the transaction
     // fails the transaction, never overwrites.
     if let Some(expected) = expected_head
-        && current.to_string() != expected
+        && current != expected
     {
         return Err(BackendError::Other(format!(
             "EXPECTED_HEAD_MISMATCH: {current}"

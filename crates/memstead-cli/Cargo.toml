@@ -29,7 +29,7 @@ serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 dirs.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form", "rustls", "webpki-roots"] }
 tempfile.workspace = true
 toml = "1.1"
 toml_edit.workspace = true
@@ -37,7 +37,7 @@ time = { version = "0.3", features = ["formatting", "parsing", "serde-well-known
 # Domain-authority publishing: generate a signing keypair and sign a publish.
 ed25519-dalek = { version = "3", features = ["rand_core"] }
 getrandom = { version = "0.4", features = ["sys_rng"] }
-base64 = "0.22"
+base64 = "0.23"
 sha2.workspace = true
 
 [dev-dependencies]

@@ -48,6 +48,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **Dependency refresh across the workspace.** The MCP SDK moves to
+  rmcp 3.1 (from 2.2): the server now models the 2026-07-28 protocol
+  revision, so `tools/list` replies carry the additive
+  `resultType`/`ttlMs`/`cacheScope` fields and tool dispatch returns
+  the MRTR `CallToolResponse` wrapper internally; the served tool
+  surface and every tool's reply body are unchanged. Alongside: gix
+  0.87 (the `tree-editor` feature folded into core; `tree-error`
+  replaces it in the manifest), reqwest 0.13 (`rustls-tls` split into
+  `rustls` + `webpki-roots` + explicit `form`), dirs 6, base64 0.23,
+  and a full `cargo update` of the lockfile. CI actions ride along
+  (setup-node v7, checkout v6 on the npm publish job, install-action
+  current pin).
+
 - **BREAKING (wire): the entity's type is `entity_type` on every read
   surface.** The MCP entity envelope (and with it the CLI's JSON entity,
   export, and changes payloads, which share the renderer) served the field

@@ -58,7 +58,7 @@ unicode-normalization = "0.1"
 sha2 = "0.11"
 indexmap = { version = "2", features = ["serde"] }
 schemars = { version = "1.0", features = ["derive", "indexmap2", "semver1"] }
-rmcp = { version = "2.2", features = ["server", "transport-io", "macros", "schemars"] }
+rmcp = { version = "3.1", features = ["server", "transport-io", "macros", "schemars"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -68,10 +68,10 @@ assert_cmd = "2"
 predicates = "3"
 zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs", "time"] }
 semver = { version = "1", features = ["serde"] }
-dirs = "5"
+dirs = "6"
 toml = "1.1"
 toml_edit = "0.25"
-gix = { version = "0.85", default-features = false, features = ["revision", "tree-editor", "blob-diff", "max-performance-safe", "sha1"] }
+gix = { version = "0.87", default-features = false, features = ["revision", "tree-error", "blob-diff", "max-performance-safe", "sha1"] }
 tantivy = "0.26"
 globset = "0.4"
 # Section-format enforcement (agent-toolbox plan 08): CommonMark+GFM-table

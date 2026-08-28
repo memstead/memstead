@@ -2551,11 +2551,7 @@ impl ServerHandler for FilesystemMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let tools: Vec<Tool> = Self::tool_router().list_all();
-        Ok(ListToolsResult {
-            tools,
-            meta: None,
-            next_cursor: None,
-        })
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     /// Friction-ledger seam (agent-trust plan 08), mirroring the full
@@ -2566,11 +2562,11 @@ impl ServerHandler for FilesystemMcpServer {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let verb = request.name.to_string();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let result = Self::tool_router().call(tcc).await;
-        if let Ok(r) = &result
+        if let Ok(rmcp::model::CallToolResponse::Complete(r)) = &result
             && r.is_error.unwrap_or(false)
             && let Some(code) = r
                 .structured_content
