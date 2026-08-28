@@ -4639,3 +4639,131 @@ fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
         "verify's baseline stays at the head it measured: {sync_state:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// projection edit (the general binding-field patch over pipeline_edit)
+// ---------------------------------------------------------------------------
+
+/// Editing the source list replaces the block whole and round-trips: the
+/// serve/bridge shape — adding a second and third source beside the existing
+/// one — lands, every other field is untouched, and the record re-reads with
+/// all three names.
+#[test]
+fn edit_replaces_the_source_list_and_preserves_the_rest() {
+    let tmp = migrated_build_only_workspace();
+    let root = tmp.path();
+    let before = read_binding(root);
+
+    let output = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "edit",
+            "engine/graph",
+            "--patch",
+            r#"{"sources": [
+                {"name":"src","type":"codebase","pointer":"../public"},
+                {"name":"serve","type":"codebase","pointer":"../serve"},
+                {"name":"bridge","type":"codebase","pointer":"../bridge"}
+            ]}"#,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).expect("--json edit must emit JSON");
+    assert_eq!(env["binding"], "engine/graph");
+    assert_eq!(
+        env["sources"],
+        serde_json::json!(["src", "serve", "bridge"])
+    );
+
+    let after = read_binding(root);
+    assert_eq!(after.sources.len(), 3);
+    assert_eq!(after.destination_mem, before.destination_mem);
+    assert_eq!(
+        after.operations.build.is_some(),
+        before.operations.build.is_some(),
+        "operations untouched by a sources patch"
+    );
+}
+
+/// A patch that would introduce a validation refusal (duplicate source name)
+/// refuses typed and writes nothing — the file stays byte-identical.
+#[test]
+fn edit_refuses_an_introduced_refusal_and_writes_nothing() {
+    let tmp = migrated_build_only_workspace();
+    let root = tmp.path();
+    let raw_before =
+        std::fs::read_to_string(root.join(".memstead/projections/engine/graph.json")).unwrap();
+
+    let output = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "edit",
+            "engine/graph",
+            "--patch",
+            r#"{"sources": [
+                {"name":"src","type":"codebase","pointer":"../public"},
+                {"name":"src","type":"codebase","pointer":"../serve"}
+            ]}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&output).expect("refusal must emit JSON");
+    assert_eq!(env["code"], "PROJECTION_EDIT_REFUSED", "got: {env}");
+    let raw_after =
+        std::fs::read_to_string(root.join(".memstead/projections/engine/graph.json")).unwrap();
+    assert_eq!(raw_before, raw_after, "no write on refusal");
+}
+
+/// A missing binding refuses PROJECTION_NOT_FOUND; a malformed patch refuses
+/// PROJECTION_EDIT_INVALID_JSON.
+#[test]
+fn edit_refusals_are_typed() {
+    let tmp = migrated_build_only_workspace();
+    let root = tmp.path();
+
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "edit",
+            "engine/ghost",
+            "--patch",
+            "{}",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_NOT_FOUND", "got: {env}");
+
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "edit",
+            "engine/graph",
+            "--patch",
+            "{nope",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], "PROJECTION_EDIT_INVALID_JSON", "got: {env}");
+}

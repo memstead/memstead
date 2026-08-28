@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead projection edit` — the general binding-field patch.** The shared
+  `pipeline_edit` layer has carried the full author-editable record (patch
+  semantics, validate-before-write, refusals-introduced-only) since the
+  projection-promotion work, but no CLI command exposed it: `init` and
+  `enable` existed, editing a source list or any other binding field did not,
+  a gap the projection-pipeline pilots hit and the backlog carried since
+  June. `projection edit <binding> --patch '<json>'` closes it: absent fields
+  preserved, `null` clears where clearing is legal, a present block replaces
+  whole, `version` stays engine-managed, and a patch that would introduce a
+  validation refusal writes nothing and names the refusals
+  (`PROJECTION_EDIT_REFUSED`). First consumer: giving a binding additional
+  sources over sibling trees.
+
 - **Caller-declared identity in provenance and checks (agent-trust plan 15,
   engine core).** Every mutation and check can now record WHO acted — an
   opaque caller-chosen string (an agent name, a session handle), declared per

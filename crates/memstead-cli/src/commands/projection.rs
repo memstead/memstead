@@ -128,6 +128,23 @@ pub enum ProjectionCommand {
     /// `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses
     /// `PROJECTION_NOT_FOUND`.
     Enable(EnableArgs),
+    /// Patch an existing binding's author-editable fields in place — the
+    /// general edit surface over the shared `pipeline_edit` layer that
+    /// `init`/`enable` already use. The patch is a JSON object with patch
+    /// semantics: an absent field is preserved, an explicit `null` clears
+    /// `intent`/`rules`/`prune`, and a present `sources`, `operations`,
+    /// `reference_mems` or `deny_paths` value replaces that whole block
+    /// (`version` stays engine-managed and is ignored if supplied). Every
+    /// edit is validated before anything lands: a patch that would
+    /// introduce a refusal the stored record does not already carry (a
+    /// duplicate source name, `sync` over a medium with no change signal)
+    /// refuses with the capability gap and writes nothing — pre-existing
+    /// refusals never block an unrelated edit. Refuses
+    /// `PROJECTION_NOT_FOUND` for a missing binding; adding a source to a
+    /// binding is `edit <binding> --patch '{"sources":[...]}'` with the
+    /// FULL source list, existing entries included, since the block
+    /// replaces.
+    Edit(EditArgs),
     /// Advance a binding's sync baseline by recording per-artifact
     /// dispositions (D7). The engine freezes the presented changed slice,
     /// subtracts already-disposed artifacts on re-presentation, appends
@@ -372,6 +389,18 @@ pub struct EnableArgs {
 }
 
 #[derive(ClapArgs, Debug)]
+pub struct EditArgs {
+    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    pub binding: String,
+    /// The JSON patch over the author-editable record, e.g.
+    /// `'{"sources": [ ...the full replacement list... ]}'`. Patch
+    /// semantics: absent = preserved, `null` clears where clearing is
+    /// legal, a present block replaces that block whole.
+    #[arg(long)]
+    pub patch: String,
+}
+
+#[derive(ClapArgs, Debug)]
 pub struct AdvanceArgs {
     /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
     pub binding: String,
@@ -466,6 +495,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         ProjectionCommand::Init(a) => init(ctx, a),
         ProjectionCommand::Migrate(a) => migrate(ctx, a),
         ProjectionCommand::Enable(a) => enable(ctx, a),
+        ProjectionCommand::Edit(a) => edit(ctx, a),
         ProjectionCommand::Advance(a) => advance(ctx, a),
         ProjectionCommand::Exclude(a) => exclude(ctx, a),
         ProjectionCommand::Verify(a) => verify(ctx, a),
@@ -1600,6 +1630,124 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// `projection edit` — the general binding-field patch over the shared
+/// `pipeline_edit` layer. The layer owns everything that matters: patch
+/// semantics (absent preserved, `null` clears, blocks replace whole),
+/// engine-managed `version`, and validate-before-write with the
+/// introduced-refusals-only rule. This function is command surface: id
+/// grammar, quarantine consult, error translation, rendering.
+fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
+    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
+        workspace_not_initialised_error(
+            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
+        )
+    })?;
+
+    let binding_id = args.binding;
+    let (mem, stem) = binding_id
+        .split_once('/')
+        .filter(|(m, n)| !m.is_empty() && !n.is_empty())
+        .filter(|(m, n)| is_single_component(m) && is_single_component(n))
+        .ok_or_else(|| invalid_binding_id(&binding_id))?;
+    let mem = mem.to_string();
+    let stem = stem.to_string();
+
+    // Quarantine consult before the edit: a legacy/corrupt record refuses
+    // with its typed reason (naming `projection migrate`) rather than a
+    // generic not-found or parse failure.
+    if let Ok(configs) = load_pipeline_configs(&root)
+        && configs
+            .quarantined
+            .iter()
+            .any(|q| format!("{}/{}", q.mem, q.name) == binding_id)
+    {
+        return Err(binding_miss_error(&configs, &binding_id).into());
+    }
+
+    let binding =
+        memstead_base::pipeline_edit::update_binding_json(&root, &mem, &stem, &args.patch)
+            .map_err(|e| edit_refused(&binding_id, e))?;
+
+    let source_names: Vec<&str> = binding.sources.iter().map(|s| s.name.as_str()).collect();
+    let mut operations: Vec<&str> = Vec::new();
+    if binding.operations.build.is_some() {
+        operations.push("build");
+    }
+    if binding.operations.sync.is_some() {
+        operations.push("sync");
+    }
+    if binding.operations.verify.is_some() {
+        operations.push("verify");
+    }
+
+    if ctx.json {
+        print_json(&json!({
+            "binding": binding_id,
+            "edited": true,
+            "sources": source_names,
+            "operations": operations,
+            "record": serde_json::to_value(&binding)?,
+        }))?;
+    } else {
+        print_markdown(&format!(
+            "# Projection edit\n\nPatched binding `{binding_id}`.\n\nSources: {}\nOperations: {}\n",
+            source_names.join(", "),
+            operations.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// Translate a [`pipeline_edit`] refusal into the CLI's typed envelope.
+/// Nothing was written on any of these — the layer validates before it
+/// writes.
+fn edit_refused(
+    binding_id: &str,
+    err: memstead_base::pipeline_edit::PipelineEditError,
+) -> CliError {
+    use memstead_base::pipeline_edit::PipelineEditError as E;
+    match &err {
+        E::NotFound { .. } => CliError::new(
+            ExitKind::NotFound,
+            "PROJECTION_NOT_FOUND",
+            format!(
+                "no binding `{binding_id}` — scaffold one with `projection init` or migrate a \
+                 legacy workspace with `projection migrate`"
+            ),
+        )
+        .with_details(json!({ "binding": binding_id })),
+        E::InvalidJson { message, .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_EDIT_INVALID_JSON",
+            format!("the patch for `{binding_id}` did not deserialize: {message}"),
+        )
+        .with_details(json!({ "binding": binding_id, "error": message })),
+        E::Capability { refusals, .. } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_EDIT_REFUSED",
+            format!(
+                "the patch would introduce validation refusals on `{binding_id}` (nothing was \
+                 written): {}",
+                refusals
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "refusals": refusals.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
+        })),
+        _ => CliError::new(
+            ExitKind::Generic,
+            "PROJECTION_EDIT_FAILED",
+            format!("could not edit binding `{binding_id}`: {err}"),
+        )
+        .with_details(json!({ "binding": binding_id, "error": err.to_string() })),
+    }
 }
 
 /// `projection check-path` — deny verdicts for tool-call candidates, engine-

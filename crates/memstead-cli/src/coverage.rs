@@ -242,6 +242,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("projection init", MUTATION),
         no_verdict("projection migrate", MUTATION),
         no_verdict("projection enable", MUTATION),
+        no_verdict("projection edit", MUTATION),
         no_verdict("projection advance", MUTATION),
         no_verdict("projection exclude", MUTATION),
         // Registry and account operations.
