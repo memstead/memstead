@@ -9,6 +9,43 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A partial enumeration can no longer pose as a population — three
+  surfaces, one rule.** The scheduled full walk branched on enumerability
+  alone, so a facet whose enumeration was known-incomplete (a malformed or
+  retired-dialect scope pattern) was walked and announced as full where an
+  explicit `--full` already refused; it now lands in the typed refusal list
+  beside the non-enumerable facets. `projection exclude` enumerated the
+  membership set unreported, so it refused genuinely in-scope artifacts and
+  printed the short count as if it were `S(D)`; it now refuses outright
+  under a partial enumeration (`PROJECTION_EXCLUDE_PARTIAL_ENUMERATION`).
+  And a code-map tree anchor observed over a partial enumeration would have
+  silently changed its stored digest; it now observes no hash and resolves
+  `recheck`, the same posture as a failed read.
+- **One artifact-resolution rule, one implementation.** The ratified
+  candidate priority (source-join first, workspace-relative fallback —
+  decision 26+29) was implemented separately by anchor resolution, the
+  write-time gate, the reverse anchor lookup, and the population scope
+  matcher, and the copies disagreed on a self-nested layout and on climbing
+  `../…` artifacts (where the fabricated `<ptr>/../…` join could resolve
+  into a sibling tree). All four now construct their candidates through one
+  shared function; a climbing artifact never joins, and a `.` pointer reads
+  exactly as an empty one on every surface.
+- **`rename` rewrites prose-only referrers.** Body wiki-links are not edge
+  sources, so a hand-authored file carrying `[[old-slug]]` with no
+  `## Relationships` row had no incoming edge and the referrer walk left its
+  link stale. The rename now also scans section bodies for links resolving
+  to the renamed id — the hand-commit folder-mem model is rewritten like
+  every engine-written referrer.
+- **The sync brief warns about retired-dialect scope patterns.** The
+  migration notes reached only the verify report and the `--full` refusal,
+  so a binding running only build and sync was never told its scope selects
+  nothing. The operative-data block now names each such pattern and offers
+  the mechanical rewrite where one exists.
+- **`projection advance` no longer demands `--dispositions` for the
+  empty-slice first call.** The flag defaults to `{}` — the shape of a first
+  advance over an empty presented slice, which exists only to write the
+  baseline.
+
 - **A ledger-excluded artifact is no longer recorded as an uncovered
   finding.** The authored-exclusion ledger gated only the report's
   decoration: the rationales rendered right beside a verdict line that still

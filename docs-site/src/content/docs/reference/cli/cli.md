@@ -1772,7 +1772,7 @@ Patch an existing binding's author-editable fields in place — the general edit
 
 Advance a binding's sync baseline by recording per-artifact dispositions (D7). The engine freezes the presented changed slice, subtracts already-disposed artifacts on re-presentation, appends new-HEAD deltas when the source moves mid-pass, and — when the remainder empties — advances the destination mem's `#synced` token via the sync-state writer (provenance piggybacks that commit). Dispositions are durable (`.memstead/state/advance/`), so a partial pass resumes across process restarts. The gate accepts **only** artifact ids the engine presented — an unknown id refuses the whole call atomically (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies a disposition for **every** artifact explicitly (auto-derivation lands later)
 
-**Usage:** `memstead projection advance --dispositions <DISPOSITIONS> <BINDING>`
+**Usage:** `memstead projection advance [OPTIONS] <BINDING>`
 
 ###### **Arguments:**
 
@@ -1780,7 +1780,9 @@ Advance a binding's sync baseline by recording per-artifact dispositions (D7). T
 
 ###### **Options:**
 
-* `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. A value may instead be an object carrying an authored rationale — `'{"src/gen.rs": {"disposition": "excluded", "rationale": "generated, no entity"}}'` — and an `excluded` verdict with a rationale is retained in the durable exclusion ledger so the artifact stops re-surfacing as `uncovered` and keeps its reasoning. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to re-present the remainder without recording anything
+* `--dispositions <DISPOSITIONS>` — A JSON object mapping each judged artifact id to its disposition, e.g. `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. A value may instead be an object carrying an authored rationale — `'{"src/gen.rs": {"disposition": "excluded", "rationale": "generated, no entity"}}'` — and an `excluded` verdict with a rationale is retained in the durable exclusion ledger so the artifact stops re-surfacing as `uncovered` and keeps its reasoning. Only ids the engine presented in the brief's changed slice are accepted — an unknown id refuses the whole call. Omitting the flag (or passing `'{}'`) records nothing and re-presents the remainder — the shape of a first advance over an empty presented slice, which exists only to write the baseline
+
+  Default value: `{}`
 
 
 

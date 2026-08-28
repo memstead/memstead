@@ -231,6 +231,37 @@ impl Engine {
                 cross_mem_ids.push(in_edge.from.clone());
             }
         }
+        // Prose-only referrers. Body wiki-links are not edge sources
+        // (every store edge originates from the auto-managed
+        // `## Relationships` section), so a hand-authored file carrying
+        // an inline `[[old-slug]]` with no relationship row has no
+        // incoming edge and the walk above cannot see it — its link
+        // would silently go stale. Scan section bodies with the same
+        // lenient extractor the load-time drift scan uses (code-fence
+        // and inline-code masking included), gated on a cheap substring
+        // probe so the store-wide pass stays proportional to actual
+        // mentions. Engine-written entities are covered either way:
+        // alias synthesis always emits the row on write.
+        for entity in self.store.all_entities() {
+            if entity.id == *id || entity.stub || seen.contains(&entity.id) {
+                continue;
+            }
+            let mentions = entity.sections.values().any(|body| {
+                body.contains(old_slug.as_str())
+                    && crate::entity::parser::extract_inline_links_lenient(body, entity.id.mem())
+                        .iter()
+                        .any(|t| t == id)
+            });
+            if !mentions {
+                continue;
+            }
+            seen.insert(entity.id.clone());
+            if entity.id.mem() == mem {
+                same_mem_ids.push(entity.id.clone());
+            } else {
+                cross_mem_ids.push(entity.id.clone());
+            }
+        }
 
         // Cross-mem peers are partitioned by mount capability.
         // Write peers feed the cross-mem rewrite plan; ReadOnly
@@ -1024,6 +1055,71 @@ mod tests {
         assert!(
             !referrer_md.contains("[[target]]"),
             "old slug must not survive in the referrer body; got:\n{referrer_md}"
+        );
+    }
+
+    /// A hand-authored folder-mem file may carry a prose `[[target]]` with NO
+    /// `## Relationships` row — body wiki-links are not edge sources, so the
+    /// store holds no incoming edge for it and the edge-driven referrer walk
+    /// cannot see it. The rename must rewrite it anyway: the referrer
+    /// collection scans section bodies for links resolving to the renamed id,
+    /// not only the store's incoming edges. (Engine-written entities are
+    /// covered either way — alias synthesis always emits the row on write —
+    /// so this bites the hand-commit folder-mem model specifically.)
+    #[test]
+    fn rename_rewrites_prose_only_referrer_without_relationships_row() {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+
+        std::fs::write(
+            mem_dir.join("target.md"),
+            "---\ntype: spec\ncreated_date: 2020-01-01\nlast_modified: 2020-01-01\nlevel: M0\n---\n# Target\n\n## Identity\n\nT\n\n## Purpose\n\nP\n",
+        )
+        .unwrap();
+        // Prose link only — deliberately NO `## Relationships` section.
+        std::fs::write(
+            mem_dir.join("referrer.md"),
+            "---\ntype: spec\ncreated_date: 2020-01-01\nlast_modified: 2020-01-01\nlevel: M0\n---\n# Referrer\n\n## Identity\n\nR\n\n## Purpose\n\nDepends on [[target]] for context.\n",
+        )
+        .unwrap();
+
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        let (actor, client) = cli_actor();
+
+        let target_id = crate::entity::EntityId::new("specs", "target");
+        let target_hash = engine
+            .store()
+            .get(&target_id)
+            .expect("target loaded from disk")
+            .content_hash
+            .clone();
+
+        engine
+            .rename_entity(
+                RenameEntityArgs {
+                    id: target_id,
+                    expected_hash: Some(target_hash),
+                    new_title: "Target Renamed".to_string(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("rename succeeds");
+
+        let referrer_md = std::fs::read_to_string(mem_dir.join("referrer.md")).unwrap();
+        assert!(
+            referrer_md.contains("[[target-renamed]]"),
+            "the prose-only wiki-link must be rewritten to the new slug; got:\n{referrer_md}"
+        );
+        assert!(
+            !referrer_md.contains("[[target]]"),
+            "the old slug must not survive in the prose-only referrer; got:\n{referrer_md}"
         );
     }
 

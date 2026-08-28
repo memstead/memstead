@@ -1403,6 +1403,75 @@ fn run_verify(
     } else {
         schedule_full_resync(full_resync_every, run_count, &facet_enum)
     };
+    // A SCHEDULED due walk consults partiality the way `--full` does: the
+    // scheduler branches on enumerability alone (it is pure and has no
+    // filesystem), so a facet whose enumeration is known-incomplete — a
+    // malformed or retired-dialect scope pattern — would be walked and
+    // announced as full over a denominator that is not the population. Demote
+    // such a facet into the typed refusal list instead, exactly where the
+    // non-enumerable ones already land. The enumeration performed here is the
+    // walk itself — its files feed the coverage pass below, so nothing is
+    // enumerated twice. (`Forced` needs no demotion: the explicit-full gate
+    // already refused the whole run on any partial facet.)
+    let mut full_walk_files: Vec<String> = Vec::new();
+    let full_resync = match full_resync {
+        FullResyncDecision::Due {
+            run_count,
+            every,
+            walked_facets,
+            mut refused,
+        } => {
+            let mut kept: Vec<String> = Vec::new();
+            for source in &resolved.sources {
+                if let ResolvedSource::Primary(p) = source
+                    && walked_facets.iter().any(|f| f == &p.name)
+                {
+                    let walked = super::cursor::enumerate_source_artifacts_reported(
+                        engine,
+                        p,
+                        &resolved.deny_paths,
+                        workspace_root,
+                    );
+                    if let Some(why) = walked.partiality_reason() {
+                        refused.push(FullResyncRefusal {
+                            facet: p.name.clone(),
+                            medium_type: medium_type_wire(p.medium_type),
+                            reason: format!(
+                                "this facet's enumeration is incomplete — {why} — so the \
+                                 scheduled full walk refuses it rather than announce complete \
+                                 coverage over a denominator that is not the population"
+                            ),
+                        });
+                    } else {
+                        kept.push(p.name.clone());
+                        full_walk_files.extend(walked.files);
+                    }
+                }
+            }
+            FullResyncDecision::Due {
+                run_count,
+                every,
+                walked_facets: kept,
+                refused,
+            }
+        }
+        FullResyncDecision::Forced { walked_facets } => {
+            for source in &resolved.sources {
+                if let ResolvedSource::Primary(p) = source
+                    && medium_capabilities(p.medium_type).enumerable
+                {
+                    full_walk_files.extend(enumerate_source_artifacts(
+                        engine,
+                        p,
+                        &resolved.deny_paths,
+                        workspace_root,
+                    ));
+                }
+            }
+            FullResyncDecision::Forced { walked_facets }
+        }
+        other => other,
+    };
 
     let mut findings: Vec<Finding> = Vec::new();
 
@@ -1519,19 +1588,9 @@ fn run_verify(
     //    explicit: the whole run refused before observing), never silently
     //    claimed as covered.
     let sample_files: Vec<String> = if full_resync.is_full_walk() {
-        let mut all: Vec<String> = Vec::new();
-        for source in &resolved.sources {
-            if let ResolvedSource::Primary(p) = source
-                && medium_capabilities(p.medium_type).enumerable
-            {
-                all.extend(enumerate_source_artifacts(
-                    engine,
-                    p,
-                    &resolved.deny_paths,
-                    workspace_root,
-                ));
-            }
-        }
+        // Collected above where the walk decision was settled — only facets
+        // the decision actually announces as walked contribute.
+        let mut all = full_walk_files;
         all.sort();
         all.dedup();
         all
@@ -3552,6 +3611,139 @@ mod tests {
             uncovered, 3,
             "the scheduled full walk covers the whole source, not a batch of one"
         );
+    }
+
+    /// A SCHEDULED full walk consults partiality the way `--full` does: a facet
+    /// whose enumeration is known-incomplete (here: a scope pattern still in
+    /// the retired workspace-relative dialect) is demoted into the typed
+    /// refusal list instead of being walked and announced as full. Without the
+    /// demotion one report carries both "full-enumeration walk fired" and
+    /// "`S(D)` is partial, no percentage".
+    #[test]
+    fn scheduled_full_walk_demotes_partial_facet_to_refusal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("a.rs"), "fn x() {}\n").unwrap();
+
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &Binding {
+                version: BINDING_VERSION,
+                intent: None,
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: "src".to_string(),
+                    change_detection: Some("git".to_string()),
+                    // A MIXED scope: the prefix-free pattern still enumerates,
+                    // so the facet is non-empty and looks like a population —
+                    // while the retired-dialect pattern's share is absent.
+                    scope: vec![
+                        PatternEntry {
+                            path: "**/*.rs".to_string(),
+                            mode: PatternMode::Allow,
+                        },
+                        PatternEntry {
+                            path: "src/nested.rs".to_string(),
+                            mode: PatternMode::Allow,
+                        },
+                    ],
+                    engagement: None,
+                    preparation: None,
+                }],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: None,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: Some(BuildOperation {
+                        mode: BuildMode::Discovery,
+                        trigger: IngestTrigger::Loop,
+                        batch_size: 20,
+                        post_actions: None,
+                    }),
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 1,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: 1, // a full walk fires EVERY run …
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
+
+        let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+        match &outcome.full_resync {
+            FullResyncDecision::Due {
+                walked_facets,
+                refused,
+                ..
+            } => {
+                assert!(
+                    walked_facets.is_empty(),
+                    "a partial facet must not be announced as walked-in-full: {walked_facets:?}"
+                );
+                assert_eq!(refused.len(), 1, "the partial facet is refused, typed");
+                assert_eq!(refused[0].facet, "graph");
+                assert!(
+                    refused[0].reason.contains("incomplete"),
+                    "the refusal names the partiality: {}",
+                    refused[0].reason
+                );
+            }
+            other => panic!("expected a due full walk decision, got {other:?}"),
+        }
     }
 
     // ---- explicit full measurement (`verify_binding_full`) ----------------

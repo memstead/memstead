@@ -52,7 +52,7 @@ use std::path::{Path, PathBuf};
 use crate::Engine;
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
-use super::cursor::{compute_source_cursor, enumerate_source_artifacts};
+use super::cursor::{compute_source_cursor, enumerate_source_artifacts_reported};
 use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::Slice;
 
@@ -615,6 +615,20 @@ pub enum ExcludeError {
         /// How many artifacts `S(D)` did enumerate (the accepted set size).
         printed: usize,
     },
+    /// The enumeration of `S(D)` is known-incomplete (a malformed or
+    /// retired-dialect scope pattern), so membership cannot be decided: the
+    /// gate would refuse genuinely in-scope artifacts and state the short
+    /// count as if it were the population. Refused whole, nothing written.
+    #[error(
+        "the binding's source enumeration is incomplete — {reason} — so `S(D)` membership \
+         cannot be decided; fix the named scope pattern(s), then re-declare the exclusions"
+    )]
+    PartialEnumeration {
+        /// The facet whose enumeration is partial.
+        facet: String,
+        /// Why the enumeration is incomplete, naming the offending patterns.
+        reason: String,
+    },
     /// Reading or writing the durable advance store failed.
     #[error("advance store error: {0}")]
     Store(#[source] StoreError),
@@ -645,13 +659,27 @@ pub fn record_exclusions(
         split_binding_id(&binding_id).map_err(|_| ExcludeError::MalformedId(binding_id.clone()))?;
 
     // Enumerate S(D) — the in-scope source-artifact set, the same enumeration the
-    // fidelity report uses for its coverage denominator.
+    // fidelity report uses for its coverage denominator. The REPORTED form: a
+    // partial enumeration (a malformed or retired-dialect scope pattern) is not
+    // the population, so deciding membership over it would refuse genuinely
+    // in-scope artifacts and state the short count as if it were `S(D)` —
+    // refuse the call instead, naming the cause.
     let mut s_d: BTreeSet<String> = BTreeSet::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
-            for f in enumerate_source_artifacts(engine, p, &resolved.deny_paths, workspace_root) {
-                s_d.insert(f);
+            let walked = enumerate_source_artifacts_reported(
+                engine,
+                p,
+                &resolved.deny_paths,
+                workspace_root,
+            );
+            if let Some(reason) = walked.partiality_reason() {
+                return Err(ExcludeError::PartialEnumeration {
+                    facet: p.name.clone(),
+                    reason,
+                });
             }
+            s_d.extend(walked.files);
         }
     }
 
@@ -1249,6 +1277,57 @@ mod tests {
         )
         .unwrap();
         assert_eq!((out2.added, out2.excluded), (1, 2));
+    }
+
+    /// A PARTIAL enumeration refuses the membership gate outright: under a
+    /// legacy-dialect scope pattern the enumerated set is not the population,
+    /// so the gate can neither refuse a genuinely in-scope artifact nor state
+    /// the short count as if it were `S(D)`. Typed refusal, nothing written.
+    #[test]
+    fn record_exclusions_refuses_partial_enumeration() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        git(root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub").join("a.rs"), "one").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        // Pointer `sub`, MIXED scope: the prefix-free pattern enumerates
+        // `sub/a.rs`, the retired-dialect pattern's share is silently absent.
+        let mut resolved = resolved_engine_graph();
+        if let ResolvedSource::Primary(p) = &mut resolved.sources[0] {
+            p.pointer = "sub".to_string();
+            p.scope.push(PatternEntry {
+                path: "sub/nested.rs".to_string(),
+                mode: PatternMode::Allow,
+            });
+        }
+
+        // Even a genuine member of the surviving subset refuses: membership in
+        // a set that is not the population is not membership in the population.
+        let err = record_exclusions(
+            &Engine::from_mounts(Vec::new()).unwrap(),
+            root,
+            &resolved,
+            &BTreeMap::from([("sub/a.rs".to_string(), "mined; no entity".to_string())]),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, ExcludeError::PartialEnumeration { .. }),
+            "got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("incomplete"),
+            "the refusal names the partiality: {err}"
+        );
+        assert!(
+            read_advance_store(root, "engine", "graph")
+                .unwrap()
+                .is_none(),
+            "a refused call must not create the advance store"
+        );
     }
 
     /// `DispositionInput` parses both the bare-verdict and the reasoned forms

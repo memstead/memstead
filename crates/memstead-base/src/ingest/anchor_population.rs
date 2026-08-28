@@ -273,17 +273,19 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
             // needs a rule for deciding which namespace a given artifact was
             // written in, and no such rule exists: a source-relative `**/*`
             // matches any relative path, so a sibling tree's file reads as
-            // in-scope. Lifting the patterns up removes the question.
+            // in-scope. Lifting the patterns up removes the question. The
+            // join is [`join_pointer`], so a `.` pointer normalizes to the
+            // pointer-less shape here exactly as it does at resolution.
             let pointer = p.pointer.trim_end_matches('/');
-            let join = |pat: &str| -> String {
-                if pointer.is_empty() {
-                    pat.to_string()
-                } else {
-                    format!("{pointer}/{pat}")
-                }
-            };
-            let allows_j: Vec<String> = allows.iter().map(|a| join(a)).collect();
-            let denies_j: Vec<String> = denies.iter().map(|d| join(d)).collect();
+            let pointer = if pointer == "." { "" } else { pointer };
+            let allows_j: Vec<String> = allows
+                .iter()
+                .map(|a| crate::engine::query::join_pointer(pointer, a))
+                .collect();
+            let denies_j: Vec<String> = denies
+                .iter()
+                .map(|d| crate::engine::query::join_pointer(pointer, d))
+                .collect();
             let allow_refs: Vec<&str> = allows_j.iter().map(String::as_str).collect();
             let deny_refs: Vec<&str> = denies_j.iter().map(String::as_str).collect();
             let Some(allow_set) = build_glob_set(&allow_refs) else {
@@ -358,25 +360,14 @@ impl SourceScope {
         false
     }
 
-    /// The workspace-relative paths an artifact could denote for this source.
+    /// The workspace-relative paths an artifact could denote for this source
+    /// — the shared decision-29 candidate rule, so the matcher reads an
+    /// artifact exactly as resolution and the write gate do (source-join
+    /// first, workspace-relative fallback; a climbing `../…` artifact never
+    /// joins — the fabricated `<ptr>/../…` would let a `**` pattern under the
+    /// pointer match a sibling tree by string).
     fn readings(&self, artifact: &str) -> Vec<String> {
-        if self.pointer.is_empty() {
-            return vec![artifact.to_string()];
-        }
-        let prefix = format!("{}/", self.pointer);
-        if artifact.starts_with(&prefix) {
-            // Already carries the pointer: it is the workspace-relative form,
-            // and joining again would produce `<ptr>/<ptr>/…`.
-            return vec![artifact.to_string()];
-        }
-        if artifact.starts_with("../") || artifact == ".." {
-            // An artifact of a source never climbs OUT of that source, so the
-            // source-relative reading is meaningless here. Joining anyway
-            // fabricates `<ptr>/../…`, which a `**` pattern under the pointer
-            // then matches by string even though it denotes a sibling tree.
-            return vec![artifact.to_string()];
-        }
-        vec![format!("{prefix}{artifact}"), artifact.to_string()]
+        crate::engine::query::artifact_candidates(&self.pointer, artifact)
     }
 
     fn covers_tree_for(&self, dir: &str) -> bool {
@@ -683,6 +674,16 @@ mod tests {
             &m0,
             &anchor("dev/notes.md", None, AnchorGrain::File)
         ));
+
+        // A `.` pointer normalizes to the pointer-less shape, matching
+        // `join_pointer` — the two spellings of "the workspace root" cannot
+        // read one scope differently.
+        let r4 = resolved_with(scope_source(".", "dev/**/*.md"));
+        let m4 = scope_matcher(&r4).unwrap();
+        assert!(
+            in_declared_scope(&m4, &anchor("dev/notes.md", None, AnchorGrain::File)),
+            "a `.` pointer reads exactly as an empty one"
+        );
     }
 
     /// Criterion 1 and 3: two bindings on one mem see different populations,

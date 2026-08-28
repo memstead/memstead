@@ -603,11 +603,19 @@ impl Engine {
             let source_roots = self.anchor_source_roots(&mount.mount.mem);
             for (eid, anchors) in &sc.entities {
                 for a in anchors {
+                    // The shared decision-29 candidate rule: the join
+                    // candidate exists only where the rule produces one (a
+                    // climbing `../…` artifact never joins); the
+                    // workspace-relative form is the `anchor_references_path`
+                    // arm below.
                     let joined = a
                         .source
                         .as_deref()
                         .and_then(|name| source_roots.get(name))
-                        .map(|join| join_pointer(&join.pointer, anchor_base_path(&a.artifact)));
+                        .map(|join| {
+                            artifact_candidates(&join.pointer, anchor_base_path(&a.artifact))
+                        })
+                        .and_then(|mut c| (c.len() > 1).then(|| c.remove(0)));
                     if anchor_references_path(a, artifact_path)
                         || joined.is_some_and(|j| {
                             path_references(
@@ -2841,12 +2849,17 @@ fn observe_path_anchor(
     // source-relative first (joined onto the declaring source's pointer,
     // which may deliberately leave the workspace root for out-of-root
     // pointers); the workspace-relative form is tried only when the
-    // source-join does not resolve. A path resolving under both joins is
-    // decided by this priority, deterministically.
-    let path = source_pointer
-        .map(|pointer| root.join(join_pointer(pointer, base)))
-        .filter(|joined| joined.exists())
-        .unwrap_or_else(|| root.join(base));
+    // source-join does not resolve. The candidate set is the shared
+    // [`artifact_candidates`] rule, so resolution, the write gate, and the
+    // population matcher read one artifact the same way.
+    let path = {
+        let candidates = artifact_candidates(source_pointer.unwrap_or(""), base);
+        candidates
+            .iter()
+            .map(|c| root.join(c))
+            .find(|p| p.exists())
+            .unwrap_or_else(|| root.join(base))
+    };
     if !path.exists() {
         return Some((
             crate::anchor::resolve_anchor(anchor, &crate::anchor::ArtifactObservation::Absent),
@@ -2885,9 +2898,20 @@ fn observe_path_anchor(
         // declaring source's own scope and the binding's deny paths. The
         // path the anchor names is workspace-relative or source-relative;
         // the enumeration is workspace-relative, so compare the resolved
-        // absolute paths.
-        let files: Vec<(String, String)> =
-            crate::ingest::cursor::enumerate_facet_files(&join.source, &join.deny_paths, root)
+        // absolute paths. A PARTIAL enumeration (malformed or retired-dialect
+        // scope pattern) observes no hash — a digest over a set that is not
+        // the population would silently change a stored tree-anchor hash;
+        // no-hash resolves `recheck`, the same posture as a failed read.
+        let enumeration = crate::ingest::cursor::enumerate_facet_files_reported(
+            &join.source,
+            &join.deny_paths,
+            root,
+        );
+        if enumeration.is_partial() {
+            None
+        } else {
+            let files: Vec<(String, String)> = enumeration
+                .files
                 .into_iter()
                 .filter(|f| root.join(f).starts_with(&path))
                 .filter_map(|f| {
@@ -2896,9 +2920,10 @@ fn observe_path_anchor(
                         .map(|bytes| (f, String::from_utf8_lossy(&bytes).into_owned()))
                 })
                 .collect();
-        Some(crate::anchor::prepared_content_hash(
-            crate::preparation::code_map_tree_digest(&files).as_bytes(),
-        ))
+            Some(crate::anchor::prepared_content_hash(
+                crate::preparation::code_map_tree_digest(&files).as_bytes(),
+            ))
+        }
     } else {
         None
     };
@@ -2964,6 +2989,34 @@ pub(crate) fn join_pointer(pointer: &str, base: &str) -> String {
     }
 }
 
+/// The candidate workspace-relative forms an anchor artifact could denote
+/// under its declaring source's pointer, in the ratified priority (bundle
+/// decision 29): the source-join first, the workspace-relative form as the
+/// fallback. **The single implementation of that rule** — resolution, the
+/// write-time gate, and the population scope matcher all construct their
+/// candidate set here, so one artifact cannot read differently across the
+/// three (each site then applies its own predicate: existence for
+/// resolution and the gate, glob membership for the matcher).
+///
+/// One lexical clarification rides with the rule: an artifact that climbs
+/// (`../…`) never joins. An artifact of a source never climbs OUT of that
+/// source, so such a path is already the workspace-relative form; joining
+/// anyway fabricates `<ptr>/../…`, which the filesystem then resolves into a
+/// sibling tree — a false resolution for an existence test and a false
+/// in-scope for a `**` glob. An artifact already carrying the pointer prefix
+/// is NOT suppressed: on a self-nested layout both readings exist and the
+/// decision's priority — source-join wins — settles it deterministically.
+pub(crate) fn artifact_candidates(pointer: &str, base: &str) -> Vec<String> {
+    let pointer = pointer.trim_end_matches('/');
+    if pointer.is_empty() || pointer == "." {
+        return vec![base.to_string()];
+    }
+    if base.starts_with("../") || base == ".." {
+        return vec![base.to_string()];
+    }
+    vec![format!("{pointer}/{base}"), base.to_string()]
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -2980,6 +3033,42 @@ mod tests {
 
     use crate::vcs::CommitContext;
     use crate::workspace::{Mount, MountCapability, MountLifecycle, MountStorage};
+
+    /// The shared decision-29 candidate rule: source-join first,
+    /// workspace-relative fallback; a pointer-less (or `.`) source has one
+    /// reading; a climbing `../…` artifact never joins (the fabricated
+    /// `<ptr>/../…` would resolve into a sibling tree).
+    #[test]
+    fn artifact_candidates_follow_decision_29_priority() {
+        use super::artifact_candidates;
+        assert_eq!(artifact_candidates("", "a/b.rs"), vec!["a/b.rs"]);
+        assert_eq!(artifact_candidates(".", "a/b.rs"), vec!["a/b.rs"]);
+        assert_eq!(artifact_candidates("./", "a/b.rs"), vec!["a/b.rs"]);
+        assert_eq!(
+            artifact_candidates("sub", "a/b.rs"),
+            vec!["sub/a/b.rs", "a/b.rs"]
+        );
+        assert_eq!(
+            artifact_candidates("sub/", "a/b.rs"),
+            vec!["sub/a/b.rs", "a/b.rs"]
+        );
+        // Self-nesting is settled by priority, not suppression: the artifact
+        // already carrying the pointer prefix still offers the join first.
+        assert_eq!(
+            artifact_candidates("sub", "sub/x.rs"),
+            vec!["sub/sub/x.rs", "sub/x.rs"]
+        );
+        // A climbing artifact is already the workspace-relative form.
+        assert_eq!(
+            artifact_candidates("sub", "../dev/x.md"),
+            vec!["../dev/x.md"]
+        );
+        assert_eq!(
+            artifact_candidates("../dev", "../dev/x.md"),
+            vec!["../dev/x.md"]
+        );
+        assert_eq!(artifact_candidates("sub", ".."), vec![".."]);
+    }
 
     /// `schema_origin` is the trust-classification authority: a built-in
     /// (or workspace-authored) schema is first-party; a schema whose

@@ -264,6 +264,23 @@ pub fn render_operative_data(
                     if !denies.is_empty() {
                         lines.push(format!("  - {deny_label}: {}", denies.join(", ")));
                     }
+                    // A scope pattern still in the retired workspace-relative
+                    // dialect selects nothing under the pointer join. The
+                    // brief is the one surface a binding running only build
+                    // and sync ever reads, so the warning must land HERE —
+                    // the verify report and the `--full` refusal reach only
+                    // bindings that verify.
+                    for note in super::cursor::scope_migration_notes(p) {
+                        let rewrite = match &note.suggested {
+                            Some(s) => format!(" — rewrite it as `{s}`"),
+                            None => String::new(),
+                        };
+                        lines.push(format!(
+                            "  - **Scope pattern `{}` is written against the workspace root \
+                             rather than the source pointer, so it selects nothing**{rewrite}.",
+                            note.pattern
+                        ));
+                    }
                     if is_graph {
                         lines.push(format!(
                             "  - Read the source baseline with `memstead_search mem={}` \
@@ -1746,6 +1763,57 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(
             !out.contains("Paired process mem"),
             "skipped process mem omitted"
+        );
+    }
+
+    /// A source whose scope still speaks the retired workspace-relative
+    /// dialect is warned about IN THE BRIEF — the operative-data block, the
+    /// one surface a binding running only build and sync ever reads. Without
+    /// it the notes reach only the verify report and the `--full` refusal,
+    /// and such a binding is never told its scope selects nothing.
+    #[test]
+    fn operative_data_warns_on_retired_scope_dialect() {
+        let r = resolved(
+            "g",
+            None,
+            // Pointer `../src` (the helper's default): one pattern in the
+            // retired dialect (begins with the pointer), one converged.
+            vec![primary(
+                MediumType::Filesystem,
+                vec![allow("../src/**/*.md"), allow("notes/**")],
+            )],
+        );
+        let skipped = ProcessMemInfo {
+            present: false,
+            skipped: true,
+            notice: None,
+            leaf_name: "g".to_string(),
+            mem_label: "ingest/g".to_string(),
+        };
+        let out = render_operative_data(&r, &skipped, None, None, &[]);
+        assert!(
+            out.contains("workspace root"),
+            "the block names the retired dialect: {out}"
+        );
+        assert!(
+            out.contains("../src/**/*.md"),
+            "the offending pattern is named: {out}"
+        );
+        assert!(
+            out.contains("`**/*.md`"),
+            "the mechanical rewrite is offered: {out}"
+        );
+
+        // A converged scope renders no warning.
+        let clean = resolved(
+            "g",
+            None,
+            vec![primary(MediumType::Filesystem, vec![allow("**/*.md")])],
+        );
+        let out2 = render_operative_data(&clean, &skipped, None, None, &[]);
+        assert!(
+            !out2.contains("workspace root"),
+            "no warning without a retired-dialect pattern: {out2}"
         );
     }
 

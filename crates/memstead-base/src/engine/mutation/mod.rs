@@ -306,13 +306,17 @@ impl super::Engine {
                     }
                 }
                 let base = crate::engine::query::anchor_base_path(&a.artifact);
-                let mut candidates: Vec<String> = Vec::new();
-                if let Some(source) = &a.source
-                    && let Some(join) = source_roots.get(source)
+                // The shared decision-29 candidate rule — the same set
+                // resolution will later read, so the gate cannot accept a
+                // path resolution would read differently.
+                let candidates: Vec<String> = match a
+                    .source
+                    .as_ref()
+                    .and_then(|source| source_roots.get(source))
                 {
-                    candidates.push(crate::engine::query::join_pointer(&join.pointer, base));
-                }
-                candidates.push(base.to_string());
+                    Some(join) => crate::engine::query::artifact_candidates(&join.pointer, base),
+                    None => vec![base.to_string()],
+                };
                 if !candidates.iter().any(|c| root.join(c).exists()) {
                     return Err(EngineError::from(
                         crate::anchor::AnchorValidationError::ArtifactUnresolvable {

@@ -411,9 +411,11 @@ pub struct AdvanceArgs {
     /// — and an `excluded` verdict with a rationale is retained in the durable
     /// exclusion ledger so the artifact stops re-surfacing as `uncovered` and
     /// keeps its reasoning. Only ids the engine presented in the brief's changed
-    /// slice are accepted — an unknown id refuses the whole call. Pass `'{}'` to
-    /// re-present the remainder without recording anything.
-    #[arg(long)]
+    /// slice are accepted — an unknown id refuses the whole call. Omitting the
+    /// flag (or passing `'{}'`) records nothing and re-presents the remainder —
+    /// the shape of a first advance over an empty presented slice, which
+    /// exists only to write the baseline.
+    #[arg(long, default_value = "{}")]
     pub dispositions: String,
 }
 
@@ -2058,6 +2060,12 @@ fn map_exclude_err(binding_id: &str, err: ExcludeError) -> CliError {
             message,
         )
         .with_details(json!({ "binding": binding_id, "not_source_members": artifacts })),
+        ExcludeError::PartialEnumeration { facet, reason } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_EXCLUDE_PARTIAL_ENUMERATION",
+            message,
+        )
+        .with_details(json!({ "binding": binding_id, "facet": facet, "reason": reason })),
         ExcludeError::Store(_) => {
             CliError::new(ExitKind::Generic, "PROJECTION_EXCLUDE_FAILED", message)
                 .with_details(json!({ "binding": binding_id }))
