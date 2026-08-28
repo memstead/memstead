@@ -4767,3 +4767,77 @@ fn edit_refusals_are_typed() {
     let env: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(env["code"], "PROJECTION_EDIT_INVALID_JSON", "got: {env}");
 }
+
+/// A ledger-excluded artifact is not an uncovered FINDING — the verdict and
+/// the findings store obey the exclusion the way the report body already
+/// did. Before the 2026-08-28 fix the second verify below still recorded
+/// `uncovered: 1` (the excluded artifact) while rendering its rationale
+/// right beside the count.
+#[test]
+fn verify_does_not_record_a_ledger_excluded_artifact_as_uncovered() {
+    let tmp = advance_workspace();
+    let root = tmp.path();
+    // The folder mount the workspace declares, with the binding's pinned
+    // schema, so verify can boot the destination mem.
+    write_store(
+        root,
+        "../engine-mem/.memstead/config.json",
+        r#"{ "schema": "default@1.0.0" }"#,
+    );
+    memstead()
+        .current_dir(root)
+        .args(["projection", "enable", "verify", "engine/graph"])
+        .assert()
+        .success();
+
+    // First verify: a.rs is in scope with no anchor — uncovered.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("verify --json must emit JSON");
+    let uncovered_before = env["report"]["findings_by_class"]["uncovered"]
+        .as_u64()
+        .unwrap_or(0);
+    assert!(uncovered_before >= 1, "precondition: a.rs uncovered: {env}");
+
+    // Exclude it with a rationale.
+    memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "engine/graph",
+            "--exclusions",
+            r#"{"src/a.rs": "mined; warrants no entity"}"#,
+        ])
+        .assert()
+        .success();
+
+    // Second verify: the exclusion gates the recording, not only the report
+    // decoration — the uncovered count drops by one and the rationale shows.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).expect("verify --json must emit JSON");
+    let uncovered_after = env["report"]["findings_by_class"]["uncovered"]
+        .as_u64()
+        .unwrap_or(0);
+    assert_eq!(
+        uncovered_after,
+        uncovered_before - 1,
+        "the excluded artifact must not be recorded as uncovered: {env}"
+    );
+    assert_eq!(
+        env["report"]["disposed_excluded"], 1,
+        "rationale kept: {env}"
+    );
+}

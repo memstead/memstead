@@ -1919,3 +1919,40 @@ fn shared_from_template_feeds_create_and_update() {
         }
     }
 }
+
+/// `--from` accepts `relations_unset` and routes it to the engine's
+/// repair-shaped semantics: on a CONFORMANT entity the engine refuses
+/// `REPAIR_NOT_NEEDED` and points at `memstead relate --remove` — the same
+/// contract MCP's `memstead_update` carries. Before 2026-08-28 the key was
+/// refused at payload parse ("unknown field"), so the repair MCP offers had
+/// no CLI equivalent at all; against that code this test fails because the
+/// refusal is a parse error, not the engine's typed verdict.
+#[test]
+fn update_from_accepts_relations_unset_with_engine_semantics() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    let hash = seed_from_entity(tmp.path(), "Unsetter", "unsetter");
+
+    let payload = update_payload(
+        tmp.path(),
+        "payload.json",
+        &format!(
+            r#"{{ "id": "cli-write--unsetter", "expected_hash": "{hash}",
+                  "relations_unset": [ {{ "rel_type": "REFERENCES", "target": "cli-write--ghost" }} ] }}"#
+        ),
+    );
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "update", "--from"])
+        .arg(&payload)
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: serde_json::Value = serde_json::from_slice(&out).expect("refusal must emit JSON");
+    assert_eq!(
+        env["code"], "REPAIR_NOT_NEEDED",
+        "the key must reach the engine's repair semantics, not die at parse: {env}"
+    );
+}

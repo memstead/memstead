@@ -7,6 +7,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A ledger-excluded artifact is no longer recorded as an uncovered
+  finding.** The authored-exclusion ledger gated only the report's
+  decoration: the rationales rendered right beside a verdict line that still
+  counted the same artifacts as uncovered in the findings store (observed as
+  "uncovered: 3" over three excluded artifacts). The exclusion now gates the
+  recording itself — an excluded artifact raises no finding, a prior open one
+  closes on the next verify, and the rationale keeps rendering. Pinned by an
+  integration test that fails on the pre-fix recording.
+- **The chunker reads frontmatter through the consolidated core.** Its
+  hand-rolled scanner recognised only the newline-terminated opening fence,
+  so a `---\r\n` document was treated as having no frontmatter: the chunk
+  view prepended a second frontmatter block over the first and the entity
+  keys vanished. `frontmatter_parts` now wraps `split_frontmatter_core`, both
+  delimiter flavours resolve in one place, and a carriage-return regression
+  test pins the repair.
+- **CLI/MCP parity: `update --from` accepts `relations_unset`.** The
+  repair-shaped relation removal MCP's `memstead_update` offers was refused
+  at payload parse on the CLI ("unknown field"), so the repair had no CLI
+  equivalent. The key now routes to the same engine semantics (refused
+  `REPAIR_NOT_NEEDED` on a conformant entity, pointing at
+  `memstead relate --remove` for everyday detachment).
+
 ### Added
 
 - **`memstead projection edit` — the general binding-field patch.** The shared

@@ -1568,8 +1568,21 @@ fn run_verify(
                     && (!entity_end_reconciled || !engine.entity_is_absent(eid))
             })
     };
+    // The durable authored-exclusion ledger (B4) gates the RECORDING, not
+    // only the report's decoration: an artifact mined and deliberately
+    // excluded with a rationale is not an uncovered finding. Until
+    // 2026-08-28 only the report body consulted the ledger, so the verdict
+    // line and the findings store kept counting exclusions as uncovered
+    // (three of them on plugin/graph) while the rationales rendered right
+    // beside the count.
+    let excluded: BTreeSet<String> =
+        crate::ingest::advance::read_advance_store(workspace_root, &mem, &name)
+            .ok()
+            .flatten()
+            .map(|state| state.exclusions.keys().cloned().collect())
+            .unwrap_or_default();
     for file in &sample_files {
-        if !covered_now(file) {
+        if !covered_now(file) && !excluded.contains(file) {
             findings.push(Finding {
                 key: key.clone(),
                 facet: facet.clone(),

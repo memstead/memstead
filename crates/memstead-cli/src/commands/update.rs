@@ -198,6 +198,15 @@ struct UpdatePayload {
     metadata_unset: Vec<String>,
     #[serde(default)]
     declare_relations: Vec<DeclareRelationPayload>,
+    /// Repair-shaped relation removals — matches the MCP `memstead_update`
+    /// `relations_unset[]` shape (`[{ rel_type, target }]`). Accepted only
+    /// when the entity currently fails conformance (the engine refuses
+    /// `REPAIR_NOT_NEEDED` on a conformant entity); everyday edge
+    /// detachment goes through `memstead relate --remove`. Until 2026-08-28
+    /// this key was refused outright here while MCP honoured it — the
+    /// response-shape asymmetry `agent-surfaces.md` forbids.
+    #[serde(default)]
+    relations_unset: Vec<RelationUnsetPayload>,
     /// Provenance anchors — matches the MCP `memstead_update` `anchors[]`
     /// shape; validated engine-side into a typed `INVALID_ANCHOR` refusal
     /// on malformed input. Merged into the entity's existing set (same
@@ -251,6 +260,25 @@ struct DeclareRelationPayload {
     /// `per_edge_description` posture in the engine.
     #[serde(default)]
     description: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+struct RelationUnsetPayload {
+    /// Relationship type of the edge to remove (case-insensitive input;
+    /// engine canonicalises).
+    rel_type: String,
+    /// Full target entity id of the edge to remove.
+    target: String,
+}
+
+impl RelationUnsetPayload {
+    fn into_arg(self) -> memstead_base::ops::RelationUnsetArg {
+        memstead_base::ops::RelationUnsetArg {
+            rel_type: self.rel_type,
+            target: EntityId::canonical(&self.target),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -351,6 +379,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             metadata: parse_kv_list(&args.metadata, "--metadata")?,
             metadata_unset: args.metadata_unset.clone(),
             declare_relations: parse_declare_relations(&args.declare_relations)?,
+            // The repair-shaped removal is `--from`-only, like MCP's own
+            // JSON-args shape — the inline flag surface stays everyday-sized.
+            relations_unset: Vec::new(),
             anchors: super::create::parse_anchor_list(&args.anchors)?,
             anchors_unset: parse_anchor_unset_list(&args.anchors_unset)?,
             dry_run: args.dry_run,
@@ -434,7 +465,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 metadata_unset: payload.metadata_unset,
                 dry_run: payload.dry_run,
                 declare_relations,
-                relations_unset: Vec::new(),
+                relations_unset: payload
+                    .relations_unset
+                    .into_iter()
+                    .map(RelationUnsetPayload::into_arg)
+                    .collect(),
                 anchors_unset: payload.anchors_unset,
             };
             let mut update_args = update_args;
@@ -572,7 +607,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 metadata_unset: payload.metadata_unset,
                 declare_relations,
                 dry_run: false,
-                relations_unset: Vec::new(),
+                relations_unset: payload
+                    .relations_unset
+                    .into_iter()
+                    .map(RelationUnsetPayload::into_arg)
+                    .collect(),
                 anchors_unset: payload.anchors_unset,
             };
             let mut update_args = update_args;

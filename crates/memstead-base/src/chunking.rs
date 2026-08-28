@@ -121,8 +121,11 @@ pub fn apply_chunking(
     let merged_fm = merge_chunk_frontmatter(&original_fm, extra_fm, idx + 1, total, !is_last);
 
     let result = if idx == 0 {
-        if let Some(end) = find_frontmatter_end(&chunks[idx]) {
-            format!("---\n{merged_fm}\n---{}", &chunks[idx][end..])
+        // The core strips exactly one newline after the closing
+        // delimiter, so re-emitting `---\n` + body reconstructs the
+        // original spacing (a blank line stays a blank line).
+        if let Some((_, body)) = frontmatter_parts(&chunks[idx]) {
+            format!("---\n{merged_fm}\n---\n{body}")
         } else {
             format!("---\n{merged_fm}\n---\n\n{}", chunks[idx])
         }
@@ -142,14 +145,9 @@ pub fn apply_chunking(
 /// the re-emitted frontmatter on each chunk matches the source's
 /// declared order.
 fn extract_frontmatter_lines(markdown: &str) -> Vec<(String, String)> {
-    let Some(end) = find_frontmatter_end(markdown) else {
+    let Some((inner, _)) = frontmatter_parts(markdown) else {
         return Vec::new();
     };
-    // `end` points past the closing `\n---`; back up 4 to land on the
-    // closing marker's leading newline. The inner block starts after
-    // `---\n` (4 chars from the start) and ends at `inner_end`.
-    let inner_end = end - 4;
-    let inner = &markdown[4..inner_end];
     inner
         .lines()
         .filter_map(|line| {
@@ -221,30 +219,34 @@ fn inject_chunk_frontmatter(markdown: &str, idx: usize, total: usize, truncated:
     let chunk_line = format!("_chunk: {idx} of {total}");
     let total_line = format!("_total_chunks: {total}");
     let truncated_line = if truncated { "_truncated: true\n" } else { "" };
-    match find_frontmatter_end(markdown) {
-        Some(end) => {
-            // `end` points just past the closing `\n---`; back up 4 to
-            // re-anchor on the closing marker, then trim the trailing
-            // `\n` from the inner block so we can re-emit it cleanly.
-            let inner_end = end - 4;
-            let inner = markdown[4..inner_end].trim_end_matches('\n');
+    match frontmatter_parts(markdown) {
+        Some((meta, body)) => {
+            let inner = meta.trim_end_matches(['\n', '\r']);
             let separator = if inner.is_empty() { "" } else { "\n" };
             format!(
-                "---\n{inner}{separator}{truncated_line}{chunk_line}\n{total_line}\n---{}",
-                &markdown[end..]
+                "---\n{inner}{separator}{truncated_line}{chunk_line}\n{total_line}\n---\n{body}"
             )
         }
         None => format!("---\n{truncated_line}{chunk_line}\n{total_line}\n---\n\n{markdown}"),
     }
 }
 
-/// Find the end of YAML frontmatter (position of the closing `---` including it).
-fn find_frontmatter_end(text: &str) -> Option<usize> {
-    if !text.starts_with("---\n") {
-        return None;
+/// Split `text` at its frontmatter via the consolidated core
+/// (`split_frontmatter_core`), returning the inner meta block and the
+/// body after the closing delimiter. `None` for a document with no
+/// opening delimiter or an unclosed block — both degrade to
+/// whole-document-is-body here, matching the tolerant read path. The
+/// hand-rolled scanner this replaces recognised only the
+/// newline-terminated opening fence, so a `---\r\n` document was
+/// treated as having no frontmatter at all and its offset constant was
+/// wrong for that shape besides (the divergence-from-the-core disease
+/// `scripts/frontmatter-sites.json` documents); the core owns both
+/// delimiter flavours in one place.
+fn frontmatter_parts(text: &str) -> Option<(&str, &str)> {
+    match crate::entity::parser::split_frontmatter_core(text) {
+        (_, crate::entity::parser::Frontmatter::Present { meta, body }) => Some((meta, body)),
+        _ => None,
     }
-    // Find closing ---
-    text[4..].find("\n---").map(|pos| pos + 4 + 4) // skip opening "---\n" + matched "\n---"
 }
 
 #[cfg(test)]
@@ -561,5 +563,26 @@ mod tests {
             assert!(chunk_1.contains(key), "chunk_1 missing `{key}`");
             assert!(chunk_2.contains(key), "chunk_2 missing `{key}`");
         }
+    }
+
+    /// A carriage-return document's frontmatter is recognised and
+    /// preserved. The hand-rolled scanner the core replaced saw no
+    /// frontmatter in a `---\r\n` document, so the single-chunk inject
+    /// path prepended a SECOND frontmatter block over the first and the
+    /// entity keys vanished from the chunk view; against that code this
+    /// test fails on both assertions.
+    #[test]
+    fn inject_preserves_carriage_return_frontmatter() {
+        let doc = "---\r\ntype: spec\r\nlevel: M0\r\n---\r\n\r\n# Title\r\n\r\nBody text.\r\n";
+        let out = inject_chunk_frontmatter(doc, 1, 1, false);
+        assert_eq!(
+            out.matches("---").count(),
+            2,
+            "exactly one frontmatter block, not a second prepended over the first:\n{out}"
+        );
+        assert!(
+            out.contains("type: spec") && out.contains("_chunk: 1 of 1"),
+            "entity keys and chunk-walk keys share the one block:\n{out}"
+        );
     }
 }
