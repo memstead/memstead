@@ -1721,6 +1721,7 @@ pub fn create_mem(
         tool: Some("memstead_mem_create"),
         note: params.note.clone(),
         role: Default::default(),
+        identity: engine.current_identity().map(str::to_string),
         logical_operation_id: None,
         entity_ids: None,
     };

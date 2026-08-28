@@ -680,6 +680,7 @@ pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
         tool: None,
         note,
         role: Default::default(),
+        identity: None,
         logical_operation_id: None,
         entity_ids: None,
     }

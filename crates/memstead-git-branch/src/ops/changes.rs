@@ -464,6 +464,7 @@ mod tests {
             client: None,
             logical_operation_id: None,
             role: None,
+            identity: None,
             entity_ids: Vec::new(),
             timestamp: 0,
         }
@@ -539,6 +540,7 @@ mod tests {
             client: None,
             logical_operation_id: None,
             role: None,
+            identity: None,
             entity_ids: Vec::new(),
             timestamp: 0,
         };

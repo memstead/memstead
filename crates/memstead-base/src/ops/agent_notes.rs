@@ -50,6 +50,10 @@ pub struct CommitNote {
     /// plan 13); absent = unspecified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Caller-declared identity from the `Identity:` trailer
+    /// (agent-trust plan 15); absent = undeclared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
     /// Ids a multi-entity commit touched (notably `batch_update`),
     /// recovered from the `Entities:` commit trailer. Lets an
     /// `--include-notes` consumer name every entity a batch changed from

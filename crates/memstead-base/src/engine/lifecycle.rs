@@ -122,6 +122,22 @@ impl Engine {
         self.current_role
     }
 
+    /// Set the caller-declared identity for subsequent mutations and
+    /// checks (agent-trust plan 15). The surface calls this before
+    /// every operation with the per-call parameter resolved against
+    /// its session default (per-call wins); `None` records as
+    /// absence. Callers pass an already-normalised value
+    /// ([`crate::vcs::normalise_identity`]).
+    pub fn set_identity(&mut self, identity: Option<String>) {
+        self.current_identity = identity;
+    }
+
+    /// The currently declared identity — what the next mutation or
+    /// check records.
+    pub fn current_identity(&self) -> Option<&str> {
+        self.current_identity.as_deref()
+    }
+
     /// Current mutation timestamp as the second-granularity ISO form
     /// the stamping paths write. Reads [`Self::mutation_clock`] — the
     /// system clock unless a test pinned it.

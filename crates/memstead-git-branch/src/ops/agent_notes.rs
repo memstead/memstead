@@ -75,6 +75,10 @@ pub struct ParsedCommit {
     /// present. Absent trailer = unspecified role — absence recorded
     /// as absence.
     pub role: Option<String>,
+    /// Value of the `Identity:` trailer (agent-trust plan 15) when
+    /// present. Absent trailer = undeclared identity — absence
+    /// recorded as absence.
+    pub identity: Option<String>,
     /// Ids from the `Entities:` trailer (multi-entity commits, e.g.
     /// `batch_update`). Empty when the trailer is absent — single-entity
     /// commits carry their id in `entity_id` instead. Round-trips with
@@ -121,6 +125,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
     let mut client: Option<String> = None;
     let mut logical_operation_id: Option<String> = None;
     let mut role: Option<String> = None;
+    let mut identity: Option<String> = None;
     let mut entity_ids: Vec<String> = Vec::new();
     if let Some(start) = first_trailer_idx {
         for line in &body_lines[start..] {
@@ -133,6 +138,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
                         logical_operation_id = Some(value.to_string());
                     }
                     "Role" if role.is_none() => role = Some(value.to_string()),
+                    "Identity" if identity.is_none() => identity = Some(value.to_string()),
                     "Entities" if entity_ids.is_empty() => {
                         entity_ids = value
                             .split(',')
@@ -157,6 +163,7 @@ pub fn parse_commit_message(body: &str) -> ParsedCommit {
         client,
         logical_operation_id,
         role,
+        identity,
         entity_ids,
     }
 }
@@ -336,6 +343,7 @@ pub fn agent_notes_since(
             client: parsed.client,
             logical_operation_id: parsed.logical_operation_id,
             role: parsed.role,
+            identity: parsed.identity,
             entity_ids: parsed.entity_ids,
             timestamp,
         });
@@ -366,6 +374,7 @@ mod tests {
             tool: Some("memstead_create"),
             note: Some("Demoting drift hook to engine surface.".into()),
             role: Default::default(),
+            identity: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         }
@@ -388,6 +397,7 @@ mod tests {
             tool: Some("rename_entity"),
             note: None,
             role: Default::default(),
+            identity: Default::default(),
             logical_operation_id: Some("logop-abc123def456"),
             entity_ids: None,
         };
@@ -405,6 +415,39 @@ mod tests {
         );
     }
 
+    /// Agent-trust plan 15: the `Identity:` trailer round-trips
+    /// through `format_commit_message` → `parse_commit_message`, and
+    /// an identity-less context emits no trailer at all — absence
+    /// recorded as absence.
+    #[test]
+    fn parser_round_trips_identity_trailer() {
+        let mut ctx = crate::vcs::CommitContext {
+            actor: crate::vcs::Actor::Agent,
+            client: None,
+            tool: Some("memstead_update"),
+            note: None,
+            role: Default::default(),
+            identity: Some("plenum-agent".into()),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let raw = crate::vcs::format_commit_message("memstead: update v:x", &ctx);
+        assert!(
+            raw.contains("Identity: plenum-agent"),
+            "format_commit_message must emit the Identity trailer; got:\n{raw}"
+        );
+        let parsed = parse_commit_message(&raw);
+        assert_eq!(parsed.identity.as_deref(), Some("plenum-agent"));
+
+        ctx.identity = None;
+        let raw = crate::vcs::format_commit_message("memstead: update v:x", &ctx);
+        assert!(
+            !raw.contains("Identity:"),
+            "an undeclared identity emits no trailer; got:\n{raw}"
+        );
+        assert_eq!(parse_commit_message(&raw).identity, None);
+    }
+
     #[test]
     fn parser_round_trips_entities_trailer() {
         // batch_update collapses its subject to `(N entities)`; the
@@ -416,6 +459,7 @@ mod tests {
             tool: Some("batch_update"),
             note: None,
             role: Default::default(),
+            identity: Default::default(),
             logical_operation_id: None,
             entity_ids: Some(vec![
                 "specs--alpha".to_string(),
@@ -479,6 +523,7 @@ mod tests {
             tool: None,
             note: None,
             role: Default::default(),
+            identity: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -509,6 +554,7 @@ mod tests {
             tool: None,
             note: Some("edited via the workspace room".into()),
             role: Default::default(),
+            identity: Default::default(),
             logical_operation_id: None,
             entity_ids: None,
         };

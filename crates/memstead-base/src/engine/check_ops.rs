@@ -102,6 +102,10 @@ impl Engine {
                 .as_trailer()
                 .unwrap_or("unspecified")
                 .to_string(),
+            // The caller-declared identity rides engine session state
+            // ([`Engine::set_identity`]), same as the role — absence
+            // records as absence (plan 15).
+            identity: self.current_identity().map(str::to_string),
             // Verification records omit the kind entirely, so a
             // kind-omitted caller's ledger lines stay byte-identical
             // to the pre-kind shape.

@@ -494,6 +494,7 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
             note: record.note.as_deref(),
             logical_operation_id: record.logical_operation_id.as_deref(),
             role: record.role,
+            identity: record.identity.as_deref(),
         };
         // Monotonic variant: the last-line `ts` is this backend's
         // drift cursor (`current_head()`), so same-millisecond commits
@@ -563,6 +564,12 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
             {
                 record = record.with_role(role);
             }
+            record = record.with_identity(
+                value
+                    .get("identity")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            );
             out.push(record);
         }
         Ok(out)
@@ -680,6 +687,7 @@ mod tests {
             tool: Some("test"),
             note: None,
             role: Default::default(),
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         }

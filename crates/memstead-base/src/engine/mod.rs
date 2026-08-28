@@ -396,6 +396,13 @@ pub struct Engine {
     /// every commit context and provenance record without widening
     /// every mutation signature.
     current_role: crate::vcs::Role,
+    /// The caller-declared identity for mutations and checks in this
+    /// session (agent-trust plan 15). Same session-state pattern as
+    /// `current_role`: set by the surface before each operation
+    /// (per-call parameter wins over the surface's session default);
+    /// `None` records as absence. An opaque caller-chosen string —
+    /// the engine neither generates, interprets, nor enriches it.
+    current_identity: Option<String>,
 }
 
 /// Clock the engine reads when stamping mutation timestamps. `Arc`'d

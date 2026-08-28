@@ -441,6 +441,7 @@ Body.
                 tool: Some("test"),
                 note: None,
                 role: Default::default(),
+                identity: None,
                 logical_operation_id: None,
                 entity_ids: None,
             },

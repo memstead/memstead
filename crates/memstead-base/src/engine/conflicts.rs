@@ -321,6 +321,7 @@ impl Engine {
             tool: Some("resolve_conflict"),
             note: note.map(String::from),
             role: self.current_role,
+            identity: self.current_identity.clone(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -337,7 +338,8 @@ impl Engine {
                 client.cloned(),
                 note.map(String::from),
             )
-            .with_role(self.current_role),
+            .with_role(self.current_role)
+            .with_identity(self.current_identity.clone()),
         )?;
         self.record_self_write(mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(mount_idx);

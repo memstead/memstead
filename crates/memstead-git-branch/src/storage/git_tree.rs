@@ -895,6 +895,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
             tool: Some("memstead_mem_delete"),
             note: None,
             role: Default::default(),
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -941,6 +942,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
             tool: Some("memstead_mem_config_write"),
             note: note.map(str::to_string),
             role: Default::default(),
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -979,6 +981,7 @@ impl memstead_base::backend::MemBackend for GitTreeMemWriter {
             tool: Some("memstead_pipeline_edit"),
             note: note.map(str::to_string),
             role: Default::default(),
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -1082,6 +1085,7 @@ fn commit_note_to_provenance(n: crate::ops::agent_notes::CommitNote) -> memstead
     {
         record = record.with_role(role);
     }
+    record = record.with_identity(n.identity);
     record
 }
 
@@ -1345,6 +1349,7 @@ mod tests {
             tool: Some("test"),
             note: None,
             role: Default::default(),
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         }
@@ -2001,6 +2006,7 @@ mod tests {
             tool: Some("memstead_create"),
             note: Some(note.to_string()),
             role: Default::default(),
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         }
@@ -2138,6 +2144,7 @@ mod tests {
                 tool: Some("memstead_update"),
                 note: None,
                 role: Default::default(),
+                identity: None,
                 logical_operation_id: None,
                 entity_ids: None,
             },

@@ -59,22 +59,24 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
 /// MCP server so the axis cannot drift between surfaces.
 /// The `include=["checks"]` axis (agent-trust plan 14): per mem,
 /// counts of the four derived check states plus the author≠checker
-/// independence gate over ok-checked entities. Transport is not
-/// identity: the recorded `(actor, client)` pair names the SURFACE a
-/// record arrived through (Agent|Cli|App plus a client binary), not
-/// who acted — the same actor reaches the engine over several
-/// surfaces, and one surface serves many actors across sessions. So
-/// until a caller-declared identity exists (the caller-identity
-/// follow-up, plan 15), NO author/checker comparison can be
-/// established and every ok-checked entity with recorded provenance
-/// lands in `unconfirmable`. `self_checked` and
-/// `confirmed_independent` remain as categories — their empty lists
-/// are a statement — but stay unreachable until real identity
-/// exists: a same pair does NOT establish the same actor, and
-/// different pairs do NOT establish different actors. Derivation
-/// only: nothing here is stamped, and a workspace without a check
-/// ledger serves all-never-checked. Identity lists are capped at
-/// [`OPEN_QUESTIONS_ITEM_CAP`] with an explicit `more` count.
+/// independence gate over ok-checked entities. The gate compares
+/// caller-declared IDENTITIES and nothing else (agent-trust plan 15):
+/// the entity's created-by record against its newest ok-check record
+/// — both carry an identity and they are equal → `self_checked`
+/// ("twice-asserted, not verified"); both carry one and they differ →
+/// `confirmed_independent`; either side lacks one → `unconfirmable`,
+/// never a guessed category. Transport is not identity: the recorded
+/// `(actor, client)` pair names the SURFACE a record arrived through
+/// and is recorded as context only — it never participates in the
+/// comparison (a same pair does not establish the same actor, and
+/// different pairs do not establish different actors). An identity is
+/// an honesty device, not authentication: caller-declared, unverified,
+/// tamper-evident in append-only history — a consistent multi-agent
+/// setup gets real independence signals, and a lying setup defeats
+/// only itself. Derivation only: nothing here is stamped, and a
+/// workspace without a check ledger serves all-never-checked.
+/// Identity lists are capped at [`OPEN_QUESTIONS_ITEM_CAP`] with an
+/// explicit `more` count.
 pub fn health_checks_axis(
     engine: &crate::engine::Engine,
     mem_filter: Option<&str>,
@@ -147,11 +149,8 @@ pub fn health_checks_axis(
             ("check_failed", 0usize),
             ("check_stale", 0usize),
         ]);
-        // Unreachable until a caller-declared identity exists (the
-        // caller-identity follow-up, plan 15) — kept so the wire shape
-        // states the categories explicitly rather than dropping them.
-        let self_checked: Vec<String> = Vec::new();
-        let confirmed_independent: Vec<String> = Vec::new();
+        let mut self_checked: Vec<String> = Vec::new();
+        let mut confirmed_independent: Vec<String> = Vec::new();
         let mut unconfirmable: Vec<String> = Vec::new();
         for e in engine.store().all_entities().filter(|e| e.mem == mem) {
             let id = e.id.0.clone();
@@ -166,17 +165,27 @@ pub fn health_checks_axis(
             if state != crate::check::CheckState::CheckedOk {
                 continue;
             }
-            // Transport is not identity. The recorded (actor, client)
-            // pair names the surface each record arrived through, not
-            // who acted — a same pair does not establish the same
-            // actor (CLI-authored + CLI-checked across sessions/days
-            // is the norm, not conviction), and different pairs do
-            // not establish different actors (one actor reaches the
-            // engine over several surfaces). Without a
-            // caller-declared identity no author/checker comparison
-            // can be established, so every ok-checked entity lands
-            // here — never a false acquittal via transport.
-            unconfirmable.push(id);
+            // Identity-only comparison (plan 15): the caller-declared
+            // identity on the creation record against the one on the
+            // newest ok-check. The (actor, client) transport pair is
+            // recorded context and never a comparator — a same pair
+            // does not establish the same actor, different pairs do
+            // not establish different actors. Either side lacking an
+            // identity (undeclared caller, records predating the
+            // field) is unconfirmable, never a guessed category.
+            let check = latest.get(&id).expect("checked_ok implies a record");
+            // Author identity from the append-only mutation record.
+            // Provenance lookup is bounded to ok-checked entities.
+            let author_identity = engine
+                .entity_provenance(&mem, &id)
+                .ok()
+                .and_then(|p| p.created_by)
+                .and_then(|r| r.identity);
+            match (author_identity, check.identity.as_ref()) {
+                (Some(a), Some(c)) if a == *c => self_checked.push(id),
+                (Some(_), Some(_)) => confirmed_independent.push(id),
+                _ => unconfirmable.push(id),
+            }
         }
         let mut m = serde_json::Map::new();
         for (k, v) in counts {
@@ -2265,6 +2274,109 @@ mod tests {
             "{axis}"
         );
         assert_eq!(process[0]["resolvable"], false, "{axis}");
+    }
+
+    /// Agent-trust plan 15: the independence gate compares
+    /// caller-declared identities and nothing else. Same transport
+    /// (folder backend, same actor, no client) throughout — equal
+    /// identities read `self_checked`, differing ones
+    /// `confirmed_independent`, a missing one on either side
+    /// `unconfirmable`; the (actor, client) pair provably does not
+    /// participate.
+    #[test]
+    fn independence_gate_compares_identities_only() {
+        use crate::engine::test_helpers::folder_mount;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("gate");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut engine = crate::Engine::from_mounts(vec![(
+            folder_mount("gate", dir.clone()),
+            Box::new(crate::storage::FilesystemMemWriter::new(dir))
+                as Box<dyn crate::backend::MemBackend>,
+        )])
+        .unwrap();
+        engine.set_workspace_root(tmp.path().to_path_buf());
+
+        let create = |engine: &mut crate::Engine, title: &str, identity: Option<&str>| {
+            engine.set_identity(identity.map(str::to_string));
+            engine
+                .create_entity(
+                    crate::CreateEntityArgs {
+                        mem: "gate".to_string(),
+                        title: title.to_string(),
+                        entity_type: "spec".to_string(),
+                        sections: [
+                            ("identity".to_string(), "x".to_string()),
+                            ("purpose".to_string(), "y".to_string()),
+                        ]
+                        .into_iter()
+                        .collect(),
+                        metadata: Default::default(),
+                        relations: Vec::new(),
+                        anchors: Vec::new(),
+                        dry_run: false,
+                    },
+                    crate::vcs::Actor::Cli,
+                    None,
+                    None,
+                )
+                .unwrap()
+                .id
+                .0
+        };
+        let a = create(&mut engine, "Self Checked", Some("alice"));
+        let b = create(&mut engine, "Independent", Some("alice"));
+        let c = create(&mut engine, "No Author Identity", None);
+
+        let check = |engine: &mut crate::Engine, id: &str, identity: Option<&str>| {
+            engine.set_identity(identity.map(str::to_string));
+            engine
+                .record_check(
+                    "gate",
+                    id,
+                    crate::check::Verdict::Ok,
+                    crate::check::CheckKind::Verification,
+                    None,
+                    crate::vcs::Actor::Cli,
+                    None,
+                )
+                .unwrap();
+        };
+        check(&mut engine, &a, Some("alice"));
+        check(&mut engine, &b, Some("bob"));
+        check(&mut engine, &c, Some("carol"));
+
+        let axis = health_checks_axis(&engine, Some("gate"));
+        let gate = &axis["gate"]["independence"];
+        assert_eq!(
+            gate["self_checked"]["items"],
+            serde_json::json!([a]),
+            "{axis}"
+        );
+        assert_eq!(
+            gate["confirmed_independent"]["items"],
+            serde_json::json!([b]),
+            "{axis}"
+        );
+        assert_eq!(
+            gate["unconfirmable"]["items"],
+            serde_json::json!([c]),
+            "{axis}"
+        );
+
+        // The recorded identity is served by the provenance block and
+        // the check record (criterion 1's engine half).
+        let prov = engine.entity_provenance("gate", &a).unwrap();
+        assert_eq!(
+            prov.created_by.as_ref().and_then(|r| r.identity.as_deref()),
+            Some("alice"),
+            "created-by serves the declared identity"
+        );
+        assert_eq!(
+            prov.last_check.as_ref().and_then(|r| r.identity.as_deref()),
+            Some("alice"),
+            "the check record serves the declared identity"
+        );
     }
 
     fn make_entity(name: &str, has_required: bool) -> Entity {

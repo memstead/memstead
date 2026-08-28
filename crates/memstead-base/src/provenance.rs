@@ -102,6 +102,12 @@ pub struct Provenance {
     /// `Unspecified` records as absence on both backends (no trailer,
     /// no ledger field) — old records read back as `Unspecified`.
     pub role: crate::vcs::Role,
+    /// The caller-declared identity (agent-trust plan 15): an opaque
+    /// caller-chosen string, same trust model as the role
+    /// (caller-declared, unverified, tamper-evident). `None` records
+    /// as absence on both backends (no trailer, no ledger field) —
+    /// old records read back as `None`, never backfilled or inferred.
+    pub identity: Option<String>,
 }
 
 impl Provenance {
@@ -132,12 +138,21 @@ impl Provenance {
             note,
             logical_operation_id: None,
             role: crate::vcs::Role::Unspecified,
+            identity: None,
         }
     }
 
     /// Builder: attach the caller-declared role (agent-trust plan 13).
     pub fn with_role(mut self, role: crate::vcs::Role) -> Self {
         self.role = role;
+        self
+    }
+
+    /// Builder: attach the caller-declared identity (agent-trust plan
+    /// 15). Callers pass an already-normalised value
+    /// ([`crate::vcs::normalise_identity`]); `None` stays absence.
+    pub fn with_identity(mut self, identity: Option<String>) -> Self {
+        self.identity = identity;
         self
     }
 

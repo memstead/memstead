@@ -88,6 +88,11 @@ pub struct EntityTouch {
     /// defaulted to a real role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Caller-declared identity this touch was performed under
+    /// (agent-trust plan 15). Absent = undeclared — recorded as
+    /// absence, never inferred from actor or client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
 }
 
 /// Where the returned story starts — the visible-truncation contract:
@@ -161,6 +166,11 @@ pub struct ProvenanceRecord {
     /// served as the explicit cannot-confirm value, never as any
     /// real role.
     pub role: String,
+    /// The caller-declared identity, when one was recorded — the
+    /// independence gate's only comparator (agent-trust plan 15).
+    /// Absence downgrades comparisons to `unconfirmable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
     /// Touch time, seconds since unix epoch.
     pub timestamp: i64,
     /// Backend-native reference (commit sha / ledger timestamp).
@@ -208,6 +218,7 @@ fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
         actor: t.actor.clone(),
         client: t.client.clone(),
         role: t.role.clone().unwrap_or_else(|| "unspecified".to_string()),
+        identity: t.identity.clone(),
         timestamp: t.timestamp,
         reference: t.reference.clone(),
     }
@@ -452,6 +463,7 @@ fn filter_notes_for_entity(
             batch_entity_ids: Vec::new(),
             logical_op: n.logical_operation_id.clone(),
             role: n.role.clone(),
+            identity: n.identity.clone(),
         };
         if n.tool_verb.as_deref() == Some("rename") {
             if let Some((old, new)) = n.entity_id.as_deref().and_then(parse_rename_pair)
@@ -528,6 +540,7 @@ fn filter_provenance_for_entity(
                 batch_entity_ids: Vec::new(),
                 logical_op: p.logical_operation_id.clone(),
                 role: p.role.as_trailer().map(str::to_string),
+                identity: p.identity.clone(),
             }
         })
         .collect();

@@ -243,6 +243,7 @@ impl Engine {
             tool: Some("update_entity"),
             note: note.map(String::from),
             role: self.current_role,
+            identity: self.current_identity.clone(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -256,7 +257,8 @@ impl Engine {
                 client.cloned(),
                 note.map(String::from),
             )
-            .with_role(self.current_role),
+            .with_role(self.current_role)
+            .with_identity(self.current_identity.clone()),
         )?;
         self.record_self_write(prepared.mount_idx, &write_id);
         let stamp_warnings = self.stamp_mutation_versions(prepared.mount_idx);
@@ -1458,6 +1460,7 @@ impl Engine {
                     Some(note_lines.join("\n"))
                 },
                 role: self.current_role,
+                identity: self.current_identity.clone(),
                 logical_operation_id: None,
                 // F13: name every entity this batch commit touched so an
                 // `--include-notes` reader can recover them from the note
@@ -1496,7 +1499,8 @@ impl Engine {
                     client.cloned(),
                     note.clone(),
                 )
-                .with_role(self.current_role),
+                .with_role(self.current_role)
+                .with_identity(self.current_identity.clone()),
             )?;
             self.record_self_write(p.mount_idx, &write_id);
             batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));

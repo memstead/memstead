@@ -458,6 +458,7 @@ impl Engine {
             tool: Some("rename_entity"),
             note: note.map(String::from),
             role: self.current_role,
+            identity: self.current_identity.clone(),
             logical_operation_id: Some(logical_op_id.as_str()),
             entity_ids: None,
         };
@@ -473,6 +474,7 @@ impl Engine {
                 note.map(String::from),
             )
             .with_role(self.current_role)
+            .with_identity(self.current_identity.clone())
             .with_logical_operation_id(logical_op_id.clone()),
         )?;
 
@@ -521,6 +523,7 @@ impl Engine {
                 tool: Some("rename_entity"),
                 note: note.map(String::from),
                 role: self.current_role,
+                identity: self.current_identity.clone(),
                 logical_operation_id: Some(logical_op_id.as_str()),
                 entity_ids: None,
             };
@@ -551,6 +554,7 @@ impl Engine {
                     note.map(String::from),
                 )
                 .with_role(self.current_role)
+                .with_identity(self.current_identity.clone())
                 .with_logical_operation_id(logical_op_id.clone()),
             )?;
             self.record_self_write(plan.mount_idx, &peer_write_id);

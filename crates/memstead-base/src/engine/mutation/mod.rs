@@ -410,6 +410,7 @@ impl super::Engine {
             tool: Some("record_anchor_observed_hashes"),
             note: note.map(String::from),
             role: self.current_role,
+            identity: self.current_identity.clone(),
             logical_operation_id: None,
             entity_ids: None,
         };

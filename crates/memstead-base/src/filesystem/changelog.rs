@@ -130,6 +130,9 @@ pub struct ChangeEntry<'a> {
     /// Caller-declared role (agent-trust plan 13); `Unspecified`
     /// omits the field — absence recorded as absence.
     pub role: crate::vcs::Role,
+    /// Caller-declared identity (agent-trust plan 15); `None` omits
+    /// the field — absence recorded as absence, same as the role.
+    pub identity: Option<&'a str>,
 }
 
 /// Errors surfaced by [`append_change`].
@@ -257,6 +260,8 @@ pub fn append_change_at(
         logical_operation_id: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         role: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        identity: Option<&'a str>,
     }
 
     let mut line = serde_json::to_string(&Wire {
@@ -267,6 +272,7 @@ pub fn append_change_at(
         note,
         client,
         role: entry.role.as_trailer(),
+        identity: entry.identity,
         logical_operation_id: entry.logical_operation_id,
     })?;
     line.push('\n');
@@ -442,6 +448,7 @@ mod tests {
                 note: Some("first draft"),
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
+                identity: None,
             },
             ts(1_715_000_000, 1),
         )
@@ -461,6 +468,34 @@ mod tests {
         assert!(ts_str.contains("T"));
         // 2024-05-06T12:53:20 UTC + 1ms == seconds=1_715_000_000, ms=1.
         assert_eq!(ts_str, "2024-05-06T12:53:20.001Z");
+        // An identity-less entry carries no identity key — absence
+        // recorded as absence (agent-trust plan 15, criterion 3).
+        assert!(value.get("identity").is_none());
+    }
+
+    /// Agent-trust plan 15: a declared identity lands as the
+    /// `identity` field of the JSONL line, verbatim.
+    #[test]
+    fn appends_the_declared_identity() {
+        let tmp = TempDir::new().unwrap();
+        append_change_at(
+            tmp.path(),
+            &ChangeEntry {
+                kind: MutationKind::Update,
+                entity: Some("spec:hello"),
+                actor: Actor::Agent,
+                client: None,
+                note: None,
+                logical_operation_id: None,
+                role: crate::vcs::Role::Unspecified,
+                identity: Some("plenum-agent"),
+            },
+            ts(1_715_000_000, 1),
+        )
+        .unwrap();
+        let lines = read_lines(&changelog_path(tmp.path()));
+        let value: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(value["identity"], "plenum-agent");
     }
 
     #[test]
@@ -476,6 +511,7 @@ mod tests {
                 note: None,
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
+                identity: None,
             },
             ts(0, 0),
         )
@@ -499,6 +535,7 @@ mod tests {
                 note: Some("   \t   "),
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
+                identity: None,
             },
             ts(0, 0),
         )
@@ -521,6 +558,7 @@ mod tests {
                 note: Some("multi-entity refactor"),
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
+                identity: None,
             },
             ts(0, 0),
         )
@@ -549,6 +587,7 @@ mod tests {
                     note: None,
                     logical_operation_id: None,
                     role: crate::vcs::Role::Unspecified,
+                    identity: None,
                 },
                 ts(t, 0),
             )
@@ -583,6 +622,7 @@ mod tests {
                 note: None,
                 logical_operation_id: None,
                 role: crate::vcs::Role::Unspecified,
+                identity: None,
             },
             ts(0, 0),
         )
@@ -638,6 +678,7 @@ mod tests {
             note: None,
             logical_operation_id: None,
             role: crate::vcs::Role::Unspecified,
+            identity: None,
         }
     }
 

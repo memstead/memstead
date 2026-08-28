@@ -7,6 +7,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Caller-declared identity in provenance and checks (agent-trust plan 15,
+  engine core).** Every mutation and check can now record WHO acted — an
+  opaque caller-chosen string (an agent name, a session handle), declared per
+  session on the engine and recorded immutably beside actor/client/role: as
+  an `Identity:` commit trailer on the git-branch backend, an `identity`
+  field on the folder changelog and the check ledger. The entity read's
+  provenance block and entity history serve it back. The author≠checker
+  independence gate now compares identities and nothing else: equal
+  identities read `self_checked`, differing ones `confirmed_independent`,
+  a missing identity on either side stays `unconfirmable` — the (actor,
+  client) transport pair is recorded context and never again a comparator.
+  Same trust model as roles: caller-declared, unverified, tamper-evident in
+  append-only history. Absence stays legal forever; records predating the
+  field stay `unconfirmable`, never backfilled. MCP and CLI declaration
+  parameters follow in this plan's surface leg.
+
 ### Fixed
 
 - **The sync brief's drifted-anchor recipe now works as written.** The brief

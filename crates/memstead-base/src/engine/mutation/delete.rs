@@ -216,6 +216,7 @@ impl Engine {
                 tool: Some("delete_entity"),
                 note: note.map(String::from),
                 role: self.current_role,
+                identity: self.current_identity.clone(),
                 logical_operation_id: None,
                 entity_ids: None,
             };
@@ -231,7 +232,8 @@ impl Engine {
                 client.cloned(),
                 note.map(String::from),
             )
-            .with_role(self.current_role),
+            .with_role(self.current_role)
+            .with_identity(self.current_identity.clone()),
         )?;
 
         let mut stamp_warnings: Vec<WarningHint> = Vec::new();

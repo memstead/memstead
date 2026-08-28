@@ -128,6 +128,13 @@ pub struct CheckRecord {
     /// honestly; downstream gates treat unspecified as
     /// cannot-confirm, never as any real role.
     pub role: String,
+    /// The caller-declared identity (agent-trust plan 15): an opaque
+    /// caller-chosen string, the ONLY comparator the independence
+    /// gate uses. Absent on ledger lines written before identities
+    /// existed and on identity-less callers — both downgrade every
+    /// comparison to `unconfirmable`, never to a guessed category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
     /// The check kind, from [`CHECK_KINDS`]. Absent on ledger lines
     /// written before kinds existed AND on freshly recorded
     /// `verification` checks — both read as `verification`, so an
@@ -298,6 +305,7 @@ mod tests {
             actor: "cli".to_string(),
             client: None,
             role: "checker".to_string(),
+            identity: None,
             kind: None,
             schema_ref: None,
         }
@@ -369,6 +377,10 @@ mod tests {
         let line = serde_json::to_string(&fresh).unwrap();
         assert!(!line.contains("kind"));
         assert!(!line.contains("schema_ref"));
+        // An identity-less record carries no identity key either —
+        // pre-plan-15 lines and identity-less callers stay
+        // byte-identical (agent-trust plan 15, criterion 3).
+        assert!(!line.contains("identity"));
     }
 
     /// Criterion 3: state derives per (entity, kind) — a later check

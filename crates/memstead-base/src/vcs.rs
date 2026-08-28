@@ -17,6 +17,26 @@
 /// local-part is a sanitised client name (or `external`), never a user.
 const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.io";
 
+/// Maximum length (in chars) of a caller-declared identity (agent-trust
+/// plan 15). Length-bounded like the provenance note: the engine
+/// neither generates, interprets, nor enriches the value — it is an
+/// opaque caller-chosen string (an agent name, a session handle, a
+/// person's chosen tag), and the bound only keeps the append-only
+/// record from carrying unbounded input. Surfaces validate against
+/// this before the mutation touches disk.
+pub const IDENTITY_MAX_LEN: usize = 128;
+
+/// Normalise a caller-supplied identity: trim, treat empty /
+/// whitespace-only as absent. Length validation is the surface's job
+/// (typed refusal against [`IDENTITY_MAX_LEN`]); this helper only
+/// canonicalises presence, so "no identity" has exactly one recorded
+/// shape everywhere.
+pub fn normalise_identity(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// Caller categories for the `Actor:` trailer and for picking an author
 /// signature. `Agent`, `Cli`, and `App` get their author from the paired
 /// `ClientId` when one is present; `External` always uses the synthetic
@@ -150,6 +170,14 @@ pub struct CommitContext<'a> {
     /// trailer — absence recorded as absence; declared roles emit
     /// `Role: <value>` in the trailer block.
     pub role: Role,
+    /// The caller-declared identity performing this mutation
+    /// (agent-trust plan 15): an opaque caller-chosen string — an
+    /// agent name, a session handle, a person's tag. Same trust model
+    /// as the role: caller-declared, unverified, tamper-evident
+    /// (bound into append-only history). `None` emits no trailer —
+    /// absence recorded as absence; present values emit
+    /// `Identity: <value>`.
+    pub identity: Option<String>,
     /// Correlation id linking every commit produced by a single
     /// logical operation (notably multi-mem `memstead_rename`). When
     /// `Some`, [`format_commit_message`] emits a `Logical-Op: <id>`
@@ -184,6 +212,7 @@ impl<'a> CommitContext<'a> {
             tool: None,
             note: None,
             role: Role::Unspecified,
+            identity: None,
             logical_operation_id: None,
             entity_ids: None,
         }
@@ -294,6 +323,12 @@ pub fn format_commit_message(prose: &str, ctx: &CommitContext<'_>) -> String {
     // `Unspecified` — the absent trailer IS the record of absence.
     if let Some(role) = ctx.role.as_trailer() {
         trailers.push(format!("Role: {role}"));
+    }
+    // `Identity:` records the caller-declared identity (plan 15);
+    // omitted when absent — the absent trailer IS the record of
+    // absence, same posture as `Role:`.
+    if let Some(identity) = ctx.identity.as_deref() {
+        trailers.push(format!("Identity: {identity}"));
     }
     // `Logical-Op:` is the wire-stable trailer key. Recognised by
     // `parse_commit_message` and threaded back into

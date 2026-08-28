@@ -879,6 +879,7 @@ impl Engine {
             tool: Some("create_entity"),
             note: note.map(String::from),
             role: self.current_role,
+            identity: self.current_identity.clone(),
             logical_operation_id: None,
             entity_ids: None,
         };
@@ -895,7 +896,8 @@ impl Engine {
                 client.cloned(),
                 note.map(String::from),
             )
-            .with_role(self.current_role),
+            .with_role(self.current_role)
+            .with_identity(self.current_identity.clone()),
         )?;
 
         // Self-write bookkeeping: jump `last_known_head` to the SHA
@@ -1358,6 +1360,7 @@ impl Engine {
                     Some(note_lines.join("\n"))
                 },
                 role: self.current_role,
+                identity: self.current_identity.clone(),
                 logical_operation_id: None,
                 entity_ids: Some(entity_ids),
             };
@@ -1390,7 +1393,8 @@ impl Engine {
                     client.cloned(),
                     note.clone(),
                 )
-                .with_role(self.current_role),
+                .with_role(self.current_role)
+                .with_identity(self.current_identity.clone()),
             )?;
             self.record_self_write(p.mount_idx, &write_id);
             batch_warnings.extend(self.stamp_mutation_versions(p.mount_idx));

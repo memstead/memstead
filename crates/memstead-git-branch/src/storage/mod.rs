@@ -144,6 +144,7 @@ fn prune_residue_dispatch(
         tool: Some("memstead_mem_create (force_overwrite)"),
         note: None,
         role: Default::default(),
+        identity: None,
         logical_operation_id: None,
         entity_ids: None,
     };
@@ -171,6 +172,7 @@ fn rename_mem_storage_dispatch(
         tool: Some("memstead mem rename"),
         note: None,
         role: Default::default(),
+        identity: None,
         logical_operation_id: None,
         entity_ids: None,
     };
