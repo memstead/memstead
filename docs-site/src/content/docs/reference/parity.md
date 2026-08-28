@@ -84,6 +84,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `domain`
 - `due`
 - `export`
+- `gates`
 - `init`
 - `install`
 - `login`

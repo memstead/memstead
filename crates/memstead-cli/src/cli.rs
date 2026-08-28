@@ -151,6 +151,9 @@ pub enum Command {
     /// date falls inside the window (default 90d), overdue first.
     Due(commands::due::Args),
 
+    /// Render the gates brief: the standing of every schema-declared gated transition — closed and open entities per gate, related-check coverage, open entities in dependency order.
+    Gates(commands::gates::Args),
+
     /// Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`).
     Export(commands::export::Args),
 
@@ -430,6 +433,7 @@ impl Command {
             Command::Type(_) => "type",
             Command::Health(_) => "health",
             Command::Due(_) => "due",
+            Command::Gates(_) => "gates",
             Command::Export(_) => "export",
             Command::Init(_) => "init",
             Command::Quickstart(_) => "quickstart",

@@ -45,6 +45,7 @@ pub mod export_html;
 pub mod export_llms_txt;
 #[cfg(feature = "file-watcher")]
 pub mod file_watcher;
+pub mod gates;
 pub mod history;
 pub mod lifecycle;
 pub mod mutation;

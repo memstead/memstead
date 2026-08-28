@@ -9,6 +9,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The gates brief: `memstead gates`.** The engine renders the standing
+  of every schema-declared `transition_requires_checks` gate: per gated
+  type, the closed entities, and the open ones in dependency order
+  (topological over the schema's acyclic edges, prerequisites first),
+  each with its related-check coverage and the exact unconfirmed
+  entities. The related-set enumeration is the same code the write-time
+  refusal runs, so the brief can never disagree with the gate. Brief
+  family rules apply: shared engine entry point, CLI verb, deliberately
+  no MCP tool.
+
 - **Gated transitions: the `transition_requires_checks` constraint.** A
   schema can now declare that a write landing a metadata field at a named
   value requires every entity related via named relationships (incoming or

@@ -213,6 +213,7 @@ pub mod domain;
 pub mod due;
 pub mod entity;
 pub mod export;
+pub mod gates;
 pub mod health;
 pub mod init;
 pub mod list;

@@ -1444,51 +1444,17 @@ pub fn unsatisfied_constraints(
                 if !triggered {
                     return None;
                 }
-                // The related set at the declared side of the declared
-                // edges. Outgoing reads this entity's own edges (the
-                // written state); incoming scans the store for edge
-                // sources pointing here — the written entity's own
-                // stored copy is excluded so an update never gates on
-                // its pre-write self.
-                let related: Vec<&crate::entity::Entity> = match direction {
-                    memstead_schema::PropagationDirection::Outgoing => entity
-                        .relationships
-                        .iter()
-                        .filter(|rel| relationships.contains(&rel.rel_type))
-                        .filter_map(|rel| store.get(&rel.target))
-                        .collect(),
-                    memstead_schema::PropagationDirection::Incoming => store
-                        .all_entities()
-                        .filter(|other| {
-                            other.id != entity.id
-                                && Some(&other.id) != exclude
-                                && other.relationships.iter().any(|rel| {
-                                    rel.target == entity.id && relationships.contains(&rel.rel_type)
-                                })
-                        })
-                        .collect(),
-                };
-                let mut unchecked: Vec<UncheckedRelated> = related
-                    .into_iter()
-                    .filter_map(|rel_entity| {
-                        let state = match checks {
-                            Some(provider) => provider(rel_entity),
-                            None => crate::check::CheckState::NeverChecked,
-                        };
-                        if state == crate::check::CheckState::CheckedOk {
-                            None
-                        } else {
-                            Some(UncheckedRelated {
-                                id: rel_entity.id.0.clone(),
-                                state: state.as_str().to_string(),
-                            })
-                        }
-                    })
-                    .collect();
+                let (_, unchecked) = transition_gate_standing(
+                    store,
+                    entity,
+                    relationships,
+                    *direction,
+                    exclude,
+                    checks,
+                );
                 if unchecked.is_empty() {
                     return None;
                 }
-                unchecked.sort_by(|a, b| a.id.cmp(&b.id));
                 Some(UnsatisfiedConstraint::TransitionRequiresChecks {
                     field: field.clone(),
                     to_value: to_value.clone(),
@@ -1500,6 +1466,65 @@ pub fn unsatisfied_constraints(
             }
         })
         .collect()
+}
+
+/// The standing of one gated-transition constraint's related set
+/// against one entity, independent of whether the entity currently
+/// holds the gated value: `(total related, those lacking a fresh
+/// confirming check record)`, the unconfirmed sorted by id. THE single
+/// related-set enumeration — shared by the write-time evaluator arm
+/// above and the gates-brief renderer, so the brief can never disagree
+/// with the refusal. Outgoing reads the entity's own edges (its
+/// written state); incoming scans the store for edge sources pointing
+/// at it, excluding the entity's own stored copy (`exclude`) so an
+/// update never gates on its pre-write self.
+pub fn transition_gate_standing(
+    store: &Store,
+    entity: &crate::entity::Entity,
+    relationships: &[String],
+    direction: memstead_schema::PropagationDirection,
+    exclude: Option<&crate::entity::EntityId>,
+    checks: Option<CheckStateProvider<'_>>,
+) -> (usize, Vec<UncheckedRelated>) {
+    let related: Vec<&crate::entity::Entity> = match direction {
+        memstead_schema::PropagationDirection::Outgoing => entity
+            .relationships
+            .iter()
+            .filter(|rel| relationships.contains(&rel.rel_type))
+            .filter_map(|rel| store.get(&rel.target))
+            .collect(),
+        memstead_schema::PropagationDirection::Incoming => store
+            .all_entities()
+            .filter(|other| {
+                other.id != entity.id
+                    && Some(&other.id) != exclude
+                    && other
+                        .relationships
+                        .iter()
+                        .any(|rel| rel.target == entity.id && relationships.contains(&rel.rel_type))
+            })
+            .collect(),
+    };
+    let total = related.len();
+    let mut unchecked: Vec<UncheckedRelated> = related
+        .into_iter()
+        .filter_map(|rel_entity| {
+            let state = match checks {
+                Some(provider) => provider(rel_entity),
+                None => crate::check::CheckState::NeverChecked,
+            };
+            if state == crate::check::CheckState::CheckedOk {
+                None
+            } else {
+                Some(UncheckedRelated {
+                    id: rel_entity.id.0.clone(),
+                    state: state.as_str().to_string(),
+                })
+            }
+        })
+        .collect();
+    unchecked.sort_by(|a, b| a.id.cmp(&b.id));
+    (total, unchecked)
 }
 
 /// The entity's tuple of frontmatter values for `fields`, in

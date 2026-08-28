@@ -19,6 +19,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead type`↴](#memstead-type)
 * [`memstead health`↴](#memstead-health)
 * [`memstead due`↴](#memstead-due)
+* [`memstead gates`↴](#memstead-gates)
 * [`memstead export`↴](#memstead-export)
 * [`memstead init`↴](#memstead-init)
 * [`memstead quickstart`↴](#memstead-quickstart)
@@ -148,6 +149,7 @@ Exit codes:
 * `type` — Describe one type, or list all types when no name given
 * `health` — Health summary (orphans, stubs, stale entities, missing fields)
 * `due` — Render the due-brief: open entities whose schema-declared due date falls inside the window (default 90d), overdue first
+* `gates` — Render the gates brief: the standing of every schema-declared gated transition — closed and open entities per gate, related-check coverage, open entities in dependency order
 * `export` — Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-contained HTML page, or one agent-readable Markdown document (`llms-txt`)
 * `init` — Initialise a filesystem mem in the current (or named) folder. Strict: errors out when the target is not empty
 * `quickstart` — One-command cold start: workspace + default-schema mem + seed entity + MCP wiring for your agent(s), in the current (or named) folder. Tolerates dotfiles and README-grade files; derives the mem name from the folder. For the strict, script-safe variant use `memstead init`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs
@@ -412,6 +414,18 @@ Render the due-brief: open entities whose schema-declared due date falls inside 
 
   Default value: `90d`
 * `--mem <MEM>` — Restrict the brief to one mem (default: every mounted mem whose schema declares a due axis)
+
+
+
+## `memstead gates`
+
+Render the gates brief: the standing of every schema-declared gated transition — closed and open entities per gate, related-check coverage, open entities in dependency order
+
+**Usage:** `memstead gates [OPTIONS]`
+
+###### **Options:**
+
+* `--mem <MEM>` — Restrict the brief to one mem (default: every mounted mem whose schema declares a gated transition)
 
 
 
