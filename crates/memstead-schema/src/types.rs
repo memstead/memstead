@@ -426,6 +426,40 @@ pub enum ConstraintDef {
         #[serde(default)]
         severity: ConstraintSeverity,
     },
+    /// Form 6 — gated transition: a write that lands `field` holding
+    /// `to_value` requires every entity related via `relationships`
+    /// edges in `direction` to carry a fresh confirming check record
+    /// (derived verification state `checked_ok` — the engine's checks
+    /// substrate; a stale or failed check does not confirm). Generic
+    /// by construction: any schema, any enum field, any relation set —
+    /// no type semantics baked in. Evaluated at write time in the
+    /// shared declared-constraints pass (block refuses, warn warns)
+    /// and reported by the health `constraints` include as a standing
+    /// violation when a check goes stale after the transition. An
+    /// empty related set satisfies the rule (universal quantification
+    /// over nothing); pair with `required_outgoing` where at least one
+    /// related entity must exist. On an engine without a check ledger
+    /// (no workspace root) every related entity derives
+    /// `never_checked`, so a declared gate refuses rather than
+    /// silently passing.
+    TransitionRequiresChecks {
+        /// The metadata field whose value gates (must declare
+        /// `enum_values`; validated by the loader).
+        field: String,
+        /// The gated value — landing it requires the checks.
+        to_value: String,
+        /// Edge names whose related entities must be checked (each
+        /// validated against the relationship vocabulary).
+        relationships: Vec<String>,
+        /// Which side of the edges holds the entities to check:
+        /// `incoming` — entities whose edges point at this one;
+        /// `outgoing` — entities this one points at.
+        direction: PropagationDirection,
+        /// Defaults to `block` — the declaration exists to refuse the
+        /// unverified transition at write time.
+        #[serde(default = "ConstraintSeverity::block")]
+        severity: ConstraintSeverity,
+    },
 }
 
 impl ConstraintDef {

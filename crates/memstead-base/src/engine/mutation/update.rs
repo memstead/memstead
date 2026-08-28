@@ -985,11 +985,13 @@ impl Engine {
         // Declared-constraints evaluation — same single evaluation the
         // health `constraints` include runs, against this update's
         // final state. Block-tier violations refuse; warn-tier warn.
+        let check_provider = self.check_state_provider();
         let violated = crate::ops::health::unsatisfied_constraints(
             &self.store,
             &next,
             type_def.as_ref(),
             Some(id),
+            Some(&check_provider),
         );
         if !violated.is_empty() {
             let blocked: Vec<_> = violated

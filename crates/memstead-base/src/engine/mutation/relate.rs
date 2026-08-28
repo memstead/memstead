@@ -823,11 +823,15 @@ impl Engine {
             // backs it). Edge-independent forms are filtered out —
             // their verdict is identical before and after a relate,
             // so refusing here would block unrelated repair work.
+            // `None` check provider: only `enum_from_neighbour` is
+            // kept below, so the checks-gated form never evaluates on
+            // this path (a relate changes edges, not the gated field).
             let blocked: Vec<_> = crate::ops::health::unsatisfied_constraints(
                 &self.store,
                 &next,
                 type_def.as_ref(),
                 Some(&args.source),
+                None,
             )
             .into_iter()
             .filter(|v| {

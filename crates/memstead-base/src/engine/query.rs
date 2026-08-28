@@ -1633,7 +1633,13 @@ impl Engine {
         &self,
         mem_filter: Option<&str>,
     ) -> Vec<crate::ops::health::ConstraintFindingReport> {
-        crate::ops::health::collect_constraint_findings(&self.store, mem_filter, &self.schemas)
+        let check_provider = self.check_state_provider();
+        crate::ops::health::collect_constraint_findings(
+            &self.store,
+            mem_filter,
+            &self.schemas,
+            Some(&check_provider),
+        )
     }
 
     /// The evaluated aggregate signals for one entity — `None` when

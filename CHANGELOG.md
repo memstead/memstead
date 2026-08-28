@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Gated transitions: the `transition_requires_checks` constraint.** A
+  schema can now declare that a write landing a metadata field at a named
+  value requires every entity related via named relationships (incoming or
+  outgoing) to carry a fresh confirming check record — derived
+  verification state `checked_ok`; stale and failed checks do not confirm.
+  Block-tier by default: the unverified transition refuses at write time
+  listing each unconfirmed entity with its derived state; a check that
+  goes stale after the transition surfaces as a standing violation on the
+  health `constraints` axis. Generic by construction (any schema, any enum
+  field, any relation set) — the first consumer is the workspace-local
+  planning schema's completion rule ("`complete` requires a check record
+  on every VERIFIES-linked criterion"). Evaluated in the single shared
+  declared-constraints pass; verdicts ride the check ledger, never an
+  entity field, so the gate cannot be satisfied by editing the entity.
+
 ### Changed
 
 - **Exemplar relations are authored in the mutation vocabulary.** A type's

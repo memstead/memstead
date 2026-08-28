@@ -1183,6 +1183,18 @@ pub enum UnsatisfiedConstraint {
         tainted_by: String,
         severity: memstead_schema::ConstraintSeverity,
     },
+    /// Form 6 — the entity holds the gated `to_value` while related
+    /// entities lack a fresh confirming check record.
+    TransitionRequiresChecks {
+        field: String,
+        to_value: String,
+        relationships: Vec<String>,
+        direction: memstead_schema::PropagationDirection,
+        /// Every related entity NOT at derived state `checked_ok`,
+        /// each with the state it derived, sorted by id.
+        unchecked: Vec<UncheckedRelated>,
+        severity: memstead_schema::ConstraintSeverity,
+    },
     /// The entity reaches no non-stub entity of a terminal type along
     /// the declared relation set — the declaration is echoed whole so
     /// the reader sees which obligation went unmet without re-fetching
@@ -1204,7 +1216,8 @@ impl UnsatisfiedConstraint {
             | Self::Unique { severity, .. }
             | Self::EnumFromNeighbour { severity, .. }
             | Self::StatusPropagation { severity, .. }
-            | Self::MustReach { severity, .. } => *severity,
+            | Self::MustReach { severity, .. }
+            | Self::TransitionRequiresChecks { severity, .. } => *severity,
         }
     }
 
@@ -1260,9 +1273,44 @@ impl UnsatisfiedConstraint {
                     terminal_types.join(", ")
                 )
             }
+            Self::TransitionRequiresChecks {
+                field,
+                to_value,
+                relationships,
+                unchecked,
+                ..
+            } => {
+                let listed: Vec<String> = unchecked
+                    .iter()
+                    .map(|u| format!("'{}' ({})", u.id, u.state))
+                    .collect();
+                format!(
+                    "transition_requires_checks: {field}={to_value} requires a fresh confirming \
+                     check record on every entity related via [{}] — unconfirmed: {}",
+                    relationships.join(", "),
+                    listed.join(", ")
+                )
+            }
         }
     }
 }
+
+/// One related entity blocking a `transition_requires_checks` gate:
+/// its id and the derived verification state it reads instead of the
+/// required `checked_ok`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UncheckedRelated {
+    pub id: String,
+    pub state: String,
+}
+
+/// The `transition_requires_checks` evaluator's window into the check
+/// ledger: derived verification state for one entity. Callers with an
+/// engine build it from the workspace check ledger; `None` (no ledger
+/// access — a workspace-less engine, or a call path that cannot reach
+/// one) derives every related entity as `never_checked`, so a
+/// declared gate refuses honestly rather than passing unverified.
+pub type CheckStateProvider<'a> = &'a dyn Fn(&crate::entity::Entity) -> crate::check::CheckState;
 
 /// Evaluate one entity's declared per-entity `constraints` against its
 /// current state (and, for the store-aware forms, against the rest of
@@ -1292,6 +1340,7 @@ pub fn unsatisfied_constraints(
     entity: &crate::entity::Entity,
     td: &TypeDefinition,
     exclude: Option<&crate::entity::EntityId>,
+    checks: Option<CheckStateProvider<'_>>,
 ) -> Vec<UnsatisfiedConstraint> {
     use memstead_schema::ConstraintDef;
     td.constraints
@@ -1381,6 +1430,74 @@ pub fn unsatisfied_constraints(
                 })
             }
             ConstraintDef::StatusPropagation { .. } => None,
+            ConstraintDef::TransitionRequiresChecks {
+                field,
+                to_value,
+                relationships,
+                direction,
+                severity,
+            } => {
+                let triggered = entity
+                    .metadata
+                    .get(field.as_str())
+                    .is_some_and(|v| v.to_frontmatter_string() == *to_value);
+                if !triggered {
+                    return None;
+                }
+                // The related set at the declared side of the declared
+                // edges. Outgoing reads this entity's own edges (the
+                // written state); incoming scans the store for edge
+                // sources pointing here — the written entity's own
+                // stored copy is excluded so an update never gates on
+                // its pre-write self.
+                let related: Vec<&crate::entity::Entity> = match direction {
+                    memstead_schema::PropagationDirection::Outgoing => entity
+                        .relationships
+                        .iter()
+                        .filter(|rel| relationships.contains(&rel.rel_type))
+                        .filter_map(|rel| store.get(&rel.target))
+                        .collect(),
+                    memstead_schema::PropagationDirection::Incoming => store
+                        .all_entities()
+                        .filter(|other| {
+                            other.id != entity.id
+                                && Some(&other.id) != exclude
+                                && other.relationships.iter().any(|rel| {
+                                    rel.target == entity.id && relationships.contains(&rel.rel_type)
+                                })
+                        })
+                        .collect(),
+                };
+                let mut unchecked: Vec<UncheckedRelated> = related
+                    .into_iter()
+                    .filter_map(|rel_entity| {
+                        let state = match checks {
+                            Some(provider) => provider(rel_entity),
+                            None => crate::check::CheckState::NeverChecked,
+                        };
+                        if state == crate::check::CheckState::CheckedOk {
+                            None
+                        } else {
+                            Some(UncheckedRelated {
+                                id: rel_entity.id.0.clone(),
+                                state: state.as_str().to_string(),
+                            })
+                        }
+                    })
+                    .collect();
+                if unchecked.is_empty() {
+                    return None;
+                }
+                unchecked.sort_by(|a, b| a.id.cmp(&b.id));
+                Some(UnsatisfiedConstraint::TransitionRequiresChecks {
+                    field: field.clone(),
+                    to_value: to_value.clone(),
+                    relationships: relationships.clone(),
+                    direction: *direction,
+                    unchecked,
+                    severity: *severity,
+                })
+            }
         })
         .collect()
 }
@@ -1456,6 +1573,7 @@ pub fn collect_constraint_findings(
     store: &Store,
     mem_filter: Option<&str>,
     mem_schemas: &HashMap<String, Arc<memstead_schema::Schema>>,
+    checks: Option<CheckStateProvider<'_>>,
 ) -> Vec<ConstraintFindingReport> {
     use memstead_schema::ConstraintDef;
     type Bucket = (
@@ -1540,7 +1658,7 @@ pub fn collect_constraint_findings(
         }
 
         // Pass 1 — per-entity forms.
-        let violations = unsatisfied_constraints(store, entity, td, None);
+        let violations = unsatisfied_constraints(store, entity, td, None, checks);
         if !violations.is_empty() {
             by_entity
                 .entry(entity.id.0.clone())
@@ -3700,7 +3818,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), schema);
 
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert_eq!(reports.len(), 1, "only the pathless claim: {reports:?}");
         assert_eq!(reports[0].id, floating.id);
         let v = must_reach_violations(&reports[0]);
@@ -3742,7 +3860,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), schema);
 
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert_eq!(reports.len(), 1, "only the floating leap: {reports:?}");
         assert_eq!(reports[0].id, leap.id);
     }
@@ -3766,7 +3884,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), schema.clone());
 
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
         assert!(
             ids.contains(&to_stub.id.0.as_str()),
@@ -3783,7 +3901,7 @@ community:
         link(&mut repaired, "GROUNDS", &ev.id);
         store.upsert(ev.id.clone(), ev);
         store.upsert(repaired.id.clone(), repaired);
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
         assert!(
             !ids.contains(&to_stub.id.0.as_str()),
@@ -3808,7 +3926,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), schema);
 
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert_eq!(reports.len(), 2, "both cycle members lack evidence");
     }
 
@@ -3841,7 +3959,7 @@ community:
         let store = two_hop_store();
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), bounded(1));
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert_eq!(
             reports.len(),
             1,
@@ -3851,7 +3969,7 @@ community:
 
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), bounded(2));
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert!(
             reports.is_empty(),
             "the same path satisfies depth 2: {reports:?}"
@@ -3876,7 +3994,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), schema);
 
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].id, c.id);
         let v = must_reach_violations(&reports[0]);
@@ -3945,7 +4063,7 @@ community:
         let mut mem_schemas = HashMap::new();
         mem_schemas.insert("arg".to_string(), schema);
 
-        let reports = collect_constraint_findings(&store, None, &mem_schemas);
+        let reports = collect_constraint_findings(&store, None, &mem_schemas, None);
         let ids: Vec<&str> = reports.iter().map(|r| r.id.0.as_str()).collect();
         assert_eq!(
             ids,
@@ -3987,14 +4105,164 @@ community:
         mem_schemas.insert("arg".to_string(), schema.clone());
         mem_schemas.insert("ground".to_string(), schema);
 
-        let all = collect_constraint_findings(&store, None, &mem_schemas);
+        let all = collect_constraint_findings(&store, None, &mem_schemas, None);
         assert_eq!(
             all.len(),
             2,
             "the crossing claim is satisfied via the cross-mem edge: {all:?}"
         );
-        let filtered = collect_constraint_findings(&store, Some("arg"), &mem_schemas);
+        let filtered = collect_constraint_findings(&store, Some("arg"), &mem_schemas, None);
         assert_eq!(filtered.len(), 1, "mem filter narrows: {filtered:?}");
         assert_eq!(filtered[0].id, floating_arg.id);
+    }
+
+    // ----------------------------------------------------------------------
+    // transition_requires_checks (form 6)
+    // ----------------------------------------------------------------------
+
+    /// Two-type gated-transition fixture: criterion --VERIFIES--> plan,
+    /// plan gates `status: complete` on incoming VERIFIES checks.
+    fn gated_transition_schema() -> std::sync::Arc<memstead_schema::Schema> {
+        let manifest = r#"name: tests-gated
+version: 0.1.0
+description: transition_requires_checks test schema
+when_to_use: tests
+types:
+  - plan
+  - criterion
+relationships:
+  mode: strict
+  definitions:
+    - name: VERIFIES
+      description: v
+      default_weight: 3.0
+      acyclic: true
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+      acyclic: true
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let plan_yaml = "name: plan\ndescription: p\nwhen_to_use: t\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields:\n  - key: status\n    description: s\n    field_type: string\n    default_value: draft\n    enum_values: [draft, complete]\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nupdatable_fields:\n  - title\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\nconstraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: complete\n    relationships: [VERIFIES]\n    direction: incoming\n    severity: block\n";
+        let criterion_yaml = "name: criterion\ndescription: c\nwhen_to_use: t\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nupdatable_fields:\n  - title\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+        std::sync::Arc::new(
+            memstead_schema::load_schema_from_memory(
+                manifest,
+                &[
+                    ("plan".to_string(), plan_yaml.to_string()),
+                    ("criterion".to_string(), criterion_yaml.to_string()),
+                ],
+            )
+            .expect("gated-transition fixture schema loads"),
+        )
+    }
+
+    /// The gate triggers only at the declared value, quantifies over
+    /// the declared incoming edges, requires derived `checked_ok`
+    /// (stale and failed do not confirm), and treats a missing
+    /// provider as never_checked — the no-ledger honesty posture. An
+    /// empty related set satisfies (universal quantification).
+    #[test]
+    fn transition_requires_checks_gates_on_derived_state() {
+        use crate::check::CheckState;
+        use crate::entity::MetadataValue;
+        let schema = gated_transition_schema();
+        let td = schema.types.get("plan").unwrap().clone();
+        let mut store = Store::default();
+
+        let mut plan = make_typed_entity("g", "the-plan", "plan");
+        plan.metadata
+            .insert("status".into(), MetadataValue::String("complete".into()));
+        let mut ok_crit = make_typed_entity("g", "ok-crit", "criterion");
+        ok_crit.relationships.push(crate::entity::Relationship {
+            rel_type: "VERIFIES".into(),
+            target: plan.id.clone(),
+            description: None,
+        });
+        let mut stale_crit = make_typed_entity("g", "stale-crit", "criterion");
+        stale_crit.relationships.push(crate::entity::Relationship {
+            rel_type: "VERIFIES".into(),
+            target: plan.id.clone(),
+            description: None,
+        });
+        for e in [plan.clone(), ok_crit.clone(), stale_crit.clone()] {
+            store.upsert(e.id.clone(), e);
+        }
+
+        let provider = |e: &crate::entity::Entity| {
+            if e.id.0.contains("ok-crit") {
+                CheckState::CheckedOk
+            } else {
+                CheckState::CheckStale
+            }
+        };
+        let violations = unsatisfied_constraints(&store, &plan, &td, None, Some(&provider));
+        assert_eq!(violations.len(), 1, "{violations:?}");
+        match &violations[0] {
+            UnsatisfiedConstraint::TransitionRequiresChecks {
+                unchecked,
+                severity,
+                ..
+            } => {
+                assert_eq!(
+                    unchecked.len(),
+                    1,
+                    "only the unconfirmed criterion is listed"
+                );
+                assert_eq!(unchecked[0].id, "g--stale-crit");
+                assert_eq!(unchecked[0].state, "check_stale");
+                assert_eq!(*severity, memstead_schema::ConstraintSeverity::Block);
+            }
+            other => panic!("expected the gated-transition violation, got {other:?}"),
+        }
+        assert!(
+            violations[0].describe().contains("g--stale-crit")
+                && violations[0].describe().contains("check_stale"),
+            "describe names the offender and its state: {}",
+            violations[0].describe()
+        );
+
+        // Every related entity confirmed -> satisfied.
+        let all_ok = |_: &crate::entity::Entity| CheckState::CheckedOk;
+        assert!(
+            unsatisfied_constraints(&store, &plan, &td, None, Some(&all_ok)).is_empty(),
+            "all confirmed satisfies the gate"
+        );
+
+        // Not at the gated value -> no evaluation.
+        let mut draft = plan.clone();
+        draft
+            .metadata
+            .insert("status".into(), MetadataValue::String("draft".into()));
+        assert!(
+            unsatisfied_constraints(&store, &draft, &td, None, Some(&provider)).is_empty(),
+            "the gate triggers only at to_value"
+        );
+
+        // No provider -> every related entity derives never_checked.
+        let violations = unsatisfied_constraints(&store, &plan, &td, None, None);
+        assert_eq!(violations.len(), 1);
+        match &violations[0] {
+            UnsatisfiedConstraint::TransitionRequiresChecks { unchecked, .. } => {
+                assert_eq!(unchecked.len(), 2, "no ledger access confirms nothing");
+                assert!(unchecked.iter().all(|u| u.state == "never_checked"));
+            }
+            other => panic!("expected the gated-transition violation, got {other:?}"),
+        }
+
+        // Empty related set -> vacuously satisfied.
+        let mut lone = make_typed_entity("g", "lone-plan", "plan");
+        lone.metadata
+            .insert("status".into(), MetadataValue::String("complete".into()));
+        store.upsert(lone.id.clone(), lone.clone());
+        assert!(
+            unsatisfied_constraints(&store, &lone, &td, None, Some(&provider)).is_empty(),
+            "an empty related set satisfies the universal quantification"
+        );
     }
 }

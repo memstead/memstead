@@ -1769,6 +1769,66 @@ fn constraint_requires_when_unknown_when_field_rejected() {
     );
 }
 
+/// Form 6 loader honesty: a well-formed `transition_requires_checks`
+/// loads with its declaration intact; a malformed one refuses typed,
+/// naming the offender — unknown `field`, `to_value` outside the
+/// field's enum, an empty `relationships` list, and an undeclared
+/// relationship name each refuse.
+#[test]
+fn constraint_transition_requires_checks_validates() {
+    use memstead_schema::{ConstraintDef, ConstraintSeverity};
+    let t = minimal_type()
+        + r#"constraints:
+  - kind: transition_requires_checks
+    field: status
+    to_value: closed
+    relationships: [PART_OF]
+    direction: incoming
+"#;
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("must load");
+    let td = schema.types.get("sample").unwrap();
+    let ConstraintDef::TransitionRequiresChecks {
+        severity,
+        direction,
+        ..
+    } = &td.constraints[0]
+    else {
+        panic!("expected transition_requires_checks");
+    };
+    assert_eq!(
+        *severity,
+        ConstraintSeverity::Block,
+        "form 6 defaults to block"
+    );
+    assert_eq!(*direction, memstead_schema::PropagationDirection::Incoming);
+
+    for (yaml, offender) in [
+        (
+            "constraints:\n  - kind: transition_requires_checks\n    field: phase\n    to_value: closed\n    relationships: [PART_OF]\n    direction: incoming\n",
+            "phase",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: archived\n    relationships: [PART_OF]\n    direction: incoming\n",
+            "archived",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: closed\n    relationships: []\n    direction: incoming\n",
+            "(empty)",
+        ),
+        (
+            "constraints:\n  - kind: transition_requires_checks\n    field: status\n    to_value: closed\n    relationships: [VERIFIES]\n    direction: incoming\n",
+            "VERIFIES",
+        ),
+    ] {
+        let t = minimal_type() + yaml;
+        let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+        assert!(
+            matches!(err, SchemaLoadError::InvalidConstraint { offender: ref o, .. } if o == offender),
+            "offender {offender}: got {err}"
+        );
+    }
+}
+
 #[test]
 fn constraint_requires_when_value_outside_enum_rejected() {
     let t = minimal_type()

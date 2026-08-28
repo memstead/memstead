@@ -304,6 +304,48 @@
             "value",
             "direction"
           ]
+        },
+        {
+          "description": "Form 6 — gated transition: a write that lands `field` holding\n`to_value` requires every entity related via `relationships`\nedges in `direction` to carry a fresh confirming check record\n(derived verification state `checked_ok` — the engine's checks\nsubstrate; a stale or failed check does not confirm). Generic\nby construction: any schema, any enum field, any relation set —\nno type semantics baked in. Evaluated at write time in the\nshared declared-constraints pass (block refuses, warn warns)\nand reported by the health `constraints` include as a standing\nviolation when a check goes stale after the transition. An\nempty related set satisfies the rule (universal quantification\nover nothing); pair with `required_outgoing` where at least one\nrelated entity must exist. On an engine without a check ledger\n(no workspace root) every related entity derives\n`never_checked`, so a declared gate refuses rather than\nsilently passing.",
+          "type": "object",
+          "properties": {
+            "direction": {
+              "description": "Which side of the edges holds the entities to check:\n`incoming` — entities whose edges point at this one;\n`outgoing` — entities this one points at.",
+              "$ref": "#/$defs/PropagationDirection"
+            },
+            "field": {
+              "description": "The metadata field whose value gates (must declare\n`enum_values`; validated by the loader).",
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "transition_requires_checks"
+            },
+            "relationships": {
+              "description": "Edge names whose related entities must be checked (each\nvalidated against the relationship vocabulary).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "severity": {
+              "description": "Defaults to `block` — the declaration exists to refuse the\nunverified transition at write time.",
+              "$ref": "#/$defs/ConstraintSeverity",
+              "default": "block"
+            },
+            "to_value": {
+              "description": "The gated value — landing it requires the checks.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "field",
+            "to_value",
+            "relationships",
+            "direction"
+          ]
         }
       ]
     },

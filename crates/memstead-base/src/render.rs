@@ -1931,6 +1931,20 @@ pub fn build_schema_payload_scoped(
                         }
                         c
                     }
+                    memstead_schema::ConstraintDef::TransitionRequiresChecks {
+                        field,
+                        to_value,
+                        relationships,
+                        direction,
+                        severity,
+                    } => serde_json::json!({
+                        "kind": "transition_requires_checks",
+                        "field": field,
+                        "to_value": to_value,
+                        "relationships": relationships,
+                        "direction": direction,
+                        "severity": severity,
+                    }),
                 })
                 .collect();
             let mut obj = serde_json::json!({

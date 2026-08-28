@@ -724,11 +724,13 @@ impl Engine {
         // same single evaluation the health `constraints` include
         // runs. Block-tier violations refuse; warn-tier violations
         // warn and the write proceeds.
+        let check_provider = self.check_state_provider();
         let violated = crate::ops::health::unsatisfied_constraints(
             &self.store,
             &entity_for_render,
             type_def.as_ref(),
             None,
+            Some(&check_provider),
         );
         if !violated.is_empty() {
             let blocked: Vec<_> = violated
@@ -1753,8 +1755,12 @@ write_rules: []
         assert_eq!(when_value, "checked");
 
         // Health parity — same single evaluation.
-        let reports =
-            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
+        let reports = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+            None,
+        );
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].id, outcome.id);
         assert_eq!(reports[0].violations.len(), 1);
@@ -3775,8 +3781,12 @@ write_rules: []
 
         // Question 1 — descendants of the fallen anchor are flagged,
         // naming their ancestor; the standing chain is not.
-        let findings =
-            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+            None,
+        );
         let tainted_of = |id: &crate::entity::EntityId| -> Vec<String> {
             findings
                 .iter()
@@ -4014,8 +4024,12 @@ write_rules: []
                 .any(|w| matches!(w, WarningHint::ConstraintUnsatisfied { .. })),
             "warn tier surfaces the duplicate as a warning and commits"
         );
-        let findings =
-            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+            None,
+        );
         assert_eq!(
             findings.len(),
             2,
@@ -4069,8 +4083,12 @@ write_rules: []
             vec![rel(&vocab.id.0, "REFERENCES")],
         )
         .unwrap();
-        let findings =
-            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+            None,
+        );
         assert!(
             findings.iter().all(|r| r.id != holder.id),
             "backed value produces no finding: {findings:?}"
@@ -4102,8 +4120,12 @@ write_rules: []
                 None,
             )
             .unwrap();
-        let findings =
-            crate::ops::health::collect_constraint_findings(engine.store(), None, engine.schemas());
+        let findings = crate::ops::health::collect_constraint_findings(
+            engine.store(),
+            None,
+            engine.schemas(),
+            None,
+        );
         let stale = findings
             .iter()
             .find(|r| r.id == holder.id)

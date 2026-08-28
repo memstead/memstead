@@ -1832,6 +1832,59 @@ fn validate_type(
                 // this per-type pass cannot see — the schema-level
                 // pass after all types load checks it.
             }
+            crate::types::ConstraintDef::TransitionRequiresChecks {
+                field,
+                to_value,
+                relationships,
+                ..
+            } => {
+                match td.metadata_fields.iter().find(|f| f.key == *field) {
+                    None => {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "transition_requires_checks",
+                            offender: field.clone(),
+                            reason: "`field` names no metadata field of this type".to_string(),
+                        });
+                    }
+                    Some(field_def) => {
+                        if let Some(allowed) = &field_def.enum_values
+                            && !allowed.contains(to_value)
+                        {
+                            errors.push(SchemaLoadError::InvalidConstraint {
+                                type_name: td.name.clone(),
+                                kind: "transition_requires_checks",
+                                offender: to_value.clone(),
+                                reason: format!(
+                                    "`to_value` is not in `{field}`'s enum_values [{}]",
+                                    allowed.join(", ")
+                                ),
+                            });
+                        }
+                    }
+                }
+                if relationships.is_empty() {
+                    errors.push(SchemaLoadError::InvalidConstraint {
+                        type_name: td.name.clone(),
+                        kind: "transition_requires_checks",
+                        offender: "(empty)".to_string(),
+                        reason: "`relationships` must name at least one declared relationship"
+                            .to_string(),
+                    });
+                }
+                for rel in relationships {
+                    if !rel_names.contains(rel) {
+                        errors.push(SchemaLoadError::InvalidConstraint {
+                            type_name: td.name.clone(),
+                            kind: "transition_requires_checks",
+                            offender: rel.clone(),
+                            reason: "`relationships` entry is not in the schema's relationship \
+                                     vocabulary"
+                                .to_string(),
+                        });
+                    }
+                }
+            }
             crate::types::ConstraintDef::StatusPropagation {
                 field,
                 value,
