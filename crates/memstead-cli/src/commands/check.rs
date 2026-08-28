@@ -97,6 +97,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "kind": record.kind.as_deref().unwrap_or("verification"),
             "schema_ref": record.schema_ref,
             "role": record.role,
+            "identity": record.identity,
             "ts": record.ts,
             "method": record.method,
         }))?;

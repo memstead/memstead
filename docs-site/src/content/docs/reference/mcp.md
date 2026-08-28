@@ -93,6 +93,13 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — the en
       "description": "Full entity id (`mem--slug`) of the entity that was checked",
       "type": "string"
     },
+    "identity": {
+      "description": "WHO is checking: an opaque identity string (agent-trust plan 15), recorded immutably on the check record. The independence gate compares the author's recorded identity against this one and nothing else — declare a stable identity per agent/session and author≠checker becomes machine-checkable. Omit to record the session default, or nothing (the check then reads unconfirmable). Over-length refuses INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "kind": {
       "description": "The check kind, from the closed vocabulary `verification` | `conformance`. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, kind) — the kinds never supersede each other. An unknown value refuses `INVALID_CHECK_KIND` naming the vocabulary.",
       "type": [
@@ -305,6 +312,13 @@ Create a new entity. Read the target mem's schema first via `memstead_schema`. R
       "description": "Entity type. Required. Allowed values are pinned by the target mem's schema — fetch them via `memstead_schema(name=<mem.schema_ref>)` (cached per session). Unknown types refuse with `UNKNOWN_ENTITY_TYPE`.",
       "type": "string"
     },
+    "identity": {
+      "description": "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "mem": {
       "description": "Mem name (directory name of the write mem)",
       "type": [
@@ -391,6 +405,13 @@ Remove an entity permanently. Deletes the entity's store record, every edge touc
     "id": {
       "description": "Full entity ID to delete",
       "type": "string"
+    },
+    "identity": {
+      "description": "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "note": {
       "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
@@ -506,7 +527,7 @@ Read one entity. Dual channel: text carries rendered markdown for direct prose c
       ]
     },
     "include_provenance": {
-      "description": "Append a `mutation_provenance` block to structured_content: `created_by` and `last_modified_by`, each with actor, client, the caller-declared `role` (or `unspecified` — absence served as cannot-confirm, never as a real role), timestamp, and the backend reference. Derived from the append-only mutation record (commit trailers / ledger), which no verb can edit after the fact — the tamper-evident half of the role trust model. When the recorded story does not start at the entity's creation, `created_by` is absent and `story_truncated` is true (stated, never fabricated). Default false: responses are byte-unchanged without the flag.",
+      "description": "Append a `mutation_provenance` block to structured_content: `created_by` and `last_modified_by`, each with actor, client, the caller-declared `role` (or `unspecified` — absence served as cannot-confirm, never as a real role), the caller-declared `identity` when one was recorded (the independence gate's only comparator), timestamp, and the backend reference. Derived from the append-only mutation record (commit trailers / ledger), which no verb can edit after the fact — the tamper-evident half of the role and identity trust model. When the recorded story does not start at the entity's creation, `created_by` is absent and `story_truncated` is true (stated, never fabricated). Default false: responses are byte-unchanged without the flag.",
       "type": [
         "boolean",
         "null"
@@ -1147,6 +1168,13 @@ Connect entities with typed edges — a list of relation operations applied atom
         "null"
       ]
     },
+    "identity": {
+      "description": "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "note": {
       "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
       "type": [
@@ -1232,6 +1260,13 @@ Rename an entity by changing its title. Updates the entity id and its file path 
     "id": {
       "description": "Full current entity ID",
       "type": "string"
+    },
+    "identity": {
+      "description": "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "new_title": {
       "description": "New title for the entity",
@@ -1820,6 +1855,13 @@ Modify an existing entity. Pre-fetch the target mem's schema via `memstead_schem
     "id": {
       "description": "Full entity ID to update",
       "type": "string"
+    },
+    "identity": {
+      "description": "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "metadata": {
       "additionalProperties": {

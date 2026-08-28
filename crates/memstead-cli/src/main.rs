@@ -114,10 +114,35 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             }
         },
     };
+    // Identity: `--identity` beats `MEMSTEAD_IDENTITY`; either is
+    // normalised (trim, empty = absent) and length-checked typed —
+    // the record is append-only, so an over-length value refuses
+    // before anything touches disk (agent-trust plan 15).
+    let identity_raw = cli
+        .identity
+        .clone()
+        .or_else(|| std::env::var("MEMSTEAD_IDENTITY").ok());
+    let identity = memstead_base::vcs::normalise_identity(identity_raw.as_deref());
+    if let Some(id) = identity.as_deref()
+        && id.chars().count() > memstead_base::vcs::IDENTITY_MAX_LEN
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_IDENTITY",
+            format!(
+                "identity is {} characters — the recorded identity is capped at {} \
+                 (it is an opaque name or handle, not a description)",
+                id.chars().count(),
+                memstead_base::vcs::IDENTITY_MAX_LEN
+            ),
+        )
+        .into());
+    }
     let ctx = setup::CliContext {
         json: cli.json,
         quiet: cli.quiet,
         role,
+        identity,
     };
 
     match cli.command {

@@ -51,6 +51,10 @@ pub struct CreateParams {
         description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
     )]
     pub role: Option<String>,
+    #[schemars(
+        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
 }
 
 /// One `anchors[]` element on `memstead_create` / `memstead_update` — a
@@ -229,6 +233,10 @@ pub struct UpdateParams {
         description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
     )]
     pub role: Option<String>,
+    #[schemars(
+        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
 }
 
 /// One `anchors_unset[]` entry on `memstead_update` — an explicit anchor-
@@ -332,6 +340,10 @@ pub struct RelateParams {
     )]
     pub role: Option<String>,
     #[schemars(
+        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
+    #[schemars(
         description = "Validate and preview the relation operations without executing — no edge lands, no stub is created, no VCS commit. dry_run runs the SAME validation a real call runs (cross-mem policy, vocabulary, description posture, acyclicity, self-loop refusal); an illegal operation refuses with the IDENTICAL typed envelope a real call would return, and a legal one reports the would-be action with `_hash` set to the PROSPECTIVE post-write source hash, `write_id` empty (the rehearsal marker), and any would-be `AUTO_STUB_CREATED` warning for an absent target — reported, never created. The follow-up real call on an unchanged mem succeeds; like create's dry_run, its `_hash` diverges from the rehearsed one whenever a wall-clock second ticks between the calls (the auto-stamped `last_modified` enters the hash) — a timestamp shift, not drift."
     )]
     pub dry_run: Option<bool>,
@@ -353,6 +365,10 @@ pub struct DeleteParams {
         description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
     )]
     pub role: Option<String>,
+    #[schemars(
+        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
 }
 
 /// Parameters for memstead_rename.
@@ -373,6 +389,10 @@ pub struct RenameParams {
         description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger) — caller-declared but tamper-evident: bound to this operation in append-only history, it cannot be edited afterwards and identities can be cross-checked across operations. Omit to record the session default (or unspecified — legal forever, never refused, treated downstream as cannot-confirm). An unknown value refuses INVALID_ROLE naming the vocabulary."
     )]
     pub role: Option<String>,
+    #[schemars(
+        description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
 }
 
 /// Parameters for `memstead_check` — the check operation
@@ -394,6 +414,10 @@ pub struct CheckParams {
         description = "The role this check is performed in, from the closed vocabulary `author` | `checker` | `verifier`. Recorded immutably on the check record — same trust model as mutation roles: caller-declared but tamper-evident. Omit to record the session default (or unspecified — legal, but an unspecified-role check cannot confirm independence downstream)."
     )]
     pub role: Option<String>,
+    #[schemars(
+        description = "WHO is checking: an opaque identity string (agent-trust plan 15), recorded immutably on the check record. The independence gate compares the author's recorded identity against this one and nothing else — declare a stable identity per agent/session and author≠checker becomes machine-checkable. Omit to record the session default, or nothing (the check then reads unconfirmable). Over-length refuses INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
     #[schemars(
         description = "The check kind, from the closed vocabulary `verification` | `conformance`. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, kind) — the kinds never supersede each other. An unknown value refuses `INVALID_CHECK_KIND` naming the vocabulary."
     )]

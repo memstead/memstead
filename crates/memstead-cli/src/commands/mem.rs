@@ -1412,6 +1412,7 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
         json: ctx.json,
         quiet: ctx.quiet,
         role: Default::default(),
+        identity: None,
     };
     let engine = crate::setup::full_engine(&setup_ctx)
         .map_err(|e| generic_error(format!("mem list: could not initialize engine: {e}")))?;

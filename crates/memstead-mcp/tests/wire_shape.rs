@@ -3338,6 +3338,289 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     assert!(p["created_by"]["timestamp"].as_i64().unwrap() > 0);
 }
 
+/// Agent-trust plan 15, criteria 1-4 across live surfaces: a declared
+/// identity records immutably on mutations and checks (per-call wins
+/// over the session default), serves through the provenance block and
+/// the raw trailer/ledger on BOTH backends, over-length refuses typed
+/// on both surfaces, and the independence gate compares identities and
+/// nothing else — cross-transport equal identities read self_checked,
+/// author-defaulted vs checker-declared differing identities read
+/// confirmed_independent.
+#[test]
+fn declared_identity_records_serves_and_gates_on_both_backends() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(tmp.path(), &[("specs", "default@1.3.0")]);
+    // The server boots with a session-level default identity.
+    let mut harness = WireHarness::start_with_args(tmp.path(), &["--identity", "session-agent"]);
+
+    // Per-call identity wins over the session default.
+    let created = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Identity Probe",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." },
+            "role": "author",
+            "identity": "agent-a"
+        }),
+    );
+    assert!(created["isError"] != true, "{created}");
+
+    // A call WITHOUT the param records the session default.
+    let defaulted = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Defaulted Identity",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." }
+        }),
+    );
+    assert!(defaulted["isError"] != true, "{defaulted}");
+
+    // Over-length refuses typed, naming the cap; nothing lands.
+    let bad = harness.call_tool(
+        "memstead_create",
+        json!({
+            "title": "Nope",
+            "entity_type": "spec",
+            "mem": "specs",
+            "sections": { "identity": "I.", "purpose": "P." },
+            "identity": "x".repeat(200)
+        }),
+    );
+    assert_eq!(bad["isError"], true, "{bad}");
+    assert_eq!(
+        bad["structuredContent"]["code"], "INVALID_IDENTITY",
+        "{bad}"
+    );
+    assert_eq!(bad["structuredContent"]["details"]["max"], 128, "{bad}");
+
+    // Raw trailer check: the append-only commit record carries exactly
+    // the resolved identities.
+    let log = Command::new("git")
+        .arg("--git-dir")
+        .arg(tmp.path().join("mem-repo").join(".git"))
+        .args(["log", "--format=%H%n%B%n---", "refs/heads/specs"])
+        .output()
+        .expect("git log");
+    let log = String::from_utf8_lossy(&log.stdout).to_string();
+    let commits: Vec<&str> = log.split("\n---").collect();
+    let probe_commit = commits
+        .iter()
+        .find(|c| c.contains("create specs--identity-probe"))
+        .expect("probe create commit present");
+    assert!(
+        probe_commit.contains("Identity: agent-a"),
+        "per-call identity recorded: {probe_commit}"
+    );
+    let defaulted_commit = commits
+        .iter()
+        .find(|c| c.contains("create specs--defaulted-identity"))
+        .expect("defaulted create commit present");
+    assert!(
+        defaulted_commit.contains("Identity: session-agent"),
+        "session default recorded when the call omits the param: {defaulted_commit}"
+    );
+
+    // CLI check on the SAME workspace, identity from the ENVIRONMENT
+    // (the CLI's session default), equal to the author's — differing
+    // (actor, client) transport pairs, equal identities.
+    let cli_bin = Path::new(memstead_mcp_bin())
+        .parent()
+        .expect("binary has a parent dir")
+        .join("memstead");
+    assert!(cli_bin.exists(), "memstead CLI binary not built");
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .env("MEMSTEAD_IDENTITY", "agent-a")
+        .args([
+            "--json",
+            "--role",
+            "checker",
+            "check",
+            "specs--identity-probe",
+            "--verdict",
+            "ok",
+        ])
+        .output()
+        .expect("run memstead CLI check");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // CLI flag wins over the env default: check the defaulted entity
+    // as a DIFFERENT identity.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .env("MEMSTEAD_IDENTITY", "must-not-record")
+        .args([
+            "--json",
+            "--identity",
+            "agent-b",
+            "--role",
+            "checker",
+            "check",
+            "specs--defaulted-identity",
+            "--verdict",
+            "ok",
+        ])
+        .output()
+        .expect("run memstead CLI check");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v["identity"], "agent-b",
+        "the flag wins over MEMSTEAD_IDENTITY: {v}"
+    );
+
+    // CLI over-length refuses typed before anything lands.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args([
+            "--json",
+            "--identity",
+            &"x".repeat(200),
+            "check",
+            "specs--identity-probe",
+            "--verdict",
+            "ok",
+        ])
+        .output()
+        .expect("run memstead CLI");
+    assert!(!out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["code"], "INVALID_IDENTITY", "{v}");
+
+    // The gate: identity-only comparison across transports.
+    let out = Command::new(&cli_bin)
+        .current_dir(tmp.path())
+        .args(["--json", "health", "--include", "checks"])
+        .output()
+        .expect("run memstead CLI health");
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let gate = &v["checks"]["specs"]["independence"];
+    let items = |k: &str| serde_json::to_string(&gate[k]["items"]).unwrap();
+    assert!(
+        items("self_checked").contains("specs--identity-probe"),
+        "equal identities across differing transports read self_checked: {v}"
+    );
+    assert!(
+        items("confirmed_independent").contains("specs--defaulted-identity"),
+        "differing identities read confirmed_independent: {v}"
+    );
+
+    // The provenance block serves the identity on the read side.
+    let read = harness.call_tool(
+        "memstead_entity",
+        json!({ "id": "specs--identity-probe", "include_provenance": true }),
+    );
+    let prov = &read["structuredContent"]["mutation_provenance"];
+    assert_eq!(prov["created_by"]["identity"], "agent-a", "{prov}");
+    assert_eq!(prov["last_check"]["identity"], "agent-a", "{prov}");
+
+    // Folder-backend parity: the JSONL ledger records the same shape,
+    // and the check ledger + gate work identically.
+    let folder = TempDir::new().unwrap();
+    let ws = folder.path().join("idws");
+    std::fs::create_dir_all(&ws).unwrap();
+    let ok = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .output()
+        .expect("quickstart");
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let ok = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args([
+            "--identity",
+            "folder-author",
+            "create",
+            "--title",
+            "Ledger Identity",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Recorded.",
+            "--section",
+            "context=Identity test.",
+        ])
+        .output()
+        .expect("folder create");
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stdout)
+    );
+    let mut ledger =
+        std::fs::read_to_string(ws.join(".memstead").join("changes.jsonl")).unwrap_or_default();
+    if ledger.is_empty() {
+        for entry in std::fs::read_dir(&ws).unwrap().flatten() {
+            let p = entry.path().join(".memstead").join("changes.jsonl");
+            if p.exists() {
+                ledger = std::fs::read_to_string(p).unwrap();
+                break;
+            }
+        }
+    }
+    assert!(
+        ledger.contains("\"identity\":\"folder-author\""),
+        "folder ledger records the identity: {ledger}"
+    );
+    let ok = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args([
+            "--identity",
+            "folder-checker",
+            "check",
+            "idws--ledger-identity",
+            "--verdict",
+            "ok",
+        ])
+        .output()
+        .expect("folder check");
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stdout)
+    );
+    let out = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args(["--json", "health", "--include", "checks"])
+        .output()
+        .expect("folder health");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let gate = &v["checks"]["idws"]["independence"];
+    assert!(
+        serde_json::to_string(&gate["confirmed_independent"]["items"])
+            .unwrap()
+            .contains("idws--ledger-identity"),
+        "folder parity — the gate fires on recorded identities: {v}"
+    );
+    let out = Command::new(&cli_bin)
+        .current_dir(&ws)
+        .args(["--json", "entity", "idws--ledger-identity", "--provenance"])
+        .output()
+        .expect("folder provenance read");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v["mutation_provenance"]["created_by"]["identity"], "folder-author",
+        "folder parity — the provenance block serves the identity: {v}"
+    );
+}
+
 /// Current `_hash` of an entity via a plain read.
 fn read_hash_of(harness: &mut WireHarness, id: &str) -> Value {
     let r = harness.call_tool("memstead_entity", json!({ "id": id }));

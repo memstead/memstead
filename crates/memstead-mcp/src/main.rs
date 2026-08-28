@@ -63,6 +63,38 @@ struct Args {
     /// mutations as unspecified unless a call declares otherwise.
     #[arg(long = "role")]
     role: Option<String>,
+
+    /// Session-level default identity for every mutation and check
+    /// this server performs (agent-trust plan 15): an opaque identity
+    /// string — an agent name, a session handle. Also settable via
+    /// the `MEMSTEAD_IDENTITY` environment variable; the flag wins.
+    /// Per-call `identity` parameters win over either. Omit to record
+    /// operations without an identity unless a call declares one.
+    #[arg(long = "identity")]
+    identity: Option<String>,
+}
+
+/// Resolve the session-level default identity from the `--identity`
+/// flag or the `MEMSTEAD_IDENTITY` environment variable (flag wins),
+/// normalised and length-checked (agent-trust plan 15). Over-length
+/// refuses at boot — the record is append-only.
+#[cfg(feature = "mem-repo")]
+fn default_identity_from(flag: Option<&str>) -> anyhow::Result<Option<String>> {
+    let raw = flag
+        .map(str::to_string)
+        .or_else(|| std::env::var("MEMSTEAD_IDENTITY").ok());
+    let identity = memstead_base::vcs::normalise_identity(raw.as_deref());
+    if let Some(id) = identity.as_deref() {
+        let len = id.chars().count();
+        if len > memstead_base::vcs::IDENTITY_MAX_LEN {
+            anyhow::bail!(
+                "memstead-mcp: ERROR [INVALID_IDENTITY]: identity is {len} characters — \
+                 capped at {} (an opaque name or handle, not a description)",
+                memstead_base::vcs::IDENTITY_MAX_LEN
+            );
+        }
+    }
+    Ok(identity)
 }
 
 #[tokio::main]
@@ -165,6 +197,7 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     use memstead_mcp::config::{DEFAULT_TOKEN_BUDGET, validate_disabled_tools};
     use memstead_mcp::read_mems;
 
+    let default_identity = default_identity_from(args.identity.as_deref())?;
     let default_role = match args.role.as_deref() {
         None => memstead_base::vcs::Role::Unspecified,
         Some(s) => memstead_base::vcs::Role::from_wire(s).ok_or_else(|| {
@@ -298,7 +331,8 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
         plugin,
     )
     .with_operator_mode(args.operator_mode)
-    .with_default_role(default_role);
+    .with_default_role(default_role)
+    .with_default_identity(default_identity);
 
     let service = server.serve(stdio()).await?;
     service.waiting().await?;

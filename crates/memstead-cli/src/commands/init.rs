@@ -350,6 +350,7 @@ mod tests {
             json: false,
             quiet: false,
             role: Default::default(),
+            identity: None,
         };
         run(
             &ctx,

@@ -98,6 +98,20 @@ pub struct Cli {
     #[arg(long = "role", global = true)]
     pub role: Option<String>,
 
+    /// Declare WHO is acting in this invocation (agent-trust plan
+    /// 15): an opaque identity string of your choosing — an agent
+    /// name, a session handle, a person's tag. Recorded immutably
+    /// alongside each mutation and check (commit trailer / ledger);
+    /// the author≠checker independence gate compares identities and
+    /// nothing else. Also settable via the `MEMSTEAD_IDENTITY`
+    /// environment variable; the flag wins when both are present.
+    /// Caller-declared and unverified, but tamper-evident in
+    /// append-only history. Omit to record operations without an
+    /// identity — legal forever, never refused; identity-less
+    /// records read `unconfirmable` at the gate.
+    #[arg(long = "identity", global = true)]
+    pub identity: Option<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }

@@ -852,6 +852,7 @@ fn dump(_ctx: &CliContext, _args: DumpArgs) -> anyhow::Result<()> {
         json: true,
         quiet: false,
         role: Default::default(),
+        identity: None,
     };
     // `full_engine` already refuses with the right typed code per
     // situation — `WORKSPACE_NOT_INITIALISED` when no workspace marker

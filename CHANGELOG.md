@@ -22,8 +22,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   client) transport pair is recorded context and never again a comparator.
   Same trust model as roles: caller-declared, unverified, tamper-evident in
   append-only history. Absence stays legal forever; records predating the
-  field stay `unconfirmable`, never backfilled. MCP and CLI declaration
-  parameters follow in this plan's surface leg.
+  field stay `unconfirmable`, never backfilled. Declaration on every
+  surface: a per-call `identity` parameter on the MCP mutation and check
+  tools (both flavours), `--identity` on both binaries and the
+  `MEMSTEAD_IDENTITY` environment variable as session defaults (per-call
+  wins over flag wins over environment). Over-length values refuse typed
+  (`INVALID_IDENTITY`, cap 128 chars); a missing identity is never refused.
 
 ### Fixed
 

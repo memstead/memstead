@@ -820,6 +820,7 @@ mod tests {
                 json: false,
                 quiet: false,
                 role: Default::default(),
+                identity: None,
             };
             run_with_root(
                 &ctx,
@@ -862,6 +863,7 @@ mod tests {
             json: false,
             quiet: false,
             role: Default::default(),
+            identity: None,
         };
         let err = run_with_root(
             &ctx,
@@ -899,6 +901,7 @@ mod tests {
             json: false,
             quiet: false,
             role: Default::default(),
+            identity: None,
         };
         let err = run_with_root(
             &ctx,
@@ -931,6 +934,7 @@ mod tests {
             json: false,
             quiet: false,
             role: Default::default(),
+            identity: None,
         };
         let err = run(
             &ctx,
@@ -970,6 +974,7 @@ mod tests {
                 json: false,
                 quiet: false,
                 role: Default::default(),
+                identity: None,
             };
             run_with_root(
                 &ctx,
@@ -1010,6 +1015,7 @@ mod tests {
             json: false,
             quiet: false,
             role: Default::default(),
+            identity: None,
         };
         let err = run_with_root(
             &ctx,
@@ -1058,6 +1064,7 @@ mod tests {
                 json: false,
                 quiet: false,
                 role: Default::default(),
+                identity: None,
             };
             run_with_root(
                 &ctx,

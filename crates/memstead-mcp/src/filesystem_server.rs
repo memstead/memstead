@@ -251,6 +251,37 @@ fn mem_durability_basis(engine: &memstead_base::Engine, mem: &str) -> &'static s
 /// `--role`); absent records unspecified. Unknown values refuse typed
 /// with the declarable vocabulary named — same contract as the full
 /// flavour.
+/// Resolve a per-call `identity` parameter (agent-trust plan 15) on
+/// the lean flavour. The session default comes from the
+/// `MEMSTEAD_IDENTITY` environment variable (the lean binary carries
+/// no `--identity` flag); per-call wins. Over-length refuses typed
+/// (`INVALID_IDENTITY`) — same contract as the full flavour; absence
+/// of both records as absence, never refused.
+fn resolve_identity_lean(raw: Option<&str>) -> Result<Option<String>, Box<CallToolResult>> {
+    let resolved = memstead_base::vcs::normalise_identity(raw).or_else(|| {
+        memstead_base::vcs::normalise_identity(std::env::var("MEMSTEAD_IDENTITY").ok().as_deref())
+    });
+    if let Some(id) = resolved.as_deref() {
+        let len = id.chars().count();
+        if len > memstead_base::vcs::IDENTITY_MAX_LEN {
+            let msg = format!(
+                "identity is {len} characters — the recorded identity is capped at {} \
+                 (it is an opaque name or handle, not a description)",
+                memstead_base::vcs::IDENTITY_MAX_LEN
+            );
+            return Err(Box::new(tool_error_with_details(
+                "INVALID_IDENTITY",
+                &msg,
+                Some(serde_json::json!({
+                    "length": len,
+                    "max": memstead_base::vcs::IDENTITY_MAX_LEN,
+                })),
+            )));
+        }
+    }
+    Ok(resolved)
+}
+
 fn resolve_role_lean(raw: Option<&str>) -> Result<memstead_base::vcs::Role, Box<CallToolResult>> {
     match raw {
         None => Ok(memstead_base::vcs::Role::Unspecified),
@@ -1219,6 +1250,10 @@ impl FilesystemMcpServer {
             Ok(r) => engine.set_role(r),
             Err(resp) => return *resp,
         }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         // Resolve the target mem. An explicit, non-empty `mem` is
         // honoured verbatim — so a multi-mount engine (e.g. a read-only
@@ -1318,6 +1353,10 @@ impl FilesystemMcpServer {
         let mut engine = crate::lock_engine!(self.engine);
         match resolve_role_lean(p.role.as_deref()) {
             Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
             Err(resp) => return *resp,
         }
         let (actor, client) = self.actor_and_client();
@@ -1441,6 +1480,10 @@ impl FilesystemMcpServer {
             Ok(r) => engine.set_role(r),
             Err(resp) => return *resp,
         }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         let args = DeleteEntityArgs {
             id: EntityId(p.id),
@@ -1498,6 +1541,10 @@ impl FilesystemMcpServer {
         let mut engine = crate::lock_engine!(self.engine);
         match resolve_role_lean(p.role.as_deref()) {
             Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
             Err(resp) => return *resp,
         }
         let (actor, client) = self.actor_and_client();
@@ -2256,6 +2303,10 @@ impl FilesystemMcpServer {
             Ok(r) => engine.set_role(r),
             Err(resp) => return *resp,
         }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         let args = RenameEntityArgs {
             id: EntityId(p.id),
@@ -2328,6 +2379,10 @@ impl FilesystemMcpServer {
             Ok(r) => engine.set_role(r),
             Err(resp) => return *resp,
         }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
+            Err(resp) => return *resp,
+        }
         let (actor, client) = self.actor_and_client();
         let id = EntityId(p.entity);
         match engine.record_check(
@@ -2359,6 +2414,7 @@ impl FilesystemMcpServer {
                     "kind": record.kind.as_deref().unwrap_or("verification"),
                     "schema_ref": record.schema_ref,
                     "role": record.role,
+                    "identity": record.identity,
                     "ts": record.ts,
                     "method": record.method,
                 }))
@@ -2684,6 +2740,7 @@ mod tests {
             dry_run: None,
             note: Some("first via mcp".to_string()),
             role: None,
+            identity: None,
         };
         let create_result = server.memstead_create(Parameters(create_params));
         assert!(
@@ -2776,6 +2833,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }
     }
 
@@ -2900,6 +2958,7 @@ mod tests {
             anchors_unset: None,
             note: None,
             role: None,
+            identity: None,
         };
         let mut u = base();
         u.append_sections = Some(IndexMap::from([("purpose".to_string(), "x".to_string())]));
@@ -2940,6 +2999,7 @@ mod tests {
                 }],
                 note: None,
                 role: None,
+                identity: None,
                 dry_run: dry,
             }))
         };
@@ -3032,6 +3092,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3063,6 +3124,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3108,6 +3170,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         assert!(result.is_error.unwrap_or(false), "create must refuse");
         let body = result.structured_content.unwrap();
@@ -3149,6 +3212,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3181,6 +3245,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3228,6 +3293,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         assert!(
             !result.is_error.unwrap_or(false),
@@ -3264,6 +3330,7 @@ mod tests {
             dry_run: None,
             note: Some("touched body".into()),
             role: None,
+            identity: None,
             declare_relations: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
@@ -3294,6 +3361,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
             declare_relations: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -3329,6 +3397,7 @@ mod tests {
                 dry_run: None,
                 note: None,
                 role: None,
+                identity: None,
                 declare_relations: None,
             }));
             assert!(
@@ -3369,6 +3438,7 @@ mod tests {
                 dry_run: None,
                 note: None,
                 role: None,
+                identity: None,
                 declare_relations: None,
             })
         };
@@ -3425,6 +3495,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
             declare_relations: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -3452,6 +3523,7 @@ mod tests {
             expected_hash: hash,
             note: Some("retired".into()),
             role: None,
+            identity: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
@@ -3481,6 +3553,7 @@ mod tests {
             }],
             note: Some("first".into()),
             role: None,
+            identity: None,
             dry_run: None,
         }));
         assert!(!added.is_error.unwrap_or(false));
@@ -3499,6 +3572,7 @@ mod tests {
             }],
             note: None,
             role: None,
+            identity: None,
             dry_run: None,
         }));
         assert!(!dup.is_error.unwrap_or(false));
@@ -3535,6 +3609,7 @@ mod tests {
             }],
             note: None,
             role: None,
+            identity: None,
             dry_run: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -3564,6 +3639,7 @@ mod tests {
             }],
             note: None,
             role: None,
+            identity: None,
             dry_run: None,
         }));
         assert!(result.is_error.unwrap_or(false));
@@ -4263,6 +4339,7 @@ mod tests {
             dry_run: None,
             note: Some("seeded with a provenance note".into()),
             role: None,
+            identity: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         seed_via_mcp(&server, "Bare");
@@ -4364,6 +4441,7 @@ mod tests {
             }],
             note: None,
             role: None,
+            identity: None,
             dry_run: None,
         }));
 
@@ -4446,6 +4524,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
         let mut other_secs = indexmap::IndexMap::new();
         other_secs.insert("identity".to_string(), "other identity".to_string());
@@ -4461,6 +4540,7 @@ mod tests {
             dry_run: None,
             note: None,
             role: None,
+            identity: None,
         }));
 
         // Issue a search using the structured query shape.
@@ -4653,6 +4733,7 @@ mod tests {
             }],
             note: None,
             role: None,
+            identity: None,
             dry_run: None,
         }));
 
@@ -4717,6 +4798,7 @@ mod tests {
             dry_run: None,
             note: Some("seed dangling link".into()),
             role: None,
+            identity: None,
             // Body wiki-link `[[gone]]` is auto-emitted as REFERENCES
             // via the alias-synthesis pass — explicit author refused
             // under the schema's `manual_authoring: forbidden` posture.
@@ -4817,6 +4899,7 @@ mod tests {
             expected_hash: hash,
             note: Some("renamed".into()),
             role: None,
+            identity: None,
         }));
         assert!(!result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();

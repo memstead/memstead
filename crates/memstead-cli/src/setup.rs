@@ -98,6 +98,11 @@ pub struct CliContext {
     /// plan 13), already validated at parse time. Stamped onto every
     /// engine this context constructs so mutations record it.
     pub role: memstead_base::vcs::Role,
+    /// The invocation-level declared identity (`--identity` /
+    /// `MEMSTEAD_IDENTITY`, agent-trust plan 15), already normalised
+    /// and length-checked at parse time. Stamped onto every engine
+    /// this context constructs so mutations and checks record it.
+    pub identity: Option<String>,
 }
 
 /// Workspace flavour resolved from cwd. Subcommands dispatch on this
@@ -529,6 +534,7 @@ impl CliContext {
                 let mut engine =
                     engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
                 engine.set_role(self.role);
+                engine.set_identity(self.identity.clone());
                 return Ok(CliEngine::MemRepo(engine));
             }
             #[cfg(not(feature = "mem-repo"))]
@@ -547,6 +553,7 @@ impl CliContext {
         let mut engine =
             BaseEngine::from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
         engine.set_role(self.role);
+        engine.set_identity(self.identity.clone());
         Ok(CliEngine::Filesystem(engine))
     }
 
@@ -589,6 +596,7 @@ impl CliContext {
         let mut engine =
             engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
         engine.set_role(self.role);
+        engine.set_identity(self.identity.clone());
         // Same interim lazy-mount posture as `cli_engine_at`.
         engine.ensure_mems_loaded(None);
         Ok(engine)
@@ -728,6 +736,7 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
 
     let mut engine = engine_from_workspace_root(&root).map_err(|e| boot_error_to_cli(&root, e))?;
     engine.set_role(_ctx.role);
+    engine.set_identity(_ctx.identity.clone());
     // Same CLI lazy-mount posture as `cli_engine_at`/`engine()`: load
     // every deferred mem up front, so no consumer of this seam (`mem
     // list` counts, `recover`, the batch commands, install/uninstall)

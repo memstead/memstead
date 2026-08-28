@@ -2277,12 +2277,12 @@ mod tests {
     }
 
     /// Agent-trust plan 15: the independence gate compares
-    /// caller-declared identities and nothing else. Same transport
-    /// (folder backend, same actor, no client) throughout — equal
-    /// identities read `self_checked`, differing ones
-    /// `confirmed_independent`, a missing one on either side
-    /// `unconfirmable`; the (actor, client) pair provably does not
-    /// participate.
+    /// caller-declared identities and nothing else (criterion 2 with
+    /// the transport complement): equal identities read
+    /// `self_checked` even across DIFFERING `(actor, client)` pairs,
+    /// differing identities read `confirmed_independent` even on the
+    /// SAME pair, a missing identity on either side reads
+    /// `unconfirmable` — the pair provably does not participate.
     #[test]
     fn independence_gate_compares_identities_only() {
         use crate::engine::test_helpers::folder_mount;
@@ -2328,7 +2328,11 @@ mod tests {
         let b = create(&mut engine, "Independent", Some("alice"));
         let c = create(&mut engine, "No Author Identity", None);
 
-        let check = |engine: &mut crate::Engine, id: &str, identity: Option<&str>| {
+        let check = |engine: &mut crate::Engine,
+                     id: &str,
+                     identity: Option<&str>,
+                     actor: crate::vcs::Actor,
+                     client: Option<&crate::vcs::ClientId>| {
             engine.set_identity(identity.map(str::to_string));
             engine
                 .record_check(
@@ -2337,14 +2341,29 @@ mod tests {
                     crate::check::Verdict::Ok,
                     crate::check::CheckKind::Verification,
                     None,
-                    crate::vcs::Actor::Cli,
-                    None,
+                    actor,
+                    client,
                 )
                 .unwrap();
         };
-        check(&mut engine, &a, Some("alice"));
-        check(&mut engine, &b, Some("bob"));
-        check(&mut engine, &c, Some("carol"));
+        let other_client = crate::vcs::ClientId {
+            name: "claude-code".into(),
+            version: "9.9".into(),
+        };
+        // a: authored (cli, no client), checked (agent, claude-code) —
+        // DIFFERING pairs, equal identities → self_checked.
+        check(
+            &mut engine,
+            &a,
+            Some("alice"),
+            crate::vcs::Actor::Agent,
+            Some(&other_client),
+        );
+        // b: SAME pair as its author record, differing identities →
+        // confirmed_independent.
+        check(&mut engine, &b, Some("bob"), crate::vcs::Actor::Cli, None);
+        // c: checker declared, author never did → unconfirmable.
+        check(&mut engine, &c, Some("carol"), crate::vcs::Actor::Cli, None);
 
         let axis = health_checks_axis(&engine, Some("gate"));
         let gate = &axis["gate"]["independence"];

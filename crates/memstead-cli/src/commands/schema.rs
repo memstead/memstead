@@ -1179,6 +1179,7 @@ mod tests {
             json: false,
             quiet: true,
             role: Default::default(),
+            identity: None,
         }
     }
 

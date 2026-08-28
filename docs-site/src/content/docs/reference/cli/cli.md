@@ -190,6 +190,7 @@ Exit codes:
 * `--quiet` — Suppress engine startup logs on stderr
 * `--workspace <PATH>` — Operate on the workspace at PATH instead of walking up from the current directory (like `git -C`: the process runs as if invoked from PATH, so relative path arguments resolve against it). Also settable via the `MEMSTEAD_WORKSPACE` environment variable; the flag wins when both are present. A PATH that is not an initialised workspace refuses with `WORKSPACE_NOT_INITIALISED` naming the path — it never falls back to the directory walk
 * `--role <ROLE>` — Declare the role this invocation's mutations are performed in (agent-trust plan 13): `author` | `checker` | `verifier`. Recorded immutably alongside each mutation (commit trailer / ledger). Omit to record mutations as unspecified — legal forever, never refused
+* `--identity <IDENTITY>` — Declare WHO is acting in this invocation (agent-trust plan 15): an opaque identity string of your choosing — an agent name, a session handle, a person's tag. Recorded immutably alongside each mutation and check (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Also settable via the `MEMSTEAD_IDENTITY` environment variable; the flag wins when both are present. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record operations without an identity — legal forever, never refused; identity-less records read `unconfirmable` at the gate
 
 
 

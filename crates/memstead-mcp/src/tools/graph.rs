@@ -32,7 +32,7 @@ pub struct EntityParams {
     )]
     pub chunk: Option<usize>,
     #[schemars(
-        description = "Append a `mutation_provenance` block to structured_content: `created_by` and `last_modified_by`, each with actor, client, the caller-declared `role` (or `unspecified` — absence served as cannot-confirm, never as a real role), timestamp, and the backend reference. Derived from the append-only mutation record (commit trailers / ledger), which no verb can edit after the fact — the tamper-evident half of the role trust model. When the recorded story does not start at the entity's creation, `created_by` is absent and `story_truncated` is true (stated, never fabricated). Default false: responses are byte-unchanged without the flag."
+        description = "Append a `mutation_provenance` block to structured_content: `created_by` and `last_modified_by`, each with actor, client, the caller-declared `role` (or `unspecified` — absence served as cannot-confirm, never as a real role), the caller-declared `identity` when one was recorded (the independence gate's only comparator), timestamp, and the backend reference. Derived from the append-only mutation record (commit trailers / ledger), which no verb can edit after the fact — the tamper-evident half of the role and identity trust model. When the recorded story does not start at the entity's creation, `created_by` is absent and `story_truncated` is true (stated, never fabricated). Default false: responses are byte-unchanged without the flag."
     )]
     pub include_provenance: Option<bool>,
 }
