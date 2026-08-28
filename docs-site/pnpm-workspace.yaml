@@ -1,2 +1,7 @@
+# Supply-chain allowlist (operator decision, 2026-08-28): exactly the named
+# dependencies may run their install-time build scripts. esbuild's script
+# places the platform binary that every build executes anyway, so the
+# approval changes when it runs, not what is trusted. Written by
+# `pnpm approve-builds esbuild`; extend only by a further operator decision.
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true

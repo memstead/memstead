@@ -9,6 +9,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The README and the crates' own descriptions speak one register.** The
+  README pitched the published crates as what you program against while every
+  library crate's crates.io description called itself an internal surface.
+  Both now say the same true thing: a surface you can program against,
+  pre-1.0, experimental, no API stability promise (operator decision,
+  2026-08-28).
+
 - **A partial enumeration can no longer pose as a population — three
   surfaces, one rule.** The scheduled full walk branched on enumerability
   alone, so a facet whose enumeration was known-incomplete (a malformed or
