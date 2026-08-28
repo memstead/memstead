@@ -3633,6 +3633,110 @@ fn a_declared_git_binding_without_a_git_root_cannot_verdict_clean() {
     );
 }
 
+/// The inconclusive gate (the graph-plans 03 pilot):
+/// `--fail-on-inconclusive` exits **6** with the typed
+/// `PROJECTION_VERIFY_INCONCLUSIVE` on a completed-but-blind run, after
+/// rendering the report; the same run without the flag keeps its
+/// long-standing exit 0 (the compatibility half); a substantive clean
+/// run with the flag still exits 0; and a findings run with BOTH gate
+/// flags exits with the findings code — the findings gate evaluates
+/// first, a substantive result outranks a blindness report.
+#[test]
+fn inconclusive_gate_exits_six_typed_and_stays_opt_in() {
+    // (1) Substantive clean run with the flag → 0.
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-inconclusive",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["rollup"]["verdict"], "clean", "{env}");
+
+    // (2) Blind run (git binding, no git root): WITHOUT the flag the
+    //     long-standing exit 0 holds — the compatibility promise.
+    std::fs::remove_dir_all(root.join("src/.git")).unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["rollup"]["verdict"], "inconclusive", "{env}");
+
+    // (3) The same blind run WITH the flag → 6, typed, report first.
+    let assertion = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-inconclusive",
+        ])
+        .assert()
+        .code(6);
+    let text = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
+    assert!(
+        text.contains("memstead-verify/v1"),
+        "the report envelope lands before the gate fails: {text}"
+    );
+    assert!(
+        text.contains("PROJECTION_VERIFY_INCONCLUSIVE"),
+        "the typed inconclusive code names the gate that fired: {text}"
+    );
+
+    // (4) Ordering: a findings run with BOTH flags exits with the
+    //     findings code, not the inconclusive one.
+    let tmp2 = verify_workspace();
+    let root2 = tmp2.path();
+    memstead()
+        .current_dir(root2)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+    let src2 = root2.join("src");
+    std::fs::write(src2.join("a.rs"), "one-drifted").unwrap();
+    git(&src2, &["add", "-A"]);
+    git(&src2, &["commit", "-qm", "drift"]);
+    let assertion = memstead()
+        .current_dir(root2)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--fail-on-findings",
+            "--fail-on-inconclusive",
+        ])
+        .assert()
+        .code(6);
+    let text = String::from_utf8_lossy(&assertion.get_output().stdout).to_string();
+    assert!(
+        text.contains("PROJECTION_VERIFY_FINDINGS")
+            && !text.contains("PROJECTION_VERIFY_INCONCLUSIVE"),
+        "the findings gate outranks the inconclusive gate: {text}"
+    );
+}
+
 /// The gate is opt-in: a bare `projection verify` over a drifted fixture
 /// exits 0 exactly as it always has. This is the compatibility promise — a
 /// silent default flip would break every existing consumer, including this

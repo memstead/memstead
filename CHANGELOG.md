@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`projection verify --fail-on-inconclusive`.** A completed run whose
+  rollup verdict is `inconclusive` — no readable change signal, an empty
+  enumerated scope — can now fail the job itself: exit 6 with the typed
+  `PROJECTION_VERIFY_INCONCLUSIVE`, report rendered first, evaluated
+  after `--fail-on-findings` so a substantive result outranks a
+  blindness report. Opt-in and additive: without the flag an
+  inconclusive run keeps its long-standing exit 0, and the exit contract
+  stays three-valued — CI branches on 6 and reads `.code` to tell which
+  gate fired. Supersedes the verify-in-CI guide's two-step verdict read
+  for opted-in callers (operator decision, 2026-08-28, option c of the
+  exit-code entry; shipped as the graph-plans pilot).
+
 - **The gates brief: `memstead gates`.** The engine renders the standing
   of every schema-declared `transition_requires_checks` gate: per gated
   type, the closed entities, and the open ones in dependency order
@@ -47,6 +59,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   "a built-in schema version is minted for meaning, never for spelling".
 
 ### Fixed
+
+- **A batch-created entity keeps its author.** The per-entity history
+  walk treated a `batch-create` commit as truncation, so every
+  batch-authored entity served no `created_by` record and the checks
+  independence gate degraded to `unconfirmable` for it. A batch-create
+  that lists the entity is now recognized as its creation: `created_by`
+  carries the batch commit's role and identity trailers, and the walk
+  stops there like any single create.
 
 - **A hierarchical mem exports under its leaf name.** `export --format mem`
   on a git-branch mem named with a path (`planning/plan-x`) stamped the

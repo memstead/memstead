@@ -28,8 +28,12 @@ findings; it does not say the run could see anything. A pass whose verdict
 is `inconclusive` — a facet with no readable change signal, or an empty
 enumerated scope — also records no findings and also exits 0. The exit code has no representation for that third answer,
 so a job that branches on the code alone goes green on exactly the runs
-this guide tells you not to gate on. Read `rollup.verdict`; the job below
-does.
+this guide tells you not to gate on. Two remedies: add
+`--fail-on-inconclusive` and the blind run itself exits `6` (typed
+`PROJECTION_VERIFY_INCONCLUSIVE`, so `.code` tells it apart from a
+findings exit; evaluated after `--fail-on-findings`, and without the flag
+nothing changes) — or read `rollup.verdict` in a second step, as the job
+below does.
 
 One more case the table cannot show: a run that records findings **and**
 then fails to write its bookkeeping (an unwritable `#verified` baseline,
@@ -100,7 +104,11 @@ jobs:
 
 The second step is what makes the gate trustworthy: it fails on
 `inconclusive` as well as on drift, so a run that could not see its source
-does not pass for lack of anything to report. Drop it only if you have
+does not pass for lack of anything to report. Opted-in callers can fold
+both steps into one by running verify with `--fail-on-findings
+--fail-on-inconclusive` — then the exit code alone carries all three
+answers, and `.code` distinguishes `PROJECTION_VERIFY_FINDINGS` from
+`PROJECTION_VERIFY_INCONCLUSIVE`. Drop the gate only if you have
 read the caps below and accept a green build on an unmeasurable binding.
 
 Replace `docs/graph` with your binding id (`memstead projection brief`

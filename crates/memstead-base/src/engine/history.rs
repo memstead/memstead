@@ -346,7 +346,21 @@ impl Engine {
         // is the entity's creation. Anything else — empty record,
         // oldest touch mid-stream — states where and why it stops.
         let story_start = match touches.last() {
-            Some(oldest) if oldest.verb.as_deref() == Some("create") => StoryStart::Recorded,
+            // `batch-create` IS this entity's creation when it is the
+            // oldest touch — a batch-authored entity carries the same
+            // append-only provenance (role, identity trailers) as a
+            // single create, and treating it as truncation erased
+            // `created_by` for every batch-authored entity, which
+            // silently degraded the checks independence gate to
+            // `unconfirmable` (found 2026-08-28, graph-plans pilot).
+            Some(oldest)
+                if matches!(
+                    oldest.verb.as_deref(),
+                    Some("create") | Some("batch-create")
+                ) =>
+            {
+                StoryStart::Recorded
+            }
             Some(oldest) => StoryStart::Truncated {
                 reason: format!(
                     "oldest recorded touch is a {} of `{}`, not the entity's creation — \
@@ -487,6 +501,11 @@ fn filter_notes_for_entity(
             let mut touch = base(&current);
             touch.batch_entity_ids = n.entity_ids.clone();
             out.push(touch);
+            // A batch-create that lists this entity is its creation —
+            // nothing older can touch it, same stop as single create.
+            if n.tool_verb.as_deref() == Some("batch-create") {
+                break;
+            }
         }
     }
     out
@@ -551,6 +570,57 @@ fn filter_provenance_for_entity(
 #[cfg(test)]
 mod tests {
     use crate::storage::MemWriter;
+
+    /// A `batch-create` commit that lists the entity IS its creation:
+    /// the filter stops walking older history there (regression: an
+    /// older unrelated note must not attach), and the touch keeps the
+    /// `batch-create` verb the story-start check accepts — before the
+    /// 2026-08-28 fix every batch-authored entity read as truncated,
+    /// which erased `created_by` and degraded the checks independence
+    /// gate to `unconfirmable`.
+    #[test]
+    fn batch_create_note_is_the_entitys_creation() {
+        use crate::ops::agent_notes::CommitNote;
+        let note = |sha: &str, verb: &str, entity_id: Option<&str>, ids: Vec<&str>| CommitNote {
+            mem: "m".into(),
+            sha: sha.into(),
+            subject: format!("memstead: {verb}"),
+            tool_verb: Some(verb.into()),
+            entity_id: entity_id.map(str::to_string),
+            note: None,
+            actor: Some("cli".into()),
+            tool: None,
+            client: None,
+            logical_operation_id: None,
+            role: Some("author".into()),
+            identity: Some("author-x".into()),
+            entity_ids: ids.into_iter().map(str::to_string).collect(),
+            timestamp: 1,
+        };
+        // Newest-first: an update, then the batch create, then an
+        // unrelated older note that must never be reached.
+        let notes = vec![
+            note("c3", "update", Some("m--thing"), vec![]),
+            note("c2", "batch-create", None, vec!["m--other", "m--thing"]),
+            note("c1", "update", Some("m--thing"), vec![]),
+        ];
+        let touches = super::filter_notes_for_entity("m--thing", &notes);
+        assert_eq!(
+            touches.len(),
+            2,
+            "the walk stops at the batch create: {touches:?}"
+        );
+        let oldest = touches.last().unwrap();
+        assert_eq!(oldest.verb.as_deref(), Some("batch-create"));
+        assert_eq!(oldest.identity.as_deref(), Some("author-x"));
+        assert!(
+            matches!(
+                oldest.verb.as_deref(),
+                Some("create") | Some("batch-create")
+            ),
+            "the story-start acceptance covers the batch verb"
+        );
+    }
 
     const SEED: &str = "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Seed\n\n## Identity\n\nSeed.\n";
 

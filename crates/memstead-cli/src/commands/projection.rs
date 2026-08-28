@@ -489,6 +489,17 @@ pub struct VerifyArgs {
     /// byte-for-byte what it has always been, so no existing consumer breaks.
     #[arg(long)]
     pub fail_on_findings: bool,
+    /// CI-gate mode for blind runs: exit 6 (typed
+    /// `PROJECTION_VERIFY_INCONCLUSIVE`) when the completed run's rollup
+    /// verdict is `inconclusive` — no readable change signal, an empty
+    /// enumerated scope — so a gate cannot go green on a measurement that
+    /// never happened. Replaces the documented two-step verdict read for
+    /// opted-in callers. Evaluated after `--fail-on-findings` (a findings
+    /// run with both flags exits with the findings code). The full report
+    /// is rendered first. Opt-in by design: without this flag an
+    /// inconclusive run keeps its long-standing exit 0.
+    #[arg(long)]
+    pub fail_on_inconclusive: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -2481,6 +2492,33 @@ binding as never verified"
             "verdict": rollup.verdict.wire(),
             "findings_total": rollup.findings_total,
             "findings_by_class": report.findings_by_class,
+            "actions": rollup.actions,
+        }))
+        .into());
+    }
+    // --- Inconclusive gate (opt-in) ---
+    // Same report-first ordering; evaluated AFTER the findings gate, so
+    // a findings run with both flags exits with the findings code (a
+    // substantive result outranks a blindness report). Without this
+    // flag an inconclusive run keeps its long-standing exit 0 — the
+    // gate exists because that 0 is indistinguishable from a
+    // substantive clean pass to a code-only consumer.
+    if args.fail_on_inconclusive
+        && rollup.verdict == memstead_base::ingest::report::RollupVerdict::Inconclusive
+    {
+        return Err(CliError::new(
+            ExitKind::Findings,
+            "PROJECTION_VERIFY_INCONCLUSIVE",
+            format!(
+                "verify completed for `{binding_id}` but the measurement was blind — verdict \
+                 inconclusive: {}",
+                rollup.because
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "verdict": rollup.verdict.wire(),
+            "blind_spots": rollup.blind_spots,
             "actions": rollup.actions,
         }))
         .into());
