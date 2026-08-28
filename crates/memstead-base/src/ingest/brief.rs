@@ -1141,10 +1141,12 @@ fn render_open_findings(findings: &[Finding]) -> String {
         "Drifted — the anchored content changed",
         "The source the entity describes moved. Update the affected section to match — \
          only the part that changed. If the entity is still accurate, leave it. Either \
-         way, re-declare the anchor on the entity (same artifact, grain, class and \
-         source, no hash): the next verify backfills the freshly observed hash and the \
-         drift clears. Updating the entity alone, or advancing the baseline, leaves \
-         the anchor drifted.",
+         way, reset the anchor on the entity in ONE update call: `anchors_unset` the \
+         row, then write it fresh in the same call's `anchors` (same artifact, grain, \
+         class and source, no hash) — the next verify backfills the freshly observed \
+         hash and the drift clears. A hashless re-declare WITHOUT the unset keeps the \
+         stored baseline by design and clears nothing, and updating the entity alone, \
+         or advancing the baseline, leaves the anchor drifted just the same.",
         &group(FindingClass::Drifted),
     );
     render_findings_group(

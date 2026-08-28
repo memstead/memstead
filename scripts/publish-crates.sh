@@ -68,14 +68,40 @@ fi
 WORKSPACE_VERSION="$(cargo metadata --format-version 1 --no-deps \
     | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="memstead-schema"))')"
 
+is_live() {
+    curl -sf -A "memstead-publish-script (ci@memstead.com)" \
+        "https://crates.io/api/v1/crates/$1/$WORKSPACE_VERSION" >/dev/null 2>&1
+}
+
 for c in "${CRATES[@]}"; do
-    if curl -sf -A "memstead-publish-script (ci@memstead.com)" \
-        "https://crates.io/api/v1/crates/$c/$WORKSPACE_VERSION" >/dev/null 2>&1; then
+    if is_live "$c"; then
         echo "publish-crates: $c@$WORKSPACE_VERSION already on crates.io — skipping"
         continue
     fi
-    echo "publish-crates: publishing $c@$WORKSPACE_VERSION"
-    cargo publish -p "$c"
+    # Retry the upload: the 0.13.0 release lost exactly one crate to a
+    # transient "Connection reset by peer" from crates.io and failed the
+    # whole job over it. Between attempts, re-check liveness FIRST — an
+    # upload can land server-side while the client sees the reset, and a
+    # blind re-publish of a live version reads as failure. Persistent
+    # errors (bad manifest, auth) still fail after the attempts.
+    published=0
+    for attempt in 1 2 3; do
+        echo "publish-crates: publishing $c@$WORKSPACE_VERSION (attempt $attempt)"
+        if cargo publish -p "$c"; then
+            published=1
+            break
+        fi
+        if is_live "$c"; then
+            echo "publish-crates: $c@$WORKSPACE_VERSION is live despite the failed attempt — the upload landed"
+            published=1
+            break
+        fi
+        [[ "$attempt" == 3 ]] || { echo "publish-crates: attempt $attempt failed, retrying in $((attempt * 20))s"; sleep $((attempt * 20)); }
+    done
+    if [[ "$published" != 1 ]]; then
+        echo "publish-crates: $c@$WORKSPACE_VERSION failed after 3 attempts" >&2
+        exit 1
+    fi
 done
 
 echo "publish-crates: done — all ${#CRATES[@]} crates published at $WORKSPACE_VERSION"

@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **The sync brief's drifted-anchor recipe now works as written.** The brief
+  told the repairing agent to re-declare a drifted anchor without a hash and
+  let the next verify backfill it — but a hashless re-declare deliberately
+  KEEPS the stored baseline (incremental anchoring depends on that), so the
+  advice cleared nothing: on the 0.13.0 release-readiness pass all 18 drifted
+  flagship anchors stayed drifted until the real reset was found. The brief
+  now states that reset: `anchors_unset` the row and write it fresh in the
+  same update call.
+- **`publish-crates.sh` retries a failed upload and re-checks liveness between
+  attempts.** The 0.13.0 release lost exactly one crate to a transient
+  connection reset from crates.io and failed the whole publish job over it.
+  Each crate now gets three attempts, and before a retry the script asks the
+  registry whether the upload landed server-side despite the client-side
+  error — a live version is success, not a duplicate-publish failure.
+
 ## [0.13.0] - 2026-08-28
 
 ### Fixed
