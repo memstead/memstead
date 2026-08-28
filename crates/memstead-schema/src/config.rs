@@ -358,6 +358,21 @@ pub struct MutationStamp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemConfig {
+    /// Workspace mem-config format version. Absent means version 1 — the
+    /// healthy common case; real mems carry no key — and an unknown value
+    /// REFUSES at parse, matching every sibling store (the binding record,
+    /// `WorkspaceConfig`, the anchors sidecar). Until 2026-08-28 this field
+    /// was not modeled at all, so serde silently dropped whatever value a
+    /// config carried and `"format": 99` verified clean. Distinct from
+    /// [`PUBLISHED_MEM_FORMAT`], the sealed-archive config's own version
+    /// line with its own gate. Read through [`Self::format_version`].
+    #[serde(
+        default,
+        deserialize_with = "de_mem_config_format",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub format: Option<u32>,
+
     /// Optional mem name. The leaf folder name under
     /// `__MEMSTEAD:mems/` (and the disk basename on the legacy disk
     /// path) is authoritative; engine-written configs omit this
@@ -613,6 +628,43 @@ pub struct PublishedMemConfig {
 /// cleanly.
 pub const PUBLISHED_MEM_FORMAT: u32 = 4;
 
+/// The workspace mem config's format version (`<mem>/.memstead/config.json`).
+/// One accepted value; an absent key means exactly this version, and any
+/// other value refuses at parse ([`de_mem_config_format`]).
+pub const MEM_CONFIG_FORMAT: u32 = 1;
+
+/// Deserialize the workspace mem config's `format` key: absent stays `None`
+/// (meaning [`MEM_CONFIG_FORMAT`]), the current version parses, anything
+/// else refuses loudly — a config a future engine may mean differently must
+/// never be silently read as today's shape.
+fn de_mem_config_format<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<u32>::deserialize(deserializer)?;
+    match value {
+        None | Some(MEM_CONFIG_FORMAT) => Ok(value),
+        // A mounted read-mem's cached config is the published shape and
+        // parses through this same struct, so the published versions this
+        // engine reads are accepted here too (their own gate ran at
+        // archive validation).
+        Some(found) if published_format_accepted(found) => Ok(value),
+        Some(found) => Err(serde::de::Error::custom(format!(
+            "unsupported mem config format {found}: this engine reads format \
+             {MEM_CONFIG_FORMAT} (an absent key means the same); a higher value \
+             was written by a newer engine — upgrade before loading this mem"
+        ))),
+    }
+}
+
+impl MemConfig {
+    /// The effective config format version: the declared value, or
+    /// [`MEM_CONFIG_FORMAT`] when the key is absent.
+    pub fn format_version(&self) -> u32 {
+        self.format.unwrap_or(MEM_CONFIG_FORMAT)
+    }
+}
+
 /// Every archive format a current reader accepts, newest first: the
 /// current integer plus format 3 (the pre-title/subject shape — the two
 /// mems already published on the live registry stay installable without
@@ -789,6 +841,24 @@ pub fn check_config(config: &Value) -> ConfigCheckResult {
             errors.push((*message).to_string());
             legacy_field_hit = true;
         }
+    }
+
+    // 2b. Format version: absent means MEM_CONFIG_FORMAT; the current
+    //     version passes; anything else is a hard error — the same verdict
+    //     the parse-time gate renders, carried here so the validation
+    //     surface (CLI check output) names it too.
+    match obj.get("format") {
+        None => {}
+        Some(v) if v.as_u64() == Some(u64::from(MEM_CONFIG_FORMAT)) => {}
+        Some(v)
+            if v.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .is_some_and(published_format_accepted) => {}
+        Some(v) => errors.push(format!(
+            "format: unsupported mem config format {v}: this engine reads format \
+             {MEM_CONFIG_FORMAT} (an absent key means the same); a higher value was \
+             written by a newer engine — upgrade before loading this mem"
+        )),
     }
 
     // 3. Schema field: exact `name@x.y.z` reference required. Bare-name
@@ -1034,6 +1104,50 @@ mod tests {
         assert!(result.valid, "errors: {:?}", result.errors);
     }
 
+    /// The workspace mem config's `format` matches every sibling store:
+    /// absent means version 1 (the healthy common case — real mems carry no
+    /// key), the current version parses, and an UNKNOWN version refuses
+    /// loudly at parse instead of being silently dropped by serde. Before
+    /// this gate, `"format": 99` on a mem config was ignored end to end:
+    /// `projection verify` returned clean and wrote a `#verified` baseline
+    /// over a config a future engine may mean differently.
+    #[test]
+    fn mem_config_format_absent_is_v1_and_unknown_refuses() {
+        // Absent: parses, reads as version 1, stays off the wire.
+        let cfg: MemConfig = serde_json::from_value(minimal_valid_config()).unwrap();
+        assert_eq!(cfg.format, None);
+        assert_eq!(cfg.format_version(), MEM_CONFIG_FORMAT);
+        let wire = serde_json::to_value(&cfg).unwrap();
+        assert!(wire.get("format").is_none(), "absent format stays absent");
+
+        // Current version: parses.
+        let mut v = minimal_valid_config();
+        v["format"] = json!(MEM_CONFIG_FORMAT);
+        let cfg: MemConfig = serde_json::from_value(v).unwrap();
+        assert_eq!(cfg.format_version(), MEM_CONFIG_FORMAT);
+
+        // Unknown version: refuses at parse, naming both versions.
+        let mut v = minimal_valid_config();
+        v["format"] = json!(99);
+        let err = parse_mem_config(&v).expect_err("format 99 must refuse, never parse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("99") && msg.contains('1'),
+            "the refusal names the found and the supported version: {msg}"
+        );
+
+        // check_config carries the same verdict for the validation surface.
+        let mut v = minimal_valid_config();
+        v["format"] = json!(99);
+        let result = check_config(&v);
+        assert!(!result.valid, "check_config must refuse an unknown format");
+        assert!(
+            result.errors.iter().any(|e| e.contains("format")),
+            "the error names the field: {:?}",
+            result.errors
+        );
+    }
+
     /// The in-config `name` field is optional — configs without a
     /// `name` key are valid; the leaf folder name under
     /// `__MEMSTEAD:mems/` (or the disk basename on the legacy disk
@@ -1061,6 +1175,7 @@ mod tests {
     #[test]
     fn mem_config_omits_name_when_none_on_serialize() {
         let cfg = MemConfig {
+            format: None,
             name: None,
             title: None,
             subject: None,
@@ -1457,6 +1572,7 @@ mod tests {
             "deadbeef".to_string(),
         );
         let cfg = MemConfig {
+            format: None,
             name: Some("demo".to_string()),
             title: None,
             subject: None,
@@ -1816,6 +1932,7 @@ mod tests {
         // MemConfig carrying `vcs: Some(...)` projects to a
         // PublishedMemConfig with no `vcs` on the wire.
         let mut cfg = MemConfig {
+            format: None,
             name: Some("demo".to_string()),
             title: None,
             subject: None,

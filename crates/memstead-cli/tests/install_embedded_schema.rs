@@ -425,7 +425,7 @@ fn archive_under_an_unknown_schema_installs_mounts_and_reads() {
         &["--json", "entity", "field-log--morning-count"],
     );
     let entity: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(entity["type"], "note", "got: {entity}");
+    assert_eq!(entity["entity_type"], "note", "got: {entity}");
     assert!(
         entity.to_string().contains("Eleven herons"),
         "the installed mem's content must be readable: {entity}"
@@ -478,7 +478,7 @@ fn archive_with_a_retired_selfloop_key_installs_and_keeps_its_meaning() {
         &["--json", "entity", "field-log--morning-count"],
     );
     let entity: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(entity["type"], "note", "got: {entity}");
+    assert_eq!(entity["entity_type"], "note", "got: {entity}");
 }
 
 /// AC2, other retired key — a pre-flip archive writes `optional:`

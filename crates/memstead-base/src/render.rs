@@ -785,7 +785,7 @@ pub struct ListResultEnvelope<'a> {
 }
 
 /// Build the structured `memstead_entity` envelope. Identity fields
-/// (`_hash`, `id`, `mem`, `type`, `title`, `_stub_kind`) come from the
+/// (`_hash`, `id`, `mem`, `entity_type`, `title`, `_stub_kind`) come from the
 /// parsed `Entity` and live at the top level. Every schema-declared frontmatter
 /// key surfaces under a nested `metadata: {...}` map — its single home.
 /// Read a metadata
@@ -793,7 +793,7 @@ pub struct ListResultEnvelope<'a> {
 /// without per-type branching. The prior shape additionally hoisted
 /// `level`/`stability`/`created_date`/`last_modified` to the top level,
 /// serialising those fields twice; that hoist is gone. The read-only
-/// identity triple (`mem`/`id`/`type`) is excluded from the nested map
+/// identity triple (frontmatter `mem`/`id`/`type`, served as `mem`/`id`/`entity_type`) is excluded from the nested map
 /// — it appears only top-level — and underscore-prefixed internal keys
 /// (`_hash`, `_tokens*`, `_mem_schema`, `_stub_*`) live in dedicated
 /// top-level slots and never appear inside the nested map. `sections` and
@@ -907,12 +907,18 @@ pub fn build_entity_envelope(
         "mem".to_string(),
         serde_json::Value::String(entity.mem.clone()),
     );
+    // `entity_type`, not `type`: one concept, one wire spelling. The wasm
+    // read surface has always served the serialized Entity's `entity_type`,
+    // and this envelope said `type` for the same read — the F7-adjacent
+    // split the 2026-08-28 wire batch closed. The FRONTMATTER key stays
+    // `type:` (on-disk storage format, not the wire), and the metadata
+    // read-only triple keeps refusing it under that name.
     envelope.insert(
-        "type".to_string(),
+        "entity_type".to_string(),
         serde_json::Value::String(entity.entity_type.clone()),
     );
     // The `# H1` display title. Structural identity like `id`/`mem`/
-    // `type`, so it lives top-level next to them; before this slot the
+    // `entity_type`, so it lives top-level next to them; before this slot the
     // structured envelope had no title at all and consumers had to
     // parse the rendered markdown's H1 to recover it.
     envelope.insert(
@@ -928,9 +934,9 @@ pub fn build_entity_envelope(
     // type-specific fields a top-level hoist never covered).
     //
     // Identity keys stay top-level and are excluded here so they too
-    // appear exactly once: `_hash`, `id`, `mem`, `type` are the
+    // appear exactly once: `_hash`, `id`, `mem`, `entity_type` are the
     // entity's structural identity (inserted above), not free-form
-    // metadata. `mem`/`id`/`type` is the engine's read-only key triple
+    // metadata. Frontmatter `mem`/`id`/`type` is the engine's read-only key triple
     // (`READ_ONLY_METADATA_KEYS`); `_`-prefixed internal keys live in
     // dedicated top-level slots (`_tokens*`, `_mem_schema`, `_stub_*`).
     // Stub entities surface an empty `metadata: {}` so consumers don't
@@ -3631,8 +3637,14 @@ mod tests {
             env.get("last_modified").is_none(),
             "last_modified must not be hoisted"
         );
-        // `type` stays top-level as identity.
-        assert_eq!(env["type"], "contract");
+        // The entity's type stays top-level as identity, spelled
+        // `entity_type` on the wire (2026-08-28 batch); the retired `type`
+        // key is gone, not aliased.
+        assert_eq!(env["entity_type"], "contract");
+        assert!(
+            env.get("type").is_none(),
+            "the retired wire key must not survive"
+        );
 
         // Nested map carries every non-internal, non-identity frontmatter key.
         let metadata = env["metadata"].as_object().expect("metadata map");

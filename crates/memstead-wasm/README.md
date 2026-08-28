@@ -53,8 +53,9 @@ const scoped = engine.entityIds("notes"); // one mem; unknown mem -> []
 
 for (const id of ids) {
   const entity = engine.getEntity(id);   // undefined if absent
-  // Note the field is `entity_type` here — the MCP surface spells the
-  // same field `type`. The shipped `.d.ts` is authoritative.
+  // `entity_type` — one spelling on every wire surface (MCP's entity
+  // envelope aligned in the 2026-08 wire batch; the retired `type` key
+  // is gone, not aliased). The shipped `.d.ts` is authoritative.
   console.log(entity.entity_type, entity.title, Object.keys(entity.sections));
 }
 

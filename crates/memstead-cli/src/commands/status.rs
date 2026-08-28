@@ -21,7 +21,8 @@ struct EdgeTypeCount<'a> {
 
 #[derive(Serialize)]
 struct TypeCount<'a> {
-    #[serde(rename = "type")]
+    // `entity_type` on the wire since the 2026-08-28 batch: one concept,
+    // one spelling, matching the entity envelope and the wasm read surface.
     entity_type: &'a str,
     count: usize,
 }

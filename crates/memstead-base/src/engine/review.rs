@@ -223,6 +223,7 @@ mod tests {
             // A config file so set_review_mark has a MemConfig to carry
             // the mark (mirrors an initialized mem).
             let config = memstead_schema::config::MemConfig {
+                format: None,
                 name: None,
                 title: None,
                 subject: None,
@@ -402,6 +403,7 @@ mod tests {
         // structural half; the export round-trip rides the exporter's
         // own tests).
         let mut config = memstead_schema::config::MemConfig {
+            format: None,
             name: None,
             title: None,
             subject: None,

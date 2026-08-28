@@ -941,7 +941,7 @@ fn export_json_git_branch_round_trips_values() {
         .iter()
         .find(|e| e["id"] == "sender-mem--delta")
         .expect("delta must be exported");
-    assert_eq!(delta["type"], "spec");
+    assert_eq!(delta["entity_type"], "spec");
     assert_eq!(delta["title"], "Delta");
     assert_eq!(delta["mem"], "sender-mem");
     assert_eq!(delta["metadata"]["level"], "M1");

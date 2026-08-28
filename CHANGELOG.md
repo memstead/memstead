@@ -48,6 +48,33 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **BREAKING (wire): the entity's type is `entity_type` on every read
+  surface.** The MCP entity envelope (and with it the CLI's JSON entity,
+  export, and changes payloads, which share the renderer) served the field
+  as `type` while the wasm `getEntity` has always served the serialized
+  Entity's `entity_type` — the same conceptual read under two spellings,
+  found the hard way by a reader following the published README example.
+  One spelling now: the envelope carries `entity_type`, `memstead status`'s
+  per-type counts carry `entity_type`, and the retired `type` key is gone,
+  not aliased (a wire-shape test pins its absence). Out of scope by design:
+  the frontmatter `type:` key (on-disk storage format, still refused as a
+  read-only metadata key under that name), binding-config `type` (the
+  source's medium — a different concept), and the playground's compact
+  graph dialect (a foreign consumer's contract, retained per its own
+  record). Operator decision 2026-08-28; rides this batch with the
+  `format` gate below.
+
+- **BREAKING (config): the workspace mem config's `format` is modeled and
+  gated.** `<mem>/.memstead/config.json` could carry any `format` value and
+  serde silently dropped it — `"format": 99` verified clean and wrote a
+  `#verified` baseline. The field is now modeled: absent means version 1
+  (the healthy common case), the known published-config versions stay
+  readable (a mounted read-mem's cached config parses through the same
+  struct), and an unknown value refuses loudly at parse and in
+  `check_config`, matching the binding record, `WorkspaceConfig`, and the
+  anchors sidecar. Breaking only for a config carrying a value no engine
+  ever wrote.
+
 - **Exemplar relations are authored in the mutation vocabulary.** A type's
   `exemplar.relations` entries now take `target:` / `rel_type:` — the same
   keys `memstead_create` accepts — so the served exemplar and the authoring

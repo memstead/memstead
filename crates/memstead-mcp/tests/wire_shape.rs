@@ -1519,9 +1519,13 @@ fn full_memstead_entity_returns_structured_envelope_alongside_markdown() {
     assert_eq!(body.get("id").and_then(Value::as_str), Some(id.as_str()),);
     assert_eq!(body.get("mem").and_then(Value::as_str), Some("demo"),);
     assert_eq!(
-        body.get("type").and_then(Value::as_str),
+        body.get("entity_type").and_then(Value::as_str),
         Some("spec"),
-        "structured.type drifted: {body}",
+        "structured.entity_type drifted: {body}",
+    );
+    assert!(
+        body.get("type").is_none(),
+        "the retired `type` wire key must not survive on the entity envelope: {body}",
     );
     assert!(
         body.get("sections").and_then(Value::as_object).is_some(),

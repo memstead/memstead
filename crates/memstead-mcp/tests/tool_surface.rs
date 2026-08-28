@@ -1023,7 +1023,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "sections",
             "id",
             "mem",
-            "type",
+            "entity_type",
             "level",
             "stability",
             "created_date",
