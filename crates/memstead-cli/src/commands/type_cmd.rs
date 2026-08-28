@@ -152,6 +152,16 @@ fn resolve_schema(ctx: &CliContext, mem: Option<&str>) -> anyhow::Result<Resolve
             // mem, not just the writable subset. Schema lookup is
             // read-only; RO mounts have schemas worth introspecting.
             if !all_loaded.contains(&name) {
+                // A mem the engine refused to load is not an unknown
+                // mem. This arm used to test the loaded roster only, so
+                // a user explicitly naming their quarantined mem was
+                // told "no mems loaded" in the exact phrasing an empty
+                // workspace produces, while the engine held the reason
+                // and the repair the whole time. The engine's own
+                // adjudicator serves MEM_QUARANTINED with both.
+                if engine.quarantine_reason(name).is_some() {
+                    return Err(CliError::from_engine_op(engine.unknown_mem_error(name)).into());
+                }
                 let known = if all_loaded.is_empty() {
                     "no mems loaded".to_string()
                 } else {

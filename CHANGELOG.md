@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A quarantined mem can no longer disappear from `status`, and `type --mem`
+  names the quarantine.** Two residuals a closing grade filed against the
+  quarantine-fallback work. `memstead type --mem <quarantined>` refused
+  `UNKNOWN_MEM` with "no mems loaded", phrasing identical to an empty
+  workspace, because the loaded roster was tested before any quarantine
+  lookup; the arm now consults the engine's own adjudicator and refuses
+  `MEM_QUARANTINED` carrying the typed reason and the repair command. And
+  `memstead status`, the roster surface the filesystem-workspace `mem list`
+  refusal points at, rendered no quarantine at all, so a quarantined mem read
+  as a small healthy workspace; both output forms now carry the quarantine
+  roster under the same never-behind-an-opt-in rule `health` follows. Both
+  pinned by integration tests that fail on the pre-fix binary.
+
 - **`memstead health` markdown form now serves conformance data it gathers.**
   `--include conformance` was accepted, documented at length in `--help`, and
   had no effect on the default markdown rendering: the `--json` form returned a

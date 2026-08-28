@@ -45,6 +45,34 @@ struct StatusPayload<'a> {
     edge_types: Vec<EdgeTypeCount<'a>>,
     type_distribution: Vec<TypeCount<'a>>,
     projections: Vec<ProjectionStatus>,
+    /// Boot-honesty roster, present whenever non-empty and never behind
+    /// an opt-in — the same rule `health` follows. On a filesystem
+    /// workspace `status` is the roster surface the `mem list` refusal
+    /// points at, so a quarantine this payload omitted was simply
+    /// invisible: the graph counts read as a small healthy workspace.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    quarantined: Vec<QuarantineLine>,
+}
+
+/// One quarantined mem: attached, refused at load, and the engine holds
+/// the typed reason and the repair — surfaced, never restated.
+#[derive(Serialize)]
+struct QuarantineLine {
+    mem: String,
+    reason_code: String,
+    reason: String,
+}
+
+fn quarantine_roster(engine: &memstead_base::Engine) -> Vec<QuarantineLine> {
+    engine
+        .quarantined_mems()
+        .iter()
+        .map(|q| QuarantineLine {
+            mem: q.mount.mem.clone(),
+            reason_code: q.reason_code.clone(),
+            reason: q.reason_message.clone(),
+        })
+        .collect()
 }
 
 /// One mem's durability line: what the engine can say about whether that
@@ -104,53 +132,58 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
     // no projections" once we get past `cli_engine()?`.
     let root = ctx.workspace_shape().map(|(_, r)| r);
 
-    let (status, total, real, schema_counts, projections, rollup, mems) = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(engine) => {
-            let status = engine.status();
-            let store: &Store = engine.store();
-            let projections = root
-                .as_deref()
-                .map(|r| projection_status(&engine, r))
-                .unwrap_or_default();
-            let rollup = root
-                .as_deref()
-                .map(|r| projection_rollup(&engine, r))
-                .unwrap_or_default();
-            let mems = mem_durability(&engine);
-            (
-                status,
-                store.len(),
-                store.all_entities().filter(|e| !e.stub).count(),
-                count_by_type(store),
-                projections,
-                rollup,
-                mems,
-            )
-        }
-        CliEngine::Filesystem(engine) => {
-            let status = engine.status();
-            let store: &Store = engine.store();
-            let projections = root
-                .as_deref()
-                .map(|r| projection_status(&engine, r))
-                .unwrap_or_default();
-            let rollup = root
-                .as_deref()
-                .map(|r| projection_rollup(&engine, r))
-                .unwrap_or_default();
-            let mems = mem_durability(&engine);
-            (
-                status,
-                store.len(),
-                store.all_entities().filter(|e| !e.stub).count(),
-                count_by_type(store),
-                projections,
-                rollup,
-                mems,
-            )
-        }
-    };
+    let (status, total, real, schema_counts, projections, rollup, mems, quarantined) =
+        match ctx.cli_engine()? {
+            #[cfg(feature = "mem-repo")]
+            CliEngine::MemRepo(engine) => {
+                let status = engine.status();
+                let store: &Store = engine.store();
+                let projections = root
+                    .as_deref()
+                    .map(|r| projection_status(&engine, r))
+                    .unwrap_or_default();
+                let rollup = root
+                    .as_deref()
+                    .map(|r| projection_rollup(&engine, r))
+                    .unwrap_or_default();
+                let mems = mem_durability(&engine);
+                let quarantined = quarantine_roster(&engine);
+                (
+                    status,
+                    store.len(),
+                    store.all_entities().filter(|e| !e.stub).count(),
+                    count_by_type(store),
+                    projections,
+                    rollup,
+                    mems,
+                    quarantined,
+                )
+            }
+            CliEngine::Filesystem(engine) => {
+                let status = engine.status();
+                let store: &Store = engine.store();
+                let projections = root
+                    .as_deref()
+                    .map(|r| projection_status(&engine, r))
+                    .unwrap_or_default();
+                let rollup = root
+                    .as_deref()
+                    .map(|r| projection_rollup(&engine, r))
+                    .unwrap_or_default();
+                let mems = mem_durability(&engine);
+                let quarantined = quarantine_roster(&engine);
+                (
+                    status,
+                    store.len(),
+                    store.all_entities().filter(|e| !e.stub).count(),
+                    count_by_type(store),
+                    projections,
+                    rollup,
+                    mems,
+                    quarantined,
+                )
+            }
+        };
     let stubs = total - real;
 
     let mut edge_pairs: Vec<_> = status.edge_types.iter().collect();
@@ -186,6 +219,7 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 })
                 .collect(),
             projections,
+            quarantined,
         };
         return print_json(&json!(payload));
     }
@@ -226,6 +260,20 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 m.backend,
                 m.unestablished.unwrap_or_default(),
             ));
+        }
+    }
+    // The quarantine roster, present whenever non-empty — same rule as
+    // `health`. Without it a quarantined mem on a filesystem workspace
+    // vanished from the very surface the `mem list` refusal points at.
+    if !quarantined.is_empty() {
+        lines.push(String::new());
+        lines.push(format!(
+            "**Quarantined mems ({})** — attached but refused at load; each line carries \
+             the engine's reason and repair:",
+            quarantined.len()
+        ));
+        for q in &quarantined {
+            lines.push(format!("- `{}` [{}] {}", q.mem, q.reason_code, q.reason));
         }
     }
     lines.push(String::new());

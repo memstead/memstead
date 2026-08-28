@@ -458,3 +458,74 @@ fn type_on_a_healthy_workspace_reports_its_own_schema_silently() {
     );
     assert_eq!(body["schema"], "default@1.0.0");
 }
+
+/// The `--mem` arm of the same command, one path over (the backlog
+/// residual plan 06's closing grade named): a user who explicitly names
+/// the mem they know about must be told it is quarantined — with the
+/// engine's reason and repair — not `UNKNOWN_MEM` in the exact phrasing
+/// an empty workspace produces.
+#[test]
+fn type_mem_names_the_quarantine_instead_of_unknown_mem() {
+    let tmp = TempDir::new().unwrap();
+    let ws = quarantined_workspace(&tmp);
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "type", "--mem", "plenum"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let body = parse_envelope(&out);
+    assert_eq!(
+        body["code"], "MEM_QUARANTINED",
+        "naming a quarantined mem is not an unknown-mem condition; got: {body}"
+    );
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("SCHEMA_NOT_FOUND") && message.contains("memstead schema install"),
+        "the refusal must carry the engine's reason and repair; got: {message}"
+    );
+}
+
+/// `status` is the roster surface the filesystem-workspace `mem list`
+/// refusal points at, so it must carry the quarantine roster in both
+/// output forms — the same never-behind-an-opt-in rule `health` follows.
+/// Without it a quarantined mem simply vanished: the graph counts read
+/// as a small healthy workspace.
+#[test]
+fn status_carries_the_quarantine_roster_in_both_forms() {
+    let tmp = TempDir::new().unwrap();
+    let ws = quarantined_workspace(&tmp);
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let body = parse_envelope(&out);
+    let roster = body["quarantined"].as_array().expect("quarantined roster");
+    assert_eq!(roster.len(), 1, "got: {body}");
+    assert_eq!(roster[0]["mem"], "plenum");
+    assert_eq!(roster[0]["reason_code"], "SCHEMA_NOT_FOUND");
+
+    let md_bytes = memstead()
+        .current_dir(&ws)
+        .arg("status")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(md_bytes).expect("stdout is UTF-8");
+    assert!(
+        md.contains("Quarantined mems (1)")
+            && md.contains("plenum")
+            && md.contains("SCHEMA_NOT_FOUND"),
+        "markdown status must render the quarantine roster; got:\n{md}"
+    );
+}

@@ -11,7 +11,7 @@ Typed error codes the static scan finds in the engine, the CLI (`memstead-cli`),
 | Code | Surfaces | Source locations |
 |------|----------|------------------|
 | `AMBIGUOUS_DESCRIPTION_DELIMITER` | engine | `crates/memstead-base/src/ops/mod.rs:1983` |
-| `AMBIGUOUS_MEM` | CLI | `crates/memstead-cli/src/commands/export.rs:503`<br>`crates/memstead-cli/src/commands/publish.rs:242`<br>`crates/memstead-cli/src/commands/type_cmd.rs:216` |
+| `AMBIGUOUS_MEM` | CLI | `crates/memstead-cli/src/commands/export.rs:503`<br>`crates/memstead-cli/src/commands/publish.rs:242`<br>`crates/memstead-cli/src/commands/type_cmd.rs:226` |
 | `AMBIGUOUS_QUERY` | CLI | `crates/memstead-cli/src/commands/context.rs:67` |
 | `ANCHORS_SIDECAR_UNREADABLE` | CLI | `crates/memstead-cli/src/commands/projection.rs:2085` |
 | `ARCHIVE_ASSEMBLY_FAILED` | CLI | `crates/memstead-cli/src/commands/publish.rs:267`<br>`crates/memstead-cli/src/commands/publish.rs:341` |
