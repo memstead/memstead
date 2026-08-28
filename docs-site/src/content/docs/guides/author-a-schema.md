@@ -258,8 +258,8 @@ exemplar:
       - 500g flour
       - 300ml water
   relations:
-    - to: canned-san-marzano-tomatoes
-      type: CONTAINS
+    - target: canned-san-marzano-tomatoes
+      rel_type: CONTAINS
 ```
 
 The pieces:
@@ -267,7 +267,7 @@ The pieces:
 - **`title`** drives the id slug exactly as a real create would.
 - **`metadata`** is validated like a real create's overrides — enums included; required-no-default fields must be present. Engine-stamped fields (`created_date`, …) are omitted.
 - **`sections`** must cover every required section, and each body must satisfy the section's declared `content` format.
-- **`relations`** use **bare placeholder slugs** as targets (no `mem--` prefix — an exemplar lives outside any mem). Rel-type legality and edge shape are validated; target existence never is.
+- **`relations`** speak the mutation vocabulary (`target:` / `rel_type:` — the same keys `memstead_create` takes, so what an agent copies from the served exemplar is exactly what the write gate accepts; the retired `to:` / `type:` spelling refuses at authoring load with a rename pointer). Targets are **bare placeholder slugs** (no `mem--` prefix — an exemplar lives outside any mem). Rel-type legality and edge shape are validated; target existence never is.
 
 Exemplars are optional per type; the built-in reference schemas carry one on every type. Agents see them via `memstead_schema` at `verbosity: full` and in `memstead type <name>` — the lite skeleton every session fetches stays unchanged. The retired `examples:` list (never validated, never served) refuses at authoring load with a pointer here.
 

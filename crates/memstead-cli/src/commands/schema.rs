@@ -1183,21 +1183,43 @@ mod tests {
         }
     }
 
-    /// The current built-in's CONTENT validates cleanly — the loader
-    /// the command runs is the same one the engine boots with. The
-    /// shipped package itself carries the seal marker, so the parity
-    /// check runs on an unsealed copy; the sealed original is pinned
-    /// by `validate_names_sealed_package` below.
+    /// An unsealed copy of the current built-in is treated as fresh
+    /// authoring input, and the shipped default-1.3 still speaks the
+    /// retired exemplar-relation spelling (`to:` / `type:`) — its
+    /// bytes are sealed, so it converges only at the family's next
+    /// minted-for-meaning bump. Until then, validating the copy
+    /// REFUSES with the rename pointer (install-time strict); the
+    /// sealed original keeps loading through the catalogue's translate
+    /// path, pinned by the loader suite. A converged copy of the same
+    /// content validates cleanly — proving the refusal is the spelling
+    /// alone.
     #[test]
-    fn validate_accepts_builtin_default_schema() {
+    fn validate_builtin_default_copy_refuses_retired_exemplar_spelling() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../memstead-schema/builtins/schemas/default-1.3");
         assert!(src.join("schema.yaml").is_file(), "fixture moved: {src:?}");
         let dir = tempfile::tempdir().unwrap();
         let dst = dir.path().join("authoring");
         copy_dir_without_marker(&src, &dst);
+        let err = validate(&ctx(), ValidateArgs { path: dst.clone() })
+            .expect_err("legacy exemplar spelling refuses as authoring input");
+        assert!(
+            err.to_string().contains("rel_type"),
+            "refusal carries the rename pointer: {err}"
+        );
+
+        // Mechanical rename to the mutation vocabulary — then the same
+        // content validates cleanly.
+        for entry in std::fs::read_dir(dst.join("types")).unwrap() {
+            let path = entry.unwrap().path();
+            let text = std::fs::read_to_string(&path).unwrap();
+            let converged = text
+                .replace("\n    - to: ", "\n    - target: ")
+                .replace("\n      type: ", "\n      rel_type: ");
+            std::fs::write(&path, converged).unwrap();
+        }
         validate(&ctx(), ValidateArgs { path: dst })
-            .expect("default builtin content must validate");
+            .expect("converged default builtin content must validate");
     }
 
     fn copy_dir_without_marker(src: &Path, dst: &Path) {

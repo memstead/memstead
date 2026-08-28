@@ -1394,8 +1394,12 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
             lines.push("Relations (placeholder targets):".to_string());
             for r in &ex.relations {
                 match &r.description {
-                    Some(d) => lines.push(format!("- {} → {} — {d}", r.rel_type, r.to)),
-                    None => lines.push(format!("- {} → {}", r.rel_type, r.to)),
+                    Some(d) => lines.push(format!(
+                        "- {} → {} — {d}",
+                        r.rel_type_name(),
+                        r.target_slug()
+                    )),
+                    None => lines.push(format!("- {} → {}", r.rel_type_name(), r.target_slug())),
                 }
             }
         }
@@ -1974,26 +1978,19 @@ pub fn build_schema_payload_scoped(
             // Relation targets are placeholder slugs by contract.
             //
             // The relation entries are emitted in the MUTATION
-            // vocabulary (`target` / `rel_type`), not in the schema
-            // author's YAML spelling (`to:` / `type:`). Those are two
-            // different audiences: the YAML is a file format a schema
-            // author writes, while THIS payload is what an agent reads
-            // before writing an entity, and an agent that copies it
-            // into `memstead_create` must get a shape the write gate
-            // accepts. Until 2026-08-27 this emitted the YAML spelling
-            // and the copy was refused — the exact round-trip
-            // consistency-sweep 05-front-door/08 exists to remove. The
-            // authoring dialect stays as it is because shipped
-            // built-ins are byte-sealed; converging it needs new schema
-            // versions (filed in dev/backlog.md).
+            // vocabulary (`target` / `rel_type`) — since the
+            // 05-front-door/08 rider landed, that is also the authoring
+            // spelling (legacy sealed content is translated at load),
+            // so an agent copying this payload into `memstead_create`
+            // gets a shape the write gate accepts.
             if let Some(ex) = &td.exemplar {
                 let relations: Vec<serde_json::Value> = ex
                     .relations
                     .iter()
                     .map(|r| {
                         let mut o = serde_json::json!({
-                            "target": r.to,
-                            "rel_type": r.rel_type,
+                            "target": r.target_slug(),
+                            "rel_type": r.rel_type_name(),
                         });
                         if let Some(d) = &r.description {
                             o["description"] = serde_json::json!(d);

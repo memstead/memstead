@@ -2953,6 +2953,115 @@ fn sealed_builtin_old_key_values_survive_translation() {
     );
 }
 
+/// Exemplar relation entries speak the mutation vocabulary
+/// (`target:` / `rel_type:`). The retired authoring spelling
+/// (`to:` / `type:`) refuses at AUTHORING load with the typed rename
+/// error; sealed content translates it so shipped versions keep
+/// loading — install-time strict, sealed-tolerant, the same doctrine
+/// as `propagating_relationships` above.
+#[test]
+fn retired_exemplar_relation_spelling_refuses_authoring_and_translates_sealed() {
+    use memstead_schema::SchemaLoadError;
+
+    let manifest = r#"name: exrel
+version: 0.1.0
+description: exemplar-relation spelling test schema
+when_to_use: tests
+types:
+  - thing
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: h
+      default_weight: 1.0
+      acyclic: true
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+    let type_base = "name: thing\ndescription: t\nwhen_to_use: h\nsections:\n  - key: body\n    heading: Body\n    required: true\n    search_weight: 10.0\n    catch_all: true\n    write_rules: []\nmetadata_fields: []\ntitle_weight: 100.0\ntext_fields:\n  - body\nhierarchy_relationship: PART_OF\nupdatable_fields:\n  - title\nhealth_required_fields: []\nstaleness_threshold_days: 90\nwrite_rules: []\n";
+    let legacy_exemplar = "exemplar:\n  title: A thing\n  sections:\n    body: Body text.\n  relations:\n    - to: parent-thing\n      type: PART_OF\n";
+    let converged_exemplar = "exemplar:\n  title: A thing\n  sections:\n    body: Body text.\n  relations:\n    - target: parent-thing\n      rel_type: PART_OF\n";
+    let legacy_yaml = format!("{type_base}{legacy_exemplar}");
+    let converged_yaml = format!("{type_base}{converged_exemplar}");
+
+    // Sealed context (in-memory): loads, values TRANSLATED onto the
+    // converged fields.
+    let sealed = memstead_schema::load_schema_from_memory(
+        manifest,
+        &[("thing".to_string(), legacy_yaml.clone())],
+    )
+    .expect("sealed content keeps loading with the old spelling translated");
+    let rel = &sealed
+        .types
+        .get("thing")
+        .unwrap()
+        .exemplar
+        .as_ref()
+        .unwrap()
+        .relations[0];
+    assert_eq!(rel.target_slug(), "parent-thing");
+    assert_eq!(rel.rel_type_name(), "PART_OF");
+    assert!(
+        rel.legacy_to.is_none() && rel.legacy_type.is_none(),
+        "sentinels are drained by the loader"
+    );
+
+    // Authoring context (directory): refuses with the rename error
+    // naming both converged keys.
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("types")).unwrap();
+    std::fs::write(tmp.path().join("schema.yaml"), manifest).unwrap();
+    std::fs::write(tmp.path().join("types").join("thing.yaml"), &legacy_yaml).unwrap();
+    let err = memstead_schema::load_schema_from_dir(tmp.path())
+        .expect_err("authoring load refuses the retired spelling");
+    match &err {
+        SchemaLoadError::ExemplarRelationSpellingRetired { type_name } => {
+            assert_eq!(type_name, "thing");
+        }
+        other => panic!("expected the spelling refusal, got {other:?}"),
+    }
+    assert!(
+        err.to_string().contains("target:") && err.to_string().contains("rel_type:"),
+        "refusal names the converged keys: {err}"
+    );
+
+    // The converged spelling authors cleanly in the same directory.
+    std::fs::write(tmp.path().join("types").join("thing.yaml"), &converged_yaml).unwrap();
+    let authored = memstead_schema::load_schema_from_dir(tmp.path())
+        .expect("converged spelling authors cleanly");
+    let rel = &authored
+        .types
+        .get("thing")
+        .unwrap()
+        .exemplar
+        .as_ref()
+        .unwrap()
+        .relations[0];
+    assert_eq!(rel.target_slug(), "parent-thing");
+    assert_eq!(rel.rel_type_name(), "PART_OF");
+
+    // An entry missing either key refuses as incomplete in authoring.
+    let incomplete_yaml = format!(
+        "{type_base}exemplar:\n  title: A thing\n  sections:\n    body: Body text.\n  relations:\n    - target: parent-thing\n"
+    );
+    std::fs::write(
+        tmp.path().join("types").join("thing.yaml"),
+        &incomplete_yaml,
+    )
+    .unwrap();
+    let err = memstead_schema::load_schema_from_dir(tmp.path())
+        .expect_err("authoring load refuses a keyless relation entry");
+    assert!(
+        matches!(&err, SchemaLoadError::ExemplarRelationIncomplete { type_name } if type_name == "thing"),
+        "expected the incomplete refusal, got {err:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Report-all accumulation — every semantic violation in one refusal
 // ---------------------------------------------------------------------------

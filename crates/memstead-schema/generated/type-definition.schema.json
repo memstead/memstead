@@ -368,7 +368,7 @@
           }
         },
         "relations": {
-          "description": "Relationship entries with PLACEHOLDER targets: each `to` is a\nbare slug (no `mem--` prefix — an exemplar lives outside any\nmem); validation checks rel-type legality and shape, never\ntarget existence.",
+          "description": "Relationship entries with PLACEHOLDER targets: each `target` is\na bare slug (no `mem--` prefix — an exemplar lives outside any\nmem); validation checks rel-type legality and shape, never\ntarget existence.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ExemplarRelation"
@@ -392,7 +392,7 @@
       ]
     },
     "ExemplarRelation": {
-      "description": "One relationship entry on an [`Exemplar`].",
+      "description": "One relationship entry on an [`Exemplar`].\n\nAuthored in the mutation vocabulary (`target:` / `rel_type:`) so the\nexemplar an agent reads is byte-for-byte the shape `memstead_create`\naccepts. The retired authoring spelling (`to:` / `type:`) is\ncaptured into the `legacy_*` sentinels for the loader's legality\ngate: authoring contexts refuse it with a rename pointer, sealed\ncontent (built-ins, installed refs) is translated so shipped\nversions keep loading — install-time strict, sealed-tolerant.",
       "type": "object",
       "properties": {
         "description": {
@@ -402,20 +402,22 @@
             "null"
           ]
         },
-        "to": {
-          "description": "Placeholder target: a bare slug, scoped to the exemplar's own\n(virtual) mem at validation time.",
-          "type": "string"
+        "rel_type": {
+          "description": "Relationship type (UPPER_SNAKE_CASE; validated against the\nschema's declared vocabulary). `Option` only for the sealed\ntranslate path — the loader guarantees `Some` on every loaded\nschema.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "type": {
-          "description": "Relationship type (UPPER_SNAKE_CASE; validated against the\nschema's declared vocabulary).",
-          "type": "string"
+        "target": {
+          "description": "Placeholder target: a bare slug, scoped to the exemplar's own\n(virtual) mem at validation time. `Option` only for the sealed\ntranslate path — the loader guarantees `Some` on every loaded\nschema.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "to",
-        "type"
-      ]
+      "additionalProperties": false
     },
     "FieldType": {
       "type": "string",

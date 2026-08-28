@@ -459,17 +459,17 @@ impl Engine {
             let ex = td.exemplar.as_ref().expect("filtered on presence above");
             let mut relations = Vec::with_capacity(ex.relations.len());
             for r in &ex.relations {
-                if r.to.contains("--") || r.to.trim().is_empty() {
+                let target = r.target_slug();
+                if target.contains("--") || target.trim().is_empty() {
                     return Err(format!(
-                        "type '{type_name}' exemplar relation target '{}' must be a bare \
+                        "type '{type_name}' exemplar relation target '{target}' must be a bare \
                          placeholder slug (no `--`, non-empty) — exemplars live outside \
                          any mem",
-                        r.to
                     ));
                 }
                 relations.push(crate::ops::RelateArg {
-                    target: crate::entity::EntityId::new(mem, &r.to),
-                    rel_type: r.rel_type.clone(),
+                    target: crate::entity::EntityId::new(mem, target),
+                    rel_type: r.rel_type_name().to_string(),
                     description: r.description.clone(),
                 });
             }

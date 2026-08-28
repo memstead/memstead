@@ -35,8 +35,8 @@ exemplar:
       - Canned Roma tomatoes: close substitute, slightly more acidic.
       - Fresh tomatoes: need blanching, peeling, longer cook — not a 1:1 swap.
   relations:
-    - to: canned-roma-tomatoes
-      type: SUBSTITUTES_FOR
+    - target: canned-roma-tomatoes
+      rel_type: SUBSTITUTES_FOR
 
 system_message: |
   Ingredients are terse. Profile, storage, substitutions — that is all.

@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Exemplar relations are authored in the mutation vocabulary.** A type's
+  `exemplar.relations` entries now take `target:` / `rel_type:` — the same
+  keys `memstead_create` accepts — so the served exemplar and the authoring
+  YAML finally speak one spelling. The retired `to:` / `type:` keys refuse
+  at authoring load (`memstead schema validate`, install) with a rename
+  pointer; sealed content — shipped built-ins, installed workspace schemas —
+  keeps loading with the old keys translated, so no existing package
+  breaks. Executes the convergence rider from the 2026-08-28 ruling
+  "a built-in schema version is minted for meaning, never for spelling".
+
 ### Fixed
 
 - **The README and the crates' own descriptions speak one register.** The

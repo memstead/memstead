@@ -57,10 +57,10 @@ exemplar:
       4. Serve over fresh tagliatelle.
     notes: "Can be made a day ahead; flavour deepens overnight."
   relations:
-    - to: canned-san-marzano-tomatoes
-      type: CONTAINS
-    - to: ground-beef
-      type: CONTAINS
+    - target: canned-san-marzano-tomatoes
+      rel_type: CONTAINS
+    - target: ground-beef
+      rel_type: CONTAINS
 
 # system_message — encouraged. Injected when the agent works with this
 # type. Keep it tight: invariants + common mistakes.

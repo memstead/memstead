@@ -87,6 +87,27 @@ pub enum SchemaLoadError {
     )]
     ExamplesRetired { type_name: String },
 
+    /// An exemplar relation entry used the retired authoring spelling
+    /// in an authoring context. Exemplars are authored in the mutation
+    /// vocabulary so what an agent copies from the served schema is
+    /// exactly what the write gate accepts. Sealed content keeps
+    /// loading with the old keys translated; only authoring refuses,
+    /// so the fix is one mechanical key rename per relation entry.
+    #[error(
+        "type '{type_name}': exemplar relation entries speak the mutation vocabulary — \
+         rename `to:` to `target:` and `type:` to `rel_type:`, then retry. (Sealed \
+         packages with the old spelling keep loading; only authoring refuses.)"
+    )]
+    ExemplarRelationSpellingRetired { type_name: String },
+
+    /// An exemplar relation entry is missing `target:` or `rel_type:`
+    /// after legacy translation — the entry cannot name an edge.
+    #[error(
+        "type '{type_name}': an exemplar relation entry must carry both `target:` \
+         (bare placeholder slug) and `rel_type:` (declared relationship name)."
+    )]
+    ExemplarRelationIncomplete { type_name: String },
+
     /// The retired `optional:` metadata-field key was used in an
     /// authoring context. The polarity flipped (first-author-path
     /// plan 07): a field is optional unless it declares
@@ -1056,6 +1077,48 @@ fn load_with_context(
             errors.push(SchemaLoadError::ExamplesRetired {
                 type_name: td.name.clone(),
             });
+        }
+
+        // Exemplar relation spelling (consistency-sweep 05-front-door/08
+        // rider): entries are authored in the mutation vocabulary
+        // (`target:` / `rel_type:`) so the served exemplar round-trips
+        // into `memstead_create` unchanged. Authoring contexts refuse
+        // the retired `to:` / `type:` spelling with the rename pointer;
+        // sealed contexts translate it so every shipped version keeps
+        // loading. After the gate, both resolved keys are guaranteed
+        // present on every loaded schema.
+        if let Some(ex) = td.exemplar.as_mut() {
+            let mut retired_spelling = false;
+            let mut incomplete = false;
+            for rel in &mut ex.relations {
+                let legacy_to = rel.legacy_to.take();
+                let legacy_type = rel.legacy_type.take();
+                if legacy_to.is_some() || legacy_type.is_some() {
+                    if types_dir.is_some() {
+                        retired_spelling = true;
+                        continue;
+                    }
+                    if rel.target.is_none() {
+                        rel.target = legacy_to;
+                    }
+                    if rel.rel_type.is_none() {
+                        rel.rel_type = legacy_type;
+                    }
+                }
+                if rel.target.is_none() || rel.rel_type.is_none() {
+                    incomplete = true;
+                }
+            }
+            if retired_spelling {
+                errors.push(SchemaLoadError::ExemplarRelationSpellingRetired {
+                    type_name: td.name.clone(),
+                });
+            }
+            if incomplete {
+                errors.push(SchemaLoadError::ExemplarRelationIncomplete {
+                    type_name: td.name.clone(),
+                });
+            }
         }
 
         // Metadata-required polarity (first-author-path plan 07):

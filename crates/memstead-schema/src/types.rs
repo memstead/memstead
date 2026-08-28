@@ -560,8 +560,8 @@ pub struct Exemplar {
     /// be present — the validator enforces it like any create.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub sections: IndexMap<String, String>,
-    /// Relationship entries with PLACEHOLDER targets: each `to` is a
-    /// bare slug (no `mem--` prefix — an exemplar lives outside any
+    /// Relationship entries with PLACEHOLDER targets: each `target` is
+    /// a bare slug (no `mem--` prefix — an exemplar lives outside any
     /// mem); validation checks rel-type legality and shape, never
     /// target existence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -569,20 +569,58 @@ pub struct Exemplar {
 }
 
 /// One relationship entry on an [`Exemplar`].
+///
+/// Authored in the mutation vocabulary (`target:` / `rel_type:`) so the
+/// exemplar an agent reads is byte-for-byte the shape `memstead_create`
+/// accepts. The retired authoring spelling (`to:` / `type:`) is
+/// captured into the `legacy_*` sentinels for the loader's legality
+/// gate: authoring contexts refuse it with a rename pointer, sealed
+/// content (built-ins, installed refs) is translated so shipped
+/// versions keep loading — install-time strict, sealed-tolerant.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExemplarRelation {
     /// Placeholder target: a bare slug, scoped to the exemplar's own
-    /// (virtual) mem at validation time.
-    pub to: String,
+    /// (virtual) mem at validation time. `Option` only for the sealed
+    /// translate path — the loader guarantees `Some` on every loaded
+    /// schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
     /// Relationship type (UPPER_SNAKE_CASE; validated against the
-    /// schema's declared vocabulary).
-    #[serde(rename = "type")]
-    pub rel_type: String,
+    /// schema's declared vocabulary). `Option` only for the sealed
+    /// translate path — the loader guarantees `Some` on every loaded
+    /// schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel_type: Option<String>,
+    /// Retired spelling of `target:` — loader-gate sentinel, never
+    /// populated on a loaded schema.
+    #[serde(default, rename = "to", skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub legacy_to: Option<String>,
+    /// Retired spelling of `rel_type:` — loader-gate sentinel, never
+    /// populated on a loaded schema.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub legacy_type: Option<String>,
     /// Optional per-edge description — validated against the
     /// rel-type's `per_edge_description` posture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+impl ExemplarRelation {
+    /// The resolved placeholder target. Loader-guaranteed present on
+    /// any loaded schema; empty string only on a hand-built value that
+    /// bypassed the loader.
+    pub fn target_slug(&self) -> &str {
+        self.target.as_deref().unwrap_or_default()
+    }
+
+    /// The resolved rel-type name. Loader-guaranteed present on any
+    /// loaded schema.
+    pub fn rel_type_name(&self) -> &str {
+        self.rel_type.as_deref().unwrap_or_default()
+    }
 }
 
 /// Derive the storage key a `## Heading` line resolves to.
