@@ -1250,7 +1250,7 @@ Storage-destroying removal — unregisters the mem AND deletes its stored conten
 
 ###### **Options:**
 
-* `--note <NOTE>` — Optional provenance note (≤280 chars). Captured on the engine trace surface; surfaces via the outer-repo Stop hook. No per-mem commit is produced by delete
+* `--note <NOTE>` — Optional provenance note (≤280 chars). Captured on the engine trace surface; surfaces via the outer-repo Stop hook. No per-mem commit is produced by delete on any backend
 * `--operator-mode` — Bypass the workspace `[[mem_management.delete]]` allowlist for this invocation. See `InitArgs::operator_mode` for the full design rationale. Also settable via `MEMSTEAD_OPERATOR_MODE=1`
 * `--detach-incoming` — Mem-replacement affordance: skip the `MEM_HAS_INCOMING_REFS` refusal and leave surviving Write-Mems' cross-mem edges into this mem dangling as stubs. The referrers' files stay untouched; a later `memstead mem init <same name>` re-adopts the edges. Use when re-homing a mem (backend or location change) under a stable name — the response lists every detached referrer so re-adoption can be verified
 

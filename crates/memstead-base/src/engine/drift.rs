@@ -329,7 +329,25 @@ impl Engine {
 
         let backend_changes = match &m.mount.storage {
             MountStorage::Folder { path } => {
-                crate::ops::folder_changes_since(path, mem, since).map_err(EngineError::Backend)?
+                match crate::ops::folder_changes_since(path, mem, since) {
+                    Ok(c) => c,
+                    // Lift the backend's typed bad-`since` marker, parallel
+                    // to the git arm's COMMIT_NOT_FOUND lift below: the
+                    // folder cursor is a timestamp, and anything else —
+                    // a mutation's `write_id` above all — refuses instead
+                    // of silently replaying the whole history.
+                    Err(BackendError::Other(msg)) if msg.starts_with("INVALID_TS_CURSOR:") => {
+                        let since = msg
+                            .strip_prefix("INVALID_TS_CURSOR:")
+                            .unwrap_or_default()
+                            .to_string();
+                        return Err(EngineError::InvalidTimestampCursor {
+                            mem: mem.to_string(),
+                            since,
+                        });
+                    }
+                    Err(e) => return Err(EngineError::Backend(e)),
+                }
             }
             MountStorage::GitBranch { gitdir, branch } => match self.git_branch_ops.as_ref() {
                 Some(hook) => match (hook.changes_since)(gitdir, branch, mem, since, clamped) {
@@ -1091,6 +1109,42 @@ mod tests {
         assert!(matches!(err, EngineError::UnknownMem(v) if v == "nope"));
     }
 
+    /// A `write_id` from a mutation response passed back as `since`
+    /// on a folder mem refuses with the typed `INVALID_CURSOR` code
+    /// and a message naming both the right cursor and the confusion —
+    /// before this guard it silently replayed the whole history.
+    #[test]
+    fn engine_changes_since_folder_refuses_write_token_as_cursor() {
+        let tmp = TempDir::new().unwrap();
+        let engine = build_demo_engine(&tmp);
+        let token = format!("{:032x}{:016x}", 1_766_000_000_000_000_000u128, 7u64);
+        let err = engine.changes_since("specs", &token, None).unwrap_err();
+        assert_eq!(err.code(), "INVALID_CURSOR");
+        match &err {
+            EngineError::InvalidTimestampCursor { mem, since } => {
+                assert_eq!(mem, "specs");
+                assert_eq!(since, &token);
+            }
+            other => panic!("expected InvalidTimestampCursor, got {other:?}"),
+        }
+        let msg = err.to_string();
+        assert!(
+            msg.contains("RFC3339"),
+            "message names the cursor dialect: {msg}"
+        );
+        assert!(
+            msg.contains("`write_id` is an identity, not a cursor"),
+            "message names the confusion: {msg}"
+        );
+        // The sentinel and a real timestamp still read.
+        assert!(
+            engine
+                .changes_since("specs", crate::ops::EMPTY_TREE_SHA, None)
+                .is_ok()
+        );
+        assert!(engine.changes_since("specs", "", None).is_ok());
+    }
+
     #[test]
     fn engine_diff_folder_mount_refuses_with_invalid_input() {
         let tmp = TempDir::new().unwrap();
@@ -1197,7 +1251,7 @@ mod tests {
         let engine = build_demo_engine(&tmp);
         // 0.5 is comfortably inside the valid range; no warning.
         let report = engine
-            .changes_since("specs", "abc", Some(0.5))
+            .changes_since("specs", "", Some(0.5))
             .expect("known mem");
         assert!(report.warnings.is_empty());
     }
@@ -1208,9 +1262,7 @@ mod tests {
         // no clamping, no warning.
         let tmp = TempDir::new().unwrap();
         let engine = build_demo_engine(&tmp);
-        let report = engine
-            .changes_since("specs", "abc", None)
-            .expect("known mem");
+        let report = engine.changes_since("specs", "", None).expect("known mem");
         assert!(report.warnings.is_empty());
     }
 

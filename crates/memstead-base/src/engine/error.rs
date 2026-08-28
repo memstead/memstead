@@ -1057,6 +1057,19 @@ pub enum EngineError {
         "commit cursor '{since}' is not a known commit in mem '{mem}' — pass the `head` a prior memstead_changes_since call returned, or the empty-tree sentinel to re-seed. A mutation's `write_id` is an identity, not a cursor"
     )]
     InvalidChangesCursor { mem: String, since: String },
+    /// `memstead_changes_since` / `memstead changes --since` on a
+    /// folder-backed (or in-memory) mem was given a `since` that is not
+    /// an RFC3339 timestamp. These backends key the change ledger off
+    /// timestamps and compare lexically, so before this refusal a
+    /// mutation's `write_id` — fixed-width hex that sorts below every
+    /// timestamp — silently replayed the whole history. Shares the
+    /// `INVALID_CURSOR` code with the git-backed variant so a sync
+    /// loop's branch (`INVALID_CURSOR` → re-seed) is backend-agnostic.
+    /// `details.since` carries the offending cursor untruncated.
+    #[error(
+        "changes cursor '{since}' is not an RFC3339 timestamp — on mem '{mem}' pass the `since` a prior memstead_changes_since call returned (the ledger's latest `ts`), or the empty string / empty-tree sentinel to read from the beginning. A mutation's `write_id` is an identity, not a cursor"
+    )]
+    InvalidTimestampCursor { mem: String, since: String },
     /// `review_mark_diff` was called on a mem with no review mark set.
     /// Marklessness is a first-class, known-from-the-roster state — the
     /// diff surface refuses typed rather than silently equating "no
@@ -1316,6 +1329,7 @@ impl EngineError {
             EngineError::NotConflicted { .. } => "NOT_CONFLICTED",
             EngineError::RenameSimilarityOutOfRange { .. } => "INVALID_INPUT",
             EngineError::InvalidChangesCursor { .. } => "INVALID_CURSOR",
+            EngineError::InvalidTimestampCursor { .. } => "INVALID_CURSOR",
             EngineError::ReviewMarkNotSet { .. } => "REVIEW_MARK_NOT_SET",
             EngineError::MemConfigIncomplete { .. } => "MEM_CONFIG_INCOMPLETE",
             EngineError::MissingRequiredDescription { .. } => "MISSING_REQUIRED_DESCRIPTION",

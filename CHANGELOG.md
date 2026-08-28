@@ -600,6 +600,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   through that wrapper.
 
 ### Fixed
+- **Folder-workspace CLI mutations carry `write_id` in `--json`.** The
+  standing reason the token exists on every mutation response is that
+  omitting it anywhere would make the response shape depend on the backend —
+  and the CLI's folder arms of `create`, `update`, `rename` and `delete` did
+  exactly that while the MCP filesystem flavour and the CLI's own `relate`
+  and `conflicts` returned it. All four now carry it; a parity test pins the
+  field non-empty across the four operations on a quickstart workspace.
+- **The commit-less flavour stops promising commits.** The lean
+  `memstead_rename` description claimed referrers are rewritten "in one
+  per-mem commit" on a substrate that keeps a change ledger and no commits;
+  the `memstead_mem_delete` description and the CLI's `mem delete` help said
+  "no per-mem commit" without saying for which backend. A new guard walks
+  every lean description and refuses any sentence asserting a commit that
+  neither negates it nor names the mem-repo flavour as its subject — the
+  four `write_id` guards key on the token and were blind to a bare commit
+  claim.
+- **The lean entity read injects `_hash` only into a document that starts
+  with frontmatter.** It previously inserted at the first `---` found
+  anywhere, which on a frontmatter-less rendering would have landed the
+  field inside body text at the first thematic break or fence; the full
+  flavour's starts-with shape is now used on both.
+- **A folder mem's change feed refuses a non-timestamp cursor instead of
+  silently replaying the whole history.** The folder ledger's cursor is an
+  RFC3339 timestamp compared lexically, and a mutation's `write_id` —
+  fixed-width hex minted from a nanosecond clock — sorts below every
+  timestamp, so passing it back as `since` returned the entire history with
+  no error. Now any `since` that is neither empty, nor the empty-tree
+  sentinel, nor RFC3339-parseable refuses with the existing `INVALID_CURSOR`
+  code, on both the unified engine (MCP full flavour and CLI) and the lean
+  filesystem server; the message names the value that IS a cursor. The lean
+  server additionally honours the empty-tree sentinel as "from the
+  beginning" — before, its hex sorted above every timestamp and silently
+  returned an empty window. Callers passing a real timestamp, an empty
+  string, or the sentinel are unaffected; a previously-accepted garbage
+  cursor now refuses instead of answering wrongly.
 - **`INVALID_FIELD_VALUE` and `SECTION_CONTENT_INVALID` are named where the
   schema-conformance vocabulary is listed.** Both are codes the engine can
   produce, and both were missing from the recovery-code lists agents read: an

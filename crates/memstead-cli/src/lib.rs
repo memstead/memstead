@@ -788,9 +788,11 @@ impl CliError {
                 })),
             ),
             // A bad `--since` cursor surfaces the typed `INVALID_CURSOR` (via
-            // `e.code()`) with the untruncated SHA — rather than leaking it
-            // as the `MEM_ERROR` catch-all.
-            InvalidChangesCursor { mem, since } => (
+            // `e.code()`) with the untruncated cursor — rather than leaking
+            // it as the `MEM_ERROR` catch-all. Both variants share the code:
+            // git-backed mems refuse an unknown commit, timestamp-backed
+            // mems refuse a non-RFC3339 `since` (a `write_id` above all).
+            InvalidChangesCursor { mem, since } | InvalidTimestampCursor { mem, since } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem, "since": since })),
             ),

@@ -363,7 +363,7 @@ pub struct DeleteArgs {
 
     /// Optional provenance note (≤280 chars). Captured on the engine
     /// trace surface; surfaces via the outer-repo Stop hook. No
-    /// per-mem commit is produced by delete.
+    /// per-mem commit is produced by delete on any backend.
     #[arg(long)]
     pub note: Option<String>,
 

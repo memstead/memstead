@@ -173,6 +173,9 @@ fn run_filesystem(
             "id": outcome.id.as_ref(),
             "file_path": outcome.file_path,
             "relations_removed": relations_removed,
+            // Backend write identity — response-shape parity with the
+            // MCP filesystem flavour.
+            "write_id": outcome.write_id,
             // Engine-emitted warnings (e.g. `NOTE_MISSING` under
             // `[mutations].require_notes`).
             "warnings": outcome.warnings,

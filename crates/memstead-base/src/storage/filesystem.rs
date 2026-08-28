@@ -651,7 +651,10 @@ fn unique_suffix() -> String {
 /// `pub(crate)` so the in-memory backend mints the same synthetic
 /// write-id shape (UNIX-nanos + counter, hex) the folder backend
 /// produces — both are history-free backends and must hand callers an
-/// identically-shaped opaque cursor.
+/// identically-shaped opaque identity. It is NOT a change cursor:
+/// the change feed's cursor is an RFC3339 timestamp, and passing this
+/// token as `since` refuses with `INVALID_CURSOR` (it would otherwise
+/// sort below every timestamp and replay the whole history).
 pub(crate) fn make_commit_id() -> CommitId {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1262,6 +1265,38 @@ mod tests {
             result.changes[0],
             crate::ops::ChangeEnvelope::Updated { .. }
         ));
+    }
+
+    /// The exact confusion the guard exists for: a mutation's
+    /// `write_id` (fixed-width hex, sorts below every timestamp)
+    /// passed back as `since` must refuse, never silently replay the
+    /// whole history. Garbage refuses on the same rule; the empty
+    /// string and the empty-tree sentinel stay "from the beginning".
+    #[test]
+    fn folder_changes_since_refuses_non_timestamp_cursor() {
+        let tmp = TempDir::new().unwrap();
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Create,
+            "specs--alpha",
+        );
+
+        let write_token = make_commit_id();
+        for bad in [write_token.as_str(), "not-a-timestamp"] {
+            let err = crate::ops::folder_changes_since(tmp.path(), "specs", bad).unwrap_err();
+            match err {
+                BackendError::Other(msg) => {
+                    assert_eq!(msg, format!("INVALID_TS_CURSOR:{bad}"));
+                }
+                other => panic!("expected typed marker, got {other:?}"),
+            }
+        }
+        for from_start in ["", crate::ops::EMPTY_TREE_SHA] {
+            let ok = crate::ops::folder_changes_since(tmp.path(), "specs", from_start).unwrap();
+            assert_eq!(ok.changes.len(), 1, "sentinel '{from_start}' reads all");
+        }
     }
 
     #[test]

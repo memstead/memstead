@@ -1031,17 +1031,18 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     memstead_base::engine::error::RECOGNISED_MUTATION_KEYS,
             })),
         ),
-        // A bad `since` cursor on `memstead_changes_since`. The folder backend
-        // keys `since` off timestamps rather than commit SHAs, so this
-        // arm isn't reached on a filesystem-mem workspace today, but the
-        // variant must be handled to keep the match exhaustive.
-        ref err @ EngineError::InvalidChangesCursor { ref mem, ref since } => {
-            tool_error_with_details(
-                "INVALID_CURSOR",
-                &err.to_string(),
-                Some(serde_json::json!({ "mem": mem, "since": since })),
-            )
-        }
+        // A bad `since` cursor on `memstead_changes_since`. On a
+        // filesystem-mem workspace the live variant is the timestamp one:
+        // the folder ledger keys `since` off RFC3339 timestamps, and a
+        // non-parseable cursor (a mutation's `write_id` above all) refuses
+        // instead of silently replaying the whole history. The git-backed
+        // variant is kept for exhaustiveness.
+        ref err @ (EngineError::InvalidChangesCursor { ref mem, ref since }
+        | EngineError::InvalidTimestampCursor { ref mem, ref since }) => tool_error_with_details(
+            "INVALID_CURSOR",
+            &err.to_string(),
+            Some(serde_json::json!({ "mem": mem, "since": since })),
+        ),
         // Review-mark diff on a markless mem — typed refusal.
         ref err @ EngineError::ReviewMarkNotSet { ref mem } => tool_error_with_details(
             "REVIEW_MARK_NOT_SET",
@@ -1106,11 +1107,14 @@ impl FilesystemMcpServer {
             computed_labelling.as_ref(),
         );
         // Inject `_hash` as the first frontmatter field so callers
-        // can pin it to `expected_hash` on the next mutation.
-        if let Some(idx) = md.find("---\n") {
-            let inject_at = idx + 4;
+        // can pin it to `expected_hash` on the next mutation. Only when
+        // the document STARTS with frontmatter — `find` would locate
+        // the first `---` anywhere (a thematic break, a fence) and
+        // inject into body text; the full flavour's
+        // `inject_md_mem_schema` starts-with shape is the model.
+        if md.starts_with("---\n") {
             let line = format!("_hash: {}\n", entity.content_hash);
-            md.insert_str(inject_at, &line);
+            md.insert_str(4, &line);
         }
 
         // Append `## Relations` when the caller asked for it. Mirrors
@@ -2156,6 +2160,31 @@ impl FilesystemMcpServer {
         };
 
         let since = p.since.trim();
+        // The empty-tree sentinel is the full flavour's first-sync form;
+        // honour it as "from the beginning" here too. Before this arm it
+        // fell through to the lexical filter, where hex starting `4b82…`
+        // sorts ABOVE every `2026-…` timestamp — silently returning an
+        // empty window instead of everything.
+        let since = if since == memstead_base::ops::EMPTY_TREE_SHA {
+            ""
+        } else {
+            since
+        };
+        // The ledger cursor is an RFC3339 timestamp compared lexically.
+        // Anything else — a mutation's `write_id` above all — refuses:
+        // that token sorts below every timestamp and would silently
+        // replay the whole history.
+        if !since.is_empty()
+            && memstead_base::filesystem::changelog::parse_rfc3339_utc(since).is_none()
+        {
+            return tool_error_with_details(
+                "INVALID_CURSOR",
+                &format!(
+                    "changes cursor '{since}' is not an RFC3339 timestamp — pass the `ts` of the last entry you read, or an empty string for a full dump. A mutation's `write_id` is an identity, not a cursor"
+                ),
+                Some(serde_json::json!({ "mem": p.mem, "since": since })),
+            );
+        }
         let mut entries: Vec<serde_json::Value> = Vec::new();
         for line in raw.lines() {
             let trimmed = line.trim();
@@ -4124,6 +4153,48 @@ mod tests {
         assert!(result.is_error.unwrap_or(false));
         let body = result.structured_content.unwrap();
         assert_eq!(body["code"], "ENTITY_NOT_FOUND");
+    }
+
+    /// The lean handler shares the engine's cursor posture: a
+    /// mutation's `write_id` (or any non-RFC3339 string) refuses with
+    /// `INVALID_CURSOR` instead of silently replaying the whole
+    /// history, and the full flavour's empty-tree sentinel reads from
+    /// the beginning instead of silently returning an empty window
+    /// (hex `4b82…` sorts above every `2026-…` timestamp).
+    #[test]
+    fn changes_since_refuses_write_token_and_honours_sentinel() {
+        let tmp = TempDir::new().unwrap();
+        write_workspace(&tmp, "demo");
+        let server = FilesystemMcpServer::from_workspace_root(tmp.path()).unwrap();
+        seed_via_mcp(&server, "A");
+
+        // A write_id off a real mutation response would be exactly this
+        // shape: fixed-width hex, sorting below every timestamp.
+        let token = format!("{:032x}{:016x}", 1_766_000_000_000_000_000u128, 7u64);
+        for bad in [token.as_str(), "not-a-timestamp"] {
+            let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
+                mem: "demo".into(),
+                since: bad.into(),
+                rename_similarity: None,
+                include_notes: false,
+            }));
+            assert!(result.is_error.unwrap_or(false), "'{bad}' must refuse");
+            let body = result.structured_content.unwrap();
+            assert_eq!(body["code"], "INVALID_CURSOR");
+            assert_eq!(body["details"]["since"], bad);
+            let msg = body["message"].as_str().unwrap();
+            assert!(msg.contains("identity, not a cursor"), "{msg}");
+        }
+
+        let result = server.memstead_changes_since(Parameters(ChangesSinceParams {
+            mem: "demo".into(),
+            since: memstead_base::ops::EMPTY_TREE_SHA.into(),
+            rename_similarity: None,
+            include_notes: false,
+        }));
+        assert!(!result.is_error.unwrap_or(false));
+        let body = result.structured_content.unwrap();
+        assert_eq!(body["count"], 1, "sentinel reads from the beginning");
     }
 
     #[test]

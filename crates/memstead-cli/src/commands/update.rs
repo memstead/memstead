@@ -609,6 +609,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     "id": outcome.id.as_ref(),
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
+                    // Backend write identity — response-shape parity with
+                    // the MCP filesystem flavour and the CLI's own
+                    // relate/conflicts commands.
+                    "write_id": outcome.write_id,
                     "modified_sections": outcome.modified_sections.replaced,
                     "modified_metadata_set": outcome.modified_metadata.set,
                     "modified_metadata_unset": outcome.modified_metadata.unset,

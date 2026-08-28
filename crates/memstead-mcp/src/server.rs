@@ -1727,15 +1727,17 @@ fn engine_err_unified(
                 }),
             ),
         ),
-        E::InvalidChangesCursor { mem, since } => tool_error_with_payload(
-            "INVALID_CURSOR",
-            &message,
-            envelope(
+        E::InvalidChangesCursor { mem, since } | E::InvalidTimestampCursor { mem, since } => {
+            tool_error_with_payload(
                 "INVALID_CURSOR",
-                message.clone(),
-                serde_json::json!({ "mem": mem, "since": since }),
-            ),
-        ),
+                &message,
+                envelope(
+                    "INVALID_CURSOR",
+                    message.clone(),
+                    serde_json::json!({ "mem": mem, "since": since }),
+                ),
+            )
+        }
         // Review-mark diff on a markless mem — typed refusal so agents
         // never equate "no mark" with "no changes".
         E::ReviewMarkNotSet { mem } => tool_error_with_payload(

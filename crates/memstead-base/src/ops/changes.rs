@@ -225,8 +225,14 @@ impl BackendChanges {
 /// `Rename` events surface as `Updated` (folder rename doesn't carry
 /// from→to metadata). `Batch` events have no entity id and don't
 /// contribute envelopes. The cursor is an RFC-3339 timestamp; the
-/// [`EMPTY_TREE_SHA`] sentinel and any non-parseable cursor are
-/// treated as "from the beginning". `head` echoes the latest
+/// [`EMPTY_TREE_SHA`] sentinel and the empty string mean "from the
+/// beginning". Any other non-parseable cursor **refuses** with the
+/// typed `INVALID_TS_CURSOR:` marker (lifted by the engine to the
+/// `INVALID_CURSOR` code): the folder ledger's timestamps are compared
+/// lexically, and a mutation's `write_id` — fixed-width hex minted
+/// from a nanosecond clock — sorts below every timestamp, so the old
+/// tolerant reading silently replayed the whole history to exactly
+/// the caller who confused the two. `head` echoes the latest
 /// timestamp seen, falling back to `since`.
 ///
 /// Envelopes are id-only (`title` / `entity_type` are `None`); the
@@ -236,6 +242,15 @@ pub fn folder_changes_since(
     mem: &str,
     since: &str,
 ) -> Result<BackendChanges, BackendError> {
+    if !since.is_empty()
+        && since != EMPTY_TREE_SHA
+        && crate::filesystem::changelog::parse_rfc3339_utc(since).is_none()
+    {
+        // Typed marker, same convention as the git backend's
+        // `COMMIT_NOT_FOUND:` — the engine wrapper lifts it to
+        // `EngineError::InvalidTimestampCursor` (code INVALID_CURSOR).
+        return Err(BackendError::Other(format!("INVALID_TS_CURSOR:{since}")));
+    }
     let log_path = crate::filesystem::changelog::changelog_path(mem_root);
     let raw = match std::fs::read_to_string(&log_path) {
         Ok(s) => s,

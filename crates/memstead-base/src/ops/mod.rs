@@ -209,7 +209,8 @@ pub struct UpdateResult {
     /// or in-memory mem. It is an identity and NOT a change cursor —
     /// `memstead_changes_since` takes a commit SHA on a git-branch mem
     /// and an RFC3339 ledger timestamp on a folder mem, and feeding it
-    /// this token silently replays a folder mem's whole history.
+    /// this token refuses with `INVALID_CURSOR` (before that guard it
+    /// silently replayed a folder mem's whole history).
     /// Empty for dry runs (no write happens).
     #[serde(default)]
     pub write_id: String,

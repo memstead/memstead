@@ -415,6 +415,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     "title": payload.title,
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
+                    // The backend's identity for this write — carried on
+                    // every mutation response on every surface, so the
+                    // response shape never depends on the backend (the
+                    // MCP filesystem flavour already returns it here).
+                    "write_id": outcome.write_id,
                     "warnings": outcome.warnings,
                     "type_guidance": outcome.type_guidance,
                 }))?;

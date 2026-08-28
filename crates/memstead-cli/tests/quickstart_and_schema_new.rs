@@ -2719,3 +2719,79 @@ fn llms_txt_export_works_on_a_filesystem_mem() {
         "a CLI export claims no deployment provenance: {doc}"
     );
 }
+
+// ---------------------------------------------------------------------
+// folder-workspace mutation responses carry the write identity
+// ---------------------------------------------------------------------
+
+/// Every mutation's `--json` response carries a non-empty `write_id` on
+/// a folder workspace — the same field the MCP filesystem flavour
+/// returns. The standing reason the token exists at all is that
+/// omitting it anywhere would make the response shape depend on the
+/// backend; before this test, `create`/`update`/`rename`/`delete`
+/// omitted it on exactly this workspace shape while `relate` and
+/// `conflicts` carried it.
+#[test]
+fn folder_workspace_mutation_json_carries_write_id_everywhere() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("write-id-parity");
+    memstead()
+        .args(["quickstart", "--json"])
+        .arg(&root)
+        .assert()
+        .success();
+
+    let run = |args: &[&str]| -> serde_json::Value {
+        let assert = memstead().current_dir(&root).args(args).assert().success();
+        serde_json::from_str(&stdout_of(assert)).expect("mutation --json emits JSON")
+    };
+
+    let created = run(&[
+        "create",
+        "--json",
+        "--title",
+        "Parity Probe",
+        "--type",
+        "concept",
+        "--section",
+        "definition=A probe entity for the write-id parity test.",
+        "--section",
+        "explanation=It exists so the parity assertion below has a subject.",
+    ]);
+    let id = created["id"].as_str().expect("created id").to_string();
+    let hash = created["_hash"].as_str().expect("created hash").to_string();
+
+    let updated = run(&[
+        "update",
+        "--json",
+        &id,
+        "--expected-hash",
+        &hash,
+        "--section",
+        "definition=The probe, updated.",
+    ]);
+    let renamed = run(&[
+        "rename",
+        "--json",
+        &id,
+        "parity-probe-renamed",
+        "--auto-hash",
+    ]);
+    let new_id = renamed["new_id"].as_str().expect("renamed id").to_string();
+    let deleted = run(&["delete", "--json", &new_id]);
+
+    for (op, payload) in [
+        ("create", &created),
+        ("update", &updated),
+        ("rename", &renamed),
+        ("delete", &deleted),
+    ] {
+        let write_id = payload["write_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{op} --json must carry `write_id`, got: {payload}"));
+        assert!(
+            !write_id.is_empty(),
+            "{op} --json must carry a non-empty write_id"
+        );
+    }
+}

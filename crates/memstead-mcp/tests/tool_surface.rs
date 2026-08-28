@@ -2468,6 +2468,60 @@ fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
     );
 }
 
+/// The filesystem flavour has no commits — its substrate is the
+/// change ledger — yet its descriptions inherited sentences from the
+/// mem-repo flavour that assert one happens ("rewritten in one per-mem
+/// commit"). The four write_id guards all key on the token and are
+/// blind to a bare commit claim, which is how that sentence survived
+/// the 2026-08 rename sweep. Structural rule, not a banned phrase: a
+/// lean-flavour description sentence naming a commit must either negate
+/// it (no / not / never / none) or explicitly speak about the mem-repo
+/// flavour as its subject.
+#[test]
+fn no_filesystem_description_asserts_a_commit_happens() {
+    let mut violations = Vec::new();
+    let mut sentences_judged = 0usize;
+    for (surface, name, desc) in descriptions() {
+        if surface != "lean" {
+            continue;
+        }
+        for sentence in desc.split(". ") {
+            let lower = sentence.to_lowercase();
+            if !lower.contains("commit") {
+                continue;
+            }
+            sentences_judged += 1;
+            let negated = [
+                "no commit",
+                "no per-mem commit",
+                "not a commit",
+                "there are no commits",
+                "no commit history",
+                "never commit",
+                "no commits",
+                "not commits",
+            ]
+            .iter()
+            .any(|n| lower.contains(n));
+            let other_flavour = lower.contains("mem-repo");
+            if !negated && !other_flavour {
+                violations.push(format!(
+                    "lean/{name}: asserts a commit on a substrate that has none — {sentence}"
+                ));
+            }
+        }
+    }
+    assert!(
+        sentences_judged > 0,
+        "no filesystem description mentions commits at all — this check has gone vacuous"
+    );
+    assert!(
+        violations.is_empty(),
+        "commit-claim violations on the commit-less flavour:\n  {}",
+        violations.join("\n  ")
+    );
+}
+
 /// Helper — return the FULL-surface description for one tool. Panics if
 /// the tool is absent (indicates the surface itself has drifted, which
 /// other tests already catch). The load-bearing substring tests below
