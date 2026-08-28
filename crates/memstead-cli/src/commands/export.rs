@@ -422,7 +422,8 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
                 block.push_str(&format!(
                     "\n- **DANGLING_CROSS_MEM_EDGE_IN_EXPORT**: `{}` → `{}` (mem `{}`) — \
                      target lives outside this archive; `memstead install` will reject it unless \
-                     mem `{}` is also present.",
+                     mem `{}` is also present. Re-export with `--self-contained` to drop such \
+                     rows (each reported; body wiki-link prose survives).",
                     e.entity_path, e.target_id, e.target_mem, e.target_mem,
                 ));
             }

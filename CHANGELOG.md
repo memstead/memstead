@@ -38,6 +38,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A hierarchical mem exports under its leaf name.** `export --format mem`
+  on a git-branch mem named with a path (`planning/plan-x`) stamped the
+  full path as the archive identity, which the archive slug grammar
+  refuses — so such mems could never produce a `.mem`. The archive
+  identity is now the leaf segment (`plan-x`), matching the publish
+  contract's documented rule; flat names are unchanged. The export
+  warning for dangling cross-mem edges now also points at
+  `--self-contained` as the remedy.
+
+
 - **The README and the crates' own descriptions speak one register.** The
   README pitched the published crates as what you program against while every
   library crate's crates.io description called itself an internal surface.

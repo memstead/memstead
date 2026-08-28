@@ -262,6 +262,15 @@ fn schema_files_from_memstead_ref(
 /// this for git-branch mounts via the [`memstead_base::GitBranchOps`]
 /// bundle so byte-snapshot consumers (the bridge, future WASM
 /// replicas) treat folder and git-branch backends symmetrically.
+/// The archive identity for a mem name: the LEAF segment
+/// (`published_config_from`'s documented contract). A hierarchical mem
+/// like `planning/plan-x` publishes as `plan-x` — the path is workspace
+/// routing, not mem identity, and the archive format's slug grammar
+/// admits no `/`. Flat names pass through unchanged.
+fn archive_identity(mem_name: &str) -> &str {
+    mem_name.rsplit('/').next().unwrap_or(mem_name)
+}
+
 #[cfg(feature = "git-object-storage")]
 #[allow(clippy::too_many_arguments)]
 pub fn export_mem_from_branch_to_bytes(
@@ -273,7 +282,7 @@ pub fn export_mem_from_branch_to_bytes(
     provenance_bytes: Option<&[u8]>,
     anchors_bytes: Option<&[u8]>,
 ) -> Result<MemExportBytes, MemExportError> {
-    let published = published_config_from(config, mem_name)?;
+    let published = published_config_from(config, archive_identity(mem_name))?;
     let config_bytes = canonical_json(&published)
         .map_err(|e| MemExportError::Canonical(e.to_string()))?
         .into_bytes();
@@ -677,6 +686,18 @@ mod tests {
         let a = std::fs::read(&out1).unwrap();
         let b = std::fs::read(&out2).unwrap();
         assert_eq!(a, b, "mem archive exports must be byte-stable");
+    }
+
+    /// A hierarchical mem name publishes under its leaf — the archive
+    /// slug grammar admits no `/` (graph-plans plan 02, 2026-08-28).
+    #[test]
+    fn archive_identity_is_the_leaf_segment() {
+        assert_eq!(
+            super::archive_identity("planning/plan-lifecycle-demo"),
+            "plan-lifecycle-demo"
+        );
+        assert_eq!(super::archive_identity("aws-patterns"), "aws-patterns");
+        assert_eq!(super::archive_identity("a/b/c"), "c");
     }
 
     #[test]
