@@ -772,15 +772,22 @@ impl Engine {
         // The returned `Vec<Relationship>` is the per-call set of
         // synthesised relations; feed it into the auto-stub warning
         // emission below.
-        let (synthesised_relations, self_link_ignored) =
-            super::synthesise_alias_relations(self, &prev_body_targets, &mut next)?;
+        let alias_outcome = super::synthesise_alias_relations(self, &prev_body_targets, &mut next)?;
+        let synthesised_relations = alias_outcome.emitted;
+        let self_link_ignored = alias_outcome.self_link_ignored;
+        let undeclared_targets: std::collections::HashSet<crate::entity::EntityId> = alias_outcome
+            .undeclared_dropped
+            .iter()
+            .map(|d| d.target.clone())
+            .collect();
+        let undeclared_dropped = alias_outcome.undeclared_dropped;
 
         // Alias-existence invariant: every body wiki-link must be
         // backed by an entry in `entity.relationships`. The validator
         // runs against the *full* post-mutation state (not just the
         // delta), so a mutation that leaves an existing unbacked link
         // in place still fails — forcing cleanup of historical drift.
-        let missing = super::scan_wikilinks_without_relation(&next)?;
+        let missing = super::scan_wikilinks_without_relation(&next, &undeclared_targets)?;
         if !missing.is_empty() {
             return Err(EngineError::WikiLinkWithoutRelation {
                 from_id: id.to_string(),
@@ -1040,6 +1047,17 @@ impl Engine {
         // pass omitted the vacuous self-edge).
         if self_link_ignored {
             warnings.push(WarningHint::SelfLinkIgnored { id: id.clone() });
+        }
+        // A cross-schema body link the alias pass declined for lack of a
+        // cross_mem_relationships declaration: the write succeeded, the
+        // link stays prose — say so, typed.
+        for dropped in undeclared_dropped {
+            warnings.push(WarningHint::CrossSchemaLinkUndeclared {
+                from: id.clone(),
+                target: dropped.target,
+                source_schema: dropped.source_schema,
+                target_schema: dropped.target_schema,
+            });
         }
 
         // Dry-run: compute prospective hash from the in-memory

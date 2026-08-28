@@ -594,17 +594,32 @@ impl Engine {
         // because the parser-side `relationships`-coverage filter has
         // already absorbed them.
         let empty_prev_targets = std::collections::HashSet::new();
-        let (synthesised_relations, self_link_ignored) =
+        let alias_outcome =
             super::synthesise_alias_relations(self, &empty_prev_targets, &mut entity_for_render)?;
-        if self_link_ignored {
+        let synthesised_relations = alias_outcome.emitted;
+        if alias_outcome.self_link_ignored {
             warnings.push(WarningHint::SelfLinkIgnored { id: id.clone() });
+        }
+        let undeclared_targets: std::collections::HashSet<crate::entity::EntityId> = alias_outcome
+            .undeclared_dropped
+            .iter()
+            .map(|d| d.target.clone())
+            .collect();
+        for dropped in alias_outcome.undeclared_dropped {
+            warnings.push(WarningHint::CrossSchemaLinkUndeclared {
+                from: id.clone(),
+                target: dropped.target,
+                source_schema: dropped.source_schema,
+                target_schema: dropped.target_schema,
+            });
         }
 
         // Alias-existence invariant: every body wiki-link must be
         // backed by an entry in `entity.relationships` (the auto-managed
         // `## Relationships` section). Runs unconditionally on every
         // Write-Mem create. See [`scan_wikilinks_without_relation`].
-        let missing = super::scan_wikilinks_without_relation(&entity_for_render)?;
+        let missing =
+            super::scan_wikilinks_without_relation(&entity_for_render, &undeclared_targets)?;
         if !missing.is_empty() {
             return Err(EngineError::WikiLinkWithoutRelation {
                 from_id: id.to_string(),
@@ -6384,6 +6399,134 @@ community:
     /// authoring of the alias type still refuses
     /// RELATION_MANUAL_AUTHORING_FORBIDDEN; a structural rel-type into
     /// the undeclared destination still refuses
+    /// A body wiki-link into a destination schema the source schema
+    /// declares NO cross-mem entry for (and no wildcard): the schema
+    /// legitimately declines the edge — but the author must be TOLD.
+    /// default@1.3.0 declares REFERENCES only toward `software`, so a
+    /// default-mem entity citing a planning-mem entity got inert prose
+    /// where the author expects a citation edge, silently (graph-plans
+    /// 02 grading, 2026-08-28). The write knows it dropped the link, so
+    /// it warns, typed, naming the target and the declaration gap.
+    #[test]
+    fn undeclared_cross_schema_body_link_warns_instead_of_vanishing() {
+        use memstead_schema::workspace_config::CrossLinkValue;
+
+        let tmp = TempDir::new().unwrap();
+        let scratch_dir = tmp.path().join("scratch");
+        let plans_dir = tmp.path().join("plans");
+        std::fs::create_dir_all(&scratch_dir).unwrap();
+        std::fs::create_dir_all(&plans_dir).unwrap();
+
+        let mount = |mem: &str, dir: &std::path::Path, schema: &str, version: (u64, u64, u64)| {
+            crate::workspace::Mount {
+                mem: mem.to_string(),
+                schema: Some(memstead_schema::SchemaRef::new(
+                    schema,
+                    semver::Version::new(version.0, version.1, version.2),
+                )),
+                storage: crate::workspace::MountStorage::Folder {
+                    path: dir.to_path_buf(),
+                },
+                capability: crate::workspace::MountCapability::Write,
+                lifecycle: crate::workspace::MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            }
+        };
+        let mut engine = Engine::from_mounts(vec![
+            (
+                mount("scratch", &scratch_dir, "default", (1, 3, 0)),
+                Box::new(FilesystemMemWriter::new(scratch_dir.clone())) as Box<dyn MemBackend>,
+            ),
+            (
+                mount("plans", &plans_dir, "planning", (0, 4, 0)),
+                Box::new(FilesystemMemWriter::new(plans_dir.clone())) as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        let mut settings = crate::workspace::WorkspaceSettings::default();
+        settings.cross_mem_links.insert(
+            "scratch".to_string(),
+            CrossLinkValue::List(vec!["plans".to_string()]),
+        );
+        engine.set_settings(settings);
+        let (actor, client) = cli_actor();
+
+        let target = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "plans".to_string(),
+                    title: "Target Plan Note".to_string(),
+                    entity_type: "goal".to_string(),
+                    sections: IndexMap::from_iter([
+                        (
+                            "statement".to_string(),
+                            "the plan goal being cited".to_string(),
+                        ),
+                        (
+                            "rationale".to_string(),
+                            "cited from a scratch mem in the repro".to_string(),
+                        ),
+                        (
+                            "success_criteria".to_string(),
+                            "the citation edge exists or the drop is warned".to_string(),
+                        ),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let entry = engine
+            .create_entity(
+                CreateEntityArgs {
+                    anchors: Vec::new(),
+                    mem: "scratch".to_string(),
+                    title: "Session Scratch".to_string(),
+                    entity_type: "memo".to_string(),
+                    sections: IndexMap::from_iter([
+                        (
+                            "claim".to_string(),
+                            "the pilot follows [[plans--target-plan-note]] step by step"
+                                .to_string(),
+                        ),
+                        ("context".to_string(), "exec session scratch".to_string()),
+                    ]),
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    dry_run: false,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .expect("prose citing an undeclared destination schema must not refuse the write");
+
+        // The schema declines the edge — that stays.
+        let stored = engine.get_entity(&entry.id).unwrap();
+        assert!(
+            !stored.relationships.iter().any(|r| r.target == target.id),
+            "default→planning declares no entry, so no edge is emitted: {:?}",
+            stored.relationships
+        );
+        // But the drop is TOLD, typed, naming target and gap.
+        assert!(
+            entry.warnings.iter().any(|w| matches!(
+                w,
+                WarningHint::CrossSchemaLinkUndeclared { target, .. }
+                    if target.as_ref() == "plans--target-plan-note"
+            )),
+            "the dropped body link must surface as a typed warning: {:?}",
+            entry.warnings
+        );
+    }
+
     /// CROSS_MEM_EDGE_NOT_DECLARED; and the workspace policy gate
     /// still fires when the direction is not granted.
     #[test]

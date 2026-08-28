@@ -1265,6 +1265,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNDECLARED_RELATIONSHIP_OPEN",
             "NOTE_MISSING",
             "INLINE_WIKI_LINK_AUTO_STUBBED",
+            "CROSS_SCHEMA_LINK_UNDECLARED",
             // Required-metadata-field warning surfaced on create when the
             // schema does not auto-fill an unsupplied required field.
             "MISSING_REQUIRED_FIELD",
@@ -1349,6 +1350,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Bug 4 (engine-bugs-from-planning-session.md): inline-wiki-link
             // auto-stub warning surfaces alongside the existing typed warnings.
             "INLINE_WIKI_LINK_AUTO_STUBBED",
+            "CROSS_SCHEMA_LINK_UNDECLARED",
             // required_outgoing warning.
             "MISSING_REQUIRED_OUTGOING",
             "required_outgoing",

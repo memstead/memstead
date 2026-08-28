@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **An undeclared cross-schema body link no longer vanishes silently.** A
+  wiki-link into a mem whose schema the source schema declares no
+  `cross_mem_relationships` entry for (a default-schema scratch mem citing
+  a planning mem, found by the graph-plans lifecycle grading) used to
+  EMIT the alias edge at write time and then lose it silently at the next
+  load — the write showed a relation the graph would not keep. The alias
+  pass now respects the declaration at write time: no edge is emitted, the
+  write still succeeds, and a typed `CROSS_SCHEMA_LINK_UNDECLARED` warning
+  names the target and the declaration gap with the schema-side remedy.
+
 ### Added
 
 - **`projection verify --fail-on-inconclusive`.** A completed run whose

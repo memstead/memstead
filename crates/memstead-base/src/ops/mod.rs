@@ -497,6 +497,26 @@ pub enum WarningHint {
     /// the alias pass's other side-effect warnings (`AUTO_STUB_CREATED` /
     /// `INLINE_WIKI_LINK_AUTO_STUBBED`).
     SelfLinkIgnored { id: EntityId },
+    /// A body wiki-link crossed into a destination whose SCHEMA the
+    /// source schema declares no cross-mem entry for (and no wildcard),
+    /// so the alias-synthesis pass emitted no edge — the schema
+    /// legitimately declines it, and the write still succeeds. Before
+    /// this warning the link became inert prose SILENTLY (found by the
+    /// graph-plans 02 grading: a default-schema scratch mem citing a
+    /// planning mem, 2026-08-28); the write knows it dropped the edge,
+    /// so it says so, naming the target and the declaration gap. The
+    /// remedy is schema-side: declare the destination schema (or a
+    /// wildcard) under `cross_mem_relationships`.
+    CrossSchemaLinkUndeclared {
+        /// The entity carrying the link.
+        from: EntityId,
+        /// The link's resolved target.
+        target: EntityId,
+        /// The source mem's schema (`name@version` display form).
+        source_schema: String,
+        /// The target mem's schema name — the missing `to_schema` entry.
+        target_schema: String,
+    },
     /// `memstead_relate` to a cross-mem target whose mem is not (yet)
     /// mounted in the workspace. The cross-mem link policy permits
     /// the edge, so the engine auto-stubs the target as a forward
@@ -1488,6 +1508,20 @@ impl fmt::Display for WarningHint {
                  created/updated normally; remove the `[[{slug}]]` link if it was a mistake",
                 slug = id.name(),
             ),
+            WarningHint::CrossSchemaLinkUndeclared {
+                from,
+                target,
+                source_schema,
+                target_schema,
+            } => write!(
+                f,
+                "{from} body-links {target}, but schema {source_schema} declares no \
+                 cross_mem_relationships entry for schema '{target_schema}' (and no \
+                 wildcard), so NO edge was emitted — the link is prose only. The write \
+                 succeeded. To make such citations real edges, declare '{target_schema}' \
+                 (or a `to_schema: \"*\"` wildcard) under the source schema's \
+                 cross_mem_relationships",
+            ),
             WarningHint::CrossMemTargetMemUncreated {
                 from_mem,
                 to_mem,
@@ -1971,6 +2005,7 @@ impl WarningHint {
             Self::AutoStubCreated { .. } => "AUTO_STUB_CREATED",
             Self::DerivationBaselineRefreshed { .. } => "DERIVATION_BASELINE_REFRESHED",
             Self::SelfLinkIgnored { .. } => "SELF_LINK_IGNORED",
+            Self::CrossSchemaLinkUndeclared { .. } => "CROSS_SCHEMA_LINK_UNDECLARED",
             Self::ParsedRelationInvalid { .. } => "PARSED_RELATION_INVALID",
             Self::ResidualStubForReadOnlyReferrers { .. } => "RESIDUAL_STUB_FOR_READONLY_REFERRERS",
             Self::MemFilesNotDeleted { .. } => "MEM_FILES_NOT_DELETED",
@@ -2430,6 +2465,17 @@ impl WarningHint {
                 "stubs": stubs,
             }),
             Self::SelfLinkIgnored { id } => serde_json::json!({ "id": id }),
+            Self::CrossSchemaLinkUndeclared {
+                from,
+                target,
+                source_schema,
+                target_schema,
+            } => serde_json::json!({
+                "from": from,
+                "target": target,
+                "source_schema": source_schema,
+                "target_schema": target_schema,
+            }),
             Self::CrossMemTargetMemUncreated {
                 from_mem,
                 to_mem,

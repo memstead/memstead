@@ -1397,13 +1397,13 @@ pub(super) fn synthesise_alias_relations(
     engine: &super::Engine,
     prev_body_targets: &std::collections::HashSet<EntityId>,
     next: &mut Entity,
-) -> Result<(Vec<crate::entity::Relationship>, bool), super::EngineError> {
+) -> Result<AliasSynthesisOutcome, super::EngineError> {
     let schema = engine
         .schemas
         .get(next.mem.as_str())
         .expect("schema present for every registered mount");
     let Some(pointer) = schema.alias_target_rel_type().map(str::to_string) else {
-        return Ok((Vec::new(), false));
+        return Ok(AliasSynthesisOutcome::default());
     };
 
     // 1. GC: drop pointer-rel-type relations whose target was a body
@@ -1440,6 +1440,8 @@ pub(super) fn synthesise_alias_relations(
     let mut already_synthesised: std::collections::HashSet<EntityId> =
         std::collections::HashSet::new();
     let mut self_link_ignored = false;
+    let mut undeclared_dropped: Vec<UndeclaredCrossSchemaLink> = Vec::new();
+    let mut undeclared_seen: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     for (section_key, body) in next.sections.iter() {
         let ids = crate::entity::parser::extract_inline_links(body, &next.mem)
             .map_err(|errs| map_wiki_link_errors(section_key, errs))?;
@@ -1458,13 +1460,66 @@ pub(super) fn synthesise_alias_relations(
                 continue;
             }
             validate_cross_mem_add_policy(engine, &next.mem, &target)?;
+            // Schema-law gate: a link into a DIFFERENT schema is an edge
+            // only where the source schema's cross_mem_relationships
+            // declare the pointer rel-type for that destination (exact
+            // entry or wildcard). Emitting anyway wrote an edge the
+            // load-path filter then silently discarded on the next boot
+            // — the write showed a relation the graph would not keep
+            // (graph-plans 02 grading, 2026-08-28). Skip synthesis and
+            // record the drop; the caller warns, typed, so the author
+            // learns the citation is prose only. An unmounted or
+            // schema-less target stays permissive (nothing to judge).
+            if target.mem() != next.mem
+                && let Some(target_ref) = target_schema_ref_for_routing(engine, target.mem())
+                && target_ref.name != schema.id().0
+                && !schema
+                    .cross_mem_entries(&target_ref.name)
+                    .iter()
+                    .any(|entry| entry.definitions.iter().any(|d| d.name == pointer))
+            {
+                if undeclared_seen.insert(target.clone()) {
+                    let (src_name, src_version) = schema.id();
+                    undeclared_dropped.push(UndeclaredCrossSchemaLink {
+                        target,
+                        source_schema: memstead_schema::SchemaRef::new(src_name, src_version)
+                            .as_display(),
+                        target_schema: target_ref.name,
+                    });
+                }
+                continue;
+            }
             let rel = crate::entity::Relationship::new(pointer.clone(), target.clone());
             next.relationships.push(rel.clone());
             already_synthesised.insert(target);
             emitted.push(rel);
         }
     }
-    Ok((emitted, self_link_ignored))
+    Ok(AliasSynthesisOutcome {
+        emitted,
+        self_link_ignored,
+        undeclared_dropped,
+    })
+}
+
+/// One body wiki-link the alias pass declined to turn into an edge
+/// because the source schema declares no cross-mem entry carrying the
+/// pointer rel-type for the target's schema. The caller surfaces each
+/// as a `CROSS_SCHEMA_LINK_UNDECLARED` warning.
+pub(super) struct UndeclaredCrossSchemaLink {
+    pub target: EntityId,
+    pub source_schema: String,
+    pub target_schema: String,
+}
+
+/// What [`synthesise_alias_relations`] did: the relations it emitted
+/// (in body iteration order), whether a self-link was dropped (F11),
+/// and the cross-schema links it declined for lack of a declaration.
+#[derive(Default)]
+pub(super) struct AliasSynthesisOutcome {
+    pub emitted: Vec<crate::entity::Relationship>,
+    pub self_link_ignored: bool,
+    pub undeclared_dropped: Vec<UndeclaredCrossSchemaLink>,
 }
 
 /// Map the first [`crate::entity::id::WikiLinkError`] from a body
@@ -1542,6 +1597,7 @@ pub(super) fn collect_body_link_targets(entity: &Entity) -> std::collections::Ha
 /// surface in the engine.
 pub(super) fn scan_wikilinks_without_relation(
     next: &Entity,
+    exempt: &std::collections::HashSet<EntityId>,
 ) -> Result<Vec<(String, EntityId)>, EngineError> {
     let explicit_targets: std::collections::HashSet<EntityId> = next
         .relationships
@@ -1558,6 +1614,13 @@ pub(super) fn scan_wikilinks_without_relation(
             // backing relation by design and must not trip the
             // unbacked-link refusal here.
             if target == next.id {
+                continue;
+            }
+            // A cross-schema link the alias pass declined for lack of a
+            // declaration is likewise intentionally unbacked: the caller
+            // warns (`CROSS_SCHEMA_LINK_UNDECLARED`) instead of the write
+            // refusing over prose the schema deliberately keeps inert.
+            if exempt.contains(&target) {
                 continue;
             }
             if !explicit_targets.contains(&target)
