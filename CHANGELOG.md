@@ -14,28 +14,53 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   produced two findings an hour apart — the first command a stranger runs, and
   the script that verifies the release those strangers are about to get — with a
   third instance recorded in a workflow comment. The two instances were repaired
-  earlier in this sweep; `scripts/check-release-external-deps.py` plus
-  `scripts/release-external-deps.json` stop the class returning. Every
-  release-path script's external hosts are declared, a script that contacts an
-  undeclared host fails, a declaration naming a host the script no longer
+  earlier in this sweep; a declared-set gate stops the class returning. The
+  gate itself (`scripts/check-release-external-deps.py` and its declaration
+  `scripts/release-external-deps.json`) lives in the private workspace repo
+  that carries this one as a submodule, not here, and every path it names below
+  is relative to that repo — so a reader of this repo alone will not find those
+  two files, and the scripts under `public/scripts/` are the subjects it covers
+  inside this one. Every
+  release-path script's external hosts are declared, a script that contacts a
+  host it has not declared fails (in every shape twenty-nine grades have found;
+  the docstring lists what is known to escape and says plainly that the list is
+  not a proof) — through a URL, a network verb, a classified
+  command, a process substitution, or a `/dev/tcp` redirect target — a declaration naming a host the script no longer
   contacts fails, and a host marked quota-bound with no declared fallback fails.
-  Subjects are DISCOVERED by walking the release path rather than read off the
-  declaration, so a new script that declares nothing fails rather than passing
-  unseen. The second half checks classification: a verification script whose
-  read-failure branch renders a disagreement fails, while one that renders it
-  unmeasured passes. A declared fallback may name that third state rather than
-  credentials — the anonymous read is the measurement, so authenticating it
-  would change what is measured instead of bounding it. Runs as its own job in
-  the repo-hygiene lane beside its sibling declared-set gates, with a
-  `--self-test` whose fixtures run through the same walk the tree does, so a
-  rule that stops working fails the self-test rather than passing it by
-  re-implementation. Every command a shell subject invokes must also be
-  classified as local or as reaching a host, so a tool outside the verb list
-  (`ssh`, `rsync`, `aws`) fails as unclassified rather than passing unseen.
+  Subjects are DISCOVERED, not read off the declaration, and discovery is a
+  CLOSURE: it starts at the release-path roots and adds every script a
+  discovered script names, so a helper the adoption leg invokes is a subject
+  whether or not anyone listed it. That is how `scripts/pin-wasm.sh` (reaches
+  npm) and `scripts/sync-private-locks.sh` entered scope. A `.mjs` or `.py`
+  subject, which the gate cannot read statically at all, is in scope
+  unconditionally and declares its hosts by hand, because silence about a file
+  the check cannot read is the same failure as silence about an undeclared host.
+  One predicate decides whether a subject is read as shell (a shell suffix, or
+  a shell shebang) and whether it counts as unreadable, so a subject can never
+  be discovered and then analyzed for nothing: an unreadable one still has the
+  hosts named in its text compared against its declaration, so declaring a file
+  does not stop the gate looking at it.
+  The second half checks classification: a verification script whose
+  read-failure branch renders a disagreement fails, and so does one that renders
+  it agreement; only unmeasured passes — in every region shape twenty grades
+  have found, which is not the same as every shape shell accepts. A declared fallback may name that third
+  state rather than credentials — the anonymous read is the measurement, so
+  authenticating it would change what is measured instead of bounding it. Runs
+  as its own job in the repo-hygiene lane beside its sibling declared-set gates,
+  with a `--self-test` whose fixtures run through the same walk the tree does,
+  each pinned to the message it expects, so a rule that stops working fails the
+  self-test rather than going red for some other reason.
   **What it does not do:** it reads shell statically, so it cannot prove what a
   script reaches at runtime. A command or a classifier reached through a
-  variable or `eval`, and a `.mjs`/`.py` subject reaching a host through a
-  library call, are outside its reach and named as such in its own docstring.
+  variable, `eval`, or a builtin taking shell source as a string (`trap 'ssh h'
+  EXIT`) is outside its reach — the gate reports nothing there rather than
+  guessing — and a `.mjs`/`.py` subject's declaration is a human's
+  word rather than a reading. A program handed inline to an interpreter is
+  still not read, but it is now REPORTED rather than passed: the call must be
+  acknowledged in the declaration, with the host it reaches or with none. Its docstring lists what is known to escape, and says
+  plainly that the list is what grades have found rather than a proof that
+  nothing else does, and that several entries on it are false positives rather
+  than misses — the same caveat applies to this entry.
 - **Semantic conformance is now a recordable, schema-bound check.** Every schema
   carries two halves: the structural half the write gate validates, and the
   semantic half (each type's `write_rules` / `writing_guidance` prose) that no
