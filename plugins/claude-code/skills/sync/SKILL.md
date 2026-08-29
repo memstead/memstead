@@ -9,11 +9,13 @@ description: >
   fidelity report (coverage, accuracy, freshness) that writes no entity but
   does record findings and a verified baseline, or `--inventory <binding>` for
   the on-demand full stock-take —
-  measure the whole binding, repair to quiescence, report. Not a
+  measure the whole binding, repair to quiescence, report — or `--sweep <mem>`
+  for the standing-claim walk: verify what the mem asserts even where no
+  source-change signal points, entity by entity, section by section. Not a
   version-control operation: changes flow from your source into your mem,
   never the reverse.
-allowed-tools: Bash, Read, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete
-argument-hint: "[--all | <binding> | --verify <binding> | --inventory <binding>]"
+allowed-tools: Bash, Read, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete, mcp__memstead__memstead_check
+argument-hint: "[--all | <binding> | --verify <binding> | --inventory <binding> | --sweep <mem>]"
 ---
 
 # Memstead Sync
@@ -27,7 +29,8 @@ findings and a `#verified` baseline. Read-only on your source; refusals verbatim
 1. `WS="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" root "$(pwd)")"` —
    every `memstead` call below carries `--workspace "$WS"`, never bare cwd.
    Parse `$ARGUMENTS`: a binding id (`<mem>/<stem>`) → step 2. `--verify
-   <binding>` → step 6. `--inventory <binding>` → step 7. No argument? Ask.
+   <binding>` → step 6. `--inventory <binding>` → step 7. `--sweep <mem>` →
+   step 8. No argument? Ask.
    `--all` → run
 
    ```sh
@@ -65,6 +68,28 @@ findings and a `#verified` baseline. Read-only on your source; refusals verbatim
    finding left open**, never guessed; a removal with no retrievable base
    version is **conflict-flagged** — present both sides, never auto-delete.
 
+   Three repair disciplines bind here and in step 7 (each earned its place by
+   measurement — the drift benchmark's run series, 2026-08):
+
+   - **Claim walk on drift, never a gestalt call.** A finding that flags a
+     drifted or stale entity is worked claim by claim: enumerate the entity's
+     checkable assertions (counts, names, versions, paths, enumerations,
+     dates, behavioral claims) section by section and check each against the
+     current source before re-baselining anything. "Reads fine overall" is
+     the measured top miss cause — a re-baselined anchor consumes the drift
+     signal and hides the stale claim from every later pass.
+   - **Post-edit recheck.** After any entity edit, re-read the whole entity
+     once against the source and fix what still contradicts it. Partial
+     repair is invisible to the loop otherwise.
+   - **Section-local reconciliation.** When one section of an entity
+     contradicts another (a normative section asserting X while a dated
+     note, correction, or the frontmatter records not-X), correct the
+     normative text itself, dated, so a reader of that section alone gets
+     the truth — a correction merely sitting next to stale normative text
+     does not heal the entity. History stays history: a done/abandoned
+     record that explicitly frames its stale text as a preserved dated
+     record and routes to existing current truth is exempt.
+
 5. Record what you did so the baseline advances:
 
    ```sh
@@ -98,6 +123,35 @@ findings and a `#verified` baseline. Read-only on your source; refusals verbatim
    never another pass over them, never a silent loop. Keep no state of your
    own between passes — the engine's dispositions are the resume point. Close
    with the final fidelity report presented as in step 6 — verdict first.
+
+8. `--sweep <mem>`: the standing-claim walk — verify what the mem asserts even
+   where no change signal points at it. Works on any mem, bound or not; this
+   is the pass that reaches drift the briefs structurally cannot see (stale
+   claims in unchanged entities, unbound mems, evidence outside the binding
+   scope). For each entity, prioritized by load-bearing frontmatter first
+   (active milestones with past target dates, done certifications, retired
+   statuses over living prose), then entities longest unverified:
+
+   - extract its checkable factual claims section by section and verify each
+     against the workspace's own trees and the graph; correct what the
+     evidence refutes, dated and conservative, via the MCP mutation tools;
+   - apply the step-4 disciplines (claim walk, post-edit recheck,
+     section-local reconciliation);
+   - record the outcome as a check record (`memstead_check`, or
+     `memstead check` on the CLI) — verified-clean and corrected entities
+     alike, so the walk leaves a machine-readable trace and the next sweep
+     can prioritize by staleness of that trace;
+   - cheap wide nets first where the mem is large: grep the mem's backticked
+     paths, UPPER_SNAKE codes, symbols, and command names against the live
+     tree in bulk before walking entities one by one — measured to clear
+     hundreds of identifiers for a handful of calls;
+   - claims only an external system could confirm (a live deployment, a
+     third-party product) are out of scope: note the limit in the check
+     record's method, never guess.
+
+   Never create or delete entities in a sweep; what has no covering entity is
+   reported, not invented. Close with per-mem counts: entities walked,
+   corrected, check-recorded, and the claims left unverifiable with reasons.
 
 ## Rules
 

@@ -7,6 +7,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **The sync skill repairs claim by claim and gains the standing-claim
+  sweep.** Three disciplines proven by the drift-benchmark run series
+  (closure 0-5/42 before, 13-17/42 per pass and 25/42 over three seeds
+  after, zero collateral across 200 control evaluations) now bind the
+  repair path: a drifted entity is worked claim by claim instead of a
+  gestalt materiality call, every edited entity is re-read once against
+  the source, and an entity that contradicts itself gets its normative
+  section reconciled with its own dated corrections. New `--sweep <mem>`
+  mode: the standing-claim walk over any mem, bound or not, verifying
+  what entities assert even where no change signal points, leaving check
+  records as its machine-readable trace.
+
 ## [0.14.0] - 2026-08-29
 
 ### Fixed
