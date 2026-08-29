@@ -11,7 +11,7 @@
       "name": "memstead",
       "source": "./plugins/claude-code",
       "description": "Work with Memstead knowledge graphs from Claude Code — typed, schema-validated markdown graphs your agent reads and grows over MCP. A session that is already running picks the new skills up only after /reload-plugins or a restart; then run /setup once per workspace. Commands for setup, interview, bulk ingest, recall, sync/verify, and graph upkeep — or just talk to Claude; the MCP tools need no slash command.",
-      "version": "0.13.0"
+      "version": "0.14.0"
     }
   ]
 }
