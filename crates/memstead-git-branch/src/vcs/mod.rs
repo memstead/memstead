@@ -46,8 +46,8 @@
 //! Cross-process contention is **out of scope** for this layer. A
 //! second process committing against the same ref hits gix's own
 //! lockfile discipline (`<gitdir>/index.lock`, `<gitdir>/HEAD.lock`,
-//! …), which this module surfaces as [`VcsError::Git`] →
-//! `VCS_ERROR`-coded envelopes. The human-readable message includes
+//! …), which this module surfaces as [`VcsError::Git`]. The
+//! human-readable message includes
 //! retry guidance; the industry norm (libgit2, GitHub Desktop) is to
 //! propagate lockfile errors back to the caller rather than introduce
 //! a custom `flock` layer.

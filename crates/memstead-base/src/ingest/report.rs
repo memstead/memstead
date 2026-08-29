@@ -13,7 +13,8 @@
 //! - **Grain-classed coverage** with tree-anchor fan-out kept on its **own
 //!   axis** — a 1-entity/200-file tree anchor shows as one anchor fanning out
 //!   over 200 files, never laundered into a blended coverage percentage (B1).
-//! - **Anchor-resolution %** over the mem's observed anchors, with `authored`
+//! - **Anchor-resolution %** over the binding's in-scope anchors (per-binding
+//!   scoping — see the struct docs below), with `authored`
 //!   provenance **excluded** from the coverage/accuracy denominators and shown
 //!   as its own bucket (B1).
 //! - **Freshness** vs. both `sync_state` tokens (`#synced` / `#verified`). A

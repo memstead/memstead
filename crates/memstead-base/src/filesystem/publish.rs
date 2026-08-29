@@ -115,8 +115,9 @@ pub fn assemble_archive(workspace_root: &Path) -> Result<Vec<u8>, AssembleError>
     // 2. Resolve the schema source files. Installed packages live under
     //    `.memstead/schemas/` (the fixed `memstead schema install`
     //    destination — same wiring as `Engine::export_mem_to_bytes`);
-    //    the workspace root also enables the `.memstead.cache/schemas/`
-    //    layer. Builtins remain the final fallback.
+    //    builtins remain the final fallback. (The former
+    //    `.memstead.cache/schemas/` layer is retired — see
+    //    memstead-schema/src/source.rs — nothing ever wrote it.)
     let schemas_dir = workspace_root.join(".memstead").join("schemas");
     let schema_files =
         collect_schema_source(Some(workspace_root), Some(&schemas_dir), &schema_ref)?;

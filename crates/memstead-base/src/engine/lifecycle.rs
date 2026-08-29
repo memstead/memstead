@@ -2698,11 +2698,12 @@ impl Engine {
         // knew for this mem — not the current (possibly already
         // drifted) on-disk tip. Reporting the tip would collapse the
         // `changes_since(since=head_before)` range to empty in exactly
-        // the sibling-drift case the recipe targets. Only history-backed
-        // mounts (git-branch) carry a git cursor: folder / archive
-        // backends have no `current_head`, so their `head_before` stays
-        // the empty-tree sentinel that pairs with the equally-empty
-        // `head_after` below.
+        // the sibling-drift case the recipe targets. `current_head` is
+        // backend-defined: git-branch serves a git cursor, the folder
+        // backend serves its change-ledger watermark, and a backend
+        // without a head signal returns None — for those, `head_before`
+        // stays the empty-tree sentinel that pairs with the
+        // equally-empty `head_after` below.
         let tracks_head = self
             .mounts
             .iter()
