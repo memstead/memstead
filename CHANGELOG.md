@@ -19,99 +19,6 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   write still succeeds, and a typed `CROSS_SCHEMA_LINK_UNDECLARED` warning
   names the target and the declaration gap with the schema-side remedy.
 
-### Added
-
-- **`projection verify --fail-on-inconclusive`.** A completed run whose
-  rollup verdict is `inconclusive` — no readable change signal, an empty
-  enumerated scope — can now fail the job itself: exit 6 with the typed
-  `PROJECTION_VERIFY_INCONCLUSIVE`, report rendered first, evaluated
-  after `--fail-on-findings` so a substantive result outranks a
-  blindness report. Opt-in and additive: without the flag an
-  inconclusive run keeps its long-standing exit 0, and the exit contract
-  stays three-valued — CI branches on 6 and reads `.code` to tell which
-  gate fired. Supersedes the verify-in-CI guide's two-step verdict read
-  for opted-in callers (operator decision, 2026-08-28, option c of the
-  exit-code entry; shipped as the graph-plans pilot).
-
-- **The gates brief: `memstead gates`.** The engine renders the standing
-  of every schema-declared `transition_requires_checks` gate: per gated
-  type, the closed entities, and the open ones in dependency order
-  (topological over the schema's acyclic edges, prerequisites first),
-  each with its related-check coverage and the exact unconfirmed
-  entities. The related-set enumeration is the same code the write-time
-  refusal runs, so the brief can never disagree with the gate. Brief
-  family rules apply: shared engine entry point, CLI verb, deliberately
-  no MCP tool.
-
-- **Gated transitions: the `transition_requires_checks` constraint.** A
-  schema can now declare that a write landing a metadata field at a named
-  value requires every entity related via named relationships (incoming or
-  outgoing) to carry a fresh confirming check record — derived
-  verification state `checked_ok`; stale and failed checks do not confirm.
-  Block-tier by default: the unverified transition refuses at write time
-  listing each unconfirmed entity with its derived state; a check that
-  goes stale after the transition surfaces as a standing violation on the
-  health `constraints` axis. Generic by construction (any schema, any enum
-  field, any relation set) — the first consumer is the workspace-local
-  planning schema's completion rule ("`complete` requires a check record
-  on every VERIFIES-linked criterion"). Evaluated in the single shared
-  declared-constraints pass; verdicts ride the check ledger, never an
-  entity field, so the gate cannot be satisfied by editing the entity.
-
-### Changed
-
-- **Dependency refresh across the workspace.** The MCP SDK moves to
-  rmcp 3.1 (from 2.2): the server now models the 2026-07-28 protocol
-  revision, so `tools/list` replies carry the additive
-  `resultType`/`ttlMs`/`cacheScope` fields and tool dispatch returns
-  the MRTR `CallToolResponse` wrapper internally; the served tool
-  surface and every tool's reply body are unchanged. Alongside: gix
-  0.87 (the `tree-editor` feature folded into core; `tree-error`
-  replaces it in the manifest), reqwest 0.13 (`rustls-tls` split into
-  `rustls` + `webpki-roots` + explicit `form`), dirs 6, base64 0.23,
-  and a full `cargo update` of the lockfile. CI actions ride along
-  (setup-node v7, checkout v6 on the npm publish job, install-action
-  current pin).
-
-- **BREAKING (wire): the entity's type is `entity_type` on every read
-  surface.** The MCP entity envelope (and with it the CLI's JSON entity,
-  export, and changes payloads, which share the renderer) served the field
-  as `type` while the wasm `getEntity` has always served the serialized
-  Entity's `entity_type` — the same conceptual read under two spellings,
-  found the hard way by a reader following the published README example.
-  One spelling now: the envelope carries `entity_type`, `memstead status`'s
-  per-type counts carry `entity_type`, and the retired `type` key is gone,
-  not aliased (a wire-shape test pins its absence). Out of scope by design:
-  the frontmatter `type:` key (on-disk storage format, still refused as a
-  read-only metadata key under that name), binding-config `type` (the
-  source's medium — a different concept), and the playground's compact
-  graph dialect (a foreign consumer's contract, retained per its own
-  record). Operator decision 2026-08-28; rides this batch with the
-  `format` gate below.
-
-- **BREAKING (config): the workspace mem config's `format` is modeled and
-  gated.** `<mem>/.memstead/config.json` could carry any `format` value and
-  serde silently dropped it — `"format": 99` verified clean and wrote a
-  `#verified` baseline. The field is now modeled: absent means version 1
-  (the healthy common case), the known published-config versions stay
-  readable (a mounted read-mem's cached config parses through the same
-  struct), and an unknown value refuses loudly at parse and in
-  `check_config`, matching the binding record, `WorkspaceConfig`, and the
-  anchors sidecar. Breaking only for a config carrying a value no engine
-  ever wrote.
-
-- **Exemplar relations are authored in the mutation vocabulary.** A type's
-  `exemplar.relations` entries now take `target:` / `rel_type:` — the same
-  keys `memstead_create` accepts — so the served exemplar and the authoring
-  YAML finally speak one spelling. The retired `to:` / `type:` keys refuse
-  at authoring load (`memstead schema validate`, install) with a rename
-  pointer; sealed content — shipped built-ins, installed workspace schemas —
-  keeps loading with the old keys translated, so no existing package
-  breaks. Executes the convergence rider from the 2026-08-28 ruling
-  "a built-in schema version is minted for meaning, never for spelling".
-
-### Fixed
-
 - **A batch-created entity keeps its author.** The per-entity history
   walk treated a `batch-create` commit as truncation, so every
   batch-authored entity served no `created_by` record and the checks
@@ -196,7 +103,59 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `REPAIR_NOT_NEEDED` on a conformant entity, pointing at
   `memstead relate --remove` for everyday detachment).
 
+- **The sync brief's drifted-anchor recipe now works as written.** The brief
+  told the repairing agent to re-declare a drifted anchor without a hash and
+  let the next verify backfill it — but a hashless re-declare deliberately
+  KEEPS the stored baseline (incremental anchoring depends on that), so the
+  advice cleared nothing: on the 0.13.0 release-readiness pass all 18 drifted
+  flagship anchors stayed drifted until the real reset was found. The brief
+  now states that reset: `anchors_unset` the row and write it fresh in the
+  same update call.
+- **`publish-crates.sh` retries a failed upload and re-checks liveness between
+  attempts.** The 0.13.0 release lost exactly one crate to a transient
+  connection reset from crates.io and failed the whole publish job over it.
+  Each crate now gets three attempts, and before a retry the script asks the
+  registry whether the upload landed server-side despite the client-side
+  error — a live version is success, not a duplicate-publish failure.
+
 ### Added
+
+- **`projection verify --fail-on-inconclusive`.** A completed run whose
+  rollup verdict is `inconclusive` — no readable change signal, an empty
+  enumerated scope — can now fail the job itself: exit 6 with the typed
+  `PROJECTION_VERIFY_INCONCLUSIVE`, report rendered first, evaluated
+  after `--fail-on-findings` so a substantive result outranks a
+  blindness report. Opt-in and additive: without the flag an
+  inconclusive run keeps its long-standing exit 0, and the exit contract
+  stays three-valued — CI branches on 6 and reads `.code` to tell which
+  gate fired. Supersedes the verify-in-CI guide's two-step verdict read
+  for opted-in callers (operator decision, 2026-08-28, option c of the
+  exit-code entry; shipped as the graph-plans pilot).
+
+- **The gates brief: `memstead gates`.** The engine renders the standing
+  of every schema-declared `transition_requires_checks` gate: per gated
+  type, the closed entities, and the open ones in dependency order
+  (topological over the schema's acyclic edges, prerequisites first),
+  each with its related-check coverage and the exact unconfirmed
+  entities. The related-set enumeration is the same code the write-time
+  refusal runs, so the brief can never disagree with the gate. Brief
+  family rules apply: shared engine entry point, CLI verb, deliberately
+  no MCP tool.
+
+- **Gated transitions: the `transition_requires_checks` constraint.** A
+  schema can now declare that a write landing a metadata field at a named
+  value requires every entity related via named relationships (incoming or
+  outgoing) to carry a fresh confirming check record — derived
+  verification state `checked_ok`; stale and failed checks do not confirm.
+  Block-tier by default: the unverified transition refuses at write time
+  listing each unconfirmed entity with its derived state; a check that
+  goes stale after the transition surfaces as a standing violation on the
+  health `constraints` axis. Generic by construction (any schema, any enum
+  field, any relation set) — the first consumer is the workspace-local
+  planning schema's completion rule ("`complete` requires a check record
+  on every VERIFIES-linked criterion"). Evaluated in the single shared
+  declared-constraints pass; verdicts ride the check ledger, never an
+  entity field, so the gate cannot be satisfied by editing the entity.
 
 - **`memstead projection edit` — the general binding-field patch.** The shared
   `pipeline_edit` layer has carried the full author-editable record (patch
@@ -231,22 +190,57 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   wins over flag wins over environment). Over-length values refuse typed
   (`INVALID_IDENTITY`, cap 128 chars); a missing identity is never refused.
 
-### Fixed
+### Changed
 
-- **The sync brief's drifted-anchor recipe now works as written.** The brief
-  told the repairing agent to re-declare a drifted anchor without a hash and
-  let the next verify backfill it — but a hashless re-declare deliberately
-  KEEPS the stored baseline (incremental anchoring depends on that), so the
-  advice cleared nothing: on the 0.13.0 release-readiness pass all 18 drifted
-  flagship anchors stayed drifted until the real reset was found. The brief
-  now states that reset: `anchors_unset` the row and write it fresh in the
-  same update call.
-- **`publish-crates.sh` retries a failed upload and re-checks liveness between
-  attempts.** The 0.13.0 release lost exactly one crate to a transient
-  connection reset from crates.io and failed the whole publish job over it.
-  Each crate now gets three attempts, and before a retry the script asks the
-  registry whether the upload landed server-side despite the client-side
-  error — a live version is success, not a duplicate-publish failure.
+- **Dependency refresh across the workspace.** The MCP SDK moves to
+  rmcp 3.1 (from 2.2): the server now models the 2026-07-28 protocol
+  revision, so `tools/list` replies carry the additive
+  `resultType`/`ttlMs`/`cacheScope` fields and tool dispatch returns
+  the MRTR `CallToolResponse` wrapper internally; the served tool
+  surface and every tool's reply body are unchanged. Alongside: gix
+  0.87 (the `tree-editor` feature folded into core; `tree-error`
+  replaces it in the manifest), reqwest 0.13 (`rustls-tls` split into
+  `rustls` + `webpki-roots` + explicit `form`), dirs 6, base64 0.23,
+  and a full `cargo update` of the lockfile. CI actions ride along
+  (setup-node v7, checkout v6 on the npm publish job, install-action
+  current pin).
+
+- **BREAKING (wire): the entity's type is `entity_type` on every read
+  surface.** The MCP entity envelope (and with it the CLI's JSON entity,
+  export, and changes payloads, which share the renderer) served the field
+  as `type` while the wasm `getEntity` has always served the serialized
+  Entity's `entity_type` — the same conceptual read under two spellings,
+  found the hard way by a reader following the published README example.
+  One spelling now: the envelope carries `entity_type`, `memstead status`'s
+  per-type counts carry `entity_type`, and the retired `type` key is gone,
+  not aliased (a wire-shape test pins its absence). Out of scope by design:
+  the frontmatter `type:` key (on-disk storage format, still refused as a
+  read-only metadata key under that name), binding-config `type` (the
+  source's medium — a different concept), and the playground's compact
+  graph dialect (a foreign consumer's contract, retained per its own
+  record). Operator decision 2026-08-28; rides this batch with the
+  `format` gate below.
+
+- **BREAKING (config): the workspace mem config's `format` is modeled and
+  gated.** `<mem>/.memstead/config.json` could carry any `format` value and
+  serde silently dropped it — `"format": 99` verified clean and wrote a
+  `#verified` baseline. The field is now modeled: absent means version 1
+  (the healthy common case), the known published-config versions stay
+  readable (a mounted read-mem's cached config parses through the same
+  struct), and an unknown value refuses loudly at parse and in
+  `check_config`, matching the binding record, `WorkspaceConfig`, and the
+  anchors sidecar. Breaking only for a config carrying a value no engine
+  ever wrote.
+
+- **Exemplar relations are authored in the mutation vocabulary.** A type's
+  `exemplar.relations` entries now take `target:` / `rel_type:` — the same
+  keys `memstead_create` accepts — so the served exemplar and the authoring
+  YAML finally speak one spelling. The retired `to:` / `type:` keys refuse
+  at authoring load (`memstead schema validate`, install) with a rename
+  pointer; sealed content — shipped built-ins, installed workspace schemas —
+  keeps loading with the old keys translated, so no existing package
+  breaks. Executes the convergence rider from the 2026-08-28 ruling
+  "a built-in schema version is minted for meaning, never for spelling".
 
 ## [0.13.0] - 2026-08-28
 
