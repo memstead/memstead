@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T00:46:11Z
-last_modified: 2026-08-23T00:46:11Z
+last_modified: 2026-08-30T00:24:19Z
 status: accepted
 decided_on: 2026-08-21
 deciders: operator (reasoning-substrate bundle, confirmed 2026-08-23), implementing agent
@@ -19,13 +19,13 @@ First form of the reasoning-substrate wave (engine half of the accountable-reaso
 
 ## Consequences
 - Each new key on the schema definition language is a format-generation event; this form is part of one declared release wave, and the release debt falls due with the wave's close-out plan, days after the last form lands.
-- Until the wave's release tag exists, no built-in schema, example, or scaffold emits the new keys; they live only in test fixtures.
+- Until the wave's release tag existed, no built-in schema, example, or scaffold emitted the new keys; they lived only in test fixtures. The wave released as engine 0.10.0 and that clause has expired: the built-in `obligation` schema now declares `when_field` on a `required_outgoing` block, and the `memstead schema new` scaffold documents the key (verified 2026-08-30).
 - Condition scope is deliberately closed: single field equals single enum value. Conjunctions, negations, comparisons, and section-presence conditions are out of scope.
 - Cardinality stays at_least_one; per-question counts (one response edge per critical question) are not expressible and not claimed.
 - Schemas without the new keys keep byte-identical engine behaviour and responses.
 
 ## Relationships
-- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-five-form-constraint-vocabulary]]
+- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **REFERENCES**: [[engine:schema-definition-format]]
 - **REFERENCES**: [[engine:graph-health-report-surface]]
 
@@ -38,4 +38,4 @@ First form of the reasoning-substrate wave (engine half of the accountable-reaso
 
 ## Notes
 
-Landed 2026-08-23 with reasoning-substrate plan 01; keys recorded under [Unreleased] in the public changelog; released only with the wave (plan 06). Extends form 4 of the five-form constraint vocabulary rather than adding a sixth constraint kind, so the vocabulary's closed kind tag stays closed.
+Landed 2026-08-23 with reasoning-substrate plan 01; the keys shipped with the wave as engine **0.10.0** (public CHANGELOG `## [0.10.0] - 2026-08-23`, whose forward-compatibility note names `when_field` / `when_value`), so they no longer sit under [Unreleased] (verified 2026-08-30). Extends form 4 of the five-form constraint vocabulary rather than adding a sixth constraint kind, so the vocabulary's closed kind tag stays closed.

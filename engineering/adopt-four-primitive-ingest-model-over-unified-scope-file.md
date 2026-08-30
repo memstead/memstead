@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:02Z
-last_modified: 2026-07-13T16:43:02Z
+last_modified: 2026-08-30T00:33:17Z
 status: superseded
 decided_on: 2026-06-17
 deciders: dasboe
@@ -39,4 +39,6 @@ The retired `scope` file carried two unrelated concerns in one shape: *what body
 
 ## Notes
 
-**Superseded in part (E2 projection promotion, 2026-07).** The `projection` + `ingest` split this decision introduced was collapsed into a single versioned *binding* file (one record per source-to-mem obligation, carrying the former projection declaration plus an `operations { build, sync, verify }` block); the flat `.memstead/ingests/` directory was retired and the `refinement` build mode was deleted. The **medium + facet** territory/engagement split this decision established survives unchanged and remains live. The superseding decision is the engine-side “collapse the pipeline into one versioned binding per source-to-mem obligation.”
+**Superseded in part (E2 projection promotion, 2026-07).** The `projection` + `ingest` split this decision introduced was collapsed into a single versioned *binding* file (one record per source-to-mem obligation, carrying the former projection declaration plus an `operations { build, sync, verify }` block); the flat `.memstead/ingests/` directory was retired and the `refinement` build mode was deleted. The immediately superseding decision is the engine-side “collapse the pipeline into one versioned binding per source-to-mem obligation.”
+
+**Fully superseded 2026-07-18; corrected 2026-08-30.** The claim previously made here, that the **medium + facet** territory/engagement split this decision established “survives unchanged and remains live”, is false. “Consolidate the pipeline into one record per pipeline with inline sources” (accepted, 2026-07-18) folded both record kinds into the binding. A pipeline is now **one** record: `.memstead/projections/<mem>/<name>.json` at `version: 2` (`BINDING_VERSION = 2` in `crates/memstead-base/src/binding.rs`), whose inline `sources[]` each carry the medium half (`type` / `pointer` / `change_detection`) and the facet half (`scope` / `engagement` / `preparation`). Medium and facet survive only as the names of a source description's two halves, never as records; `crates/memstead-base/src/pipeline.rs` keeps `Medium` / `Facet` / `Projection` solely as migrate-local legacy parse shapes that no live path constructs. Nothing in the Decision or Consequences above describes a live configuration shape: of the four fixed directories `.memstead/{mediums,facets,projections,ingests}/` only `projections/` remains, and `memstead projection migrate` removes the retired trees in place. Read the consolidation decision for the current model; this record is history.

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-07-13T16:43:04Z
+last_modified: 2026-08-30T00:33:18Z
 status: superseded
 decided_on: 2026-06-08
 deciders: memstead-core
@@ -49,4 +49,8 @@ The earlier pipeline shape conflated three concerns in a single `Scope` record a
 
 ## Notes
 
-The primitives live in `crates/memstead-base/src/pipeline.rs` (`Medium` / `Facet` / `Projection` / `Ingest`). The pipeline is per-mem — each mem declares its own mediums, facets, projections, and ingests. This is the mechanism that produces graphs like the engineering mem itself: an ingest running a projection over a codebase medium.
+**Superseded; corrected 2026-08-30.** No part of this record describes the current pipeline, and none of it should be followed as configuration guidance. Two successive decisions dismantled the four-primitive model: “Collapse the pipeline into one versioned binding per source-to-mem obligation” (2026-07-10) folded the `Ingest` record into the binding's `operations` block and deleted the `refinement` mode, and “Consolidate the pipeline into one record per pipeline with inline sources” (accepted, 2026-07-18) folded the standalone medium and facet records in as well. A pipeline is now **one** record: `.memstead/projections/<mem>/<name>.json` at `version: 2` (`BINDING_VERSION = 2` in `crates/memstead-base/src/binding.rs`), whose inline `sources[]` each carry the medium half (`type` / `pointer` / `change_detection`) and the facet half (`scope` / `engagement` / `preparation`). The `mediums/`, `facets/` and `ingests/` trees are retired; `memstead projection migrate` converts every prior generation in place and removes them.
+
+The named types do still appear in `crates/memstead-base/src/pipeline.rs`, but only as migrate-local legacy parse shapes for the gen-1, gen-2 and v1 conversion legs of `memstead projection migrate`; no live path constructs or reads them. There is no `Ingest` struct in that file at all (`IngestTrigger` survives as the trigger enum of the binding's operations, and a migrate-local `LegacyIngest` lives in `pipeline_store.rs`). The statement that this mechanism “produces graphs like the engineering mem itself” is also false: the engineering mem is graph-authoritative and has no binding under `.memstead/projections/`.
+
+One deferral recorded here did carry forward. `Facet.preparation`, the reserved-but-unimplemented slot, is now `Source.preparation` on the v2 inline source, with the same behaviour: a source naming a preparation the engine's registry does not know is accepted at rest and reported unsupported at run time, never silently skipped.

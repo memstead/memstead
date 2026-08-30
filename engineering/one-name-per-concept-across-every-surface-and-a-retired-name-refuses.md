@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-27T19:26:52Z
-last_modified: 2026-08-27T21:59:30Z
+last_modified: 2026-08-30T00:33:19Z
 authority: accepted
 universality: domain-wide
 tags: wire-surface, naming, mcp, cli, ui-api, migration, engine
@@ -19,6 +19,7 @@ Every machine-facing surface over the engine: the MCP tools on both flavours, th
 - **REFERENCES**: [[agent-first-surface-design]]
 - **GOVERNS**: [[engine:mcp-tool-surface]]
 - **GOVERNS**: [[engine:cli-command-surface]]
+- **REFERENCES**: [[sealed-content-is-read-by-the-same-reader-that-admitted-it]]
 
 ## Justification
 
@@ -34,7 +35,7 @@ A projection built to a FOREIGN consumer's contract keeps that consumer's names,
 The exception is deliberately narrower than it first read. `memstead-cli`'s `EdgeTypeCount` was listed here too, on the ground that an aggregate count row is not an edge a caller can write. That reasoning was too generous: nothing foreign consumes it, so keeping a second name cost a reader something and bought nothing. It was converged on 2026-08-27 and the exception withdrawn. An exception earns its place by naming a consumer whose contract would break, not by arguing the surface is unimportant. The boundary that makes this an exception and not a loophole: a shape a caller SENDS, or one that describes what a caller may send, is governed; a shape rendered for a third-party renderer is not. A projection that starts accepting writes stops being exempt.
 
 
-ONE SURFACE IS KNOWN UNCONVERGED, and it is recorded here as an open item rather than an exception, because nothing about it earns exemption. The schema exemplar's authoring dialect (`ExemplarRelation` in `memstead-schema`, the built-in type YAMLs, and the authoring guide) still spells an edge `to:` / `type:`. This rule's own Scope claims prose and generated docs are governed "because a name that survives only in an example is still a name an agent will copy", and the exemplar is precisely an example an agent copies. The served payload was converged so the copy is accepted; the authoring file was not. What blocks it is mechanical, not principled: the current shipped built-in must validate as authoring content, and its bytes are sealed, so converging the dialect needs a version bump. The engine already has the strict-authoring / sealed-tolerant translate pattern this would use (see `propagating_relationships` in the schema loader). Tracked in `dev/backlog.md`. A reader consulting this principle should know the tree is not yet fully under it.
+THE ONE SURFACE THIS SECTION RECORDED AS UNCONVERGED IS NOW CONVERGED (corrected 2026-08-30). The paragraph that stood here said the schema exemplar's authoring dialect still spelled an edge `to:` / `type:`, and pointed at `dev/backlog.md` for tracking. Both halves have moved. `ExemplarRelation` in `memstead-schema` now carries `target:` and `rel_type:` as its live fields, the same keys `memstead_create` accepts, with `to:` and `type:` demoted to loader-gate sentinels; the authoring path (`memstead schema validate`, install) refuses them with `ExemplarRelationSpellingRetired` and a rename pointer, which is exactly the typed refusal this rule's Statement demands. Sealed content is the remainder and stays by design: the shipped built-in type YAMLs still carry the old keys in their bytes and the loader translates them on the sealed path, because rewriting sealed bytes is forbidden by [[engineering--sealed-content-is-read-by-the-same-reader-that-admitted-it]]. That is the strict-authoring / sealed-tolerant translate pattern the old paragraph predicted would be used, and it landed rather than remaining a plan. The change ships in the `[Unreleased]` section of `public/CHANGELOG.md` ("Exemplar relations are authored in the mutation vocabulary"), executing the convergence rider from the 2026-08-28 ruling, and `dev/backlog.md` no longer carries a tracking entry for it. The tree is under this rule on every governed surface.
 
 ## Consequences
 

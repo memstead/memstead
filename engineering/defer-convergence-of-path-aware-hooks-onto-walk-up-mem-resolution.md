@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-07-13T16:44:00Z
+last_modified: 2026-08-30T00:33:18Z
 status: superseded
 decided_on: 2026-06-08
 deciders: dasboe
@@ -41,4 +41,4 @@ No `.mcp.json` shape a current workspace actually emits carries a `--mem` arg (t
 
 ## Notes
 
-Revisit when the hook-resolution convergence work is scheduled. The deferral rationale lives in the git history of the hook-relocation work; this entity surfaces the choice so the requirement's `violated` status has a recorded cause.
+**Reversed 2026-06-09; corrected 2026-08-30.** The convergence this record deferred was scheduled and done, so nothing in the Decision or Consequences above describes current behaviour. “Converge path-aware hooks onto engine-true workspace resolution” (accepted) put the four path-aware hooks on a shared resolver, `plugins/claude-code/hooks/workspace-resolve-utils.mjs`, which walks up for `.memstead/workspace.toml` (with a `.memstead.toml` fallback for pre-rebuild workspaces) and reads `.memstead/state/mounts.json` for folder-backed mem dirs; it carries its own fixture tests in `workspace-resolve-utils.test.js`. There is no `--mem`-only `.mcp.json` scan and no `./specs` fallback left. The entity-edit and entity-bash guards fire at the tool call on folder-backed workspaces, and `plugin--entity-mutation-must-route-through-the-engine` stands at `verification_status: verified`, not `violated`. Read the convergence decision for the current mechanism; this record is kept only as the recorded cause of the interval during which the requirement stood violated.

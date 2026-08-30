@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:02Z
-last_modified: 2026-07-13T16:43:59Z
+last_modified: 2026-08-30T00:33:17Z
 authority: established
 universality: domain-wide
 tags: plugin, skills, workspace-discovery, front-door, onboarding
@@ -10,7 +10,7 @@ tags: plugin, skills, workspace-discovery, front-door, onboarding
 # Advertised front-door commands serve a fresh non-maintainer workspace
 
 ## Statement
-The plugin's advertised front-door commands (`/ingest`, `/setup`, `/start`, and any slash command a fresh user is invited to run) MUST work on the workspace the shipped `init`/`quickstart` actually produces: a folder-backed workspace carrying only the engine marker `.memstead/workspace.toml`, with no legacy `.memstead.toml` and no dumpable mem-repo. A command that hard-fails with "workspace not found" or a missing-`workspace dump` error on that shape is a broken front door, regardless of working correctly on the maintainer's own mem-repo workspace.
+The plugin's advertised front-door commands (as of 2026-08-30: `/setup`, `/ingest`, `/sync`, `/learn`, `/tidy`, `/interview`, and any slash command a fresh user is invited to run) MUST work on the workspace the shipped `init`/`quickstart` actually produces: a folder-backed workspace carrying only the engine marker `.memstead/workspace.toml`, with no legacy `.memstead.toml` and no dumpable mem-repo. A command that hard-fails with "workspace not found" or a missing-`workspace dump` error on that shape is a broken front door, regardless of working correctly on the maintainer's own mem-repo workspace. (Corrected 2026-08-30: the list previously named `/start`, which the plugin has never shipped and does not ship; the six skills above are the whole advertised surface.)
 
 ## Scope
 Every user-facing skill that discovers or loads the workspace before doing its work â€” the workspace-root walk-up, the plugin-config loader, and any engine-dump consumer sitting behind an advertised command. It does NOT govern internal/maintainer-only tooling or hooks that fire silently, which may assume richer workspace state.
@@ -29,4 +29,6 @@ A command may still degrade its RESULT when workspace data is genuinely absent â
 
 ## Consequences
 
-Workspace discovery accepts the engine marker `.memstead/workspace.toml` as a root (not only the legacy `.memstead.toml`). Loaders that consume the engine `workspace dump` catch its unavailability on a folder-backed workspace and substitute an empty dump, letting the store walk still surface any configured work, rather than aborting the whole command. Both realizations trace to this rule: the ingest workspace-loader's dump-degradation and the ingest front-door assembler's marker-aware root discovery.
+Workspace discovery accepts the engine marker `.memstead/workspace.toml` as a root (not only the legacy `.memstead.toml`). Loaders that consume the engine `workspace dump` catch its unavailability on a folder-backed workspace and substitute an empty dump, letting the store walk still surface any configured work, rather than aborting the whole command.
+
+**Corrected 2026-08-30.** The two realizations this section cited, the ingest workspace-loader's dump-degradation and the ingest front-door assembler's marker-aware root discovery, are no longer plugin code. The ingest skill's `scripts/inject.mjs` is now a thin router: selection, change detection and brief assembly moved into the engine behind `memstead projection brief`, and the hooks' shared `workspace-resolve-utils.mjs` carries the marker-aware walk-up (`.memstead/workspace.toml`, with the legacy `.memstead.toml` accepted as a fallback). The rule is unchanged; what enforces it moved from the skill scripts into the engine and the shared resolver, which is a stronger position, not a weaker one.

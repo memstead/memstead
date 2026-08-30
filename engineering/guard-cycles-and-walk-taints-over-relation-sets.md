@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T01:54:06Z
-last_modified: 2026-08-23T01:54:06Z
+last_modified: 2026-08-30T00:32:30Z
 status: accepted
 decided_on: 2026-08-21
 deciders: operator (reasoning-substrate bundle, confirmed 2026-08-23), implementing agent
@@ -21,11 +21,11 @@ Third form of the reasoning-substrate wave. The 2026-08-21 argument-schema exper
 - One cycle vocabulary: the set refusal reuses RELATIONSHIP_CYCLE and its recovery shape; single-rel-type refusals stay byte-identical, and every consumer surface (MCP servers, CLI) carries the additive fields.
 - A rel-type may appear in at most one set; the loader refuses overlap, single-member and empty sets, and undeclared names.
 - Cycle refusal stays write-time (a cycle is completed by exactly one identifiable write); no health-only mode for the set form.
-- Part of the declared release wave; keys ship with the close-out plan, and until the tag no built-in, example, or scaffold emits them.
+- Part of the declared release wave. Corrected 2026-08-30: the wave shipped. `relationships.acyclic_sets` is released under 0.10.0 (2026-08-23) in the public changelog, so the pre-tag embargo this bullet described has lapsed. No built-in schema declares the keys; the schema scaffold (`memstead schema new`) documents them in its commented template.
 - Schemas without the declarations keep byte-identical responses and behaviour.
 
 ## Relationships
-- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-five-form-constraint-vocabulary]]
+- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **REFERENCES**: [[engine:graph-health-report-surface]]
 - **REFERENCES**: [[engine:schema-definition-format]]
 

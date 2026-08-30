@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T03:10:21Z
-last_modified: 2026-08-23T03:10:21Z
+last_modified: 2026-08-30T00:24:19Z
 status: accepted
 decided_on: 2026-08-21
 deciders: operator (reasoning-substrate bundle, confirmed 2026-08-23), implementing agent
@@ -26,7 +26,7 @@ Fifth and last form of the reasoning-substrate wave. The named limit is delibera
 - Schemas without the declaration keep byte-identical responses everywhere.
 
 ## Relationships
-- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-five-form-constraint-vocabulary]]
+- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **INFORMED_BY**: [[serve-declared-aggregate-signals-as-counts-with-thresholds-and-evidence]]
 - **REFERENCES**: [[engine:graph-health-report-surface]]
 - **REFERENCES**: [[engine:entity-read-projection-surface]]
@@ -42,4 +42,4 @@ Fifth and last form of the reasoning-substrate wave. The named limit is delibera
 
 ## Notes
 
-Landed 2026-08-23 with reasoning-substrate plan 05; keys recorded under [Unreleased] in the public changelog; released only with the wave (plan 06). Shape depth is the max level of the visited-set-bounded breadth-first walk, exact on tree-shaped support.
+Landed 2026-08-23 with reasoning-substrate plan 05; the keys shipped with the wave as engine **0.10.0** (public CHANGELOG `## [0.10.0] - 2026-08-23`, whose forward-compatibility note names `relationships.labelling`), so they no longer sit under [Unreleased]; no built-in schema or example declares the key, only the `memstead schema new` scaffold documents it (verified 2026-08-30). Shape depth is the max level of the visited-set-bounded breadth-first walk, exact on tree-shaped support.

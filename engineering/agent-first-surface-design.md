@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:02Z
-last_modified: 2026-08-18T20:17:46Z
+last_modified: 2026-08-30T00:33:18Z
 authority: established
 universality: domain-wide
 tags: agent-first, mcp, surface-design, ergonomics, primary-consumer, wire-surface, engine
@@ -27,7 +27,7 @@ Governs every surface an agent consumes directly: the [[engine--mcp-tool-surface
 
 ## Justification
 
-Stated as the project's foundational design stance (`AGENTS.md`: "built for LLM agents as the primary consumer... evaluate them from the agent's perspective first"; `VISION.md`: "designed for LLM agents as the primary author and consumer... two layers, two consumer profiles, one shared substrate"). A surface optimised for humans first — verbose prose over structured fields, positional arguments, silent coercion of bad input — costs the agent the three things it is most scarce in: context budget, round-trips, and the ability to self-correct. Optimising the agent path first is therefore not a stylistic preference but the load-bearing product bet.
+Stated as the project's foundational design stance. The workspace constitution (`CLAUDE.md`, Design principle) puts it as "built for LLM agents as the primary consumer, evaluate formats, tool shapes, naming from the agent's perspective first", and `VISION.md` as "designed for LLM agents as the primary author and consumer... Two layers, two consumer profiles, one shared substrate". (Corrected 2026-08-30: the first quotation was attributed here to the open repo's `AGENTS.md`. It is not there. `AGENTS.md` is the public mirror of the workspace constitution and deliberately carries the shorter form, "MCP as the AI agent access layer" plus the MCP tool policy, not the design-principle paragraph. The `VISION.md` half of the citation is verbatim correct.) A surface optimised for humans first, verbose prose over structured fields, positional arguments, silent coercion of bad input, costs the agent the three things it is most scarce in: context budget, round-trips, and the ability to self-correct. Optimising the agent path first is therefore not a stylistic preference but the load-bearing product bet.
 
 ## Exceptions
 

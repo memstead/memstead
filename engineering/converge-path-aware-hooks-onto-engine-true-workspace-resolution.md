@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-07-13T16:44:00Z
+last_modified: 2026-08-30T00:32:28Z
 status: accepted
 decided_on: 2026-06-09
 deciders: dasboe
@@ -20,7 +20,7 @@ The deferral [[engineering--defer-convergence-of-path-aware-hooks-onto-walk-up-m
 ## Consequences
 - The entity-edit and entity-bash guards fire at the tool call on folder-backed workspaces; [[plugin--entity-mutation-must-route-through-the-engine]] returns to `verified`.
 - On git-branch workspaces the resolver yields no folder dirs and the file/shell guards are correctly inert — entities are branch blobs with no working-tree file to edit; mem-repo integrity there rests on [[engineering--engine-owns-mem-repo-state]] and the CI [[plugin--architecture-guard-check-script]].
-- A second engine-true resolver now exists alongside `inject.mjs` and the drift hooks' `.memstead.toml` walk-ups; full convergence of those remains open.
+- The convergence is complete as of 2026-08-30 (corrected here; this bullet used to read that a second resolver stood alongside `inject.mjs` and the drift hooks' `.memstead.toml` walk-ups, with full convergence still open). `workspace-resolve-utils.mjs` is now the only workspace resolver in the plugin: the context-injection hook (`inject-context.mjs`), the realization check, the entity edit and bash guards and `deny-meta-files.mjs` all import it, and `scripts/binary-version.mjs`'s `resolveWorkspaceRootFrom` composes it rather than walking on its own. The `.memstead.toml` walk-up survives only inside the shared resolver, as the legacy-marker arm of `hasWorkspaceMarker`; no separate drift hook remains.
 - The shared resolver carries its own fixture tests (`workspace-resolve-utils.test.js`), so a regression to the fallback behaviour is caught in CI.
 
 ## Relationships

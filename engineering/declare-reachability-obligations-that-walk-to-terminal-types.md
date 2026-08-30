@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T01:20:39Z
-last_modified: 2026-08-23T01:20:39Z
+last_modified: 2026-08-30T00:32:29Z
 status: accepted
 decided_on: 2026-08-21
 deciders: operator (reasoning-substrate bundle, confirmed 2026-08-23), implementing agent
@@ -21,11 +21,11 @@ Second form of the reasoning-substrate wave. `required_outgoing` checks one hop,
 - The sweep pays the walk cost; the write path pays nothing. A reverse adjacency index is built once per sweep, and only when some pinned schema declares an incoming obligation.
 - Warn tier is the ceiling by design; the loader refuses the block promise rather than load-and-downgrade.
 - Condition scope stays closed: reach-a-terminal only. Arbitrary path patterns were rejected; each new pattern must argue itself as its own form.
-- Part of the declared release wave; the keys ship with the wave close-out, and until the tag no built-in, example, or scaffold emits them.
+- Part of the declared release wave. Corrected 2026-08-30: the wave shipped. `must_reach` is released under 0.10.0 (2026-08-23) in the public changelog, so the pre-tag embargo this bullet described has lapsed. No built-in schema declares `must_reach`; the schema scaffold (`memstead schema new`) documents the key in its commented template.
 - Schemas without the form keep byte-identical responses and health output.
 
 ## Relationships
-- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-five-form-constraint-vocabulary]]
+- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **INFORMED_BY**: [[require-an-outgoing-edge-conditionally-on-a-metadata-value]]
 - **REFERENCES**: [[engine:graph-health-report-surface]]
 

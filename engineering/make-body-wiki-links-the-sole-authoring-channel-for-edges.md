@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-07-13T16:44:02Z
+last_modified: 2026-08-30T00:32:30Z
 status: accepted
 decided_on: 2026-06-08
 deciders: memstead-core
@@ -12,13 +12,13 @@ tags: edge-model, wikilink, alias, mutation-path, engine
 # Make body wiki-links the sole authoring channel for edges
 
 ## Decision
-We chose to make body wiki-links `[[target]]` the single authoring channel for typed edges of a schema's `alias_target_rel_type`, with the rendered `## Relationships` section a derived projection of the body link set rather than an independently-authored source. An agent writes `[[X]]` in prose and the engine synthesises the backing relation; explicit hand-authoring of the pointer rel-type is refused (`RELATION_MANUAL_AUTHORING_FORBIDDEN`), and every body wiki-link must be backed by a relation or the mutation is refused (`WIKILINK_WITHOUT_RELATION` for schemas that opt out of the pointer). The mechanism is realized by [[engine--alias-synthesis-pass]].
+We chose to make body wiki-links `[[target]]` the single authoring channel for typed edges of a schema's `alias_target_rel_type`, with the rendered `## Relationships` section a derived projection of the body link set rather than an independently-authored source. An agent writes `[[X]]` in prose and the engine synthesises the backing relation; explicit hand-authoring of the pointer rel-type is refused (`RELATION_MANUAL_AUTHORING_FORBIDDEN`), and every body wiki-link must be backed by a relation or the mutation is refused (`WIKILINK_WITHOUT_RELATION` for schemas that opt out of the pointer). **Amended 2026-08-30 (standing-claim sweep):** one case now neither backs the link nor refuses the write. A wiki-link into a mem whose schema the source schema declares no `cross_mem_relationships` entry for is DROPPED by the alias pass: no edge is emitted, the write succeeds, and a typed `CROSS_SCHEMA_LINK_UNDECLARED` warning names the target and the declaration gap with the schema-side remedy (engine 0.14.0). The prior behaviour emitted the edge at write time and lost it silently at the next load, which is why the refusal-or-back rule was narrowed rather than the load-time drop kept. The mechanism is realized by [[engine--alias-synthesis-pass]].
 
 ## Context
 In a markdown-and-git knowledge graph, prose references and the structured relationship list are two representations of the same edges. If both are independently authored, they drift: an agent updates a wiki-link in prose but forgets the relationship entry, or vice versa, and the graph's link integrity silently degrades. The graph is built for LLM agents as the primary consumer, so the authoring ergonomics and the single-source-of-truth guarantee both had to be resolved at the write path, not left to convention.
 
 ## Consequences
-- The prose body becomes the single source of truth for edges; the `## Relationships` section is regenerated from it on every write, so the two can never diverge.
+- The prose body becomes the single source of truth for edges; the `## Relationships` section is regenerated from it on every write, so the two can never diverge, with one declared exception since engine 0.14.0 (noted 2026-08-30): a body link the alias pass declines for want of a `cross_mem_relationships` declaration stays in the prose with no row in the section, and the write carries a `CROSS_SCHEMA_LINK_UNDECLARED` warning saying so.
 - Agents author edges inline with no separate relate call for the pointer rel-type — fewer round-trips, which the MCP tool policy explicitly optimizes for.
 - Cost: the pointer rel-type can no longer be hand-authored (`RELATION_MANUAL_AUTHORING_FORBIDDEN`), and removing a relation while body links to its target remain is refused unless another relation to that target survives (`RELATION_HAS_BODY_LINKS`) — agents must reason about set-membership semantics rather than treating each edge independently.
 - A schema may opt out of the alias model by omitting `alias_target_rel_type`; such schemas refuse unbacked body wiki-links outright rather than auto-backing them.

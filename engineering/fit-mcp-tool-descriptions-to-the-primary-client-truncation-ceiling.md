@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:04Z
-last_modified: 2026-08-27T19:00:34Z
+last_modified: 2026-08-30T00:32:29Z
 status: accepted
 decided_on: 2026-07-06
 deciders: memstead-core
@@ -19,9 +19,9 @@ Claude Code — the primary MCP consumer through the pre-release window — sile
 
 ## Consequences
 - Descriptions are budgeted: every wording change must keep each tool inside the meta-suite's word band and under the byte ceiling with its backtick refs lintable — enforced by the full build's `tool_surface.rs`.
-- Cross-tool teaching centralises in the byte-pinned server `instructions` string, which the engine surfaces to clients once on connect; an instructions edit is a guarded two-site change (`SERVER_INSTRUCTIONS_COPY` restates the literal and a drift test fails on divergence).
+- Cross-tool teaching centralises in the byte-pinned server `instructions` string, which the engine surfaces to clients once on connect; an instructions edit is a ONE-site change. Corrected 2026-08-30: this bullet used to describe a guarded two-site change against a `SERVER_INSTRUCTIONS_COPY` duplicate. That copy and its extraction-based match test were deliberately retired (agent-trust plan 05); `tool_surface.rs` now reads the live `memstead_mcp::server::SERVER_INSTRUCTIONS` const directly, so there is no second copy to drift.
 - The ceiling is deliberately client-specific — it tracks Claude Code's 2,048-char limit, not a portable standard. A second primary client with a tighter limit would force another pass; that is accepted as a single-primary-consumer, pre-release trade.
-- The guard binds the full flavour only: the lean filesystem surface carries its own shorter, unlinted descriptions and ships no `tool_surface.rs` suite, so an agent on the lean build reads contract text the ceiling never checked.
+- The guard binds BOTH flavours. Corrected 2026-08-30: this bullet used to say the lean filesystem surface carried unlinted descriptions the ceiling never checked. `tool_surface.rs`'s `descriptions()` harvester now enumerates the `full` and `lean` routers alike, so the byte ceiling, the backtick-reference lint and the leading-verb rule cover the lean build's descriptions too.
 
 ## Relationships
 - **REFERENCES**: [[engine:schema-describe-projection-surface]]
@@ -39,4 +39,4 @@ Claude Code — the primary MCP consumer through the pre-release window — sile
 
 ## Notes
 
-A specialisation of [[engineering--agent-first-surface-design]] applied to description sizing, and a sibling of the count-focused [[engineering--mcp-tool-surface-stays-small]] — together they hold the [[engine--mcp-tool-surface]] within the primary consumer's ergonomic limits (small count, un-truncated text). Guard realized in `crates/memstead-mcp/tests/tool_surface.rs` (`descriptions_fit_primary_client_truncation`); the relocated teaching lives in the server `instructions` literal in `crates/memstead-mcp/src/server.rs`.
+A specialisation of [[engineering--agent-first-surface-design]] applied to description sizing, and a sibling of the count-focused [[engineering--mcp-tool-surface-stays-small]] — together they hold the [[engine--mcp-tool-surface]] within the primary consumer's ergonomic limits (small count, un-truncated text). Guard realized in `crates/memstead-mcp/tests/tool_surface.rs` (`descriptions_fit_primary_client_truncation`). Corrected 2026-08-30: the description text is no longer written inline in Rust. Every tool description and both halves of the server instructions live as Markdown files under `crates/memstead-mcp/descriptions/` (a `full/` set and a `filesystem/` set for the lean flavour), pulled in by `include_str!` from `crates/memstead-mcp/src/descriptions.rs` and, for the instructions, into the `SERVER_INSTRUCTIONS` const in `crates/memstead-mcp/src/server.rs`.

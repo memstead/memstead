@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-07-13T16:44:05Z
+last_modified: 2026-08-30T00:33:19Z
 authority: established
 universality: domain-wide
 tags: plugin, skills, ingest, agent-first, single-source-of-truth
@@ -18,17 +18,18 @@ Applies to every prompt-assembling skill in the plugin's skills layer — the pr
 ## Relationships
 - **REFERENCES**: [[plugin:writing-guidance-resolver]]
 - **REFERENCES**: [[plugin:ingest-situation-brief-assembler]]
-- **REFERENCES**: [[plugin:old-ingest-skill]]
 - **GOVERNS**: [[plugin:ingest-situation-brief-assembler]]
 - **GOVERNS**: [[plugin:writing-guidance-resolver]]
 
 ## Justification
 
-The engine, its MCP tools, and its schemas are built for LLM agents as the primary consumer, so their descriptions already are the canonical procedure. A prompt that repeats them is a second source of truth that drifts silently the moment a tool contract or a schema write-rule changes. [[plugin--writing-guidance-resolver]] pulls each mem's schema writing-guidance live, and [[plugin--ingest-situation-brief-assembler]] composes only the run's situation — both are built to read mechanics from the surface rather than freeze them in prose.
+The engine, its MCP tools, and its schemas are built for LLM agents as the primary consumer, so their descriptions already are the canonical procedure. A prompt that repeats them is a second source of truth that drifts silently the moment a tool contract or a schema write-rule changes.
+
+**Rechecked 2026-08-30.** The two plugin-side realizations this section used to cite, [[plugin--writing-guidance-resolver]] and [[plugin--ingest-situation-brief-assembler]], are no longer plugin code: the whole assembly moved into the engine. The `/ingest` skill's prompt is now one line that shells `scripts/inject.mjs`, a router with no selection, backoff or brief-assembly logic of its own; the engine renders the situation brief behind `memstead projection brief`, and a skill that wants a type's prose calls `memstead_schema` with `verbosity: "full"` rather than carrying a resolver. The principle is satisfied more strongly than when it was written, since the single source of truth is now also the single assembler, but the two entities named above describe a plugin layer that has been dissolved into the engine.
 
 ## Exceptions
 
-- The frozen [[plugin--old-ingest-skill]] fallback predates this principle and deliberately hard-codes per-medium procedure in prompt templates. It is retained unchanged as a revert path, not brought into conformance.
+- **Corrected 2026-08-30: this exception has expired.** It carved out a frozen `plugin--old-ingest-skill` fallback that hard-coded per-medium procedure in prompt templates, retained as a revert path. No such skill ships: the plugin's skills are `ingest`, `interview`, `learn`, `setup`, `sync` and `tidy`, and none of them carries a procedure template. Every prompt-assembling surface in the plugin is now under the rule with no carve-out.
 
 ## Consequences
 

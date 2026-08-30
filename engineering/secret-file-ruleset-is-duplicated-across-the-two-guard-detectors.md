@@ -1,7 +1,7 @@
 ---
 type: memo
 created_date: 2026-07-13T16:43:07Z
-last_modified: 2026-07-13T16:43:07Z
+last_modified: 2026-08-30T00:33:20Z
 status: closed
 tags: constraint, observation, security, plugin, hooks
 ---
@@ -35,4 +35,5 @@ The secret-file ruleset — which filenames, extensions, and path segments count
 
 ## Outcome
 
-- Open constraint. Any change to the set of secret files must touch both `guard-secrets-read-utils.mjs` and `guard-secrets-bash-utils.mjs`; verify list parity when either changes.
+- **Was an open constraint until 2026-07-11.** While both detectors shipped, any change to the set of secret files had to touch both `guard-secrets-read-utils.mjs` and `guard-secrets-bash-utils.mjs`, with list parity verified by hand whenever either changed.
+- **Closed 2026-07-11 (plugin diet); corrected here 2026-08-30.** Do not act on the parity instruction above: it names files that no longer exist. Neither `guard-secrets-read-utils.mjs` nor `guard-secrets-bash-utils.mjs` is present in `plugins/claude-code/hooks/`, and no secret-guard detector ships in the plugin at all; the string `guard-secrets` survives in the repo only in `public/CHANGELOG.md`, as the record of the removal. Secrets hygiene is delegated to Claude Code's `permissions.deny`, and [[plugin--agent-must-not-access-secret-files-through-any-tool-surface]], the requirement this constraint served, stands at `verification_status: waived`. There is no ruleset left to keep in sync, so the DRY-drift hazard described in ## Substance is dissolved rather than mitigated.

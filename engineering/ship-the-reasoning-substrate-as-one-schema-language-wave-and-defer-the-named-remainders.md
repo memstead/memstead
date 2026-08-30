@@ -23,7 +23,7 @@ The wave is the engine half of the accountable-reasoning program; each form was 
 - No truth computing landed anywhere in the wave: every form reports structure or refuses writes on structure; nothing scores, weighs, or decides which content is right.
 
 ## Relationships
-- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-five-form-constraint-vocabulary]]
+- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **REFERENCES**: [[engine:schema-definition-format]]
 - **REFERENCES**: [[require-an-outgoing-edge-conditionally-on-a-metadata-value]]
 - **REFERENCES**: [[declare-reachability-obligations-that-walk-to-terminal-types]]

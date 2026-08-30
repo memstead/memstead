@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-08-18T21:26:10Z
+last_modified: 2026-08-30T00:24:19Z
 status: accepted
 decided_on: 2026-05-19
 deciders: dasboe
@@ -12,7 +12,7 @@ tags: plugin
 # Plugin ships under MIT distinct from the engine
 
 ## Decision
-The Claude Code plugin (`plugins/claude-code/`) is licensed under the MIT License, deliberately distinct from the project's default dual MIT-OR-Apache-2.0 and the proprietary terms of the commercial layer (then including the macOS app). The plugin's `LICENSE` file carries the MIT text (Copyright 2026 Björn Bösenberg), and the repo-root licensing map records `plugins/claude-code/` → MIT as one of two folders that deviate from the dual MIT-OR-Apache-2.0 default.
+The Claude Code plugin (`plugins/claude-code/`) is licensed under the MIT License, deliberately distinct from the project's default dual MIT-OR-Apache-2.0 and the proprietary terms of the commercial layer (then including the macOS app). The plugin's `LICENSE` file carries the MIT text (Copyright 2026 Björn Bösenberg), and the repo-root licensing map records `plugins/claude-code/` → MIT. It is now the ONLY folder deviating from the dual MIT-OR-Apache-2.0 default: the second deviating row left the map with the macOS app's 2026-08-18 retirement, so `public/LICENSING.md` carries two rows, the `/` default and this one (verified 2026-08-30).
 
 ## Context
 The project follows an open-core model with a per-folder license map (the repo-root `LICENSING.md` is the authority): the open core — engine, CLI, MCP server, schemas, docs, and the `.mem` format + publish/install client — ships dual **MIT OR Apache-2.0** (the Rust-ecosystem standard, at the user's option); the registry server is the proprietary commercial layer (the macOS app was part of it until its 2026-08-18 retirement); plugins for third-party tools sit between them. A plugin extends someone else's host (Claude Code today, other tools later) and is expected to be copied, forked, and embedded freely — the licensing posture that maximizes ecosystem adoption differs from the posture chosen for the embeddable engine core. The packaging manifest ([[plugin--plugin-packaging-manifest]]) makes the plugin installable but declares no license itself (`plugin.json` carries only name/description/version); the license lives in the folder's `LICENSE` file and the repo-root mapping, not in the manifest descriptors.

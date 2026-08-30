@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T02:38:44Z
-last_modified: 2026-08-23T02:38:44Z
+last_modified: 2026-08-30T00:24:19Z
 status: accepted
 decided_on: 2026-08-21
 deciders: operator (reasoning-substrate bundle, confirmed 2026-08-23), implementing agent
@@ -25,7 +25,7 @@ Fourth form of the reasoning-substrate wave and the operator's originating idea 
 - Schemas without signals keep byte-identical responses on every surface, and the canonical markdown form (anchor hashing, export, parser round-trips) stays signal-free by contract.
 
 ## Relationships
-- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-five-form-constraint-vocabulary]]
+- **INFORMED_BY**: [[declare-unhealthy-to-keep-invariants-through-a-six-form-constraint-vocabulary]]
 - **REFERENCES**: [[engine:graph-health-report-surface]]
 - **REFERENCES**: [[engine:entity-read-projection-surface]]
 
@@ -40,4 +40,4 @@ Fourth form of the reasoning-substrate wave and the operator's originating idea 
 
 ## Notes
 
-Landed 2026-08-23 with reasoning-substrate plan 04; keys and the SIGNAL_THRESHOLD_CROSSED code recorded under [Unreleased] in the public changelog; released only with the wave (plan 06).
+Landed 2026-08-23 with reasoning-substrate plan 04; the keys and the SIGNAL_THRESHOLD_CROSSED code shipped with the wave as engine **0.10.0** (public CHANGELOG `## [0.10.0] - 2026-08-23`, whose forward-compatibility note names `signals`), so they no longer sit under [Unreleased]. The post-tag state of the deferral above is unchanged: no built-in schema or example declares `signals`; only the `memstead schema new` scaffold documents the key (verified 2026-08-30).
