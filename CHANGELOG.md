@@ -30,6 +30,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The sync skill adopts the model-truth campaign's maintenance
+  disciplines.** Corrections are applied silently — no dated stamps or
+  was-wrong narration in normative sections (the measured sediment
+  mechanism: one repair pass had planted 39 dated markers across 27
+  entities; git and the check record carry the archaeology, and the
+  schema's designated history forms stay exempt). The sweep may cite
+  git history as a legitimate source, and cut defects (a fused entity,
+  a missing owner) route to `/remodel` — the sweep reports them, never
+  re-cuts.
 - **The sync skill repairs claim by claim and gains the standing-claim
   sweep.** Three disciplines proven by the drift-benchmark run series
   (closure 0-5/42 before, 13-17/42 per pass and 25/42 over three seeds
