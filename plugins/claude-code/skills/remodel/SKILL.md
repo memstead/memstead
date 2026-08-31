@@ -31,7 +31,9 @@ around.
 ## Steps
 
 1. `WS="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" root "$(pwd)")"` —
-   every `memstead` call carries `--workspace "$WS"`. Parse `$ARGUMENTS`:
+   every `memstead` call carries `--workspace "$WS"` (outside a plugin
+   install, where that script does not exist, let `memstead` resolve
+   the workspace by its own directory walk from cwd). Parse `$ARGUMENTS`:
    `--all` → step 2 over every writable mem, then work the single
    worst-signalling cluster (one round per invocation — loop-friendly);
    nothing signals → report quiescence in one line and stop (under a
@@ -47,20 +49,27 @@ around.
    sidecar and Realization-style path claims); entities with zero
    outgoing relationships; empty definition-test sections (e.g. a
    decision type whose rejected-alternatives section holds nothing);
-   repeat-repair hotspots from the check ledger. Rank candidates by
-   BOTH uncovered mass AND model shape — a fully anchored cluster can
-   still be badly cut. Report the ranking with evidence one line each.
+   repeat-repair hotspots from the check ledger. Fold zero-degree
+   entities into their nearest SUBJECT before ranking — a cluster
+   partition computed from the edge graph drops exactly the entities
+   whose defect is "no edges", hiding the defect the round exists to
+   repair. Rank candidates by BOTH uncovered mass AND model shape — a
+   fully anchored cluster can still be badly cut. Report the ranking
+   with evidence one line each.
 
 3. CONTRACT FIRST. For the chosen cluster's mem, read the full schema
    prose (`memstead_schema`, verbosity full, scoped to the types in
    play), the binding intent, writeGuidance, and subject. The
    contract, not taste, decides every judgment below.
 
-4. TARGET INVENTORY, derived blind. Read the cluster's SOURCE deeply
-   (module docs, public surfaces, versioned formats — the whole
-   cluster, not samples; for graph-authoritative mems the repo and its
-   git history are the source) BEFORE enumerating live entities, and
-   write the target inventory: which entities this cluster needs, in
+4. TARGET INVENTORY, derived blind — by a READ-ONLY SUBAGENT
+   restricted to the contract and the source tree (you ran the scan,
+   so YOUR blindness is spent; the subagent's is not, and it may
+   refute your cluster hypothesis — let it). It reads the cluster's
+   SOURCE deeply (module docs, public surfaces, versioned formats —
+   the whole cluster, not samples; for graph-authoritative mems the
+   repo and its git history are the source) without ever enumerating
+   live entities, and writes the target inventory: which entities this cluster needs, in
    which types, at which grain, with which main relationships — one
    line each with the owned artifacts. Apply the schema's cut rules
    strictly: one entity per obligation/concept, never file-named, the
@@ -83,9 +92,11 @@ around.
    composed — then mechanically verify: every backticked identifier in
    the new body must grep in the cluster's source, zero misses);
    straddles → SPLIT with relationships re-pointed and anchors moved;
-   wrong type → the schema's migration path (where no retype surface
-   exists, report it, do not fake it via delete+create against
-   incoming refs); dissolved subjects → the schema's own
+   wrong type → today this branch REPORTS, always: no surface can
+   retype (`type` is read-only and delete+create breaks incoming
+   refs), so a mis-type diagnosis goes to the storey-2 report AND a
+   `memstead_check` failed-verdict on the entity, so the next round
+   inherits it instead of re-deriving it — never fake a retype; dissolved subjects → the schema's own
    history/supersession forms, never deletion of recorded knowledge;
    substance in catch-alls → relocate to declared sections; maintenance
    narration in normative sections → apply corrections silently (git
@@ -94,9 +105,13 @@ around.
    factual content is preserved or demonstrably false against the
    source. Boundary claims ("the only X", "exactly N") only after
    tracing callers, never inferred. Anchor what you create or move.
+   Edge note: `REFERENCES` forbids manual authoring by design — it is
+   minted by body wiki-links, never declared explicitly; declare only
+   the typed relationships the schema's vocabulary allows.
 
 7. RECONSTRUCTION BRACKET, for a big rebuild (creations plus splits
-   touching a double-digit share of the cluster): BEFORE the rebuild,
+   touching ten PERCENT or more of the cluster's entities — a share,
+   not a count): BEFORE the rebuild,
    derive ~10 service tasks from the SOURCE (questions an agent
    serving the subject must answer), have a fresh read-only subagent
    answer them from the mem alone, score against the source; AFTER
@@ -107,9 +122,14 @@ around.
 8. REPORT AND GATE. Close with: the signal evidence, the inventory
    with adjudication verdicts, every write one line each with its
    derivation, the bracket scores where run, deliberate leaves with
-   grounds, and the storey-2 findings routed to the operator. The
-   rebuild is committed by the engine per write; PUSHING and any
-   cross-repo adoption stay with the operator — present, never push.
+   grounds, and the storey-2 findings routed to the operator.
+   Git-branch mems are committed by the engine per write;
+   FOLDER-BACKED mems land as files plus ledger rows and stay
+   uncommitted — and a rename in ANY mem can rewrite incoming
+   cross-mem links in a folder mem the round never targeted. Name
+   every repo left with uncommitted changes explicitly in the
+   report; PUSHING, committing folder-mem state, and any cross-repo
+   adoption stay with the operator — present, never push.
    Record a `memstead_check` verdict on every entity you verified or
    rebuilt so /sync's sweep prioritizes correctly afterwards.
 
