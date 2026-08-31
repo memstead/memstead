@@ -1132,8 +1132,9 @@ fn render_findings_group(
 /// Render the open-findings block for the sync brief (C2) — the findings
 /// `findings_store.current(key)` returned, grouped by class, each carrying the
 /// conservative repair guidance the reconcile rules (C3) mandate. Empty string
-/// when there are no open findings.
-fn render_open_findings(findings: &[Finding]) -> String {
+/// when there are no open findings. `binding_id` feeds the buildable
+/// `projection exclude` line in the uncovered group's guidance.
+fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
     if findings.is_empty() {
         return String::new();
     }
@@ -1186,13 +1187,23 @@ fn render_open_findings(findings: &[Finding]) -> String {
     );
     // Uncovered — a source artifact with no entity: create only for a clearly-new
     // concept (conservatism rule "no new entities unless clearly-new concept").
-    render_findings_group(
-        &mut lines,
-        "Uncovered — a source artifact with no entity",
+    // The third disposition — deliberately not modeled — routes to `projection
+    // exclude`, the verb whose gate accepts a stable artifact (`advance` gates on
+    // the changed slice, so a stable uncovered artifact is undispositionable
+    // there; three campaign runs hit that wall before this line existed).
+    let uncovered_guidance = format!(
         "An in-scope source artifact has no anchor in the mem. Create an entity for it \
          **only** if it is a clearly-new concept with no existing entity; otherwise \
          extend the entity that already owns the concept, or leave it for a discovery \
-         build.",
+         build. A third answer is legitimate: the artifact is mined and deliberately \
+         warrants no entity. Record that with a rationale — it stops presenting here \
+         from the next brief on:\n\n```bash\nmemstead projection exclude {binding_id} \
+         --exclusions '{{\"<artifact>\": \"<rationale>\"}}'\n```"
+    );
+    render_findings_group(
+        &mut lines,
+        "Uncovered — a source artifact with no entity",
+        &uncovered_guidance,
         &group(FindingClass::Uncovered),
     );
     // Queued — not yet adjudicated: verify owns these, not sync.
@@ -1480,7 +1491,7 @@ pub fn render_sync_brief(
     adopt: bool,
 ) -> String {
     let preface = render_changed_slice(cursor);
-    let open_findings = render_open_findings(findings);
+    let open_findings = render_open_findings(findings, &resolved.name);
     let prune_block = render_prune_proposals(prune);
     let has_work =
         adopt || !preface.is_empty() || !open_findings.is_empty() || !prune_block.is_empty();

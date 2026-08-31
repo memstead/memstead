@@ -776,6 +776,15 @@ fn current_key(
 /// head on its own key). **Read-only** on the destination mem (shared
 /// `&Engine`): no findings recording, no mutation. A binding whose store does
 /// not exist yet yields the key and an empty vec.
+///
+/// The durable authored-exclusion ledger is consulted HERE, not only at
+/// recording time: an `uncovered` finding whose artifact the ledger names is
+/// dropped from the slice, so an exclusion `projection advance` /
+/// `projection exclude` just accepted stops presenting on the very next
+/// brief — without waiting for a verify pass to rewrite the stored batch.
+/// (Recording has consulted the ledger since 2026-08-28; a batch recorded
+/// before an exclusion landed still carried the finding, and three
+/// independent runs read that as a repair that did not take.)
 pub fn current_findings(
     engine: &Engine,
     workspace_root: &Path,
@@ -784,10 +793,22 @@ pub fn current_findings(
 ) -> Result<(FindingKey, Vec<Finding>), FindingsError> {
     let (mem, name) = split_binding_id(&resolved.name)?;
     let key = current_key(engine, workspace_root, binding, resolved);
-    let findings = read_findings_store(workspace_root, &mem, &name)
+    let mut findings = read_findings_store(workspace_root, &mem, &name)
         .map_err(FindingsError::Store)?
         .map(|s| s.current(&key).to_vec())
         .unwrap_or_default();
+    let excluded: BTreeSet<String> =
+        crate::ingest::advance::read_advance_store(workspace_root, &mem, &name)
+            .ok()
+            .flatten()
+            .map(|state| state.exclusions.keys().cloned().collect())
+            .unwrap_or_default();
+    if !excluded.is_empty() {
+        findings.retain(|f| {
+            !(f.class == FindingClass::Uncovered
+                && matches!(&f.target, FindingTarget::Artifact { artifact } if excluded.contains(artifact)))
+        });
+    }
     Ok((key, findings))
 }
 
@@ -4042,5 +4063,128 @@ mod tests {
         // No-flag: the sampled verify over the same binding still runs.
         let sampled = verify_binding(&engine, root, binding, &resolved).unwrap();
         assert_eq!(sampled.binding, "engine/manual");
+    }
+
+    fn sourceless_binding() -> crate::binding::Binding {
+        crate::binding::Binding {
+            version: crate::binding::BINDING_VERSION,
+            intent: None,
+            sources: Vec::new(),
+            reference_mems: Vec::new(),
+            destination_mem: "m".to_string(),
+            deny_paths: Vec::new(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: crate::binding::Operations {
+                build: None,
+                sync: None,
+                verify: None,
+            },
+        }
+    }
+
+    fn uncovered(key: &FindingKey, artifact: &str) -> Finding {
+        Finding {
+            key: key.clone(),
+            facet: "src".to_string(),
+            target: FindingTarget::Artifact {
+                artifact: artifact.to_string(),
+            },
+            class: FindingClass::Uncovered,
+            detail: "source artifact in scope has no anchor in the destination mem".to_string(),
+            created_at: "1".to_string(),
+        }
+    }
+
+    /// An exclusion `projection exclude` just accepted takes effect on the
+    /// VERY NEXT brief read, with no verify pass in between: the stored batch
+    /// still carries the uncovered finding, and `current_findings` drops it
+    /// against the durable exclusion ledger. Non-uncovered findings and
+    /// uncovered artifacts the ledger does not name are untouched.
+    #[test]
+    fn current_findings_drops_ledger_excluded_uncovered_without_a_verify() {
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        let engine = crate::engine::Engine::from_mounts(Vec::new()).unwrap();
+        let binding = sourceless_binding();
+        let resolved = resolve_binding_run("m/s", &binding).unwrap();
+
+        let key = FindingKey {
+            binding_hash: crate::binding::hash_binding(&binding),
+            source_head: String::new(),
+        };
+        let mut store = FindingsStore {
+            binding: "m/s".to_string(),
+            ..Default::default()
+        };
+        store.record(
+            key.clone(),
+            "1".to_string(),
+            vec![uncovered(&key, "docs/a.md"), uncovered(&key, "docs/b.md")],
+        );
+        write_findings_store(root, "m", "s", &store).unwrap();
+
+        // Before the exclusion: both present.
+        let (_, before) = current_findings(&engine, root, &binding, &resolved).unwrap();
+        assert_eq!(before.len(), 2);
+
+        // The exclusion lands in the durable ledger (as `projection exclude`
+        // records it) — no verify rewrites the batch.
+        let state = crate::ingest::advance::AdvanceState {
+            binding: "m/s".to_string(),
+            exclusions: [("docs/a.md".to_string(), "generated; no entity".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        crate::ingest::advance::write_advance_store(root, "m", "s", &state).unwrap();
+
+        let (_, after) = current_findings(&engine, root, &binding, &resolved).unwrap();
+        assert_eq!(after.len(), 1);
+        assert!(matches!(
+            &after[0].target,
+            FindingTarget::Artifact { artifact } if artifact == "docs/b.md"
+        ));
+    }
+
+    /// Findings recorded under a prior `hash(D)` are superseded and never
+    /// surface through `current_findings` — the brief renders the current
+    /// batch alone.
+    #[test]
+    fn current_findings_never_serves_superseded_batches() {
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        let engine = crate::engine::Engine::from_mounts(Vec::new()).unwrap();
+        let binding = sourceless_binding();
+        let resolved = resolve_binding_run("m/s", &binding).unwrap();
+
+        let old_key = key("a-prior-binding-hash", "head0");
+        let cur_key = FindingKey {
+            binding_hash: crate::binding::hash_binding(&binding),
+            source_head: String::new(),
+        };
+        let mut store = FindingsStore {
+            binding: "m/s".to_string(),
+            ..Default::default()
+        };
+        store.record(
+            old_key.clone(),
+            "1".to_string(),
+            vec![uncovered(&old_key, "docs/stale.md")],
+        );
+        store.record(
+            cur_key.clone(),
+            "2".to_string(),
+            vec![uncovered(&cur_key, "docs/live.md")],
+        );
+        write_findings_store(root, "m", "s", &store).unwrap();
+
+        let (_, current) = current_findings(&engine, root, &binding, &resolved).unwrap();
+        assert_eq!(current.len(), 1);
+        assert!(matches!(
+            &current[0].target,
+            FindingTarget::Artifact { artifact } if artifact == "docs/live.md"
+        ));
     }
 }

@@ -53,6 +53,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **An accepted exclusion takes effect on the very next sync brief.** The
+  brief served the last recorded findings batch as-is, so an artifact
+  `projection exclude` had just accepted kept presenting as uncovered
+  until a verify pass rewrote the batch; three independent runs read that
+  as a repair that did not take, and one live run was steered at ~300
+  findings a fresh measurement no longer carried. The brief's findings
+  read now consults the durable exclusion ledger and drops excluded
+  uncovered findings; superseded batches were already structurally
+  excluded and are now pinned by test. The brief's uncovered guidance
+  also gained the missing routing: `projection exclude` is the verb whose
+  gate accepts a stable artifact (`advance` gates on the changed slice),
+  and the brief now prints the buildable command instead of never naming
+  the verb.
+
 - **The plugin's entity-bash guard classifies per target instead of
   command-wide.** The hook blocked any command that mentioned an entity
   file AND matched any write pattern anywhere, so a read piped to a
