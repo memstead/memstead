@@ -53,6 +53,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The plugin's entity-bash guard classifies per target instead of
+  command-wide.** The hook blocked any command that mentioned an entity
+  file AND matched any write pattern anywhere, so a read piped to a
+  scratch path (`grep ... entity.md > /tmp/out`), a compound command
+  containing an `echo`, and read-only git plumbing on entities whose
+  kebab-case names contain words like `install` or `patch` were all
+  refused as mutations (five agents rerouted around the guard in one
+  campaign day). Now a redirect is a block reason only when its target
+  IS an entity file, output-producing verbs (`echo`, `printf`, heredocs)
+  are not write patterns by themselves, and entity paths are blanked
+  before verb matching so a verb inside a filename never counts. Real
+  writes (redirects into entities, `sed -i`, `mv`/`rm`/`cp`, `dd of=`,
+  git `checkout`/`restore`/`reset`) block exactly as before.
+
 - **Published command help catches up with the shipped surface.** The
   `projection` command tree's own docs said "five leaves" while nine ship;
   the top-level help now lists all nine verbs. `memstead status` printed a

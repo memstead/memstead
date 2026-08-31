@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { referencesEntityFile, isWriteCommand, checkBashCommand, escapeRegex } from './guard-entity-bash-utils.mjs';
+import { referencesEntityFile, redirectsIntoEntityFile, isWriteCommand, checkBashCommand, escapeRegex } from './guard-entity-bash-utils.mjs';
 
 describe('escapeRegex', () => {
   it('escapes special regex characters', () => {
@@ -64,16 +64,30 @@ describe('referencesEntityFile', () => {
   });
 });
 
+describe('redirectsIntoEntityFile', () => {
+  it('detects output redirect into an entity file', () => {
+    assert.ok(redirectsIntoEntityFile('echo test > specs/domain/entity.md', 'specs'));
+  });
+
+  it('detects append redirect into an entity file', () => {
+    assert.ok(redirectsIntoEntityFile('echo test >> specs/domain/entity.md', 'specs'));
+  });
+
+  it('detects heredoc with redirect into an entity file', () => {
+    assert.ok(redirectsIntoEntityFile('cat <<EOF > specs/domain/entity.md', 'specs'));
+  });
+
+  it('ignores a redirect to a non-entity target', () => {
+    assert.ok(!redirectsIntoEntityFile('grep foo specs/domain/entity.md > /tmp/out.txt', 'specs'));
+  });
+
+  it('ignores a redirect to a non-entity .md', () => {
+    assert.ok(!redirectsIntoEntityFile('echo test > specs/README.md', 'specs'));
+  });
+});
+
 describe('isWriteCommand', () => {
   // Should detect as write
-  it('detects output redirect >', () => {
-    assert.ok(isWriteCommand('echo test > file.md'));
-  });
-
-  it('detects append redirect >>', () => {
-    assert.ok(isWriteCommand('echo test >> file.md'));
-  });
-
   it('detects sed -i', () => {
     assert.ok(isWriteCommand('sed -i "" s/foo/bar/ file.md'));
   });
@@ -102,12 +116,19 @@ describe('isWriteCommand', () => {
     assert.ok(isWriteCommand('git restore file.md'));
   });
 
-  it('detects echo', () => {
-    assert.ok(isWriteCommand('echo "content"'));
+  // Should NOT detect as write: output-producing commands touch no file
+  // without a redirect, and the redirect is tested against its real target
+  // by redirectsIntoEntityFile.
+  it('does not treat bare echo as a write', () => {
+    assert.ok(!isWriteCommand('echo "content"'));
   });
 
-  it('detects heredoc', () => {
-    assert.ok(isWriteCommand('cat <<EOF'));
+  it('does not treat printf as a write', () => {
+    assert.ok(!isWriteCommand('printf "%s" content'));
+  });
+
+  it('does not treat a bare heredoc as a write', () => {
+    assert.ok(!isWriteCommand('cat <<EOF'));
   });
 
   // Should NOT detect as write
@@ -235,6 +256,46 @@ describe('checkBashCommand', () => {
   it('allows write to underscore .md in specs/', () => {
     const result = checkBashCommand('echo test > specs/domain/my_notes.md', memDir);
     assert.equal(result.action, 'allow');
+  });
+
+  // Regression: reads that share a command with output-producing verbs or
+  // redirect to scratch paths (model-truth campaign, five agents rerouting)
+  it('allows a read of an entity file redirected to a scratch path', () => {
+    const result = checkBashCommand('grep -n foo specs/test-core/spec-entity.md > /tmp/hits.txt', memDir);
+    assert.equal(result.action, 'allow');
+  });
+
+  it('allows a compound command reading an entity beside an echo', () => {
+    const result = checkBashCommand('echo "---"; cat specs/test-core/spec-entity.md', memDir);
+    assert.equal(result.action, 'allow');
+  });
+
+  it('still blocks a heredoc redirected into an entity file', () => {
+    const result = checkBashCommand('cat <<EOF > specs/test-core/spec-entity.md', memDir);
+    assert.equal(result.action, 'block');
+  });
+
+  // Regression: write verbs INSIDE entity filenames (drift-benchmark C0:
+  // `git show` / `cat-file` on names containing "install" / "patch" blocked
+  // while byte-identical commands on other entities passed)
+  it('allows git show on an entity whose name contains a write verb', () => {
+    const result = checkBashCommand('git show HEAD:specs/domain/install-guide.md', memDir);
+    assert.equal(result.action, 'allow');
+    assert.equal(checkBashCommand('git show abc123 -- specs/domain/patch-notes.md', memDir).action, 'allow');
+  });
+
+  it('allows cat of an entity whose name contains a write verb', () => {
+    assert.equal(checkBashCommand('cat specs/domain/install-guide.md', memDir).action, 'allow');
+    assert.equal(checkBashCommand('cat specs/domain/dd-conventions.md', memDir).action, 'allow');
+  });
+
+  it('still blocks a real write to a verb-named entity', () => {
+    assert.equal(checkBashCommand('rm specs/domain/install-guide.md', memDir).action, 'block');
+    assert.equal(checkBashCommand('echo x > specs/domain/install-guide.md', memDir).action, 'block');
+  });
+
+  it('blocks dd writing to an entity via of=', () => {
+    assert.equal(checkBashCommand('dd if=/dev/zero of=specs/domain/entity.md', memDir).action, 'block');
   });
 
   // Edge cases
