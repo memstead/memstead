@@ -75,6 +75,16 @@ pub struct Args {
     /// Ignored by every other format.
     #[arg(long = "base-url", value_name = "URL")]
     pub base_url: Option<String>,
+
+    /// Opt extra per-entity content into the `--format json` document
+    /// (comma-separated). Keys: `anchors` — each entity envelope gains
+    /// an `anchors` array with its stored provenance anchors, so the
+    /// file-to-entity map a carving or sync pass starts from is one
+    /// export instead of one `memstead anchors <id>` per entity. An
+    /// unknown key refuses naming the allowed set; refused for every
+    /// other format.
+    #[arg(long, value_delimiter = ',', value_name = "KEY")]
+    pub include: Vec<String>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -95,6 +105,14 @@ pub enum Format {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    if !args.include.is_empty() && !matches!(args.format, Format::Json) {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--include applies only to --format json",
+        )
+        .into());
+    }
     if matches!(args.format, Format::Json) {
         return run_json(ctx, args);
     }
@@ -159,6 +177,25 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .into());
     }
 
+    // Include-key validation — one key today; an unknown key refuses
+    // naming the allowed set rather than silently exporting less than
+    // the caller asked for.
+    const JSON_INCLUDE_KEYS: &[&str] = &["anchors"];
+    for key in &args.include {
+        if !JSON_INCLUDE_KEYS.contains(&key.as_str()) {
+            return Err(CliError::new(
+                ExitKind::Validation,
+                "INVALID_INPUT",
+                format!(
+                    "unknown --include key {key:?} — allowed: {}",
+                    JSON_INCLUDE_KEYS.join(", ")
+                ),
+            )
+            .into());
+        }
+    }
+    let include_anchors = args.include.iter().any(|k| k == "anchors");
+
     let cli_engine = ctx.cli_engine()?;
     let engine = cli_engine.base();
 
@@ -215,7 +252,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 let outgoing = engine.store().outgoing(&entity.id);
                 // Export is a canonical-form surface — computed
                 // signals are a serving projection and stay out.
-                memstead_base::render::build_entity_envelope(
+                let mut envelope = memstead_base::render::build_entity_envelope(
                     entity,
                     tokens,
                     None,
@@ -226,7 +263,20 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     None,
                     None,
                     None,
-                )
+                );
+                // `--include anchors`: the stored provenance anchors ride
+                // each envelope, so the file-to-entity map a carving pass
+                // starts from is one export instead of one `memstead
+                // anchors <id>` per entity. Canonical stored form, no
+                // live resolution — this stays a pure read.
+                if include_anchors && let Some(obj) = envelope.as_object_mut() {
+                    let anchors = engine.entity_anchors(&entity.id);
+                    obj.insert(
+                        "anchors".to_string(),
+                        serde_json::to_value(&anchors).unwrap_or(serde_json::Value::Null),
+                    );
+                }
+                envelope
             })
             .collect();
 

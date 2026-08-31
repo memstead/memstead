@@ -1,5 +1,5 @@
 //! `memstead check` — record a check of one entity (agent-trust
-//! plan 14).
+//! plan 14), or a batch of checks from a file.
 //!
 //! Mirrors the MCP `memstead_check` tool 1:1. A check is the
 //! engine-recorded act of verification: verdict from the closed
@@ -9,11 +9,19 @@
 //! workspace's append-only check ledger. Checking mutates nothing:
 //! no entity write, no mem commit. Derived check state is served by
 //! `memstead entity <id> --provenance`.
+//!
+//! `--from <file>` records many checks in ONE engine boot — the batch
+//! family's contract applies: every entry is validated up front
+//! (verdict and kind vocabulary, entity existence) and any invalid
+//! entry refuses the WHOLE batch naming every failing entry; nothing
+//! is recorded on a refusal. The need is measured, not hypothetical:
+//! one campaign run paid 242 engine boots for 242 verdicts.
 
 use clap::Parser;
 use memstead_base::EntityId;
 use memstead_base::check::{CHECK_KINDS, CheckKind, VERDICTS, Verdict};
 use memstead_base::vcs::Actor;
+use serde::Deserialize;
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -22,16 +30,17 @@ use crate::setup::CliContext;
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Full entity id (`mem--slug`) of the entity that was checked.
-    pub id: String,
+    #[arg(required_unless_present = "from", conflicts_with = "from")]
+    pub id: Option<String>,
 
     /// The verdict: `ok` | `failed`. The vocabulary is closed —
     /// nuance goes in `--method` or in process-mem entities.
-    #[arg(long)]
-    pub verdict: String,
+    #[arg(long, required_unless_present = "from", conflicts_with = "from")]
+    pub verdict: Option<String>,
 
     /// Free-text method note — how the check was performed. For a
     /// conformance check, name the judging model here.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "from")]
     pub method: Option<String>,
 
     /// The check kind: `verification` (default — "I checked this
@@ -40,25 +49,45 @@ pub struct Args {
     /// schema pin into the record, and the verdict goes stale when
     /// the content hash moves OR the pin changes). The vocabulary is
     /// closed.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "from")]
     pub kind: Option<String>,
+
+    /// Record a batch of checks from a JSON file in one engine boot:
+    /// `{"checks": [{"id": "...", "verdict": "ok", "method": "...",
+    /// "kind": "..."}, ...]}` — `method` and `kind` optional per entry,
+    /// mirroring the single form. All-or-nothing: any invalid entry
+    /// (unknown verdict or kind, missing entity) refuses the whole
+    /// batch and names EVERY failing entry; nothing is recorded.
+    #[arg(long, value_name = "PATH")]
+    pub from: Option<std::path::PathBuf>,
 }
 
-pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let Some(verdict) = Verdict::from_wire(&args.verdict) else {
-        return Err(CliError::new(
-            ExitKind::Validation,
-            "INVALID_VERDICT",
-            format!(
-                "unknown verdict {:?} — the vocabulary is: {}",
-                args.verdict,
-                VERDICTS.join(", ")
-            ),
-        )
-        .into());
-    };
-    let kind = match args.kind.as_deref() {
-        None => CheckKind::Verification,
+/// The `--from` file payload. `deny_unknown_fields` on both levels so a
+/// typo'd key refuses loudly instead of silently dropping data — the
+/// batch family's posture.
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct BatchPayload {
+    checks: Vec<BatchEntry>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct BatchEntry {
+    id: String,
+    verdict: String,
+    #[serde(default)]
+    method: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+}
+
+/// Parse a wire kind string, `None` input meaning the default
+/// verification kind. Shared by the single and batch forms so the two
+/// cannot drift.
+fn parse_kind(kind: Option<&str>) -> Result<CheckKind, CliError> {
+    match kind {
+        None => Ok(CheckKind::Verification),
         Some(s) => CheckKind::from_wire(s).ok_or_else(|| {
             CliError::new(
                 ExitKind::Validation,
@@ -68,9 +97,40 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     CHECK_KINDS.join(", ")
                 ),
             )
-        })?,
-    };
-    let id = EntityId::canonical(&args.id);
+        }),
+    }
+}
+
+fn parse_verdict(verdict: &str) -> Result<Verdict, CliError> {
+    Verdict::from_wire(verdict).ok_or_else(|| {
+        CliError::new(
+            ExitKind::Validation,
+            "INVALID_VERDICT",
+            format!(
+                "unknown verdict {verdict:?} — the vocabulary is: {}",
+                VERDICTS.join(", ")
+            ),
+        )
+    })
+}
+
+pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    if let Some(path) = &args.from {
+        return run_batch(ctx, path);
+    }
+    // The single form: clap guarantees id + verdict are present when
+    // `--from` is absent.
+    let id_arg = args
+        .id
+        .as_deref()
+        .expect("clap: id required without --from");
+    let verdict_arg = args
+        .verdict
+        .as_deref()
+        .expect("clap: verdict required without --from");
+    let verdict = parse_verdict(verdict_arg)?;
+    let kind = parse_kind(args.kind.as_deref())?;
+    let id = EntityId::canonical(id_arg);
     let mut engine = ctx.cli_engine()?.into_base();
     let client = crate::setup::cli_client_id();
     let record = engine
@@ -111,5 +171,141 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         state.as_str(),
         record.role
     ));
+    Ok(())
+}
+
+/// The `--from` batch: parse, validate EVERY entry, refuse atomically on
+/// any failure, then record all entries against one booted engine.
+fn run_batch(ctx: &CliContext, path: &std::path::Path) -> anyhow::Result<()> {
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        CliError::new(
+            ExitKind::Generic,
+            "INVALID_INPUT",
+            format!("cannot read --from file {}: {e}", path.display()),
+        )
+    })?;
+    let payload: BatchPayload = serde_json::from_str(&raw).map_err(|e| {
+        CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "--from payload is not the documented shape ({e}); expected \
+                 {{\"checks\": [{{\"id\", \"verdict\", \"method\"?, \"kind\"?}}, …]}}"
+            ),
+        )
+    })?;
+    if payload.checks.is_empty() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--from payload carries no checks — an empty batch records nothing",
+        )
+        .into());
+    }
+
+    let mut engine = ctx.cli_engine()?.into_base();
+
+    // Validate everything before recording anything — any failure
+    // refuses the whole batch, naming every failing entry (the batch
+    // family contract).
+    let mut parsed: Vec<(EntityId, Verdict, CheckKind, Option<String>)> = Vec::new();
+    let mut failures: Vec<serde_json::Value> = Vec::new();
+    for (i, entry) in payload.checks.iter().enumerate() {
+        let id = EntityId::canonical(&entry.id);
+        let mut entry_errors: Vec<serde_json::Value> = Vec::new();
+        let verdict = match parse_verdict(&entry.verdict) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                entry_errors.push(serde_json::json!({
+                    "code": "INVALID_VERDICT",
+                    "message": e.to_string(),
+                }));
+                None
+            }
+        };
+        let kind = match parse_kind(entry.kind.as_deref()) {
+            Ok(k) => Some(k),
+            Err(e) => {
+                entry_errors.push(serde_json::json!({
+                    "code": "INVALID_CHECK_KIND",
+                    "message": e.to_string(),
+                }));
+                None
+            }
+        };
+        let exists = engine
+            .store()
+            .all_entities()
+            .any(|e| !e.stub && e.mem == id.mem() && e.id.0 == *id.as_ref());
+        if !exists {
+            entry_errors.push(serde_json::json!({
+                "code": "ENTITY_NOT_FOUND",
+                "message": format!("entity not found: {}", id.as_ref()),
+            }));
+        }
+        if entry_errors.is_empty() {
+            parsed.push((id, verdict.unwrap(), kind.unwrap(), entry.method.clone()));
+        } else {
+            failures.push(serde_json::json!({
+                "index": i,
+                "id": entry.id,
+                "errors": entry_errors,
+            }));
+        }
+    }
+    if !failures.is_empty() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "BATCH_REFUSED",
+            format!(
+                "batch check REFUSED — {} of {} entr(ies) failed validation, nothing recorded",
+                failures.len(),
+                payload.checks.len()
+            ),
+        )
+        .with_details(serde_json::json!({ "failed_entries": failures }))
+        .into());
+    }
+
+    let client = crate::setup::cli_client_id();
+    let mut recorded: Vec<serde_json::Value> = Vec::new();
+    for (id, verdict, kind, method) in &parsed {
+        let record = engine
+            .record_check(
+                id.mem(),
+                id.as_ref(),
+                *verdict,
+                *kind,
+                method.as_deref(),
+                Actor::Cli,
+                Some(&client),
+            )
+            .map_err(CliError::from_engine_op)?;
+        recorded.push(serde_json::json!({
+            "entity": record.entity,
+            "verdict": record.verdict,
+            "kind": record.kind.as_deref().unwrap_or("verification"),
+            "schema_ref": record.schema_ref,
+            "ts": record.ts,
+        }));
+    }
+
+    if ctx.json {
+        print_json(&serde_json::json!({
+            "recorded": recorded.len(),
+            "checks": recorded,
+        }))?;
+        return Ok(());
+    }
+    let mut md = format!("# Batch check recorded — {} entr(ies)\n\n", recorded.len());
+    for r in &recorded {
+        md.push_str(&format!(
+            "- ✓ `{}` — {} ({})\n",
+            r["entity"].as_str().unwrap_or_default(),
+            r["verdict"].as_str().unwrap_or_default(),
+            r["kind"].as_str().unwrap_or_default(),
+        ));
+    }
+    print_markdown(&md);
     Ok(())
 }

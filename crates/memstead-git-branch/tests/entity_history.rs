@@ -49,6 +49,7 @@ fn update_args(id: &str, body: &str) -> UpdateEntityArgs {
             .collect(),
         append_sections: Default::default(),
         patch_sections: Default::default(),
+        sections_unset: Vec::new(),
         metadata: Default::default(),
         metadata_unset: Vec::new(),
         dry_run: false,

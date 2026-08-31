@@ -3559,3 +3559,202 @@ fn a_state_write_still_removes_what_the_writer_unregistered() {
         "an unregistered mount must not be resurrected by the merge; got:\n{after}"
     );
 }
+
+/// `check --from` records a batch of checks in one engine boot, and any
+/// invalid entry refuses the WHOLE batch naming every failing entry —
+/// the batch family's all-or-nothing contract (the need is measured:
+/// one campaign run paid 242 boots for 242 verdicts).
+#[test]
+fn cli_check_from_records_batch_and_refuses_atomically() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("batchcheckws");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .assert()
+        .success();
+    for title in ["Probe One", "Probe Two"] {
+        memstead()
+            .current_dir(&ws)
+            .args([
+                "create",
+                "--title",
+                title,
+                "--type",
+                "memo",
+                "--section",
+                "claim=Recorded.",
+                "--section",
+                "context=Batch test.",
+            ])
+            .assert()
+            .success();
+    }
+
+    // Valid batch: both entries recorded, one boot.
+    let batch = ws.join("checks.json");
+    fs::write(
+        &batch,
+        r#"{"checks": [
+            {"id": "batchcheckws--probe-one", "verdict": "ok", "method": "read in full"},
+            {"id": "batchcheckws--probe-two", "verdict": "failed", "kind": "conformance"}
+        ]}"#,
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "check", "--from", batch.to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["recorded"], 2, "{v}");
+    assert_eq!(v["checks"][0]["entity"], "batchcheckws--probe-one", "{v}");
+    assert_eq!(v["checks"][1]["kind"], "conformance", "{v}");
+    assert!(
+        v["checks"][1]["schema_ref"]
+            .as_str()
+            .is_some_and(|s| s.contains('@')),
+        "conformance entries carry the engine-stamped pin: {v}"
+    );
+
+    // One bad verdict + one missing entity: the whole batch refuses,
+    // both failures named, nothing recorded.
+    fs::write(
+        &batch,
+        r#"{"checks": [
+            {"id": "batchcheckws--probe-one", "verdict": "maybe"},
+            {"id": "batchcheckws--does-not-exist", "verdict": "ok"},
+            {"id": "batchcheckws--probe-two", "verdict": "ok"}
+        ]}"#,
+    )
+    .unwrap();
+    let refused = memstead()
+        .current_dir(&ws)
+        .args(["--json", "check", "--from", batch.to_str().unwrap()])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let e = format!(
+        "{}{}",
+        String::from_utf8_lossy(&refused.stdout),
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(e.contains("BATCH_REFUSED"), "{e}");
+    assert!(e.contains("INVALID_VERDICT"), "{e}");
+    assert!(e.contains("ENTITY_NOT_FOUND"), "{e}");
+    assert!(e.contains("nothing recorded"), "{e}");
+
+    // The single form still works unchanged beside the batch form.
+    memstead()
+        .current_dir(&ws)
+        .args(["check", "batchcheckws--probe-one", "--verdict", "ok"])
+        .assert()
+        .success();
+}
+
+/// `export --format json --include anchors` rides each entity envelope
+/// with its stored provenance anchors — the file-to-entity map a carving
+/// pass starts from in one export instead of one `memstead anchors <id>`
+/// call per entity (the live run paid 139 invocations). Unknown include
+/// keys refuse naming the allowed set; other formats refuse `--include`.
+#[test]
+fn export_json_include_anchors_rides_the_envelope() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("anchorexport");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "create",
+            "--title",
+            "Anchored Probe",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Anchored.",
+            "--section",
+            "context=Export include test.",
+        ])
+        .assert()
+        .success();
+    // Anchor artifacts must resolve; give the workspace a real file.
+    fs::create_dir_all(ws.join("src")).unwrap();
+    fs::write(ws.join("src/probe.rs"), "fn probe() {}\n").unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "update",
+            "anchorexport--anchored-probe",
+            "--anchor",
+            r#"{"artifact": "src/probe.rs", "grain": "file", "class": "authored"}"#,
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["export", "--format", "json", "--include", "anchors"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let doc: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let entities = doc["mems"]["anchorexport"]["entities"]
+        .as_array()
+        .expect("entities array");
+    let probe = entities
+        .iter()
+        .find(|e| e["id"] == "anchorexport--anchored-probe")
+        .expect("probe exported");
+    let anchors = probe["anchors"].as_array().expect("anchors array present");
+    assert_eq!(anchors.len(), 1, "{probe}");
+    assert_eq!(anchors[0]["artifact"], "src/probe.rs", "{probe}");
+    assert_eq!(anchors[0]["class"], "authored", "{probe}");
+
+    // Without --include, the envelope stays byte-compatible: no anchors key.
+    let plain = memstead()
+        .current_dir(&ws)
+        .args(["export", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plain_doc: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+    assert!(
+        plain_doc["mems"]["anchorexport"]["entities"][0]
+            .get("anchors")
+            .is_none(),
+        "no anchors key without the include"
+    );
+
+    // Unknown key refuses naming the allowed set.
+    let refused = memstead()
+        .current_dir(&ws)
+        .args(["export", "--format", "json", "--include", "signals"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let e = String::from_utf8_lossy(&refused.stderr).to_string();
+    assert!(e.contains("unknown --include key"), "{e}");
+    assert!(e.contains("anchors"), "{e}");
+
+    // Non-json formats refuse --include.
+    memstead()
+        .current_dir(&ws)
+        .args(["export", "--format", "llms-txt", "--include", "anchors"])
+        .assert()
+        .failure();
+}

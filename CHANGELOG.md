@@ -28,6 +28,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   over all seeds at zero collateral across 300+ control evaluations
   and zero fabricated claims in its final 35 creations.
 
+- **`memstead check --from <file>` records a batch of checks in one
+  engine boot.** Payload `{"checks": [{"id", "verdict", "method"?,
+  "kind"?}, …]}`; the batch family's contract applies — every entry
+  validated up front, any invalid entry refuses the whole batch naming
+  EVERY failing entry, nothing recorded on refusal. The need is
+  measured: one campaign run paid 242 engine boots for 242 verdicts.
+
+- **`memstead export --format json --include anchors`.** Each entity
+  envelope gains its stored provenance anchors, so the file-to-entity
+  map a carving or sync pass starts from is one export instead of one
+  `memstead anchors <id>` call per entity (139 in the live run).
+
 - **`sections_unset` — a section can be closed.** `memstead_update`
   (MCP, both servers), `memstead update --section-unset KEY`, and
   `batch-update` entries gain the fourth section mode: remove a
