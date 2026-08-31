@@ -100,13 +100,19 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
         )));
     }
 
-    // Optional sections (schema order)
+    // Optional sections (schema order). A key ABSENT from the entity's
+    // map is not rendered: emitting `unwrap_or("")` here is what
+    // materialised an empty heading for every declared-but-unwritten
+    // optional section on the first round-trip — scaffold headings no
+    // content ever reached (one campaign counted 82 across a mem) — and
+    // what made `sections_unset` impossible: the removed key came back
+    // as an empty heading on the next parse. A key PRESENT with empty
+    // content still renders (empty-but-kept is a valid authored state);
+    // required sections render unconditionally above, as before.
     for s in schema.sections.iter().filter(|s| !s.required) {
-        let content = entity
-            .sections
-            .get(s.key.as_str())
-            .map(|v| v.as_str())
-            .unwrap_or("");
+        let Some(content) = entity.sections.get(s.key.as_str()) else {
+            continue;
+        };
         // All sections get the same spacing for roundtrip stability
         parts.push(close_open_fence(format!("## {}\n\n{content}", s.heading)));
     }

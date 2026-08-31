@@ -82,6 +82,8 @@ struct EntryPayload {
     #[serde(default)]
     patch_sections: IndexMap<String, PatchPayload>,
     #[serde(default)]
+    sections_unset: Vec<String>,
+    #[serde(default)]
     metadata: IndexMap<String, String>,
     #[serde(default)]
     metadata_unset: Vec<String>,
@@ -307,6 +309,7 @@ fn build_update_args(
             sections: entry.sections,
             append_sections: entry.append_sections,
             patch_sections,
+            sections_unset: entry.sections_unset,
             metadata: entry.metadata,
             metadata_unset: entry.metadata_unset,
             declare_relations,
@@ -429,6 +432,7 @@ mod tests {
             sections: Default::default(),
             append_sections: Default::default(),
             patch_sections: Default::default(),
+            sections_unset: Vec::new(),
             metadata: Default::default(),
             metadata_unset: Vec::new(),
             dry_run: false,

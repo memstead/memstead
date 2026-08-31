@@ -65,6 +65,14 @@ pub struct Args {
     #[arg(long = "append", value_name = "KEY=VALUE", conflicts_with = "from")]
     pub append: Vec<String>,
 
+    /// Remove a section outright (heading and body): repeatable
+    /// `--section-unset KEY`. The close gesture for a declared-but-empty
+    /// heading with nothing to receive; silent no-op on an absent key.
+    /// Refuses for a schema-required section (fill it instead), for
+    /// `relationships`, and for a key also written in the same call.
+    #[arg(long = "section-unset", value_name = "KEY", conflicts_with = "from")]
+    pub section_unset: Vec<String>,
+
     /// Find-and-replace inside a section: repeatable `--patch key=OLD=>NEW`.
     /// Use `=>` (two chars) as the separator between old and new. Exact match
     /// of the first occurrence; use `--patch-all` to replace every occurrence.
@@ -192,6 +200,8 @@ struct UpdatePayload {
     append_sections: IndexMap<String, String>,
     #[serde(default)]
     patch_sections: IndexMap<String, PatchPayload>,
+    #[serde(default)]
+    sections_unset: Vec<String>,
     #[serde(default)]
     metadata: IndexMap<String, String>,
     #[serde(default)]
@@ -376,6 +386,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             sections: parse_kv_list(&args.sections, "--section")?,
             append_sections: parse_kv_list(&args.append, "--append")?,
             patch_sections: parse_patch_list_combined(&args.patch, &args.patch_all)?,
+            sections_unset: args.section_unset.clone(),
             metadata: parse_kv_list(&args.metadata, "--metadata")?,
             metadata_unset: args.metadata_unset.clone(),
             declare_relations: parse_declare_relations(&args.declare_relations)?,
@@ -461,6 +472,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 sections: payload.sections,
                 append_sections: payload.append_sections,
                 patch_sections,
+                sections_unset: payload.sections_unset.clone(),
                 metadata: payload.metadata,
                 metadata_unset: payload.metadata_unset,
                 dry_run: payload.dry_run,
@@ -603,6 +615,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 // today; pass empty.
                 append_sections: IndexMap::new(),
                 patch_sections: IndexMap::new(),
+                sections_unset: payload.sections_unset,
                 metadata: payload.metadata,
                 metadata_unset: payload.metadata_unset,
                 declare_relations,

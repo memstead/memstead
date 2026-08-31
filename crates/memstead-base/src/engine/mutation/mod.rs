@@ -1692,6 +1692,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), "updated".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             dry_run: false,

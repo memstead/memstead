@@ -410,6 +410,7 @@ impl Engine {
         if args.sections.is_empty()
             && args.append_sections.is_empty()
             && args.patch_sections.is_empty()
+            && args.sections_unset.is_empty()
             && args.metadata.is_empty()
             && args.metadata_unset.is_empty()
             && args.declare_relations.is_empty()
@@ -464,6 +465,62 @@ impl Engine {
                     section: key.clone(),
                     modes: vec!["append_sections".to_string(), "patch_sections".to_string()],
                 });
+            }
+        }
+        // `sections_unset` is a fourth mode: a key both written and
+        // removed in one call is a contradiction, not a sequence.
+        for key in &args.sections_unset {
+            let mut modes = vec!["sections_unset".to_string()];
+            if args.sections.contains_key(key) {
+                modes.push("sections".to_string());
+            }
+            if args.append_sections.contains_key(key) {
+                modes.push("append_sections".to_string());
+            }
+            if args.patch_sections.contains_key(key) {
+                modes.push("patch_sections".to_string());
+            }
+            if modes.len() > 1 {
+                return Err(EngineError::ConflictingSectionModes {
+                    section: key.clone(),
+                    modes,
+                });
+            }
+        }
+        // Removing a REQUIRED section refuses with the conformance
+        // vocabulary: the right repair for a required-but-empty heading
+        // is filling it, never removing it. One refusal names every
+        // offending key.
+        let unset_required: Vec<crate::runtime_validator::MissingRequiredSection> = type_def
+            .required_sections()
+            .filter(|sec| args.sections_unset.contains(&sec.key))
+            .map(|sec| crate::runtime_validator::MissingRequiredSection {
+                entity_type: type_def.name.clone(),
+                key: sec.key.clone(),
+                heading: sec.heading.clone(),
+                write_rules: sec.write_rules.clone(),
+            })
+            .collect();
+        if !unset_required.is_empty() {
+            let mut type_guidance: std::collections::BTreeMap<String, Vec<String>> =
+                std::collections::BTreeMap::new();
+            type_guidance.insert(type_def.name.clone(), type_def.write_rules.clone());
+            return Err(EngineError::MissingRequiredSection {
+                entity_type: type_def.name.clone(),
+                missing_count: unset_required.len(),
+                sections: unset_required,
+                type_guidance,
+                pre_announced_missing_fields: Vec::new(),
+            });
+        }
+        // An absent key is a silent no-op (symmetric with
+        // `metadata_unset`), so the updatable-section gate applies only
+        // to keys the entity actually carries — otherwise unsetting a
+        // key the schema never declared would refuse instead of
+        // no-opping.
+        for key in &args.sections_unset {
+            if entity.sections.contains_key(key) || key == "relationships" {
+                validate_updatable_section(key.as_str(), type_def.as_ref())?;
             }
         }
 
@@ -685,6 +742,17 @@ impl Engine {
             };
             next.sections.insert(key.clone(), patched);
             modified_sections_patched.push(key);
+        }
+
+        // Apply `sections_unset` after the write modes (same-key overlap
+        // is already refused above, so ordering carries no semantics):
+        // heading and body leave the entity. Absent keys no-op silently,
+        // symmetric with `metadata_unset`.
+        let mut modified_sections_unset: Vec<String> = Vec::new();
+        for key in &args.sections_unset {
+            if next.sections.shift_remove(key).is_some() {
+                modified_sections_unset.push(key.clone());
+            }
         }
 
         let mut modified_metadata_set: Vec<String> = Vec::new();
@@ -1098,6 +1166,7 @@ impl Engine {
                     replaced: modified_sections,
                     appended: modified_sections_appended,
                     patched: modified_sections_patched,
+                    unset: modified_sections_unset,
                 },
                 modified_metadata: ModifiedMetadata {
                     set: modified_metadata_set,
@@ -1144,6 +1213,7 @@ impl Engine {
                 replaced: modified_sections,
                 appended: modified_sections_appended,
                 patched: modified_sections_patched,
+                unset: modified_sections_unset,
             },
             modified_metadata: ModifiedMetadata {
                 set: modified_metadata_set,
@@ -1813,6 +1883,7 @@ mod tests {
                         sections,
                         append_sections: IndexMap::new(),
                         patch_sections: IndexMap::new(),
+                        sections_unset: Vec::new(),
                         metadata: IndexMap::new(),
                         metadata_unset: Vec::new(),
                         declare_relations: Vec::new(),
@@ -1936,6 +2007,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), "updated body".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -1950,6 +2022,7 @@ mod tests {
             sections: IndexMap::new(),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -2040,6 +2113,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), body.to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -2134,6 +2208,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), body.to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -2220,6 +2295,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), "new".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -2312,6 +2388,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), "new body".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -2398,6 +2475,7 @@ mod tests {
             sections: IndexMap::new(),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: vec![crate::ops::RelateArg {
@@ -2414,6 +2492,7 @@ mod tests {
             sections: IndexMap::from_iter([("identity".to_string(), "x".to_string())]),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -2467,6 +2546,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2517,6 +2597,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2557,6 +2638,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2599,6 +2681,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2633,6 +2716,7 @@ mod tests {
                     sections: replace,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2665,6 +2749,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: patches,
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2711,6 +2796,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: patches,
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2729,6 +2815,153 @@ mod tests {
             }
             other => panic!("expected PatchOldNotFound, got {other:?}"),
         }
+    }
+
+    /// Convenience: the update-args fixture for the sections_unset tests
+    /// (all-empty apart from the caller-set fields).
+    fn unset_args(id: EntityId, hash: String, unset: &[&str]) -> UpdateEntityArgs {
+        UpdateEntityArgs {
+            anchors: Vec::new(),
+            id,
+            expected_hash: Some(hash),
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            sections_unset: unset.iter().map(|s| s.to_string()).collect(),
+            metadata: IndexMap::new(),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
+        }
+    }
+
+    /// `sections_unset` removes a non-required section outright — heading
+    /// and body — and reports it under `modified_sections.unset`. An
+    /// absent key no-ops silently (symmetric with `metadata_unset`).
+    #[test]
+    fn update_entity_sections_unset_removes_optional_section() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Unset Subject");
+        let (actor, client) = cli_actor();
+        // Give the entity an optional section first.
+        let mut sections = IndexMap::new();
+        sections.insert("specifies".to_string(), "temporary content".to_string());
+        let with_specifies = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    sections,
+                    ..unset_args(seeded.id.clone(), seeded.content_hash.clone(), &[])
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+
+        let outcome = engine
+            .update_entity(
+                unset_args(
+                    seeded.id.clone(),
+                    with_specifies.content_hash.clone(),
+                    &["specifies", "not-present"],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert_eq!(outcome.modified_sections.unset, vec!["specifies"]);
+        let entity = engine.store().get(&seeded.id).unwrap();
+        assert!(
+            !entity.sections.contains_key("specifies"),
+            "section removed: {:?}",
+            entity.sections.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Removing a schema-REQUIRED section refuses with the conformance
+    /// vocabulary — the right repair for a required-but-empty heading is
+    /// filling it, never removing it (operator condition on this verb).
+    #[test]
+    fn update_entity_sections_unset_refuses_required_section() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Unset Required");
+        let (actor, client) = cli_actor();
+        let err = engine
+            .update_entity(
+                unset_args(
+                    seeded.id.clone(),
+                    seeded.content_hash.clone(),
+                    &["identity"],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        match err {
+            EngineError::MissingRequiredSection {
+                entity_type,
+                sections,
+                ..
+            } => {
+                assert_eq!(entity_type, "spec");
+                assert_eq!(sections.len(), 1);
+                assert_eq!(sections[0].key, "identity");
+            }
+            other => panic!("expected MissingRequiredSection, got {other:?}"),
+        }
+    }
+
+    /// The same key written and unset in one call is a contradiction —
+    /// refused as a section-mode conflict; and `relationships` is not
+    /// unsettable, like every other write mode.
+    #[test]
+    fn update_entity_sections_unset_conflicts_and_relationships_refuse() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Unset Conflict");
+        let (actor, client) = cli_actor();
+        let mut sections = IndexMap::new();
+        sections.insert("specifies".to_string(), "body".to_string());
+        let err = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    sections,
+                    ..unset_args(
+                        seeded.id.clone(),
+                        seeded.content_hash.clone(),
+                        &["specifies"],
+                    )
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        match err {
+            EngineError::ConflictingSectionModes { section, modes } => {
+                assert_eq!(section, "specifies");
+                assert!(modes.contains(&"sections_unset".to_string()), "{modes:?}");
+                assert!(modes.contains(&"sections".to_string()), "{modes:?}");
+            }
+            other => panic!("expected ConflictingSectionModes, got {other:?}"),
+        }
+
+        let err = engine
+            .update_entity(
+                unset_args(
+                    seeded.id.clone(),
+                    seeded.content_hash.clone(),
+                    &["relationships"],
+                ),
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "SECTION_NOT_UPDATABLE", "{err:?}");
     }
 
     /// A patch whose `old` lives in a DIFFERENT section gets that section
@@ -2758,6 +2991,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: patches,
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2801,6 +3035,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: appends,
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2863,12 +3098,15 @@ mod tests {
         // reports "empty section" here is telling the truth about the parse
         // and a lie about the entity.
         let stored = engine.get_entity(&id).expect("entity loads");
+        // Since absent-vs-empty became representable (sections_unset), a
+        // heading masked inside the fence parses as ABSENT — the honest
+        // reading: the document carries no visible `## Purpose` section.
         assert!(
             stored
                 .sections
                 .get("purpose")
-                .is_some_and(|v| v.trim().is_empty()),
-            "purpose should read as empty: {:?}",
+                .is_none_or(|v| v.trim().is_empty()),
+            "purpose should read as absent or empty: {:?}",
             stored.sections.get("purpose")
         );
         assert!(
@@ -2890,6 +3128,7 @@ mod tests {
                     )]),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -2911,18 +3150,11 @@ mod tests {
             } => {
                 assert_eq!(section, "identity");
                 assert_eq!(fence, "```");
-                // Every declared section after the open fence, not just the
-                // first: the fence's range reaches end of text, so it took
-                // all of them.
-                assert_eq!(
-                    swallowed,
-                    &vec![
-                        "Purpose".to_string(),
-                        "Specifies".to_string(),
-                        "Constraints".to_string(),
-                        "Rationale".to_string(),
-                    ]
-                );
+                // Every declared section after the open fence — the fence's
+                // range reaches end of text. The seeded file carries only
+                // the written sections (unwritten optional headings are no
+                // longer scaffolded), so `Purpose` is the whole set here.
+                assert_eq!(swallowed, &vec!["Purpose".to_string()]);
             }
             other => panic!("expected UnterminatedFenceInStoredBody, got {other:?}"),
         }
@@ -2954,6 +3186,7 @@ mod tests {
                     ]),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3057,6 +3290,7 @@ mod tests {
                     )]),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3111,6 +3345,7 @@ mod tests {
                     sections: IndexMap::from_iter([("identity".to_string(), "body".to_string())]),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3149,6 +3384,7 @@ mod tests {
                     sections,
                     append_sections: appends,
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3196,6 +3432,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata,
                     metadata_unset: vec!["tags".to_string()],
                     declare_relations: Vec::new(),
@@ -3272,6 +3509,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3378,6 +3616,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     dry_run: false,
@@ -3436,6 +3675,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     dry_run: false,
@@ -3514,6 +3754,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3558,6 +3799,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3717,6 +3959,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3813,6 +4056,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3888,6 +4132,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -3963,6 +4208,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4013,6 +4259,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4054,6 +4301,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     // `tags` is declared on the `spec` schema but
                     // unset on the seeded entity. Unsetting it should
@@ -4097,6 +4345,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4138,6 +4387,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata,
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4227,6 +4477,7 @@ mod tests {
                     sections: IndexMap::new(),
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: vec![RelateArg {
@@ -4278,6 +4529,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4328,6 +4580,7 @@ mod tests {
                         sections: noop_sections.clone(),
                         append_sections: IndexMap::new(),
                         patch_sections: IndexMap::new(),
+                        sections_unset: Vec::new(),
                         metadata: IndexMap::new(),
                         metadata_unset: Vec::new(),
                         declare_relations: Vec::new(),
@@ -4360,6 +4613,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4460,6 +4714,7 @@ mod tests {
                     sections: new_sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4552,6 +4807,7 @@ mod tests {
                     sections: new_sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4655,6 +4911,7 @@ mod tests {
                     sections: edit,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4734,6 +4991,7 @@ mod tests {
                     sections: drop_link,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4830,6 +5088,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4903,6 +5162,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -4997,6 +5257,7 @@ mod tests {
                     sections,
                     append_sections: IndexMap::new(),
                     patch_sections: IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),
@@ -5310,6 +5571,7 @@ community:
                         sections,
                         append_sections: IndexMap::new(),
                         patch_sections: IndexMap::new(),
+                        sections_unset: Vec::new(),
                         metadata: IndexMap::new(),
                         metadata_unset: Vec::new(),
                         declare_relations: Vec::new(),
@@ -5598,6 +5860,7 @@ community:
             sections: IndexMap::new(),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -5775,6 +6038,7 @@ community:
             sections: IndexMap::new(),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),
@@ -6122,6 +6386,7 @@ community:
             sections: IndexMap::new(),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),

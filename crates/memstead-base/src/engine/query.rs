@@ -4644,6 +4644,7 @@ community:
             sections: IndexMap::new(),
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             declare_relations: Vec::new(),

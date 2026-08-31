@@ -199,6 +199,10 @@ pub struct UpdateParams {
         description = "Section fields to patch (find-and-replace): { \"specifies\": { \"old\": \"...\", \"new\": \"...\" } }"
     )]
     pub patch_sections: Option<IndexMap<String, PatchInput>>,
+    #[schemars(
+        description = "Section keys to REMOVE from the entity — heading and body both: [\"notes\"]. The close gesture for a declared-but-empty heading with nothing to receive, and the repair for a legacy undeclared heading. Silent no-op on an absent key (symmetric with metadata_unset). Refuses for a schema-REQUIRED section (MISSING_REQUIRED_SECTION — fill it instead), for `relationships` (SECTION_NOT_UPDATABLE), and for a key also named in sections / append_sections / patch_sections (CONFLICTING_SECTION_MODES)."
+    )]
+    pub sections_unset: Option<Vec<String>>,
     #[schemars(description = "Metadata fields to set: { \"level\": \"M1\" }")]
     pub metadata: Option<IndexMap<String, String>>,
     #[schemars(

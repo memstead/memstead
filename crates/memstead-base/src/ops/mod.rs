@@ -161,6 +161,9 @@ pub struct ModifiedSections {
     /// (`patch_sections`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patched: Vec<String>,
+    /// Section keys removed outright — heading and body (`sections_unset`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unset: Vec<String>,
 }
 
 /// Metadata-level mutations applied by a single `memstead_update` call.

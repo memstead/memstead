@@ -208,6 +208,7 @@ impl Engine {
             sections,
             append_sections: IndexMap::new(),
             patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
             metadata: IndexMap::new(),
             metadata_unset: Vec::new(),
             dry_run: false,

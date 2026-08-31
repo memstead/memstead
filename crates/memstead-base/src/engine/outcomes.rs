@@ -144,6 +144,16 @@ pub struct UpdateEntityArgs {
     /// when `old` doesn't appear. Mutually exclusive with the
     /// other two section modes for the same key.
     pub patch_sections: IndexMap<String, crate::ops::PatchArg>,
+    /// Section keys to REMOVE from the entity — heading and body both.
+    /// The close gesture for a declared-but-empty heading with nothing
+    /// to receive (the shape a discovery build leaves behind), and the
+    /// repair for a legacy undeclared heading. Silently no-ops on an
+    /// absent key (symmetric with `metadata_unset`). Refused for a
+    /// schema-REQUIRED section (`MISSING_REQUIRED_SECTION` — the right
+    /// repair there is filling, not removing), for `relationships`
+    /// (`SECTION_NOT_UPDATABLE`), and for a key also named in any other
+    /// section mode (`CONFLICTING_SECTION_MODES`).
+    pub sections_unset: Vec<String>,
     /// Metadata fields to set or replace. Values land as
     /// `MetadataValue::String` for V1.
     pub metadata: IndexMap<String, String>,

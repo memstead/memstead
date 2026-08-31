@@ -3599,6 +3599,7 @@ write_rules: []
                     sections,
                     append_sections: indexmap::IndexMap::new(),
                     patch_sections: indexmap::IndexMap::new(),
+                    sections_unset: Vec::new(),
                     metadata: indexmap::IndexMap::new(),
                     metadata_unset: Vec::new(),
                     declare_relations: Vec::new(),

@@ -81,14 +81,23 @@ pub fn parse_markdown(
     let mut result_sections = IndexMap::new();
     for s in &schema.sections {
         if s.catch_all {
-            result_sections.insert(s.key.clone(), catch_all_content.clone());
-        } else {
-            let val = sections_map
-                .get(s.key.as_str())
-                .map(|(_, content)| content.clone())
-                .unwrap_or_default();
-            result_sections.insert(s.key.clone(), val);
+            // The catch-all key stays present when its own heading was in
+            // the document or any non-schema section fed it — an absent
+            // catch-all with no absorbed content stays absent, like every
+            // other section below.
+            if sections_map.contains_key(s.key.as_str()) || !catch_all_content.trim().is_empty() {
+                result_sections.insert(s.key.clone(), catch_all_content.clone());
+            }
+        } else if let Some((_, content)) = sections_map.get(s.key.as_str()) {
+            result_sections.insert(s.key.clone(), content.clone());
         }
+        // A declared section whose heading the document does not carry is
+        // ABSENT, not present-with-empty. Materialising every declared key
+        // here (the pre-fix `unwrap_or_default`) made "no heading" and
+        // "empty heading" the same entity, so the generator re-emitted a
+        // scaffold heading for every declared-but-unwritten section and
+        // `sections_unset` could not close one — the removed key came back
+        // on the next round-trip.
     }
 
     // Parse metadata values with type coercion

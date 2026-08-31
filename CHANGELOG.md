@@ -28,7 +28,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   over all seeds at zero collateral across 300+ control evaluations
   and zero fabricated claims in its final 35 creations.
 
+- **`sections_unset` — a section can be closed.** `memstead_update`
+  (MCP, both servers), `memstead update --section-unset KEY`, and
+  `batch-update` entries gain the fourth section mode: remove a
+  section's heading and body outright. No-op on an absent key
+  (symmetric with `metadata_unset`); refused for a schema-REQUIRED
+  section (`MISSING_REQUIRED_SECTION` — the right repair there is
+  filling, not removing), for `relationships`, and for a key also
+  written in the same call (`CONFLICTING_SECTION_MODES`). The
+  mutation response reports removals under `modified_sections.unset`.
+
 ### Changed
+
+- **A declared-but-unwritten optional section is absent, not an empty
+  scaffold heading.** The generator emitted every declared optional
+  heading whether or not the entity carried the section, and the parser
+  materialised every declared key back as present-with-empty — so "no
+  heading" and "empty heading" were the same entity, every fresh entity
+  sprouted scaffold headings no content ever reached (one campaign
+  counted 82 across a mem), and no gesture could close one. Now an
+  optional section renders only when the entity carries its key, and
+  parsing a document without a heading yields no key for it. Existing
+  files are byte-stable (their headings parse as present-with-empty and
+  keep rendering); newly created entities no longer carry scaffold
+  headings; `sections_unset` is the close gesture and survives the
+  round-trip.
 
 - **The sync skill adopts the model-truth campaign's maintenance
   disciplines.** Corrections are applied silently — no dated stamps or

@@ -457,6 +457,7 @@ Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-conta
 * `--mem <NAME>` — Which mem to export (by name). For `--format markdown`, omitting this argument runs a workspace-wide export and reports any declined mounts under `skipped_mounts`. For `--format mem`, required when more than one write mem is loaded; defaults to the first writable mem otherwise. For `--format json`, omitting it exports every writable mem; naming a read-only mount exports that mount (read-mems are excluded from the workspace-wide default — they are someone else's published content)
 * `--self-contained` — For `--format mem`: make the archive self-contained by dropping every `## Relationships` row whose target lives in another mem, then re-pack and strictly validate it (the same pass `install` runs). Without it, a mem that references its sibling mems exports with `DANGLING_CROSS_MEM_EDGE_IN_EXPORT` warnings and `install` refuses the archive; with it, every dropped edge is reported as `CROSS_MEM_EDGE_DROPPED` instead. Section text, body wiki-links included, is never touched: an alias row synthesised from a body link loses nothing the body does not still say
 * `--base-url <URL>` — Absolute base URL for entity links in `--format llms-txt` (e.g. `https://example.com`). With it, references render as absolute links exactly as the served document does; without it they target the document-relative `entity/<id>`. There is no third form. Ignored by every other format
+* `--include <KEY>` — Opt extra per-entity content into the `--format json` document (comma-separated). Keys: `anchors` — each entity envelope gains an `anchors` array with its stored provenance anchors, so the file-to-entity map a carving or sync pass starts from is one export instead of one `memstead anchors <id>` per entity. An unknown key refuses naming the allowed set; refused for every other format
 
 
 
@@ -780,6 +781,7 @@ Modify an existing entity. `--expected-hash` is required for an update that chan
 * `--force` — Skip the hash check entirely (explicit overwrite)
 * `--section <KEY=VALUE>` — Replace section content: repeatable `--section key=value`. Body wiki-links must take slug-form (`[[idempotency]]`, not the title-case `[[Idempotency]]`) — a non-slug target refuses with `INVALID_WIKI_LINK_TARGET` carrying a `proposed_slug` to retry with
 * `--append <KEY=VALUE>` — Append to section content: repeatable `--append key=value`
+* `--section-unset <KEY>` — Remove a section outright (heading and body): repeatable `--section-unset KEY`. The close gesture for a declared-but-empty heading with nothing to receive; silent no-op on an absent key. Refuses for a schema-required section (fill it instead), for `relationships`, and for a key also written in the same call
 * `--patch <KEY=OLD=>NEW>` — Find-and-replace inside a section: repeatable `--patch key=OLD=>NEW`. Use `=>` (two chars) as the separator between old and new. Exact match of the first occurrence; use `--patch-all` to replace every occurrence
 * `--patch-all <KEY=OLD=>NEW>` — Replace every occurrence of OLD in the section — sibling of `--patch`. Repeatable `--patch-all key=OLD=>NEW`
 * `--metadata <KEY=VALUE>` — Metadata field: repeatable `--metadata key=value`
@@ -1009,7 +1011,7 @@ Report a mem's changes since a cursor. The cursor is backend-specific and is nev
 
 Record a check: "entity E checked, verdict ok | failed, via method M" — an engine-recorded act carrying the session's `--role`, never a mutation (entity markdown, hash, and mem commits untouched). Derived check state serves via `memstead entity <id> --provenance`
 
-**Usage:** `memstead check [OPTIONS] --verdict <VERDICT> <ID>`
+**Usage:** `memstead check [OPTIONS] [ID]`
 
 ###### **Arguments:**
 
@@ -1020,6 +1022,7 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — an eng
 * `--verdict <VERDICT>` — The verdict: `ok` | `failed`. The vocabulary is closed — nuance goes in `--method` or in process-mem entities
 * `--method <METHOD>` — Free-text method note — how the check was performed. For a conformance check, name the judging model here
 * `--kind <KIND>` — The check kind: `verification` (default — "I checked this entity's content") | `conformance` (a semantic judgment against the type's schema prose; the engine stamps the mem's schema pin into the record, and the verdict goes stale when the content hash moves OR the pin changes). The vocabulary is closed
+* `--from <PATH>` — Record a batch of checks from a JSON file in one engine boot: `{"checks": [{"id": "...", "verdict": "ok", "method": "...", "kind": "..."}, ...]}` — `method` and `kind` optional per entry, mirroring the single form. All-or-nothing: any invalid entry (unknown verdict or kind, missing entity) refuses the whole batch and names EVERY failing entry; nothing is recorded
 
 
 
