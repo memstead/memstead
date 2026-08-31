@@ -52,18 +52,19 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    `memstead --workspace "$WS" projection brief --sync <binding>`.
 
 4. Apply only what the brief calls for, via the MCP mutation tools, inside
-   the destination mem only. An unchanged-meaning drift finding is an
-   **annotation**, not a rewrite; a genuinely ambiguous change is **skipped,
-   finding left open**, never guessed; a removal with no retrievable base is
-   **conflict-flagged** — present both sides, never auto-delete. Three
+   the destination mem only. Unchanged-meaning drift is an **annotation**,
+   not a rewrite; an ambiguous change is **skipped, finding left open**,
+   never guessed; a removal with no retrievable base is
+   **conflict-flagged** — present both sides, never auto-delete. Four
    measured disciplines bind here and in steps 7–8: **claim walk on drift**
    (check a flagged entity assertion by assertion against the source before
    any re-baseline — never a gestalt "reads fine", the measured top miss
    cause); **post-edit recheck** (re-read the whole edited entity once
    against the source); **section-local reconciliation** (when an entity's
-   sections disagree, correct the stale normative text itself, dated — a
-   correction merely beside it does not heal it; an explicit dated
-   historical record routing to existing current truth is exempt).
+   sections disagree, correct the stale normative text ITSELF, not
+   beside it); **silent correction** (no dated stamps or was-wrong
+   narration in normative sections — git and the check record carry
+   the archaeology; schema-designated history forms exempt).
 
 5. Record what you did so the baseline advances:
    `memstead --workspace "$WS" projection advance <binding> --dispositions '{"<artifact-id>":"worked", …}'`.
@@ -74,8 +75,7 @@ baseline, no entity writes). Source read-only; refusals verbatim.
 6. `--verify <binding>`: run `memstead --workspace "$WS" projection verify <binding>` —
    findings, never entities; it measures the mem, not your project's
    changes. Present the engine's report as ordered, verdict first, never
-   re-ranked. A near-zero first report is onboarding — name the route
-   (`/ingest`, then `/sync`).
+   re-ranked. A near-zero first report is onboarding — `/ingest`, then `/sync`.
 
 7. `--inventory <binding>`: the full stock-take. Measure completely with
    `memstead --workspace "$WS" projection verify <binding> --full`, then
@@ -92,18 +92,18 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    even where no change signal points, on any mem, bound or not. Walk
    load-bearing frontmatter first (past target dates, done certifications,
    retired statuses over living prose), then longest-unverified. Per
-   entity: verify its checkable claims against the workspace's trees and
-   graph under the step-4 disciplines, correct what the evidence refutes,
-   and record a `memstead_check` verdict — clean and corrected alike — so
-   the next sweep prioritizes by trace staleness. Bulk-grep the mem's
-   paths, codes, and symbols against the tree first. Externally
-   unconfirmable claims are out of scope — note the limit, never guess.
-   Never create or delete entities in a sweep — the uncovered is
-   reported, not invented — and close with per-mem counts.
+   entity: verify its checkable claims against the workspace's trees,
+   graph, and git history (a legitimate source) under the step-4
+   disciplines, correct what the evidence refutes, and record a
+   `memstead_check` verdict — clean and corrected alike — so the next
+   sweep prioritizes by trace staleness. Bulk-grep the mem's paths,
+   codes, and symbols against the tree first; unconfirmable claims are
+   out of scope — note the limit, never guess. Never create, delete,
+   or re-cut in a sweep: a fused entity or missing owner is
+   `/remodel`'s business — report, don't fix. Close with per-mem counts.
 
 ## Rules
 
 - The **sole maintenance writer** for bound mems. Changes flow source → mem,
-  never the reverse; not a version-control operation. Conservative by
-  default — the brief's rules bind; when unsure, skip and leave the finding
-  open: a stale finding is cheaper than a wrong edit.
+  never the reverse; not a version-control operation. Conservative — when
+  unsure, skip and leave the finding open: cheaper than a wrong edit.
