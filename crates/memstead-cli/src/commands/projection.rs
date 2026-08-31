@@ -1,8 +1,9 @@
 //! `memstead projection` — the binding (projection-promotion) command tree.
 //!
 //! The projection is the unit: one versioned binding per source→mem obligation
-//! (bundle plan `03-projection-promotion`). The tree ships five leaves —
-//! `brief`, `init`, `migrate`, `advance`, `enable`:
+//! (bundle plan `03-projection-promotion`). The tree ships nine leaves —
+//! `brief`, `init`, `migrate`, `enable`, `edit`, `advance`, `exclude`,
+//! `verify`, `check-path`:
 //!
 //! - `brief` renders a binding's run-brief — the Markdown prompt an agent
 //!   consumes — for a canonical binding id `<mem>/<stem>` (D3/D9), or the next
@@ -11,9 +12,15 @@
 //! - `migrate` converts every prior on-disk generation into v2 records in
 //!   place: gen-1 root folders, the gen-2 four-primitive store, and the v1
 //!   three-file store — folding medium+facet content inline.
-//! - `advance` records disposition-gated sync-baseline advances (D7).
 //! - `enable` adds a missing `build` / `sync` / `verify` operation block to an
 //!   existing binding (D6 — the remedy a refused mutating op cites).
+//! - `edit` patches an existing binding's author-editable fields in place.
+//! - `advance` records disposition-gated sync-baseline advances (D7).
+//! - `exclude` records authored exclusions for in-scope source artifacts.
+//! - `verify` measures a binding's fidelity, records durable findings, and
+//!   renders the tier-1 fidelity report (E3b).
+//! - `check-path` answers deny verdicts: is a path or pattern hidden by a
+//!   binding's `deny_paths`?
 //!
 //! This tree is the sole binding surface: the retired `ingest` and `pipeline`
 //! command trees folded in here (`ingest brief` → `projection brief`,
@@ -173,10 +180,12 @@ pub enum ProjectionCommand {
     /// Measure a binding's fidelity and record durable findings (E3b, group A).
     /// Read-only on the destination mem's ENTITIES: verify adjudicates its anchors
     /// against the live source and samples in-scope artifacts, writing findings
-    /// keyed `(hash(D), source_head)` into the engine-owned findings store
-    /// (`.memstead/state/findings/`). A binding-declaration edit or a source-head
-    /// move partitions the keyspace, so prior findings are segregated as
-    /// superseded, never presented as current. Verify mutates no entity — any
+    /// keyed by the binding's `hash(D)` alone into the engine-owned findings store
+    /// (`.memstead/state/findings/`); the `source_head` a finding was observed
+    /// at is carried as metadata, so findings survive source-head movement and
+    /// stay presented until a later verify supersedes them. A
+    /// binding-declaration edit changes `hash(D)` and segregates prior
+    /// findings as superseded, never presented as current. Verify mutates no entity — any
     /// repair routes through the (later) sync brief — but it is not a pure read:
     /// a completed run records the findings store, backfills observed content
     /// hashes onto hash-less anchors, and records a `#verified` baseline. It then renders the
@@ -340,8 +349,8 @@ pub struct InitArgs {
     /// Intent prose for the agent (the binding's `intent`). Optional.
     #[arg(long)]
     pub intent: Option<String>,
-    /// Binding stem — the `<stem>` half of the binding id and the shared file
-    /// name of the scaffolded medium / facet / binding. Defaults to the final
+    /// Binding stem — the `<stem>` half of the binding id and the file name
+    /// of the scaffolded binding record. Defaults to the final
     /// path component of `--source`.
     #[arg(long)]
     pub name: Option<String>,

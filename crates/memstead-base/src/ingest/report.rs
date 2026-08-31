@@ -317,7 +317,7 @@ pub struct FidelityReport {
     pub findings_by_class: BTreeMap<String, usize>,
     /// Tier-3 backlog depth — findings queued for adjudication (B1).
     pub backlog: usize,
-    /// Findings recorded under a **prior** `(hash(D), source_head)` key,
+    /// Findings recorded under a **prior** `hash(D)`,
     /// segregated as superseded (the heavy detail list is the count's backing).
     pub superseded: Vec<String>,
     /// Persisted dispositions that exclude an otherwise-uncovered artifact from
@@ -1026,7 +1026,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.backlog
     ));
     md.push_str(&format!(
-        "- superseded (prior `(hash(D), source_head)` key, segregated): {}\n\n",
+        "- superseded (prior `hash(D)`, segregated): {}\n\n",
         report.superseded.len()
     ));
 

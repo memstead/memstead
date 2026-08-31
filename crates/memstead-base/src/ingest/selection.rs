@@ -12,7 +12,7 @@
 //! **Due-checks** (cheap, per pair, before backoff): build is always due
 //! (unchanged semantics — backoff alone decides); sync is due when a source
 //! moved past its `#synced` baseline **or** open findings exist under the
-//! binding's current `(hash(D), source_head)` key; verify is due when a source
+//! binding's current `hash(D)`; verify is due when a source
 //! moved past its `#verified` baseline (a never-verified source with a live
 //! token counts as moved — the first verify is due). A pair that is not due is
 //! passed over without touching its backoff state.
@@ -311,7 +311,7 @@ fn declared_for_loop(binding: &Binding, op: OperationKind) -> bool {
 /// The cheap per-operation due-check, evaluated before backoff. Build is
 /// always due (unchanged semantics — backoff alone decides). Sync is due when
 /// a source moved past its `#synced` baseline or open findings exist under
-/// the binding's current `(hash(D), source_head)` key (the same read the sync
+/// the binding's current `hash(D)` (the same read the sync
 /// brief consumes — an unreadable findings store contributes nothing here;
 /// the source-moved clause still fires, and the brief render surfaces the
 /// store error). Verify is due when a source moved past its `#verified`
@@ -654,7 +654,7 @@ mod tests {
 
     /// The sync due-check: a loop-declared sync pair with unmoved sources is
     /// due only when open findings exist under the binding's current
-    /// `(hash(D), source_head)` key; an empty current batch is not due.
+    /// `hash(D)`; an empty current batch is not due.
     #[test]
     fn sync_pair_due_only_on_open_findings_when_source_unmoved() {
         let ws = tempfile::tempdir().unwrap();

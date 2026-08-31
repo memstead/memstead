@@ -1,13 +1,12 @@
 //! The deterministic ingest-orchestration surface.
 //!
-//! Ingest today has two implementations that have drifted apart: a full
-//! orchestration (selection, backoff, change-detection, brief assembly,
-//! process-state lifecycle) living in the Claude-Code plugin's Node.js, and
-//! (historically) a hard-coded natural-language charge in the retired macOS
-//! app that used none of it. This module is the engine-side home the deterministic half is being
-//! ported into, so that every client reduces to a thin consumer pulling
+//! This module is the engine-side home of ingest's deterministic half
+//! (selection, backoff, change-detection, brief assembly, process-state
+//! lifecycle), so that every client reduces to a thin consumer pulling
 //! the *same* rendered run-brief from the engine — honouring the
 //! engine-surface parity rule and "the engine owns mem-repo state".
+//! (The orchestration once lived in the Claude-Code plugin's Node.js;
+//! that port is complete, and the plugin skill is a thin client.)
 //!
 //! The boundary is load-bearing: **deterministic → engine** (selection,
 //! backoff, change-detection, brief assembly, cursor/process-state);
@@ -16,7 +15,7 @@
 //! hosts the agent.
 //!
 //! The deterministic half is ported and wired: the structural [`resolve`]
-//! layer (joins an ingest config to its projection, facets, and mediums), the
+//! layer (unpacks a stored v2 binding, sources inline — no join), the
 //! [`change_detection`] primitives, the [`cursor`] driver that assembles a
 //! per-source changed slice across the git / graph / mtime strategies, and
 //! [`brief`] assembly — all reachable through `memstead projection brief` (CLI),

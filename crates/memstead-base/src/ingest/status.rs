@@ -422,7 +422,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
                 severity: 4,
                 text: format!(
                     "`{binding_id}` source moved since the last sync — run `memstead projection \
-                     sync {binding_id}`"
+                     brief {binding_id} --sync`"
                 ),
             });
         }

@@ -180,7 +180,8 @@ pub enum Command {
 
     /// Remove an installed read-mem's workspace-level mount. The global
     /// cache copy survives by default; re-`install` re-registers it.
-    /// MEM-REPO WORKSPACES ONLY (see `install`).
+    /// Works on every workspace shape, symmetric with `install`: a
+    /// workspace that can attach a read-mem can detach one.
     #[cfg(feature = "mem-repo")]
     Uninstall(commands::uninstall::Args),
 
@@ -295,7 +296,6 @@ pub enum Command {
     /// `PARSED_RELATION_INVALID` warnings, re-renders affected
     /// source entities to drop the stale rows, and reports per-entry
     /// outcomes. Read-only-origin drops surface as skipped.
-    /// MEM-REPO WORKSPACES ONLY (see `install`).
     #[cfg(feature = "mem-repo")]
     Recover(commands::recover::Args),
 
@@ -403,14 +403,17 @@ pub enum Command {
     Schema(commands::schema::Args),
 
     /// Pipeline tooling — one versioned v2 binding per pipeline, sources
-    /// inline. `memstead projection brief <binding>` renders a binding's
-    /// run-brief (the Markdown prompt an agent consumes); `memstead
-    /// projection init` scaffolds a fresh v2 record non-interactively;
-    /// `memstead projection migrate` converts every prior on-disk generation
-    /// (gen-1 root folders, the four-primitive store, the v1 three-file
-    /// store) into v2 records in place; `memstead projection advance`
-    /// records disposition-gated sync-baseline advances; `memstead projection
-    /// enable <build|sync|verify> <binding>` adds a missing operation block.
+    /// inline. Nine verbs: `brief` renders a binding's run-brief (the
+    /// Markdown prompt an agent consumes); `init` scaffolds a fresh v2
+    /// record non-interactively; `migrate` converts every prior on-disk
+    /// generation (gen-1 root folders, the four-primitive store, the v1
+    /// three-file store) into v2 records in place; `enable
+    /// <build|sync|verify> <binding>` adds a missing operation block;
+    /// `edit` patches a binding's author-editable fields; `advance`
+    /// records disposition-gated sync-baseline advances; `exclude`
+    /// records authored exclusions for in-scope artifacts; `verify`
+    /// measures a binding's fidelity and records findings; `check-path`
+    /// answers deny verdicts for paths and patterns.
     Projection(commands::projection::Args),
 }
 

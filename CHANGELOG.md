@@ -51,6 +51,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   what entities assert even where no change signal points, leaving check
   records as its machine-readable trace.
 
+### Fixed
+
+- **Published command help catches up with the shipped surface.** The
+  `projection` command tree's own docs said "five leaves" while nine ship;
+  the top-level help now lists all nine verbs. `memstead status` printed a
+  Do-next line recommending `projection sync`, a verb the binary does not
+  have (now: `projection brief <binding> --sync`). `projection verify`'s
+  help and the fidelity report still described findings as keyed
+  `(hash(D), source_head)` although the store keys on `hash(D)` alone with
+  the head carried as metadata. `uninstall` and `recover` claimed
+  "MEM-REPO WORKSPACES ONLY" although both are shape-agnostic. `projection
+  init --name`'s help named the retired three-file scaffold. The ingest
+  module header no longer frames the subsystem as a port in progress. The
+  generated CLI reference picks these up on the next docs build.
+
 ## [0.14.0] - 2026-08-29
 
 ### Fixed
