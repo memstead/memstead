@@ -4,7 +4,7 @@ Memstead is a schema-agnostic graph engine. A mem keeps a typed model of a chose
 
 AI agents are the primary consumers and structured markdown is the storage layer. Every entity is a typed file in git; every mutation goes through the engine's MCP tool surface; every schema and every mem travels as a portable, versioned package.
 
-This document describes why the engine exists, what it bets on, and where it is going.
+This document describes why the engine exists, what it bets on, and where it is going. Limits are stated here with their scope. Read each one for what it says rather than as a verdict on the whole; where a bound comes from a measurement, the measurement is cited.
 
 ## Why this exists
 
@@ -190,6 +190,18 @@ The projected graph is published as one or more `.mem` files on the university's
 An AI agent researching *"machine-learning programmes in Europe"* hits memstead.io, finds `mit.edu:cs-dept/ml-curriculum`, downloads from `mit.edu`, and gets a graph the publishing authority validated and signed — a stated, attributable claim rather than whatever the agent managed to parse out of the HTML. The gain is provenance and publisher accountability, not a reading advantage.
 
 This turns Memstead from "a registry for sharing knowledge graphs" into "an open standard for how websites make their knowledge accessible to AI." The engine stays the same; the surface area grows from "developers sharing mems" to "any organisation publishing structured knowledge."
+
+## How Memstead speaks about itself
+
+Three lines of conduct are drawn as explicitly as the architectural ones above. They apply the same rule to the project's own speech: what the engine does at the write gate, the project does in how it describes itself.
+
+- **No ornament.** Anything Memstead ships or stores is supposed to have a nameable job, and what does not is a finding rather than furniture. The test is purpose, not usage: a mechanism built for a stated job and not yet exercised is capability waiting for its moment. What is refused is the feature or the entity whose only job is to make the surface look complete, which is the nonconforming write the engine rejects, committed by hand. The payoff is a surface where what is present can be assumed to mean something.
+
+- **Claims are derived or absent.** A statement Memstead makes about itself comes from the running system, with its measured bounds attached, and a published bound is a sign the measurement exists, not that the product is fragile. Null results appear alongside wins for the same reason a good lab publishes both. This document is the working example: the read-side evaluation above publishes a null result against the project's own interest, and the scaling section names its central capability as unbuilt.
+
+- **Honest answers over pleasant ones.** "Unknown" and "not in the store" are first-class answers. The engine refuses a nonconforming write rather than bending it into shape, and a finding left open is cheaper than a wrong repair. An agent can then act on what the system says without discounting it first.
+
+These lines describe a direction held, not a state achieved, and claiming otherwise would itself break the second one. The commitment is therefore machinery rather than purity: gates, sweeps, and registers exist so that a lapse is found by the system before it is found by a reader. Two are on the record. In August 2026 a register of sixteen launch claims went red on eight of them the first time its own referee ran in CI, some naming evidence that had moved, some carrying no verifiable pointer at all, and one still claiming a product that had already been retired; the register is green today because the claims were repaired, not because the check was relaxed. Earlier that month a public page here claimed Memstead was the only system of its kind to validate a write before it lands, and stood for seventeen days against this project's own published prior-art file, which already credited a neighbour with the same behaviour; the project's own comparison sweep narrowed the claim, not an outside reader. Both were found from the inside, and each one tightened a gate.
 
 ## Known risks
 
