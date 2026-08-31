@@ -287,22 +287,34 @@ fn git_head(git_root: &Path) -> Option<String> {
 /// ingest-level deny (workspace-relative). One join, named by the caller,
 /// rather than one hardcoded root that silently disagrees with the walk.
 ///
-/// A `**`-prefixed pattern is prefix-free — it matches under any directory,
-/// in particular the medium subtree — so it is emitted verbatim as a
-/// git-root-relative glob. Lexically re-rooting it (join + relativize) would
-/// produce `../**/…` for any non-root medium pointer, and git *fatals* on an
-/// out-of-tree pathspec, sinking the whole diff into a no-signal degrade.
+/// A `**`-prefixed pattern joins at `base` like every other pattern — the
+/// pointer join is what confines the diff to the medium subtree. Emitted
+/// verbatim (git-root-relative), a scope glob like `**/*.md` matched the
+/// WHOLE repository, so a sub-tree-pointed binding's changed slice presented
+/// artifacts its enumeration correctly kept out of `S(D)` and its `exclude`
+/// gate refused as out-of-scope — the two axes provably disagreed
+/// (drift-benchmark runs 03 and 06 on `plugin/graph`). `base` sits inside
+/// `git_root` by construction on the allow path (the root is found by walking
+/// up from `base`), so the joined form cannot escape the repo there; the
+/// escape fallback below keeps the historical repo-wide reading for a deny
+/// whose namespace root lies outside this repo, which for an exclude is the
+/// conservative direction.
 fn to_git_pathspec(pattern: &str, git_root: &Path, base: &Path, exclude: bool) -> String {
     let magic = if exclude {
         ":(glob,exclude)"
     } else {
         ":(glob)"
     };
-    if pattern.starts_with("**") {
-        return format!("{magic}{pattern}");
-    }
     let resolved = normalize_lexical(&base.join(pattern));
     let git_rel = relative_path(git_root, &resolved);
+    if pattern.starts_with("**")
+        && git_rel
+            .components()
+            .next()
+            .is_some_and(|c| c == Component::ParentDir)
+    {
+        return format!("{magic}{pattern}");
+    }
     format!("{magic}{}", git_rel.to_string_lossy())
 }
 
@@ -2032,6 +2044,56 @@ mod tests {
                 assert_eq!(slice.modified, vec!["keep.rs"]);
             }
             other => panic!("expected Changed (deny dropped), got {other:?}"),
+        }
+    }
+
+    /// A sub-tree-pointed source's changed slice honours the pointer join the
+    /// enumeration honours: a `**`-prefixed scope glob anchors at the medium
+    /// base, so a change OUTSIDE the pointed subtree never enters the slice.
+    /// Regression for drift-benchmark runs 03/06 (`plugin/graph`): the slice
+    /// presented repo-wide artifacts that `S(D)` correctly excluded and the
+    /// exclude gate refused, steering sync at artifacts it had no mandate over.
+    #[test]
+    fn git_slice_confines_to_the_medium_subtree() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/in.md"), "one").unwrap();
+        std::fs::write(root.join("out.md"), "one").unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "seed"]);
+        let baseline = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        std::fs::write(root.join("sub/in.md"), "two").unwrap();
+        std::fs::write(root.join("out.md"), "two").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "move both"]);
+
+        let source = Source {
+            pointer: "sub".to_string(),
+            ..primary(vec![PatternEntry {
+                path: "**/*.md".to_string(),
+                mode: PatternMode::Allow,
+            }])
+        };
+        let outcome = compute_git_slice(&source, &[], root, Some(&baseline));
+        match outcome {
+            SliceOutcome::Changed { slice, .. } => {
+                assert_eq!(slice.modified, vec!["sub/in.md"]);
+                assert!(slice.added.is_empty());
+                assert!(slice.deleted.is_empty());
+            }
+            other => panic!("expected Changed confined to the subtree, got {other:?}"),
         }
     }
 

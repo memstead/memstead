@@ -53,6 +53,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A sub-tree-pointed binding's changed slice honours the pointer join.**
+  A `**`-prefixed scope glob was pushed to git verbatim as a repo-wide
+  pathspec, so a binding pointing at a subtree (`plugin/graph` points at
+  `../public/plugins/claude-code`) was steered by its sync brief at
+  changed artifacts across the whole repository — artifacts its own
+  enumeration correctly kept out of `S(D)` and its `exclude` gate refused
+  as out-of-scope; the two axes provably disagreed (reproduced twice in
+  the drift-benchmark, re-reproduced live before the fix). Scope globs
+  now anchor at the medium base in the git diff exactly as the
+  enumeration anchors them; a deny whose namespace root lies outside the
+  repo keeps its conservative repo-wide reading.
+
 - **An accepted exclusion takes effect on the very next sync brief.** The
   brief served the last recorded findings batch as-is, so an artifact
   `projection exclude` had just accepted kept presenting as uncovered
