@@ -54,9 +54,12 @@ the drift-findings layer. Stable knowledge, fast-cycling findings.
 
 The measurement is a read-only count against the mem-repo's git branches and can
 be re-run at any time; no third party has independently reproduced it yet (which
-would lift it from *repeatable* to *proven*). The commit-mining method and the
-per-branch split are recorded in the project's own status-site campaign protocol
-(`dev/status-site-campaign/protocol.md`, Iteration 18 / Finding F19).
+would lift it from *repeatable* to *proven*). The method is the one stated
+above in full: mine every delete commit on the mem-repo's entity branches,
+classify each by its `Resolved: …` rationale, and count the ingest
+process-mems' findings lifecycle. (First derived in an internal campaign as
+Finding F19; that protocol is retired, and this section is now the method's
+public record.)
 
 ## Where this figure lives
 

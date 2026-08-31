@@ -72,6 +72,17 @@ left for a reader to discover.
 | files mentioning bugs | 26 | 10 |
 | entities of the schema's `incident` type | n/a | **0** |
 
+The identifier row counts distinct dated bug tags, truncated prefixes
+included, exactly as `grep -rhoE '\bB-2026[0-9-]*' <arm> | sort -u | wc -l`
+returns them over `arm-a/` and `arm-b-mem/`. The command is stated because
+a reader counting with any other pattern gets different numbers (a
+verification pass on 2026-08-30 did, and read the row as non-reproducing
+until the pattern was recovered). The files row is the looser "mentions
+bug material at all" reading; nearby patterns land within a few files of
+it (`grep -rl 'B-2026-'` gives 26/11, `grep -rlw bug` 29/10), and the
+qualitative claim — one arm concentrates its bug record, the other
+barely holds one — does not move with the pattern.
+
 Arm A holds a dedicated `bug-tracker.md`. Arm B holds no operational records at
 all: the pinned `software@0.1.0` schema declares an `incident` type and the
 writers used it zero times in ten rounds.

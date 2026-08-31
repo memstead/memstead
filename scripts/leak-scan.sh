@@ -14,8 +14,7 @@ set -uo pipefail
 DEST="${1:-../public}"
 HITS=0
 
-# Skip build artifacts and the committed-static registry HTTP reference
-# (registry.md documents a public HTTP API — an allowed prose mention).
+# Skip build artifacts.
 # Exclude the guard scripts themselves: they *define* the leak patterns
 # (dev/plans, macos/, …) as regex literals, so scanning them self-matches.
 PRUNE=( --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules \
