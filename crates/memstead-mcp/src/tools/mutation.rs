@@ -196,9 +196,9 @@ pub struct UpdateParams {
     #[schemars(description = "Section fields to append to: { \"specifies\": \"extra content\" }")]
     pub append_sections: Option<IndexMap<String, String>>,
     #[schemars(
-        description = "Section fields to patch (find-and-replace): { \"specifies\": { \"old\": \"...\", \"new\": \"...\" } }"
+        description = "Section fields to patch (find-and-replace): { \"specifies\": { \"old\": \"...\", \"new\": \"...\" } } — or a LIST of patches per section, applied in order against the evolving body: { \"specifies\": [{...}, {...}] }. Batched edits to one section land in one call."
     )]
-    pub patch_sections: Option<IndexMap<String, PatchInput>>,
+    pub patch_sections: Option<IndexMap<String, PatchesInput>>,
     #[schemars(
         description = "Section keys to REMOVE from the entity — heading and body both: [\"notes\"]. The close gesture for a declared-but-empty heading with nothing to receive, and the repair for a legacy undeclared heading. Silent no-op on an absent key (symmetric with metadata_unset). Refuses for a schema-REQUIRED section (MISSING_REQUIRED_SECTION — fill it instead), for `relationships` (SECTION_NOT_UPDATABLE), and for a key also named in sections / append_sections / patch_sections (CONFLICTING_SECTION_MODES)."
     )]
@@ -290,6 +290,26 @@ pub struct RelationUnsetInput {
     pub rel_type: String,
     #[schemars(description = "Full target entity ID of the edge to remove")]
     pub target: String,
+}
+
+/// One patch or a list of patches for a single section — the wire
+/// accepts both shapes (`{...}` and `[{...}, ...]`); a single object is
+/// the historical form and stays valid unchanged.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum PatchesInput {
+    One(PatchInput),
+    Many(Vec<PatchInput>),
+}
+
+impl PatchesInput {
+    /// Flatten to the engine's per-section patch list.
+    pub fn into_vec(self) -> Vec<PatchInput> {
+        match self {
+            PatchesInput::One(p) => vec![p],
+            PatchesInput::Many(v) => v,
+        }
+    }
 }
 
 /// Find-and-replace input.

@@ -153,7 +153,10 @@ pub struct Args {
     /// alongside `--from`: the hash-mode flags (`--expected-hash`, which
     /// overrides the file's `expected_hash` field; `--auto-hash`; `--force`),
     /// `--dry-run` (forces a dry run even when the file says otherwise), and
-    /// `--note`.
+    /// `--note`. Deliberately: `auto_hash` is NOT a payload field here
+    /// (unlike `batch-update` entries) — a stored payload must not be able
+    /// to disable optimistic locking; pass the `--auto-hash` FLAG beside
+    /// `--from` for that.
     #[arg(long = "from", value_name = "FILE")]
     pub from: Option<PathBuf>,
 
@@ -199,7 +202,7 @@ struct UpdatePayload {
     #[serde(default)]
     append_sections: IndexMap<String, String>,
     #[serde(default)]
-    patch_sections: IndexMap<String, PatchPayload>,
+    patch_sections: IndexMap<String, PatchesPayload>,
     #[serde(default)]
     sections_unset: Vec<String>,
     #[serde(default)]
@@ -299,6 +302,27 @@ struct PatchPayload {
     new: String,
     #[serde(default)]
     all: bool,
+}
+
+/// One patch or a list of patches per section — the payload accepts both
+/// (`{...}` and `[{...}, ...]`), mirroring the MCP wire; a list applies
+/// in order against the section's evolving body.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
+enum PatchesPayload {
+    One(PatchPayload),
+    Many(Vec<PatchPayload>),
+}
+
+impl PatchesPayload {
+    #[cfg(feature = "mem-repo")]
+    fn into_vec(self) -> Vec<PatchPayload> {
+        match self {
+            PatchesPayload::One(p) => vec![p],
+            PatchesPayload::Many(v) => v,
+        }
+    }
 }
 
 /// Template-symmetry check against the live entity: a shared
@@ -447,11 +471,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .map(|(k, v)| {
                     (
                         k,
-                        PatchArg {
-                            old: v.old,
-                            new: v.new,
-                            all: v.all,
-                        },
+                        v.into_vec()
+                            .into_iter()
+                            .map(|v| PatchArg {
+                                old: v.old,
+                                new: v.new,
+                                all: v.all,
+                            })
+                            .collect(),
                     )
                 })
                 .collect();
@@ -921,8 +948,9 @@ fn parse_kv_list(items: &[String], flag: &str) -> anyhow::Result<IndexMap<String
 fn parse_patch_list_combined(
     first_only: &[String],
     all: &[String],
-) -> anyhow::Result<IndexMap<String, PatchPayload>> {
-    let mut out = IndexMap::with_capacity(first_only.len() + all.len());
+) -> anyhow::Result<IndexMap<String, PatchesPayload>> {
+    let mut out: IndexMap<String, Vec<PatchPayload>> =
+        IndexMap::with_capacity(first_only.len() + all.len());
     for (items, flag, replace_all) in [(first_only, "--patch", false), (all, "--patch-all", true)] {
         for raw in items {
             let (key, rest) = raw.split_once('=').ok_or_else(|| {
@@ -939,25 +967,32 @@ fn parse_patch_list_combined(
                     format!("{flag}: expected KEY=OLD=>NEW (missing `=>`), got `{raw}`"),
                 )
             })?;
-            if out.contains_key(key) {
+            // The inline separator cannot express an OLD or NEW that itself
+            // contains `=>`: the split is ambiguous, and a first-occurrence
+            // split silently corrupted the section (backlog, live melt).
+            // Refuse toward the payload form, which carries arbitrary text.
+            if new.contains("=>") {
                 return Err(CliError::new(
                     ExitKind::Validation,
                     "INVALID_INPUT",
                     format!(
-                        "duplicate patch for section `{key}` -- only one of --patch / --patch-all per section"
+                        "{flag}: `{raw}` carries more than one `=>` — the inline form cannot                          say which one separates OLD from NEW. Use `--from <file.json>` with                          `patch_sections`, which carries arbitrary text unambiguously."
                     ),
                 )
                 .into());
             }
-            out.insert(
-                key.to_string(),
-                PatchPayload {
-                    old: old.to_string(),
-                    new: new.to_string(),
-                    all: replace_all,
-                },
-            );
+            // Repeats for one section apply in order against the evolving
+            // body — batched edits land in one call (`--patch` and
+            // `--patch-all` may mix per section).
+            out.entry(key.to_string()).or_default().push(PatchPayload {
+                old: old.to_string(),
+                new: new.to_string(),
+                all: replace_all,
+            });
         }
     }
-    Ok(out)
+    Ok(out
+        .into_iter()
+        .map(|(k, v)| (k, PatchesPayload::Many(v)))
+        .collect())
 }

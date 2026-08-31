@@ -1291,6 +1291,19 @@ fn render_type_catalog_lines(types: Vec<Arc<TypeDefinition>>) -> String {
 
 /// Render a single type's definition as agent-friendly markdown.
 pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
+    render_type_info_markdown_in(schema, None)
+}
+
+/// Like [`render_type_info_markdown`], with the parent [`memstead_schema::Schema`]
+/// supplied so relationship rows can carry their schema-level authoring
+/// posture. Without it, `memstead type` rendered `REFERENCES` beside 40
+/// authorable rel-types with no marker, and the manual-authoring refusal
+/// arrived only AFTER an agent had composed (and lost) an all-or-nothing
+/// batch — the ban must be visible before the write.
+pub fn render_type_info_markdown_in(
+    schema: &TypeDefinition,
+    parent: Option<&memstead_schema::Schema>,
+) -> String {
     let mut lines = Vec::new();
     lines.push(format!("# Type: {}", schema.name.as_str()));
     lines.push(String::new());
@@ -1342,6 +1355,21 @@ pub fn render_type_info_markdown(schema: &TypeDefinition) -> String {
             .any(|r| r == rel_type)
         {
             flags.push("no-self-loop");
+        }
+        // Schema-level authoring posture, when the parent schema is in
+        // hand: a rel-type the alias machinery owns (e.g. REFERENCES)
+        // is marked here, BEFORE a write, instead of only refusing
+        // after a batch is composed.
+        if let Some(p) = parent {
+            match p.relationship_manual_authoring(rel_type) {
+                memstead_schema::ManualAuthoring::Forbidden => {
+                    flags.push("manual authoring FORBIDDEN — emitted from body wiki-links only");
+                }
+                memstead_schema::ManualAuthoring::Warn => {
+                    flags.push("manual authoring warns");
+                }
+                memstead_schema::ManualAuthoring::Allow => {}
+            }
         }
         let flag_str = if flags.is_empty() {
             String::new()

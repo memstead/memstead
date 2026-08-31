@@ -552,7 +552,7 @@ impl Engine {
                 .chain(
                     args.patch_sections
                         .iter()
-                        .map(|(k, p)| (k.as_str(), p.new.as_str())),
+                        .flat_map(|(k, ps)| ps.iter().map(move |p| (k.as_str(), p.new.as_str()))),
                 ),
             {
                 let t: &memstead_schema::TypeDefinition = type_def.as_ref();
@@ -697,50 +697,56 @@ impl Engine {
         // PatchOldNotFound carrying a UTF-8-safe truncated snapshot
         // of the current body. Mirrors full.
         let mut modified_sections_patched: Vec<String> = Vec::new();
-        for (key, patch) in args.patch_sections {
-            let existing = next
-                .sections
-                .get(&key)
-                .ok_or_else(|| EngineError::PatchSectionEmpty {
-                    section: key.clone(),
-                })?
-                .clone();
-            if !existing.contains(&patch.old) {
-                let cap = PATCH_OLD_NOT_FOUND_CONTENT_CAP;
-                let truncated = existing.len() > cap;
-                // Truncate at a UTF-8 char boundary to avoid
-                // splitting a code point.
-                let mut cut = cap.min(existing.len());
-                while cut > 0 && !existing.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                let current_content = if truncated {
-                    existing[..cut].to_string()
-                } else {
-                    existing.clone()
-                };
-                // Where the substring DOES occur — the one-call recovery
-                // when the patch targeted the wrong section (a "found in
-                // `versioning` instead" hint turns three attempts into one).
-                let found_in_sections: Vec<String> = next
+        for (key, patches) in args.patch_sections {
+            // Patches for one section apply in order against the evolving
+            // body, so a batched multi-edit lands in one call (the old
+            // one-patch-per-section-per-call shape cost one refused call
+            // per extra edit; two campaigns hit it).
+            for patch in patches {
+                let existing = next
                     .sections
-                    .iter()
-                    .filter(|(k, body)| k.as_str() != key && body.contains(&patch.old))
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                return Err(EngineError::PatchOldNotFound {
-                    section: key,
-                    current_content,
-                    truncated,
-                    found_in_sections,
-                });
+                    .get(&key)
+                    .ok_or_else(|| EngineError::PatchSectionEmpty {
+                        section: key.clone(),
+                    })?
+                    .clone();
+                if !existing.contains(&patch.old) {
+                    let cap = PATCH_OLD_NOT_FOUND_CONTENT_CAP;
+                    let truncated = existing.len() > cap;
+                    // Truncate at a UTF-8 char boundary to avoid
+                    // splitting a code point.
+                    let mut cut = cap.min(existing.len());
+                    while cut > 0 && !existing.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    let current_content = if truncated {
+                        existing[..cut].to_string()
+                    } else {
+                        existing.clone()
+                    };
+                    // Where the substring DOES occur — the one-call recovery
+                    // when the patch targeted the wrong section (a "found in
+                    // `versioning` instead" hint turns three attempts into one).
+                    let found_in_sections: Vec<String> = next
+                        .sections
+                        .iter()
+                        .filter(|(k, body)| k.as_str() != key && body.contains(&patch.old))
+                        .map(|(k, _)| k.clone())
+                        .collect();
+                    return Err(EngineError::PatchOldNotFound {
+                        section: key,
+                        current_content,
+                        truncated,
+                        found_in_sections,
+                    });
+                }
+                let patched = if patch.all {
+                    existing.replace(&patch.old, &patch.new)
+                } else {
+                    existing.replacen(&patch.old, &patch.new, 1)
+                };
+                next.sections.insert(key.clone(), patched);
             }
-            let patched = if patch.all {
-                existing.replace(&patch.old, &patch.new)
-            } else {
-                existing.replacen(&patch.old, &patch.new, 1)
-            };
-            next.sections.insert(key.clone(), patched);
             modified_sections_patched.push(key);
         }
 
@@ -2734,11 +2740,11 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert(
             "identity".to_string(),
-            crate::ops::PatchArg {
+            vec![crate::ops::PatchArg {
                 old: "hello".to_string(),
                 new: "HI".to_string(),
                 all: false,
-            },
+            }],
         );
         let outcome = engine
             .update_entity(
@@ -2781,11 +2787,11 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert(
             "identity".to_string(),
-            crate::ops::PatchArg {
+            vec![crate::ops::PatchArg {
                 old: "this-substring-does-not-exist".to_string(),
                 new: "nope".to_string(),
                 all: false,
-            },
+            }],
         );
         let err = engine
             .update_entity(
@@ -2964,6 +2970,49 @@ mod tests {
         assert_eq!(err.code(), "SECTION_NOT_UPDATABLE", "{err:?}");
     }
 
+    /// Several patches for ONE section apply in order against the
+    /// evolving body — the batched multi-edit the one-patch-per-section
+    /// map shape refused (backlog: `duplicate patch` per extra edit,
+    /// reconfirmed by two campaigns).
+    #[test]
+    fn update_entity_applies_multiple_patches_per_section_in_order() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Multi Patch");
+        let (actor, client) = cli_actor();
+        let mut patches = IndexMap::new();
+        patches.insert(
+            "identity".to_string(),
+            vec![
+                crate::ops::PatchArg {
+                    old: "fixture".to_string(),
+                    new: "FIRST".to_string(),
+                    all: false,
+                },
+                // The second patch matches text the FIRST patch produced —
+                // provable in-order application against the evolving body.
+                crate::ops::PatchArg {
+                    old: "FIRST identity".to_string(),
+                    new: "SECOND".to_string(),
+                    all: false,
+                },
+            ],
+        );
+        let outcome = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    patch_sections: patches,
+                    ..unset_args(seeded.id.clone(), seeded.content_hash.clone(), &[])
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert_eq!(outcome.modified_sections.patched, vec!["identity"]);
+        let entity = engine.store().get(&seeded.id).unwrap();
+        assert_eq!(entity.sections["identity"], "SECOND body");
+    }
+
     /// A patch whose `old` lives in a DIFFERENT section gets that section
     /// named in the refusal — the one-call recovery for a patch that
     /// targeted the wrong section (backlog: a "found in `versioning`
@@ -2976,11 +3025,11 @@ mod tests {
         let mut patches = IndexMap::new();
         patches.insert(
             "identity".to_string(),
-            crate::ops::PatchArg {
+            vec![crate::ops::PatchArg {
                 old: "fixture purpose body".to_string(),
                 new: "nope".to_string(),
                 all: false,
-            },
+            }],
         );
         let err = engine
             .update_entity(

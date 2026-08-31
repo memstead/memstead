@@ -49,7 +49,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
         Some(name) => match schema.get_type(name) {
             Some(td) => {
-                let mut out = render::render_type_info_markdown(&td);
+                let mut out = render::render_type_info_markdown_in(&td, Some(schema));
                 out.insert_str(0, &format!("**Schema:** `{schema_label}`\n\n"));
                 if let Some(n) = &notice {
                     out.insert_str(0, &format!("{n}\n\n"));

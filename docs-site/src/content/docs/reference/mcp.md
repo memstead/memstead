@@ -1746,6 +1746,20 @@ Modify an existing entity. Pre-fetch the target mem's schema (`memstead_schema`)
       ],
       "type": "object"
     },
+    "PatchesInput": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PatchInput"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/PatchInput"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "One patch or a list of patches for a single section — the wire\naccepts both shapes (`{...}` and `[{...}, ...]`); a single object is\nthe historical form and stays valid unchanged."
+    },
     "RelationInput": {
       "additionalProperties": false,
       "description": "A relationship input for create/batch tools.",
@@ -1892,9 +1906,9 @@ Modify an existing entity. Pre-fetch the target mem's schema (`memstead_schema`)
     },
     "patch_sections": {
       "additionalProperties": {
-        "$ref": "#/$defs/PatchInput"
+        "$ref": "#/$defs/PatchesInput"
       },
-      "description": "Section fields to patch (find-and-replace): { \"specifies\": { \"old\": \"...\", \"new\": \"...\" } }",
+      "description": "Section fields to patch (find-and-replace): { \"specifies\": { \"old\": \"...\", \"new\": \"...\" } } — or a LIST of patches per section, applied in order against the evolving body: { \"specifies\": [{...}, {...}] }. Batched edits to one section land in one call.",
       "type": [
         "object",
         "null"

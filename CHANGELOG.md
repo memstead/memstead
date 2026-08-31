@@ -50,6 +50,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   written in the same call (`CONFLICTING_SECTION_MODES`). The
   mutation response reports removals under `modified_sections.unset`.
 
+- **A section takes several patches in one call, applied in order.**
+  `patch_sections` accepts a LIST of patches per section on every
+  surface — MCP `memstead_update` (a single object stays valid
+  unchanged), `update --from`, `batch-update` entries, and repeated
+  `--patch`/`--patch-all` flags for one section (which used to refuse
+  `duplicate patch`, costing one call per extra edit; two campaigns hit
+  it). Patches apply in order against the section's evolving body.
+
 ### Changed
 
 - **A declared-but-unwritten optional section is absent, not an empty
@@ -88,6 +96,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   records as its machine-readable trace.
 
 ### Fixed
+
+- **An inline `--patch` whose text carries a second `=>` refuses instead
+  of corrupting the section.** The splitter took the first occurrence,
+  silently mis-splitting OLD from NEW; the ambiguity now refuses with a
+  pointer to `--from`, which carries arbitrary text unambiguously.
+
+- **`verify-anchors` backfills first-observed hashes.** Only the
+  binding-backed verify backfilled, so a manually re-pinned anchor on a
+  binding-less mem read `recheck` forever (`hash_source: backfill` on
+  every manual re-pin, live melt). The standalone pass now records
+  observed hashes onto hash-less anchors exactly as the binding pass
+  does — idempotent, and the recheck queue drains on the next pass.
+
+- **`batch-update` entries tolerate the template `mem` key.**
+  `batch-create` accepted it and `update --from` tolerated it while
+  `batch-update` refused the whole batch on the unknown field; it now
+  validates against the entry id's mem exactly as `update --from` does.
+
+- **`memstead type` marks rel-types the alias machinery owns.** The
+  manual-authoring posture now renders beside each relationship
+  (`manual authoring FORBIDDEN — emitted from body wiki-links only`),
+  so the refusal is visible BEFORE a batch is composed instead of
+  arriving after an all-or-nothing `batch-relate` was built around it.
+
 
 - **Non-JSON CLI errors carry the recovery payload.** The human error path
   printed `code: message` alone and serialized the structured `details`

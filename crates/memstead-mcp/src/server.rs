@@ -2847,7 +2847,7 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
-        let patch_sections: indexmap::IndexMap<String, memstead_base::ops::PatchArg> = p
+        let patch_sections: indexmap::IndexMap<String, Vec<memstead_base::ops::PatchArg>> = p
             .patch_sections
             .clone()
             .unwrap_or_default()
@@ -2855,11 +2855,14 @@ impl McpServer {
             .map(|(k, v)| {
                 (
                     k,
-                    memstead_base::ops::PatchArg {
-                        old: v.old,
-                        new: v.new,
-                        all: v.all.unwrap_or(false),
-                    },
+                    v.into_vec()
+                        .into_iter()
+                        .map(|v| memstead_base::ops::PatchArg {
+                            old: v.old,
+                            new: v.new,
+                            all: v.all.unwrap_or(false),
+                        })
+                        .collect(),
                 )
             })
             .collect();
@@ -12249,14 +12252,14 @@ write_rules: []
             .map(|l| l.trim_start_matches("_hash:").trim().to_string())
             .expect("_hash present");
 
-        let mut patches: IndexMap<String, PatchInput> = IndexMap::new();
+        let mut patches: IndexMap<String, crate::tools::mutation::PatchesInput> = IndexMap::new();
         patches.insert(
             "identity".to_string(),
-            PatchInput {
+            crate::tools::mutation::PatchesInput::One(PatchInput {
                 old: "this-substring-is-not-in-the-body".to_string(),
                 new: "replacement".to_string(),
                 all: None,
-            },
+            }),
         );
         let result = server.memstead_update(Parameters(UpdateParams {
             anchors: None,
@@ -12657,11 +12660,11 @@ write_rules: []
             )])),
             patch_sections: Some(IndexMap::from_iter([(
                 "constraints".to_string(),
-                crate::tools::mutation::PatchInput {
+                crate::tools::mutation::PatchesInput::One(crate::tools::mutation::PatchInput {
                     old: "drop me".to_string(),
                     new: "keep me".to_string(),
                     all: Some(false),
-                },
+                }),
             )])),
             metadata: Some(IndexMap::from_iter([(
                 "level".to_string(),

@@ -2,7 +2,10 @@
 //! statement: verify every anchor in a mem against its declared source,
 //! with no binding required. Read-only on mem CONTENT — a sidecar read
 //! plus filesystem observation, no entity touched. It is not a pure
-//! read: like any verify, a completed run records its findings store.
+//! read: like any verify, a completed run records its findings store,
+//! and (like the binding-backed verify) backfills first-observed hashes
+//! onto hash-less anchors in the sidecar, so a manual re-pin drains out
+//! of the recheck queue instead of queueing forever.
 
 use clap::Parser;
 use serde_json::json;
@@ -46,11 +49,39 @@ pub struct Args {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    let cli_engine = ctx.cli_engine()?;
-    let engine = cli_engine.base();
+    let mut engine = ctx.cli_engine()?.into_base();
 
     let report = engine
         .verify_mem_anchors(&args.mem_name)
+        .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
+
+    // Backfill observed hashes onto hash-less anchors, exactly as the
+    // binding-backed verify does after its pass — the engine writer skips
+    // anchors that already carry a hash, so a re-run stages nothing. Until
+    // 2026-08-31 only the binding path backfilled, so every manually
+    // re-pinned anchor on a binding-less mem read `recheck` forever and its
+    // repair waited on a verify surface the mem did not have (backlog, live
+    // melt: every manual re-pin read `hash_source: backfill`).
+    let backfill: Vec<memstead_base::anchor::ObservedArtifactHash> = report
+        .anchors
+        .iter()
+        .filter(|a| {
+            a.state == "recheck"
+                && a.observed_hash.is_some()
+                && matches!(a.class.as_str(), "anchored" | "derived")
+        })
+        .map(|a| memstead_base::anchor::ObservedArtifactHash {
+            entity: a.entity_id.clone(),
+            artifact: a.artifact.clone(),
+            hash: a.observed_hash.clone().expect("filtered on Some"),
+        })
+        .collect();
+    let backfilled = engine
+        .record_anchor_observed_hashes(
+            &args.mem_name,
+            &backfill,
+            Some("verify-anchors: first-observation hash backfill"),
+        )
         .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
 
     // Persist the flagged findings under the mem-scoped standalone
@@ -100,6 +131,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "fully_adjudicated": report.fully_adjudicated(),
             "entity_end_unreconciled": report.unreconciled,
             "anchors": report.anchors,
+            "hash_backfilled": backfilled,
             "findings": findings,
         }))?;
     } else {
@@ -154,6 +186,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     ));
                 }
             }
+        }
+        if backfilled > 0 {
+            out.push_str(&format!(
+                "\nBackfilled {backfilled} observed hash(es) onto hash-less anchors — the \
+                 recheck queue drains on the next pass.\n"
+            ));
         }
         match &persisted {
             Some(fs) => {

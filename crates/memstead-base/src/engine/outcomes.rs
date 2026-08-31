@@ -137,13 +137,15 @@ pub struct UpdateEntityArgs {
     /// is rejected with [`EngineError::ConflictingSectionModes`].
     pub append_sections: IndexMap<String, String>,
     /// Section keys whose body should be patched via find-and-
-    /// replace. Each value is a [`crate::ops::PatchArg`] with
-    /// `old`, `new`, and `all` (replace every occurrence vs first
-    /// only). Errors with [`EngineError::PatchSectionEmpty`] when
-    /// the section is absent and [`EngineError::PatchOldNotFound`]
-    /// when `old` doesn't appear. Mutually exclusive with the
-    /// other two section modes for the same key.
-    pub patch_sections: IndexMap<String, crate::ops::PatchArg>,
+    /// replace. Each value is a LIST of [`crate::ops::PatchArg`]
+    /// (`old`, `new`, `all`), applied in order against the section's
+    /// evolving body — batched edits to one section land in one call
+    /// instead of one call per patch. Errors with
+    /// [`EngineError::PatchSectionEmpty`] when the section is absent
+    /// and [`EngineError::PatchOldNotFound`] when an `old` doesn't
+    /// appear at its turn. Mutually exclusive with the other section
+    /// modes for the same key.
+    pub patch_sections: IndexMap<String, Vec<crate::ops::PatchArg>>,
     /// Section keys to REMOVE from the entity — heading and body both.
     /// The close gesture for a declared-but-empty heading with nothing
     /// to receive (the shape a discovery build leaves behind), and the
@@ -240,6 +242,7 @@ impl UpdateEntityArgs {
         !self.sections.is_empty()
             || !self.append_sections.is_empty()
             || !self.patch_sections.is_empty()
+            || !self.sections_unset.is_empty()
             || !self.metadata.is_empty()
             || !self.metadata_unset.is_empty()
             || !self.declare_relations.is_empty()

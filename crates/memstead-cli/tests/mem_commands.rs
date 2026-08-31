@@ -3758,3 +3758,131 @@ fn export_json_include_anchors_rides_the_envelope() {
         .assert()
         .failure();
 }
+
+/// Repeated `--patch` flags for ONE section apply in order (the old
+/// shape refused `duplicate patch`), and an inline patch whose text
+/// carries a second `=>` refuses toward `--from` instead of silently
+/// splitting at the first occurrence and corrupting the section.
+#[test]
+fn cli_update_multi_patch_per_section_and_ambiguous_separator_refusal() {
+    let tmp = TempDir::new().unwrap();
+    make_json_export_workspace(tmp.path());
+
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "sender-mem--delta",
+            "--force",
+            "--patch",
+            "identity=Multi-section=>ONE",
+            "--patch",
+            "identity=ONE fixture=>TWO",
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "entity", "sender-mem--delta"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let body = v["sections"]["identity"].as_str().unwrap();
+    assert!(
+        body.starts_with("TWO entity"),
+        "patches applied in order against the evolving body: {body}"
+    );
+
+    let refused = memstead()
+        .current_dir(tmp.path())
+        .args([
+            "update",
+            "sender-mem--delta",
+            "--force",
+            "--patch",
+            "identity=a=>b=>c",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let e = String::from_utf8_lossy(&refused.stderr).to_string();
+    assert!(e.contains("more than one `=>`"), "{e}");
+    assert!(e.contains("--from"), "{e}");
+}
+
+/// `verify-anchors` backfills first-observed hashes onto hash-less
+/// anchors like the binding-backed verify does — a manual re-pin drains
+/// out of the recheck queue on the next standalone pass instead of
+/// reading `recheck` forever (backlog, live melt).
+#[test]
+fn verify_anchors_backfills_hashless_anchor_and_recheck_drains() {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join("backfillws");
+    fs::create_dir_all(&ws).unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args(["quickstart"])
+        .assert()
+        .success();
+    fs::create_dir_all(ws.join("src")).unwrap();
+    fs::write(ws.join("src/pinned.rs"), "fn pinned() {}\n").unwrap();
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "create",
+            "--title",
+            "Pinned Probe",
+            "--type",
+            "memo",
+            "--section",
+            "claim=Pinned.",
+            "--section",
+            "context=Backfill test.",
+        ])
+        .assert()
+        .success();
+    // A hash-less hash-bearing anchor — the manual re-pin shape.
+    memstead()
+        .current_dir(&ws)
+        .args([
+            "update",
+            "backfillws--pinned-probe",
+            "--anchor",
+            r#"{"artifact": "src/pinned.rs", "grain": "file", "class": "anchored"}"#,
+        ])
+        .assert()
+        .success();
+
+    let out = memstead()
+        .current_dir(&ws)
+        .args(["--json", "verify-anchors", "--mem", "backfillws"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["recheck"], 1, "hash-less anchor queues once: {v}");
+    assert_eq!(v["hash_backfilled"], 1, "…and is backfilled this pass: {v}");
+
+    // Second pass: the backfilled hash adjudicates deterministically.
+    let out2 = memstead()
+        .current_dir(&ws)
+        .args(["--json", "verify-anchors", "--mem", "backfillws"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v2: serde_json::Value = serde_json::from_slice(&out2).unwrap();
+    assert_eq!(v2["resolved"], 1, "recheck drained: {v2}");
+    assert_eq!(v2["recheck"], 0, "{v2}");
+    assert_eq!(
+        v2["hash_backfilled"], 0,
+        "idempotent — nothing staged: {v2}"
+    );
+}

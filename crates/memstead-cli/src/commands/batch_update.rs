@@ -80,9 +80,17 @@ struct EntryPayload {
     #[serde(default)]
     append_sections: IndexMap<String, String>,
     #[serde(default)]
-    patch_sections: IndexMap<String, PatchPayload>,
+    patch_sections: IndexMap<String, PatchesPayload>,
     #[serde(default)]
     sections_unset: Vec<String>,
+    /// Tolerated for template symmetry with `batch-create` entries and
+    /// `update --from`: when present it must match the mem encoded in
+    /// the entry's id (update cannot move an entity between mems); a
+    /// differing value refuses the entry. Until 2026-08-31 this key was
+    /// refused outright here (`deny_unknown_fields`, no field) while
+    /// both siblings accepted it — each mismatch cost one refused batch.
+    #[serde(default)]
+    mem: Option<String>,
     #[serde(default)]
     metadata: IndexMap<String, String>,
     #[serde(default)]
@@ -120,6 +128,24 @@ struct PatchPayload {
     new: String,
     #[serde(default)]
     all: bool,
+}
+
+/// One patch or a list per section — both shapes accepted, list applied
+/// in order (mirrors `update --from` and the MCP wire).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PatchesPayload {
+    One(PatchPayload),
+    Many(Vec<PatchPayload>),
+}
+
+impl PatchesPayload {
+    fn into_vec(self) -> Vec<PatchPayload> {
+        match self {
+            PatchesPayload::One(p) => vec![p],
+            PatchesPayload::Many(v) => v,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -256,6 +282,21 @@ fn build_update_args(
     // Per-entry provenance note rides alongside the args to the engine.
     let note = entry.note.clone();
     let id = EntityId::canonical(&entry.id);
+    // Template-symmetry `mem` key: tolerated when it matches the id's
+    // mem, refused when it contradicts it (same rule as `update --from`).
+    if let Some(m) = entry.mem.as_deref()
+        && m != id.mem()
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            format!(
+                "entry `{}`: template `mem` {m:?} does not match the mem in the id —                  update cannot move an entity between mems (delete + create instead)",
+                entry.id
+            ),
+        )
+        .into());
+    }
     let expected_hash = if entry.force {
         None
     } else if entry.auto_hash {
@@ -281,11 +322,14 @@ fn build_update_args(
         .map(|(k, v)| {
             (
                 k,
-                PatchArg {
-                    old: v.old,
-                    new: v.new,
-                    all: v.all,
-                },
+                v.into_vec()
+                    .into_iter()
+                    .map(|v| PatchArg {
+                        old: v.old,
+                        new: v.new,
+                        all: v.all,
+                    })
+                    .collect(),
             )
         })
         .collect();

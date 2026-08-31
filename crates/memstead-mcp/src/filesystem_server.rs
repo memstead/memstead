@@ -2969,11 +2969,11 @@ mod tests {
         let mut u = base();
         u.patch_sections = Some(IndexMap::from([(
             "purpose".to_string(),
-            crate::tools::mutation::PatchInput {
+            crate::tools::mutation::PatchesInput::One(crate::tools::mutation::PatchInput {
                 old: "a".into(),
                 new: "b".into(),
                 all: None,
-            },
+            }),
         )]));
         let r = server.memstead_update(Parameters(u));
         assert!(is_unsupported(&r));
