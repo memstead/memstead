@@ -662,10 +662,20 @@ impl Engine {
                 } else {
                     existing.clone()
                 };
+                // Where the substring DOES occur — the one-call recovery
+                // when the patch targeted the wrong section (a "found in
+                // `versioning` instead" hint turns three attempts into one).
+                let found_in_sections: Vec<String> = next
+                    .sections
+                    .iter()
+                    .filter(|(k, body)| k.as_str() != key && body.contains(&patch.old))
+                    .map(|(k, _)| k.clone())
+                    .collect();
                 return Err(EngineError::PatchOldNotFound {
                     section: key,
                     current_content,
                     truncated,
+                    found_in_sections,
                 });
             }
             let patched = if patch.all {
@@ -2716,6 +2726,58 @@ mod tests {
         match err {
             EngineError::PatchOldNotFound { section, .. } => {
                 assert_eq!(section, "identity");
+            }
+            other => panic!("expected PatchOldNotFound, got {other:?}"),
+        }
+    }
+
+    /// A patch whose `old` lives in a DIFFERENT section gets that section
+    /// named in the refusal — the one-call recovery for a patch that
+    /// targeted the wrong section (backlog: a "found in `versioning`
+    /// instead" hint turns three attempts into one).
+    #[test]
+    fn update_entity_patch_names_the_sections_that_do_contain_old() {
+        let tmp = TempDir::new().unwrap();
+        let (mut engine, seeded) = engine_with_seed(&tmp, "Patch Wrong Section");
+        let (actor, client) = cli_actor();
+        let mut patches = IndexMap::new();
+        patches.insert(
+            "identity".to_string(),
+            crate::ops::PatchArg {
+                old: "fixture purpose body".to_string(),
+                new: "nope".to_string(),
+                all: false,
+            },
+        );
+        let err = engine
+            .update_entity(
+                UpdateEntityArgs {
+                    anchors: Vec::new(),
+                    id: seeded.id.clone(),
+                    expected_hash: Some(seeded.content_hash.clone()),
+                    sections: IndexMap::new(),
+                    append_sections: IndexMap::new(),
+                    patch_sections: patches,
+                    metadata: IndexMap::new(),
+                    metadata_unset: Vec::new(),
+                    declare_relations: Vec::new(),
+                    dry_run: false,
+                    relations_unset: Vec::new(),
+                    anchors_unset: Vec::new(),
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap_err();
+        match err {
+            EngineError::PatchOldNotFound {
+                section,
+                found_in_sections,
+                ..
+            } => {
+                assert_eq!(section, "identity");
+                assert_eq!(found_in_sections, vec!["purpose".to_string()]);
             }
             other => panic!("expected PatchOldNotFound, got {other:?}"),
         }

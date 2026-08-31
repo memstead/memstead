@@ -2388,10 +2388,15 @@ fn quickstart_repo_name_refusal_retry_keeps_the_repo_flag() {
             .assert()
             .failure(),
     );
+    // The retry command is one line; the error may carry a structured
+    // `details:` block after the message, which is not part of the command.
     let retry = err
         .split("pass one explicitly: ")
         .nth(1)
         .expect("the refusal carries a retry command")
+        .lines()
+        .next()
+        .expect("the retry command is on the marker's own line")
         .trim();
     assert!(
         retry.contains("--repo"),

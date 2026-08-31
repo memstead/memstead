@@ -545,12 +545,14 @@ impl CliError {
                 section,
                 current_content,
                 truncated,
+                found_in_sections,
             } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({
                     "section": section,
                     "current_content": current_content,
                     "truncated": truncated,
+                    "found_in_sections": found_in_sections,
                 })),
             ),
             RenameBlockedByCrossMemPolicy {

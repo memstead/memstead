@@ -87,10 +87,25 @@ pub fn render_cli_error(
             serde_json::to_string(&envelope).unwrap_or_default(),
         )
     } else {
-        (
-            ErrorStream::Stderr,
-            format!("memstead: ERROR [{code}]: {message}"),
-        )
+        // The human path carries the SAME structured recovery payload the
+        // JSON envelope does — the engine computed it either way, and
+        // dropping it here is what sent an agent probing five rel-types in
+        // sequence when `details.allowed_source_types` had the answer
+        // (backlog, model-truth campaign). Rendered as an indented pretty
+        // block after the one-line header, so the first line stays the
+        // documented `memstead: ERROR [<CODE>]: <message>` shape.
+        let mut line = format!("memstead: ERROR [{code}]: {message}");
+        if let Some(d) = details
+            && !d.is_null()
+            && let Ok(pretty) = serde_json::to_string_pretty(d)
+        {
+            line.push_str("\ndetails:");
+            for l in pretty.lines() {
+                line.push_str("\n  ");
+                line.push_str(l);
+            }
+        }
+        (ErrorStream::Stderr, line)
     }
 }
 
@@ -147,5 +162,25 @@ mod tests {
         let (stream, line) = render_cli_error("ENTITY_NOT_FOUND", "not found", false, None);
         assert_eq!(stream, ErrorStream::Stderr);
         assert!(line.starts_with("memstead: ERROR [ENTITY_NOT_FOUND]: "));
+    }
+
+    /// The human form renders the structured recovery payload too — the
+    /// engine computed it, and the agent on the text channel needs it as
+    /// much as the `--json` consumer does. Header line stays the documented
+    /// shape; details follow as an indented block.
+    #[test]
+    fn markdown_error_carries_details_block() {
+        let details = serde_json::json!({ "allowed_source_types": ["spec", "contract"] });
+        let (stream, line) =
+            render_cli_error("INVALID_REL_SHAPE", "bad edge", false, Some(&details));
+        assert_eq!(stream, ErrorStream::Stderr);
+        let mut lines = line.lines();
+        assert_eq!(
+            lines.next(),
+            Some("memstead: ERROR [INVALID_REL_SHAPE]: bad edge")
+        );
+        assert_eq!(lines.next(), Some("details:"));
+        assert!(line.contains("allowed_source_types"));
+        assert!(line.contains("contract"));
     }
 }

@@ -897,6 +897,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
             section,
             current_content,
             truncated,
+            found_in_sections,
         } => {
             let message = format!("patch `old` substring not found in {section}");
             tool_error_with_details(
@@ -906,6 +907,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
                     "section": section,
                     "current_content": current_content,
                     "truncated": truncated,
+                    "found_in_sections": found_in_sections,
                 })),
             )
         }

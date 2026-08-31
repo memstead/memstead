@@ -780,12 +780,15 @@ pub enum EngineError {
     /// `patch_sections` provided an `old` substring that does not
     /// appear in the section's current body. Carries a truncated
     /// snapshot of the current content so the caller can surface
-    /// the actual state to the operator.
+    /// the actual state to the operator, and the sections whose
+    /// bodies DO contain the substring — the one-call recovery when
+    /// the patch simply targeted the wrong section.
     #[error("patch `old` substring not found in {section}")]
     PatchOldNotFound {
         section: String,
         current_content: String,
         truncated: bool,
+        found_in_sections: Vec<String>,
     },
     /// `UNTERMINATED_FENCE_IN_STORED_BODY`: the entity on disk already ends a
     /// section inside an open code fence, and this write does not resolve it
@@ -1615,11 +1618,13 @@ impl EngineError {
                 section,
                 current_content,
                 truncated,
+                found_in_sections,
             } => {
                 serde_json::json!({
                     "section": section,
                     "current_content": current_content,
                     "truncated": truncated,
+                    "found_in_sections": found_in_sections,
                 })
             }
             EngineError::RelationshipCycle {

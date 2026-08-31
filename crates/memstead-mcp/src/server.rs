@@ -1313,6 +1313,7 @@ fn engine_err_unified(
             section,
             current_content,
             truncated,
+            found_in_sections,
         } => tool_error_with_payload(
             "PATCH_OLD_NOT_FOUND",
             &message,
@@ -1323,6 +1324,7 @@ fn engine_err_unified(
                     "section": section,
                     "current_content": current_content,
                     "truncated": truncated,
+                    "found_in_sections": found_in_sections,
                 }),
             ),
         ),

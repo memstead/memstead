@@ -53,6 +53,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Non-JSON CLI errors carry the recovery payload.** The human error path
+  printed `code: message` alone and serialized the structured `details`
+  only under `--json`, so the recovery data the engine already computes
+  (`INVALID_REL_SHAPE`'s allowed endpoint types, `PATCH_OLD_NOT_FOUND`'s
+  current content) was invisible exactly where an agent on the text
+  channel needed it — one run probed five rel-types in sequence for an
+  answer the payload held. The header line keeps its documented shape;
+  `details` follows as an indented pretty-printed block on stderr.
+
+- **`PATCH_OLD_NOT_FOUND` names the sections that DO contain the
+  substring.** The refusal said only where the patch's `old` was not
+  found; when it lives in a different section (the common mistargeting),
+  the new `details.found_in_sections` turns three attempts into one.
+
 - **A sub-tree-pointed binding's changed slice honours the pointer join.**
   A `**`-prefixed scope glob was pushed to git verbatim as a repo-wide
   pathspec, so a binding pointing at a subtree (`plugin/graph` points at
