@@ -7,6 +7,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **New `/remodel` skill — model truth as its own maintenance cadence.**
+  Where `/sync` repairs what entities SAY, `/remodel` repairs what a mem
+  IS: whether every obligation of the subject has exactly one home
+  entity of the right type, substance sits in its declared sections,
+  and the graph is wired. A cheap signal scan (`--all` walks every mem
+  and descends only where type collapse, unowned source mass, missing
+  edges, or empty definition-test sections justify it; `--scan` reports
+  without writing) selects the cluster; the round then derives a target
+  inventory blind from contract plus source, has it adversarially
+  checked by an independent subagent, diffs it against the live
+  entities, rebuilds conservatively under a two-gate creation
+  discipline (neighbours read first; every symbol claim traced to a
+  source line, mechanically verified), and brackets big rebuilds with a
+  before/after reconstruction probe. Grown and measured in the
+  model-truth benchmark campaign: the shipped loop closed 0 of 51
+  frozen model-truth items, the grown round closed 14 per pass and 24
+  over all seeds at zero collateral across 300+ control evaluations
+  and zero fabricated claims in its final 35 creations.
+
 ### Changed
 
 - **The sync skill repairs claim by claim and gains the standing-claim

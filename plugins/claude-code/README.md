@@ -53,6 +53,7 @@ Every command below is one you type. Pick by the job:
 | bring a mem up to date after its source changed | **`/sync`** |
 | measure how faithfully a mem still matches its source | **`/sync --verify`** |
 | take a full stock-take — measure a binding completely, repair until clean | **`/sync --inventory`** |
+| check whether a mem is still CUT right for its subject — and rebuild where it is not | **`/remodel`** (`--scan` to only look) |
 
 **Everyday graph work has no command — just talk to Claude.** In a session that
 started with the server attached, the `memstead_*` MCP tools need no slash
