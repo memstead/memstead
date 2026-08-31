@@ -91,13 +91,23 @@ around.
    line before the write, code blocks copied from source, never
    composed — then mechanically verify: every backticked identifier in
    the new body must grep in the cluster's source, zero misses);
-   straddles → SPLIT with relationships re-pointed and anchors moved;
+   straddles → SPLIT with relationships re-pointed and anchors
+   moved, then the RECEIVER CHECK before the split counts as done:
+   walk the predecessor's body claim by claim and show each factual
+   statement has a receiving owner among the successors or is
+   demonstrably false — a split that sheds a true statement is the
+   one collateral this round can cause, and it was measured once;
    wrong type → today this branch REPORTS, always: no surface can
    retype (`type` is read-only and delete+create breaks incoming
    refs), so a mis-type diagnosis goes to the storey-2 report AND a
    `memstead_check` failed-verdict on the entity, so the next round
-   inherits it instead of re-deriving it — never fake a retype; dissolved subjects → the schema's own
-   history/supersession forms, never deletion of recorded knowledge;
+   inherits it instead of re-deriving it — never fake a retype;
+   dissolved subjects → the schema's own history/supersession forms,
+   never deletion of recorded knowledge, and never RENAMING or
+   rewriting a frozen historical record onto its live successor
+   (author the successor, link the supersession, leave the record
+   standing — a frozen entity kept for its citations must keep
+   describing what its citers cite);
    substance in catch-alls → relocate to declared sections; maintenance
    narration in normative sections → apply corrections silently (git
    carries the archaeology), supersession where the schema prescribes
