@@ -76,7 +76,7 @@ const families = [
   {
     title: "The mem lifecycle",
     blurb: "Building a mem from sources, then keeping it true.",
-    skills: ["ingest", "sync", "tidy"],
+    skills: ["ingest", "sync", "remodel", "tidy"],
   },
 ];
 
