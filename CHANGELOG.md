@@ -9,6 +9,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead schema <pin>` renders workspace-installed packages, not
+  only built-ins.** A pinned reference that is no built-in now falls
+  through to the workspace's installed stores (the filesystem
+  `.memstead/schemas/` layout and the mem-repo's `__MEMSTEAD:schemas/`
+  ref), so a workspace-local schema's sealed README — a contract
+  carrier, not only documentation — is readable through the same
+  sanctioned verb (`origin: "workspace"` on the JSON envelope). Bare
+  names stay built-in-only; a pin found nowhere refuses naming both
+  stores.
 - **`leak-scan.sh` accepts caller-supplied allowlist extensions.** The
   env var `LEAK_SCAN_EXTRA_ALLOW_FILE` names a file of extended-regex
   lines OR'd into the allowlist, for callers scanning a tree with its

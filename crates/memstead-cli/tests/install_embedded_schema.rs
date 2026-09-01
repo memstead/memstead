@@ -209,6 +209,55 @@ fn publish_fieldnotes_archive(root: &Path, cache: &Path) -> PathBuf {
     archive
 }
 
+/// `memstead schema <pin>` renders a WORKSPACE-INSTALLED package's
+/// sealed README, not only a built-in's. The README is a contract
+/// carrier (the flagship catalogue rides there), so the render verb
+/// must read the same sealed store the installer wrote — refusing
+/// with "no built-in schema" left workspace packages' READMEs without
+/// a sanctioned read surface.
+#[test]
+fn schema_render_reads_workspace_installed_readme() {
+    let _guard = cache_guard();
+    let ws = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+    let root = ws.path();
+    run_ok(root, cache.path(), &["mem-repo", "init", "."]);
+    let pkg = root.join("fieldnotes-pkg");
+    write_package(&pkg, NOTE_TYPE);
+    fs::write(
+        pkg.join("README.md"),
+        "# fieldnotes\n\n<!-- CONTRACT:BEGIN -->\none testable line\n<!-- CONTRACT:END -->\n",
+    )
+    .unwrap();
+    run_ok(
+        root,
+        cache.path(),
+        &["schema", "install", pkg.to_str().unwrap()],
+    );
+
+    let out = run_ok(
+        root,
+        cache.path(),
+        &["--json", "schema", "fieldnotes@0.1.0"],
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["origin"], "workspace");
+    let readme = v["readme"].as_str().expect("readme rendered");
+    assert!(
+        readme.contains("<!-- CONTRACT:BEGIN -->") && readme.contains("one testable line"),
+        "sealed README content must round-trip: {readme}"
+    );
+
+    // A pin that exists nowhere still refuses, naming both stores.
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .args(["schema", "fieldnotes@9.9.9"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("SCHEMA_NOT_FOUND"));
+}
+
 /// A FOLDER mem inside a mem-repo workspace pins a schema that
 /// `memstead schema install` sealed on the `__MEMSTEAD:schemas/` ref.
 /// The loader resolves the pin from the ref, so the mem mounts and

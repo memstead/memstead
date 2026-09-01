@@ -154,56 +154,132 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 }
 
-/// `memstead schema <REF>`: the built-in package's README rendered for
-/// the package it ships in (see [`Args::reference`]).
+/// `memstead schema <REF>`: the package's README rendered for the
+/// package it ships in (see [`Args::reference`]). Built-ins resolve
+/// first; a pinned reference that is not a built-in falls through to
+/// the workspace's installed stores — the filesystem
+/// `.memstead/schemas/<name>@<version>/` layout and the mem-repo's
+/// `__MEMSTEAD:schemas/` ref — so a workspace-local schema's sealed
+/// README (a contract carrier, not only docs) is readable through the
+/// same sanctioned verb as a built-in's.
 fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
     let schema_ref = resolve_builtin_read_ref(reference)?;
     let version = schema_ref.version.to_string();
-    let pkg = memstead_schema::builtins::builtin_package(&schema_ref.name, &version).ok_or_else(
-        || {
-            CliError::new(
-                ExitKind::Validation,
-                "SCHEMA_NOT_FOUND",
-                format!("no built-in schema {}", schema_ref.as_display()),
-            )
-        },
-    )?;
-    let readme = pkg
-        .files
-        .iter()
-        .find(|(path, _)| path == memstead_schema::builtins::PACKAGE_README_FILE)
-        .and_then(|(_, bytes)| std::str::from_utf8(bytes).ok())
-        .map(|text| {
-            memstead_schema::builtins::render_package_readme(&pkg.name, &pkg.version, text)
-        });
-    let pin = format!("{}@{}", pkg.name, pkg.version);
+    let (origin, name, ver, readme_bytes) =
+        match memstead_schema::builtins::builtin_package(&schema_ref.name, &version) {
+            Some(pkg) => {
+                let bytes = pkg
+                    .files
+                    .iter()
+                    .find(|(path, _)| path == memstead_schema::builtins::PACKAGE_README_FILE)
+                    .map(|(_, bytes)| bytes.to_vec());
+                ("builtin", pkg.name.to_string(), pkg.version.to_string(), bytes)
+            }
+            None => match workspace_installed_readme(ctx, &schema_ref) {
+                Some(bytes) => (
+                    "workspace",
+                    schema_ref.name.clone(),
+                    version.clone(),
+                    Some(bytes),
+                ),
+                None => {
+                    return Err(CliError::new(
+                        ExitKind::Validation,
+                        "SCHEMA_NOT_FOUND",
+                        format!(
+                            "no built-in or workspace-installed schema {}",
+                            schema_ref.as_display()
+                        ),
+                    )
+                    .into());
+                }
+            },
+        };
+    let readme = readme_bytes
+        .as_deref()
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .map(|text| memstead_schema::builtins::render_package_readme(&name, &ver, text));
+    let pin = format!("{name}@{ver}");
     if ctx.json {
         print_json(&json!({
             "schema": pin,
-            "name": pkg.name,
-            "version": pkg.version,
-            "origin": "builtin",
+            "name": name,
+            "version": ver,
+            "origin": origin,
             "readme": readme,
         }))?;
         return Ok(());
     }
+    // Human label per origin — the wire `origin` stays the machine token.
+    let label = if origin == "builtin" {
+        "built-in"
+    } else {
+        "workspace-installed"
+    };
     match readme {
         Some(text) => print_markdown(&format!(
-            "<!-- {pin}: built-in package README, rendered for this generation -->\n{text}"
+            "<!-- {pin}: {label} package README, rendered for this generation -->\n{text}"
         )),
-        None => print_markdown(&format!(
-            "`{pin}` is a built-in package that ships no README.\n"
-        )),
+        None => print_markdown(&format!("`{pin}` is a {label} package that ships no README.\n")),
     }
     Ok(())
 }
 
+/// The sealed README of a workspace-installed schema package, from the
+/// filesystem `.memstead/schemas/<name>@<version>/` layout first, then
+/// the mem-repo's `__MEMSTEAD:schemas/` ref (where `memstead schema
+/// install` writes on git-backed workspaces). `None` outside a
+/// workspace or when the package (or its README) is absent.
+fn workspace_installed_readme(
+    ctx: &CliContext,
+    schema_ref: &SchemaRef,
+) -> Option<Vec<u8>> {
+    let (_, root) = ctx.workspace_shape()?;
+    let fs_readme = root
+        .join(".memstead")
+        .join("schemas")
+        .join(format!("{}@{}", schema_ref.name, schema_ref.version))
+        .join("README.md");
+    if let Ok(bytes) = std::fs::read(&fs_readme) {
+        return Some(bytes);
+    }
+    #[cfg(feature = "mem-repo")]
+    {
+        let gitdir = root.join("mem-repo").join(".git");
+        if gitdir.is_dir()
+            && let Ok(Some(bytes)) =
+                memstead_git_branch::storage_memstead::read_schema_file_from_memstead_ref(
+                    &gitdir,
+                    &schema_ref.name,
+                    &schema_ref.version.to_string(),
+                    "README.md",
+                )
+        {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
 /// Resolve a reference for a READ: a pin as given, a bare name to its
 /// newest built-in generation (a read is safe to default; `install`
-/// keeps refusing bare names so a pin is always explicit).
+/// keeps refusing bare names so a pin is always explicit). A pin is
+/// only parsed here — whether it names a built-in or a
+/// workspace-installed package is the render path's lookup, so a
+/// workspace-local pin is not refused before the workspace stores are
+/// consulted. Bare names stay built-in-only: the workspace stores are
+/// version-addressed, and defaulting a generation for a contract
+/// carrier would hide which generation the reader got.
 fn resolve_builtin_read_ref(reference: &str) -> anyhow::Result<SchemaRef> {
     if reference.contains('@') {
-        return resolve_builtin_ref(reference);
+        return reference.parse::<SchemaRef>().map_err(|e: String| {
+            CliError::new(
+                ExitKind::Validation,
+                "INVALID_INPUT",
+                format!("invalid schema pin {reference:?}: {e}"),
+            )
+            .into()
+        });
     }
     let reg = memstead_schema::SchemaRegistry::builtin();
     let mut versions = reg.available_versions(reference);
