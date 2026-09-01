@@ -52,7 +52,7 @@ without losing its place. The
 [grow-a-mem guide](../grow-a-mem-from-a-source/) runs this end to end.
 
 ```
-/loop /memstead:ingest <binding>
+/loop /ingest <binding>
 ```
 
 **Done when:** `memstead projection verify <binding> --full` shows
@@ -66,7 +66,7 @@ paid once.
 From here on, maintenance is one line:
 
 ```
-/loop /memstead:sync --all
+/loop /sync --all
 ```
 
 Each round asks the engine what changed since the last one, repairs
@@ -94,7 +94,7 @@ sections, whether the graph is wired. Organic growth degrades that
 silently even while every sentence stays true.
 
 ```
-/loop /memstead:remodel --all
+/loop /remodel --all
 ```
 
 A cheap signal scan walks every mem first and descends into the
