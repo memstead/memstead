@@ -23,6 +23,21 @@ Or via Homebrew (macOS / Linux):
 brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
 ```
 
+Or manually, checksum-verified — for any environment where piping to a
+shell is unwanted or disallowed. Every release ships per-target archives
+with published checksums (the same artifacts the install script fetches —
+the script is convenience, not a requirement). From the
+[latest release](https://github.com/memstead/memstead/releases/latest)
+fetch `memstead-cli-<target>.tar.xz` and `memstead-mcp-<target>.tar.xz`
+plus their `.sha256` companions — targets follow Rust naming, e.g.
+`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`. Then verify, unpack,
+and place both binaries anywhere on your `PATH`:
+
+```bash
+sha256sum -c memstead-cli-<target>.tar.xz.sha256   # → OK
+tar -xJf memstead-cli-<target>.tar.xz
+```
+
 Or build from source. You need the [Rust toolchain](https://rustup.rs) — `rustc --version` should print a version. Then, from a clone of the repository:
 
 ```bash
