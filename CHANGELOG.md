@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-01
+
 ### Added
 
 - **New `/remodel` skill — model truth as its own maintenance cadence.**
@@ -4278,7 +4280,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/memstead/memstead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/memstead/memstead/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/memstead/memstead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/memstead/memstead/compare/v0.11.0...v0.12.0

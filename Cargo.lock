@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-base"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "globset",
  "indexmap",
@@ -2535,7 +2535,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-cli"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2568,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-engine"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "memstead-base",
  "memstead-schema",
@@ -2583,7 +2583,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-git-branch"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "dirs",
  "gix",
@@ -2612,7 +2612,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-mcp"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2637,7 +2637,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-schema"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "include_dir",
  "indexmap",
@@ -2656,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "memstead-wasm"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "console_error_panic_hook",
  "indexmap",
@@ -4881,7 +4881,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
