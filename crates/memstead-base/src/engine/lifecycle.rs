@@ -1649,6 +1649,25 @@ impl Engine {
     /// `EngineError::InvalidInput`. Workspace-level schema dir is
     /// threaded from `self.settings.schemas_dir` for the
     /// schema-source resolution chain.
+    /// Resolve the mem's pinned schema from the workspace's
+    /// `__MEMSTEAD:schemas/` ref (git-branch schema store) for the
+    /// export paths of NON-git-branch mounts. `None` when the full
+    /// flavour is not loaded, the workspace has no mem-repo, or the
+    /// package is not on the ref — callers then fall through to the
+    /// disk/builtin chain unchanged. Without this, a folder mem whose
+    /// schema `memstead schema install` sealed on the ref LOADS but
+    /// cannot EXPORT: the loader and the archive assembler must read
+    /// the same store.
+    pub(crate) fn ref_schema_source_for(
+        &self,
+        config: &memstead_schema::MemConfig,
+    ) -> Option<Vec<memstead_schema::SchemaSourceFile>> {
+        let ops = self.git_branch_ops.as_ref()?;
+        let root = self.workspace_root.as_deref()?;
+        let pin = config.schema.as_ref()?;
+        (ops.collect_ref_schema_source)(root, pin).ok().flatten()
+    }
+
     pub fn export_mem(
         &self,
         mem_name: &str,
@@ -1706,6 +1725,7 @@ impl Engine {
                 output_path,
                 workspace_root,
                 workspace_schemas_dir,
+                self.ref_schema_source_for(config),
             )
             .map_err(|e| EngineError::Backend(BackendError::Other(format!("export_mem: {e}")))),
             MountStorage::GitBranch { gitdir, branch } => {

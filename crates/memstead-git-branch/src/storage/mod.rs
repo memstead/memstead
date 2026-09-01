@@ -68,7 +68,28 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     write_schema: write_schema_dispatch,
     read_schema_file: read_schema_file_dispatch,
     read_ref_schemas: read_ref_schemas_dispatch,
+    collect_ref_schema_source: collect_ref_schema_source_dispatch,
 };
+
+/// Dispatcher for the folder-mount export path: collect one pinned
+/// schema's raw source files from the workspace's
+/// `__MEMSTEAD:schemas/<name>@<version>/` tree, so a folder mem whose
+/// schema `memstead schema install` sealed on the ref can export the
+/// same package the loader resolved. `Ok(None)` when the workspace has
+/// no mem-repo or the ref/package is absent — the caller falls through
+/// to the disk/builtin chain.
+fn collect_ref_schema_source_dispatch(
+    workspace_root: &std::path::Path,
+    schema_ref: &memstead_schema::SchemaRef,
+) -> Result<Option<Vec<memstead_schema::SchemaSourceFile>>, memstead_base::backend::BackendError> {
+    let gitdir = workspace_root.join("mem-repo").join(".git");
+    if !gitdir.is_dir() {
+        return Ok(None);
+    }
+    Ok(crate::ops::export::schema_files_from_memstead_ref(
+        &gitdir, schema_ref,
+    ))
+}
 
 /// Dispatcher for `Engine::install_schema` on git-branch workspaces.
 /// Writes the schema package onto the unified `__MEMSTEAD:schemas/` ref

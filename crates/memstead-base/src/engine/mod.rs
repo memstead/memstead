@@ -639,6 +639,21 @@ pub type GitBranchReadSchemaFileFn = fn(
 pub type GitBranchReadRefSchemasFn =
     fn(workspace_root: &Path) -> Result<Vec<Arc<memstead_schema::Schema>>, BackendError>;
 
+/// Collect one pinned schema's raw source files (manifest, sealed
+/// format marker, type definitions) from the workspace's
+/// `__MEMSTEAD:schemas/<name>@<version>/` ref — the tree `memstead
+/// schema install` writes on the git-branch backend. `Ok(None)` when
+/// the workspace has no mem-repo, the ref, or the package. Read-only;
+/// the consumer is the FOLDER-mount export path: a folder mem living
+/// in a mem-repo workspace pins a schema the installer sealed on the
+/// ref, so the archive assembler must read the same store the loader
+/// resolves from, or the mem loads but cannot export.
+pub type GitBranchCollectSchemaSourceFn =
+    fn(
+        workspace_root: &Path,
+        schema_ref: &memstead_schema::SchemaRef,
+    ) -> Result<Option<Vec<memstead_schema::SchemaSourceFile>>, BackendError>;
+
 /// Bundle of git-branch-specific op dispatchers. Installed on the
 /// engine at full boot. Each field is one ops-method that previously
 /// lived on the `MemBackend` trait; moving them off the trait keeps
@@ -660,6 +675,7 @@ pub struct GitBranchOps {
     pub write_schema: GitBranchWriteSchemaFn,
     pub read_schema_file: GitBranchReadSchemaFileFn,
     pub read_ref_schemas: GitBranchReadRefSchemasFn,
+    pub collect_ref_schema_source: GitBranchCollectSchemaSourceFn,
 }
 
 impl std::fmt::Debug for Engine {

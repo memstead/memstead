@@ -216,7 +216,7 @@ pub fn export_mem_from_branch(
 /// `None` when the branch, the package subtree, or its `schema.yaml`
 /// is absent, so the caller falls through to the disk/builtin chain.
 #[cfg(feature = "git-object-storage")]
-fn schema_files_from_memstead_ref(
+pub(crate) fn schema_files_from_memstead_ref(
     mem_repo_gitdir: &Path,
     schema_ref: &memstead_schema::SchemaRef,
 ) -> Option<Vec<memstead_schema::SchemaSourceFile>> {
@@ -597,7 +597,7 @@ mod tests {
         // `mem` acts as the source root for schema resolution. It has no
         // `.memstead/schemas/` dir of its own, so the default pin falls through
         // to the embedded builtin.
-        let result = export_mem(&mem, &config, &out, None, None).unwrap();
+        let result = export_mem(&mem, &config, &out, None, None, None).unwrap();
         assert_eq!(result.name, "aws-patterns");
         assert_eq!(result.version, "1.2.0");
         assert_eq!(result.entity_count, 2);
@@ -679,9 +679,9 @@ mod tests {
         let out1 = tmp.path().join("a.mem");
         let out2 = tmp.path().join("b.mem");
 
-        export_mem(&mem, &config, &out1, None, None).unwrap();
+        export_mem(&mem, &config, &out1, None, None, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        export_mem(&mem, &config, &out2, None, None).unwrap();
+        export_mem(&mem, &config, &out2, None, None, None).unwrap();
 
         let a = std::fs::read(&out1).unwrap();
         let b = std::fs::read(&out2).unwrap();
@@ -717,7 +717,7 @@ mod tests {
 
         let config = memstead_schema::load_and_validate(&mem).unwrap();
         let out = tmp.path().join("out.mem");
-        let err = export_mem(&mem, &config, &out, None, None).unwrap_err();
+        let err = export_mem(&mem, &config, &out, None, None, None).unwrap_err();
         assert!(matches!(
             err,
             MemExportError::Convert(memstead_schema::PublishConversionError::MissingVersion)

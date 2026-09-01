@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use memstead_schema::{
     ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_PROVENANCE_PATH, ARCHIVE_SCHEMA_PREFIX,
     ArchiveProvenance, EntityProvenance, MemConfig, PublishConversionError, SchemaSourceError,
-    collect_schema_source, published_config_from,
+    SchemaSourceFile, collect_schema_source, published_config_from,
 };
 use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 
@@ -149,6 +149,7 @@ pub fn export_mem(
     output_path: &Path,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
+    ref_schema_source: Option<Vec<SchemaSourceFile>>,
 ) -> Result<MemExportResult, MemExportError> {
     let basename = mem_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let explicit_name = config.name.as_deref().unwrap_or(basename);
@@ -158,6 +159,7 @@ pub fn export_mem(
         workspace_root,
         workspace_schemas_dir,
         explicit_name,
+        ref_schema_source,
     )?;
 
     if let Some(parent) = output_path.parent()
@@ -190,12 +192,20 @@ pub fn export_mem(
 /// Callers reaching this through [`crate::Engine::export_mem_to_bytes`]
 /// pass the mount's mem name; callers reaching it directly choose
 /// the disk basename or a config-supplied alias.
+///
+/// `ref_schema_source`: pre-collected schema source files from the
+/// workspace's `__MEMSTEAD:schemas/` ref (git-branch schema store).
+/// `Some` takes precedence over the disk/builtin chain — the same
+/// precedence the git-branch export path applies — so a folder mem in
+/// a mem-repo workspace seals the schema the loader resolved. `None`
+/// keeps the historical disk/builtin chain unchanged.
 pub fn export_mem_to_bytes(
     mem_dir: &Path,
     config: &MemConfig,
     workspace_root: Option<&Path>,
     workspace_schemas_dir: Option<&Path>,
     explicit_name: &str,
+    ref_schema_source: Option<Vec<SchemaSourceFile>>,
 ) -> Result<MemExportBytes, MemExportError> {
     if !mem_dir.is_dir() {
         return Err(MemExportError::DirNotFound(mem_dir.display().to_string()));
@@ -238,6 +248,7 @@ pub fn export_mem_to_bytes(
         md_entries,
         provenance.as_ref(),
         anchors_bytes.as_deref(),
+        ref_schema_source,
     )
 }
 
@@ -253,6 +264,7 @@ pub fn export_mem_to_bytes(
 /// `md_entries` are `(mem-relative path, bytes)` pairs; paths are
 /// posix-normalised for the archive. Entries need not be pre-sorted — the
 /// archive sort makes the output deterministic regardless of input order.
+#[allow(clippy::too_many_arguments)]
 pub fn export_entries_to_bytes(
     config: &MemConfig,
     workspace_root: Option<&Path>,
@@ -261,14 +273,21 @@ pub fn export_entries_to_bytes(
     md_entries: Vec<(PathBuf, Vec<u8>)>,
     provenance: Option<&ArchiveProvenance>,
     anchors_bytes: Option<&[u8]>,
+    ref_schema_source: Option<Vec<SchemaSourceFile>>,
 ) -> Result<MemExportBytes, MemExportError> {
     let published = published_config_from(config, explicit_name)?;
     let config_bytes = canonical_json(&published)
         .map_err(|e| MemExportError::Canonical(e.to_string()))?
         .into_bytes();
 
-    let schema_files =
-        collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?;
+    // The git-branch schema store wins where the caller resolved it —
+    // the same precedence the git-branch export path applies — so a
+    // schema sealed by `memstead schema install` on the `__MEMSTEAD`
+    // ref exports for folder mems too, not only for branch mems.
+    let schema_files = match ref_schema_source {
+        Some(files) => files,
+        None => collect_schema_source(workspace_root, workspace_schemas_dir, &published.schema)?,
+    };
 
     let entity_count = md_entries.len();
     let mut all_entries: Vec<(String, Vec<u8>)> =

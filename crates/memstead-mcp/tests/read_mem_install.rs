@@ -56,7 +56,7 @@ fn build_valid_archive(mem_dir: &Path, archive_path: &Path, name: &str) {
     let config = memstead_schema::load_and_validate(&mem_dir).unwrap();
     // No workspace context — schema resolver falls through to the
     // embedded builtin.
-    export_mem(&mem_dir, &config, archive_path, None, None).unwrap();
+    export_mem(&mem_dir, &config, archive_path, None, None, None).unwrap();
 }
 
 /// Process-global env lock — identical pattern to

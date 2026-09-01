@@ -191,6 +191,7 @@ impl Engine {
                 workspace_root,
                 workspace_schemas_dir,
                 mem_name,
+                self.ref_schema_source_for(config),
             )
             .map(|out| out.bytes)
             .map_err(|e| {
@@ -270,6 +271,7 @@ impl Engine {
                     md_entries,
                     provenance.as_ref(),
                     anchors_bytes.as_deref(),
+                    self.ref_schema_source_for(config),
                 )
                 .map(|out| out.bytes)
                 .map_err(|e| {

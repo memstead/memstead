@@ -209,6 +209,82 @@ fn publish_fieldnotes_archive(root: &Path, cache: &Path) -> PathBuf {
     archive
 }
 
+/// A FOLDER mem inside a mem-repo workspace pins a schema that
+/// `memstead schema install` sealed on the `__MEMSTEAD:schemas/` ref.
+/// The loader resolves the pin from the ref, so the mem mounts and
+/// writes — and export must read the SAME store. The historical
+/// filesystem-only collector refused with `schema not found`, leaving
+/// a mem that loads but cannot seal (found live on the flagship mem,
+/// 2026-09-01: folder mount, pin on the ref, no filesystem package).
+#[test]
+fn folder_mem_with_ref_installed_schema_exports() {
+    let _guard = cache_guard();
+    let ws = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+    let root = ws.path();
+    run_ok(root, cache.path(), &["mem-repo", "init", "."]);
+    let pkg = root.join("fieldnotes-pkg");
+    write_package(&pkg, NOTE_TYPE);
+    run_ok(
+        root,
+        cache.path(),
+        &["schema", "install", pkg.to_str().unwrap()],
+    );
+    run_ok(
+        root,
+        cache.path(),
+        &[
+            "mem",
+            "init",
+            "field-folder",
+            "--schema",
+            "fieldnotes@0.1.0",
+            "--storage",
+            "folder",
+            "--no-gitignore",
+        ],
+    );
+    run_ok(
+        root,
+        cache.path(),
+        &[
+            "create",
+            "--mem",
+            "field-folder",
+            "--title",
+            "Evening Count",
+            "--type",
+            "note",
+            "--section",
+            "body=Three herons at dusk, west bank.",
+            "--metadata",
+            "observer=A. Ranger",
+        ],
+    );
+
+    let archive = root.join("field-folder.mem");
+    run_ok(
+        root,
+        cache.path(),
+        &[
+            "export",
+            "--format",
+            "mem",
+            "--mem",
+            "field-folder",
+            "-o",
+            archive.to_str().unwrap(),
+        ],
+    );
+    // The archive embeds the ref-sealed package — same member set the
+    // git-branch export path seals for branch mems.
+    let mut zip = zip::ZipArchive::new(fs::File::open(&archive).unwrap()).unwrap();
+    assert!(
+        zip.by_name(NOTE_MEMBER).is_ok(),
+        "archive must embed the ref-installed schema's type file"
+    );
+}
+
 /// A receiver workspace: mem-repo shaped, one default-schema mem, and
 /// no knowledge whatsoever of `fieldnotes`.
 fn fresh_receiver(root: &Path, cache: &Path) {

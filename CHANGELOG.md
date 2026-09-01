@@ -7,7 +7,38 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`leak-scan.sh` accepts caller-supplied allowlist extensions.** The
+  env var `LEAK_SCAN_EXTRA_ALLOW_FILE` names a file of extended-regex
+  lines OR'd into the allowlist, for callers scanning a tree with its
+  own legitimate self-matches (e.g. a seal gate scanning exported
+  archives). Blank lines and `#` comments are skipped; the default
+  pattern classes are never weakened.
+
 ### Fixed
+
+- **A folder mem whose schema was installed onto the mem-repo's
+  `__MEMSTEAD:schemas/` ref can now export.** The archive assembler
+  resolved schemas only from the filesystem `.memstead/schemas/`
+  chain, while the loader resolves pins from the ref — two readers,
+  two answers: the mem mounted and wrote but `export --format mem`
+  refused with `schema not found`. The folder-mount export paths now
+  consult the ref store through a new `GitBranchOps` hook with the
+  same precedence the branch export applies, so the archive seals the
+  package the loader resolved.
+- **Projection status stopped stat-walking the world.** Two costs on
+  the status path multiplied into minute-long `memstead status` runs
+  (and a hanging UI status endpoint): facet-file enumeration walked
+  every directory under a source pointer — build trees and
+  node_modules included — even when no scope pattern could match
+  there, and `mem_predates_binding` answered "does this mem have
+  anchors" by observing (hashing) every anchor against its live
+  source. Enumeration now prunes directories outside every allow
+  pattern's literal prefix (unanchored `**` scopes keep the full walk),
+  and the emptiness question is answered by a sidecar parse
+  (`Engine::mem_has_anchors`) that observes nothing. Measured on the
+  dogfood workspace: `memstead status` 53s → 0.9s.
 
 - **Plain `tree` anchors adjudicate deterministically instead of resting
   in `recheck` forever.** A `tree` anchor under no code-map preparation
