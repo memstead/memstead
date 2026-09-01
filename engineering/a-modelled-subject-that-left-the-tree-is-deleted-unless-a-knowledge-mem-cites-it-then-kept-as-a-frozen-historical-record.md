@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T18:07:56Z
-last_modified: 2026-08-23T18:07:56Z
+last_modified: 2026-09-01T09:25:27Z
 status: accepted
 decided_on: 2026-08-23
 deciders: operator (consolidation bundle, plan 08), implementing agent
@@ -19,6 +19,11 @@ The plugin mem modelled nine skills and four hooks the 2026-07-11 diet removed, 
 
 ## Consequences
 - A code mem's live entity set equals what the source tree holds, plus explicitly frozen records that knowledge mems cite; a reader can tell them apart by `stability: frozen` and the dated note.\n- Cross-mem edges never dangle from a sync deletion: the referrer keeps its target, or the deletion removed the referring edge in the same act.\n- The rule is the binding-built mems' half of the walk's supersession idea: records of their time stay marked as such, never presented as current.\n- Cost: frozen records sit in the mem's counts; the verify report's coverage excludes them only where their artifacts left scope, which is exactly right.
+
+## Relationships
+- **MOTIVATED_BY**: [[degrade-never-disappear]]
+- **MOTIVATED_BY**: [[plugin:old-ingest-skill]]
+- **MOTIVATED_BY**: [[plugin:commit-skill]]
 
 ## Options
 

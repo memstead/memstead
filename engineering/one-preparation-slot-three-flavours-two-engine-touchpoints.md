@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-22T10:09:54Z
-last_modified: 2026-08-22T10:15:48Z
+last_modified: 2026-09-01T09:25:27Z
 status: accepted
 decided_on: 2026-08-22
 deciders: SPEC W9 design pass (flywheel 09/01), graded against the anker/plenum channel findings and the WOENENN primary needs statement
@@ -19,6 +19,12 @@ Three independent consumers converged on the reserved `Source.preparation` slot 
 
 ## Consequences
 Landing order follows the channels' own instruction: entity and url grains first (content preparation is the first registry entry), delivery second, code-map third — each an independent follow-up plan consuming this design (flywheel 09 bundle names them). Non-foreclosure is structural: one registry, two orthogonal touchpoints; content and code-map never touch delivery's seam and vice versa. The first landed implementation bumps `PREPARATION_IMPL_VERSION` to 1 and thereby demonstrates the documented findings-invalidation behaviour; the migration test updates to expect the narrowed refusal rather than deleting. Docs correct in both directions: the GLOSSARY's "reserved for non-text mediums (PDF, DOCX, audio)" claim — contradicted by all three actual consumers, all on text and graph mediums — is replaced by the registry/touchpoint description with the PDF non-goal at the point of use. The deliberate residue the design states rather than hides: grains other than path/entity/url (`tree`) keep their recorded-but-unhashed state until a code-map preparation lands — that flavour is exactly the mechanism that will close it.
+
+## Relationships
+- **MOTIVATES**: [[the-preparation-registry-is-engine-owned-and-its-entity-flavour-hashes-the-load-bearing-sections]]
+- **MOTIVATES**: [[delivery-preparation-delivers-dated-entries-as-units-in-one-stamp-ordered-sequence]]
+- **MOTIVATES**: [[code-map-preparation-hashes-a-heuristic-interface-digest-and-closes-the-tree-grain-for-code-sources]]
+- **MOTIVATES**: [[engine:preparation-registry]]
 
 ## Options
 

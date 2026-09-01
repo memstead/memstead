@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-23T18:07:56Z
-last_modified: 2026-08-30T00:32:28Z
+last_modified: 2026-09-01T09:25:27Z
 status: accepted
 decided_on: 2026-08-23
 deciders: operator (consolidation decision I), implementing agent
@@ -22,6 +22,11 @@ On 2026-08-23 the three binding-built code mems described the world of 2026-07-0
 - The loop is long: the engine binding's delta spans hundreds of artifacts, so sessions record batches consumed and the plan carries a bounded exit instead of a finish-line fiction.
 - The keys live in the binding-id shape (`<mem>/<stem>/<source>#synced`), so the rotation, briefs and verify all read them. Corrected 2026-08-30: this bullet was written as `<mem>/<stem>/<facet>#synced`, the pre-consolidation spelling. The v2 single-record binding carries no facet; the key's third component is the inline SOURCE name, which migration preserved byte-verbatim from the facet name (`memstead-base/src/pipeline.rs`), so the live dogfood keys read `engine/graph/source-tree#synced`.
 - Cost: sync work proportional to the true drift; that cost was always owed, the baseline just stops hiding it.
+
+## Relationships
+- **MOTIVATED_BY**: [[a-claim-about-running-state-is-measured-against-the-running-system]]
+- **MOTIVATED_BY**: [[engine:projection-binding-store]]
+- **MOTIVATED_BY**: [[engine:projection-verify-and-findings-store]]
 
 ## Options
 
