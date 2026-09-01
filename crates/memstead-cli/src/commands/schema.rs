@@ -880,7 +880,7 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
                 .to_string(),
         )
     })?;
-    let (schema_ref, files) = resolve_source(&args.source)?;
+    let (schema_ref, files) = resolve_source(&args.source, ctx.workspace_shape().map(|(_, r)| r).as_deref())?;
 
     match shape {
         WorkspaceShape::Filesystem => {
@@ -986,8 +986,14 @@ fn install_to_git_branch(
 
 /// Resolve `<source>` (a path to a package dir, or a built-in name /
 /// `name@version`) to its pin and the package files to write.
+/// `workspace_root` (when the install runs inside one) makes the
+/// authoring-provenance stamp portable: a path INSIDE the workspace is
+/// stamped workspace-relative, so a clone on another machine (CI
+/// included) resolves the same authoring dir instead of reporting a
+/// machine-local absolute path as missing.
 fn resolve_source(
     source: &str,
+    workspace_root: Option<&Path>,
 ) -> anyhow::Result<(SchemaRef, Vec<memstead_schema::SchemaSourceFile>)> {
     let as_path = Path::new(source);
     if as_path.is_dir() {
@@ -1033,10 +1039,22 @@ fn resolve_source(
         let authoring_path = as_path
             .canonicalize()
             .unwrap_or_else(|_| as_path.to_path_buf());
+        // Workspace-relative when inside the workspace (portable across
+        // clones — the stamped path resolves wherever the tree checks
+        // out); absolute otherwise (honestly machine-pinned).
+        let stamped = workspace_root
+            .and_then(|root| root.canonicalize().ok())
+            .and_then(|root| {
+                authoring_path
+                    .strip_prefix(&root)
+                    .ok()
+                    .map(|rel| rel.display().to_string())
+            })
+            .unwrap_or_else(|| authoring_path.display().to_string());
         files.push(memstead_schema::SchemaSourceFile {
             archive_path: memstead_schema::INSTALL_PROVENANCE_FILE.to_string(),
             bytes: serde_json::to_vec_pretty(&json!({
-                "authoring_path": authoring_path.display().to_string(),
+                "authoring_path": stamped,
             }))
             .expect("provenance stamp serialises"),
         });
@@ -1409,7 +1427,7 @@ mod tests {
     #[test]
     fn resolve_source_for_builtin_includes_schema_and_template() {
         let (schema_ref, files) =
-            resolve_source("planning@0.1.0").expect("planning source collects");
+            resolve_source("planning@0.1.0", None).expect("planning source collects");
         assert_eq!(schema_ref.name, "planning");
         let paths: Vec<&str> = files.iter().map(|f| f.archive_path.as_str()).collect();
         assert!(paths.contains(&"schema.yaml"), "got {paths:?}");

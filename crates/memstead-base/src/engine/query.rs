@@ -2101,7 +2101,18 @@ impl Engine {
                 continue;
             };
             let schema_ref = format!("{name}@{version}");
-            let authoring = std::path::Path::new(&stamped_path);
+            // A workspace-relative stamp (the portable form the installer
+            // writes for in-workspace authoring dirs) resolves against
+            // THIS workspace root, so the axis checks real drift on every
+            // clone instead of reporting another machine's absolute path
+            // as missing. Absolute stamps stay machine-pinned as-is.
+            let stamped = std::path::Path::new(&stamped_path);
+            let resolved: std::path::PathBuf = if stamped.is_absolute() {
+                stamped.to_path_buf()
+            } else {
+                root.join(stamped)
+            };
+            let authoring = resolved.as_path();
             if !authoring.is_dir() {
                 out.push(WarningHint::SchemaAuthoringSourceMissing {
                     schema_ref,

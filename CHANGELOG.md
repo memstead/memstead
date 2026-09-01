@@ -27,6 +27,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Schema install stamps its authoring provenance portably.** The
+  install-provenance stamp recorded the authoring directory as an
+  absolute machine-local path, so on every other clone (CI included)
+  the authoring-drift health axis reported the package's source as
+  missing instead of checking it. A path inside the workspace is now
+  stamped workspace-relative and the axis resolves it against the
+  current workspace root; out-of-workspace authoring dirs stay
+  honestly machine-pinned absolute.
 - **A folder mem whose schema was installed onto the mem-repo's
   `__MEMSTEAD:schemas/` ref can now export.** The archive assembler
   resolved schemas only from the filesystem `.memstead/schemas/`
