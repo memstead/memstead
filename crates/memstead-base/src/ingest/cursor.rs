@@ -3564,9 +3564,10 @@ mod tests {
     /// leaves file, span and tree anchors resolving while a signature edit
     /// drifts them; a file joining the tree drifts the tree anchor alone;
     /// the sibling source without a preparation keeps whole-file hashing
-    /// and its tree anchor stays unhashed (the stated remainder); and a
-    /// write-time `content` on a code-map source records the digest hash,
-    /// never the raw one.
+    /// and its tree anchor hashes the plain per-file digest (so it resolves
+    /// and drifts deterministically like everything else — the once-stated
+    /// unhashed remainder is closed); and a write-time `content` on a
+    /// code-map source records the digest hash, never the raw one.
     #[test]
     fn code_map_anchors_drift_on_interface_changes_only() {
         use crate::anchor::{
@@ -3707,6 +3708,13 @@ mod tests {
             hash_source: None,
         };
         let plain_raw = crate::anchor::prepared_content_hash(b"export const N = 1\n");
+        let plain_tree = crate::anchor::prepared_content_hash(
+            crate::preparation::plain_tree_digest(&[(
+                "corpus/plain/notes.js".to_string(),
+                b"export const N = 1\n".to_vec(),
+            )])
+            .as_bytes(),
+        );
         let mut sidecar = AnchorSidecar::default();
         sidecar.set(
             "home--holder",
@@ -3735,12 +3743,7 @@ mod tests {
                     "plain",
                     &plain_raw,
                 ),
-                anchor(
-                    "corpus/plain",
-                    AnchorGrain::Tree,
-                    "plain",
-                    "0000000000000000",
-                ),
+                anchor("corpus/plain", AnchorGrain::Tree, "plain", &plain_tree),
             ],
         );
         std::fs::write(
@@ -3769,10 +3772,10 @@ mod tests {
             )
         };
 
-        // Unchanged: everything under the code map resolves; the plain tree
-        // is hash-bearing but unobservable (no hash on the engine's side), so
-        // it is `recheck`, never a fabricated drift — the stated remainder.
-        let (file, span, tree, plain_file, plain_tree, report) = states(root);
+        // Unchanged: everything resolves — the plain tree included, since
+        // its prepared form is the plain per-file digest of its scoped files
+        // (the once-stated unhashed remainder is closed).
+        let (file, span, tree, plain_file, plain_tree_state, report) = states(root);
         assert_eq!(
             (file, span, tree, plain_file),
             (
@@ -3782,8 +3785,11 @@ mod tests {
                 Some(AnchorState::Resolves)
             )
         );
-        assert_eq!(plain_tree, (Some(AnchorState::Recheck), None));
-        assert_eq!((report.resolved, report.drifted, report.recheck), (4, 0, 1));
+        assert_eq!(
+            plain_tree_state,
+            (Some(AnchorState::Resolves), Some(plain_tree.clone()))
+        );
+        assert_eq!((report.resolved, report.drifted, report.recheck), (5, 0, 0));
 
         // Comment, formatting and body edits: invisible.
         write(
@@ -3834,10 +3840,17 @@ mod tests {
         );
 
         // The plain source is untouched by the code map: a body edit in its
-        // file drifts the whole-file hash exactly as before.
+        // file drifts the whole-file hash exactly as before — and now the
+        // plain TREE anchor too, since any scoped-file byte change moves the
+        // plain per-file digest.
         write("plain/notes.js", "export const N = 1 // note\n");
-        let (_, _, _, plain_file, _, _) = states(root);
+        let (_, _, _, plain_file, plain_tree_state, _) = states(root);
         assert_eq!(plain_file, Some(AnchorState::Drifted));
+        assert_eq!(
+            plain_tree_state.0,
+            Some(AnchorState::Drifted),
+            "a body edit in a scoped file drifts the plain tree anchor"
+        );
 
         // Write time: `content` on a code-map source records the digest hash.
         let engine = crate::Engine::from_workspace_root(root).unwrap();

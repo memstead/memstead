@@ -9,6 +9,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Plain `tree` anchors adjudicate deterministically instead of resting
+  in `recheck` forever.** A `tree` anchor under no code-map preparation
+  had no prepared form: observation never yielded a hash, backfill never
+  fired, and every verify pass re-queued the same
+  `queued-for-adjudication` finding while the report's own remedy
+  (`verify --full`) could not drain it. The tree's prepared form is now a
+  digest over every scoped file under it — the code map under a code-map
+  preparation, the plain per-file prepared-content map otherwise — so a
+  hash-less tree anchor backfills on first observation and thereafter
+  resolves or drifts from the hash comparison alone, exactly like a file
+  anchor. Any scoped-file byte change, and any file joining or leaving
+  the tree, moves the digest; a tree with no resolvable source-join or a
+  partial enumeration still observes no hash and stays honest `recheck`.
+- **An authored exclusion now supersedes a standing `uncovered` finding
+  in the store, not only in the presentation filter.** The head-durable
+  merge carried an unsampled `uncovered` finding forward even after its
+  artifact gained a ledger exclusion, so the verdict line kept counting a
+  finding the coverage section already reported as accounted for. The
+  merge's accounting closure folds the exclusion ledger in; the stale
+  finding closes on the next verify pass.
 - **A stored `_`-prefixed metadata key can no longer shadow a computed
   frontmatter field.** The underscore namespace belongs to the read
   channel's computed slots (`_hash`, `_tokens`, `_signals`, ...), but the

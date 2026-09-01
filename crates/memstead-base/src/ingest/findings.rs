@@ -1107,8 +1107,11 @@ struct PassObservation {
 /// - an anchor finding carries while its anchor still exists but was
 ///   unobservable this pass; a vanished anchor closes it;
 /// - a coverage (artifact) finding carries while the artifact is still in
-///   `S(D)` and still carries no covering anchor (`covered_now`); departure
-///   from `S(D)` or gained coverage closes it.
+///   `S(D)` and is still unaccounted (`accounted_now`: no covering anchor
+///   and no ledger exclusion); departure from `S(D)`, gained coverage, or a
+///   recorded exclusion closes it — so an exclusion supersedes a standing
+///   `uncovered` finding in the store itself, not only in the presentation
+///   filter, and the verdict count cannot contradict the coverage section.
 ///
 /// Carried findings keep their original [`Finding::key`] (the head they were
 /// observed at). The carry rules are the growth bound: nothing is carried
@@ -1119,7 +1122,7 @@ fn merge_with_prior(
     mut fresh: Vec<Finding>,
     prior: &[Finding],
     obs: &PassObservation,
-    covered_now: impl Fn(&str) -> bool,
+    accounted_now: impl Fn(&str) -> bool,
 ) -> Vec<Finding> {
     let fresh_idx: BTreeMap<String, usize> = fresh
         .iter()
@@ -1149,7 +1152,7 @@ fn merge_with_prior(
         let still_open = match &f.target {
             FindingTarget::Anchor { .. } => obs.anchors_existing.contains(&tkey),
             FindingTarget::Artifact { artifact } => {
-                obs.s_d.contains(artifact) && !covered_now(artifact)
+                obs.s_d.contains(artifact) && !accounted_now(artifact)
             }
         };
         if still_open {
@@ -1708,7 +1711,14 @@ fn run_verify(
         s_d,
     };
     let prior = store.current(&key).to_vec();
-    let findings = merge_with_prior(findings, &prior, &obs, covered_now);
+    // The merge's accounting closure folds the exclusion ledger in: an
+    // artifact that gained an authored exclusion since its `uncovered`
+    // finding was recorded is accounted for, so the stale finding closes in
+    // the store instead of being carried forward and merely hidden by the
+    // presentation filter.
+    let findings = merge_with_prior(findings, &prior, &obs, |artifact: &str| {
+        covered_now(artifact) || excluded.contains(artifact)
+    });
 
     let backlog = findings
         .iter()
@@ -2057,6 +2067,49 @@ mod tests {
         store.record(now.clone(), "400".to_string(), Vec::new());
         assert_eq!(store.batches.len(), 2, "hashCUR collapsed, hashOLD kept");
         assert_eq!(store.superseded(&now).len(), 1);
+    }
+
+    /// An authored exclusion supersedes a standing `uncovered` finding in
+    /// the STORE, not only in the presentation filter: the merge's
+    /// accounting closure folds the exclusion ledger in, so an unsampled
+    /// artifact that gained an exclusion since its finding was recorded
+    /// closes instead of carrying forward — the verdict count can no longer
+    /// contradict the coverage section's "0 unaccounted".
+    #[test]
+    fn merge_closes_uncovered_findings_for_ledger_excluded_artifacts() {
+        let k_old = key("h", "head1");
+        let uncovered = |artifact: &str| Finding {
+            key: k_old.clone(),
+            facet: "src".to_string(),
+            target: FindingTarget::Artifact {
+                artifact: artifact.to_string(),
+            },
+            class: FindingClass::Uncovered,
+            detail: "no anchor".to_string(),
+            created_at: "1".to_string(),
+        };
+        let prior = vec![uncovered("src/excluded.rs"), uncovered("src/open.rs")];
+        let obs = PassObservation {
+            anchors_observed: BTreeSet::new(),
+            anchors_existing: BTreeSet::new(),
+            files_observed: BTreeSet::new(), // neither sampled this pass
+            s_d: ["src/excluded.rs".to_string(), "src/open.rs".to_string()].into(),
+        };
+        let excluded: BTreeSet<String> = ["src/excluded.rs".to_string()].into();
+        let merged = merge_with_prior(Vec::new(), &prior, &obs, |artifact: &str| {
+            excluded.contains(artifact)
+        });
+        assert_eq!(
+            merged.len(),
+            1,
+            "the excluded finding closes, the open one carries: {merged:?}"
+        );
+        assert_eq!(
+            merged[0].target,
+            FindingTarget::Artifact {
+                artifact: "src/open.rs".to_string()
+            }
+        );
     }
 
     /// The head-durable merge: an unobserved-but-still-open prior finding
@@ -2676,6 +2729,9 @@ mod tests {
     /// 3. the tier-3 recheck queue for such anchors drains: post-backfill
     ///    clean passes queue nothing, instead of re-queueing forever.
     ///
+    /// The plain-TREE sibling of this lifecycle is
+    /// [`plain_tree_anchor_backfills_then_adjudicates_deterministically`].
+    ///
     /// REFUSAL half: `authored` / `informed-by` anchors never gain hashes and
     /// never adjudicate `drifted`; an `unstable` hash-stability medium
     /// resolves `recheck` (queued), never `drifted`.
@@ -2985,6 +3041,226 @@ mod tests {
                         FindingTarget::Anchor { artifact, .. } if artifact == "src/other.rs"
                     )),
                 "an unstable hash break must never assert drift"
+            );
+        }
+    }
+
+    /// The plain-TREE sibling of the backfill lifecycle: a hash-less `tree`
+    /// anchor under NO preparation observes the plain per-file digest of its
+    /// scoped files, backfills once, and thereafter adjudicates
+    /// deterministically — `drifted` on any scoped-file byte change or a
+    /// file joining the tree, `resolves` when nothing moved. Before the
+    /// plain tree digest existed, such an anchor observed no hash at all and
+    /// re-issued `recheck` (queued-for-adjudication) on every pass, forever
+    /// — the loop this test seals shut.
+    #[test]
+    fn plain_tree_anchor_backfills_then_adjudicates_deterministically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![Mount {
+                        mem: "engine".to_string(),
+                        schema: Some("default@1.0.0".parse().unwrap()),
+                        storage: MountStorage::Folder {
+                            path: mem_dir.clone(),
+                        },
+                        capability: MountCapability::Write,
+                        lifecycle: MountLifecycle::Eager,
+                        cross_linkable: false,
+                        migration_target: None,
+                    }],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("src").join("b.rs"), "fn b() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-a"]);
+
+        std::fs::write(
+            mem_dir.join("e.md"),
+            "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+        )
+        .unwrap();
+        // One hash-less TREE anchor over `src`, carrying the declaring
+        // source's NAME — the join is what scopes the enumeration, so a
+        // tree anchor without a resolvable source stays honest `recheck`.
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set(
+            "engine--e",
+            vec![Anchor {
+                artifact: "src".to_string(),
+                grain: AnchorGrain::Tree,
+                class: AnchorProvenanceClass::Anchored,
+                at_version: None,
+                hash: None,
+                hash_stability: AnchorHashStability::Stable,
+                derived_from: Vec::new(),
+                binding: None,
+                source: Some("graph".to_string()),
+                span_unvalidated: false,
+                hash_source: None,
+            }],
+        );
+        std::fs::write(
+            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &Binding {
+                version: BINDING_VERSION,
+                intent: None,
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                        path: "src/**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
+                    engagement: None,
+                    preparation: None,
+                }],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: None,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
+
+        // --- Pass 1: the tree observes the plain digest and backfills. ---
+        let expected_digest = crate::anchor::prepared_content_hash(
+            crate::preparation::plain_tree_digest(&[
+                ("src/a.rs".to_string(), b"fn a() {}\n".to_vec()),
+                ("src/b.rs".to_string(), b"fn b() {}\n".to_vec()),
+            ])
+            .as_bytes(),
+        );
+        {
+            let mut engine = Engine::from_workspace_root(root).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            let backfilled: Vec<(&str, &str, &str)> = outcome
+                .hash_backfill
+                .iter()
+                .map(|b| (b.entity.as_str(), b.artifact.as_str(), b.hash.as_str()))
+                .collect();
+            assert_eq!(
+                backfilled,
+                vec![("engine--e", "src", expected_digest.as_str())],
+                "the tree anchor observes the plain digest and backfills"
+            );
+            assert_eq!(outcome.backlog, 0, "no recheck queue: the digest exists");
+            let written =
+                record_anchor_hash_backfill(&mut engine, "engine", &outcome, None).unwrap();
+            assert_eq!(written, 1);
+        }
+
+        // --- Pass 2: idempotent and clean. ---
+        {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            assert!(outcome.hash_backfill.is_empty(), "backfill happens once");
+            assert_eq!(outcome.backlog, 0, "steady state: nothing re-queues");
+            let store = read_findings_store(root, "engine", "graph")
+                .unwrap()
+                .unwrap();
+            assert!(
+                store
+                    .current(&outcome.key)
+                    .iter()
+                    .all(|f| !matches!(f.target, FindingTarget::Anchor { .. })),
+                "unchanged tree resolves clean: {:?}",
+                store.current(&outcome.key)
+            );
+        }
+
+        // --- A file JOINS the tree: the digest moves. ---
+        std::fs::write(root.join("src").join("c.rs"), "fn c() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head-b"]);
+
+        // --- Pass 3: deterministic drift, no queued deferral. ---
+        {
+            let engine = Engine::from_workspace_root(root).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            assert!(outcome.hash_backfill.is_empty());
+            assert_eq!(outcome.backlog, 0, "drift is asserted, never queued");
+            let store = read_findings_store(root, "engine", "graph")
+                .unwrap()
+                .unwrap();
+            let current = store.current(&outcome.key);
+            assert!(
+                current.iter().any(|f| f.class == FindingClass::Drifted
+                    && matches!(
+                        &f.target,
+                        FindingTarget::Anchor { artifact, .. } if artifact == "src"
+                    )),
+                "a joined file drifts the tree anchor deterministically: {current:?}"
+            );
+            assert!(
+                !current
+                    .iter()
+                    .any(|f| f.class == FindingClass::QueuedForAdjudication),
+                "the perpetual recheck loop is sealed: {current:?}"
             );
         }
     }

@@ -228,8 +228,8 @@ pub fn url_prepared_hash(content: &[u8]) -> String {
 /// read (`AnchorInput::content`). `None` for a grain whose prepared form
 /// is never computed from supplied bytes: `entity` (computed from the live
 /// graph, so a supplied rendering could disagree with the store) and `tree`
-/// (no prepared form — the recorded-but-unhashed residue the code-map
-/// flavour closes).
+/// (its prepared form is a digest over the enumerated scoped files —
+/// observation-side work no single supplied byte-string can represent).
 pub fn supplied_content_hash(grain: AnchorGrain, content: &[u8]) -> Option<String> {
     match grain {
         AnchorGrain::Span | AnchorGrain::File => Some(prepared_content_hash(content)),
@@ -247,8 +247,9 @@ pub fn supplied_content_hash(grain: AnchorGrain, content: &[u8]) -> Option<Strin
 pub enum PathPrepared {
     /// The prepared-content hash to record or compare.
     Hash(String),
-    /// The grain has no prepared form under this preparation (a `tree`
-    /// without a code map): observe no hash, resolve `recheck`.
+    /// The grain has no prepared form at this single-artifact touchpoint (a
+    /// `tree`, whose digest needs its files enumerated — the caller's job):
+    /// observe no hash here, resolve `recheck` where no digest arrives.
     NoHash,
     /// The artifact addresses a sub-file unit the file no longer yields (a
     /// `<path>#<key>` span under a delivery preparation): an absent artifact.
@@ -260,11 +261,12 @@ pub enum PathPrepared {
 /// `content` path share, so a hash recorded at write time is the hash a
 /// later observation computes. No preparation (or one that does not prepare
 /// path grains): the file's bytes under the minimal canonicalization for
-/// `file`/`span`, no hash for `tree`. [`DATED_ENTRIES`]: a `<path>#<key>`
+/// `file`/`span`. [`DATED_ENTRIES`]: a `<path>#<key>`
 /// span hashes its unit ([`PathPrepared::UnitAbsent`] when the key is gone),
 /// a bare file its bytes. [`CODE_MAP`]: `file`/`span` hash the interface
-/// digest; a `tree` needs its files enumerated, which is the caller's job
-/// ([`code_map_tree_digest`]), so it answers `NoHash` here.
+/// digest. A `tree` needs its files enumerated, which is the caller's job
+/// under every preparation ([`code_map_tree_digest`] /
+/// [`plain_tree_digest`]), so it answers `NoHash` here.
 pub fn path_prepared_hash(
     preparation: Option<&str>,
     artifact: &str,
@@ -312,6 +314,26 @@ pub fn code_map_tree_digest(files: &[(String, String)]) -> String {
                 prepared_content_hash(code_map_digest(path, text).as_bytes())
             )
         })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The plain digest of a tree: one line per scoped file under it,
+/// `<prepared-content hash>  <path>`, in path order — hashed by the caller
+/// through [`prepared_content_hash`]. Any byte change in any scoped file,
+/// and any file joining or leaving the tree, changes the digest — the same
+/// whole-content posture a `file` anchor has, lifted to the directory. This
+/// is the no-preparation counterpart of [`code_map_tree_digest`]; it is what
+/// lets a plain `tree` anchor adjudicate deterministically instead of
+/// resting in `recheck` forever.
+pub fn plain_tree_digest(files: &[(String, Vec<u8>)]) -> String {
+    let mut rows: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+        .collect();
+    rows.sort();
+    rows.iter()
+        .map(|(path, bytes)| format!("{}  {path}", prepared_content_hash(bytes)))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -2017,6 +2039,42 @@ mod tests {
             "use std::fmt\n#[derive(Debug)]\npub struct Thing\npub id:u32\nimpl Thing\n\
              pub fn new(id:u32)->Self\nfn hidden(&self)"
         );
+    }
+
+    /// The plain tree digest is order-insensitive on input, sorted on
+    /// output, and moves on any byte change and on any file joining or
+    /// leaving — the whole-content posture of a `file` anchor lifted to the
+    /// directory, so a plain `tree` anchor adjudicates deterministically.
+    #[test]
+    fn plain_tree_digest_is_sorted_and_content_sensitive() {
+        let files = vec![
+            ("src/b.rs".to_string(), b"fn b() {}\n".to_vec()),
+            ("src/a.rs".to_string(), b"fn a() {}\n".to_vec()),
+        ];
+        let base = plain_tree_digest(&files);
+        assert!(
+            base.starts_with(&format!(
+                "{}  src/a.rs\n",
+                prepared_content_hash(b"fn a() {}\n")
+            )),
+            "rows sort by path regardless of input order"
+        );
+        let reordered = vec![files[1].clone(), files[0].clone()];
+        assert_eq!(plain_tree_digest(&reordered), base);
+        let body_edit = vec![
+            files[0].clone(),
+            ("src/a.rs".to_string(), b"fn a() { /* edit */ }\n".to_vec()),
+        ];
+        assert_ne!(
+            plain_tree_digest(&body_edit),
+            base,
+            "any byte change moves the plain digest (unlike the code map)"
+        );
+        let mut joined = files.clone();
+        joined.push(("src/c.rs".to_string(), b"fn c() {}\n".to_vec()));
+        assert_ne!(plain_tree_digest(&joined), base, "a joining file moves it");
+        let left = vec![files[0].clone()];
+        assert_ne!(plain_tree_digest(&left), base, "a leaving file moves it");
     }
 
     /// A tree's map changes when a file joins, leaves, or changes its

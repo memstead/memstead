@@ -2833,9 +2833,12 @@ pub(crate) struct AnchorSourceJoin {
 /// unit's own text is the hashed unit, and a key the file no longer yields
 /// is an absent artifact); under a **code-map** preparation a file or span
 /// hashes the interface digest, and a `tree` hashes the code map of every
-/// scoped file under it. A `tree` grain under no code map has no prepared
-/// form and observes no hash; a read failure likewise observes no hash —
-/// those resolve `recheck`, never a fabricated `drifted`. Non-hash classes
+/// scoped file under it. A `tree` under any other preparation hashes the
+/// plain per-file prepared-content map of its scoped files, so tree anchors
+/// adjudicate deterministically like file anchors. A `tree` with no
+/// resolvable source-join (the enumeration scope is undefined without one),
+/// a partial enumeration, and a read failure observe no hash — those
+/// resolve `recheck`, never a fabricated `drifted`. Non-hash classes
 /// (`authored` / `informed-by`) skip the read entirely, so an anchor-less or
 /// hash-free mem pays no observation cost.
 fn observe_path_anchor(
@@ -2897,17 +2900,20 @@ fn observe_path_anchor(
         }
     } else if anchor.grain == AnchorGrain::Tree
         && path.is_dir()
-        && preparation == Some(crate::preparation::CODE_MAP)
         && let Some(join) = join
     {
-        // The tree's code map: every scoped file under the tree, by the
-        // declaring source's own scope and the binding's deny paths. The
-        // path the anchor names is workspace-relative or source-relative;
-        // the enumeration is workspace-relative, so compare the resolved
-        // absolute paths. A PARTIAL enumeration (malformed or retired-dialect
-        // scope pattern) observes no hash — a digest over a set that is not
-        // the population would silently change a stored tree-anchor hash;
-        // no-hash resolves `recheck`, the same posture as a failed read.
+        // The tree's prepared form: a digest over every scoped file under
+        // the tree, by the declaring source's own scope and the binding's
+        // deny paths — the code map under a code-map preparation, the plain
+        // per-file prepared-content map otherwise, so a tree anchor
+        // adjudicates deterministically instead of resting in `recheck`
+        // forever. The path the anchor names is workspace-relative or
+        // source-relative; the enumeration is workspace-relative, so compare
+        // the resolved absolute paths. A PARTIAL enumeration (malformed or
+        // retired-dialect scope pattern) observes no hash — a digest over a
+        // set that is not the population would silently change a stored
+        // tree-anchor hash; no-hash resolves `recheck`, the same posture as
+        // a failed read.
         let enumeration = crate::ingest::cursor::enumerate_facet_files_reported(
             &join.source,
             &join.deny_paths,
@@ -2915,7 +2921,7 @@ fn observe_path_anchor(
         );
         if enumeration.is_partial() {
             None
-        } else {
+        } else if preparation == Some(crate::preparation::CODE_MAP) {
             let files: Vec<(String, String)> = enumeration
                 .files
                 .into_iter()
@@ -2928,6 +2934,16 @@ fn observe_path_anchor(
                 .collect();
             Some(crate::anchor::prepared_content_hash(
                 crate::preparation::code_map_tree_digest(&files).as_bytes(),
+            ))
+        } else {
+            let files: Vec<(String, Vec<u8>)> = enumeration
+                .files
+                .into_iter()
+                .filter(|f| root.join(f).starts_with(&path))
+                .filter_map(|f| std::fs::read(root.join(&f)).ok().map(|bytes| (f, bytes)))
+                .collect();
+            Some(crate::anchor::prepared_content_hash(
+                crate::preparation::plain_tree_digest(&files).as_bytes(),
             ))
         }
     } else {
