@@ -277,9 +277,11 @@ pub fn render_sync_brief_for(
 /// have produced would go quiet. That is the exit-code contract, which 03/01's
 /// scope excludes.
 pub fn mem_predates_binding(engine: &Engine, resolved: &ResolvedIngest) -> bool {
-    let no_anchors = engine
-        .mem_anchors_resolved(&resolved.destination_mem)
-        .is_empty();
+    // Existence only — `mem_anchors_resolved` would OBSERVE every anchor
+    // (hash live sources, enumerate file scopes) to answer a question the
+    // sidecar parse alone answers. On the status path this ran per binding
+    // per request and dominated the cost (2026-09-01 profile).
+    let no_anchors = !engine.mem_has_anchors(&resolved.destination_mem);
     let prefix = format!("{}/", resolved.name);
     let never_synced = engine
         .mem_config_for(&resolved.destination_mem)

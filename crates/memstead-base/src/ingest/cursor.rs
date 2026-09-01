@@ -512,6 +512,18 @@ pub fn enumerate_facet_files_reported(
     // so `.git/**` plumbing cannot enter `S(D)`, matching the git strategy
     // (whose diffs never name `.git` files).
     let base = medium_base(&source.pointer, workspace_root);
+    // Directory pruning by allow-prefix: a directory is entered only when
+    // some allow pattern could still match beneath it. Each pattern
+    // contributes its longest literal leading segment run (up to the first
+    // segment carrying a glob metacharacter); a directory whose segments
+    // diverge from every pattern's literal prefix can contain no match, so
+    // the walk never descends into it. A pattern that begins with a glob
+    // segment (`**/*.rs`) contributes the empty prefix and keeps the full
+    // walk — behaviour is unchanged for unanchored scopes. This is what
+    // keeps a broad-pointer facet (`..` with `dev/**/*.md`) from stat-walking
+    // every build tree and node_modules in the repository on each
+    // enumeration (status tokens, verify S(D), sync briefs all pass here).
+    let allow_prefixes: Vec<Vec<String>> = allows.iter().map(|p| glob_literal_prefix(p)).collect();
     let mut out: Vec<String> = Vec::new();
     let mut stack = vec![base.clone()];
     while let Some(dir) = stack.pop() {
@@ -532,7 +544,12 @@ pub fn enumerate_facet_files_reported(
                     VCS_INTERNAL_DIRS.contains(&n) || n == ".memstead" || n == ".memstead.cache"
                 });
                 if !skip {
-                    stack.push(path);
+                    let dir_src_rel = relative_path(&base, &normalize_lexical(&path))
+                        .to_string_lossy()
+                        .to_string();
+                    if allow_could_match_under(&allow_prefixes, &dir_src_rel) {
+                        stack.push(path);
+                    }
                 }
             } else if file_type.is_file() {
                 let normalized = normalize_lexical(&path);
@@ -559,6 +576,38 @@ pub fn enumerate_facet_files_reported(
         malformed,
         legacy_dialect,
     }
+}
+
+/// The longest run of leading path segments in a glob pattern that carry no
+/// glob metacharacter — the literal region a match must live under. `dev/**/
+/// *.md` → `["dev"]`; `VISION.md` → `["VISION.md"]`; `**/*.rs` → `[]`.
+fn glob_literal_prefix(pattern: &str) -> Vec<String> {
+    pattern
+        .split('/')
+        .take_while(|seg| {
+            !seg.chars()
+                .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether any allow pattern could match a file somewhere under the
+/// directory at `dir_rel` (source-relative). True when, for some pattern's
+/// literal prefix, the directory's segments and the prefix agree over their
+/// common length: the directory is either an ancestor of the literal region
+/// (the walk must pass through it) or inside the pattern's glob region. An
+/// empty prefix (pattern starts with a glob segment) matches every
+/// directory — no pruning for unanchored scopes.
+fn allow_could_match_under(prefixes: &[Vec<String>], dir_rel: &str) -> bool {
+    let dir_segs: Vec<&str> = dir_rel.split('/').filter(|s| !s.is_empty()).collect();
+    prefixes.iter().any(|prefix| {
+        let n = dir_segs.len().min(prefix.len());
+        dir_segs[..n]
+            .iter()
+            .zip(prefix[..n].iter())
+            .all(|(d, p)| *d == p.as_str())
+    })
 }
 
 /// What an enumeration of a source's scope selected, and what it could not
@@ -2523,7 +2572,7 @@ mod tests {
     #[test]
     fn migration_notes_are_empty_without_a_pointer() {
         let source = primary(vec![PatternEntry {
-            path: "dev/**/*.md".to_string(),
+            path: "notes/**/*.md".to_string(),
             mode: PatternMode::Allow,
         }]);
         assert!(scope_migration_notes(&source).is_empty());
@@ -2559,6 +2608,61 @@ mod tests {
         let mut graph_source = source.clone();
         graph_source.medium_type = MediumType::Graph;
         assert!(enumerate_facet_files(&graph_source, &[], root).is_empty());
+    }
+
+    /// The allow-prefix pruning never changes WHAT an enumeration selects —
+    /// only which directories the walk bothers to enter. Anchored patterns
+    /// (`notes/**/*.md`) still find their files, root-level literals
+    /// (`VISION.md`) still match, and a subtree no pattern can reach
+    /// contributes nothing whether walked or pruned.
+    #[test]
+    fn enumerate_prunes_directories_outside_every_allow_prefix() {
+        let ws = tempfile::tempdir().unwrap();
+        let root = ws.path();
+        std::fs::create_dir_all(root.join("notes/drafts")).unwrap();
+        std::fs::create_dir_all(root.join("target/debug/build")).unwrap();
+        std::fs::write(root.join("notes/drafts/a.md"), "").unwrap();
+        std::fs::write(root.join("notes/top.md"), "").unwrap();
+        std::fs::write(root.join("VISION.md"), "").unwrap();
+        std::fs::write(root.join("target/debug/build/junk.md"), "").unwrap();
+
+        let source = primary(vec![
+            PatternEntry {
+                path: "notes/**/*.md".to_string(),
+                mode: PatternMode::Allow,
+            },
+            PatternEntry {
+                path: "VISION.md".to_string(),
+                mode: PatternMode::Allow,
+            },
+        ]);
+        assert_eq!(
+            enumerate_facet_files(&source, &[], root),
+            vec!["VISION.md", "notes/drafts/a.md", "notes/top.md"],
+        );
+    }
+
+    /// The prefix/could-match helpers, on their own terms: segment-exact
+    /// comparison (no byte-prefix confusion between `no` and `notes`), the
+    /// empty prefix of an unanchored pattern admitting everything, and both
+    /// directions of the common-length rule (ancestor of the literal region,
+    /// inside the glob region).
+    #[test]
+    fn allow_prefix_pruning_helpers() {
+        assert_eq!(glob_literal_prefix("notes/**/*.md"), vec!["notes"]);
+        assert_eq!(glob_literal_prefix("VISION.md"), vec!["VISION.md"]);
+        assert!(glob_literal_prefix("**/*.rs").is_empty());
+        assert_eq!(glob_literal_prefix("a/b/{c,d}/e"), vec!["a", "b"]);
+
+        let prefixes = vec![vec!["notes".to_string()], vec!["VISION.md".to_string()]];
+        assert!(allow_could_match_under(&prefixes, "notes"));
+        assert!(allow_could_match_under(&prefixes, "notes/drafts"));
+        assert!(!allow_could_match_under(&prefixes, "no"));
+        assert!(!allow_could_match_under(&prefixes, "public"));
+        assert!(!allow_could_match_under(&prefixes, "target/debug"));
+
+        let unanchored = vec![Vec::<String>::new()];
+        assert!(allow_could_match_under(&unanchored, "anything/at/all"));
     }
 
     /// Graph enumeration is real: a graph source's `S(D)` is the source mem's

@@ -645,6 +645,27 @@ impl Engine {
     /// live graph for an `entity` one — or `None` when unobserved (never
     /// fabricated). The verify pipeline consumes it to adjudicate a mem's
     /// anchors against the source; audit/health can reuse it.
+    /// Whether `mem`'s anchor sidecar records ANY anchor row — the cheap
+    /// existence check [`Self::mem_anchors_resolved`] cannot serve: that
+    /// walk OBSERVES every anchor (hashing live source artifacts, and for
+    /// path anchors enumerating the facet's file scope) when a caller only
+    /// needs to know the sidecar is non-empty. Parses the sidecar and stops
+    /// there; false for an unknown mem, a backend without anchors, or an
+    /// empty sidecar — the same population `mem_anchors_resolved` would
+    /// report empty for, minus the observation cost.
+    pub fn mem_has_anchors(&self, mem: &str) -> bool {
+        let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+            return false;
+        };
+        let Ok(Some(bytes)) = mount.backend.read_anchors_sidecar() else {
+            return false;
+        };
+        let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
+            return false;
+        };
+        sc.entities.values().any(|anchors| !anchors.is_empty())
+    }
+
     pub fn mem_anchors_resolved(&self, mem: &str) -> Vec<(EntityId, ResolvedAnchor)> {
         let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
             return Vec::new();
