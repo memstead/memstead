@@ -140,8 +140,18 @@ pub fn render_entity_markdown_with_signals(
         lines.push(format!("_tokens_unfiltered_body: {full_tokens}"));
     }
 
-    // Emit entity metadata
+    // Emit entity metadata. Same predicate as the JSON envelope's
+    // metadata map: `_`-prefixed keys are computed read-channel slots
+    // (the `_hash` line above, `_tokens`, `_signals`, ...) and the
+    // reserved triple is structural identity — a stored key in either
+    // namespace would render as a second, stale copy beside the
+    // computed one.
     for (key, value) in &entity.metadata {
+        if key.starts_with('_')
+            || crate::runtime_validator::READ_ONLY_METADATA_KEYS.contains(&key.as_str())
+        {
+            continue;
+        }
         lines.push(format!("{key}: {value}"));
     }
     lines.push("---".to_string());
@@ -2591,6 +2601,44 @@ mod tests {
             heading_spans: std::collections::HashMap::new(),
             raw_section_headings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn markdown_frontmatter_filters_computed_and_reserved_metadata_keys() {
+        // A stored `_hash` metadata key (frontmatter copied out of a read
+        // response and written back) must not render as a second `_hash:`
+        // line beside the computed one, and the reserved triple stays
+        // structural — same predicate as the JSON envelope's metadata map.
+        use crate::entity::MetadataValue;
+        let mut entity = test_entity();
+        entity.metadata.insert(
+            "_hash".to_string(),
+            MetadataValue::String("stale".to_string()),
+        );
+        entity.metadata.insert(
+            "type".to_string(),
+            MetadataValue::String("spec".to_string()),
+        );
+        entity
+            .metadata
+            .insert("level".to_string(), MetadataValue::String("M0".to_string()));
+
+        let md = render_entity_markdown(&entity, None);
+        assert_eq!(
+            md.matches("_hash:").count(),
+            1,
+            "one computed _hash line, no stored copy"
+        );
+        assert!(md.contains("_hash: abc123"), "the computed hash wins");
+        assert!(
+            !md.contains("stale"),
+            "the stored _hash value never renders"
+        );
+        assert!(
+            !md.contains("\ntype: "),
+            "the reserved triple stays structural"
+        );
+        assert!(md.contains("level: M0"), "declared metadata still renders");
     }
 
     #[test]

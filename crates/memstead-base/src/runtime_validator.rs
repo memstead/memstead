@@ -642,8 +642,17 @@ pub const READ_ONLY_METADATA_KEYS: &[&str] = &["mem", "id", "type"];
 /// checked here: create's posture for `init_timestamp` /
 /// `auto_timestamp` fields is stamp-and-proceed with an
 /// `IGNORED_READONLY_FIELD` warning, deliberately.
+///
+/// The `_` prefix is refused as a namespace, not as a key list: every
+/// underscore-prefixed frontmatter key is a computed read-channel slot
+/// (`_hash`, `_tokens`, `_signals`, ...), so a stored metadata key in
+/// that namespace would render as a second, stale copy of a computed
+/// field — frontmatter copied out of a read response and pasted into a
+/// write is the observed ingress. Unset stays permissive (see
+/// [`validate_unsettable_metadata_key`]): removing a smuggled `_` key
+/// is the same sanctioned repair as removing a smuggled reserved key.
 pub fn validate_reserved_metadata_key(key: &str) -> Result<(), ValidationError> {
-    if READ_ONLY_METADATA_KEYS.contains(&key) {
+    if READ_ONLY_METADATA_KEYS.contains(&key) || key.starts_with('_') {
         return Err(ValidationError::ReadOnlyField {
             field: key.to_string(),
         });
@@ -1535,6 +1544,25 @@ write_rules: []
             )
             .expect("test schema must load"),
         )
+    }
+
+    #[test]
+    fn reserved_metadata_gate_refuses_the_underscore_namespace_on_set() {
+        // The `_` prefix is the computed read-channel namespace (`_hash`,
+        // `_tokens`, ...); a stored key there would render as a second,
+        // stale copy of a computed field. Refused as a namespace on every
+        // set path; ordinary keys pass unchanged.
+        for key in ["_hash", "_tokens", "_anything"] {
+            assert!(matches!(
+                validate_reserved_metadata_key(key),
+                Err(ValidationError::ReadOnlyField { .. })
+            ));
+        }
+        assert!(validate_reserved_metadata_key("level").is_ok());
+        assert!(matches!(
+            validate_reserved_metadata_key("type"),
+            Err(ValidationError::ReadOnlyField { .. })
+        ));
     }
 
     #[test]

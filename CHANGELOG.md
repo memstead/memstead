@@ -7,6 +7,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stored `_`-prefixed metadata key can no longer shadow a computed
+  frontmatter field.** The underscore namespace belongs to the read
+  channel's computed slots (`_hash`, `_tokens`, `_signals`, ...), but the
+  write gate accepted `_hash` as ordinary metadata and the markdown
+  renderer emitted the stored copy beside the computed line — an external
+  agent test surfaced the duplicate `_hash` after pasting read-response
+  frontmatter into a write. Both halves of the shared-gate rule now hold:
+  every set path refuses `_`-prefixed metadata keys as `READ_ONLY_FIELD`
+  (unset stays permissive, the sanctioned repair for an already-smuggled
+  key), and the markdown frontmatter applies the same computed-and-reserved
+  filter the JSON envelope always had.
+
 ## [0.15.0] - 2026-09-01
 
 ### Added
