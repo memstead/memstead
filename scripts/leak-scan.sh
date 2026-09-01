@@ -8,6 +8,12 @@
 #
 # Exits non-zero (and prints the offending hits) on any hit. The OAuth Device
 # Flow client ID is intentionally allowed (public by design) and not scanned.
+#
+# LEAK_SCAN_EXTRA_ALLOW_FILE (env, optional): path to a file of extended-regex
+# lines OR'd into the allowlist — for callers scanning a tree with its own
+# legitimate self-matches (e.g. the memstead.ai seal gate scanning exported
+# archives). Blank lines and #-comments are skipped. The default pattern
+# classes are never weakened; the file only adds path-anchored exemptions.
 
 set -uo pipefail
 
@@ -30,6 +36,14 @@ PRUNE=( --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules \
 #   * the pipeline migration's and workspace-loader's `"projection":"macos/graph"`
 #     strings are test-fixture projection identifiers, not path references.
 ALLOW='leak-scan\.sh:[0-9]+:|LICENSING\.md:[0-9]+:.*(macos/|memstead-registry|inspector/|local-ai/)|deny-meta-files\.test\.js:[0-9]+:.*(dev/plans|macos/)|(pipeline[a-z_]*\.rs|workspace-loader\.test\.js):[0-9]+:.*macos/graph'
+
+# Caller-supplied additions (see header). Each non-comment line is OR'd in.
+if [ -n "${LEAK_SCAN_EXTRA_ALLOW_FILE:-}" ] && [ -f "$LEAK_SCAN_EXTRA_ALLOW_FILE" ]; then
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    ALLOW="$ALLOW|$line"
+  done < "$LEAK_SCAN_EXTRA_ALLOW_FILE"
+fi
 
 scan() { # label  pattern  [extra grep args...]
   local label="$1" pat="$2"; shift 2
