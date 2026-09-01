@@ -89,18 +89,18 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    the resume point); close with the step-6 report, verdict first.
 
 8. `--sweep <mem>`: the standing-claim walk — verify what the mem asserts
-   even where no change signal points, on any mem, bound or not. Walk
-   load-bearing frontmatter first (past target dates, done certifications,
-   retired statuses over living prose), then longest-unverified. Per
-   entity: verify its checkable claims against the workspace's trees,
-   graph, and git history (a legitimate source) under the step-4
-   disciplines, correct what the evidence refutes, and record a
-   `memstead_check` verdict — clean and corrected alike — so the next
-   sweep prioritizes by trace staleness. Bulk-grep the mem's paths,
-   codes, and symbols against the tree first; unconfirmable claims are
-   out of scope — note the limit, never guess. Never create, delete,
-   or re-cut in a sweep: a fused entity or missing owner is
-   `/remodel`'s business — report, don't fix. Close with per-mem counts.
+   even where no change signal points, on any mem, bound or not.
+   Bulk-grep the mem's paths, codes, and symbols against the tree first;
+   walk load-bearing frontmatter, then longest-unverified. Per entity:
+   verify its checkable claims against the workspace's trees, graph, and
+   git history (a legitimate source) under the step-4 disciplines,
+   correct what the evidence refutes, and record a `memstead_check`
+   verdict — clean and corrected alike. Verdict order is binding:
+   `failed` BEFORE the repair (at the defective hash), `ok` after — a
+   post-repair failed stamp pins the defect to the healed body forever.
+   Unconfirmable claims are out of scope — note the limit, never guess.
+   Never create, delete, or re-cut in a sweep: a fused entity or missing
+   owner is `/remodel`'s business. Close with per-mem counts.
 
 ## Rules
 
