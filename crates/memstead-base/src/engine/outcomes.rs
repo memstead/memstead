@@ -502,6 +502,206 @@ pub struct RenameEntityOutcome {
     pub warnings: Vec<WarningHint>,
 }
 
+/// Arguments for [`Engine::retype_entity`].
+#[derive(Debug, Clone)]
+pub struct RetypeEntityArgs {
+    pub id: EntityId,
+    /// Optimistic locking. `None` skips the check (dry runs always skip it).
+    pub expected_hash: Option<String>,
+    /// The type the entity becomes; must be declared by the mem's schema.
+    pub target_type: String,
+    /// Section keys to rename on the way: `old key → new key`. A key not
+    /// mapped keeps its name and must be declared by the target type (or
+    /// the retype refuses `UNKNOWN_SECTION` with a proposed map).
+    pub section_map: IndexMap<String, String>,
+    /// Metadata keys the caller explicitly lets go — the fields the
+    /// source type declared and the target does not (a spec's `level`
+    /// on the way to a memo). Never inferred: an undeclared field that is
+    /// not listed here refuses `UNKNOWN_METADATA_FIELD`, because dropping
+    /// data unannounced is what the write gates exist to prevent. A key
+    /// the entity does not carry is a silent no-op.
+    pub drop_metadata: Vec<String>,
+    /// Validate everything and compute the prospective hash without
+    /// writing, committing, or touching the store.
+    pub dry_run: bool,
+}
+
+/// Successful outcome of [`Engine::retype_entity`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RetypeEntityOutcome {
+    pub id: EntityId,
+    /// Unchanged by the retype — the id and path are the point.
+    pub file_path: String,
+    pub old_type: String,
+    pub new_type: String,
+    /// Wire key `_hash`: the content hash after the write (the next
+    /// `expected_hash`); on a dry run the UNCHANGED current hash.
+    #[serde(rename = "_hash")]
+    pub content_hash: String,
+    /// The hash the entity would carry after the write — dry runs only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prospective_hash: Option<String>,
+    /// The identity the mem's backend minted for this write — a commit
+    /// SHA on a git-branch mem, an opaque synthetic token on a folder or
+    /// in-memory mem. An identity, never a change cursor. Empty on a dry
+    /// run (no disk write happened).
+    pub write_id: String,
+    /// `(old key, new key)` pairs the `section_map` applied.
+    pub sections_renamed: Vec<(String, String)>,
+    /// Every edge examined against the target type's pins: outgoing,
+    /// incoming (loaded), and incoming from deferred mems.
+    pub edges_rechecked: usize,
+    /// Always true: the content hash moved, so every check record and
+    /// derivation baseline keyed to the previous hash is stale.
+    pub checks_stale: bool,
+    /// The sentence that says so, for the surface to print.
+    pub staleness_note: String,
+    pub warnings: Vec<WarningHint>,
+}
+
+/// Which side of an edge the retyped entity is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RetypeEdgeDirection {
+    Outgoing,
+    Incoming,
+}
+
+/// One edge the target type's pins refuse.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RetypeEdge {
+    pub direction: RetypeEdgeDirection,
+    pub from: String,
+    pub to: String,
+    pub rel_type: String,
+    pub cross_mem: bool,
+    /// The shape validator's own recovery detail (allowed source and
+    /// target types, suggestion).
+    pub detail: serde_json::Value,
+}
+
+/// One reason a retype is refused. Every problem found is reported
+/// together in [`EngineError::RetypeRefused`]; each carries the wire code
+/// the same condition has on the create/update/relate surfaces.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RetypeProblem {
+    /// A (mapped) section key the target type does not declare.
+    UnknownSection {
+        key: String,
+        declared: Vec<String>,
+        suggestion: Option<String>,
+    },
+    /// A section the target type requires is absent or empty.
+    MissingRequiredSection {
+        key: String,
+        heading: String,
+        write_rules: Vec<String>,
+    },
+    /// A metadata field the target type requires is unset and has no
+    /// default.
+    MissingRequiredField {
+        key: String,
+        description: String,
+        enum_values: Vec<String>,
+    },
+    /// A validator refusal carried verbatim: body content, an unknown
+    /// metadata field, an enum or field value the target rejects.
+    Validation {
+        code: &'static str,
+        message: String,
+        details: serde_json::Value,
+    },
+    /// `section_map` names a key the entity does not carry.
+    SectionMapSourceMissing {
+        key: String,
+        present: Vec<String>,
+    },
+    /// Two sections would land under one key.
+    SectionMapCollision {
+        from: String,
+        to: String,
+        also_from: String,
+    },
+    EdgeShape(RetypeEdge),
+    RequiredOutgoingUnsatisfied(Vec<crate::ops::MissingRequiredOutgoingBlock>),
+    ConstraintUnsatisfied(Vec<crate::ops::health::UnsatisfiedConstraint>),
+}
+
+impl RetypeProblem {
+    /// The wire code this condition carries everywhere else.
+    pub fn code(&self) -> &'static str {
+        match self {
+            RetypeProblem::UnknownSection { .. } => "UNKNOWN_SECTION",
+            RetypeProblem::MissingRequiredSection { .. } => "MISSING_REQUIRED_SECTION",
+            RetypeProblem::MissingRequiredField { .. } => "REQUIRED_FIELD_UNSET",
+            RetypeProblem::Validation { code, .. } => code,
+            RetypeProblem::SectionMapSourceMissing { .. } => "SECTION_MAP_SOURCE_MISSING",
+            RetypeProblem::SectionMapCollision { .. } => "SECTION_MAP_COLLISION",
+            RetypeProblem::EdgeShape(_) => "INVALID_REL_SHAPE",
+            RetypeProblem::RequiredOutgoingUnsatisfied(_) => "MISSING_REQUIRED_OUTGOING",
+            RetypeProblem::ConstraintUnsatisfied(_) => "CONSTRAINT_UNSATISFIED",
+        }
+    }
+
+    /// One line a human or agent can act on.
+    pub fn message(&self) -> String {
+        match self {
+            RetypeProblem::UnknownSection {
+                key,
+                declared,
+                suggestion,
+            } => format!(
+                "section `{key}` is not declared by the target type (declared: {}){}",
+                declared.join(", "),
+                suggestion
+                    .as_deref()
+                    .map(|s| format!("; map it with section_map {key}={s}"))
+                    .unwrap_or_default()
+            ),
+            RetypeProblem::MissingRequiredSection { key, heading, .. } => {
+                format!("required section `{key}` ({heading}) is missing or empty")
+            }
+            RetypeProblem::MissingRequiredField { key, .. } => {
+                format!("required metadata field `{key}` is unset and has no default")
+            }
+            RetypeProblem::Validation { message, .. } => message.clone(),
+            RetypeProblem::SectionMapSourceMissing { key, present } => format!(
+                "section_map names `{key}`, which the entity does not carry (present: {})",
+                present.join(", ")
+            ),
+            RetypeProblem::SectionMapCollision {
+                from,
+                to,
+                also_from,
+            } => {
+                format!("section_map sends both `{also_from}` and `{from}` to `{to}`")
+            }
+            RetypeProblem::EdgeShape(e) => format!(
+                "{} edge {} --{}--> {} is outside the target type's pins{}",
+                match e.direction {
+                    RetypeEdgeDirection::Outgoing => "outgoing",
+                    RetypeEdgeDirection::Incoming => "incoming",
+                },
+                e.from,
+                e.rel_type,
+                e.to,
+                if e.cross_mem { " (cross-mem)" } else { "" }
+            ),
+            RetypeProblem::RequiredOutgoingUnsatisfied(blocks) => format!(
+                "{} block-tier required_outgoing block(s) of the target type unsatisfied",
+                blocks.len()
+            ),
+            RetypeProblem::ConstraintUnsatisfied(v) => {
+                format!(
+                    "{} block-tier constraint(s) of the target type violated",
+                    v.len()
+                )
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -25,7 +25,7 @@ use crate::error_envelope::{tool_error, tool_error_with_payload};
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams, ReloadParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
+    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams, RetypeParams, UpdateParams,
 };
 
 /// The MCP server wrapping the Engine.
@@ -1642,6 +1642,16 @@ fn engine_err_unified(
                 }),
             ),
         ),
+        // Retype refusals carry their report-all payload from `details()`
+        // so the CLI and MCP envelopes cannot drift; the code is the
+        // shared problem code or `RETYPE_REFUSED` (see `EngineError::code`).
+        E::RetypeRefused { .. } | E::RetypeNoOp { .. } | E::RetypeReferrerUnprobeable { .. } => {
+            tool_error_with_payload(
+                e.code(),
+                &message,
+                envelope(e.code(), message.clone(), e.details()),
+            )
+        }
         E::RenameNoOp { id, new_title } => tool_error_with_payload(
             "RENAME_NO_OP",
             &message,
@@ -3579,6 +3589,86 @@ impl McpServer {
                 // drained notices to match the success channel split —
                 // collision (`HASH_MISMATCH`) is the path drift matters
                 // most, since it lands on the very entity being written.
+                let notices = engine.take_mem_changed_notices();
+                let warnings = notices_as_reload_warnings(&notices);
+                attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
+            }
+        }
+    }
+
+    #[tool(
+        name = "memstead_retype",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn memstead_retype(&self, Parameters(p): Parameters<RetypeParams>) -> CallToolResult {
+        if let Some(err) = validate_entity_id(&p.id) {
+            return err;
+        }
+        if let Some(err) = validate_note(p.note.as_deref()) {
+            return err;
+        }
+        let dry_run = p.dry_run.unwrap_or(false);
+        if !dry_run && p.expected_hash.as_deref().is_none_or(str::is_empty) {
+            let msg = "`expected_hash` is required for a real retype (read the entity first and \
+                       pass its `_hash`); only `dry_run: true` may omit it";
+            return tool_error_with_payload(
+                "INVALID_INPUT",
+                msg,
+                envelope(
+                    "INVALID_INPUT",
+                    msg.to_string(),
+                    serde_json::json!({ "field": "expected_hash" }),
+                ),
+            );
+        }
+        let id = EntityId::canonical(&p.id);
+        let mem_for_anchor = id.mem().to_string();
+        let role = match self.resolve_role(p.role.as_deref()) {
+            Ok(r) => r,
+            Err(resp) => return *resp,
+        };
+        let identity = match self.resolve_identity(p.identity.as_deref()) {
+            Ok(i) => i,
+            Err(resp) => return *resp,
+        };
+        let unified = self.unified_engine();
+        let mut engine = crate::lock_engine!(unified);
+        engine.set_role(role);
+        engine.set_identity(identity);
+        let args = memstead_base::RetypeEntityArgs {
+            id: id.clone(),
+            expected_hash: p.expected_hash.clone(),
+            target_type: p.target_type.clone(),
+            section_map: p
+                .section_map
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .collect(),
+            drop_metadata: p.drop_metadata.clone().unwrap_or_default(),
+            dry_run,
+        };
+        let client = self.client.get().cloned();
+        match engine.retype_entity(args, Actor::Agent, client.as_ref(), p.note.as_deref()) {
+            Ok(outcome) => {
+                let mut body = serde_json::to_value(&outcome).unwrap_or(serde_json::Value::Null);
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert("dry_run".into(), serde_json::json!(dry_run));
+                }
+                attach_durability(&mut body, &engine, id.mem());
+                attach_mem_changed(&mut body, engine.take_mem_changed_notices());
+                let res = json_response(&body);
+                match mem_schema_ref_unified(&engine, &mem_for_anchor) {
+                    Some(s) => with_mem_schema_anchor(res, &s),
+                    None => res,
+                }
+            }
+            Err(e) => {
                 let notices = engine.take_mem_changed_notices();
                 let warnings = notices_as_reload_warnings(&notices);
                 attach_drift_to_error(engine_err_unified(e, &engine), &warnings, notices)
@@ -9644,6 +9734,122 @@ write_rules: []
         assert!(adopt_text.contains("\"incoming_count\": 1"));
         assert!(adopt_text.contains("\"from\""));
         assert!(adopt_text.contains("entity-a"));
+    }
+
+    /// `memstead_retype` end-to-end through the unified engine: the
+    /// same outcome the CLI verb produces — type and mapped sections
+    /// rewritten, id and path unchanged, `checks_stale` stated — and a
+    /// typed report-all refusal before it, over the same wire envelope.
+    #[test]
+    fn test_memstead_retype_via_unified_engine_path() {
+        let tmp = setup_test_workspace();
+        let mem_dir = tmp.path().join("specs");
+        let writer = memstead_base::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let mount = memstead_base::Mount {
+            mem: "specs".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: memstead_base::MountStorage::Folder { path: mem_dir },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let unified = memstead_base::Engine::from_mounts(vec![(
+            mount,
+            Box::new(writer) as Box<dyn memstead_base::backend::MemBackend>,
+        )])
+        .unwrap();
+        let server = McpServer::new(unified, crate::config::DEFAULT_TOKEN_BUDGET);
+        let hash_of = |id: &str| {
+            let unified = server.unified_engine().lock().unwrap();
+            unified
+                .get_entity(&EntityId(id.to_string()))
+                .expect("entity must exist")
+                .content_hash
+                .clone()
+        };
+
+        // Report-all refusal: a spec's `level` field is not a memo
+        // field, and its `identity`/`purpose` sections are not memo
+        // sections — both classes arrive in one typed envelope.
+        let refused = server.memstead_retype(Parameters(RetypeParams {
+            id: "specs--entity-b".to_string(),
+            target_type: "memo".to_string(),
+            section_map: None,
+            drop_metadata: None,
+            expected_hash: Some(hash_of("specs--entity-b")),
+            dry_run: None,
+            note: None,
+            role: None,
+            identity: None,
+        }));
+        assert!(refused.is_error.unwrap_or(false));
+        let body = refused.structured_content.clone().unwrap();
+        assert_eq!(body["code"], "UNKNOWN_SECTION", "{body}");
+        let codes: Vec<&str> = body["details"]["problems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["code"].as_str().unwrap())
+            .collect();
+        assert!(codes.contains(&"UNKNOWN_SECTION"), "{codes:?}");
+        assert!(codes.contains(&"MISSING_REQUIRED_SECTION"), "{codes:?}");
+        assert!(codes.contains(&"UNKNOWN_METADATA_FIELD"), "{codes:?}");
+        assert_eq!(
+            body["details"]["proposed_section_map"]["identity"],
+            "substance"
+        );
+        assert!(body["details"]["target_sections"].is_array());
+
+        // The spec-only `level` field is dropped explicitly on the way.
+        let result = server.memstead_retype(Parameters(RetypeParams {
+            id: "specs--entity-b".to_string(),
+            target_type: "memo".to_string(),
+            section_map: Some(
+                [
+                    ("identity".to_string(), "claim".to_string()),
+                    ("purpose".to_string(), "context".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            drop_metadata: Some(vec!["level".to_string()]),
+            expected_hash: Some(hash_of("specs--entity-b")),
+            dry_run: None,
+            note: Some("retype over MCP".to_string()),
+            role: None,
+            identity: None,
+        }));
+        assert!(
+            !result.is_error.unwrap_or(false),
+            "{}",
+            extract_text(&result)
+        );
+        let text = extract_text(&result);
+        assert!(text.contains("\"old_type\": \"spec\""), "{text}");
+        assert!(text.contains("\"new_type\": \"memo\""), "{text}");
+        assert!(text.contains("\"checks_stale\": true"), "{text}");
+        assert!(text.contains("\"staleness_note\""), "{text}");
+        assert!(text.contains("\"_hash\""), "{text}");
+        assert!(text.contains("\"_mem_schema\""), "{text}");
+        {
+            let unified = server.unified_engine().lock().unwrap();
+            let e = unified
+                .get_entity(&EntityId("specs--entity-b".to_string()))
+                .expect("still there under the same id");
+            assert_eq!(e.entity_type, "memo");
+            assert_eq!(e.file_path, "entity-b.md");
+            assert!(e.sections.contains_key("claim"));
+            assert!(e.sections.contains_key("context"));
+            // The incoming USES edge from entity-a stays.
+            assert_eq!(
+                unified
+                    .store()
+                    .incoming(&EntityId("specs--entity-b".to_string()))
+                    .len(),
+                1
+            );
+        }
     }
 
     /// `memstead_delete` end-to-end through the unified engine. Wire

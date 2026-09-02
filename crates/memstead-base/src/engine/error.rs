@@ -340,6 +340,42 @@ pub enum EngineError {
         entity_id: String,
         missing: Vec<crate::ops::MissingRequiredOutgoingBlock>,
     },
+    /// A retype refused: every problem the target type has with the
+    /// entity's sections, metadata, edges, and block-tier constraints,
+    /// reported together (the report-all contract), with the target's
+    /// declared sections, its catch-all, and a proposed `section_map`
+    /// as the recovery payload. The wire code is the one shared code
+    /// when every problem carries the same one (`UNKNOWN_SECTION`,
+    /// `INVALID_REL_SHAPE`, …) and `RETYPE_REFUSED` when they mix.
+    #[error(
+        "retype of {id} from '{from_type}' to '{to_type}' refused: {} problem(s) — {}",
+        problems.len(),
+        problems.iter().map(|p| p.message()).collect::<Vec<_>>().join("; ")
+    )]
+    RetypeRefused {
+        id: String,
+        from_type: String,
+        to_type: String,
+        problems: Vec<crate::engine::outcomes::RetypeProblem>,
+        target_sections: Vec<String>,
+        target_catch_all: Option<String>,
+        proposed_section_map: std::collections::BTreeMap<String, String>,
+    },
+    /// The entity already has the requested type.
+    #[error("retype of {id} is a no-op: it already has type '{entity_type}'")]
+    RetypeNoOp { id: String, entity_type: String },
+    /// A deferred (lazy, unloaded) mem's storage could not be enumerated,
+    /// so its edges into the entity could not be re-checked. The retype
+    /// refuses rather than assuming those edges fit the target type.
+    #[error(
+        "retype of {id} refused: referrers in mem '{mem}' cannot be probed ({reason}); load the \
+         mem (or repair its storage) and retry"
+    )]
+    RetypeReferrerUnprobeable {
+        id: String,
+        mem: String,
+        reason: String,
+    },
     /// Mutation rejected because the named entity is not in the
     /// store. Distinct from `UnknownMem`: the mem exists, the
     /// entity does not.
@@ -1292,6 +1328,22 @@ impl EngineError {
             EngineError::CrossMemEdgeNotDeclared { .. } => "CROSS_MEM_EDGE_NOT_DECLARED",
             EngineError::RepairNotNeeded { .. } => "REPAIR_NOT_NEEDED",
             EngineError::RenameNoOp { .. } => "RENAME_NO_OP",
+            EngineError::RetypeRefused { problems, .. } => {
+                // A section-map defect dominates: until the keys land where
+                // the target declares them, nothing else about the sections
+                // can be judged, and the missing-required findings it causes
+                // ride along in `details.problems`.
+                if problems.iter().any(|p| p.code() == "UNKNOWN_SECTION") {
+                    return "UNKNOWN_SECTION";
+                }
+                let first = problems.first().map(|p| p.code());
+                match first {
+                    Some(code) if problems.iter().all(|p| p.code() == code) => code,
+                    _ => "RETYPE_REFUSED",
+                }
+            }
+            EngineError::RetypeNoOp { .. } => "RETYPE_NO_OP",
+            EngineError::RetypeReferrerUnprobeable { .. } => "RETYPE_REFERRER_UNPROBEABLE",
             EngineError::EmptyUpdate { .. } => "EMPTY_UPDATE",
             EngineError::RenameBlockedByCrossMemPolicy { .. } => {
                 "RENAME_BLOCKED_BY_CROSS_MEM_POLICY"
@@ -1367,6 +1419,39 @@ impl EngineError {
     /// `code` + `message`).
     pub fn details(&self) -> serde_json::Value {
         match self {
+            EngineError::RetypeRefused {
+                id,
+                from_type,
+                to_type,
+                problems,
+                target_sections,
+                target_catch_all,
+                proposed_section_map,
+            } => serde_json::json!({
+                "id": id,
+                "from_type": from_type,
+                "to_type": to_type,
+                "problems": problems
+                    .iter()
+                    .map(|p| {
+                        let mut v = serde_json::to_value(p).unwrap_or(serde_json::Value::Null);
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("code".into(), serde_json::json!(p.code()));
+                            obj.insert("message".into(), serde_json::json!(p.message()));
+                        }
+                        v
+                    })
+                    .collect::<Vec<_>>(),
+                "target_sections": target_sections,
+                "target_catch_all": target_catch_all,
+                "proposed_section_map": proposed_section_map,
+            }),
+            EngineError::RetypeNoOp { id, entity_type } => {
+                serde_json::json!({ "id": id, "entity_type": entity_type })
+            }
+            EngineError::RetypeReferrerUnprobeable { id, mem, reason } => {
+                serde_json::json!({ "id": id, "mem": mem, "reason": reason })
+            }
             EngineError::NotFound { id } => serde_json::json!({ "id": id }),
             EngineError::AlreadyExists {
                 id,

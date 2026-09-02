@@ -239,6 +239,7 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("relate", MUTATION),
         no_verdict("delete", MUTATION),
         no_verdict("rename", MUTATION),
+        no_verdict("retype", MUTATION),
         no_verdict("conflicts resolve", MUTATION),
         no_verdict("review-mark set", MUTATION),
         no_verdict("review-mark clear", MUTATION),

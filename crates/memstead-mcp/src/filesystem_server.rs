@@ -30,14 +30,14 @@ use memstead_base::render::{render_entity_markdown, render_search_markdown};
 use memstead_base::vcs::{Actor, ClientId};
 use memstead_base::{
     BootError, CreateEntityArgs, DeleteEntityArgs, Engine, EngineError, RelateAction,
-    RelateEntityArgs, RenameEntityArgs, UpdateEntityArgs,
+    RelateEntityArgs, RenameEntityArgs, RetypeEntityArgs, UpdateEntityArgs,
 };
 use std::path::Path;
 
 use crate::tools::admin::{ChangesSinceParams, DiffParams, HealthParams};
 use crate::tools::graph::{EntityParams, OverviewParams, SchemaParams, SearchParams};
 use crate::tools::mutation::{
-    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams, UpdateParams,
+    CheckParams, CreateParams, DeleteParams, RelateParams, RenameParams, RetypeParams, UpdateParams,
 };
 
 /// MCP server backed by the unified [`memstead_base::Engine`].
@@ -342,6 +342,11 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
     // doing so in-arm.
     let display = err.to_string();
     match err {
+        EngineError::RetypeRefused { .. }
+        | EngineError::RetypeNoOp { .. }
+        | EngineError::RetypeReferrerUnprobeable { .. } => {
+            tool_error_with_details(err.code(), &display, Some(err.details()))
+        }
         // 04/02, criterion 5: the parity twin of the mem-repo server's arm.
         EngineError::UnterminatedFenceInStoredBody { .. } => tool_error_with_details(
             "UNTERMINATED_FENCE_IN_STORED_BODY",
@@ -2332,6 +2337,62 @@ impl FilesystemMcpServer {
                     // `NOTE_MISSING` under `require_notes`).
                     "warnings": outcome.warnings,
                 });
+                json_response(&body)
+            }
+            Err(e) => engine_op_error(e),
+        }
+    }
+
+    #[tool(
+        name = "memstead_retype",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn memstead_retype(&self, Parameters(p): Parameters<RetypeParams>) -> CallToolResult {
+        let dry_run = p.dry_run.unwrap_or(false);
+        if !dry_run && p.expected_hash.as_deref().is_none_or(str::is_empty) {
+            return tool_error_with_details(
+                "INVALID_INPUT",
+                "`expected_hash` is required for a real retype (read the entity first and pass \
+                 its `_hash`); only `dry_run: true` may omit it",
+                Some(serde_json::json!({ "field": "expected_hash" })),
+            );
+        }
+        let mut engine = crate::lock_engine!(self.engine);
+        match resolve_role_lean(p.role.as_deref()) {
+            Ok(r) => engine.set_role(r),
+            Err(resp) => return *resp,
+        }
+        match resolve_identity_lean(p.identity.as_deref()) {
+            Ok(i) => engine.set_identity(i),
+            Err(resp) => return *resp,
+        }
+        let (actor, client) = self.actor_and_client();
+        let args = RetypeEntityArgs {
+            id: EntityId(p.id),
+            expected_hash: p.expected_hash,
+            target_type: p.target_type,
+            section_map: p.section_map.unwrap_or_default().into_iter().collect(),
+            drop_metadata: p.drop_metadata.unwrap_or_default(),
+            dry_run,
+        };
+        match engine.retype_entity(args, actor, client.as_ref(), p.note.as_deref()) {
+            Ok(outcome) => {
+                let durable = mem_is_durable(&engine, outcome.id.mem());
+                let durability_basis = mem_durability_basis(&engine, outcome.id.mem());
+                let mut body = serde_json::to_value(&outcome).unwrap_or(serde_json::Value::Null);
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert("dry_run".into(), serde_json::json!(dry_run));
+                    obj.insert("durable".into(), serde_json::json!(durable));
+                    obj.insert(
+                        "durability_basis".into(),
+                        serde_json::json!(durability_basis),
+                    );
+                }
                 json_response(&body)
             }
             Err(e) => engine_op_error(e),

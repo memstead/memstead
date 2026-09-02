@@ -22,6 +22,7 @@ pub mod mem_sweep;
 pub mod parse_recovery;
 pub mod relate;
 pub mod rename;
+pub mod retype;
 pub mod update;
 
 /// Look up an entity's `(title, entity_type)` pair in `store`. Both

@@ -31,6 +31,8 @@ pub enum ProvenanceKind {
     Delete,
     Relate,
     Rename,
+    /// A type change in place (`Engine::retype_entity`).
+    Retype,
     Batch,
 }
 
@@ -43,6 +45,7 @@ impl ProvenanceKind {
             ProvenanceKind::Delete => "delete",
             ProvenanceKind::Relate => "relate",
             ProvenanceKind::Rename => "rename",
+            ProvenanceKind::Retype => "retype",
             ProvenanceKind::Batch => "batch",
         }
     }
@@ -57,6 +60,7 @@ impl ProvenanceKind {
             "delete" => Some(ProvenanceKind::Delete),
             "relate" => Some(ProvenanceKind::Relate),
             "rename" => Some(ProvenanceKind::Rename),
+            "retype" => Some(ProvenanceKind::Retype),
             "batch" => Some(ProvenanceKind::Batch),
             _ => None,
         }

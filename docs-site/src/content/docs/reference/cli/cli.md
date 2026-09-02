@@ -41,6 +41,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead relate`↴](#memstead-relate)
 * [`memstead delete`↴](#memstead-delete)
 * [`memstead rename`↴](#memstead-rename)
+* [`memstead retype`↴](#memstead-retype)
 * [`memstead batch-update`↴](#memstead-batch-update)
 * [`memstead batch-create`↴](#memstead-batch-create)
 * [`memstead batch-relate`↴](#memstead-batch-relate)
@@ -168,6 +169,7 @@ Exit codes:
 * `relate` — Add or remove a typed relationship between two entities
 * `delete` — Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by design (no post-state to race on); race protection comes from `HAS_INCOMING_REFS` — and `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases
 * `rename` — Rename an entity (changes ID, file path, and every incoming wiki-link)
+* `retype` — Change an entity's type in place (id, path and incoming edges stay; sections, metadata and every edge are validated against the target type)
 * `batch-update` — Update many entities in one atomic call. Input is a JSON file with a top-level `updates: [...]` array (one entry per entity, each with its own hash mode and mutation fields). All-or-nothing: if any entry fails (validation, hash mismatch, missing entity) the whole batch is refused and NOTHING is committed — fix the named entry and resubmit. On success the batch lands as one commit. Mirrors `memstead update` per entry. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead update` per entity there
 * `batch-create` — Create many entities in one atomic call. Input is a JSON file with a top-level `creates: [...]` array — each entry the same shape as `create --from`, with its own provenance `note`. Intra-batch references resolve as real targets (cycles included where the schema permits), so a mutually-referencing set lands in a single pass with no stubs. All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead create` per entity there (losing atomicity and intra-batch reference resolution)
 * `batch-relate` — Apply many edge changes in one atomic call. Input is a JSON file with a top-level `relates: [...]` array mixing additions and removals, applied in order — each entry mirrors `relate` (`from` / `rel_type` / `to`, optional `remove`, `description`, per-entry `note`). All-or-nothing: any invalid entry refuses the whole batch and names EVERY failing entry. One commit per touched mem. MEM-REPO WORKSPACES ONLY — refuses with `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace `memstead quickstart` produces; fall back to one `memstead relate` per edge there
@@ -881,6 +883,29 @@ Slug derivation:
 * `--expected-hash <HASH>` — Hash from `memstead entity <id>`. Required unless `--auto-hash` or `--force`
 * `--auto-hash` — Refetch the current hash immediately before writing
 * `--force` — Skip the hash check (explicit overwrite)
+* `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
+
+
+
+## `memstead retype`
+
+Change an entity's type in place (id, path and incoming edges stay; sections, metadata and every edge are validated against the target type)
+
+**Usage:** `memstead retype [OPTIONS] --type <TYPE> <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Entity ID (`mem--slug`)
+
+###### **Options:**
+
+* `--type <TYPE>` — The target type, as declared by the mem's schema
+* `--section-map <OLD=NEW>` — Section key renames applied before validation: `old=new`, repeatable or comma-separated (`statement=conclusion,notes=context`)
+* `--drop-metadata <KEY>` — Metadata keys to drop explicitly, comma-separated or repeatable: fields the current type declares and the target does not (a spec's `level` on the way to a memo). Never inferred — an undeclared field that is not listed refuses `UNKNOWN_METADATA_FIELD`
+* `--expected-hash <HASH>` — Hash from `memstead entity <id>`. Required unless `--auto-hash`, `--force`, or `--dry-run`
+* `--auto-hash` — Refetch the current hash immediately before writing
+* `--force` — Skip the hash check (explicit overwrite)
+* `--dry-run` — Validate everything and report the prospective hash without writing, committing, or changing the store
 * `--note <NOTE>` — Agent-authored provenance note (≤280 chars). When `[mutations].require_notes = true` a missing note adds a `NOTE_MISSING` warning
 
 

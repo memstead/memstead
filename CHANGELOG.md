@@ -9,6 +9,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead retype <id> --type <target>` and `memstead_retype`: change
+  an entity's type in place.** The id, file path and every incoming edge
+  stay; nothing is deleted or re-created. The existing sections and
+  metadata are validated against the target type with a report-all
+  refusal (every unknown section, missing required section, unknown or
+  invalid metadata value and block-tier constraint together, with the
+  target's declared sections, its catch-all and a proposed `section_map`
+  in the details), `--section-map old=new` renames section keys on the
+  way (nothing is moved into the catch-all silently), and every incoming
+  and outgoing edge, cross-mem included, is re-checked against the target
+  type's relationship pins — a violation refuses `INVALID_REL_SHAPE`
+  listing each edge, so the loader never has to drop a shape-invalid edge
+  at the next boot. Referrers in a lazy (unloaded) mem are probed through
+  storage; a mem that cannot be probed refuses
+  `RETYPE_REFERRER_UNPROBEABLE`. One commit lands with the new `retype`
+  provenance kind, and the response states that check records and
+  derivation baselines on the entity are stale because its content hash
+  moved. `dry_run` previews without a hash. The MCP roster grows to 20
+  tools (14 lean); `update --from` and the `memstead_update` description
+  point at the new verb.
 - **Url anchors are observable.** `memstead verify-anchors --mem <m>
   --observations <file>` takes observer-supplied rows `{artifact, hash |
   content | absent: true, observed_at?}` for the one grain the engine never

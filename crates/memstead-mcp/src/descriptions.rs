@@ -88,6 +88,10 @@ pub const FULL: &[(&str, &str)] = &[
         include_str!("../descriptions/full/memstead_rename.md"),
     ),
     (
+        "memstead_retype",
+        include_str!("../descriptions/full/memstead_retype.md"),
+    ),
+    (
         "memstead_schema",
         include_str!("../descriptions/full/memstead_schema.md"),
     ),
@@ -141,6 +145,10 @@ pub const FILESYSTEM: &[(&str, &str)] = &[
     (
         "memstead_rename",
         include_str!("../descriptions/filesystem/memstead_rename.md"),
+    ),
+    (
+        "memstead_retype",
+        include_str!("../descriptions/filesystem/memstead_retype.md"),
     ),
     (
         "memstead_schema",

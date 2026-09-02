@@ -51,11 +51,12 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_overview",
     "memstead_schema",
     "memstead_search",
-    // Mutation (5)
+    // Mutation (6)
     "memstead_create",
     "memstead_delete",
     "memstead_relate",
     "memstead_rename",
+    "memstead_retype",
     "memstead_update",
     // Process tier (1) — the bundle's single deliberate tool
     // addition (agent-trust plan 14): the check operation.
@@ -517,14 +518,13 @@ fn expected_hints(tool_name: &str) -> HintTriple {
         // `idempotent = false` across the board because a partial-failure
         // retry is not safe (duplicate-title collisions, pre-existing
         // state drift, renamed-out-of-existence scenarios).
-        "memstead_create" | "memstead_update" | "memstead_rename" | "memstead_check" => {
-            HintTriple {
-                read_only: Some(false),
-                destructive: Some(false),
-                idempotent: Some(false),
-                open_world: Some(false),
-            }
-        }
+        "memstead_create" | "memstead_update" | "memstead_rename" | "memstead_retype"
+        | "memstead_check" => HintTriple {
+            read_only: Some(false),
+            destructive: Some(false),
+            idempotent: Some(false),
+            open_world: Some(false),
+        },
         // `memstead_delete` — the only genuinely destructive tool on the
         // surface. File + edges removed, not recoverable without a git
         // revert; agent must opt in via an explicit call.
@@ -1393,6 +1393,39 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "orphan_stubs_removed",
             // Shared note/require_notes surface.
             "note",
+        ],
+        "memstead_retype" => &[
+            "old_type",
+            "new_type",
+            "_hash",
+            "prospective_hash",
+            "sections_renamed",
+            "edges_rechecked",
+            "write_id",
+            "checks_stale",
+            "staleness_note",
+            "warnings",
+            "details.target_sections",
+            "details.target_catch_all",
+            "details.proposed_section_map",
+            "details.problems",
+            "details.current",
+            // Codes the report-all envelope carries, named literally.
+            "UNKNOWN_SECTION",
+            "MISSING_REQUIRED_SECTION",
+            "UNKNOWN_METADATA_FIELD",
+            "INVALID_ENUM_VALUE",
+            "INVALID_FIELD_VALUE",
+            "REQUIRED_FIELD_UNSET",
+            "MISSING_REQUIRED_OUTGOING",
+            "CONSTRAINT_UNSATISFIED",
+            "INVALID_REL_SHAPE",
+            "RETYPE_REFUSED",
+            "RETYPE_REFERRER_UNPROBEABLE",
+            "RETYPE_NO_OP",
+            "HASH_MISMATCH",
+            // Provenance kind the description names.
+            "retype",
         ],
         "memstead_rename" => &[
             "old_id",
@@ -2481,6 +2514,7 @@ fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
         "memstead_update",
         "memstead_delete",
         "memstead_rename",
+        "memstead_retype",
         "memstead_relate",
         // Returns `seed_write_id`, so it carries the same claim and
         // was outside this list until 2026-08-27 — correct only by

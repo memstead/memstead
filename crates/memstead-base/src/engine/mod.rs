@@ -70,7 +70,8 @@ pub use mutation::delete::DeleteReferrers;
 pub use mutation::{PATCH_OLD_NOT_FOUND_CONTENT_CAP, RELATIONSHIP_CYCLE_PATH_CAP};
 pub use outcomes::{
     CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs, DeleteEntityOutcome, RelateAction,
-    RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, SetSchemaOutcome,
+    RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome, RetypeEdge,
+    RetypeEdgeDirection, RetypeEntityArgs, RetypeEntityOutcome, RetypeProblem, SetSchemaOutcome,
     SetSchemaResult, UpdateEntityArgs, UpdateEntityOutcome,
 };
 pub use review::{ReviewMarkStatus, SetReviewMarkOutcome};

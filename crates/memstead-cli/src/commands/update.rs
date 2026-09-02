@@ -250,7 +250,7 @@ struct UpdatePayload {
     title: Option<String>,
     /// Tolerated for template symmetry with `create --from`; must
     /// match the entity's current type (update cannot retype —
-    /// delete + create instead). A differing value refuses.
+    /// `memstead retype` does). A differing value refuses.
     #[serde(default)]
     entity_type: Option<String>,
     /// Tolerated for template symmetry with `create --from`; must
@@ -359,7 +359,7 @@ fn check_template_identity(
             "INVALID_INPUT",
             format!(
                 "template `entity_type` {ty:?} differs from the entity's current type {:?} — \
-                 update cannot retype; delete + create instead",
+                 update cannot retype; use `memstead retype <id> --type <target>`",
                 entity.entity_type
             ),
         ));

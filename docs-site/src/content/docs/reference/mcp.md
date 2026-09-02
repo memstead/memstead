@@ -6,7 +6,7 @@ title: "MCP tools"
 
 Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpServer` (the lean `--no-default-features` build) and `McpServer` (the full default build). Every tool the running server exposes appears below; each section is tagged with the flavour pair (`lean + full`, `lean only`, or `full only`).
 
-**Counts:** the lean build exposes 13 tools; the full build exposes 19 (a strict superset on shared names).
+**Counts:** the lean build exposes 14 tools; the full build exposes 20 (a strict superset on shared names).
 
 ## Index
 
@@ -26,6 +26,7 @@ Generated from the live `tool_router().list_all()` catalogues on `FilesystemMcpS
 - [`memstead_relate`](#memstead-relate)
 - [`memstead_reload`](#memstead-reload)
 - [`memstead_rename`](#memstead-rename)
+- [`memstead_retype`](#memstead-retype)
 - [`memstead_schema`](#memstead-schema)
 - [`memstead_search`](#memstead-search)
 - [`memstead_update`](#memstead-update)
@@ -1296,6 +1297,92 @@ Rename an entity by changing its title. Updates the entity id and its file path 
 }
 ```
 
+## `memstead_retype`
+
+**Flavour:** lean + full
+
+Modify an entity's type in place. The id, file path, and every incoming edge stay; nothing is deleted or re-created, so history and provenance survive. The entity's existing sections and metadata are validated against the TARGET type and every problem is reported together in one refusal: unknown sections (`UNKNOWN_SECTION`, with `details.target_sections`, `details.target_catch_all` and a `details.proposed_section_map` to retry with), `MISSING_REQUIRED_SECTION`, metadata refusals (`UNKNOWN_METADATA_FIELD`, `INVALID_ENUM_VALUE`, `INVALID_FIELD_VALUE`, `REQUIRED_FIELD_UNSET`), block-tier constraints (`MISSING_REQUIRED_OUTGOING`, `CONSTRAINT_UNSATISFIED`), and every incoming or outgoing edge, cross-mem included, that the target type's relationship pins refuse (`INVALID_REL_SHAPE`, each edge listed with referrer and rel-type). The envelope's code is `UNKNOWN_SECTION` whenever a section key misses (fix the map first), otherwise the shared code when every problem is of one class, and `RETYPE_REFUSED` when they mix; `details.problems` carries each with its own code. Rename section keys on the way with `section_map`, and let go of fields the target does not declare with `drop_metadata`; nothing is moved or dropped silently. Referrers in a lazy (unloaded) mem are probed through storage; a mem that cannot be probed refuses `RETYPE_REFERRER_UNPROBEABLE`. Requires `expected_hash` (mismatch emits `HASH_MISMATCH` with `details.current`); `dry_run` validates and returns `prospective_hash` without writing and needs no hash. The current type refuses `RETYPE_NO_OP`. Response: `old_type`, `new_type`, `_hash` (the next `expected_hash`), `sections_renamed`, `edges_rechecked`, `write_id` (an identity, never a change cursor), and `checks_stale` with `staleness_note`: the content hash moved, so check records and derivation baselines on this entity are stale. One commit lands with the `retype` provenance kind. Optional `note` — shared provenance contract, see memstead_create.
+
+**Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "drop_metadata": {
+      "description": "Metadata keys to drop explicitly: fields the current type declares and the target does not (a spec's `level` on the way to a memo). Never inferred — an undeclared field not listed here refuses UNKNOWN_METADATA_FIELD, since dropping data unannounced is what the write gates prevent. A key the entity does not carry is a no-op.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "dry_run": {
+      "description": "Validate everything (sections, metadata, every incoming and outgoing edge, block-tier constraints) and return the prospective `_hash` without writing, committing, or changing the store. The optimistic lock is skipped on a dry run.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "expected_hash": {
+      "description": "Hash from memstead_entity (_hash). Required unless `dry_run` is true. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "description": "Full entity ID (`mem--slug`) of the entity to retype",
+      "type": "string"
+    },
+    "identity": {
+      "description": "WHO is acting: an opaque identity string of your choosing (agent-trust plan 15). Recorded immutably alongside the mutation; the author≠checker independence gate compares identities and nothing else. Omit to record the session default. Over-length values refuse INVALID_IDENTITY (cap 128 chars).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "description": "Agent-authored provenance note (≤280 chars, one sentence describing why this mutation happened). Lands in the per-mem commit body between the mechanical subject line and the provenance trailers (`Tool:`, `Actor:`, `Client:`), and is surfaced by the outer-repo Stop hook when aggregating session activity. Omit for pure-housekeeping edits; when `[mutations].require_notes = true` in workspace config a missing note adds a `NOTE_MISSING` `WarningHint` to the response (the mutation still commits).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "description": "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger). Omit to record the session default. An unknown value refuses INVALID_ROLE naming the vocabulary.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "section_map": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Section key renames applied before validation, `{\"old_key\": \"new_key\"}`. A section the target type does not declare refuses UNKNOWN_SECTION with `details.target_sections`, `details.target_catch_all` and a `details.proposed_section_map` to retry with; sections are never moved silently.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "target_type": {
+      "description": "The target entity type, as declared by the mem's schema (`memstead_schema`). Unknown types refuse UNKNOWN_ENTITY_TYPE; the current type refuses RETYPE_NO_OP.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "target_type"
+  ],
+  "type": "object"
+}
+```
+
 ## `memstead_schema`
 
 **Flavour:** lean + full
@@ -1888,7 +1975,7 @@ Modify an existing entity. Pre-fetch the target mem's schema (`memstead_schema`)
       ]
     },
     "metadata_unset": {
-      "description": "Metadata keys to remove. Silent no-op if absent. Errors on the engine-stamped timestamp fields (created_date / last_modified) and on schema-required fields. The reserved identity triple (mem / id / type) is asymmetric by design: SET refuses (READ_ONLY_FIELD, here and on create) but UNSET is allowed — the sanctioned repair for an entity that acquired a smuggled reserved key before the write gates closed. Unsetting `type` never leaves the entity typeless (the engine re-seeds the authoritative discriminator; on a healthy entity it is a no-op). Cannot overlap with `metadata` keys — pass one or the other per key.",
+      "description": "Metadata keys to remove. Silent no-op if absent. Errors on the engine-stamped timestamp fields (created_date / last_modified) and on schema-required fields. The reserved identity triple (mem / id / type) is asymmetric by design: SET refuses (READ_ONLY_FIELD, here and on create; a type change is `memstead_retype`, which re-validates the entity against the target type) but UNSET is allowed — the sanctioned repair for an entity that acquired a smuggled reserved key before the write gates closed. Unsetting `type` never leaves the entity typeless (the engine re-seeds the authoritative discriminator; on a healthy entity it is a no-op). Cannot overlap with `metadata` keys — pass one or the other per key.",
       "items": {
         "type": "string"
       },

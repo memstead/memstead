@@ -63,6 +63,7 @@ pub enum MutationKind {
     Delete,
     Relate,
     Rename,
+    Retype,
     Batch,
 }
 
@@ -74,6 +75,7 @@ impl MutationKind {
             MutationKind::Delete => "delete",
             MutationKind::Relate => "relate",
             MutationKind::Rename => "rename",
+            MutationKind::Retype => "retype",
             MutationKind::Batch => "batch",
         }
     }
@@ -91,6 +93,7 @@ impl From<ProvenanceKind> for MutationKind {
             ProvenanceKind::Delete => MutationKind::Delete,
             ProvenanceKind::Relate => MutationKind::Relate,
             ProvenanceKind::Rename => MutationKind::Rename,
+            ProvenanceKind::Retype => MutationKind::Retype,
             ProvenanceKind::Batch => MutationKind::Batch,
         }
     }
@@ -104,6 +107,7 @@ impl From<MutationKind> for ProvenanceKind {
             MutationKind::Delete => ProvenanceKind::Delete,
             MutationKind::Relate => ProvenanceKind::Relate,
             MutationKind::Rename => ProvenanceKind::Rename,
+            MutationKind::Retype => ProvenanceKind::Retype,
             MutationKind::Batch => ProvenanceKind::Batch,
         }
     }

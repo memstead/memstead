@@ -71,6 +71,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `memstead_diff`
 - `memstead_mem_configure`
 - `memstead_mem_set_schema`
+- `memstead_retype`
 
 ### Unaligned — CLI
 
@@ -92,6 +93,7 @@ Surface entries the registry does not pin to a logical operation. Either add a r
 - `mem-repo`
 - `publish`
 - `quickstart`
+- `retype`
 - `review-mark`
 - `schema`
 - `uninstall`

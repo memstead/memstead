@@ -183,6 +183,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Relate(args) => commands::relate::run(&ctx, args),
         Command::Delete(args) => commands::delete::run(&ctx, args),
         Command::Rename(args) => commands::rename::run(&ctx, args),
+        Command::Retype(args) => commands::retype::run(&ctx, args),
         #[cfg(feature = "mem-repo")]
         Command::BatchUpdate(args) => commands::batch_update::run(&ctx, args),
         #[cfg(feature = "mem-repo")]

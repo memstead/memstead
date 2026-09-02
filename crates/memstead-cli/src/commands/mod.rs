@@ -227,6 +227,7 @@ pub mod relate;
 pub mod relations;
 pub mod reload;
 pub mod rename;
+pub mod retype;
 pub mod review_mark;
 pub mod schema;
 pub mod search;

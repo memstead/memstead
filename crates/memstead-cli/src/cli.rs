@@ -245,6 +245,10 @@ pub enum Command {
     /// Rename an entity (changes ID, file path, and every incoming wiki-link).
     Rename(commands::rename::Args),
 
+    /// Change an entity's type in place (id, path and incoming edges stay;
+    /// sections, metadata and every edge are validated against the target type).
+    Retype(commands::retype::Args),
+
     /// Update many entities in one atomic call. Input is a JSON file
     /// with a top-level `updates: [...]` array (one entry per entity,
     /// each with its own hash mode and mutation fields). All-or-nothing:
@@ -456,6 +460,7 @@ impl Command {
             Command::Relate(_) => "relate",
             Command::Delete(_) => "delete",
             Command::Rename(_) => "rename",
+            Command::Retype(_) => "retype",
             #[cfg(feature = "mem-repo")]
             Command::BatchUpdate(_) => "batch-update",
             #[cfg(feature = "mem-repo")]

@@ -59,6 +59,7 @@ fn shared_rows() -> Vec<SurfaceCoverage> {
         no_verdict("memstead_relate", MUTATION),
         no_verdict("memstead_delete", MUTATION),
         no_verdict("memstead_rename", MUTATION),
+        no_verdict("memstead_retype", MUTATION),
         // The one surface deliberately outside the rule: its verdict
         // is the caller's claim about the caller's own work, never
         // the engine's claim about state the engine examined.

@@ -206,7 +206,7 @@ pub struct UpdateParams {
     #[schemars(description = "Metadata fields to set: { \"level\": \"M1\" }")]
     pub metadata: Option<IndexMap<String, String>>,
     #[schemars(
-        description = "Metadata keys to remove. Silent no-op if absent. Errors on the engine-stamped timestamp fields (created_date / last_modified) and on schema-required fields. The reserved identity triple (mem / id / type) is asymmetric by design: SET refuses (READ_ONLY_FIELD, here and on create) but UNSET is allowed — the sanctioned repair for an entity that acquired a smuggled reserved key before the write gates closed. Unsetting `type` never leaves the entity typeless (the engine re-seeds the authoritative discriminator; on a healthy entity it is a no-op). Cannot overlap with `metadata` keys — pass one or the other per key."
+        description = "Metadata keys to remove. Silent no-op if absent. Errors on the engine-stamped timestamp fields (created_date / last_modified) and on schema-required fields. The reserved identity triple (mem / id / type) is asymmetric by design: SET refuses (READ_ONLY_FIELD, here and on create; a type change is `memstead_retype`, which re-validates the entity against the target type) but UNSET is allowed — the sanctioned repair for an entity that acquired a smuggled reserved key before the write gates closed. Unsetting `type` never leaves the entity typeless (the engine re-seeds the authoritative discriminator; on a healthy entity it is a no-op). Cannot overlap with `metadata` keys — pass one or the other per key."
     )]
     pub metadata_unset: Option<Vec<String>>,
     #[schemars(
@@ -415,6 +415,43 @@ pub struct RenameParams {
     pub role: Option<String>,
     #[schemars(
         description = "WHO is acting: an opaque identity string of your choosing — an agent name, a session handle (agent-trust plan 15). Recorded immutably alongside the mutation (commit trailer / ledger); the author≠checker independence gate compares identities and nothing else. Caller-declared and unverified, but tamper-evident in append-only history. Omit to record the session default, or nothing — legal forever, never refused; identity-less records read unconfirmable at the gate. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
+    )]
+    pub identity: Option<String>,
+}
+
+/// Parameters for `memstead_retype` — change an entity's type in place.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RetypeParams {
+    #[schemars(description = "Full entity ID (`mem--slug`) of the entity to retype")]
+    pub id: String,
+    #[schemars(
+        description = "The target entity type, as declared by the mem's schema (`memstead_schema`). Unknown types refuse UNKNOWN_ENTITY_TYPE; the current type refuses RETYPE_NO_OP."
+    )]
+    pub target_type: String,
+    #[schemars(
+        description = "Section key renames applied before validation, `{\"old_key\": \"new_key\"}`. A section the target type does not declare refuses UNKNOWN_SECTION with `details.target_sections`, `details.target_catch_all` and a `details.proposed_section_map` to retry with; sections are never moved silently."
+    )]
+    pub section_map: Option<std::collections::BTreeMap<String, String>>,
+    #[schemars(
+        description = "Metadata keys to drop explicitly: fields the current type declares and the target does not (a spec's `level` on the way to a memo). Never inferred — an undeclared field not listed here refuses UNKNOWN_METADATA_FIELD, since dropping data unannounced is what the write gates prevent. A key the entity does not carry is a no-op."
+    )]
+    pub drop_metadata: Option<Vec<String>>,
+    #[schemars(
+        description = "Hash from memstead_entity (_hash). Required unless `dry_run` is true. Mismatch returns code HASH_MISMATCH with details.current carrying the current on-disk hash."
+    )]
+    pub expected_hash: Option<String>,
+    #[schemars(
+        description = "Validate everything (sections, metadata, every incoming and outgoing edge, block-tier constraints) and return the prospective `_hash` without writing, committing, or changing the store. The optimistic lock is skipped on a dry run."
+    )]
+    pub dry_run: Option<bool>,
+    #[schemars(description = NOTE_PARAM_DESCRIPTION)]
+    pub note: Option<String>,
+    #[schemars(
+        description = "The role this mutation is performed in, from the closed vocabulary `author` | `checker` | `verifier` (agent-trust plan 13). Recorded immutably alongside the mutation (commit trailer / ledger). Omit to record the session default. An unknown value refuses INVALID_ROLE naming the vocabulary."
+    )]
+    pub role: Option<String>,
+    #[schemars(
+        description = "WHO is acting: an opaque identity string of your choosing (agent-trust plan 15). Recorded immutably alongside the mutation; the author≠checker independence gate compares identities and nothing else. Omit to record the session default. Over-length values refuse INVALID_IDENTITY (cap 128 chars)."
     )]
     pub identity: Option<String>,
 }

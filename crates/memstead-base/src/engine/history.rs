@@ -175,6 +175,12 @@ pub struct ProvenanceRecord {
     pub timestamp: i64,
     /// Backend-native reference (commit sha / ledger timestamp).
     pub reference: String,
+    /// The mutation verb of the touch (`create` / `update` / `rename` /
+    /// `retype` / `relate` / …), when the record carries one — so a
+    /// reader can tell a type change from an edit without opening the
+    /// commit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verb: Option<String>,
 }
 
 /// The entity read's derived provenance block: created-by and
@@ -221,6 +227,7 @@ fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
         identity: t.identity.clone(),
         timestamp: t.timestamp,
         reference: t.reference.clone(),
+        verb: t.verb.clone(),
     }
 }
 
