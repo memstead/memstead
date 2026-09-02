@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-28T11:27:24Z
-last_modified: 2026-08-28T11:27:24Z
+last_modified: 2026-09-02T12:41:03Z
 status: accepted
 decided_on: 2026-08-28
 deciders: operator (agent-trust plan 15)
@@ -32,3 +32,5 @@ The gate [[check-state-is-derived-from-engine-recorded-check-acts-never-stamped]
 ## Notes
 
 
+
+2026-09-02 amendment (backlog-engine bundle A, plan 5; decision basket line 9, option a): the comparator is no longer the criterion's own author. A check on a criterion reads `confirmed_independent` only when its identity differs from every identity that mutated the verified plan, its criteria or its session-log notes since the criterion was written; a check under one of those identities reads `self_checked`; a check or a record without an identity stays `unconfirmable`. Nothing is stamped: the reading is computed at read time from the append-only provenance record, so every existing ledger keeps parsing and derives under the new rule, and the `transition_requires_checks` gate consumes the same reading, so a plan cannot complete on the executor's own checks. The checks axis names the comparator and the executors per record.

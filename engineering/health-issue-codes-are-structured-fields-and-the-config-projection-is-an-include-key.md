@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-06T08:31:01Z
-last_modified: 2026-08-18T20:17:56Z
+last_modified: 2026-09-02T12:41:04Z
 status: accepted
 decided_on: 2026-08-06
 deciders: operator (stability-sweep plan 04), implementing agent
@@ -30,3 +30,6 @@ A typed field survives every projection that carries issues at all — the same 
 ## Notes
 
 **2026-08-18:** the UniFFI `HealthIssue` consumer named in the consequences retired with the native macOS app (the UniFFI surface left the workspace); the typed-code posture itself is unchanged and every remaining surface still branches on the code field.
+
+
+2026-09-02 amendment (backlog-engine bundle A, plan 7): health is composed once. `compose_health` lives in `memstead-base` and every renderer, the MCP tool and both CLI builds, calls it; the CLI's `--json` bytes equal the tool's `structured_content` for every include key and under `--mem`, pinned by a parity test that also scans the CLI for per-axis composer calls. A health axis is added in the composer, never in a renderer. The stub integrity finding is `UNRESOLVED_STUB` (a stub is by construction referenced, never orphaned), emitted through a named constant so the error-code index publishes it; `edge_types` and `type_distribution` render in name order and the per-entity health lists in id order on every surface, so two runs or two processes emit the same bytes.

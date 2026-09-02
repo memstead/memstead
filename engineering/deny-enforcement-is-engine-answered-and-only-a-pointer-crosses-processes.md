@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-21T17:51:04Z
-last_modified: 2026-08-21T17:51:04Z
+last_modified: 2026-09-02T12:41:03Z
 status: accepted
 decided_on: 2026-08-21
 deciders: agent session (flywheel W6/02) under the SPEC decision and the standing engine-change directive
@@ -32,3 +32,5 @@ Rejected: keeping the JS fast path beside the engine check (two enforcement path
 ## Notes
 
 
+
+2026-09-02 amendment (backlog-engine bundle A, plan 3): the sampled projection verify honours the binding's deny paths and every reconciled exclusion before sampling, so a sample never lands on a path the binding excludes; the scheduler reconciles its cached enumeration by set membership rather than by the binding hash alone (a hash-only rule either misses file churn or restarts the rotation on every run of a live codebase), a dropped exclusion is a persisted `dropped_exclusions` record the next sync brief reports once rather than a finding class, and `projection_status` and `projection_rollup` share one per-binding pass with the coverage tally naming its unit (entities per artifact) so the figure cannot be read as an anchor count.
