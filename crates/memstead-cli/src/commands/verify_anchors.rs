@@ -21,7 +21,7 @@ use crate::output::{print_json, print_markdown};
 use crate::setup::CliContext;
 
 /// Verify every anchor in a mem against its declared source. Per
-/// anchor: `resolved` (source present, hash matches), `drifted`
+/// anchor: `resolves` (source present, hash matches), `drifted`
 /// (present, hash differs, stability says drifted), `recheck` (hash
 /// differs under `unstable`, or a hash is missing on either side),
 /// `unresolvable` (the source artifact is GONE: a measured failure), or
@@ -46,7 +46,10 @@ use crate::setup::CliContext;
 /// The counts never travel alone: every rendering states the
 /// `population` they were computed over and whether the axis was
 /// `fully_adjudicated`, because a resolution figure read on its own is
-/// read as health.
+/// read as health. A sidecar the engine cannot read is a typed refusal
+/// (`ANCHORS_SIDECAR_UNREADABLE`, the mem and the parse reason named,
+/// `fully_adjudicated: false` in its details), never zero rows: nothing
+/// is recorded for a pass that measured nothing.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Which mem to verify (by name).
@@ -61,7 +64,7 @@ pub struct Args {
     /// — exactly one of `hash` / `content` / `absent`, `observed_at`
     /// defaulting to now. `content` is hashed under the same rule the write
     /// path applies to an anchor's `content`. A url row with a supplied
-    /// observation adjudicates like a file anchor (equal hash `resolved`,
+    /// observation adjudicates like a file anchor (equal hash `resolves`,
     /// differing hash `drifted` under `stable` and `recheck` under
     /// `unstable`, `absent` → `recheck`); a url row without one stays
     /// `unobserved`. Matched observations are recorded on the sidecar rows
@@ -142,6 +145,33 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .verify_mem_anchors_with(&args.mem_name, &supplied)
         .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
 
+    // Nothing was measured: refuse before any observation, backfill or
+    // finding is recorded — a findings store fed from an unread sidecar
+    // would close every prior finding as "verified clean".
+    if let Some(why) = &report.sidecar_error {
+        return Err(CliError::new(
+            crate::output::ExitKind::Validation,
+            "ANCHORS_SIDECAR_UNREADABLE",
+            format!(
+                "mem `{}`: the anchors sidecar could not be read ({why}); nothing was \
+                 measured, so no state is reported and nothing was recorded. Fix or remove \
+                 the sidecar, then run again.",
+                report.mem
+            ),
+        )
+        .with_details(json!({
+            "mem": report.mem,
+            "reason": why,
+            "fully_adjudicated": report.fully_adjudicated(),
+            "population": report.population_statement(),
+            "verdict_coverage": crate::coverage::VERIFY_ANCHORS
+                .axis_coverage()
+                .expect("verify-anchors is a verdict surface")
+                .wire_line(),
+        }))
+        .into());
+    }
+
     // Record the supplied observations on their url rows (`last_observed`),
     // so the rows carry a dated state from here on and age visibly. An
     // identical re-run stages nothing.
@@ -219,7 +249,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .expect("verify-anchors is a verdict surface")
                 .wire_line(),
             "mem": report.mem,
-            "resolved": report.resolved,
+            "resolves": report.resolves,
             "drifted": report.drifted,
             "recheck": report.recheck,
             "unresolvable": report.unresolvable,
@@ -243,11 +273,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // unit (consistency-sweep 03/05, criteria 1 and 3): a count shown
         // without what it could not adjudicate is read as health.
         let mut out = format!(
-            "# Anchor verification — `{}`\n\n- Resolved: {}\n- Drifted: {}\n- Recheck: {}\n\
+            "# Anchor verification — `{}`\n\n- Resolves: {}\n- Drifted: {}\n- Recheck: {}\n\
              - Unresolvable (artifact gone): {}\n- Unobserved (not measured this pass): {}\n\
              - Dangling (entity gone): {}\n- Population: {}\n",
             report.mem,
-            report.resolved,
+            report.resolves,
             report.drifted,
             report.recheck,
             report.unresolvable,
@@ -273,13 +303,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if report.anchors.is_empty() {
             out.push_str("\n_(no anchors in this mem)_\n");
         } else {
-            // Non-resolved rows are the actionable set; resolved rows
-            // stay off the detail list so a healthy mem reads as four
+            // Rows that do not resolve are the actionable set; resolving
+            // rows stay off the detail list so a healthy mem reads as four
             // counts, not a table.
             let flagged: Vec<_> = report
                 .anchors
                 .iter()
-                .filter(|a| a.state != "resolved")
+                .filter(|a| a.state != memstead_base::anchor::AnchorState::Resolves.as_wire())
                 .collect();
             if !flagged.is_empty() {
                 out.push_str("\n## Flagged anchors\n\n");

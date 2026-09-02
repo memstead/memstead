@@ -3180,7 +3180,7 @@ mod tests {
         let (prepared, plain, report) = states(root);
         assert_eq!(prepared, Some(AnchorState::Resolves));
         assert_eq!(plain, Some(AnchorState::Resolves));
-        assert_eq!((report.resolved, report.drifted), (2, 0));
+        assert_eq!((report.resolves, report.drifted), (2, 0));
 
         // A notes-only edit (`conditions` is not load-bearing): the prepared
         // anchor holds, the default-form anchor drifts — today's behaviour,
@@ -3193,14 +3193,14 @@ mod tests {
             "a comma in the notes must not break a load-bearing anchor"
         );
         assert_eq!(plain, Some(AnchorState::Drifted));
-        assert_eq!((report.resolved, report.drifted), (1, 1));
+        assert_eq!((report.resolves, report.drifted), (1, 1));
 
         // A load-bearing edit: both drift.
         write_pinned("The sky is green.", "daylight, clear weather");
         let (prepared, plain, report) = states(root);
         assert_eq!(prepared, Some(AnchorState::Drifted));
         assert_eq!(plain, Some(AnchorState::Drifted));
-        assert_eq!((report.resolved, report.drifted), (0, 2));
+        assert_eq!((report.resolves, report.drifted), (0, 2));
 
         // Complement: a hand-edited record naming an identifier the registry
         // does not know computes no form — its anchors are unobserved, never
@@ -3898,7 +3898,7 @@ mod tests {
             plain_tree_state,
             (Some(AnchorState::Resolves), Some(plain_tree.clone()))
         );
-        assert_eq!((report.resolved, report.drifted, report.recheck), (5, 0, 0));
+        assert_eq!((report.resolves, report.drifted, report.recheck), (5, 0, 0));
 
         // Comment, formatting and body edits: invisible.
         write(

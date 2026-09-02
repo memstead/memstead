@@ -1630,7 +1630,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "friction",
             // Standalone anchor-verification axis (include=anchors).
             "anchors",
-            "resolved",
+            "resolves",
             "drifted",
             "recheck",
             "unresolvable",

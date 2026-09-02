@@ -2270,7 +2270,8 @@ remove the sidecar and re-run",
         .with_details(json!({
             "binding": binding_id,
             "mem": resolved.destination_mem,
-            "error": err,
+            // The same key every other surface uses for this condition.
+            "reason": err,
         }))
         .into());
     }

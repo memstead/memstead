@@ -46,11 +46,34 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // Both variants expose the same read surface. `state` carries the live
     // resolution (present only for a by-entity lookup on a path-medium mem;
     // `None` for the reverse `--artifact` lookup, which spans mems).
-    let rows: Vec<AnchorRow> = match ctx.cli_engine()? {
+    let (rows, unreadable): (Vec<AnchorRow>, Vec<SidecarCondition>) = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
-        CliEngine::MemRepo(engine) => collect(&engine, &args),
-        CliEngine::Filesystem(engine) => collect(&engine, &args),
+        CliEngine::MemRepo(engine) => {
+            (collect(&engine, &args), unreadable_sidecars(&engine, &args))
+        }
+        CliEngine::Filesystem(engine) => {
+            (collect(&engine, &args), unreadable_sidecars(&engine, &args))
+        }
     };
+    // By entity: the one mem's sidecar is the whole answer, and an
+    // unreadable one is a refusal, not "no anchors". By artifact: the
+    // lookup spans mems, so the readable ones still answer and the
+    // unreadable ones ride along as conditions.
+    if args.id.is_some()
+        && let Some(c) = unreadable.first()
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "ANCHORS_SIDECAR_UNREADABLE",
+            format!(
+                "mem `{}`: the anchors sidecar could not be read ({}); the entity's anchors \
+                 are unknown, not absent",
+                c.mem, c.reason
+            ),
+        )
+        .with_details(serde_json::json!({ "mem": c.mem, "reason": c.reason }))
+        .into());
+    }
 
     let now = memstead_base::engine::mutation::iso_now();
     if ctx.json {
@@ -80,8 +103,18 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "count": rows.len(),
             "anchors": anchors_json,
             "composition": composition,
+            // Mems whose sidecar could not be read: their rows are unknown,
+            // not absent, and `count` does not cover them.
+            "sidecar_unreadable": unreadable
+                .iter()
+                .map(|c| serde_json::json!({
+                    "code": "ANCHORS_SIDECAR_UNREADABLE",
+                    "mem": c.mem,
+                    "reason": c.reason,
+                }))
+                .collect::<Vec<_>>(),
         }))?;
-    } else if rows.is_empty() {
+    } else if rows.is_empty() && unreadable.is_empty() {
         let subject = args
             .artifact
             .as_deref()
@@ -91,6 +124,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         print_markdown(&format!("# Anchors\n\nNo anchors for {subject}."));
     } else {
         let mut body = format!("# Anchors ({})\n", rows.len());
+        for c in &unreadable {
+            body.push_str(&format!(
+                "\n> **ANCHORS_SIDECAR_UNREADABLE** — mem `{}`: {}. Its rows are unknown, not \
+                 absent; the count above does not cover it.\n",
+                c.mem, c.reason
+            ));
+        }
         for (id, a, state, observed_at) in &rows {
             let hash = a.hash.as_deref().unwrap_or("-");
             let state_str = state
@@ -115,6 +155,29 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         print_markdown(&body);
     }
     Ok(())
+}
+
+/// A mem whose anchors sidecar could not be read this pass.
+struct SidecarCondition {
+    mem: String,
+    reason: String,
+}
+
+/// The unreadable sidecars the requested lookup touches: the one mem for a
+/// by-entity read, every mounted mem for the reverse lookup.
+fn unreadable_sidecars(engine: &memstead_base::Engine, args: &Args) -> Vec<SidecarCondition> {
+    let mems: Vec<String> = if let Some(id) = args.id.as_deref() {
+        vec![EntityId::canonical(id).mem().to_string()]
+    } else {
+        engine.mem_names().iter().map(|m| m.to_string()).collect()
+    };
+    mems.into_iter()
+        .filter_map(|mem| {
+            engine
+                .anchors_sidecar_error(&mem)
+                .map(|reason| SidecarCondition { mem, reason })
+        })
+        .collect()
 }
 
 /// One anchor row: `(entity_id, anchor, live_state, observed_at)` — the

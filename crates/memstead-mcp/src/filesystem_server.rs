@@ -1998,7 +1998,12 @@ impl FilesystemMcpServer {
                 value["labelling"] = engine.health_labelling_axis(mem_scope);
             }
             if let Some(cov) = crate::coverage::HEALTH.axis_coverage() {
-                value["verdict_coverage"] = serde_json::json!(cov.wire_line());
+                value["verdict_coverage"] =
+                    serde_json::json!(cov.wire_line_promoting(if wants_anchors {
+                        &["anchors"]
+                    } else {
+                        &[]
+                    }));
             }
             return json_response(&value);
         }

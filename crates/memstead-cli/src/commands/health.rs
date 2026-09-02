@@ -170,10 +170,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // The coverage rule (memstead_base::ops::coverage): the axes
         // this surface's verdict answers for, straight from the CLI's
         // registry row so output and declaration cannot diverge.
+        // An opt-in axis rendered this pass was examined by it: `anchors`
+        // moves into the examined set under `--include anchors`.
         "verdict_coverage": crate::coverage::HEALTH
             .axis_coverage()
             .expect("health is a verdict surface")
-            .wire_line(),
+            .wire_line_promoting(if include.iter().any(|s| s == "anchors") {
+                &["anchors"]
+            } else {
+                &[]
+            }),
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),
@@ -348,6 +354,16 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if ungranted > 0 {
                 strict_violations.push(("ungranted_cross_mem_edges", ungranted));
             }
+            // A sidecar the engine cannot read: every anchor surface over
+            // that mem reports a condition instead of rows, and a strict run
+            // that passed over it would be clean over the unmeasured.
+            let unreadable = findings
+                .iter()
+                .filter(|f| f.code == "ANCHORS_SIDECAR_UNREADABLE")
+                .count();
+            if unreadable > 0 {
+                strict_violations.push(("anchors_sidecar_unreadable", unreadable));
+            }
         }
         obj.insert("findings".into(), serde_json::to_value(&findings)?);
         // Beside the findings, never among them (04/01, criterion 2). An
@@ -375,6 +391,25 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     }
     if let Some(axis) = &anchors_axis {
+        // The axis was asked for, so it is examined: a mem whose sidecar
+        // could not be read is a strict violation here as well, or a
+        // `--strict --include anchors` run would exit clean over a mem it
+        // never measured.
+        let unreadable = axis
+            .as_object()
+            .map(|mems| {
+                mems.values()
+                    .filter(|m| m.get("condition").is_some_and(|c| !c.is_null()))
+                    .count()
+            })
+            .unwrap_or(0);
+        if unreadable > 0
+            && !strict_violations
+                .iter()
+                .any(|(k, _)| *k == "anchors_sidecar_unreadable")
+        {
+            strict_violations.push(("anchors_sidecar_unreadable", unreadable));
+        }
         obj.insert("anchors".to_string(), axis.clone());
     }
     if let Some(axis) = &ledger_axis {
@@ -880,10 +915,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             // statement of what was adjudicated. It reads its counts out of a
             // `serde_json::Value` by index, which is how it stayed invisible
             // to the figure check until that check learned the form.
+            if let Some(c) = counts.get("condition").filter(|c| !c.is_null()) {
+                lines.push(format!(
+                    "- `{mem}`: ANCHORS_SIDECAR_UNREADABLE — {} — {}",
+                    c["reason"].as_str().unwrap_or("reason not stated"),
+                    counts["population"]
+                        .as_str()
+                        .unwrap_or("population not stated"),
+                ));
+                continue;
+            }
             lines.push(format!(
-                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable (artifact gone) \
+                "- `{mem}`: resolves {}, drifted {}, recheck {}, unresolvable (artifact gone) \
                  {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
-                counts["resolved"].as_u64().unwrap_or(0),
+                counts["resolves"].as_u64().unwrap_or(0),
                 counts["drifted"].as_u64().unwrap_or(0),
                 counts["recheck"].as_u64().unwrap_or(0),
                 counts["unresolvable"].as_u64().unwrap_or(0),

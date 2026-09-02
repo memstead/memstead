@@ -119,6 +119,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         provenance,
         signals,
         labelling,
+        sidecar_error,
     ) = match engine_handle {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
@@ -142,8 +143,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .then(|| engine.store().incoming(&id).to_vec());
             let origin = engine.mem_origin_class(id.mem());
             let prov = provenance_block(&engine);
+            // The provenance layer's readability rides every entity read:
+            // an unreadable sidecar means this entity's anchors are unknown,
+            // and a read that stayed silent would pass for "none".
+            let sidecar = engine.anchors_sidecar_error(id.mem());
             (
-                entity, md, outgoing, incoming, origin, prov, signals, labelling,
+                entity, md, outgoing, incoming, origin, prov, signals, labelling, sidecar,
             )
         }
         CliEngine::Filesystem(engine) => {
@@ -167,8 +172,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .then(|| engine.store().incoming(&id).to_vec());
             let origin = engine.mem_origin_class(id.mem());
             let prov = provenance_block(&engine);
+            // The provenance layer's readability rides every entity read:
+            // an unreadable sidecar means this entity's anchors are unknown,
+            // and a read that stayed silent would pass for "none".
+            let sidecar = engine.anchors_sidecar_error(id.mem());
             (
-                entity, md, outgoing, incoming, origin, prov, signals, labelling,
+                entity, md, outgoing, incoming, origin, prov, signals, labelling, sidecar,
             )
         }
     };
@@ -219,9 +228,26 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         if let (Some(prov), Some(obj)) = (&provenance, envelope.as_object_mut()) {
             obj.insert("mutation_provenance".into(), prov.clone());
         }
+        if let (Some(why), Some(obj)) = (&sidecar_error, envelope.as_object_mut()) {
+            obj.insert(
+                "anchors_sidecar_error".into(),
+                serde_json::json!({
+                    "code": "ANCHORS_SIDECAR_UNREADABLE",
+                    "mem": id.mem(),
+                    "reason": why,
+                }),
+            );
+        }
         crate::output::print_json(&envelope)?;
     } else {
         let mut text = chunked.clone();
+        if let Some(why) = &sidecar_error {
+            text.push_str(&format!(
+                "\n\n> **ANCHORS_SIDECAR_UNREADABLE** — mem `{}`: {why}. This entity's provenance \
+                 anchors are unknown, not absent.\n",
+                id.mem()
+            ));
+        }
         if let Some(prov) = &provenance {
             let render_rec = |label: &str, key: &str| -> Option<String> {
                 let r = prov.get(key)?;

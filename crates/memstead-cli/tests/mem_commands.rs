@@ -2394,18 +2394,18 @@ fn source_dialect_anchors_join_fallback_collide_and_refuse() {
     };
     assert_eq!(
         state_of("a.txt"),
-        "resolved",
+        "resolves",
         "source-relative resolves via the pointer-join: {v}"
     );
     assert_eq!(
         state_of("x.txt"),
-        "resolved",
+        "resolves",
         "collision resolves to the SOURCE-join target (its hash matches the \
          source copy; the workspace twin would read drifted): {v}"
     );
     assert_eq!(
         state_of("srcdir/a.txt"),
-        "resolved",
+        "resolves",
         "workspace-relative fallback unbroken: {v}"
     );
 
@@ -2540,7 +2540,7 @@ fn verify_anchors_reports_four_states_without_binding() {
         .stdout
         .clone();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(v["resolved"], 1, "full: {v}");
+    assert_eq!(v["resolves"], 1, "full: {v}");
     assert_eq!(v["drifted"], 1, "full: {v}");
     assert_eq!(v["recheck"], 1, "full: {v}");
     assert_eq!(v["unresolvable"], 1, "full: {v}");
@@ -2553,7 +2553,7 @@ fn verify_anchors_reports_four_states_without_binding() {
             .map(|a| a["state"].as_str().unwrap().to_string())
             .unwrap_or_else(|| panic!("anchor for {artifact} missing: {v}"))
     };
-    assert_eq!(state_of("src-a.txt"), "resolved");
+    assert_eq!(state_of("src-a.txt"), "resolves");
     assert_eq!(state_of("src-b.txt"), "drifted");
     assert_eq!(state_of("src-c.txt"), "recheck");
     assert_eq!(state_of("src-d.txt"), "unresolvable");
@@ -2731,7 +2731,7 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
             .map(|a| a["state"].as_str().unwrap().to_string())
             .unwrap_or_else(|| panic!("no row for {artifact}: {v}"))
     };
-    assert_eq!(state_of(&v, "https://w.test/stable"), "resolved");
+    assert_eq!(state_of(&v, "https://w.test/stable"), "resolves");
     assert_eq!(state_of(&v, "https://w.test/living"), "recheck");
     assert_eq!(state_of(&v, "https://w.test/gone"), "recheck");
     assert_eq!(state_of(&v, "https://w.test/never"), "unobserved");
@@ -3094,7 +3094,7 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
         .clone();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     // Path anchors still resolve per their own states — nothing nulls.
-    assert_eq!(v["resolved"], 1, "{v}");
+    assert_eq!(v["resolves"], 1, "{v}");
     assert_eq!(v["drifted"], 1, "{v}");
     assert_eq!(v["recheck"], 1, "{v}");
     // src-d is DELETED: a measured failure. The url anchor was never observed
@@ -3348,7 +3348,7 @@ fn verify_anchors_health_axis_and_refusals() {
         .stdout
         .clone();
     let empty: serde_json::Value = serde_json::from_slice(&empty).unwrap();
-    assert_eq!(empty["resolved"], 0);
+    assert_eq!(empty["resolves"], 0);
     assert_eq!(empty["anchors"].as_array().map(|a| a.len()), Some(0));
 
     // Unknown mem: typed refusal, no INTERNAL.
@@ -4351,7 +4351,7 @@ fn verify_anchors_backfills_hashless_anchor_and_recheck_drains() {
         .stdout
         .clone();
     let v2: serde_json::Value = serde_json::from_slice(&out2).unwrap();
-    assert_eq!(v2["resolved"], 1, "recheck drained: {v2}");
+    assert_eq!(v2["resolves"], 1, "recheck drained: {v2}");
     assert_eq!(v2["recheck"], 0, "{v2}");
     assert_eq!(
         v2["hash_backfilled"], 0,

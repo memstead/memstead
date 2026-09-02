@@ -2214,7 +2214,7 @@ community:
         };
         assert_eq!(
             state_of("https://w.test/stable"),
-            ("resolved".into(), Some(0), true)
+            ("resolves".into(), Some(0), true)
         );
         assert_eq!(
             state_of("https://w.test/living"),
@@ -2234,7 +2234,7 @@ community:
         );
         assert_eq!(report.recordable_observations.len(), 3);
         assert_eq!(
-            (report.resolved, report.recheck, report.unobserved),
+            (report.resolves, report.recheck, report.unobserved),
             (1, 2, 1)
         );
 

@@ -785,6 +785,16 @@ impl Engine {
             return Err(self.unknown_mem_error(mem));
         }
         let now = self.now_iso();
+        // An unreadable sidecar is a condition, never zero rows: the readers
+        // below would degrade it to "no anchors" and the report would then
+        // describe a clean mem it never measured.
+        if let Some(why) = self.anchors_sidecar_error(mem) {
+            return Ok(MemAnchorVerification {
+                mem: mem.to_string(),
+                sidecar_error: Some(why),
+                ..Default::default()
+            });
+        }
         let mut report = MemAnchorVerification {
             mem: mem.to_string(),
             unreconciled: self
@@ -836,8 +846,8 @@ impl Engine {
             }
             let state = match resolved.state {
                 Some(crate::anchor::AnchorState::Resolves) => {
-                    report.resolved += 1;
-                    "resolved"
+                    report.resolves += 1;
+                    crate::anchor::AnchorState::Resolves.as_wire()
                 }
                 Some(crate::anchor::AnchorState::Drifted) => {
                     report.drifted += 1;
@@ -1984,14 +1994,31 @@ impl Engine {
         if !self.schemas.contains_key(mem) {
             return Err(self.unknown_mem_error(mem));
         }
-        Ok(crate::ops::integrity::consistency_findings(
+        let mut findings = crate::ops::integrity::consistency_findings(
             &self.store,
             mem,
             // The one grant resolver, the same one the write gate calls. Every
             // consumer of the axis reaches it through this funnel, so there is
             // no site where a second answer could be written (04/07).
             &|from, to| self.cross_mem_link_allowed(from, to),
-        ))
+        );
+        // The provenance layer's own consistency: a sidecar the engine cannot
+        // read is a finding on the mem, beside the entity-level ones. Without
+        // it every anchor surface reads zero rows over this mem and calls
+        // that clean (backlog, found by the evidence-engine grader 2026-09-02).
+        if let Some(why) = self.anchors_sidecar_error(mem) {
+            findings.push(crate::ops::integrity::IntegrityFinding {
+                id: mem.to_string(),
+                axis: crate::ops::integrity::IntegrityAxis::Consistency,
+                code: "ANCHORS_SIDECAR_UNREADABLE".to_string(),
+                detail: serde_json::json!({
+                    "mem": mem,
+                    "reason": why,
+                    "repair": "the anchors sidecar is unreadable, so every anchor surface for this mem reports a condition instead of rows; fix or remove the sidecar file, then re-record anchors",
+                }),
+            });
+        }
+        Ok(findings)
     }
 
     /// Every cross-mem edge the workspace's current grant resolution does
@@ -2807,9 +2834,18 @@ pub(crate) fn anchor_base_path(artifact: &str) -> &str {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct MemAnchorVerification {
     pub mem: String,
+    /// The anchors sidecar could not be read: the parse or IO reason. When
+    /// set, no row was counted — every count below is zero because nothing
+    /// was measured, not because the mem is clean — `fully_adjudicated`
+    /// reads false and the population reads unknown. One condition, one
+    /// code (`ANCHORS_SIDECAR_UNREADABLE`), rendered by every surface from
+    /// this field; no surface parses the sidecar on its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidecar_error: Option<String>,
     /// Source present, hash matches (or a non-hash class whose source
-    /// exists).
-    pub resolved: usize,
+    /// exists). The wire name is the `AnchorState` wire form, `resolves`;
+    /// `resolved` was retired on 2026-09-02 (one name per state).
+    pub resolves: usize,
     /// Source present, hash differs, stability `stable` — real drift.
     pub drifted: usize,
     /// Hash differs under `unstable` stability, or a hash is missing on
@@ -2897,7 +2933,13 @@ impl MemAnchorVerification {
         // same rows appeared twice and the two numbers could not be reconciled
         // by a reader. A recheck row is a row whose drift could NOT be
         // asserted, which is the definition of unadjudicated.
-        let adjudicated = self.resolved + self.drifted + self.unresolvable;
+        if let Some(why) = &self.sidecar_error {
+            return format!(
+                "population unknown: the anchors sidecar could not be read ({why}); no row was \
+                 counted, and zero counts here are not a clean mem"
+            );
+        }
+        let adjudicated = self.resolves + self.drifted + self.unresolvable;
         let unadjudicated = self.recheck + self.unobserved;
         let mut s = format!(
             "over {} counted row(s): {adjudicated} adjudicated, {unadjudicated} not (recheck {}, unobserved {})",
@@ -2923,7 +2965,10 @@ impl MemAnchorVerification {
     /// figures above rest on an incomplete measurement, which is not the same
     /// as a failed one.
     pub fn fully_adjudicated(&self) -> bool {
-        self.recheck == 0 && self.unobserved == 0 && self.unreconciled.is_none()
+        self.sidecar_error.is_none()
+            && self.recheck == 0
+            && self.unobserved == 0
+            && self.unreconciled.is_none()
     }
 }
 
@@ -2934,7 +2979,7 @@ pub struct VerifiedAnchor {
     pub artifact: String,
     pub grain: String,
     pub class: String,
-    /// `resolved` | `drifted` | `recheck` | `unresolvable` (artifact gone) |
+    /// `resolves` | `drifted` | `recheck` | `unresolvable` (artifact gone) |
     /// `unobserved` (not measured this pass) | `dangling` (the entity is
     /// gone). The wire vocabulary of this field, which is NOT the engine's
     /// `AnchorState` enum: that has four variants describing the artifact

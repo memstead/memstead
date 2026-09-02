@@ -442,7 +442,7 @@ mod tests {
         drop(seeded);
         let report = engine.verify_mem_anchors("specs").unwrap();
         assert_eq!(report.dangling, 1);
-        assert_eq!(report.resolved, 0, "never evidence of health");
+        assert_eq!(report.resolves, 0, "never evidence of health");
         assert_eq!(
             report.unresolvable, 0,
             "and never folded into the artifact-end bucket, whose repair is the opposite"

@@ -2229,6 +2229,23 @@ impl McpServer {
             // deterministic on a stable medium; `state` is absent when the
             // source is unobserved (a `url` grain, or an `entity` grain whose
             // mem is not mounted), never fabricated.
+            // An unreadable sidecar is a condition on the read, never an
+            // absent `anchors` key: the entity's anchors are unknown.
+            if let Some(why) = engine.anchors_sidecar_error(id.mem()) {
+                obj.insert(
+                    "anchors_sidecar_error".into(),
+                    serde_json::json!({
+                        "code": "ANCHORS_SIDECAR_UNREADABLE",
+                        "mem": id.mem(),
+                        "reason": &why,
+                    }),
+                );
+                md.push_str(&format!(
+                    "\n\n> **ANCHORS_SIDECAR_UNREADABLE** — mem `{}`: {why}. This entity's \
+                     provenance anchors are unknown, not absent.\n",
+                    id.mem()
+                ));
+            }
             let resolved = engine.entity_anchors_resolved(&id);
             if !resolved.is_empty() {
                 let anchors: Vec<memstead_base::anchor::Anchor> =

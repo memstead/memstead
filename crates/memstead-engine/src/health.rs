@@ -350,7 +350,11 @@ pub fn compose_health(
         // this report's defect statement answers for, stamped by the
         // composer itself so every consumer of the composition
         // carries the same declaration.
-        "verdict_coverage": memstead_base::ops::coverage::HEALTH_COVERAGE.wire_line(),
+        // An opt-in axis the report rendered this pass was examined by it:
+        // `anchors` moves into the examined set when included.
+        "verdict_coverage": memstead_base::ops::coverage::HEALTH_COVERAGE.wire_line_promoting(
+            if include.iter().any(|s| s == "anchors") { &["anchors"] } else { &[] },
+        ),
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),
@@ -829,11 +833,22 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
     if let Some(obj) = v.get("anchors").and_then(|x| x.as_object()) {
         let _ = writeln!(s, "\n## Anchors ({} mems)", obj.len());
         for (mem, counts) in obj {
+            if let Some(c) = counts.get("condition").filter(|c| !c.is_null()) {
+                let _ = writeln!(
+                    s,
+                    "- `{mem}`: ANCHORS_SIDECAR_UNREADABLE — {} — {}",
+                    c["reason"].as_str().unwrap_or("reason not stated"),
+                    counts["population"]
+                        .as_str()
+                        .unwrap_or("population not stated"),
+                );
+                continue;
+            }
             let _ = writeln!(
                 s,
-                "- `{mem}`: resolved {}, drifted {}, recheck {}, unresolvable (artifact gone) \
+                "- `{mem}`: resolves {}, drifted {}, recheck {}, unresolvable (artifact gone) \
                  {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
-                counts["resolved"].as_u64().unwrap_or(0),
+                counts["resolves"].as_u64().unwrap_or(0),
                 counts["drifted"].as_u64().unwrap_or(0),
                 counts["recheck"].as_u64().unwrap_or(0),
                 counts["unresolvable"].as_u64().unwrap_or(0),

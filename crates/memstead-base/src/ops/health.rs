@@ -587,10 +587,20 @@ pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value 
         let Ok(report) = engine.verify_mem_anchors(&mem) else {
             continue;
         };
+        let condition = report.sidecar_error.as_ref().map(|why| {
+            serde_json::json!({
+                "code": "ANCHORS_SIDECAR_UNREADABLE",
+                "mem": mem,
+                "reason": why,
+            })
+        });
         out.insert(
             mem,
             serde_json::json!({
-                "resolved": report.resolved,
+                // The one condition that replaces the counts: an unreadable
+                // sidecar. Absent when the sidecar read cleanly.
+                "condition": condition,
+                "resolves": report.resolves,
                 "drifted": report.drifted,
                 "recheck": report.recheck,
                 // Split from `unresolvable` (03/05, criterion 2): the artifact

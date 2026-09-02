@@ -115,10 +115,27 @@ impl AxisCoverage {
     /// would tax each call's token budget, and the reader's question
     /// the stamp answers is WHICH axes the verdict covers.
     pub fn wire_line(&self) -> String {
-        let not_examined: Vec<&str> = self.excluded.iter().map(|(a, _)| *a).collect();
+        self.wire_line_promoting(&[])
+    }
+
+    /// The wire line with the named excluded axes promoted into the
+    /// examined set — for a report that rendered an opt-in axis this
+    /// pass (`--include anchors`) and therefore did examine it. An axis
+    /// not in the excluded list is ignored; the static declaration is
+    /// untouched.
+    pub fn wire_line_promoting(&self, promoted: &[&str]) -> String {
+        let mut examined: Vec<&str> = self.examined.to_vec();
+        let mut not_examined: Vec<&str> = Vec::new();
+        for (a, _) in self.excluded {
+            if promoted.contains(a) {
+                examined.push(a);
+            } else {
+                not_examined.push(a);
+            }
+        }
         format!(
             "examined={}; not_examined={}",
-            self.examined.join(","),
+            examined.join(","),
             not_examined.join(",")
         )
     }

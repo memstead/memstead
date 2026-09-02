@@ -23,6 +23,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   skipped. Engine: `Engine::push_all` over two new transport primitives
   (`ls_remote`, `resolve_ref`) on the git-branch ops table; the MCP
   surface is unchanged.
+- **An unreadable anchors sidecar is a typed condition on every read
+  surface, never zero rows.** A sidecar the engine cannot read (an unknown
+  version, a truncated file, an IO fault, a retired state name) used to
+  degrade to "no anchors" everywhere but the binding-scoped fidelity
+  report, and a mem then verified clean over rows nobody read. Now one
+  condition, one code, `ANCHORS_SIDECAR_UNREADABLE`, rendered by every
+  surface from the engine's one sidecar check: `memstead anchors <id>` and
+  `memstead verify-anchors` refuse typed (the mem and the parse reason
+  named, `fully_adjudicated: false` and an unknown population in the
+  details, nothing recorded), `memstead anchors --artifact` carries the
+  affected mems under `sidecar_unreadable`, `health --include anchors`
+  carries a per-mem `condition` with an unknown population, `health
+  --include integrity` lists the finding (id: the mem) and `--strict`
+  refuses under either include, and the entity read (CLI `--json` and
+  markdown, MCP `memstead_entity`) carries `anchors_sidecar_error`.
+
+### Changed
+
+- **One anchor-state name: `resolves`.** The verify surfaces, the health
+  `anchors` axis and their text renderings spelled the matching state
+  `resolved` while the entity read and the sidecar's `last_observed.state`
+  spelled it `resolves` (the `AnchorState` wire form). `resolves` wins
+  everywhere: the `resolved` count on `verify-anchors` and `health
+  --include anchors` is now `resolves`, and a row state reads `resolves`.
+  `resolved` as input (a sidecar row's `last_observed.state`) refuses with
+  the vocabulary named, as `ANCHORS_SIDECAR_UNREADABLE`.
+- **`health --include anchors` examines anchors.** The `verdict_coverage`
+  line lists `anchors` under examined when the axis was rendered, and an
+  unreadable sidecar is a strict violation on that run.
 
 ## [0.16.0] - 2026-09-02
 
