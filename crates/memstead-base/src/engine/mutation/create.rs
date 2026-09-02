@@ -869,7 +869,7 @@ impl Engine {
         // carried anchors — an anchorless create writes no sidecar and is
         // byte-identical to a pre-anchor create.
         if !validated_anchors.is_empty() {
-            super::stage_anchors_sidecar(backend, &id, &[], validated_anchors)?;
+            super::stage_anchors_sidecar(backend, &id, &[], validated_anchors, true)?;
         }
         // Derivation baselines (agent-trust plan 12): each explicitly
         // declared relation on a derivation rel-type records the
@@ -1308,6 +1308,7 @@ impl Engine {
                     &p.id,
                     &[],
                     p.anchors.clone(),
+                    true,
                 )
             {
                 self.store = store_snapshot;

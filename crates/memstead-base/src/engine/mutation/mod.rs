@@ -675,18 +675,34 @@ pub(crate) fn stage_anchors_sidecar(
     entity_id: &EntityId,
     unsets: &[crate::anchor::AnchorUnset],
     anchors: Vec<crate::anchor::Anchor>,
-) -> Result<(), EngineError> {
-    let mut sidecar = match backend.read_anchors_sidecar()? {
-        Some(bytes) => crate::anchor::AnchorSidecar::from_bytes(&bytes).map_err(|e| {
-            EngineError::Backend(crate::backend::BackendError::Other(format!(
-                "anchors sidecar parse: {e}"
-            )))
-        })?,
-        None => crate::anchor::AnchorSidecar::default(),
-    };
-    sidecar.merge(entity_id.as_ref(), unsets, anchors);
+    rebaseline: bool,
+) -> Result<bool, EngineError> {
+    let mut sidecar = read_sidecar(backend)?;
+    // An anchors-only update whose rows restate the stored ones writes
+    // nothing: the sidecar bytes stay, and the caller is told the anchors
+    // did not change (backlog-decisions plan B10). `rebaseline` marks the
+    // update that also changed the entity's content, where a restated row
+    // is rewritten hash-less for the next verify to backfill.
+    if !sidecar.merge(entity_id.as_ref(), unsets, anchors, rebaseline) {
+        return Ok(false);
+    }
     backend.write_anchors_sidecar(&sidecar.to_bytes())?;
-    Ok(())
+    Ok(true)
+}
+
+/// Whether merging `anchors` / `unsets` into `entity_id`'s row would change
+/// the mem's sidecar, computed on a copy before anything is written, so
+/// the update path can answer truthfully (and skip the commit) when an
+/// anchors-only update restates what is stored.
+pub(crate) fn anchors_would_change(
+    backend: &dyn crate::backend::MemBackend,
+    entity_id: &EntityId,
+    unsets: &[crate::anchor::AnchorUnset],
+    anchors: &[crate::anchor::Anchor],
+    rebaseline: bool,
+) -> Result<bool, EngineError> {
+    let mut sidecar = read_sidecar(backend)?;
+    Ok(sidecar.merge(entity_id.as_ref(), unsets, anchors.to_vec(), rebaseline))
 }
 
 /// Load the mem's anchors sidecar through `backend`, or the empty

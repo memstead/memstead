@@ -394,6 +394,31 @@ pub enum AnchorHashSource {
     Backfill,
 }
 
+impl Anchor {
+    /// Whether `other`, as a caller supplied it, restates this stored row:
+    /// equal on every field a caller writes (artifact, grain, class,
+    /// version, stability, derivation, binding, source, span validation)
+    /// and, when the caller named a hash, on the hash too. The engine-set
+    /// fields (`hash_source`, `last_observed`, a backfilled hash the caller
+    /// did not name) do not count: a re-pin that restates the row is a
+    /// no-op, not a fresh baseline.
+    pub fn same_as_supplied(&self, other: &Anchor) -> bool {
+        self.artifact == other.artifact
+            && self.grain == other.grain
+            && self.class == other.class
+            && self.at_version == other.at_version
+            && self.hash_stability == other.hash_stability
+            && self.derived_from == other.derived_from
+            && self.binding == other.binding
+            && self.source == other.source
+            && self.span_unvalidated == other.span_unvalidated
+            && other
+                .hash
+                .as_ref()
+                .is_none_or(|h| Some(h) == self.hash.as_ref())
+    }
+}
+
 impl AnchorHashSource {
     pub fn as_wire(self) -> &'static str {
         match self {
@@ -1618,37 +1643,57 @@ impl AnchorSidecar {
     /// Writing anchors never removes an anchor the call did not name in
     /// `unsets`; an empty `incoming` merges nothing. A row emptied by
     /// unsets prunes its key so the sidecar never accumulates empty rows.
-    pub fn merge(&mut self, entity_id: &str, unsets: &[AnchorUnset], incoming: Vec<Anchor>) {
+    pub fn merge(
+        &mut self,
+        entity_id: &str,
+        unsets: &[AnchorUnset],
+        incoming: Vec<Anchor>,
+        rebaseline: bool,
+    ) -> bool {
         let mut row = self.entities.remove(entity_id).unwrap_or_default();
+        let before = row.len();
         row.retain(|a| !unsets.iter().any(|u| u.matches(a)));
-        for mut anchor in incoming {
+        let mut changed = row.len() != before;
+        for anchor in incoming {
             match row.iter_mut().find(|e| {
                 e.artifact == anchor.artifact && e.grain == anchor.grain && e.class == anchor.class
             }) {
                 Some(existing) => {
-                    // Carry the stored baseline forward when the incoming row
-                    // does not mention one (consistency-sweep 03/03,
-                    // criterion 5). A re-pin usually exists to update the
-                    // artifact reference, and dropping the hash made the next
-                    // verify re-baseline silently, so drift became
-                    // unfalsifiable with nothing recording that it had. A
-                    // caller who supplies a hash still replaces it, and one
-                    // who means to CLEAR a baseline unsets the row and writes
-                    // it fresh — unsets are applied above, before this merge.
-                    if anchor.hash.is_none()
-                        && let Some(kept) = existing.hash.clone()
-                    {
-                        anchor.hash = Some(kept);
-                        anchor.hash_source = existing.hash_source;
+                    // The same triple replaces the row (backlog-decisions
+                    // plan B10). A row identical to the stored one on every
+                    // caller-supplied field is a no-op: nothing is written
+                    // and the caller hears so. Otherwise the stored row goes,
+                    // baseline included: a re-pin that names no hash is
+                    // written hash-less for the next verify to backfill
+                    // against the artifact as it now is, which is what a
+                    // re-pin after a sync repair means. A caller who
+                    // supplies a hash sets that baseline directly. (The
+                    // 2026-08 consistency sweep carried the stored baseline
+                    // forward instead, which left every one-update repair
+                    // reading `drifted` against the content it had just
+                    // repaired; the re-pin is itself recorded, so nothing is
+                    // lost by re-baselining.)
+                    // `rebaseline` is the update that also rewrote the
+                    // entity's content (a sync repair): its anchors were
+                    // drawn from the artifact as it now is, so a restated
+                    // row still moves the baseline; on an anchors-only
+                    // update a restated row is a no-op.
+                    if !rebaseline && existing.same_as_supplied(&anchor) {
+                        continue;
                     }
                     *existing = anchor;
+                    changed = true;
                 }
-                None => row.push(anchor),
+                None => {
+                    row.push(anchor);
+                    changed = true;
+                }
             }
         }
         if !row.is_empty() {
             self.entities.insert(entity_id.to_string(), row);
         }
+        changed
     }
 
     /// Blank every artifact reference — `artifact` and each `derived_from`
@@ -2042,7 +2087,7 @@ three
         let mut repin = file_anchor("src/a.rs", "");
         repin.hash = None;
         repin.hash_source = None;
-        sc.merge("m--e", &[], vec![repin]);
+        sc.merge("m--e", &[], vec![repin], false);
         let row = &sc.entities["m--e"][0];
         assert_eq!(
             row.hash.as_deref(),
@@ -2051,7 +2096,7 @@ three
         );
         assert_eq!(row.hash_source, Some(AnchorHashSource::Author));
 
-        sc.merge("m--e", &[], vec![file_anchor("src/a.rs", "h-new")]);
+        sc.merge("m--e", &[], vec![file_anchor("src/a.rs", "h-new")], false);
         assert_eq!(
             sc.entities["m--e"][0].hash.as_deref(),
             Some("h-new"),
@@ -2068,7 +2113,7 @@ three
         let mut fresh = file_anchor("src/a.rs", "");
         fresh.hash = None;
         fresh.hash_source = None;
-        sc.merge("m--e", &[unset], vec![fresh]);
+        sc.merge("m--e", &[unset], vec![fresh], false);
         assert_eq!(
             sc.entities["m--e"][0].hash, None,
             "unset-then-write is how a caller clears a baseline"
@@ -2532,7 +2577,7 @@ three
             "m--e",
             vec![file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")],
         );
-        sc.merge("m--e", &[], vec![file_anchor("c.rs", "h-c")]);
+        sc.merge("m--e", &[], vec![file_anchor("c.rs", "h-c")], false);
         let row = sc.get("m--e");
         assert_eq!(row.len(), 3);
         assert_eq!(row[0], file_anchor("a.rs", "h-a"));
@@ -2550,7 +2595,7 @@ three
             "m--e",
             vec![file_anchor("a.rs", "h-old"), file_anchor("b.rs", "h-b")],
         );
-        sc.merge("m--e", &[], vec![file_anchor("a.rs", "h-new")]);
+        sc.merge("m--e", &[], vec![file_anchor("a.rs", "h-new")], false);
         let row = sc.get("m--e");
         assert_eq!(row.len(), 2);
         assert_eq!(row[0], file_anchor("a.rs", "h-new"));
@@ -2569,7 +2614,7 @@ three
         let mut informed = file_anchor("a.rs", "h-a");
         informed.class = AnchorProvenanceClass::InformedBy;
         informed.hash = None;
-        sc.merge("m--e", &[], vec![span, informed]);
+        sc.merge("m--e", &[], vec![span, informed], false);
         assert_eq!(sc.get("m--e").len(), 3);
     }
 
@@ -2587,9 +2632,10 @@ three
             "m--e",
             &[],
             vec![file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")],
+            false,
         );
         assert_eq!(sc.to_bytes(), before, "full re-send is byte-stable");
-        sc.merge("m--e", &[], Vec::new());
+        sc.merge("m--e", &[], Vec::new(), false);
         assert_eq!(sc.to_bytes(), before, "empty merge is a no-op");
     }
 
@@ -2616,7 +2662,7 @@ three
             grain: Some(AnchorGrain::Span),
             class: None,
         };
-        sc.merge("m--e", &[narrowed], Vec::new());
+        sc.merge("m--e", &[narrowed], Vec::new(), false);
         assert_eq!(
             sc.get("m--e"),
             &[file_anchor("a.rs", "h-a"), file_anchor("b.rs", "h-b")]
@@ -2628,7 +2674,7 @@ three
             grain: None,
             class: None,
         };
-        sc.merge("m--e", &[missing], Vec::new());
+        sc.merge("m--e", &[missing], Vec::new(), false);
         assert_eq!(sc.get("m--e").len(), 2);
 
         // Bare artifact: everything on a.rs goes, b.rs untouched.
@@ -2637,7 +2683,7 @@ three
             grain: None,
             class: None,
         };
-        sc.merge("m--e", &[bare], Vec::new());
+        sc.merge("m--e", &[bare], Vec::new(), false);
         assert_eq!(sc.get("m--e"), &[file_anchor("b.rs", "h-b")]);
     }
 
@@ -2655,7 +2701,7 @@ three
             grain: None,
             class: None,
         };
-        sc.merge("m--e", &[bare], vec![file_anchor("a.rs", "h-new")]);
+        sc.merge("m--e", &[bare], vec![file_anchor("a.rs", "h-new")], false);
         assert_eq!(sc.get("m--e"), &[file_anchor("a.rs", "h-new")]);
     }
 
@@ -2670,7 +2716,7 @@ three
             grain: None,
             class: None,
         };
-        sc.merge("m--e", &[bare], Vec::new());
+        sc.merge("m--e", &[bare], Vec::new(), false);
         assert!(sc.is_empty());
         assert!(!sc.to_bytes().windows(5).any(|w| w == b"m--e\""));
     }

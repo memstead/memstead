@@ -317,6 +317,12 @@ pub struct UpdateEntityOutcome {
     /// `memstead_entity` round-trip on the stubbed target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relations_declared: Vec<RelationDeclared>,
+    /// Whether the update's anchors changed the sidecar: absent when the
+    /// update carried no anchors or unsets, `true` when a row was added,
+    /// replaced or removed, `false` when every supplied row restated
+    /// what was stored (nothing written, the sidecar bytes untouched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchors_changed: Option<bool>,
 }
 
 /// One batched relation declaration applied by a mutation call.
@@ -742,6 +748,7 @@ mod tests {
             orphan_stubs_removed: Vec::new(),
             warnings: Vec::new(),
             relations_declared: Vec::new(),
+            anchors_changed: None,
         };
         assert!(serde_json::to_string(&update).is_ok());
 

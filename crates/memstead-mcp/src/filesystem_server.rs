@@ -1444,7 +1444,7 @@ impl FilesystemMcpServer {
             Ok(outcome) => {
                 let durable = mem_is_durable(&engine, outcome.id.mem());
                 let durability_basis = mem_durability_basis(&engine, outcome.id.mem());
-                let body = serde_json::json!({
+                let mut body = serde_json::json!({
                     "id": outcome.id.to_string(),
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
@@ -1469,6 +1469,11 @@ impl FilesystemMcpServer {
                         .map(|i| i.to_string())
                         .collect::<Vec<_>>(),
                 });
+                // Present only when the update carried anchors or unsets
+                // (backlog-decisions plan B10).
+                if let Some(changed) = outcome.anchors_changed {
+                    body["anchors_changed"] = serde_json::json!(changed);
+                }
                 json_response(&body)
             }
             Err(e) => engine_op_error(e),

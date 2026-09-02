@@ -1363,6 +1363,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // that was a stub target's last referrer GC's the stub and
             // lists it here (shared shape with relate / delete).
             "orphan_stubs_removed",
+            // Whether an update that carried anchors changed the sidecar
+            // (backlog-decisions plan B10); absent without anchors.
+            "anchors_changed",
             // Read-only field list: error code + the engine-stamped
             // metadata fields named alongside mem/id/type.
             "READ_ONLY_FIELD",

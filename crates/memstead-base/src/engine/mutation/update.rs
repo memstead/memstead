@@ -75,6 +75,14 @@ struct PreparedUpdate {
     /// its content change already bumps `_hash` and surfaces as a delta,
     /// so the anchor activity riding it is already visible.
     anchor_only: bool,
+    /// Whether the anchors merge changes the sidecar: `None` when the
+    /// update carried no anchors or unsets, `Some(true)` when a row is
+    /// added, replaced or removed, `Some(false)` when every supplied row
+    /// restates what is stored (then nothing is staged).
+    anchors_changed: Option<bool>,
+    /// Whether the entity's content changed in this update: the anchors
+    /// merge then re-baselines a restated row (a sync repair's re-pin).
+    content_changed: bool,
 }
 
 /// The store-side results of applying a prepared write — filled in
@@ -197,12 +205,13 @@ impl Engine {
         backend.write_entity(Path::new(&prepared.file_path), prepared.markdown.as_bytes())?;
         // Stage the anchors sidecar into the same commit as the entity
         // write. Only when the update carried anchors or anchor unsets.
-        if !prepared.anchors.is_empty() || !prepared.anchor_unsets.is_empty() {
+        if prepared.anchors_changed == Some(true) {
             super::stage_anchors_sidecar(
                 backend,
                 &prepared.id,
                 &prepared.anchor_unsets,
                 prepared.anchors.clone(),
+                prepared.content_changed,
             )?;
         }
         // Derivation baselines (agent-trust plan 12): declared
@@ -300,6 +309,7 @@ impl Engine {
             prospective_hash: None,
             warnings,
             relations_declared: prepared.relations_declared,
+            anchors_changed: prepared.anchors_changed,
         })
     }
 
@@ -924,15 +934,27 @@ impl Engine {
         // the unchanged `content_hash`; conflating the two would
         // lose the prospective-hash channel callers use to chain a
         // follow-up real update with `expected_hash`.
+        // Whether the anchors merge would change the sidecar, decided on a
+        // copy before any write so the answer can steer the no-op guard:
+        // an anchors-only update that restates the stored rows is a no-op
+        // like any other (backlog-decisions plan B10).
+        let anchors_changed: Option<bool> =
+            if validated_anchors.is_empty() && validated_anchor_unsets.is_empty() {
+                None
+            } else {
+                Some(super::anchors_would_change(
+                    self.mounts[mount_idx].backend.as_ref(),
+                    id,
+                    &validated_anchor_unsets,
+                    &validated_anchors,
+                    !content_unchanged,
+                )?)
+            };
         if !args.dry_run {
-            // An update carrying `anchors[]` or `anchors_unset[]` is never
-            // a no-op even when the entity content is unchanged — the
-            // anchors sidecar must be written, so fall through to the
-            // real-commit path.
-            if content_unchanged
-                && validated_anchors.is_empty()
-                && validated_anchor_unsets.is_empty()
-            {
+            // An update carrying anchors or unsets that change the sidecar
+            // is never a no-op even when the entity content is unchanged;
+            // one whose rows restate what is stored is.
+            if content_unchanged && anchors_changed != Some(true) {
                 // No-op: report the preserved `last_modified` from
                 // the pre-stamp `next` (which still carries the
                 // entity's on-disk value because we haven't run the
@@ -965,6 +987,7 @@ impl Engine {
                     orphan_stubs_removed: Vec::new(),
                     warnings: vec![WarningHint::UpdateNoop { id: id.clone() }],
                     relations_declared,
+                    anchors_changed,
                 }));
             }
         }
@@ -1184,6 +1207,7 @@ impl Engine {
                 orphan_stubs_removed: Vec::new(),
                 warnings,
                 relations_declared: relations_declared.clone(),
+                anchors_changed,
             }));
         }
 
@@ -1236,8 +1260,9 @@ impl Engine {
             // anchor work is present. The explicit `!is_empty()` keeps the
             // predicate self-evidently correct without leaning on that
             // invariant.
-            anchor_only: content_unchanged
-                && (!validated_anchors.is_empty() || !validated_anchor_unsets.is_empty()),
+            anchor_only: content_unchanged && anchors_changed == Some(true),
+            anchors_changed,
+            content_changed: !content_unchanged,
             anchors: validated_anchors,
             anchor_unsets: validated_anchor_unsets,
         }))
@@ -1497,6 +1522,7 @@ impl Engine {
                     &p.id,
                     &p.anchor_unsets,
                     p.anchors.clone(),
+                    p.content_changed,
                 )
             {
                 self.store = store_snapshot;

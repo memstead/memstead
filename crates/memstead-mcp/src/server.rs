@@ -3023,6 +3023,12 @@ impl McpServer {
                 if let Some(hash) = outcome.prospective_hash {
                     body["prospective_hash"] = serde_json::json!(hash);
                 }
+                // Present only when the update carried anchors or unsets:
+                // whether the sidecar changed (a restated row writes
+                // nothing and says so; backlog-decisions plan B10).
+                if let Some(changed) = outcome.anchors_changed {
+                    body["anchors_changed"] = serde_json::json!(changed);
+                }
                 // Surface `relations_declared` when the agent used
                 // `declare_relations`. Always-present-when-non-empty
                 // wire shape so consumers branch on `.len()` rather

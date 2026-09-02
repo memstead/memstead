@@ -121,7 +121,13 @@ pub struct Args {
     /// Provenance anchor: repeatable `--anchor '<json>'`, each a JSON
     /// object of the anchor shape. Written into the mem-branch anchors
     /// sidecar in the same commit as the update; a malformed anchor
-    /// refuses `INVALID_ANCHOR`. An update carrying only `--anchor` (no
+    /// refuses `INVALID_ANCHOR`. A row naming a stored (artifact, grain,
+    /// class) triple replaces it, on folder and git-branch mems alike:
+    /// rewritten hash-less for the next verify to backfill when any
+    /// supplied field differs or the update also changed content (a sync
+    /// repair's re-pin), a no-op that writes nothing when it restates the
+    /// stored row; the response says which under `anchors_changed`.
+    /// An update carrying only `--anchor` (no
     /// section/metadata change) still commits the sidecar. Conflicts with
     /// `--from` (the file's `anchors[]` is authoritative there).
     #[arg(long = "anchor", value_name = "JSON", conflicts_with = "from")]
@@ -573,6 +579,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .collect();
                     body.push_str(&format!("\n- Orphan stubs GC'd: {}", ids.join(", ")));
                 }
+                if let Some(changed) = result.anchors_changed {
+                    body.push_str(if changed {
+                        "\n- Anchors: changed (sidecar rewritten)"
+                    } else {
+                        "\n- Anchors: unchanged (rows restate what is stored; nothing written)"
+                    });
+                }
                 if !result.warnings.is_empty() {
                     let parts: Vec<String> =
                         result.warnings.iter().map(|w| w.to_string()).collect();
@@ -684,7 +697,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         })
                     })
                     .collect();
-                print_json(&serde_json::json!({
+                let mut payload = serde_json::json!({
                     "id": outcome.id.as_ref(),
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
@@ -704,7 +717,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .iter()
                         .map(|i| i.to_string())
                         .collect::<Vec<_>>(),
-                }))?;
+                });
+                // Present only when the update carried anchors or unsets
+                // (backlog-decisions plan B10).
+                if let Some(changed) = outcome.anchors_changed {
+                    payload["anchors_changed"] = serde_json::json!(changed);
+                }
+                print_json(&payload)?;
             } else {
                 let mut body = format!("# Updated `{}`", outcome.id);
                 if !outcome.modified_sections.replaced.is_empty() {
@@ -750,6 +769,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .map(|i| i.to_string())
                         .collect();
                     body.push_str(&format!("\n- Orphan stubs GC'd: {}", ids.join(", ")));
+                }
+                if let Some(changed) = outcome.anchors_changed {
+                    body.push_str(if changed {
+                        "\n- Anchors: changed (sidecar rewritten)"
+                    } else {
+                        "\n- Anchors: unchanged (rows restate what is stored; nothing written)"
+                    });
                 }
                 if !outcome.warnings.is_empty() {
                     let parts: Vec<String> =

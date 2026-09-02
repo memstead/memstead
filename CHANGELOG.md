@@ -9,6 +9,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **An anchors-only update replaces the row on every mount kind, and
+  says so.** `memstead update --anchor` (and `memstead_update` with
+  `anchors`) naming a stored (artifact, grain, class) triple replaces the
+  row on folder and git-branch mems alike: rewritten hash-less for the
+  next verify to backfill when any supplied field differs or the update
+  also changed the entity's content (the sync brief's one-update repair,
+  which used to keep the old baseline and read `drifted` against the
+  content it had just repaired), and a truthful no-op when the row
+  restates what is stored (nothing written, no commit, `UPDATE_NOOP`).
+  Every update response that carried anchors now says `anchors_changed`.
+
 - **The health mem filter applies to every section and warning.** Under
   `health --mem <m>` and `memstead_health` with `mem`, one rule scopes the
   whole report: the anchors section, the folder-ledger map and the per-mem
