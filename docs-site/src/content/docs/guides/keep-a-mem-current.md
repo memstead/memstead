@@ -77,10 +77,10 @@ the baseline. The loop ends itself when every binding reports
 quiescence, so running it "too often" costs almost nothing.
 
 Two companions live on the same command: `--verify <binding>` renders
-the fidelity report without writing anything, and `--sweep <mem>`
-walks a mem's standing claims even where no change signal points,
-leaving a check record per entity so the next sweep knows what is
-freshly verified.
+the fidelity report without writing anything, and `--sweep <mem>
+[<mem>...]` walks a mem's standing claims even where no change signal
+points, one mem after another in the order named, leaving a check
+record per entity so the next sweep knows what is freshly verified.
 
 **Done when:** never. This is the steady state. The observable is the
 verify report staying clean and the loop's rounds staying short.

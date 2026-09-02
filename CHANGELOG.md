@@ -9,6 +9,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`/sync --sweep` takes a list of mems.** `--sweep <mem> [<mem>...]`
+  walks the named mems in order, one finished before the next starts, a
+  mem the workspace does not mount named and skipped; the closing
+  per-mem counts name any mem the session did not reach, so the next
+  invocation lists exactly those. One mem still works as before.
 - **Check records carry a structured finding and accept an open `x-`
   kind.** `memstead check` (single and `--from`) and `memstead_check` take
   an optional `finding {code, message, section?, evidence?}`: persisted on

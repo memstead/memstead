@@ -9,13 +9,14 @@ description: >
   fidelity report (coverage, accuracy, freshness) that writes no entity but
   does record findings and a verified baseline, or `--inventory <binding>` for
   the on-demand full stock-take —
-  measure the whole binding, repair to quiescence, report — or `--sweep <mem>`
-  for the standing-claim walk: verify what the mem asserts even where no
-  source-change signal points, entity by entity, section by section. Not a
+  measure the whole binding, repair to quiescence, report — or `--sweep <mem>
+  [<mem>...]` for the standing-claim walk: verify what the mem asserts even
+  where no source-change signal points, entity by entity, section by section,
+  one mem after another in the order named. Not a
   version-control operation: changes flow from your source into your mem,
   never the reverse.
 allowed-tools: Bash, Read, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_delete, mcp__memstead__memstead_check
-argument-hint: "[--all | <binding> | --verify <binding> | --inventory <binding> | --sweep <mem>]"
+argument-hint: "[--all | <binding> | --verify <binding> | --inventory <binding> | --sweep <mem> [<mem>...]]"
 ---
 # Memstead Sync
 
@@ -28,7 +29,7 @@ baseline, no entity writes). Source read-only; refusals verbatim.
 1. `WS="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" root "$(pwd)")"` —
    every `memstead` call below carries `--workspace "$WS"`, never bare cwd.
    Parse `$ARGUMENTS`: a binding id (`<mem>/<stem>`) → step 2. `--verify
-   <binding>` → step 6. `--inventory <binding>` → step 7. `--sweep <mem>` →
+   <binding>` → step 6. `--inventory <binding>` → step 7. `--sweep <mem>...` →
    step 8. No argument? Ask. `--all` → run
    `memstead --json --workspace "$WS" projection brief --all --operation any --consume`
    (`--consume` takes the slot; gated like step 2's anchors via
@@ -88,8 +89,8 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    silent loop. Keep no state between passes (the engine's dispositions are
    the resume point); close with the step-6 report, verdict first.
 
-8. `--sweep <mem>`: the standing-claim walk — verify what the mem asserts
-   even where no change signal points, on any mem, bound or not.
+8. `--sweep <mem>...`: the standing-claim walk over each named mem in turn,
+   bound or not — verify what it asserts even where no change signal points.
    Bulk-grep the mem's paths, codes, and symbols against the tree first;
    walk load-bearing frontmatter, then longest-unverified. Per entity:
    verify its checkable claims against the workspace's trees, graph, and
@@ -100,7 +101,7 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    post-repair failed stamp pins the defect to the healed body forever.
    Unconfirmable claims are out of scope — note the limit, never guess.
    Never create, delete, or re-cut in a sweep: a fused entity or missing
-   owner is `/remodel`'s business. Close with per-mem counts.
+   owner is `/remodel`'s business. Close with per-mem counts; name unreached mems.
 
 ## Rules
 
