@@ -267,14 +267,6 @@ impl Engine {
         }
 
         // ----- Edges: both directions, same-mem and cross-mem -----
-        let our_schema_ref = self.mounts[mount_idx]
-            .mount
-            .schema
-            .clone()
-            .unwrap_or_else(|| {
-                let (name, version) = schema.id();
-                memstead_schema::SchemaRef::new(&name, version)
-            });
         let mut edges_rechecked = 0usize;
         // Outgoing: this entity is the source; its type changes.
         for rel in &next.relationships {
@@ -285,38 +277,14 @@ impl Engine {
                 .filter(|e| !e.stub)
                 .map(|e| e.entity_type.clone());
             let target_mem = rel.target.mem();
-            let violation = if target_mem == mem {
-                validate_rel_shape(
-                    &rel.rel_type,
-                    &args.target_type,
-                    target_type.as_deref(),
-                    &schema,
-                )
-                .err()
-            } else {
-                let target_ref = self
-                    .mount(target_mem)
-                    .and_then(|m| m.schema.clone())
-                    .or_else(|| {
-                        self.schemas.get(target_mem).map(|s| {
-                            let (n, v) = s.id();
-                            memstead_schema::SchemaRef::new(&n, v)
-                        })
-                    });
-                match target_ref {
-                    Some(target_ref) => match validate_cross_mem_edge(
-                        &rel.rel_type,
-                        &args.target_type,
-                        target_type.as_deref(),
-                        &schema,
-                        &target_ref,
-                    ) {
-                        CrossMemRelCheck::Ok | CrossMemRelCheck::EdgeNotDeclared => None,
-                        CrossMemRelCheck::Invalid(e) => Some(e),
-                    },
-                    None => None,
-                }
-            };
+            let violation = self.edge_shape_violation(
+                &schema,
+                &mem,
+                target_mem,
+                &rel.rel_type,
+                &args.target_type,
+                target_type.as_deref(),
+            );
             if let Some(e) = violation {
                 problems.push(RetypeProblem::EdgeShape(RetypeEdge {
                     direction: RetypeEdgeDirection::Outgoing,
@@ -341,28 +309,20 @@ impl Engine {
             };
             edges_rechecked += 1;
             let from_mem = from.mem().to_string();
-            let violation = if from_mem == mem {
-                validate_rel_shape(
+            let referrer_type = referrer.entity_type.clone();
+            // The edge's source schema is the referrer's; the target is this
+            // mem. Same-schema cross-mem edges take the shared schema's pins
+            // exactly as relate and the loader do.
+            let violation = match self.schemas.get(&from_mem).cloned() {
+                Some(referrer_schema) => self.edge_shape_violation(
+                    &referrer_schema,
+                    &from_mem,
+                    &mem,
                     &rel_type,
-                    &referrer.entity_type,
+                    &referrer_type,
                     Some(&args.target_type),
-                    &schema,
-                )
-                .err()
-            } else {
-                match self.schemas.get(&from_mem) {
-                    Some(referrer_schema) => match validate_cross_mem_edge(
-                        &rel_type,
-                        &referrer.entity_type,
-                        Some(&args.target_type),
-                        referrer_schema,
-                        &our_schema_ref,
-                    ) {
-                        CrossMemRelCheck::Ok | CrossMemRelCheck::EdgeNotDeclared => None,
-                        CrossMemRelCheck::Invalid(e) => Some(e),
-                    },
-                    None => None,
-                }
+                ),
+                None => None,
             };
             if let Some(e) = violation {
                 problems.push(RetypeProblem::EdgeShape(RetypeEdge {
@@ -378,8 +338,7 @@ impl Engine {
         // Incoming, deferred referrers: a lazy mem's entities are not in
         // the store. Enumerate its storage and check every relation that
         // names this entity. A mem that cannot be enumerated refuses.
-        edges_rechecked +=
-            self.recheck_deferred_referrers(id, &args.target_type, &our_schema_ref, &mut problems)?;
+        edges_rechecked += self.recheck_deferred_referrers(id, &args.target_type, &mut problems)?;
 
         // ----- Block-tier constraints of the target type -----
         let unsatisfied =
@@ -554,6 +513,48 @@ impl Engine {
         })
     }
 
+    /// The shape violation, if any, of one edge `from_type --rel_type-->
+    /// to_type` whose source entity lives in `source_mem` (schema
+    /// `source_schema`) and whose target lives in `target_mem` — the rule
+    /// relate applies at write time and the loader at boot, so the three
+    /// can never disagree: a same-mem edge, and a cross-mem edge between
+    /// mems pinning the SAME schema, is judged by that schema's own
+    /// relationship pins; a cross-mem edge between different schemas is
+    /// judged by the source schema's `cross_mem_relationships` entry for
+    /// the target schema. An edge whose entry is not declared at all is
+    /// not a shape violation (it already exists; the loader drops it on
+    /// its own grounds), and a target mem whose schema cannot be resolved
+    /// falls back to the intra-mem rule, as relate does.
+    fn edge_shape_violation(
+        &self,
+        source_schema: &memstead_schema::Schema,
+        source_mem: &str,
+        target_mem: &str,
+        rel_type: &str,
+        from_type: &str,
+        to_type: Option<&str>,
+    ) -> Option<ValidationError> {
+        let target_ref: Option<memstead_schema::SchemaRef> = if source_mem == target_mem {
+            None
+        } else {
+            super::target_schema_ref_for_routing(self, target_mem)
+        };
+        let cross_mem_different = match (&target_ref, source_schema.id()) {
+            (Some(target), (src_name, _)) => target.name != src_name,
+            (None, _) => false,
+        };
+        if cross_mem_different {
+            let target_ref = target_ref.expect("Some when cross_mem_different");
+            match validate_cross_mem_edge(rel_type, from_type, to_type, source_schema, &target_ref)
+            {
+                CrossMemRelCheck::Ok | CrossMemRelCheck::EdgeNotDeclared => None,
+                CrossMemRelCheck::Invalid(e) => Some(e),
+            }
+        } else {
+            validate_rel_shape(rel_type, from_type, to_type, source_schema).err()
+        }
+    }
+
     /// Re-check the edges that reach `id` from mems whose content is not
     /// in the store — deferred (lazy, unloaded) mounts. Their entities
     /// are enumerated and read through the mount's own backend, the same
@@ -565,7 +566,6 @@ impl Engine {
         &self,
         id: &EntityId,
         target_type: &str,
-        our_schema_ref: &memstead_schema::SchemaRef,
         problems: &mut Vec<RetypeProblem>,
     ) -> Result<usize, EngineError> {
         let mut examined = 0usize;
@@ -618,16 +618,14 @@ impl Engine {
                     }
                     examined += 1;
                     let violation = match referrer_schema {
-                        Some(referrer_schema) => match validate_cross_mem_edge(
+                        Some(referrer_schema) => self.edge_shape_violation(
+                            referrer_schema,
+                            &referrer_mem,
+                            id.mem(),
                             &rel.rel_type,
                             &parsed.entity.entity_type,
                             Some(target_type),
-                            referrer_schema,
-                            our_schema_ref,
-                        ) {
-                            CrossMemRelCheck::Ok | CrossMemRelCheck::EdgeNotDeclared => None,
-                            CrossMemRelCheck::Invalid(e) => Some(e),
-                        },
+                        ),
                         None => None,
                     };
                     if let Some(e) = violation {
@@ -1136,6 +1134,63 @@ write_rules: []
         assert!(edge.cross_mem);
         assert_eq!(edge.from, r.to_string());
         assert_eq!(file_bytes(&f, &c), before_c);
+    }
+
+    /// Two mems pinning the SAME schema: a cross-mem edge is judged by that
+    /// schema's own pins, exactly as relate and the loader judge it, so a
+    /// retype that would strand the referrer's edge refuses — the
+    /// same-schema case the grader of 2026-09-02 found waved through.
+    #[test]
+    fn same_schema_cross_mem_edges_are_rechecked() {
+        let f = fixture();
+        let tmp_twin = f._tmp.path().join("mem-twin");
+        std::fs::create_dir_all(&tmp_twin).unwrap();
+        let main_pin = SchemaRef::new("rt", semver::Version::new(0, 1, 0));
+        let mut engine = Engine::from_mounts_with_schemas_dir(
+            vec![
+                (
+                    mount(
+                        "main",
+                        f.main_dir.clone(),
+                        main_pin.clone(),
+                        MountLifecycle::Eager,
+                    ),
+                    Box::new(FilesystemMemWriter::new(f.main_dir.clone())) as Box<dyn MemBackend>,
+                ),
+                (
+                    mount("twin", tmp_twin.clone(), main_pin, MountLifecycle::Eager),
+                    Box::new(FilesystemMemWriter::new(tmp_twin.clone())) as Box<dyn MemBackend>,
+                ),
+            ],
+            Some(&f.schemas_dir),
+        )
+        .unwrap();
+        let mut settings = WorkspaceSettings::default();
+        let mut links: BTreeMap<String, CrossLinkValue> = BTreeMap::new();
+        links.insert("twin".to_string(), CrossLinkValue::Wildcard);
+        links.insert("main".to_string(), CrossLinkValue::Wildcard);
+        settings.cross_mem_links = links;
+        engine.set_settings(settings);
+
+        let v = create(&mut engine, "main", "Claim V", "claim", "statement");
+        let w = create(&mut engine, "twin", "Claim W", "claim", "statement");
+        relate(&mut engine, &w, "SUPPORTS", &v); // pinned target: claim
+        let before = file_bytes(&f, &v);
+        let err = retype(&mut engine, &v, "finding", &[("statement", "conclusion")]).unwrap_err();
+        assert_eq!(err.code(), "INVALID_REL_SHAPE", "{err}");
+        let EngineError::RetypeRefused { problems, .. } = &err else {
+            panic!("{err:?}")
+        };
+        let RetypeProblem::EdgeShape(edge) = &problems[0] else {
+            panic!("{problems:?}")
+        };
+        assert!(edge.cross_mem);
+        assert_eq!(edge.from, w.to_string());
+        assert_eq!(file_bytes(&f, &v), before);
+
+        // Outgoing across the twin: W supports V, retyping W refuses too.
+        let err = retype(&mut engine, &w, "finding", &[("statement", "conclusion")]).unwrap_err();
+        assert_eq!(err.code(), "INVALID_REL_SHAPE", "{err}");
     }
 
     /// The referrer lives in a LAZY mem: its edge is not in the store, so
