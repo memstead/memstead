@@ -54,6 +54,7 @@ use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
 use super::cursor::{
     compute_source_cursor, enumerate_source_artifacts, enumerate_source_artifacts_reported,
+    medium_base, normalize_lexical, relative_path,
 };
 use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::Slice;
@@ -746,6 +747,10 @@ pub fn advance_baseline(
 /// The outcome of a [`record_exclusions`] call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExcludeOutcome {
+    /// The canonical (workspace-relative) id each requested id resolved to,
+    /// in request order: what the ledger now holds, so an agent sees the
+    /// spelling that took effect when it passed the source-relative form.
+    pub recorded: Vec<(String, String)>,
     /// The binding id whose exclusion ledger was written.
     pub binding: String,
     /// Total authored exclusions in the ledger after this call (this call + prior).
@@ -773,6 +778,10 @@ pub enum ExcludeError {
         artifacts: Vec<String>,
         /// How many artifacts `S(D)` did enumerate (the accepted set size).
         printed: usize,
+        /// For each offending id, the nearest known ids of `S(D)` (by
+        /// shared path suffix, then name similarity), so the agent can
+        /// repair the spelling instead of guessing.
+        nearest: BTreeMap<String, Vec<String>>,
     },
     /// The enumeration of `S(D)` is known-incomplete (a malformed or
     /// retired-dialect scope pattern), so membership cannot be decided: the
@@ -850,17 +859,52 @@ pub fn record_exclusions(
 
     // Gate (atomic): every exclusion id must be an S(D) member. Validate BEFORE
     // any disk write so a refusal leaves the store untouched.
-    let mut not_member: Vec<String> = exclusions
-        .keys()
-        .filter(|a| !s_d.contains(a.as_str()))
-        .cloned()
+    // Resolve each requested id to the canonical (workspace-relative) form
+    // `S(D)` is keyed by: the canonical form itself, or the source-relative
+    // form joined onto a primary source's medium base, the way the anchor
+    // write gate resolves an artifact path (backlog-decisions plan B11).
+    // Stored ids are always canonical, so a ledger written before this
+    // resolution keeps working unchanged.
+    let bases: Vec<PathBuf> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(medium_base(&p.pointer, workspace_root)),
+            ResolvedSource::Reference { .. } => None,
+        })
         .collect();
+    let mut canonical: BTreeMap<String, String> = BTreeMap::new();
+    let mut not_member: Vec<String> = Vec::new();
+    for requested in exclusions.keys() {
+        if s_d.contains(requested.as_str()) {
+            canonical.insert(requested.clone(), requested.clone());
+            continue;
+        }
+        let joined = bases.iter().find_map(|base| {
+            let candidate =
+                relative_path(workspace_root, &normalize_lexical(&base.join(requested)))
+                    .to_string_lossy()
+                    .to_string();
+            s_d.contains(candidate.as_str()).then_some(candidate)
+        });
+        match joined {
+            Some(c) => {
+                canonical.insert(requested.clone(), c);
+            }
+            None => not_member.push(requested.clone()),
+        }
+    }
     if !not_member.is_empty() {
         not_member.sort();
         not_member.dedup();
+        let nearest = not_member
+            .iter()
+            .map(|id| (id.clone(), nearest_known_ids(id, &s_d)))
+            .collect();
         return Err(ExcludeError::NotSourceMember {
             artifacts: not_member,
             printed: s_d.len(),
+            nearest,
         });
     }
 
@@ -873,7 +917,9 @@ pub fn record_exclusions(
             ..Default::default()
         });
     let mut added = 0usize;
-    for (artifact, rationale) in exclusions {
+    let mut recorded: Vec<(String, String)> = Vec::new();
+    for (requested, rationale) in exclusions {
+        let artifact = &canonical[requested];
         if state
             .exclusions
             .insert(artifact.clone(), rationale.clone())
@@ -886,14 +932,44 @@ pub fn record_exclusions(
                 .exclusion_sources
                 .insert(artifact.clone(), facet.clone());
         }
+        recorded.push((requested.clone(), artifact.clone()));
     }
     write_advance_store(workspace_root, &mem, &name, &state).map_err(ExcludeError::Store)?;
 
     Ok(ExcludeOutcome {
+        recorded,
         binding: binding_id,
         excluded: state.exclusions.len(),
         added,
     })
+}
+
+/// The known ids of `S(D)` nearest to an unknown one: those sharing its
+/// file name first, then those sharing its last path components, at most
+/// five, sorted. A repair hint, never a match.
+fn nearest_known_ids(unknown: &str, known: &BTreeSet<String>) -> Vec<String> {
+    let name = unknown.rsplit('/').next().unwrap_or(unknown);
+    let tail: Vec<&str> = unknown.rsplit('/').take(2).collect();
+    let mut scored: Vec<(usize, &String)> = known
+        .iter()
+        .filter_map(|k| {
+            let kname = k.rsplit('/').next().unwrap_or(k);
+            let ktail: Vec<&str> = k.rsplit('/').take(2).collect();
+            let same_dir = tail.len() > 1 && ktail.get(1) == tail.get(1);
+            let score = if kname == name && same_dir {
+                3
+            } else if kname == name {
+                2
+            } else if same_dir || k.contains(name) || name.contains(kname) {
+                1
+            } else {
+                0
+            };
+            (score > 0).then_some((score, k))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    scored.into_iter().take(5).map(|(_, k)| k.clone()).collect()
 }
 
 #[cfg(test)]

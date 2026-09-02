@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **`projection exclude` resolves the artifact id and refuses an unknown
+  one.** An exclusion id written in the source-relative form (relative to
+  the source's pointer) is resolved through the binding's source join at
+  exclude time, the way the anchor write gate resolves an artifact path,
+  so it names the same artifact as the workspace-relative form the report
+  uses; the ledger holds the one canonical id (a ledger written before
+  keeps working), and the response lists each requested id beside the
+  canonical id it was recorded as. An id that resolves to no artifact of
+  the binding's source refuses the whole call
+  (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`) naming the nearest known ids in
+  the message and under `details.nearest`, never recording a no-op.
+
 - **An anchors-only update replaces the row on every mount kind, and
   says so.** `memstead update --anchor` (and `memstead_update` with
   `anchors`) naming a stored (artifact, grain, class) triple replaces the

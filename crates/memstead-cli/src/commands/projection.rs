@@ -171,9 +171,15 @@ pub enum ProjectionCommand {
     /// be recorded as deliberately not-modeled with a rationale. Each accepted
     /// `(artifact, rationale)` lands in the durable exclusion ledger the fidelity
     /// report consults, so the artifact stops re-surfacing as `uncovered` under
-    /// exhaustive coverage and keeps its reasoning. An artifact outside `S(D)`
-    /// refuses the whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`);
-    /// re-declaring merges into the ledger. The write path for the option-(a)
+    /// exhaustive coverage and keeps its reasoning. An id may be written in
+    /// either form, the workspace-relative one the report uses or the
+    /// source-relative one (relative to the source's pointer): it is resolved
+    /// through the binding's source join at exclude time, the ledger holds the
+    /// canonical workspace-relative id, and the response lists what was
+    /// recorded. An id that resolves to no artifact of `S(D)` refuses the
+    /// whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`, naming
+    /// the nearest known ids); re-declaring merges into the ledger. The write
+    /// path for the option-(a)
     /// process-mem judgment migration, and the general "this in-scope artifact is
     /// mined and warrants no destination entity, because …" capability.
     Exclude(ExcludeArgs),
@@ -435,8 +441,10 @@ pub struct ExcludeArgs {
     /// A JSON object mapping each in-scope source artifact id to the authored
     /// rationale for excluding it, e.g.
     /// `'{"docs/legacy.md": "superseded; no entity", "vendor/x.rs": "generated"}'`.
-    /// Every id must be a member of the binding's enumerable source `S(D)` — an
-    /// id outside scope refuses the whole call.
+    /// Every id must resolve to a member of the binding's enumerable source
+    /// `S(D)`, in the workspace-relative form or the source-relative one; the
+    /// ledger holds the canonical workspace-relative id. An id resolving to no
+    /// artifact refuses the whole call, naming the nearest known ids.
     #[arg(long)]
     pub exclusions: String,
 }
@@ -2074,12 +2082,30 @@ fn map_exclude_err(binding_id: &str, err: ExcludeError) -> CliError {
             CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
                 .with_details(json!({ "binding": binding_id }))
         }
-        ExcludeError::NotSourceMember { artifacts, .. } => CliError::new(
+        ExcludeError::NotSourceMember {
+            artifacts, nearest, ..
+        } => CliError::new(
             ExitKind::Validation,
             "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER",
-            message,
+            {
+                let hints: Vec<String> = nearest
+                    .iter()
+                    .filter(|(_, ids)| !ids.is_empty())
+                    .map(|(id, ids)| format!("{id} → nearest known: {}", ids.join(", ")))
+                    .collect();
+                if hints.is_empty() {
+                    message
+                } else {
+                    format!("{message}; {}", hints.join("; "))
+                }
+            },
         )
-        .with_details(json!({ "binding": binding_id, "not_source_members": artifacts })),
+        .with_details(json!({
+            "binding": binding_id,
+            "not_source_members": artifacts,
+            // The nearest known ids per offender: the spelling to repair to.
+            "nearest": nearest,
+        })),
         ExcludeError::PartialEnumeration { facet, reason } => CliError::new(
             ExitKind::Validation,
             "PROJECTION_EXCLUDE_PARTIAL_ENUMERATION",
@@ -2149,13 +2175,32 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
             "binding": outcome.binding,
             "excluded": outcome.excluded,
             "added": outcome.added,
+            // Each requested id and the canonical (workspace-relative) id
+            // it resolved to: the spelling the ledger holds.
+            "recorded": outcome
+                .recorded
+                .iter()
+                .map(|(requested, canonical)| json!({
+                    "requested": requested,
+                    "canonical": canonical,
+                }))
+                .collect::<Vec<_>>(),
         }))?;
     } else {
-        print_markdown(&format!(
+        let mut body = format!(
             "# Projection exclude\n\nBinding `{}`: {} artifact(s) newly excluded, \
              {} in the ledger.\n",
             outcome.binding, outcome.added, outcome.excluded
-        ));
+        );
+        for (requested, canonical) in &outcome.recorded {
+            if requested == canonical {
+                body.push_str(&format!("\n- `{canonical}`"));
+            } else {
+                body.push_str(&format!("\n- `{canonical}` (from `{requested}`)"));
+            }
+        }
+        body.push('\n');
+        print_markdown(&body);
     }
     Ok(())
 }

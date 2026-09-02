@@ -1,0 +1,222 @@
+//! `projection exclude` resolves the artifact id and refuses an unknown one
+//! (backlog-decisions plan B11): on a bound fixture whose source pointer is
+//! a sub-tree (and a second whose pointer lies outside the workspace root,
+//! the flagship's shape), the source-relative id and the workspace-relative
+//! one resolve to the same canonical id, the ledger holds that one form, the
+//! response lists what was recorded, the next verify counts the artifact as
+//! disposed excluded, and an id resolving to no artifact refuses the whole
+//! call naming the nearest known ids; a ledger written before the plan in
+//! the canonical form keeps filtering unchanged.
+
+use std::path::Path;
+
+use assert_cmd::Command;
+use serde_json::Value;
+use tempfile::TempDir;
+
+fn memstead() -> Command {
+    Command::cargo_bin("memstead").expect("memstead binary must be built by cargo")
+}
+
+fn write_store(root: &Path, rel: &str, contents: &str) {
+    let path = root.join(".memstead").join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, contents).unwrap();
+}
+
+fn git(repo: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@example")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@example")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A folder-mem workspace bound to a source at `pointer` (relative to the
+/// workspace root) holding `docs/a.md` and `docs/b.md` under git; returns
+/// the workspace root. The source dir is created at `root.join(pointer)`
+/// normalised, so `..`-relative pointers land beside the workspace.
+fn bound_workspace(tmp: &TempDir, pointer: &str) -> std::path::PathBuf {
+    let root = tmp.path().join("ws");
+    std::fs::create_dir_all(root.join("engine-mem").join(".memstead")).unwrap();
+    std::fs::write(
+        root.join("engine-mem")
+            .join(".memstead")
+            .join("config.json"),
+        r#"{ "schema": "default@1.0.0" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("engine-mem").join("seed.md"),
+        "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Seed\n\n## Identity\n\nThe seed.\n\n## Purpose\n\nExists.\n",
+    )
+    .unwrap();
+    write_store(
+        &root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        &root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+    write_store(
+        &root,
+        "projections/engine/docs.json",
+        &format!(
+            r#"{{"version":2,"intent":"model the docs","sources":[{{"name":"docs","type":"codebase","pointer":"{pointer}","change_detection":"git","scope":[{{"path":"**/*.md","mode":"allow"}}]}}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{{"build":{{"mode":"discovery","trigger":"loop","batch_size":20}},"sync":{{"trigger":"manual","batch_size":20}},"verify":{{"trigger":"manual","batch_size":20,"adjudication_mode":"strict"}}}}}}"#
+        ),
+    );
+    let src = root.join(pointer);
+    std::fs::create_dir_all(src.join("docs")).unwrap();
+    std::fs::write(src.join("docs").join("a.md"), "# A\n").unwrap();
+    std::fs::write(src.join("docs").join("b.md"), "# B\n").unwrap();
+    git(&src, &["init", "-q"]);
+    git(&src, &["add", "-A"]);
+    git(&src, &["commit", "-q", "-m", "init"]);
+    root
+}
+
+fn exclude(root: &Path, payload: &str) -> (bool, Value) {
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "exclude",
+            "engine/docs",
+            "--exclusions",
+            payload,
+        ])
+        .output()
+        .unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    let json_start = text.find('{').unwrap_or(0);
+    let v: Value = serde_json::from_str(text[json_start..].trim()).unwrap_or(Value::Null);
+    (out.status.success(), v)
+}
+
+fn ledger(root: &Path) -> Value {
+    let path = root
+        .join(".memstead")
+        .join("state")
+        .join("advance")
+        .join("engine")
+        .join("docs.json");
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+fn verify(root: &Path) -> Value {
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/docs", "--full"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+fn exercise(pointer: &str, canonical_a: &str, canonical_b: &str) {
+    let tmp = TempDir::new().unwrap();
+    let root = bound_workspace(&tmp, pointer);
+
+    // Before any exclusion: both artifacts are the uncovered backfill.
+    let report = verify(&root);
+    assert_eq!(report["report"]["disposed_excluded"], 0, "{report}");
+
+    // The source-relative form resolves to the canonical id.
+    let (ok, v) = exclude(&root, r#"{"docs/a.md": "probe"}"#);
+    assert!(ok, "{v}");
+    assert_eq!(v["added"], 1);
+    assert_eq!(v["recorded"][0]["requested"], "docs/a.md");
+    assert_eq!(v["recorded"][0]["canonical"], canonical_a);
+    let stored = ledger(&root);
+    assert!(stored["exclusions"][canonical_a].is_string(), "{stored}");
+    assert!(
+        stored["exclusions"]["docs/a.md"].is_null(),
+        "no second spelling: {stored}"
+    );
+
+    // The workspace-relative form gives the same result, byte for byte.
+    let (ok, v2) = exclude(&root, &format!(r#"{{"{canonical_a}": "probe"}}"#));
+    assert!(ok, "{v2}");
+    assert_eq!(v2["added"], 0);
+    assert_eq!(v2["recorded"][0]["canonical"], canonical_a);
+    assert_eq!(
+        ledger(&root),
+        stored,
+        "the ledger is unchanged by the restatement"
+    );
+
+    // The next verify counts the artifact as disposed excluded.
+    let report = verify(&root);
+    assert_eq!(report["report"]["disposed_excluded"], 1, "{report}");
+    let rationales = report["report"]["disposed_excluded_rationales"].to_string();
+    assert!(rationales.contains(canonical_a), "{rationales}");
+    assert!(!rationales.contains(canonical_b), "{rationales}");
+
+    // An id resolving to no artifact refuses, naming the nearest known ids,
+    // and records nothing.
+    let before = ledger(&root);
+    let (ok, err) = exclude(&root, r#"{"docs/zzz.md": "probe"}"#);
+    assert!(!ok);
+    assert_eq!(err["code"], "PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER", "{err}");
+    let nearest = err["details"]["nearest"]["docs/zzz.md"].to_string();
+    assert!(
+        nearest.contains(canonical_a) && nearest.contains(canonical_b),
+        "{err}"
+    );
+    assert!(
+        err["message"].as_str().unwrap().contains("nearest known"),
+        "{err}"
+    );
+    assert_eq!(ledger(&root), before, "a refused call records nothing");
+}
+
+/// B11 AC1 on a sub-tree pointer inside the workspace.
+#[test]
+fn a_source_relative_exclude_takes_effect_and_an_unknown_id_is_refused() {
+    exercise("src", "src/docs/a.md", "src/docs/b.md");
+}
+
+/// B11 AC1 on a pointer outside the workspace root, the flagship's shape.
+#[test]
+fn the_same_holds_for_a_pointer_outside_the_workspace_root() {
+    exercise("../ext", "../ext/docs/a.md", "../ext/docs/b.md");
+}
+
+/// B11 AC1 refusal complement: a ledger written before the plan, holding
+/// the canonical form, still filters the same artifact.
+#[test]
+fn a_pre_existing_canonical_ledger_still_filters() {
+    let tmp = TempDir::new().unwrap();
+    let root = bound_workspace(&tmp, "../ext");
+    write_store(
+        &root,
+        "state/advance/engine/docs.json",
+        r#"{"binding":"engine/docs","frozen_slice":{"added":[],"modified":[],"deleted":[]},"dispositions":{},"exclusions":{"../ext/docs/b.md":"written before the plan"},"exclusion_sources":{"../ext/docs/b.md":"docs"}}"#,
+    );
+    let report = verify(&root);
+    assert_eq!(report["report"]["disposed_excluded"], 1, "{report}");
+    assert!(
+        report["report"]["disposed_excluded_rationales"]
+            .to_string()
+            .contains("../ext/docs/b.md"),
+        "{report}"
+    );
+}
