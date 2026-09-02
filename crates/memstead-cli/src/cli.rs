@@ -145,6 +145,15 @@ pub enum Command {
     Type(commands::type_cmd::Args),
 
     /// Health summary (orphans, stubs, stale entities, missing fields).
+    ///
+    /// Every report carries a verdict-coverage line with three buckets:
+    /// `examined` names the axes the defect verdict answers for (a
+    /// finding there fails `--strict`); `advisory` names the axes the
+    /// report renders, always or on `--include`, beside the verdict
+    /// without folding them in (stale entities, conformance findings,
+    /// anchor drift, check states: the figures are shown, the verdict
+    /// says nothing about them); `not_examined` names the axes this
+    /// surface never looks at, which another surface answers for.
     Health(commands::health::Args),
 
     /// Render the due-brief: open entities whose schema-declared due

@@ -9,6 +9,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The verdict-coverage line files advisory axes under a name that
+  says so.** Every verdict surface (`health`, `overview`, `status`,
+  `verify-anchors`, `projection verify`, `workspace dump`, and the MCP
+  `verdict_coverage` / `_verdict_coverage` stamps) now renders three
+  buckets: `examined` (the verdict answers for the axis), `advisory`
+  (the surface renders the axis, always or on request, beside the verdict
+  and never folds it in), and `not_examined` (the surface never looks at
+  the axis; another surface answers for it). Health's stale, conformance,
+  check-state and the other rendered-but-advisory axes read `advisory`
+  where they read `not_examined`, which every independent reader had
+  taken as "not looked at"; the examined set, the promotion of `anchors`
+  on include, and every verdict are unchanged. The coverage registry
+  refuses an axis filed in two buckets, and the health and MCP references
+  state the three buckets.
 - **The parse-generate fixpoint holds when a merged section ends inside
   an open HTML block.** A non-schema section whose content ends inside an
   HTML block of the kinds no blank line ends (`<!X`, `<!--`, `<?`,

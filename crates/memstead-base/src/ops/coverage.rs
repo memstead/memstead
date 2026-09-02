@@ -60,19 +60,35 @@ pub fn verdict_axes() -> Vec<&'static str> {
 }
 
 /// One surface's static coverage claim: which axes its verdict
-/// answers for, and why the rest are outside its scope. The two
+/// answers for, which it reports beside the verdict without folding
+/// them in, and which lie outside its scope altogether. The three
 /// lists must jointly name every axis in the vocabulary; a blanket
 /// "everything else" clause is deliberately impossible, because it
 /// would swallow a newly introduced axis silently, and the one
 /// permanent property this module owes is that a new axis fails
 /// every declaration that has not met it.
+///
+/// The three buckets, as they read on the wire:
+/// - `examined`: the verdict answers for the axis; a finding there
+///   makes the verdict fail.
+/// - `advisory`: the surface renders the axis (always, or on request)
+///   beside the verdict and never folds it in; a reader sees the
+///   figures, the verdict says nothing about them. Filing these under
+///   "not examined" read, to every independent reader so far, as "not
+///   looked at", and a gate reading the word would refuse a report
+///   that had done the work.
+/// - `not_examined`: the surface does not look at the axis at all;
+///   the reason names the surface that answers for it.
 #[derive(Debug, Clone, Copy)]
 pub struct AxisCoverage {
     /// Axes the surface's clean verdict actually examined.
     pub examined: &'static [&'static str],
-    /// Axes the verdict does not answer for, each with the reason a
+    /// Axes the surface reports beside its verdict without folding
+    /// them in, each with the reason a reader needs.
+    pub advisory: &'static [(&'static str, &'static str)],
+    /// Axes the surface does not examine, each with the reason a
     /// reader needs (typically: which surface answers for it instead).
-    pub excluded: &'static [(&'static str, &'static str)],
+    pub not_examined: &'static [(&'static str, &'static str)],
 }
 
 /// What a declared surface claims about verdicts.
@@ -100,11 +116,18 @@ impl AxisCoverage {
         self.examined.to_vec()
     }
 
-    /// The exclusions as they are stamped into surface output:
+    /// The advisory axes as they are stamped into surface output:
+    /// `(axis, reason)` pairs, so a reader can see which axes the
+    /// surface reports beside its verdict without reading the source.
+    pub fn advisory_wire(&self) -> Vec<(&'static str, &'static str)> {
+        self.advisory.to_vec()
+    }
+
+    /// The unexamined axes as they are stamped into surface output:
     /// `(axis, reason)` pairs, so a reader can see which axes the
     /// verdict does not cover without reading the source.
-    pub fn excluded_wire(&self) -> Vec<(&'static str, &'static str)> {
-        self.excluded.to_vec()
+    pub fn not_examined_wire(&self) -> Vec<(&'static str, &'static str)> {
+        self.not_examined.to_vec()
     }
 
     /// The declaration as it is stamped into surface output: one
@@ -118,15 +141,23 @@ impl AxisCoverage {
         self.wire_line_promoting(&[])
     }
 
-    /// The wire line with the named excluded axes promoted into the
-    /// examined set — for a report that rendered an opt-in axis this
-    /// pass (`--include anchors`) and therefore did examine it. An axis
-    /// not in the excluded list is ignored; the static declaration is
-    /// untouched.
+    /// The wire line with the named advisory or unexamined axes
+    /// promoted into the examined set — for a report that rendered an
+    /// opt-in axis this pass (`--include anchors`) and therefore did
+    /// examine it. An axis in neither list is ignored; the static
+    /// declaration is untouched.
     pub fn wire_line_promoting(&self, promoted: &[&str]) -> String {
         let mut examined: Vec<&str> = self.examined.to_vec();
+        let mut advisory: Vec<&str> = Vec::new();
         let mut not_examined: Vec<&str> = Vec::new();
-        for (a, _) in self.excluded {
+        for (a, _) in self.advisory {
+            if promoted.contains(a) {
+                examined.push(a);
+            } else {
+                advisory.push(a);
+            }
+        }
+        for (a, _) in self.not_examined {
             if promoted.contains(a) {
                 examined.push(a);
             } else {
@@ -134,8 +165,9 @@ impl AxisCoverage {
             }
         }
         format!(
-            "examined={}; not_examined={}",
+            "examined={}; advisory={}; not_examined={}",
             examined.join(","),
+            advisory.join(","),
             not_examined.join(",")
         )
     }
@@ -169,7 +201,10 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
         "config",
         "mounts",
     ],
-    excluded: &[
+    // Every axis health renders (always, or on `--include`) without
+    // folding it into the defect verdict. `anchors` is promoted into
+    // the examined set for the pass that rendered it.
+    advisory: &[
         (
             "orphans",
             "descriptive list; the defect verdict polices orphan stubs through the integrity findings",
@@ -221,11 +256,11 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
             "check states are derived views; the verdicts in them belong to their recording callers",
         ),
         ("ledger", "descriptive view of the check ledger"),
-        (
-            "projection",
-            "projection fidelity is answered by status and projection verify",
-        ),
     ],
+    not_examined: &[(
+        "projection",
+        "projection fidelity is answered by status and projection verify",
+    )],
 };
 
 /// The overview surface's coverage claim, shared by every consumer
@@ -235,16 +270,16 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
 /// diverge.
 pub const OVERVIEW_COVERAGE: AxisCoverage = AxisCoverage {
     examined: &["mounts", "config"],
-    excluded: &[
+    advisory: &[(
+        "dangling_links",
+        "rendered on request as a listing; the verdict over them is health's",
+    )],
+    not_examined: &[
         ("orphans", OVERVIEW_SCOPE),
         ("stubs", OVERVIEW_SCOPE),
         ("most_connected", OVERVIEW_SCOPE),
         ("missing_fields", OVERVIEW_SCOPE),
         ("stale", OVERVIEW_SCOPE),
-        (
-            "dangling_links",
-            "rendered on request as a listing; the verdict over them is health's",
-        ),
         ("tags", OVERVIEW_SCOPE),
         ("missing_required_outgoing", OVERVIEW_SCOPE),
         ("constraints", OVERVIEW_SCOPE),
@@ -255,10 +290,7 @@ pub const OVERVIEW_COVERAGE: AxisCoverage = AxisCoverage {
         ("anchors", OVERVIEW_SCOPE),
         ("friction", OVERVIEW_SCOPE),
         ("open_questions", OVERVIEW_SCOPE),
-        (
-            "vital_signs",
-            "descriptive model-truth counts; the remodel skill holds the thresholds",
-        ),
+        ("vital_signs", OVERVIEW_SCOPE),
         ("stale_derivations", OVERVIEW_SCOPE),
         ("checks", OVERVIEW_SCOPE),
         ("ledger", OVERVIEW_SCOPE),
@@ -284,11 +316,11 @@ const OVERVIEW_SCOPE: &str = "overview is a descriptive composition; its only \
 /// - an axis named by a declaration that the vocabulary does not
 ///   carry (a stale axis reading as coverage),
 /// - an axis in the vocabulary that a verdict declaration neither
-///   examines nor excludes (a new axis met by silence: the clean
-///   verdict would cover it by omission),
-/// - an axis both examined and excluded (a contradiction),
-/// - an exclusion or no-verdict claim with an empty reason (a
-///   declaration that declares nothing).
+///   examines, reports as advisory, nor excludes (a new axis met by
+///   silence: the clean verdict would cover it by omission),
+/// - an axis in more than one bucket (a contradiction),
+/// - an advisory, exclusion or no-verdict claim with an empty reason
+///   (a declaration that declares nothing).
 pub fn validate_coverage(
     vocab: &[&str],
     registry: &[SurfaceCoverage],
@@ -334,6 +366,8 @@ pub fn validate_coverage(
                 }
             }
             CoverageDisposition::Verdict(cov) => {
+                let in_advisory = |axis: &str| cov.advisory.iter().any(|(a, _)| *a == axis);
+                let in_not_examined = |axis: &str| cov.not_examined.iter().any(|(a, _)| *a == axis);
                 for axis in cov.examined {
                     if !vocab.contains(axis) {
                         findings.push(format!(
@@ -342,36 +376,48 @@ pub fn validate_coverage(
                             row.surface
                         ));
                     }
-                    if cov.excluded.iter().any(|(a, _)| a == axis) {
+                    if in_advisory(axis) || in_not_examined(axis) {
                         findings.push(format!(
                             "surface `{}` both examines and excludes axis `{axis}`",
                             row.surface
                         ));
                     }
                 }
-                for (axis, reason) in cov.excluded {
-                    if !vocab.contains(axis) {
-                        findings.push(format!(
-                            "surface `{}` excludes axis `{axis}`, which the \
-                             vocabulary does not carry",
-                            row.surface
-                        ));
+                for (bucket, rows) in [
+                    ("advisory", cov.advisory),
+                    ("not_examined", cov.not_examined),
+                ] {
+                    for (axis, reason) in rows {
+                        if !vocab.contains(axis) {
+                            findings.push(format!(
+                                "surface `{}` files axis `{axis}` as {bucket}, which the \
+                                 vocabulary does not carry",
+                                row.surface
+                            ));
+                        }
+                        if reason.trim().is_empty() {
+                            findings.push(format!(
+                                "surface `{}` files axis `{axis}` as {bucket} without a reason",
+                                row.surface
+                            ));
+                        }
                     }
-                    if reason.trim().is_empty() {
+                }
+                for (axis, _) in cov.advisory {
+                    if in_not_examined(axis) {
                         findings.push(format!(
-                            "surface `{}` excludes axis `{axis}` without a reason",
+                            "surface `{}` files axis `{axis}` as both advisory and not_examined",
                             row.surface
                         ));
                     }
                 }
                 for axis in vocab {
                     let examined = cov.examined.contains(axis);
-                    let excluded = cov.excluded.iter().any(|(a, _)| a == axis);
-                    if !examined && !excluded {
+                    if !examined && !in_advisory(axis) && !in_not_examined(axis) {
                         findings.push(format!(
                             "surface `{}` declares nothing for axis `{axis}`: \
                              its clean verdict would cover the axis by omission, \
-                             examine it or exclude it with a reason",
+                             examine it, report it as advisory, or exclude it with a reason",
                             row.surface
                         ));
                     }
@@ -394,7 +440,8 @@ mod tests {
             surface: "verify",
             disposition: CoverageDisposition::Verdict(AxisCoverage {
                 examined: &["anchors"],
-                excluded: &[("mounts", "the roster surface answers for mounts")],
+                advisory: &[],
+                not_examined: &[("mounts", "the roster surface answers for mounts")],
             }),
         }
     }
@@ -427,7 +474,8 @@ mod tests {
             surface: "verify",
             disposition: CoverageDisposition::Verdict(AxisCoverage {
                 examined: &["anchors"],
-                excluded: &[],
+                advisory: &[],
+                not_examined: &[],
             }),
         };
         let findings = validate_coverage(VOCAB, &[silent, ledger()], &["verify", "check"]);
@@ -501,7 +549,8 @@ mod tests {
             surface: "verify",
             disposition: CoverageDisposition::Verdict(AxisCoverage {
                 examined: &["anchors"],
-                excluded: &[("mounts", "  ")],
+                advisory: &[],
+                not_examined: &[("mounts", "  ")],
             }),
         };
         let findings = validate_coverage(VOCAB, &[bare, ledger()], &["verify", "check"]);
@@ -519,7 +568,8 @@ mod tests {
             surface: "verify",
             disposition: CoverageDisposition::Verdict(AxisCoverage {
                 examined: &["anchors", "mounts"],
-                excluded: &[("mounts", "also excluded")],
+                advisory: &[],
+                not_examined: &[("mounts", "also excluded")],
             }),
         };
         let findings = validate_coverage(VOCAB, &[both, ledger()], &["verify", "check"]);
@@ -540,6 +590,66 @@ mod tests {
                 .iter()
                 .any(|f| f.contains("declared more than once")),
             "{findings:?}"
+        );
+    }
+
+    /// An axis filed as both advisory and not examined is a
+    /// contradiction, not a double assurance.
+    #[test]
+    fn advisory_and_not_examined_fails() {
+        let both = SurfaceCoverage {
+            surface: "verify",
+            disposition: CoverageDisposition::Verdict(AxisCoverage {
+                examined: &["anchors"],
+                advisory: &[("mounts", "rendered beside the verdict")],
+                not_examined: &[("mounts", "the roster surface answers for mounts")],
+            }),
+        };
+        let findings = validate_coverage(VOCAB, &[both, ledger()], &["verify", "check"]);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.contains("both advisory and not_examined")),
+            "{findings:?}"
+        );
+    }
+
+    /// The wire line names all three buckets, and a promoted axis
+    /// leaves its bucket for the examined set.
+    #[test]
+    fn wire_line_names_three_buckets_and_promotes() {
+        let cov = AxisCoverage {
+            examined: &["mounts"],
+            advisory: &[("anchors", "rendered on request")],
+            not_examined: &[("projection", "another surface answers")],
+        };
+        assert_eq!(
+            cov.wire_line(),
+            "examined=mounts; advisory=anchors; not_examined=projection"
+        );
+        assert_eq!(
+            cov.wire_line_promoting(&["anchors"]),
+            "examined=mounts,anchors; advisory=; not_examined=projection"
+        );
+    }
+
+    /// The health declaration files every axis it can render as
+    /// examined or advisory and only the axis it never renders as not
+    /// examined: the bucket names say what the report did.
+    #[test]
+    fn health_declaration_buckets_follow_what_the_report_renders() {
+        let cov = HEALTH_COVERAGE;
+        for key in HEALTH_INCLUDE_KEYS {
+            let examined = cov.examined.contains(key);
+            let advisory = cov.advisory.iter().any(|(a, _)| a == key);
+            assert!(
+                examined || advisory,
+                "health include `{key}` renders on request, so it is examined or advisory"
+            );
+        }
+        assert_eq!(
+            cov.not_examined.iter().map(|(a, _)| *a).collect::<Vec<_>>(),
+            vec!["projection"]
         );
     }
 

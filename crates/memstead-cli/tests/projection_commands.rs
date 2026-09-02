@@ -3821,7 +3821,9 @@ fn human_report_opens_with_verdict_and_actions() {
     // grade): human mode must carry the stamp the JSON envelope
     // carries, or the human reader gets a verdict with no coverage.
     assert!(
-        text.contains("**Verdict coverage:** examined=projection,anchors; not_examined="),
+        text.contains(
+            "**Verdict coverage:** examined=projection,anchors; advisory=; not_examined="
+        ),
         "human mode carries the verdict-coverage stamp: {text}"
     );
 }

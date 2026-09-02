@@ -1814,7 +1814,9 @@ fn overview_single_chunk_carries_the_verdict_coverage_stamp() {
         .clone();
     let md = String::from_utf8(out).unwrap();
     assert!(
-        md.contains("_verdict_coverage: examined=mounts,config; not_examined="),
+        md.contains(
+            "_verdict_coverage: examined=mounts,config; advisory=dangling_links; not_examined="
+        ),
         "single-chunk overview must carry the coverage stamp in its own \
          frontmatter:\n{md}"
     );

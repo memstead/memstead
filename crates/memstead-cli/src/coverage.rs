@@ -48,7 +48,8 @@ pub const STATUS: SurfaceCoverage = SurfaceCoverage {
     surface: "status",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["projection"],
-        excluded: &[
+        advisory: &[],
+        not_examined: &[
             ("orphans", STATUS_SCOPE),
             ("stubs", STATUS_SCOPE),
             ("most_connected", STATUS_SCOPE),
@@ -87,7 +88,8 @@ pub const VERIFY_ANCHORS: SurfaceCoverage = SurfaceCoverage {
     surface: "verify-anchors",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["anchors"],
-        excluded: &[
+        advisory: &[],
+        not_examined: &[
             ("orphans", ANCHORS_ONLY),
             ("stubs", ANCHORS_ONLY),
             ("most_connected", ANCHORS_ONLY),
@@ -118,7 +120,8 @@ pub const PROJECTION_VERIFY: SurfaceCoverage = SurfaceCoverage {
     surface: "projection verify",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["projection", "anchors"],
-        excluded: &[
+        advisory: &[],
+        not_examined: &[
             ("orphans", VERIFY_SCOPE),
             ("stubs", VERIFY_SCOPE),
             ("most_connected", VERIFY_SCOPE),
@@ -149,7 +152,8 @@ pub const WORKSPACE_DUMP: SurfaceCoverage = SurfaceCoverage {
     surface: "workspace dump",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
         examined: &["mounts", "config"],
-        excluded: &[
+        advisory: &[],
+        not_examined: &[
             ("orphans", DUMP_SCOPE),
             ("stubs", DUMP_SCOPE),
             ("most_connected", DUMP_SCOPE),
