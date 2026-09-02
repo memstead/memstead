@@ -188,6 +188,85 @@ pub fn closing_fence_if_unterminated(text: &str) -> Option<String> {
     }
 }
 
+/// When `text` ends inside an open HTML block of a kind no blank line
+/// ends (CommonMark types 1–5: a `<script>`/`<pre>`/`<style>`/`<textarea>`
+/// tag, `<!--`, `<?`, `<!` + letter, `<![CDATA[`), return the line that
+/// terminates it. `None` when the trailing context is neutral: no such
+/// block open, or a type 6/7 block that the caller's blank-line join
+/// already ends.
+///
+/// Inside such a block the referee reads no fence at all, so whatever a
+/// caller appends after `text` is parsed differently than it was where
+/// it came from: a fence opener that hid a `## ` line in situ is plain
+/// text after the append, the line becomes a heading, and the document
+/// shifts structure on every parse→generate round. Same oracle discipline
+/// as [`closing_fence_if_unterminated`]: the referee decides via a probe
+/// (a fence-plus-marker appended after a blank line must come back
+/// masked), the candidate closer is derived from the open block's own
+/// start condition, and the probe verifies it. A `text` that ends inside
+/// an open fence is the fence oracle's case, not this one: it returns
+/// `None`, so callers run the fence close first.
+pub fn closing_html_block_if_unterminated(text: &str) -> Option<String> {
+    if !text.contains('<') {
+        return None;
+    }
+    const PROBE: &str = "memstead-html-probe";
+    // A fence appended after a blank line must mask the marker; if the
+    // marker survives, the trailing context hides fences.
+    let fences_work =
+        |t: &str| !mask_code_blocks(&format!("{t}\n\n```\n{PROBE}\n```")).contains(PROBE);
+    if fences_work(text) {
+        return None;
+    }
+    // Inside an open fence the probe's own fence line closes it and the
+    // marker survives too — that case belongs to the fence oracle.
+    if closing_fence_if_unterminated(text).is_some() {
+        return None;
+    }
+    // The open block is the last HTML block whose range reaches the end
+    // of the text; its first line carries the start condition.
+    let open = Parser::new_ext(text, parser_options())
+        .into_offset_iter()
+        .filter(|(event, _)| matches!(event, Event::Start(Tag::HtmlBlock)))
+        .map(|(_, range)| range)
+        .filter(|r| r.end >= text.trim_end().len())
+        .last()?;
+    let first_line = text[open.start..].lines().next().unwrap_or("").trim_start();
+    let lower = first_line.to_ascii_lowercase();
+    let closer = if lower.starts_with("<!--") {
+        "-->".to_string()
+    } else if lower.starts_with("<?") {
+        "?>".to_string()
+    } else if lower.starts_with("<![cdata[") {
+        "]]>".to_string()
+    } else if lower.starts_with("<!") {
+        ">".to_string()
+    } else {
+        let tag = ["script", "pre", "style", "textarea"]
+            .into_iter()
+            .find(|tag| {
+                lower
+                    .strip_prefix('<')
+                    .and_then(|rest| rest.strip_prefix(tag))
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '>']))
+            })?;
+        format!("</{tag}>")
+    };
+    if fences_work(&format!("{text}\n{closer}")) {
+        Some(closer)
+    } else {
+        None
+    }
+}
+
+/// The one question both concatenation sites ask: does `text` end inside
+/// a block context that would change how the next appended piece is
+/// read? A fence first (it swallows headings), then an HTML block (it
+/// hides fences); never both, since neither can open inside the other.
+pub fn closing_context_if_unterminated(text: &str) -> Option<String> {
+    closing_fence_if_unterminated(text).or_else(|| closing_html_block_if_unterminated(text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,5 +466,72 @@ mod tests {
         let masked = mask_all(input);
         assert!(!masked.contains('`'));
         assert!(masked.contains("after"));
+    }
+
+    #[test]
+    fn unterminated_html_block_yields_its_own_closer() {
+        // Type 4: `<!` + letter, ended only by a line containing `>`.
+        assert_eq!(
+            closing_html_block_if_unterminated("<!S**: [[-----\nmore"),
+            Some(">".to_string())
+        );
+        // Type 2: a comment.
+        assert_eq!(
+            closing_html_block_if_unterminated("<!-- draft"),
+            Some("-->".to_string())
+        );
+        // Type 3: a processing instruction.
+        assert_eq!(
+            closing_html_block_if_unterminated("<?php"),
+            Some("?>".to_string())
+        );
+        // Type 5: CDATA.
+        assert_eq!(
+            closing_html_block_if_unterminated("<![CDATA[ raw"),
+            Some("]]>".to_string())
+        );
+        // Type 1: the raw-text tags, case-insensitive, closed by their own tag.
+        assert_eq!(
+            closing_html_block_if_unterminated("<Script>\nlet x;"),
+            Some("</script>".to_string())
+        );
+        assert_eq!(
+            closing_html_block_if_unterminated("<pre class=\"x\">\ntext"),
+            Some("</pre>".to_string())
+        );
+        // The combined oracle picks the same line.
+        assert_eq!(
+            closing_context_if_unterminated("<!-- draft"),
+            Some("-->".to_string())
+        );
+    }
+
+    #[test]
+    fn closed_and_blank_line_ended_html_blocks_need_no_closer() {
+        assert_eq!(closing_html_block_if_unterminated("<!-- a -->\ntext"), None);
+        assert_eq!(
+            closing_html_block_if_unterminated("<!S open\nclosed here >"),
+            None
+        );
+        // Type 6/7 end at the blank line every caller joins with.
+        assert_eq!(
+            closing_html_block_if_unterminated("<div>\nstill html"),
+            None
+        );
+        assert_eq!(
+            closing_html_block_if_unterminated("<span>inline</span> prose"),
+            None
+        );
+        assert_eq!(closing_html_block_if_unterminated("no markup"), None);
+        // An open fence is the fence oracle's case; the combined oracle
+        // returns the fence closer, not an HTML one.
+        assert_eq!(
+            closing_html_block_if_unterminated("```\n<!-- inside code"),
+            None
+        );
+        assert_eq!(
+            closing_context_if_unterminated("```\n<!-- inside code"),
+            Some("```".to_string())
+        );
     }
 }

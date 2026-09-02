@@ -790,7 +790,15 @@ fn build_catch_all(sections: &SplitSections, schema: &TypeDefinition) -> String 
     // next piece, and no closer is ever added for a construct the
     // document context does not read as a fence. The oracle verifies
     // its closer against the mask, so the appended line is a real
-    // closer wherever it lands.
+    // closer wherever it lands. The context is not only fences: an
+    // HTML block of the kinds no blank line ends (`<!X`, `<!--`, `<?`,
+    // `<![CDATA[`, a `<script>`-family tag) hides every fence the
+    // referee would otherwise read, so a piece that ends inside one
+    // changes what the NEXT piece's fences mean — a `## ` line that a
+    // fence masked in situ surfaces as a heading after the merge, and
+    // as an empty non-schema section it is dropped a round later
+    // (fuzz finding, long tier, 0.17.0 release readiness run, corpus
+    // member `crash-1233c134…`). The same oracle closes both.
     let mut joined = String::new();
     for piece in parts {
         if joined.is_empty() {
@@ -799,7 +807,7 @@ fn build_catch_all(sections: &SplitSections, schema: &TypeDefinition) -> String 
             joined.push_str("\n\n");
             joined.push_str(&piece);
         }
-        if let Some(closer) = crate::markdown::closing_fence_if_unterminated(&joined) {
+        if let Some(closer) = crate::markdown::closing_context_if_unterminated(&joined) {
             joined.push('\n');
             joined.push_str(&closer);
         }
@@ -1586,6 +1594,47 @@ Third unknown.
         );
         let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
         let e2 = parse_markdown(&m1, "vt.md", &schema, "specs").unwrap();
+        let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
+        assert_eq!(m1, m2, "parse→generate is a fixpoint");
+    }
+
+    // Fixture pinned by the coverage-guided long tier (0.17.0 release
+    // readiness run, 2026-09-02; corpus member `crash-1233c134…`): a
+    // non-schema section whose content ends inside an HTML block of a
+    // kind no blank line ends (`<!X`, type 4) was merged in front of a
+    // later piece. In situ a `>` line in the catch-all's own content had
+    // closed the block, so the later piece's tilde fence opened and
+    // masked a `## ` line into content; merged, the block stayed open,
+    // the fence became prose, the masked line surfaced as an empty
+    // non-schema heading, and the next round dropped it. The merge's
+    // incremental context close now terminates HTML blocks like fences.
+    #[test]
+    fn merged_open_html_block_is_closed_so_later_fences_keep_masking() {
+        let schema = spec_schema();
+        let md = "\
+---
+type: spec
+---
+# T
+
+## Claim
+<!X
+
+## Specifies
+done >
+
+## Later
+~~~
+## Hidden
+";
+        let e1 = parse_markdown(md, "html.md", &schema, "specs").unwrap();
+        assert_eq!(
+            e1.entity.sections["specifies"],
+            "done >\n\n## Claim\n<!X\n>\n\n## Later\n~~~\n## Hidden\n~~~",
+            "the open HTML block closes before the next piece, the dangling fence after it"
+        );
+        let m1 = crate::entity::generator::generate_markdown(&e1.entity, &schema);
+        let e2 = parse_markdown(&m1, "html.md", &schema, "specs").unwrap();
         let m2 = crate::entity::generator::generate_markdown(&e2.entity, &schema);
         assert_eq!(m1, m2, "parse→generate is a fixpoint");
     }

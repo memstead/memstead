@@ -34,7 +34,7 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
     // endings of their own, so its tail after a CR is a line that can
     // open a fence), which masked every following section on the next
     // parse (fuzz finding, corpus member `crash-711dc30a…`).
-    parts.push(close_open_fence(format!("# {}", entity.title)));
+    parts.push(close_open_context(format!("# {}", entity.title)));
 
     // Required sections (schema order)
     for s in schema.sections.iter().filter(|s| s.required) {
@@ -43,7 +43,7 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             .get(s.key.as_str())
             .map(|v| v.as_str())
             .unwrap_or("");
-        parts.push(close_open_fence(format!("## {}\n{content}", s.heading)));
+        parts.push(close_open_context(format!("## {}\n{content}", s.heading)));
     }
 
     // Relationships section (between required and optional).
@@ -94,7 +94,7 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
                 }
             })
             .collect();
-        parts.push(close_open_fence(format!(
+        parts.push(close_open_context(format!(
             "## Relationships\n{}",
             rel_lines.join("\n")
         )));
@@ -114,21 +114,23 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
             continue;
         };
         // All sections get the same spacing for roundtrip stability
-        parts.push(close_open_fence(format!("## {}\n\n{content}", s.heading)));
+        parts.push(close_open_context(format!("## {}\n\n{content}", s.heading)));
     }
 
     parts.join("\n\n") + "\n"
 }
 
-/// Terminate an emitted part that ends inside an open code fence.
+/// Terminate an emitted part that ends inside an open block context: a
+/// code fence, or an HTML block of the kinds no blank line ends.
 /// Without this, everything the generator writes after the part
 /// — the following section headings included — is inside that fence on
 /// the next parse: sections are absorbed, and the document grows on
-/// every parse→generate round. The fix is at generation, not by
-/// mutating the stored content: one round normalises (the reparsed
-/// section content then carries the closing fence), after which
-/// parse→generate is a fixpoint. Balanced parts are untouched, so
-/// canonical bytes of well-formed entities do not change.
+/// every parse→generate round; an open HTML block hides the next
+/// part's fences instead, so masked lines surface as structure. The
+/// fix is at generation, not by mutating the stored content: one round
+/// normalises (the reparsed section content then carries the closer),
+/// after which parse→generate is a fixpoint. Balanced parts are
+/// untouched, so canonical bytes of well-formed entities do not change.
 ///
 /// The check runs over exactly the bytes emitted — heading and title
 /// lines included, not just section content — because a heading or
@@ -136,8 +138,8 @@ pub fn generate_markdown(entity: &Entity, schema: &TypeDefinition) -> String {
 /// are CommonMark line endings of their own, so its tail after a CR is
 /// a line that can open a fence (fuzz findings, corpus members
 /// `crash-eca0fc99…` and `crash-711dc30a…`).
-fn close_open_fence(mut part: String) -> String {
-    if let Some(closer) = crate::markdown::closing_fence_if_unterminated(&part) {
+fn close_open_context(mut part: String) -> String {
+    if let Some(closer) = crate::markdown::closing_context_if_unterminated(&part) {
         part.push('\n');
         part.push_str(&closer);
     }

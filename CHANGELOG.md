@@ -9,6 +9,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The parse-generate fixpoint holds when a merged section ends inside
+  an open HTML block.** A non-schema section whose content ends inside an
+  HTML block of the kinds no blank line ends (`<!X`, `<!--`, `<?`,
+  `<![CDATA[`, a `<script>`-family tag) is merged into the catch-all in
+  front of later pieces; the open block hid every fence in those pieces
+  on the next parse, so a `## ` line a fence had masked in situ surfaced
+  as an empty non-schema heading and was dropped a round later, and a
+  re-save of an unchanged file produced a diff. The merge's incremental
+  context close and the generator's part close now terminate such a
+  block with its own end line (`>`, `-->`, `?>`, `]]>`, `</script>`),
+  verified against the CommonMark referee the way fence closers are;
+  balanced content is untouched. Found by the long-tier fuzzer on the
+  0.17.0 release readiness run; the artifact is pinned in the shared
+  corpus (`crash-1233c134…`) and a reduced fixture in the parser tests.
 - **The wasm health surface no longer traps once the stale axis defers to
   anchor state.** The engine's default mutation clock was
   `SystemTime::now`, which is unimplemented on `wasm32-unknown-unknown`
