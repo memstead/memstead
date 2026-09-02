@@ -96,7 +96,16 @@ fetch-inspect-pull:
 memstead fetch knowledge     # see what moved (updated refs print per ref)
 memstead pull knowledge      # fast-forward + reload, refuses on divergence
 memstead push knowledge      # send your own commits
+memstead push --all          # every mem branch plus __MEMSTEAD, fast-forward only
 ```
+
+`push --all` is the whole-workspace form: it lists the remote once, skips
+every ref already in sync (a run with nothing to send prints nothing),
+prints one line per ref it moved, and names a ref it could not
+fast-forward (`NON_FAST_FORWARD`) while still pushing the others, exiting
+non-zero at the end. It also carries the `__MEMSTEAD` ref, where schemas
+and mem configs live, which the single-mem form has no route for. There
+is no `--force` on `--all`.
 
 `pull` validates the incoming tree against the mem's pinned schema
 before moving anything (`SCHEMA_VIOLATION_IN_FETCH` refuses the whole

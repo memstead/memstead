@@ -38,7 +38,10 @@ pub use changes::{
 pub use commit_envelope::{CommitEnvelope, EntityChange};
 pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 pub use export::{MemExportBytes, MemExportError};
-pub use transport::{FetchOutcome, PullOutcome, PushOutcome, RemoteAddOutcome, UpdatedRef};
+pub use transport::{
+    FetchOutcome, PullOutcome, PushAllOutcome, PushOutcome, PushedRef, RefusedRef,
+    RemoteAddOutcome, UpdatedRef,
+};
 
 use crate::entity::EntityId;
 use indexmap::IndexMap;

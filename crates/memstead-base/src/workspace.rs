@@ -109,6 +109,12 @@ impl Mount {
     }
 }
 
+/// Branch name of the mem-repo's unified engine ref — schemas plus
+/// per-mem configs in one tree. Not a mem: it has no mount, and the
+/// transport verbs that walk every ref (`push --all`) carry it by
+/// name.
+pub const MEMSTEAD_REF_BRANCH: &str = "__MEMSTEAD";
+
 /// A mount's declared branch as a fully-qualified local ref. The
 /// `branch` field tolerates both `refs/heads/<path>` (used verbatim,
 /// any `refs/` value is) and bare `<path>` (prefixed) — the same

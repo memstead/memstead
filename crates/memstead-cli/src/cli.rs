@@ -364,7 +364,11 @@ pub enum Command {
     /// Push a mem's branch to a git remote. `--force` uses
     /// force-with-lease semantics; without it, non-fast-forward pushes
     /// refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the
-    /// remote is not configured.
+    /// remote is not configured. `--all` pushes every mounted
+    /// git-branch mem's branch plus the workspace's schema-and-config
+    /// ref, fast-forward only: silent for refs already in sync, one line
+    /// per ref moved, a refused ref named while the others still go,
+    /// non-zero exit at the end.
     #[cfg(feature = "mem-repo")]
     Push(commands::transport::PushArgs),
 

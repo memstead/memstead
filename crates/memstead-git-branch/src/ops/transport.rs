@@ -222,6 +222,51 @@ pub fn push_in_gitdir(
     })
 }
 
+/// `Engine::push_all` first half: the remote's branch table in one
+/// round-trip (`git ls-remote --heads <remote>`), as `(full ref
+/// name, sha)` pairs. The same failure classification as `fetch`:
+/// `UNKNOWN_REMOTE:<remote>` when the remote is not configured or
+/// unreachable as such.
+pub fn ls_remote_in_gitdir(
+    gitdir: &Path,
+    remote: &str,
+) -> Result<Vec<(String, String)>, BackendError> {
+    if !gitdir.is_dir() {
+        return Err(BackendError::Other(format!(
+            "gitdir not found: {}",
+            gitdir.display()
+        )));
+    }
+    let remote_owned = remote.to_string();
+    let stdout = run_git(gitdir, &["ls-remote", "--heads", remote], move |stderr| {
+        classify_remote_failure(&remote_owned, stderr)
+    })?;
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            let (sha, name) = line.split_once('\t')?;
+            Some((name.trim().to_string(), sha.trim().to_string()))
+        })
+        .collect())
+}
+
+/// `Engine::push_all` second half: one local ref's SHA, `Ok(None)`
+/// when the ref does not exist. The `Result` is for the transport
+/// contract; `git rev-parse` itself never fails here beyond "not
+/// found".
+pub fn resolve_ref_in_gitdir(
+    gitdir: &Path,
+    ref_name: &str,
+) -> Result<Option<String>, BackendError> {
+    if !gitdir.is_dir() {
+        return Err(BackendError::Other(format!(
+            "gitdir not found: {}",
+            gitdir.display()
+        )));
+    }
+    Ok(resolve_ref(gitdir, ref_name))
+}
+
 /// `memstead mem-repo remote-add` implementation: configures (or
 /// re-points) the named remote on the mem-repo gitdir. Upsert
 /// semantics — an existing remote gets `git remote set-url`, a new one
@@ -773,6 +818,165 @@ mod tests {
 
         // The remote never saw the push.
         assert!(resolve_ref(&remote, "refs/heads/specs").is_none());
+    }
+
+    /// A `default@1.0.0` spec that passes the pre-push schema gate
+    /// (`body` above omits the required `Purpose` section on purpose
+    /// for the transport-only tests).
+    fn valid_body(title: &str) -> String {
+        format!(
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# {title}\n\n## Identity\n\n{title}\n\n## Purpose\n\n{title}\n"
+        )
+    }
+
+    fn git_branch_mount(gitdir: &Path, mem: &str, branch: &str) -> memstead_base::Mount {
+        memstead_base::Mount {
+            mem: mem.to_string(),
+            schema: Some(memstead_schema::SchemaRef::new(
+                "default",
+                semver::Version::new(1, 0, 0),
+            )),
+            storage: memstead_base::MountStorage::GitBranch {
+                gitdir: gitdir.to_path_buf(),
+                branch: branch.to_string(),
+            },
+            capability: memstead_base::MountCapability::Write,
+            lifecycle: memstead_base::MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        }
+    }
+
+    /// `ls-remote` lists the remote's branches as full ref names and
+    /// classifies an unconfigured remote as `UNKNOWN_REMOTE`.
+    #[test]
+    fn ls_remote_lists_heads_and_types_unknown_remote() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+
+        assert!(ls_remote_in_gitdir(&local, "origin").unwrap().is_empty());
+        let sha = commit(&local, "specs", "a.md", &body("A"));
+        push_in_gitdir(&local, "origin", "specs", "specs", false).unwrap();
+        assert_eq!(
+            ls_remote_in_gitdir(&local, "origin").unwrap(),
+            vec![("refs/heads/specs".to_string(), sha)]
+        );
+
+        let err = ls_remote_in_gitdir(&local, "nowhere").unwrap_err();
+        assert!(err.to_string().contains("UNKNOWN_REMOTE:nowhere"), "{err}");
+    }
+
+    /// A1 AC1: `push_all` moves exactly the lagging refs — two mem
+    /// branches and `__MEMSTEAD` ahead, one branch in sync — reports
+    /// the synced one as such, and a second run moves nothing. With
+    /// one branch made non-fast-forward on the remote the run
+    /// refuses that ref by name, still pushes the other lagging refs,
+    /// and the caller sees the refusal on the outcome.
+    #[test]
+    fn engine_push_all_moves_only_lagging_refs_and_continues_past_a_refusal() {
+        let tmp = TempDir::new().unwrap();
+        let local = init_local(&tmp, "local");
+        let remote = init_bare_remote(&tmp, "remote.git");
+        add_remote(&local, "origin", &remote);
+
+        for mem in ["alpha", "beta", "gamma"] {
+            commit(&local, mem, "a.md", &valid_body("A"));
+        }
+        {
+            let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/__MEMSTEAD".to_string());
+            writer
+                .write_entity(Path::new("schemas/README.md"), b"seed\n")
+                .unwrap();
+            writer.commit("seed", &CommitContext::internal()).unwrap();
+        }
+        // Bring everything in sync first, then move three of the four.
+        for r in ["alpha", "beta", "gamma", "__MEMSTEAD"] {
+            push_in_gitdir(&local, "origin", r, r, false).unwrap();
+        }
+        let alpha2 = commit(&local, "alpha", "b.md", &valid_body("B"));
+        let beta2 = commit(&local, "beta", "b.md", &valid_body("B"));
+        let memstead2 = {
+            let writer = GitTreeMemWriter::new(local.clone(), "refs/heads/__MEMSTEAD".to_string());
+            writer
+                .write_entity(Path::new("schemas/README.md"), b"seed 2\n")
+                .unwrap();
+            writer.commit("move", &CommitContext::internal()).unwrap()
+        };
+
+        let mounts = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .map(|m| {
+                let mount = git_branch_mount(&local, m, m);
+                let backend = crate::storage::instantiate_full_backend(&mount).unwrap();
+                (mount, backend)
+            })
+            .collect();
+        let mut engine = memstead_base::Engine::from_mounts(mounts).unwrap();
+        engine.set_git_branch_ops(crate::storage::FULL_GIT_BRANCH_OPS);
+
+        let out = engine.push_all("origin").unwrap();
+        assert!(out.refused.is_empty(), "refused: {:?}", out.refused);
+        let moved: Vec<(&str, &str)> = out
+            .pushed
+            .iter()
+            .map(|p| (p.ref_name.as_str(), p.new_sha.as_str()))
+            .collect();
+        assert_eq!(
+            moved,
+            vec![
+                ("refs/heads/__MEMSTEAD", memstead2.as_str()),
+                ("refs/heads/alpha", alpha2.as_str()),
+                ("refs/heads/beta", beta2.as_str()),
+            ]
+        );
+        assert_eq!(out.in_sync, vec!["refs/heads/gamma".to_string()]);
+        assert!(out.refused.is_empty());
+        assert!(out.pushed.iter().all(|p| !p.previous_sha.is_empty()));
+        assert_eq!(out.pushed[1].mem.as_deref(), Some("alpha"));
+        assert_eq!(out.pushed[0].mem, None);
+        assert_eq!(
+            resolve_ref(&remote, "refs/heads/alpha").as_deref(),
+            Some(alpha2.as_str())
+        );
+
+        // Second run: nothing lags.
+        let again = engine.push_all("origin").unwrap();
+        assert!(again.pushed.is_empty());
+        assert!(again.refused.is_empty());
+        assert_eq!(again.in_sync.len(), 4);
+
+        // Diverge `beta` on the remote; move `gamma` locally.
+        let other = init_local(&tmp, "other");
+        add_remote(&other, "origin", &remote);
+        pull_in_gitdir(&other, "origin", "beta", "beta").unwrap();
+        commit(&other, "beta", "remote-only.md", &valid_body("R"));
+        push_in_gitdir(&other, "origin", "beta", "beta", false).unwrap();
+        let gamma2 = commit(&local, "gamma", "b.md", &valid_body("B"));
+
+        let third = engine.push_all("origin").unwrap();
+        assert_eq!(third.refused.len(), 1);
+        assert_eq!(third.refused[0].ref_name, "refs/heads/beta");
+        assert_eq!(third.refused[0].mem.as_deref(), Some("beta"));
+        assert_eq!(third.refused[0].code, "NON_FAST_FORWARD");
+        assert_eq!(
+            third
+                .pushed
+                .iter()
+                .map(|p| p.ref_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["refs/heads/gamma"]
+        );
+        assert_eq!(
+            resolve_ref(&remote, "refs/heads/gamma").as_deref(),
+            Some(gamma2.as_str())
+        );
+        // The diverged remote branch was not overwritten.
+        assert_ne!(
+            resolve_ref(&remote, "refs/heads/beta").as_deref(),
+            Some(beta2.as_str())
+        );
     }
 
     /// Criterion 4 (05/04): a mem whose declared branch is not its

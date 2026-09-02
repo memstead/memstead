@@ -672,6 +672,162 @@ impl Engine {
         })
     }
 
+    /// Push every mounted git-branch mem's declared branch, plus the
+    /// `__MEMSTEAD` ref of every mem-repo those mounts share, to
+    /// `remote` — fast-forward only, there is no force variant. One
+    /// `ls-remote` per mem-repo decides which refs lag; a ref whose
+    /// local and remote SHA agree is reported `in_sync` and never
+    /// sent. Each lagging mem branch goes through [`Self::push`]
+    /// (the pre-push schema gate included); `__MEMSTEAD` goes through
+    /// the same transport seam with no schema gate, it IS the
+    /// schemas. A refusal on one ref lands in `refused` with its
+    /// typed code and the run continues with the next ref — the
+    /// caller decides the exit status from the outcome. Folder,
+    /// archive and in-memory mounts have no branch and are skipped.
+    /// Only a remote that cannot be listed at all (`UNKNOWN_REMOTE`)
+    /// fails the run as a whole.
+    pub fn push_all(&self, remote: &str) -> Result<crate::ops::PushAllOutcome, EngineError> {
+        use crate::ops::{PushAllOutcome, PushedRef, RefusedRef};
+
+        let hook = self.git_branch_ops.ok_or_else(|| {
+            EngineError::Backend(BackendError::Other(
+                "git-branch push hook not installed (full flavour not loaded)".to_string(),
+            ))
+        })?;
+
+        // Mem-repos in mount order, each once; a workspace may spread
+        // its mounts over more than one gitdir.
+        let mut gitdirs: Vec<std::path::PathBuf> = Vec::new();
+        for m in &self.mounts {
+            if let MountStorage::GitBranch { gitdir, .. } = &m.mount.storage
+                && !gitdirs.contains(gitdir)
+            {
+                gitdirs.push(gitdir.clone());
+            }
+        }
+
+        let mut outcome = PushAllOutcome {
+            remote: remote.to_string(),
+            ..Default::default()
+        };
+
+        for gitdir in &gitdirs {
+            let remote_refs: std::collections::HashMap<String, String> =
+                (hook.ls_remote)(gitdir, remote)
+                    .map_err(|e| match e {
+                        BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                            EngineError::UnknownRemote(
+                                msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
+                            )
+                        }
+                        other => EngineError::Backend(other),
+                    })?
+                    .into_iter()
+                    .collect();
+
+            // `__MEMSTEAD` first: schemas and mem configs before the
+            // content that depends on them, so a clone that pulls
+            // mid-run never sees a mem its schema ref lacks.
+            let memstead_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_REF_BRANCH);
+            let mut targets: Vec<(String, Option<String>, String)> = Vec::new();
+            match (hook.resolve_ref)(gitdir, &memstead_ref) {
+                Ok(Some(_)) => targets.push((
+                    memstead_ref.clone(),
+                    None,
+                    crate::MEMSTEAD_REF_BRANCH.to_string(),
+                )),
+                Ok(None) => {}
+                Err(e) => return Err(EngineError::Backend(e)),
+            }
+            for m in &self.mounts {
+                if let MountStorage::GitBranch { gitdir: g, branch } = &m.mount.storage
+                    && g == gitdir
+                {
+                    targets.push((
+                        crate::workspace::branch_full_ref(branch),
+                        Some(m.mount.mem.clone()),
+                        branch.clone(),
+                    ));
+                }
+            }
+
+            for (ref_name, mem, branch) in targets {
+                let local_sha = match (hook.resolve_ref)(gitdir, &ref_name) {
+                    Ok(Some(sha)) => sha,
+                    Ok(None) => {
+                        outcome.refused.push(RefusedRef {
+                            ref_name: ref_name.clone(),
+                            mem: mem.clone(),
+                            code: "UNKNOWN_REF".to_string(),
+                            message: format!(
+                                "{ref_name} does not exist locally{}",
+                                mem.as_deref()
+                                    .map(|m| format!(" (mem `{m}`'s declared branch)"))
+                                    .unwrap_or_default()
+                            ),
+                        });
+                        continue;
+                    }
+                    Err(e) => return Err(EngineError::Backend(e)),
+                };
+                let previous_sha = remote_refs.get(&ref_name).cloned().unwrap_or_default();
+                if previous_sha == local_sha {
+                    outcome.in_sync.push(ref_name);
+                    continue;
+                }
+                let result = match &mem {
+                    Some(m) => self.push(m, remote, false).map(|o| o.new_sha),
+                    None => (hook.push)(gitdir, remote, &branch, crate::MEMSTEAD_REF_BRANCH, false)
+                        .map(|o| o.new_sha)
+                        .map_err(|e| match e {
+                            BackendError::Other(msg) if msg.starts_with("NON_FAST_FORWARD:") => {
+                                EngineError::NonFastForward {
+                                    mem: crate::MEMSTEAD_REF_BRANCH.to_string(),
+                                    remote: remote.to_string(),
+                                }
+                            }
+                            BackendError::Other(msg) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                                EngineError::UnknownRemote(
+                                    msg.trim_start_matches("UNKNOWN_REMOTE:").trim().to_string(),
+                                )
+                            }
+                            other => EngineError::Backend(other),
+                        }),
+                };
+                match result {
+                    Ok(new_sha) => outcome.pushed.push(PushedRef {
+                        ref_name,
+                        mem,
+                        previous_sha,
+                        new_sha,
+                    }),
+                    Err(e) => {
+                        // The single-mem refusal names `force`, which
+                        // `--all` does not offer; say what applies here.
+                        let message = match &e {
+                            EngineError::NonFastForward { .. } => format!(
+                                "remote `{remote}` carries commits on {ref_name} this clone lacks; \
+                                 fetch and pull {}, then push again",
+                                mem.as_deref()
+                                    .map(|m| format!("mem `{m}`"))
+                                    .unwrap_or_else(|| "the schema ref".to_string()),
+                            ),
+                            other => other.to_string(),
+                        };
+                        outcome.refused.push(RefusedRef {
+                            ref_name,
+                            mem,
+                            code: e.code().to_string(),
+                            message,
+                        })
+                    }
+                }
+            }
+        }
+
+        Ok(outcome)
+    }
+
     /// Configure (or re-point) a named remote on the workspace's
     /// mem-repo, so `fetch` / `pull` / `push` have somewhere to go.
     /// Upsert semantics — safe to re-run with a new URL. The mem-repo

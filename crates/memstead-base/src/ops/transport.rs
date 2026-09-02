@@ -74,6 +74,55 @@ pub struct PushOutcome {
     pub forced: bool,
 }
 
+/// Outcome of `Engine::push_all`: every mounted git-branch mem's
+/// declared branch plus the `__MEMSTEAD` ref of each mem-repo,
+/// pushed fast-forward only. The run never stops at the first
+/// refusal — a ref that cannot move lands in `refused` and the
+/// remaining refs are still attempted, so one diverged branch never
+/// holds back the publication of the others. A ref already at the
+/// remote's SHA is recorded in `in_sync` and not pushed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PushAllOutcome {
+    /// Remote name the run targeted.
+    pub remote: String,
+    /// Refs the remote now carries at a new SHA, in push order.
+    pub pushed: Vec<PushedRef>,
+    /// Refs whose local and remote SHA already agreed — nothing was
+    /// sent for them.
+    pub in_sync: Vec<String>,
+    /// Refs the run could not move, each with its typed code.
+    pub refused: Vec<RefusedRef>,
+}
+
+/// One ref `Engine::push_all` moved on the remote.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PushedRef {
+    /// Full ref name (e.g. `refs/heads/specs`, `refs/heads/__MEMSTEAD`).
+    pub ref_name: String,
+    /// Mem the ref belongs to; `None` for the `__MEMSTEAD` ref.
+    pub mem: Option<String>,
+    /// SHA the remote held before the push. Empty when the remote
+    /// did not carry the ref yet.
+    pub previous_sha: String,
+    /// SHA the remote acknowledged after the push.
+    pub new_sha: String,
+}
+
+/// One ref `Engine::push_all` could not move.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RefusedRef {
+    /// Full ref name the refusal is about.
+    pub ref_name: String,
+    /// Mem the ref belongs to; `None` for the `__MEMSTEAD` ref.
+    pub mem: Option<String>,
+    /// Typed refusal code (`NON_FAST_FORWARD`, `LOCAL_INVALID_STATE`,
+    /// `UNKNOWN_REF`, …) — the same vocabulary the single-mem push
+    /// returns as an error.
+    pub code: String,
+    /// The refusal's human message.
+    pub message: String,
+}
+
 /// Outcome of `Engine::remote_add`. Configures a named remote on the
 /// workspace's mem-repo so `fetch` / `pull` / `push` have somewhere to
 /// go — upsert semantics (re-pointing an existing remote is not an

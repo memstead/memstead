@@ -59,6 +59,8 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     fetch: fetch_dispatch,
     pull: pull_dispatch,
     push: push_dispatch,
+    ls_remote: ls_remote_dispatch,
+    resolve_ref: resolve_ref_dispatch,
     remote_add: remote_add_dispatch,
     read_tree: read_tree_dispatch,
     export: export_dispatch,
@@ -346,6 +348,40 @@ fn push_dispatch(
         let _ = (gitdir, remote, branch, mem, force);
         Err(memstead_base::backend::BackendError::Other(
             "push: git-object-storage feature not enabled".to_string(),
+        ))
+    }
+}
+
+fn ls_remote_dispatch(
+    gitdir: &std::path::Path,
+    remote: &str,
+) -> Result<Vec<(String, String)>, memstead_base::backend::BackendError> {
+    #[cfg(feature = "git-object-storage")]
+    {
+        crate::ops::transport::ls_remote_in_gitdir(gitdir, remote)
+    }
+    #[cfg(not(feature = "git-object-storage"))]
+    {
+        let _ = (gitdir, remote);
+        Err(memstead_base::backend::BackendError::Other(
+            "ls-remote: git-object-storage feature not enabled".to_string(),
+        ))
+    }
+}
+
+fn resolve_ref_dispatch(
+    gitdir: &std::path::Path,
+    ref_name: &str,
+) -> Result<Option<String>, memstead_base::backend::BackendError> {
+    #[cfg(feature = "git-object-storage")]
+    {
+        crate::ops::transport::resolve_ref_in_gitdir(gitdir, ref_name)
+    }
+    #[cfg(not(feature = "git-object-storage"))]
+    {
+        let _ = (gitdir, ref_name);
+        Err(memstead_base::backend::BackendError::Other(
+            "resolve-ref: git-object-storage feature not enabled".to_string(),
         ))
     }
 }

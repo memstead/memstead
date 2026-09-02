@@ -182,7 +182,7 @@ Exit codes:
 * `reload` — Reload one writable mem's slice of the in-memory store from its on-disk branch tip — or every writable mem when `--mem` is omitted. CLI parity with the MCP `memstead_reload` tool
 * `fetch` — Fetch a mem's branch refs from a git remote into the mem-repo (no local branch moves — inspect first, then `pull`). Requires a git-branch-backed mem (`INVALID_INPUT` on folder mounts); refuses `UNKNOWN_REMOTE` when the remote is not configured
 * `pull` — Fast-forward a mem's branch to its fetched remote counterpart and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when the local branch is not an ancestor of the remote — reconcile via `branch-reset`, or resolve on another clone and push
-* `push` — Push a mem's branch to a git remote. `--force` uses force-with-lease semantics; without it, non-fast-forward pushes refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the remote is not configured
+* `push` — Push a mem's branch to a git remote. `--force` uses force-with-lease semantics; without it, non-fast-forward pushes refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the remote is not configured. `--all` pushes every mounted git-branch mem's branch plus the workspace's schema-and-config ref, fast-forward only: silent for refs already in sync, one line per ref moved, a refused ref named while the others still go, non-zero exit at the end
 * `branch-reset` — Reset a mem's branch pointer to a target ref/SHA. Refuses to discard commits reachable from any remote ref (`PUSHED_COMMITS_PROTECTED`)
 * `mem` — Mem lifecycle commands
 * `mem-repo` — Mem-repo-git lifecycle commands
@@ -1187,20 +1187,23 @@ Fast-forward a mem's branch to its fetched remote counterpart and reload the in-
 
 ## `memstead push`
 
-Push a mem's branch to a git remote. `--force` uses force-with-lease semantics; without it, non-fast-forward pushes refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the remote is not configured
+Push a mem's branch to a git remote. `--force` uses force-with-lease semantics; without it, non-fast-forward pushes refuse (`NON_FAST_FORWARD`). Refuses `UNKNOWN_REMOTE` when the remote is not configured. `--all` pushes every mounted git-branch mem's branch plus the workspace's schema-and-config ref, fast-forward only: silent for refs already in sync, one line per ref moved, a refused ref named while the others still go, non-zero exit at the end
 
-**Usage:** `memstead push [OPTIONS] <MEM>`
+**Usage:** `memstead push [OPTIONS] [MEM]`
 
 ###### **Arguments:**
 
-* `<MEM>`
+* `<MEM>` — Mem whose branch to push. Omitted with `--all`
 
 ###### **Options:**
 
 * `--remote <REMOTE>`
 
   Default value: `origin`
-* `--force` — Force-push (`--force-with-lease` under the hood). Refused non-fast-forward pushes only happen here. Use with care — the remote's view of the branch is overwritten
+* `--force` — Force-push (`--force-with-lease` under the hood). Refused non-fast-forward pushes only happen here. Use with care — the remote's view of the branch is overwritten. Single-mem only: `--all` is fast-forward only and does not take it
+
+  Default value: `false`
+* `--all` — Push every mounted git-branch mem's branch plus the workspace's schema-and-config ref, fast-forward only. Refs already at the remote's SHA are skipped silently; one line per ref moved; a ref that cannot fast-forward is refused by name (`NON_FAST_FORWARD`) while the other refs still go, and the run exits non-zero at the end. Folder and archive mounts have no branch and are skipped
 
   Default value: `false`
 

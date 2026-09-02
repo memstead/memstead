@@ -569,6 +569,19 @@ pub type GitBranchPushFn = fn(
     force: bool,
 ) -> Result<crate::ops::PushOutcome, BackendError>;
 
+/// `Engine::push_all` dispatch, first half: the remote's ref table
+/// in one round-trip (`git ls-remote --heads`), as `(full ref name,
+/// sha)` pairs. Lets the engine tell a lagging ref from one already
+/// in sync before it sends anything.
+pub type GitBranchLsRemoteFn =
+    fn(gitdir: &Path, remote: &str) -> Result<Vec<(String, String)>, BackendError>;
+
+/// `Engine::push_all` dispatch, second half: resolve one local ref
+/// to its SHA. `Ok(None)` when the ref does not exist (a fresh
+/// mem-repo legitimately has no `__MEMSTEAD` yet).
+pub type GitBranchResolveRefFn =
+    fn(gitdir: &Path, ref_name: &str) -> Result<Option<String>, BackendError>;
+
 /// `Engine::remote_add` dispatch — configures a named remote on the
 /// mem-repo gitdir (upsert: add, or set-url when it already exists).
 pub type GitBranchRemoteAddFn =
@@ -667,6 +680,8 @@ pub struct GitBranchOps {
     pub fetch: GitBranchFetchFn,
     pub pull: GitBranchPullFn,
     pub push: GitBranchPushFn,
+    pub ls_remote: GitBranchLsRemoteFn,
+    pub resolve_ref: GitBranchResolveRefFn,
     pub remote_add: GitBranchRemoteAddFn,
     pub read_tree: GitBranchReadTreeFn,
     pub export: GitBranchExportFn,

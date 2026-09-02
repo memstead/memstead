@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **`memstead push --all` publishes the whole mem-repo.** Every mounted
+  git-branch mem's declared branch plus the mem-repo's `__MEMSTEAD` ref
+  (schemas and mem configs, which the single-mem verb had no route for),
+  fast-forward only: one `ls-remote` decides which refs lag, a ref already
+  at the remote's SHA is skipped silently, one line per ref moved
+  (`<ref> <previous> -> <new>`), so a run with nothing to publish prints
+  nothing and exits 0. A ref that cannot fast-forward is refused by name
+  (`NON_FAST_FORWARD`, the mem named) while the other lagging refs still
+  go, and the run exits non-zero at the end with every refused and pushed
+  ref under `details`. `--force` stays on the single-mem verb and is
+  refused beside `--all`; folder and archive mounts have no branch and are
+  skipped. Engine: `Engine::push_all` over two new transport primitives
+  (`ls_remote`, `resolve_ref`) on the git-branch ops table; the MCP
+  surface is unchanged.
+
 ## [0.16.0] - 2026-09-02
 
 ### Added

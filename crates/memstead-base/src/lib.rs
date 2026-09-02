@@ -72,13 +72,13 @@ pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
     DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, EntityHistoryReport, EntityTouch,
     FromArchiveBytesError, GitBranchBranchResetFn, GitBranchChangesSinceFn, GitBranchDiffFn,
-    GitBranchExportFn, GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchOps, GitBranchPullFn,
-    GitBranchPushFn, GitBranchReadTreeFn, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, INLINE_LIST_CAP,
-    MutationClock, ReferrerInfo, RelateAction, RelateEntityArgs, RelateEntityOutcome,
-    RenameEntityArgs, RenameEntityOutcome, RetypeEdge, RetypeEdgeDirection, RetypeEntityArgs,
-    RetypeEntityOutcome, RetypeProblem, ReviewMarkStatus, SchemaSourceDiagnostic, SchemaStaging,
-    SetReviewMarkOutcome, StoryStart, UpdateEntityArgs, UpdateEntityOutcome,
-    format_inline_list_overflow,
+    GitBranchExportFn, GitBranchExportToBytesFn, GitBranchFetchFn, GitBranchLsRemoteFn,
+    GitBranchOps, GitBranchPullFn, GitBranchPushFn, GitBranchReadTreeFn, GitBranchResolveRefFn,
+    HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, INLINE_LIST_CAP, MutationClock, ReferrerInfo,
+    RelateAction, RelateEntityArgs, RelateEntityOutcome, RenameEntityArgs, RenameEntityOutcome,
+    RetypeEdge, RetypeEdgeDirection, RetypeEntityArgs, RetypeEntityOutcome, RetypeProblem,
+    ReviewMarkStatus, SchemaSourceDiagnostic, SchemaStaging, SetReviewMarkOutcome, StoryStart,
+    UpdateEntityArgs, UpdateEntityOutcome, format_inline_list_overflow,
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
@@ -114,8 +114,9 @@ pub use pipeline_store::{
 pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};
 pub use workspace::{
-    CreateRuleSetting, DeleteRuleSetting, Mount, MountCapability, MountLifecycle, MountStorage,
-    SCHEMA_WILDCARD, Workspace, WorkspaceSettings, branch_full_ref, branch_short_name,
+    CreateRuleSetting, DeleteRuleSetting, MEMSTEAD_REF_BRANCH, Mount, MountCapability,
+    MountLifecycle, MountStorage, SCHEMA_WILDCARD, Workspace, WorkspaceSettings, branch_full_ref,
+    branch_short_name,
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,
