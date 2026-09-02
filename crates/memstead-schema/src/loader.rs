@@ -133,6 +133,17 @@ pub enum SchemaLoadError {
         reason: String,
     },
 
+    /// A `resolution:` declaration referencing a section, field or check
+    /// kind the type does not have in the required shape.
+    #[error(
+        "type '{type_name}' resolution declaration is invalid: {reason} — offending name: '{offender}'"
+    )]
+    InvalidResolutionAxis {
+        type_name: String,
+        offender: String,
+        reason: String,
+    },
+
     #[error("schema relationship vocabulary must include a '_default' definition")]
     MissingDefaultWeight,
 
@@ -2099,6 +2110,85 @@ fn validate_type(
     }
 
     // Exactly one catch_all section
+    if let Some(res) = &td.resolution {
+        if !td.sections.iter().any(|s| s.key == res.condition_section) {
+            errors.push(SchemaLoadError::InvalidResolutionAxis {
+                type_name: td.name.clone(),
+                offender: res.condition_section.clone(),
+                reason: "`condition_section` names no section of this type".to_string(),
+            });
+        }
+        match &res.status_field {
+            None if !res.open_values.is_empty() => {
+                errors.push(SchemaLoadError::InvalidResolutionAxis {
+                    type_name: td.name.clone(),
+                    offender: res.open_values.join(", "),
+                    reason: "`open_values` given without a `status_field`".to_string(),
+                });
+            }
+            None => {}
+            Some(field) => match td.metadata_fields.iter().find(|f| f.key == *field) {
+                None => errors.push(SchemaLoadError::InvalidResolutionAxis {
+                    type_name: td.name.clone(),
+                    offender: field.clone(),
+                    reason: "`status_field` names no metadata field of this type".to_string(),
+                }),
+                Some(f) => match &f.enum_values {
+                    None => errors.push(SchemaLoadError::InvalidResolutionAxis {
+                        type_name: td.name.clone(),
+                        offender: field.clone(),
+                        reason: "`status_field` must name an enum-typed metadata field \
+                                 (declare enum_values)"
+                            .to_string(),
+                    }),
+                    Some(allowed) => {
+                        if res.open_values.is_empty() {
+                            errors.push(SchemaLoadError::InvalidResolutionAxis {
+                                type_name: td.name.clone(),
+                                offender: "(empty)".to_string(),
+                                reason: "`open_values` must name at least one open status \
+                                         value when `status_field` is declared"
+                                    .to_string(),
+                            });
+                        }
+                        for v in &res.open_values {
+                            if !allowed.contains(v) {
+                                errors.push(SchemaLoadError::InvalidResolutionAxis {
+                                    type_name: td.name.clone(),
+                                    offender: v.clone(),
+                                    reason: format!(
+                                        "`open_values` entry is not in `{field}`'s enum_values [{}]",
+                                        allowed.join(", ")
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                },
+            },
+        }
+        if let Some(kind) = &res.check_kind {
+            let well_formed = matches!(kind.as_str(), "verification" | "conformance")
+                || (kind.strip_prefix("x-").is_some_and(|name| {
+                    !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                        && !name.starts_with('-')
+                        && !name.ends_with('-')
+                }));
+            if !well_formed {
+                errors.push(SchemaLoadError::InvalidResolutionAxis {
+                    type_name: td.name.clone(),
+                    offender: kind.clone(),
+                    reason: "`check_kind` must be `verification`, `conformance`, or an `x-<name>` \
+                             kind (lowercase letters, digits, hyphens)"
+                        .to_string(),
+                });
+            }
+        }
+    }
+
     let catch_all_count = td.sections.iter().filter(|s| s.catch_all).count();
     if catch_all_count != 1 {
         errors.push(SchemaLoadError::CatchAllViolation {

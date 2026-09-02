@@ -839,7 +839,81 @@ pub fn health_open_questions_axis(
             }
         }
 
+        // The resolution readings (plan B5): for every type of this mem
+        // that declares `resolution`, the open entities with no condition
+        // written, and the open entities whose condition nobody has
+        // checked under the declared kind. The ledger is read as it is;
+        // an `x-` kind counts by name, an engine kind by derived state.
+        let (mut missing, mut unchecked) = (Vec::new(), Vec::new());
+        if let Some(schema) = engine.schema_for(mem) {
+            let ledger = engine
+                .workspace_root()
+                .map(crate::check::CheckLedger::for_workspace);
+            for entity in engine
+                .store()
+                .all_entities()
+                .filter(|e| !e.stub && e.id.mem() == mem)
+            {
+                let Some(td) = schema.types.get(&entity.entity_type) else {
+                    continue;
+                };
+                let Some(res) = &td.resolution else { continue };
+                if let Some(field) = &res.status_field {
+                    let open = match entity.metadata.get(field) {
+                        Some(crate::entity::MetadataValue::String(s)) => {
+                            res.open_values.contains(s)
+                        }
+                        _ => false,
+                    };
+                    if !open {
+                        continue;
+                    }
+                }
+                let has_condition = entity
+                    .sections
+                    .get(&res.condition_section)
+                    .is_some_and(|body| !body.trim().is_empty());
+                if !has_condition {
+                    missing.push(serde_json::json!({
+                        "kind": "resolution_missing",
+                        "id": entity.id.to_string(),
+                        "section": res.condition_section,
+                    }));
+                    continue;
+                }
+                let kind = res.check_kind.as_deref().unwrap_or("verification");
+                let checked = ledger.as_ref().is_some_and(|l| {
+                    l.all().into_iter().rev().any(|r| {
+                        r.entity == entity.id.to_string()
+                            && r.verdict == "ok"
+                            && r.entity_hash == entity.content_hash
+                            && match crate::check::RecordKind::from_wire(kind) {
+                                Some(crate::check::RecordKind::Engine(k)) => {
+                                    r.resolved_kind() == Some(k)
+                                }
+                                Some(crate::check::RecordKind::Foreign(name)) => {
+                                    r.kind.as_deref() == Some(name.as_str())
+                                }
+                                None => false,
+                            }
+                    })
+                });
+                if !checked {
+                    unchecked.push(serde_json::json!({
+                        "kind": "resolution_unchecked",
+                        "id": entity.id.to_string(),
+                        "section": res.condition_section,
+                        "check_kind": kind,
+                    }));
+                }
+            }
+        }
+        let resolution_missing = capped(missing);
+        let resolution_unchecked = capped(unchecked);
+
         let total_open = stubs["count"].as_u64().unwrap_or(0)
+            + resolution_missing["count"].as_u64().unwrap_or(0)
+            + resolution_unchecked["count"].as_u64().unwrap_or(0)
             + recheck.len() as u64
             + unresolvable.len() as u64
             + unobserved.len() as u64
@@ -867,6 +941,8 @@ pub fn health_open_questions_axis(
         }
         entry.insert("unsatisfied_constraints".into(), constraints);
         entry.insert("dangling_links".into(), dangling);
+        entry.insert("resolution_missing".into(), resolution_missing);
+        entry.insert("resolution_unchecked".into(), resolution_unchecked);
         if !process.is_empty() {
             entry.insert("process".into(), serde_json::Value::Array(process));
         } else {

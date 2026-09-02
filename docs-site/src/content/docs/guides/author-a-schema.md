@@ -256,6 +256,36 @@ without `due:` contributes nothing. A closed entity (its status outside
 install: the fields must exist with those shapes and every open value
 must be in the status enum.
 
+## 8c. Declare what would resolve an open entity
+
+A type whose entities can be open (a question, a criterion, a risk) can
+declare a **resolution condition**: the section where an open entity says
+what would resolve it, and the check kind under which that condition
+counts as checked. In the mould of the due axis:
+
+```yaml
+resolution:
+  status_field: status               # optional: an enum-typed metadata field
+  open_values: [open, investigating] # its values under which the entity is open
+  condition_section: answer_approach # a declared section of the type
+  check_kind: verification           # optional: verification (default),
+                                     # conformance, or an x-<name> kind
+```
+
+With it `memstead health --include open_questions` answers two questions
+per mem without reading prose: the open entities whose condition section
+is empty (`resolution_missing`) and the open entities whose condition
+nobody has checked under the declared kind (`resolution_unchecked`, read
+from the check ledger at the entity's current content; a caller-declared
+`x-` kind counts by name). A type without `status_field` is open in every
+entity, which suits a criterion whose assertion is its own condition. The
+declaration is a reading: the write path refuses nothing new, the
+section's `required` flag stays your choice, and the engine never judges
+whether a condition is well-formed. The loader validates the shape at
+install (the section must exist, the field must be an enum carrying every
+open value, the kind must be well-formed); an engine older than the key
+refuses the package at parse, naming `resolution`, as every new key.
+
 ## 9. Declare a section's markdown shape
 
 A section declaration can also pin the markdown structure of its body — a flat `content` expression over the mdast block vocabulary (`paragraph`, `list`, `table`, `code`, `blockquote`, `heading`, `thematicBreak`, `html`), with attribute forms (`list(bullet)`, `list(ordered)`, `heading(3)`–`heading(6)`, `code(lang=json)`) and regular operators: sequence by space, alternation `(paragraph | list)`, repetition `+` `*` `?`. Optional companions:

@@ -131,6 +131,13 @@ pub struct TypeDefinition {
     /// existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due: Option<DueAxis>,
+    /// The type's declared resolution condition (see [`ResolutionAxis`]):
+    /// where an open entity of this type says what would resolve it, and
+    /// which check kind counts as having checked that condition. Absent
+    /// for types without the notion; a schema without any `resolution:`
+    /// behaves byte-identically to before the key existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<ResolutionAxis>,
     // Populated by loader from schema-level defaults merged with
     // edge_weight_overrides. Skipped during serialization so the on-disk
     // form round-trips.
@@ -794,6 +801,39 @@ pub struct TableFormat {
 /// first") a declared section key. The axis is rendering-only: it
 /// never enforces anything (constraints own enforcement) and the
 /// engine never advances a date (the agent loop is the runtime).
+/// A type's declared **resolution condition** (backlog-decisions plan
+/// B5, Plenum finding 23): the section in which an open entity states
+/// what would resolve it, and the check kind under which that condition
+/// counts as checked. With it the `open_questions` health axis answers
+/// two questions without reading prose: which open entities have no
+/// condition written (`resolution_missing`), and which have one nobody
+/// has checked (`resolution_unchecked`, from the check ledger). The
+/// declaration is a reading, not a rule: the write path refuses nothing
+/// new, the section's own `required` flag stays the author's choice, and
+/// the engine never judges whether a condition is well-formed. Validated
+/// at schema load: `condition_section` must name a declared section;
+/// `status_field` (optional) an enum-typed metadata field with every
+/// `open_values` entry in its enum, and without it every entity of the
+/// type counts as open; `check_kind` (optional, default `verification`)
+/// an engine kind or a well-formed `x-` kind.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolutionAxis {
+    /// The section where an open entity states what would resolve it.
+    pub condition_section: String,
+    /// Enum-typed metadata field whose value says whether the entity is
+    /// still open; absent means every entity of the type is open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_field: Option<String>,
+    /// The `status_field` values under which the entity is open.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_values: Vec<String>,
+    /// The check kind that counts as having checked the condition:
+    /// `verification` (default), `conformance`, or an `x-<name>` kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_kind: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DueAxis {

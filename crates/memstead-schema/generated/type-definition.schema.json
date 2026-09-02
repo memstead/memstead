@@ -98,6 +98,17 @@
         "$ref": "#/$defs/RequiredOutgoing"
       }
     },
+    "resolution": {
+      "description": "The type's declared resolution condition (see [`ResolutionAxis`]):\nwhere an open entity of this type says what would resolve it, and\nwhich check kind counts as having checked that condition. Absent\nfor types without the notion; a schema without any `resolution:`\nbehaves byte-identically to before the key existed.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResolutionAxis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "sections": {
       "type": "array",
       "items": {
@@ -370,7 +381,6 @@
       ]
     },
     "DueAxis": {
-      "description": "A type's declared **due axis** (first-author-path plan 08): which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).",
       "type": "object",
       "properties": {
         "date_field": {
@@ -649,6 +659,41 @@
       "required": [
         "relationships",
         "cardinality"
+      ]
+    },
+    "ResolutionAxis": {
+      "description": "A type's declared **due axis** (first-author-path plan 08): which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).\nA type's declared **resolution condition** (backlog-decisions plan\nB5, Plenum finding 23): the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
+      "type": "object",
+      "properties": {
+        "check_kind": {
+          "description": "The check kind that counts as having checked the condition:\n`verification` (default), `conformance`, or an `x-<name>` kind.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "condition_section": {
+          "description": "The section where an open entity states what would resolve it.",
+          "type": "string"
+        },
+        "open_values": {
+          "description": "The `status_field` values under which the entity is open.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status_field": {
+          "description": "Enum-typed metadata field whose value says whether the entity is\nstill open; absent means every entity of the type is open.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "condition_section"
       ]
     },
     "SectionDef": {

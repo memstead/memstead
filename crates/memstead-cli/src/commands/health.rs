@@ -686,6 +686,8 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
                 "anchors_dangling",
                 "unsatisfied_constraints",
                 "dangling_links",
+                "resolution_missing",
+                "resolution_unchecked",
             ] {
                 let count = entry[kind]["count"].as_u64().unwrap_or(0);
                 if count > 0 {

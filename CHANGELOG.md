@@ -7,6 +7,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **A type declares what would resolve its open entities.** The schema
+  language gains one optional key on a type, `resolution:` (`condition_section`,
+  optional `status_field` with `open_values`, optional `check_kind`), in the
+  mould of `due:`. With it the `open_questions` health axis lists, per mem,
+  the open entities whose condition section is empty (`resolution_missing`)
+  and the open entities whose condition nobody has checked under the
+  declared kind (`resolution_unchecked`, from the check ledger at the
+  entity's current content, `x-` kinds admitted by name); a type without a
+  status field is open in every entity, so a criterion's assertion can be
+  its own condition. A reading only: the write path refuses nothing new and
+  the engine never judges a condition. The loader validates the declaration
+  at install (`InvalidResolutionAxis` naming the offender), and a schema
+  package carrying the key refuses at parse on engines before this one, as
+  every new key does (format addition; `deny_unknown_fields` intact).
+
 ## [0.17.0] - 2026-09-02
 
 ### Added
