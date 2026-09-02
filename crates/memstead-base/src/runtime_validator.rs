@@ -19,7 +19,8 @@ use std::sync::OnceLock;
 
 use indexmap::IndexMap;
 use memstead_schema::{
-    CrossMemRelationshipEntry, FieldType, RelationshipDef, RelationshipMode, Schema, TypeDefinition,
+    CrossMemRelationshipEntry, FieldType, RelationshipDef, RelationshipMode, Schema, Serialization,
+    TypeDefinition,
 };
 use regex::Regex;
 
@@ -998,6 +999,29 @@ pub fn parse_metadata_value(
             type_write_rules: schema.write_rules.clone(),
             entity_type: schema.name.clone(),
         });
+    }
+
+    // A declared `value_pattern` binds every written value in full; a
+    // csv-array field is checked member by member so the refusal names
+    // the one malformed entry, not the whole list.
+    if let Some(pattern) = field_def.value_pattern.as_ref()
+        && let Ok(re) = regex::Regex::new(&format!("^(?:{pattern})$"))
+    {
+        let members: Vec<&str> = if field_def.serialization == Serialization::CsvArray {
+            value.split(',').map(str::trim).collect()
+        } else {
+            vec![value]
+        };
+        if let Some(bad) = members.iter().find(|m| !re.is_match(m)) {
+            return Err(ValidationError::InvalidFieldValue {
+                field: key.to_string(),
+                value: (*bad).to_string(),
+                expected_type: "String".to_string(),
+                expected_format: Some(format!("matching the pattern `{pattern}`")),
+                field_description: Some(field_def.description.clone()),
+                entity_type: schema.name.clone(),
+            });
+        }
     }
 
     Ok(match field_def.field_type {

@@ -9,6 +9,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`software@0.5.0`: a code mem says only true things.** A new built-in
+  generation (0.4.0 stays byte-identical): `contract` gains the `protocol`
+  value `engine_state` and an optional `version_axes` field (a csv list of
+  `name=constant` pairs) for the durable state files an engine owns and
+  later engines must read back; `spec` gains an optional `notes` catch-all
+  section for standing remarks (a frozen spec's historical-record marker,
+  what superseded it) so Identity stays one sentence of current state, and
+  declares `last_resort: true` so the vital-signs axis reads the type-share
+  signal on every software mem. The guidance now says what a code-projected
+  mem can hold: `spec` is the home type for a surface there and dominates
+  by design (the signal worth watching is a cluster with no non-spec entity
+  beside its specs), `requirement` belongs to mems with a normative source
+  and is absent from a code mem by design, and the failure-mode list names
+  only relationships the vocabulary carries.
+- **A metadata field declares the shape of its values.** `value_pattern`
+  on a metadata field is a regular expression every written value must
+  match in full, member by member on a `csv_array` field; a malformed
+  value refuses `INVALID_FIELD_VALUE` naming the member and the pattern,
+  and a pattern that does not compile refuses at install
+  (`InvalidFieldPattern`). The schema render and the MCP skeleton show it
+  as `pattern`.
+
 - **A type declares what would resolve its open entities.** The schema
   language gains one optional key on a type, `resolution:` (`condition_section`,
   optional `status_field` with `open_values`, optional `check_kind`), in the

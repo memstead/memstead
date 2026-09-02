@@ -896,6 +896,15 @@ pub struct MetadataFieldDef {
     pub serialization: Serialization,
     #[serde(default)]
     pub filterable: Filterable,
+    /// A regular expression every written value must match in full
+    /// (the engine anchors it at both ends). For a `csv_array` field
+    /// each member is matched on its own, so a list of shaped entries
+    /// (`name=constant`, `YYYY-Qn`, a ticket key) refuses one malformed
+    /// member naming it (`INVALID_FIELD_VALUE`, the pattern quoted as
+    /// the expected format). The loader refuses a pattern that does not
+    /// compile at install. Absent means any string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_pattern: Option<String>,
 }
 
 impl MetadataFieldDef {

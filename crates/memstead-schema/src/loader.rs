@@ -144,6 +144,18 @@ pub enum SchemaLoadError {
         reason: String,
     },
 
+    /// A metadata field's `value_pattern` is not a valid regular
+    /// expression.
+    #[error(
+        "type '{type_name}' metadata field '{field}' value_pattern '{pattern}' does not compile: {reason}"
+    )]
+    InvalidFieldPattern {
+        type_name: String,
+        field: String,
+        pattern: String,
+        reason: String,
+    },
+
     #[error("schema relationship vocabulary must include a '_default' definition")]
     MissingDefaultWeight,
 
@@ -2244,6 +2256,18 @@ fn validate_type(
                 field: m.key.clone(),
                 default: default.clone(),
                 allowed: allowed.clone(),
+            });
+        }
+        // A `value_pattern` must compile here, at install, so the write
+        // path never meets a malformed regex.
+        if let Some(pattern) = m.value_pattern.as_ref()
+            && let Err(e) = regex::Regex::new(&format!("^(?:{pattern})$"))
+        {
+            errors.push(SchemaLoadError::InvalidFieldPattern {
+                type_name: td.name.clone(),
+                field: m.key.clone(),
+                pattern: pattern.clone(),
+                reason: e.to_string(),
             });
         }
     }

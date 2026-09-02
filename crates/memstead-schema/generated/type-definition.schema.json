@@ -545,6 +545,13 @@
         "serialization": {
           "$ref": "#/$defs/Serialization",
           "default": "default"
+        },
+        "value_pattern": {
+          "description": "A regular expression every written value must match in full\n(the engine anchors it at both ends). For a `csv_array` field\neach member is matched on its own, so a list of shaped entries\n(`name=constant`, `YYYY-Qn`, a ticket key) refuses one malformed\nmember naming it (`INVALID_FIELD_VALUE`, the pattern quoted as\nthe expected format). The loader refuses a pattern that does not\ncompile at install. Absent means any string.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,

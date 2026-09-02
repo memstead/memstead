@@ -149,6 +149,8 @@ memstead: ERROR [MISSING_REQUIRED_SECTION]: missing 1 required section(s) for ty
 
 Now iterate on the package: rename `note` into your first real type (the filename stem, its `name:` field, and the manifest's `types:` entry must agree), add types one file at a time, and grow the relationship vocabulary. After each edit: `schema validate`, `schema install`, and bump `version:` when a published mem depends on it. The scaffold's comments cover each knob — sections, metadata fields, search weights, hierarchy and propagation, staleness.
 
+A metadata field can declare the shape of its values with `value_pattern`, a regular expression the engine anchors at both ends and checks on every write; on a `csv_array` field each member is checked on its own, so a list of shaped entries (`name=constant` pairs, ticket keys, quarter labels) refuses the one malformed member by name (`INVALID_FIELD_VALUE`, the pattern quoted as the expected format). A pattern that does not compile refuses at install. The schema render and the MCP skeleton show it as `pattern`.
+
 For full worked schemas to read (not copy — the scaffold already gave you a valid base), see the [examples](https://github.com/memstead/memstead/tree/main/examples): `agent-program` (a single-mem, execution-flavoured schema) and the `reimpl-source`/`reimpl-target` pair (a two-mem model with cross-mem links).
 
 ## 7. Declare keep-health constraints

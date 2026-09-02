@@ -3541,3 +3541,32 @@ fn due_axis_malformed_references_refuse_with_accumulation() {
         "{msg}"
     );
 }
+
+/// A metadata field's `value_pattern` must compile at load, so the write
+/// path never meets a malformed regex; the error names the type, the
+/// field and the pattern.
+#[test]
+fn value_pattern_must_compile() {
+    let t = minimal_type().replace(
+        "    field_type: string\n    default_value: active",
+        "    field_type: string\n    value_pattern: \"[a-z\"\n    default_value: active",
+    );
+    let err = load(&minimal_manifest(), &[("sample", &t)]).expect_err("must fail");
+    assert!(
+        matches!(err, SchemaLoadError::InvalidFieldPattern { ref field, ref pattern, .. } if field == "status" && pattern == "[a-z"),
+        "got: {err}"
+    );
+}
+
+/// A well-formed `value_pattern` loads and survives on the field.
+#[test]
+fn value_pattern_loads_onto_the_field() {
+    let t = minimal_type().replace(
+        "    field_type: string\n    default_value: active",
+        "    field_type: string\n    value_pattern: \"[a-z]+\"\n    default_value: active",
+    );
+    let schema = load(&minimal_manifest(), &[("sample", &t)]).expect("loads");
+    let td = schema.types.get("sample").expect("type");
+    let f = td.metadata_field("status").expect("field");
+    assert_eq!(f.value_pattern.as_deref(), Some("[a-z]+"));
+}

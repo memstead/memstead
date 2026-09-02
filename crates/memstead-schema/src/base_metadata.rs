@@ -25,6 +25,7 @@ pub fn prefix_fields() -> Vec<MetadataFieldDef> {
             auto_timestamp: false,
             serialization: Serialization::Default,
             filterable: Filterable::None,
+            value_pattern: None,
         },
         MetadataFieldDef {
             key: "created_date".to_string(),
@@ -43,6 +44,7 @@ pub fn prefix_fields() -> Vec<MetadataFieldDef> {
             // "entities created since X" axis. Range-filterable to match
             // `last_modified` and the `memstead_search` range_filters example.
             filterable: Filterable::Range,
+            value_pattern: None,
         },
         MetadataFieldDef {
             key: "last_modified".to_string(),
@@ -58,6 +60,7 @@ pub fn prefix_fields() -> Vec<MetadataFieldDef> {
             auto_timestamp: true,
             serialization: Serialization::Default,
             filterable: Filterable::Range,
+            value_pattern: None,
         },
     ]
 }
@@ -77,6 +80,7 @@ pub fn suffix_fields() -> Vec<MetadataFieldDef> {
         auto_timestamp: false,
         serialization: Serialization::CsvArray,
         filterable: Filterable::Equality,
+        value_pattern: None,
     }]
 }
 

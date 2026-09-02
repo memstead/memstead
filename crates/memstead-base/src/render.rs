@@ -1855,6 +1855,14 @@ pub fn build_schema_payload_scoped(
                             .unwrap()
                             .insert("default".into(), serde_json::json!(default));
                     }
+                    // A declared `value_pattern` is the shape every write
+                    // must match (per member on a csv-array field), so an
+                    // agent forms a legal value from the skeleton alone.
+                    if let Some(pattern) = &f.value_pattern {
+                        obj.as_object_mut()
+                            .unwrap()
+                            .insert("pattern".into(), serde_json::json!(pattern));
+                    }
                     // Surface the `filterable` posture so an agent constructs
                     // valid `filters` / `range_filters` from the schema body
                     // in one shot. Always present: `"equality"` accepts
@@ -2501,6 +2509,9 @@ fn describe_metadata_field(field: &memstead_schema::MetadataFieldDef) -> String 
     }
     if let Some(default) = &field.default_value {
         extras.push(format!("default: {default}"));
+    }
+    if let Some(pattern) = &field.value_pattern {
+        extras.push(format!("pattern: `{pattern}`"));
     }
     let filterable_str = match field.filterable {
         Filterable::None => None,
