@@ -1958,15 +1958,19 @@ impl FilesystemMcpServer {
                 // instructions advertise came back empty from the one server
                 // that could fill it (04/04, criterion 11, found by the plan's
                 // grade).
-                value["ledger"] =
-                    serde_json::to_value(engine.ledger_reconciliation()).unwrap_or_default();
+                let mut ledger = engine.ledger_reconciliation();
+                if let Some(v) = mem_scope {
+                    ledger.retain(|mem, _| mem == v);
+                }
+                value["ledger"] = serde_json::to_value(ledger).unwrap_or_default();
             }
             if let Some(obs) = body_observations {
                 value["body_observations"] =
                     serde_json::to_value(obs).unwrap_or(serde_json::Value::Null);
             }
             if wants_anchors {
-                value["anchors"] = memstead_base::ops::health::health_anchors_axis(&engine);
+                value["anchors"] =
+                    memstead_base::ops::health::health_anchors_axis(&engine, mem_scope);
             }
             if wants_constraints {
                 value["constraints"] = serde_json::to_value(engine.constraint_findings(mem_scope))

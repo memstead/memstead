@@ -2303,7 +2303,7 @@ community:
             .unwrap();
         assert_eq!(aged.unobserved_for_days, Some(30));
         assert!(!aged.observation_supplied);
-        let axis = crate::ops::health::health_anchors_axis(&engine);
+        let axis = crate::ops::health::health_anchors_axis(&engine, None);
         let aging = axis["specs"]["aging"].as_array().unwrap();
         assert!(
             aging

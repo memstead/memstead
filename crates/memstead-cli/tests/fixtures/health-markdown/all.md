@@ -37,7 +37,10 @@
 
 ## Missing required outgoing
 
-## Conformance findings (1)
+## Conformance findings (0)
+- none
+
+## Consistency findings (1)
 - [UNRESOLVED_STUB] notes--ghost (axis consistency)
 
 ## Constraint violations (0)

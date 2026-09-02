@@ -2113,6 +2113,9 @@ impl WarningHint {
             // derived (the agent's filter payload) and fall through
             // to `None` below to stay visible to the caller.
             Self::SearchMemIndexUnavailable { mem, .. } => Some(mem.as_str()),
+            Self::OutOfBandEditsUndetected { mem } => Some(mem.as_str()),
+            Self::ConfigWriteIntervened { mem, .. } => Some(mem.as_str()),
+            Self::CrossSchemaLinkUndeclared { from, .. } => Some(from.mem()),
             // Workspace- or request-scoped — no mem to attribute.
             // OuterRepoNotIgnoringMemRepo concerns the embedding repo,
             // not a specific mem; an agent should see it under any
@@ -2124,6 +2127,25 @@ impl WarningHint {
             // request's mem — `None` here keeps them visible to
             // the caller that triggered them.
             _ => None,
+        }
+    }
+
+    /// Whether this warning belongs in a report scoped to `mem`: the one
+    /// rule the health composer applies to every warning under a mem
+    /// filter. A warning attributed to one mem (`source_mem`) concerns
+    /// that mem only; a warning naming several mems (the schema-source
+    /// trio) concerns each of them; a warning attributed to no mem at all
+    /// (a request notice, a workspace-level roster or config condition)
+    /// concerns every mem, this one included, and stays.
+    pub fn concerns_mem(&self, mem: &str) -> bool {
+        if let Some(source) = self.source_mem() {
+            return source == mem;
+        }
+        match self {
+            Self::SchemaAuthoringSourceMissing { mems, .. }
+            | Self::SchemaAuthoringSourceDiverged { mems, .. }
+            | Self::SchemaUnstampedSourceRot { mems, .. } => mems.iter().any(|m| m == mem),
+            _ => true,
         }
     }
 

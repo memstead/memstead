@@ -9,6 +9,9 @@
 - Missing fields: 6
 - Communities: 3
 
-## Conformance findings (1)
+## Conformance findings (0)
+- none
+
+## Consistency findings (1)
 - [UNRESOLVED_STUB] notes--ghost (axis consistency)
 

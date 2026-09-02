@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The health mem filter applies to every section and warning.** Under
+  `health --mem <m>` and `memstead_health` with `mem`, one rule scopes the
+  whole report: the anchors section, the folder-ledger map and the per-mem
+  config entries now carry only the named mem (they used to list every
+  mem), and every warning is kept only when it concerns that mem, the
+  folder-mem out-of-band notice included (a warning attributed to no mem,
+  a request notice or a workspace-level condition, concerns every mem and
+  stays). Only the mem rosters and `default_writable_mem`, workspace
+  facts, stay global. Without a filter the report is
+  byte-identical to before. The CLI markdown also files consistency-axis
+  rows (the `integrity` include) under their own "Consistency findings"
+  heading instead of "Conformance findings".
+
 - **The integrity axis blames no grant after an unmount.** A cross-mem
   edge whose target mem is not mounted is reported once, as the dangling
   finding (`DANGLING_RELATION_TARGET_MISSING`, emitted even when the

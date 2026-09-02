@@ -133,14 +133,14 @@ pub fn compose_health(
     };
     let vf = mem_filter.as_deref();
 
-    // Symmetric with the data filter below: mem-attributable warnings
-    // (SUSPICIOUS_NESTED_PREFIX, DUPLICATE_SECTION_HEADING, etc.) drop out when
-    // their source mem isn't the scoped one. Workspace- and request-scoped
-    // warnings (OUTER_REPO_…, UNKNOWN_INCLUDE_KEY, LIMIT_CLAMPED) report `None`
-    // from `source_mem()` and stay visible — agents should see them
-    // regardless of which mem they're scoping to.
+    // Symmetric with the data filter below, and the one rule every warning
+    // follows under a filter: `WarningHint::concerns_mem` keeps a warning
+    // attributed to the scoped mem (or naming it among several), drops one
+    // attributed to another mem, and keeps a warning attributed to no mem
+    // at all (OUTER_REPO_…, UNKNOWN_INCLUDE_KEY, LIMIT_CLAMPED: workspace-
+    // or request-scoped, so they concern every mem, this one included).
     if let Some(v) = vf {
-        warnings.retain(|w| w.source_mem().is_none_or(|wv| wv == v));
+        warnings.retain(|w| w.concerns_mem(v));
     }
 
     let in_mem = |e: &crate::Entity| -> bool {
@@ -578,7 +578,7 @@ pub fn compose_health(
     if include.iter().any(|s| s == "anchors") {
         obj.insert(
             "anchors".into(),
-            crate::ops::health::health_anchors_axis(engine),
+            crate::ops::health::health_anchors_axis(engine, vf),
         );
     }
     if include.iter().any(|s| s == "stale_derivations") {
@@ -732,9 +732,13 @@ pub fn compose_health(
     // it cannot attribute. Git-branch mems are absent from the map rather than
     // present and clean (criterion 4).
     if include.iter().any(|s| s == "ledger") {
+        let mut ledger = engine.ledger_reconciliation();
+        if let Some(v) = vf {
+            ledger.retain(|mem, _| mem == v);
+        }
         obj.insert(
             "ledger".into(),
-            serde_json::to_value(engine.ledger_reconciliation()).unwrap_or_default(),
+            serde_json::to_value(ledger).unwrap_or_default(),
         );
     }
 
@@ -747,9 +751,15 @@ pub fn compose_health(
     // implementation, every surface. `mutations` + `plugin` are passed
     // in via [`HealthConfig`] (server-owned copies, inserted verbatim).
     if args.include_config || include.iter().any(|s| s == "config") {
+        // Per-mem config entries follow the same scope as every other
+        // section: one mem under a filter, every writable mem without.
+        let config_mems: Vec<String> = match vf {
+            Some(v) => writable_mems.iter().filter(|m| *m == v).cloned().collect(),
+            None => writable_mems.clone(),
+        };
         let entries = crate::ops::health::config_projection(
             engine,
-            &writable_mems,
+            &config_mems,
             config.mutations.clone(),
             config.plugin.clone(),
         );

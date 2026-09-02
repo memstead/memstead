@@ -961,8 +961,12 @@ pub fn health_open_questions_axis(
     serde_json::Value::Object(top)
 }
 
-pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value {
+pub fn health_anchors_axis(
+    engine: &crate::engine::Engine,
+    mem_filter: Option<&str>,
+) -> serde_json::Value {
     let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
+    mems.retain(|m| mem_filter.is_none_or(|v| m == v));
     mems.sort();
     let mut out = serde_json::Map::new();
     for mem in mems {

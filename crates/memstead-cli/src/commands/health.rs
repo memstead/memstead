@@ -20,9 +20,14 @@ use crate::setup::CliContext;
 /// Default: counts only. Pass `--include` to drill into details.
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Scope the report to one writable mem (the engine still loads every
-    /// mem: dangling-link adjudication and the community partition are
-    /// only truthful over the whole store).
+    /// Scope the report to one writable mem: one rule applied to every
+    /// section and every warning (the anchors section, the folder-ledger
+    /// map and the per-mem config entries carry only that mem; a warning
+    /// stays only when it concerns that mem, a warning attributed to no
+    /// mem concerning every mem); only the mem rosters and
+    /// `default_writable_mem`, workspace facts, stay global. The
+    /// engine still loads every mem: dangling-link adjudication and the
+    /// community partition are only truthful over the whole store.
     #[arg(long)]
     pub mem: Option<String>,
 
@@ -454,25 +459,38 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
         lines.push(String::new());
     }
     if let Some(items) = v.get("findings").and_then(Value::as_array) {
-        lines.push(format!("## Conformance findings ({})", items.len()));
-        if items.is_empty() {
-            lines.push("- none".to_string());
+        // Two axes travel in one array; a consistency row (the integrity
+        // include) renders under its own heading so it never reads as a
+        // conformance finding. The consistency heading appears only when
+        // such rows exist, so a conformance-only report renders as before.
+        let (conformance, consistency): (Vec<&Value>, Vec<&Value>) = items
+            .iter()
+            .partition(|item| item["axis"].as_str() != Some("consistency"));
+        let mut groups = vec![("Conformance", conformance)];
+        if !consistency.is_empty() {
+            groups.push(("Consistency", consistency));
         }
-        for item in items {
-            let mut line = format!(
-                "- [{}] {} (axis {})",
-                item["code"].as_str().unwrap_or("?"),
-                s(item, "id"),
-                item["axis"].as_str().unwrap_or("?"),
-            );
-            for key in ["field", "heading", "section"] {
-                if let Some(val) = item["detail"][key].as_str() {
-                    line.push_str(&format!(" — {key} `{val}`"));
-                }
+        for (label, rows) in groups {
+            lines.push(format!("## {label} findings ({})", rows.len()));
+            if rows.is_empty() {
+                lines.push("- none".to_string());
             }
-            lines.push(line);
+            for item in rows {
+                let mut line = format!(
+                    "- [{}] {} (axis {})",
+                    item["code"].as_str().unwrap_or("?"),
+                    s(item, "id"),
+                    item["axis"].as_str().unwrap_or("?"),
+                );
+                for key in ["field", "heading", "section"] {
+                    if let Some(val) = item["detail"][key].as_str() {
+                        line.push_str(&format!(" — {key} `{val}`"));
+                    }
+                }
+                lines.push(line);
+            }
+            lines.push(String::new());
         }
-        lines.push(String::new());
     }
     if let Some(items) = v.get("body_observations").and_then(Value::as_array)
         && !items.is_empty()
