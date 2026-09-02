@@ -52,6 +52,31 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **`health --include anchors` examines anchors.** The `verdict_coverage`
   line lists `anchors` under examined when the axis was rendered, and an
   unreadable sidecar is a strict violation on that run.
+- **A sampled `projection verify` honours the binding as declared now.** The
+  rotation scheduler used to walk its cached order to the end of a rotation,
+  so after `projection edit` added a `deny_paths` entry every sampled run
+  kept recording `uncovered` findings for files the binding denied. The
+  order is now reconciled against the current item set on every window: a
+  departed item leaves it, an arriving item joins the rotation in flight,
+  and the recorded window is held to `S(D)` as a second wall. `--full` is
+  unchanged.
+- **`projection_status` and `projection_rollup` share one scan.**
+  `memstead status` and the ui-api status endpoint compute the per-binding
+  resolution once (`projection_overview`) and derive the rollup from it; the
+  two standalone functions remain and agree, and the rollup's shape is
+  unchanged.
+- **Authored exclusions key on the artifact and its source.** An exclusion
+  records the facet it was declared under, survives any `projection edit`
+  that keeps that source, and is dropped when the source leaves the
+  declaration; the sync brief now lists the exclusions in force (artifact,
+  source, rationale) and reports a dropped one once with its source named.
+  Entries recorded before the field existed are attributed on the next
+  brief or verify.
+- **Coverage counts describing entities per artifact.** The fidelity report
+  states its unit: an artifact counts once when at least one entity anchors
+  it, however many anchor rows it carries; `covered_artifacts`,
+  `describing_entities` and the `unit` line ride the report's coverage
+  block. Historic reports are not rewritten.
 
 ## [0.16.0] - 2026-09-02
 

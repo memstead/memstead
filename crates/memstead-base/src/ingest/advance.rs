@@ -52,7 +52,9 @@ use std::path::{Path, PathBuf};
 use crate::Engine;
 use crate::workspace_store::{StoreError, WORKSPACE_STORE_DIR};
 
-use super::cursor::{compute_source_cursor, enumerate_source_artifacts_reported};
+use super::cursor::{
+    compute_source_cursor, enumerate_source_artifacts, enumerate_source_artifacts_reported,
+};
 use super::resolve::{ResolvedIngest, ResolvedSource};
 use super::slice::Slice;
 
@@ -87,6 +89,160 @@ pub struct AdvanceState {
     /// keeps its reasoning. Generic across every binding and medium.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub exclusions: BTreeMap<String, String>,
+    /// artifact id → the source facet the exclusion was recorded under
+    /// (2026-09-02, basket line 3). An exclusion keys on the artifact and
+    /// its source, never on the binding hash: a re-declared source keeps
+    /// its exclusions across `projection edit`, a removed source drops
+    /// them ([`reconcile_exclusions`]). Entries recorded before the field
+    /// existed are attributed on the next reconcile.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub exclusion_sources: BTreeMap<String, String>,
+    /// Exclusions the reconcile dropped because their source left the
+    /// declaration — kept so the next sync brief reports them with the
+    /// source named, then cleared once reported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_exclusions: Vec<DroppedExclusion>,
+}
+
+/// One authored exclusion dropped by [`reconcile_exclusions`]: the source it
+/// was recorded under is no longer declared on the binding.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DroppedExclusion {
+    pub artifact: String,
+    /// The facet name the exclusion was recorded under; `unattributed` for
+    /// a pre-field entry no declared source enumerates.
+    pub source: String,
+    pub rationale: String,
+    pub dropped_at: String,
+}
+
+/// One authored exclusion in force, as the sync brief lists it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ActiveExclusion {
+    pub artifact: String,
+    pub source: String,
+    pub rationale: String,
+}
+
+/// The exclusion ledger after reconciliation against the binding as declared
+/// now: what is in force, and what was dropped (reported once).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ExclusionLedger {
+    pub active: Vec<ActiveExclusion>,
+    pub dropped: Vec<DroppedExclusion>,
+}
+
+/// Reconcile a binding's authored exclusions against its declared sources:
+/// an exclusion whose recorded source is still declared stays in force; one
+/// whose source left the declaration is dropped (moved to
+/// `dropped_exclusions`, reported by the next brief and cleared after); a
+/// pre-field entry with no recorded source is attributed to the declared
+/// source that enumerates it, or dropped as `unattributed` when none does.
+/// Nothing here keys on the binding hash, so `projection edit` of any other
+/// field leaves every exclusion untouched. Writes the store only when
+/// something changed; a binding with no store yields an empty ledger.
+pub fn reconcile_exclusions(
+    engine: &Engine,
+    workspace_root: &Path,
+    resolved: &ResolvedIngest,
+) -> Result<ExclusionLedger, StoreError> {
+    let Ok((mem, name)) = split_binding_id(&resolved.name) else {
+        return Ok(ExclusionLedger::default());
+    };
+    let Some(mut state) = read_advance_store(workspace_root, &mem, &name)? else {
+        return Ok(ExclusionLedger::default());
+    };
+    let declared: BTreeSet<String> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(p.name.clone()),
+            ResolvedSource::Reference { .. } => None,
+        })
+        .collect();
+    let mut changed = false;
+    let mut membership: Option<BTreeMap<String, String>> = None;
+    let mut dropped_now: Vec<DroppedExclusion> = Vec::new();
+    let mut active: Vec<ActiveExclusion> = Vec::new();
+    for (artifact, rationale) in state.exclusions.clone() {
+        let recorded = state.exclusion_sources.get(&artifact).cloned();
+        let source = match recorded {
+            Some(s) if declared.contains(&s) => Some(s),
+            Some(s) => {
+                dropped_now.push(DroppedExclusion {
+                    artifact: artifact.clone(),
+                    source: s,
+                    rationale: rationale.clone(),
+                    dropped_at: crate::engine::mutation::iso_now(),
+                });
+                None
+            }
+            None => {
+                let facets = membership.get_or_insert_with(|| {
+                    let mut m = BTreeMap::new();
+                    for s in &resolved.sources {
+                        if let ResolvedSource::Primary(p) = s {
+                            for f in enumerate_source_artifacts(
+                                engine,
+                                p,
+                                &resolved.deny_paths,
+                                workspace_root,
+                            ) {
+                                m.entry(f).or_insert_with(|| p.name.clone());
+                            }
+                        }
+                    }
+                    m
+                });
+                match facets.get(&artifact).cloned() {
+                    Some(f) => {
+                        state.exclusion_sources.insert(artifact.clone(), f.clone());
+                        changed = true;
+                        Some(f)
+                    }
+                    None => {
+                        dropped_now.push(DroppedExclusion {
+                            artifact: artifact.clone(),
+                            source: "unattributed".to_string(),
+                            rationale: rationale.clone(),
+                            dropped_at: crate::engine::mutation::iso_now(),
+                        });
+                        None
+                    }
+                }
+            }
+        };
+        match source {
+            Some(source) => active.push(ActiveExclusion {
+                artifact,
+                source,
+                rationale,
+            }),
+            None => {
+                state.exclusions.remove(&artifact);
+                state.exclusion_sources.remove(&artifact);
+                changed = true;
+            }
+        }
+    }
+    // Report what was dropped now plus what an earlier reconcile dropped and
+    // no brief has reported yet; the report clears the record.
+    let mut dropped = std::mem::take(&mut state.dropped_exclusions);
+    if !dropped.is_empty() {
+        changed = true;
+    }
+    dropped.extend(dropped_now);
+    if changed {
+        if state.exclusions.is_empty()
+            && state.frozen_slice == Slice::default()
+            && state.dispositions.is_empty()
+        {
+            delete_advance_store(workspace_root, &mem, &name)?;
+        } else {
+            write_advance_store(workspace_root, &mem, &name, &state)?;
+        }
+    }
+    Ok(ExclusionLedger { active, dropped })
 }
 
 /// The verdict marking an artifact **deliberately excluded** from coverage —
@@ -497,6 +653,7 @@ pub fn advance_baseline(
             );
         } else {
             state.exclusions.remove(artifact);
+            state.exclusion_sources.remove(artifact);
         }
     }
 
@@ -564,6 +721,8 @@ pub fn advance_baseline(
                 frozen_slice: Slice::default(),
                 dispositions: BTreeMap::new(),
                 exclusions: state.exclusions.clone(),
+                exclusion_sources: state.exclusion_sources.clone(),
+                dropped_exclusions: state.dropped_exclusions.clone(),
             };
             write_advance_store(workspace_root, &mem, &name, &durable)
                 .map_err(AdvanceError::Store)?;
@@ -665,6 +824,9 @@ pub fn record_exclusions(
     // in-scope artifacts and state the short count as if it were `S(D)` —
     // refuse the call instead, naming the cause.
     let mut s_d: BTreeSet<String> = BTreeSet::new();
+    // artifact → the facet it enumerates under (the first, in declaration
+    // order): the source half of the exclusion's identity.
+    let mut facet_of: BTreeMap<String, String> = BTreeMap::new();
     for source in &resolved.sources {
         if let ResolvedSource::Primary(p) = source {
             let walked = enumerate_source_artifacts_reported(
@@ -678,6 +840,9 @@ pub fn record_exclusions(
                     facet: p.name.clone(),
                     reason,
                 });
+            }
+            for f in &walked.files {
+                facet_of.entry(f.clone()).or_insert_with(|| p.name.clone());
             }
             s_d.extend(walked.files);
         }
@@ -715,6 +880,11 @@ pub fn record_exclusions(
             .is_none()
         {
             added += 1;
+        }
+        if let Some(facet) = facet_of.get(artifact) {
+            state
+                .exclusion_sources
+                .insert(artifact.clone(), facet.clone());
         }
     }
     write_advance_store(workspace_root, &mem, &name, &state).map_err(ExcludeError::Store)?;
@@ -777,6 +947,7 @@ mod tests {
             frozen_slice: slice(&["c.rs"], &["a.rs"], &["b.rs"]),
             dispositions: disp(&[("a.rs", "worked")]),
             exclusions: BTreeMap::new(),
+            ..Default::default()
         };
         write_advance_store(root, "engine", "graph", &state).unwrap();
         assert!(
@@ -1576,5 +1747,166 @@ mod tests {
             );
             assert!(!out.completed);
         }
+    }
+
+    /// A workspace with one folder mem `engine` (default@1.0.0), a git source
+    /// tree at the root, and `files` written relative to the root. Returns the
+    /// root; the caller writes the binding.
+    fn a3_workspace(root: &std::path::Path, files: &[&str]) {
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = crate::workspace::Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: crate::workspace::MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::workspace_store::WorkspaceStoreAdapter::save_state(
+            &crate::FileWorkspaceStore::new(),
+            root,
+            &crate::workspace::Workspace {
+                mounts: vec![mount],
+                settings: crate::workspace::WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        for f in files {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "fn x() {}\n").unwrap();
+        }
+    }
+
+    fn a3_binding(
+        sources: &[(&str, &str)],
+        deny: &[&str],
+        batch_size: u32,
+    ) -> crate::binding::Binding {
+        crate::binding::Binding {
+            version: crate::binding::BINDING_VERSION,
+            intent: None,
+            sources: sources
+                .iter()
+                .map(|(name, glob)| crate::pipeline::Source {
+                    name: name.to_string(),
+                    medium_type: crate::pipeline::MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![crate::pipeline::PatternEntry {
+                        path: glob.to_string(),
+                        mode: crate::pipeline::PatternMode::Allow,
+                    }],
+                    engagement: None,
+                    preparation: None,
+                })
+                .collect(),
+            reference_mems: Vec::new(),
+            destination_mem: "engine".to_string(),
+            deny_paths: deny.iter().map(|d| d.to_string()).collect(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: crate::binding::Operations {
+                build: Some(crate::binding::BuildOperation {
+                    mode: crate::binding::BuildMode::Discovery,
+                    trigger: crate::pipeline::IngestTrigger::Loop,
+                    batch_size,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: Some(crate::binding::VerifyOperation {
+                    trigger: crate::pipeline::IngestTrigger::Manual,
+                    batch_size,
+                    adjudication_cap: crate::binding::DEFAULT_ADJUDICATION_CAP,
+                    // Scheduled full walks off: the sampled path is under test.
+                    full_resync_every: 0,
+                }),
+            },
+        }
+    }
+
+    /// A3 AC3: an exclusion survives a binding edit that changes an unrelated
+    /// field, still carrying its source and rationale; removing its source
+    /// from the declaration drops it, reported once with the source named.
+    #[test]
+    fn exclusions_survive_edits_and_drop_with_their_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        a3_workspace(root, &["src/a.rs", "docs/x.md"]);
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let two = |batch: u32| {
+            a3_binding(
+                &[("graph", "src/**/*.rs"), ("docs", "docs/**/*.md")],
+                &[],
+                batch,
+            )
+        };
+
+        let b = two(20);
+        crate::pipeline_store::write_binding(root, "engine", "graph", &b).unwrap();
+        let resolved = crate::ingest::resolve::resolve_binding_run("engine/graph", &b).unwrap();
+        let mut ex = BTreeMap::new();
+        ex.insert("docs/x.md".to_string(), "index page, mined".to_string());
+        record_exclusions(&engine, root, &resolved, &ex).unwrap();
+        let ledger = reconcile_exclusions(&engine, root, &resolved).unwrap();
+        assert_eq!(ledger.active.len(), 1);
+        assert_eq!(ledger.active[0].source, "docs");
+        assert_eq!(ledger.active[0].rationale, "index page, mined");
+        assert!(ledger.dropped.is_empty());
+
+        // The edit: batch size only. Same source, same rationale.
+        let edited = two(5);
+        crate::pipeline_store::write_binding(root, "engine", "graph", &edited).unwrap();
+        let resolved =
+            crate::ingest::resolve::resolve_binding_run("engine/graph", &edited).unwrap();
+        let ledger = reconcile_exclusions(&engine, root, &resolved).unwrap();
+        assert_eq!(ledger.active.len(), 1, "{ledger:?}");
+        assert_eq!(ledger.active[0].artifact, "docs/x.md");
+        assert_eq!(ledger.active[0].rationale, "index page, mined");
+        assert!(ledger.dropped.is_empty());
+
+        // The source leaves the declaration: dropped, named, once.
+        let without = a3_binding(&[("graph", "src/**/*.rs")], &[], 5);
+        crate::pipeline_store::write_binding(root, "engine", "graph", &without).unwrap();
+        let resolved =
+            crate::ingest::resolve::resolve_binding_run("engine/graph", &without).unwrap();
+        let ledger = reconcile_exclusions(&engine, root, &resolved).unwrap();
+        assert!(ledger.active.is_empty(), "{ledger:?}");
+        assert_eq!(ledger.dropped.len(), 1);
+        assert_eq!(ledger.dropped[0].artifact, "docs/x.md");
+        assert_eq!(ledger.dropped[0].source, "docs");
+        assert_eq!(ledger.dropped[0].rationale, "index page, mined");
+        let again = reconcile_exclusions(&engine, root, &resolved).unwrap();
+        assert!(
+            again.active.is_empty() && again.dropped.is_empty(),
+            "reported once: {again:?}"
+        );
+        assert!(
+            read_advance_store(root, "engine", "graph")
+                .unwrap()
+                .is_none()
+        );
     }
 }

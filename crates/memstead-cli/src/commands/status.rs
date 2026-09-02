@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use memstead_base::Store;
-use memstead_base::ingest::status::{
-    ProjectionStatus, Rollup, projection_rollup, projection_status,
-};
+use memstead_base::ingest::status::{ProjectionStatus, Rollup, projection_overview};
 use serde::Serialize;
 use serde_json::json;
 
@@ -139,13 +137,13 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
             CliEngine::MemRepo(engine) => {
                 let status = engine.status();
                 let store: &Store = engine.store();
-                let projections = root
+                // One per-binding pass for both projections (A3 AC2).
+                let (projections, rollup) = root
                     .as_deref()
-                    .map(|r| projection_status(&engine, r))
-                    .unwrap_or_default();
-                let rollup = root
-                    .as_deref()
-                    .map(|r| projection_rollup(&engine, r))
+                    .map(|r| {
+                        let o = projection_overview(&engine, r);
+                        (o.bindings, o.rollup)
+                    })
                     .unwrap_or_default();
                 let mems = mem_durability(&engine);
                 let quarantined = quarantine_roster(&engine);
@@ -163,13 +161,13 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
             CliEngine::Filesystem(engine) => {
                 let status = engine.status();
                 let store: &Store = engine.store();
-                let projections = root
+                // One per-binding pass for both projections (A3 AC2).
+                let (projections, rollup) = root
                     .as_deref()
-                    .map(|r| projection_status(&engine, r))
-                    .unwrap_or_default();
-                let rollup = root
-                    .as_deref()
-                    .map(|r| projection_rollup(&engine, r))
+                    .map(|r| {
+                        let o = projection_overview(&engine, r);
+                        (o.bindings, o.rollup)
+                    })
                     .unwrap_or_default();
                 let mems = mem_durability(&engine);
                 let quarantined = quarantine_roster(&engine);

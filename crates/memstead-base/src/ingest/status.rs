@@ -109,6 +109,10 @@ struct BindingResolution {
     /// Whether the findings/moved state counts as an action under the
     /// rollup's rules (uncovered only under exhaustive coverage).
     has_action: bool,
+    /// Whether the uncovered count is an action here (exhaustive coverage
+    /// declared or effective) — carried so the rollup needs no second look
+    /// at the binding.
+    uncovered_counts: bool,
 }
 
 impl BindingResolution {
@@ -123,18 +127,29 @@ impl BindingResolution {
     }
 }
 
+// Test-only instrumentation: how many per-binding scans ran on this thread.
+// A3 AC2 pins one scan per binding for a call that yields both the status
+// list and the rollup.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static BINDING_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn resolve_binding_status(
     engine: &Engine,
     workspace_root: &Path,
     binding: &crate::binding::Binding,
     resolved: &ResolvedIngest,
 ) -> BindingResolution {
+    #[cfg(test)]
+    BINDING_SCANS.with(|c| c.set(c.get() + 1));
     if mem_predates_binding(engine, resolved) {
         return BindingResolution {
             onboarding: true,
             source_moved: false,
             findings: FindingCounts::default(),
             has_action: false,
+            uncovered_counts: false,
         };
     }
     let source_moved = source_moved(engine, resolved, workspace_root);
@@ -164,6 +179,7 @@ fn resolve_binding_status(
         source_moved,
         findings,
         has_action,
+        uncovered_counts,
     }
 }
 
@@ -188,11 +204,35 @@ fn signal_of(strategy: ChangeStrategy) -> &'static str {
 /// sources cannot be resolved (dangling facet/medium) contributes its
 /// operations + advance counts with an empty `state` map.
 pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<ProjectionStatus> {
+    projection_overview(engine, workspace_root).bindings
+}
+
+/// The status list and the rollup from **one** per-binding pass — what
+/// `memstead status` and the ui-api status endpoint render together. Until
+/// 2026-09-02 each called [`projection_status`] and [`projection_rollup`] in
+/// turn, and every binding's scan (source-head tokens, findings store,
+/// exclusion ledger) ran twice per request; the rollup is now derived from the
+/// resolutions the status pass already computed, and its shape is unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProjectionOverview {
+    /// The per-binding drill-down ([`projection_status`]).
+    pub bindings: Vec<ProjectionStatus>,
+    /// The dashboard lead ([`projection_rollup`]).
+    pub rollup: Rollup,
+}
+
+/// See [`ProjectionOverview`]: one scan per binding, both projections.
+pub fn projection_overview(engine: &Engine, workspace_root: &Path) -> ProjectionOverview {
     let Ok(configs) = load_pipeline_configs(workspace_root) else {
-        return Vec::new();
+        return ProjectionOverview {
+            bindings: Vec::new(),
+            rollup: Rollup::default(),
+        };
     };
 
     let mut out = Vec::with_capacity(configs.bindings.len());
+    let mut scans: Vec<(String, Option<BindingResolution>)> =
+        Vec::with_capacity(configs.bindings.len());
     for record in &configs.bindings {
         let binding_id = format!("{}/{}", record.mem, record.name);
         let binding = &record.config;
@@ -269,7 +309,7 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
             None => (RollupVerdict::Clean, false, FindingCounts::default()),
         };
         out.push(ProjectionStatus {
-            binding: binding_id,
+            binding: binding_id.clone(),
             destination_mem: binding.destination_mem.clone(),
             operations,
             state,
@@ -278,8 +318,13 @@ pub fn projection_status(engine: &Engine, workspace_root: &Path) -> Vec<Projecti
             source_moved,
             findings,
         });
+        scans.push((binding_id, resolution));
     }
-    out
+    let rollup = rollup_from_scans(configs.bindings.len(), &scans);
+    ProjectionOverview {
+        bindings: out,
+        rollup,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -379,27 +424,26 @@ struct Candidate {
 /// expected first-sync backfill worklist, so pre-binding history alone never
 /// drives an `action-needed` verdict (E1).
 pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
-    let Ok(configs) = load_pipeline_configs(workspace_root) else {
-        return Rollup::default();
-    };
-    if configs.bindings.is_empty() {
+    projection_overview(engine, workspace_root).rollup
+}
+
+/// Derive the rollup from the per-binding resolutions the status pass
+/// computed — the SAME scan, consumed once (A3 AC2). A binding whose sources
+/// did not resolve carries `None` and contributes nothing here, exactly as
+/// the former standalone rollup skipped it.
+fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]) -> Rollup {
+    if total == 0 {
         return Rollup::default();
     }
-    let total = configs.bindings.len();
 
     let mut candidates: Vec<Candidate> = Vec::new();
     let mut action_bindings = 0usize;
     let mut onboarding_bindings = 0usize;
 
-    for record in &configs.bindings {
-        let binding_id = format!("{}/{}", record.mem, record.name);
-        let binding = &record.config;
-        let Ok(resolved) = resolve_binding_run(&binding_id, binding) else {
+    for (binding_id, resolution) in scans {
+        let Some(resolution) = resolution else {
             continue;
         };
-
-        // The SAME per-binding scan projection_status serves (one truth).
-        let resolution = resolve_binding_status(engine, workspace_root, binding, &resolved);
 
         // Adopt (E1): a mem that predates its binding is onboarding, never a red
         // verdict. Its uncovered artifacts are the backfill worklist, so we skip
@@ -456,12 +500,7 @@ pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
         // curated binding covers a deliberate slice, so uncovered is
         // information, not a defect (B4). (`has_action` already encodes
         // this rule; the candidate mirrors it.)
-        if uncovered > 0
-            && matches!(
-                crate::binding::effective_coverage_semantics(binding).value,
-                CoverageSemantics::Exhaustive
-            )
-        {
+        if uncovered > 0 && resolution.uncovered_counts {
             candidates.push(Candidate {
                 severity: 3,
                 text: format!(
@@ -858,5 +897,26 @@ mod tests {
         );
         assert!(rollup.actions.is_empty());
         assert!(rollup.headline.contains("No projection bindings"));
+    }
+
+    /// A3 AC2: one scan per binding yields both projections. Uses the same
+    /// fixture as the verdict test above; the counter is thread-local, so
+    /// the delta is this call's alone.
+    #[test]
+    fn overview_scans_each_binding_once_for_status_and_rollup() {
+        let tmp = TempDir::new().unwrap();
+        let engine = one_binding_workspace(&tmp);
+        let root = tmp.path();
+        let before = BINDING_SCANS.with(std::cell::Cell::get);
+        let overview = projection_overview(&engine, root);
+        let after = BINDING_SCANS.with(std::cell::Cell::get);
+        assert_eq!(overview.bindings.len(), 1);
+        assert_eq!(after - before, 1, "one scan for status AND rollup");
+        // The two standalone forms still agree with the combined one.
+        assert_eq!(
+            serde_json::to_value(projection_status(&engine, root)).unwrap(),
+            serde_json::to_value(&overview.bindings).unwrap()
+        );
+        assert_eq!(projection_rollup(&engine, root), overview.rollup);
     }
 }

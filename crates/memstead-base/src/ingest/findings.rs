@@ -1611,7 +1611,26 @@ fn run_verify(
     //    are refused (scheduled: the typed refusal rides on `full_resync`;
     //    explicit: the whole run refused before observing), never silently
     //    claimed as covered.
-    let sample_files: Vec<String> = if full_resync.is_full_walk() {
+    // `S(D)` — the in-scope population under the binding as it is declared
+    // NOW (deny_paths applied). Computed before the sample is drawn so the
+    // window can be held to it: the rotation scheduler reconciles its
+    // in-flight order against this set, and the retain below is the second
+    // wall for the same invariant, a recorded `uncovered` finding names an
+    // artifact of `S(D)` and nothing else.
+    let mut s_d: BTreeSet<String> = BTreeSet::new();
+    for source in &resolved.sources {
+        if let ResolvedSource::Primary(p) = source
+            && medium_capabilities(p.medium_type).enumerable
+        {
+            s_d.extend(enumerate_source_artifacts(
+                engine,
+                p,
+                &resolved.deny_paths,
+                workspace_root,
+            ));
+        }
+    }
+    let mut sample_files: Vec<String> = if full_resync.is_full_walk() {
         // Collected above where the walk decision was settled — only facets
         // the decision actually announces as walked contribute.
         let mut all = full_walk_files;
@@ -1623,6 +1642,7 @@ fn run_verify(
             .map(|b| b.files)
             .unwrap_or_default()
     };
+    sample_files.retain(|f| s_d.contains(f));
     // Filtered by BINDING, not merely by mem (consistency-sweep 03/01,
     // criterion 7). The report's coverage lookup was scoped first and this one
     // was missed, which is the worse of the two: this decides whether an
@@ -1658,11 +1678,11 @@ fn run_verify(
     // line and the findings store kept counting exclusions as uncovered
     // (three of them on plugin/graph) while the rationales rendered right
     // beside the count.
+    // Reconciled first (A3 AC3): an exclusion whose source left the
+    // declaration is dropped here as well, not only when a brief renders.
     let excluded: BTreeSet<String> =
-        crate::ingest::advance::read_advance_store(workspace_root, &mem, &name)
-            .ok()
-            .flatten()
-            .map(|state| state.exclusions.keys().cloned().collect())
+        crate::ingest::advance::reconcile_exclusions(engine, workspace_root, resolved)
+            .map(|l| l.active.into_iter().map(|e| e.artifact).collect())
             .unwrap_or_default();
     for file in &sample_files {
         if !covered_now(file) && !excluded.contains(file) {
@@ -1691,19 +1711,6 @@ fn run_verify(
             binding: binding_id.clone(),
             ..Default::default()
         });
-    let mut s_d: BTreeSet<String> = BTreeSet::new();
-    for source in &resolved.sources {
-        if let ResolvedSource::Primary(p) = source
-            && medium_capabilities(p.medium_type).enumerable
-        {
-            s_d.extend(enumerate_source_artifacts(
-                engine,
-                p,
-                &resolved.deny_paths,
-                workspace_root,
-            ));
-        }
-    }
     let obs = PassObservation {
         anchors_observed,
         anchors_existing,
@@ -4469,5 +4476,179 @@ mod tests {
             &current[0].target,
             FindingTarget::Artifact { artifact } if artifact == "docs/live.md"
         ));
+    }
+
+    /// A workspace with one folder mem `engine` (default@1.0.0), a git source
+    /// tree at the root, and `files` written relative to the root. Returns the
+    /// root; the caller writes the binding.
+    fn a3_workspace(root: &std::path::Path, files: &[&str]) {
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = crate::workspace::Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: crate::workspace::MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::workspace_store::WorkspaceStoreAdapter::save_state(
+            &crate::FileWorkspaceStore::new(),
+            root,
+            &crate::workspace::Workspace {
+                mounts: vec![mount],
+                settings: crate::workspace::WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        for f in files {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "fn x() {}\n").unwrap();
+        }
+    }
+
+    fn a3_binding(
+        sources: &[(&str, &str)],
+        deny: &[&str],
+        batch_size: u32,
+    ) -> crate::binding::Binding {
+        crate::binding::Binding {
+            version: crate::binding::BINDING_VERSION,
+            intent: None,
+            sources: sources
+                .iter()
+                .map(|(name, glob)| crate::pipeline::Source {
+                    name: name.to_string(),
+                    medium_type: crate::pipeline::MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![crate::pipeline::PatternEntry {
+                        path: glob.to_string(),
+                        mode: crate::pipeline::PatternMode::Allow,
+                    }],
+                    engagement: None,
+                    preparation: None,
+                })
+                .collect(),
+            reference_mems: Vec::new(),
+            destination_mem: "engine".to_string(),
+            deny_paths: deny.iter().map(|d| d.to_string()).collect(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: crate::binding::Operations {
+                build: Some(crate::binding::BuildOperation {
+                    mode: crate::binding::BuildMode::Discovery,
+                    trigger: crate::pipeline::IngestTrigger::Loop,
+                    batch_size,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: Some(crate::binding::VerifyOperation {
+                    trigger: crate::pipeline::IngestTrigger::Manual,
+                    batch_size,
+                    adjudication_cap: crate::binding::DEFAULT_ADJUDICATION_CAP,
+                    // Scheduled full walks off: the sampled path is under test.
+                    full_resync_every: 0,
+                }),
+            },
+        }
+    }
+
+    /// A3 AC1: after `projection edit` adds a deny, every sampled verify
+    /// records zero `uncovered` findings naming a denied file across five
+    /// rotation windows while `S(D)` reads thirty; lifting the deny makes the
+    /// denied files present again (the filter follows the binding, not the
+    /// rotation cache).
+    #[test]
+    fn sampled_verify_records_nothing_for_denied_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mut files: Vec<String> = (0..30).map(|i| format!("src/keep/k{i:02}.rs")).collect();
+        files.extend((0..10).map(|i| format!("src/deny/d{i:02}.rs")));
+        let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+        a3_workspace(root, &refs);
+        let engine = Engine::from_workspace_root(root).unwrap();
+
+        let run = |binding: &Binding| -> (VerifyOutcome, Vec<String>) {
+            let resolved = resolve_binding_run("engine/graph", binding).unwrap();
+            let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
+            let store = read_findings_store(root, "engine", "graph")
+                .unwrap()
+                .expect("store written");
+            let uncovered: Vec<String> = store
+                .current(&outcome.key)
+                .iter()
+                .filter(|f| f.class == FindingClass::Uncovered)
+                .filter_map(|f| match &f.target {
+                    FindingTarget::Artifact { artifact } => Some(artifact.clone()),
+                    _ => None,
+                })
+                .collect();
+            (outcome, uncovered)
+        };
+
+        // One sampled run over the whole set seeds the rotation (40 files,
+        // window 8).
+        let open = a3_binding(&[("graph", "src/**/*.rs")], &[], 8);
+        write_binding(root, "engine", "graph", &open).unwrap();
+        let (_, first) = run(&open);
+        assert!(!first.is_empty(), "the sample records uncovered files");
+
+        // The edit: deny the ten files.
+        let denied = a3_binding(&[("graph", "src/**/*.rs")], &["src/deny/**"], 8);
+        write_binding(root, "engine", "graph", &denied).unwrap();
+        let resolved = resolve_binding_run("engine/graph", &denied).unwrap();
+        let ResolvedSource::Primary(p) = &resolved.sources[0] else {
+            panic!("primary source")
+        };
+        assert_eq!(
+            enumerate_source_artifacts(&engine, p, &resolved.deny_paths, root).len(),
+            30,
+            "the denominator honours the deny"
+        );
+        for pass in 0..5 {
+            let (_, uncovered) = run(&denied);
+            assert!(
+                uncovered.iter().all(|a| !a.starts_with("src/deny/")),
+                "pass {pass} recorded a denied artifact: {uncovered:?}"
+            );
+        }
+
+        // Lifting the deny: the files come back into the sample.
+        write_binding(root, "engine", "graph", &open).unwrap();
+        let mut seen_denied = false;
+        for _ in 0..8 {
+            let (_, uncovered) = run(&open);
+            if uncovered.iter().any(|a| a.starts_with("src/deny/")) {
+                seen_denied = true;
+                break;
+            }
+        }
+        assert!(
+            seen_denied,
+            "with the deny lifted the files are sampled again"
+        );
     }
 }

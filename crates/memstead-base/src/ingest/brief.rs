@@ -1232,6 +1232,53 @@ fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
+/// Render the authored-exclusion block for the sync brief: what is in force
+/// (artifact, source, rationale) and what the reconcile dropped because its
+/// source left the declaration. Empty when the ledger is empty.
+fn render_exclusions(ledger: &crate::ingest::advance::ExclusionLedger) -> String {
+    if ledger.active.is_empty() && ledger.dropped.is_empty() {
+        return String::new();
+    }
+    let mut lines: Vec<String> = Vec::new();
+    if !ledger.active.is_empty() {
+        lines.push("## Excluded artifacts (authored)".to_string());
+        lines.push(String::new());
+        lines.push(
+            "These in-scope artifacts are deliberately excluded with a recorded rationale; \
+             they never present as uncovered and need no entity. An exclusion keys on the \
+             artifact and its source, so it survives edits to the rest of the binding."
+                .to_string(),
+        );
+        lines.push(String::new());
+        for e in &ledger.active {
+            lines.push(format!(
+                "- `{}` (source `{}`): {}",
+                e.artifact, e.source, e.rationale
+            ));
+        }
+        lines.push(String::new());
+    }
+    if !ledger.dropped.is_empty() {
+        lines.push("## Exclusions dropped — their source is no longer declared".to_string());
+        lines.push(String::new());
+        lines.push(
+            "The source these exclusions were recorded under left the binding's declaration, \
+             so they no longer apply; re-declare the source and record them again if they \
+             still hold."
+                .to_string(),
+        );
+        lines.push(String::new());
+        for d in &ledger.dropped {
+            lines.push(format!(
+                "- `{}` (source `{}`, dropped {}): {}",
+                d.artifact, d.source, d.dropped_at, d.rationale
+            ));
+        }
+        lines.push(String::new());
+    }
+    format!("{}\n", lines.join("\n"))
+}
+
 /// Render the prune-proposals block for the sync brief (group F) — the deletion
 /// proposals prune surfaced, each with its guarantee-appropriate treatment.
 /// Empty string when there are no proposals.
@@ -1502,6 +1549,7 @@ pub fn render_sync_brief(
     findings: &[Finding],
     prune: &[PruneProposal],
     adopt: bool,
+    exclusions: &crate::ingest::advance::ExclusionLedger,
 ) -> String {
     let preface = render_changed_slice(cursor);
     let open_findings = render_open_findings(findings, &resolved.name);
@@ -1509,7 +1557,13 @@ pub fn render_sync_brief(
     let has_work =
         adopt || !preface.is_empty() || !open_findings.is_empty() || !prune_block.is_empty();
 
-    let mut parts: Vec<String> = vec![render_sync_situation(resolved)];
+    // The exclusion ledger renders on every sync brief, work or not: an
+    // exclusion in force is standing state the agent must not re-litigate,
+    // and one the reconcile dropped is reported here, once, with its source.
+    let mut parts: Vec<String> = vec![
+        render_sync_situation(resolved),
+        render_exclusions(exclusions),
+    ];
 
     if !has_work {
         parts.push(
@@ -2418,7 +2472,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 "in scope, no anchor",
             ),
         ];
-        let out = render_sync_brief(&r, &cursor, &findings, &[], false);
+        let out = render_sync_brief(
+            &r,
+            &cursor,
+            &findings,
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         // Both inputs present in one brief (C2).
         assert!(out.contains("## Source changes since the last sync"));
         assert!(out.contains("`moved.rs`"));
@@ -2443,7 +2504,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             artifact_target("src/x.rs"),
             "d",
         )];
-        let out = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
+        let out = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &findings,
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         // Five conservatism rules.
         assert!(out.contains("Unsure whether an entity is affected — skip it."));
         assert!(out.contains(
@@ -2474,7 +2542,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         // `<mem>/<stem>` while `destination_mem` is the mem — the header uses the
         // mem, the backfill command uses the binding id.
         r.name = "engine/graph".to_string();
-        let out = render_sync_brief(&r, &empty_cursor(), &[], &[], true);
+        let out = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &[],
+            &[],
+            true,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(out.contains("## First sync — adopting `engine`"));
         assert!(out.contains("0% anchored is expected — this is onboarding, not a failure."));
         assert!(out.contains("do **not** replay the whole history"));
@@ -2489,7 +2564,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let r = resolved("engine", None, vec![]);
         let mut cursor = empty_cursor();
         cursor.reseed = vec![cmd("engine/graph/src#synced", "TOK")];
-        let out = render_sync_brief(&r, &cursor, &[], &[], false);
+        let out = render_sync_brief(
+            &r,
+            &cursor,
+            &[],
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(out.contains("No usable sync baseline exists for"));
         assert!(out.contains("Treating the current source state as the baseline"));
     }
@@ -2499,7 +2581,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
     #[test]
     fn sync_brief_nothing_to_sync() {
         let r = resolved("engine", None, vec![]);
-        let out = render_sync_brief(&r, &empty_cursor(), &[], &[], false);
+        let out = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &[],
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(out.contains("## Nothing to sync"));
         assert!(!out.contains("## How to repair"));
         assert!(!out.contains("## Open findings"));
@@ -2518,7 +2607,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "d",
         )];
         let verify = render_verify_brief(&r, 1);
-        let sync = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
+        let sync = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &findings,
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         // Verify: no repair section, no repair verbs as instructions.
         assert!(!verify.contains("## How to repair"));
         assert!(!verify.contains("Update the affected section"));
@@ -2546,7 +2642,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             binding_id: "engine/graph".to_string(),
             delivery: vec![],
         };
-        let out = render_sync_brief(&r, &cursor, &[], &[], false);
+        let out = render_sync_brief(
+            &r,
+            &cursor,
+            &[],
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(out.contains("## Stale claims beyond the slice — search, then judge"));
         // The search is bound to the changed facts and the destination mem.
         assert!(out.contains("Extract the **changed facts** from the changed artifacts above"));
@@ -2577,17 +2680,38 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             artifact_target("src/x.rs"),
             "d",
         )];
-        let out = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
+        let out = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &findings,
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(!out.contains(heading), "findings-only pass must not search");
 
         // Reseed-only pass (first sync, no diffable slice).
         let mut reseed_cursor = empty_cursor();
         reseed_cursor.reseed = vec![cmd("engine/graph/src#synced", "TOK")];
-        let out = render_sync_brief(&r, &reseed_cursor, &[], &[], false);
+        let out = render_sync_brief(
+            &r,
+            &reseed_cursor,
+            &[],
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(!out.contains(heading), "reseed-only pass must not search");
 
         // Nothing-to-sync pass.
-        let out = render_sync_brief(&r, &empty_cursor(), &[], &[], false);
+        let out = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &[],
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(!out.contains(heading));
     }
 
@@ -2605,7 +2729,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 )
             })
             .collect();
-        let out = render_sync_brief(&r, &empty_cursor(), &findings, &[], false);
+        let out = render_sync_brief(
+            &r,
+            &empty_cursor(),
+            &findings,
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         assert!(out.contains("- …and 4 more"));
         // The last few beyond the cap are not rendered inline.
         assert!(!out.contains(&format!("src/f{}.rs", FINDINGS_CAP + 3)));
@@ -2648,7 +2779,14 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
                 "in scope, no anchor",
             ),
         ];
-        let out = render_sync_brief(&r, &cursor, &findings, &[], false);
+        let out = render_sync_brief(
+            &r,
+            &cursor,
+            &findings,
+            &[],
+            false,
+            &crate::ingest::advance::ExclusionLedger::default(),
+        );
         let headings: Vec<&str> = out
             .lines()
             .filter(|l| l.starts_with("## ") || l.starts_with("### "))
@@ -2750,19 +2888,47 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         )];
         assert_clean(
             "sync brief (changed slice + findings)",
-            &render_sync_brief(&r, &changed_cursor, &findings, &[], false),
+            &render_sync_brief(
+                &r,
+                &changed_cursor,
+                &findings,
+                &[],
+                false,
+                &crate::ingest::advance::ExclusionLedger::default(),
+            ),
         );
         assert_clean(
             "sync brief (findings-only)",
-            &render_sync_brief(&r, &empty_cursor(), &findings, &[], false),
+            &render_sync_brief(
+                &r,
+                &empty_cursor(),
+                &findings,
+                &[],
+                false,
+                &crate::ingest::advance::ExclusionLedger::default(),
+            ),
         );
         assert_clean(
             "sync brief (nothing to sync)",
-            &render_sync_brief(&r, &empty_cursor(), &[], &[], false),
+            &render_sync_brief(
+                &r,
+                &empty_cursor(),
+                &[],
+                &[],
+                false,
+                &crate::ingest::advance::ExclusionLedger::default(),
+            ),
         );
         assert_clean(
             "sync brief (adopt)",
-            &render_sync_brief(&r, &empty_cursor(), &[], &[], true),
+            &render_sync_brief(
+                &r,
+                &empty_cursor(),
+                &[],
+                &[],
+                true,
+                &crate::ingest::advance::ExclusionLedger::default(),
+            ),
         );
     }
 }

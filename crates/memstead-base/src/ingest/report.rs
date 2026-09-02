@@ -112,6 +112,11 @@ pub struct TreeFanout {
     pub fanout: usize,
 }
 
+/// The coverage unit, stated on every fidelity report (A3 AC4).
+pub const COVERAGE_UNIT: &str = "describing entities per artifact — an artifact counts once \
+     when at least one entity anchors it, however many anchor rows it carries; anchor rows \
+     are counted on the resolution axis, never here";
+
 /// Grain-classed coverage over `S(D)` (B1). Tree-anchor fan-out is a **separate
 /// axis** — `direct_covered` and `tree_only_covered` are never summed into one
 /// blended percentage.
@@ -119,6 +124,17 @@ pub struct TreeFanout {
 pub struct GrainCoverage {
     /// The denominator basis (B5).
     pub denominator: DenominatorBasis,
+    /// `S(D)` artifacts covered by at least one describing entity, direct or
+    /// tree — the coverage unit (2026-09-02, basket line 7): an artifact
+    /// counts once however many anchor rows or entities describe it, so
+    /// three anchors from one entity on one file are one covered artifact.
+    pub covered_artifacts: usize,
+    /// Distinct destination entities that describe at least one `S(D)`
+    /// artifact through this binding's anchors.
+    pub describing_entities: usize,
+    /// The unit statement, verbatim on the report, so the figure is never
+    /// read as an anchor-row count.
+    pub unit: &'static str,
     /// `S(D)` files directly covered by a non-tree (file / span) anchor.
     pub direct_covered: usize,
     /// `S(D)` files covered **only** via a tree-grain anchor (the fan-out axis,
@@ -845,8 +861,21 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.coverage.tree_only_covered
     ));
     md.push_str(&format!(
-        "- uncovered (no anchor): {}\n\n",
+        "- uncovered (no anchor): {}\n",
         report.coverage.uncovered.len()
+    ));
+    // The unit, stated beside the figures (A3 AC4): the count is over
+    // artifacts described, never over anchor rows.
+    md.push_str(&format!(
+        "- coverage unit: {} — {} describing entit{} over {} covered artifact(s)\n\n",
+        report.coverage.unit,
+        report.coverage.describing_entities,
+        if report.coverage.describing_entities == 1 {
+            "y"
+        } else {
+            "ies"
+        },
+        report.coverage.covered_artifacts
     ));
 
     // Coverage-semantics framing (B4). REFUSAL (E1): under adopt, the exhaustive
@@ -1422,6 +1451,7 @@ pub fn compute_fidelity_report(
     let mut direct_covered = 0usize;
     let mut tree_only_covered = 0usize;
     let mut uncovered: Vec<String> = Vec::new();
+    let mut describing: BTreeSet<String> = BTreeSet::new();
     let mut tree_fanout: BTreeMap<(String, String), usize> = BTreeMap::new();
     let entity_end_reconciled = engine.entity_set_is_reconcilable(dest.as_str()).is_ok();
     for file in &s_d {
@@ -1454,6 +1484,7 @@ pub fn compute_fidelity_report(
             uncovered.push(file.clone());
             continue;
         }
+        describing.extend(mine.iter().map(|(eid, _)| eid.as_ref().to_string()));
         let has_non_tree = mine.iter().any(|(_, a)| a.grain != AnchorGrain::Tree);
         if has_non_tree {
             direct_covered += 1;
@@ -1480,6 +1511,9 @@ pub fn compute_fidelity_report(
 
     let coverage = GrainCoverage {
         denominator,
+        covered_artifacts: direct_covered + tree_only_covered,
+        describing_entities: describing.len(),
+        unit: COVERAGE_UNIT,
         direct_covered,
         tree_only_covered,
         uncovered: uncovered.clone(),
@@ -1767,6 +1801,9 @@ mod tests {
             source_moved_past_synced: Some(false),
             coverage: GrainCoverage {
                 denominator: DenominatorBasis::Enumerated { count: 10 },
+                covered_artifacts: 9,
+                describing_entities: 4,
+                unit: COVERAGE_UNIT,
                 direct_covered: 6,
                 tree_only_covered: 3,
                 uncovered: vec!["src/a.rs".to_string()],
@@ -2590,6 +2627,9 @@ mod rollup_tests {
             source_moved_past_synced: Some(false),
             coverage: GrainCoverage {
                 denominator: DenominatorBasis::Enumerated { count: 4 },
+                covered_artifacts: 4,
+                describing_entities: 2,
+                unit: COVERAGE_UNIT,
                 direct_covered: 4,
                 tree_only_covered: 0,
                 uncovered: Vec::new(),
@@ -2912,5 +2952,179 @@ mod rollup_tests {
         assert_eq!(RollupVerdict::Inconclusive.wire(), "inconclusive");
         let json = serde_json::to_string(&RollupVerdict::Inconclusive).unwrap();
         assert_eq!(json, "\"inconclusive\"");
+    }
+
+    /// A workspace with one folder mem `engine` (default@1.0.0), a git source
+    /// tree at the root, and `files` written relative to the root. Returns the
+    /// root; the caller writes the binding.
+    fn a3_workspace(root: &std::path::Path, files: &[&str]) {
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = crate::workspace::Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: crate::workspace::MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: crate::workspace::MountCapability::Write,
+            lifecycle: crate::workspace::MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::workspace_store::WorkspaceStoreAdapter::save_state(
+            &crate::FileWorkspaceStore::new(),
+            root,
+            &crate::workspace::Workspace {
+                mounts: vec![mount],
+                settings: crate::workspace::WorkspaceSettings::default(),
+            },
+        )
+        .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        for f in files {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "fn x() {}\n").unwrap();
+        }
+    }
+
+    fn a3_binding(
+        sources: &[(&str, &str)],
+        deny: &[&str],
+        batch_size: u32,
+    ) -> crate::binding::Binding {
+        crate::binding::Binding {
+            version: crate::binding::BINDING_VERSION,
+            intent: None,
+            sources: sources
+                .iter()
+                .map(|(name, glob)| crate::pipeline::Source {
+                    name: name.to_string(),
+                    medium_type: crate::pipeline::MediumType::Codebase,
+                    pointer: String::new(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![crate::pipeline::PatternEntry {
+                        path: glob.to_string(),
+                        mode: crate::pipeline::PatternMode::Allow,
+                    }],
+                    engagement: None,
+                    preparation: None,
+                })
+                .collect(),
+            reference_mems: Vec::new(),
+            destination_mem: "engine".to_string(),
+            deny_paths: deny.iter().map(|d| d.to_string()).collect(),
+            coverage_semantics: None,
+            rules: None,
+            prune: None,
+            operations: crate::binding::Operations {
+                build: Some(crate::binding::BuildOperation {
+                    mode: crate::binding::BuildMode::Discovery,
+                    trigger: crate::pipeline::IngestTrigger::Loop,
+                    batch_size,
+                    post_actions: None,
+                }),
+                sync: None,
+                verify: Some(crate::binding::VerifyOperation {
+                    trigger: crate::pipeline::IngestTrigger::Manual,
+                    batch_size,
+                    adjudication_cap: crate::binding::DEFAULT_ADJUDICATION_CAP,
+                    // Scheduled full walks off: the sampled path is under test.
+                    full_resync_every: 0,
+                }),
+            },
+        }
+    }
+
+    /// A3 AC4: coverage counts describing entities per artifact — an artifact
+    /// with three anchors from one entity counts once, one with an anchor from
+    /// each of two entities counts once; the report states the unit.
+    #[test]
+    fn coverage_counts_artifacts_described_not_anchor_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        a3_workspace(root, &["src/three.rs", "src/two.rs", "src/none.rs"]);
+        let mem_dir = root.join("mem");
+        for slug in ["one", "left", "right"] {
+            std::fs::write(
+                mem_dir.join(format!("{slug}.md")),
+                "---\ntype: decision\n---\n\n# E\n\n## Decision\n\nBody.\n",
+            )
+            .unwrap();
+        }
+        let mk = |artifact: &str| crate::anchor::Anchor {
+            artifact: artifact.to_string(),
+            grain: crate::anchor::AnchorGrain::File,
+            class: crate::anchor::AnchorProvenanceClass::Anchored,
+            at_version: None,
+            hash: Some("recorded".to_string()),
+            hash_stability: crate::anchor::AnchorHashStability::Stable,
+            derived_from: Vec::new(),
+            binding: None,
+            source: None,
+            span_unvalidated: false,
+            hash_source: None,
+            last_observed: None,
+        };
+        let mut sidecar = crate::anchor::AnchorSidecar::default();
+        sidecar.set(
+            "engine--one",
+            vec![mk("src/three.rs"), mk("src/three.rs"), mk("src/three.rs")],
+        );
+        sidecar.set("engine--left", vec![mk("src/two.rs")]);
+        sidecar.set("engine--right", vec![mk("src/two.rs")]);
+        std::fs::write(
+            mem_dir.join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        let b = a3_binding(&[("graph", "src/**/*.rs")], &[], 20);
+        crate::pipeline_store::write_binding(root, "engine", "graph", &b).unwrap();
+
+        let engine = crate::Engine::from_workspace_root(root).unwrap();
+        let resolved = crate::ingest::resolve::resolve_binding_run("engine/graph", &b).unwrap();
+        let outcome =
+            crate::ingest::findings::verify_binding(&engine, root, &b, &resolved).unwrap();
+        let report = super::compute_fidelity_report(&engine, root, &b, &resolved, &outcome.key);
+        assert_eq!(
+            report.coverage.denominator,
+            super::DenominatorBasis::Enumerated { count: 3 }
+        );
+        assert_eq!(
+            report.coverage.covered_artifacts, 2,
+            "{:?}",
+            report.coverage
+        );
+        assert_eq!(
+            report.coverage.describing_entities, 3,
+            "{:?}",
+            report.coverage
+        );
+        assert_eq!(report.coverage.uncovered, vec!["src/none.rs".to_string()]);
+        let md = super::render_fidelity_report(&report, 8_000, &[]).markdown;
+        assert!(
+            md.contains("coverage unit: describing entities per artifact"),
+            "{md}"
+        );
+        assert!(
+            md.contains("3 describing entities over 2 covered artifact(s)"),
+            "{md}"
+        );
     }
 }

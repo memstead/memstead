@@ -164,6 +164,47 @@ pub fn bump_verify_runs(cache_root: &Path, binding_name: &str) -> u64 {
     n
 }
 
+/// Bring a rotation in flight into agreement with the item set it is asked
+/// to walk **this** call. The cursor persists a shuffled order across runs;
+/// until 2026-09-02 that order was consulted as-is mid-rotation, so an item
+/// that had left the set (a source file a fresh `deny_paths` entry now
+/// excludes) kept being served for the rest of the rotation and every sampled
+/// verify recorded an `uncovered` finding for a file the binding denied
+/// (backlog, the apparatus files of 2026-09-01). The rule now: an item no
+/// longer in the set leaves the order (the position shifts with it), and an
+/// item newly in the set joins at the end of the current rotation in a
+/// reproducible order, so the rotation still covers the whole set once
+/// before reshuffling and the next window never names a departed item. A
+/// rotation that has not started, or is exhausted, is left to the reshuffle.
+fn reconcile_order(cursor: &mut RotationCursor, items: &[String]) {
+    if cursor.order.is_empty() || cursor.cursor >= cursor.order.len() {
+        return;
+    }
+    let current: std::collections::BTreeSet<&str> = items.iter().map(String::as_str).collect();
+    let mut kept: Vec<String> = Vec::with_capacity(cursor.order.len());
+    let mut position = 0usize;
+    for (i, item) in cursor.order.iter().enumerate() {
+        if current.contains(item.as_str()) {
+            if i < cursor.cursor {
+                position += 1;
+            }
+            kept.push(item.clone());
+        }
+    }
+    let present: std::collections::BTreeSet<&str> = kept.iter().map(String::as_str).collect();
+    let mut arrivals: Vec<String> = items
+        .iter()
+        .filter(|i| !present.contains(i.as_str()))
+        .cloned()
+        .collect();
+    if !arrivals.is_empty() {
+        shuffle(&mut arrivals, cursor.rotation);
+        kept.extend(arrivals);
+    }
+    cursor.order = kept;
+    cursor.cursor = position;
+}
+
 /// Advance one **named** rotation over an arbitrary item set — the generalized
 /// rotation core the verify samplers (D2) repurpose. `items` is the full set to
 /// cover (sorted + de-duplicated by the caller for determinism); `rotation_key`
@@ -185,6 +226,7 @@ pub fn next_rotation_batch(
 
     let mut state = load_state(cache_root, binding_name).unwrap_or_default();
     let mut cursor = state.rotations.remove(rotation_key).unwrap_or_default();
+    reconcile_order(&mut cursor, &items);
     if cursor.order.is_empty() || cursor.cursor >= cursor.order.len() {
         // New rotation: bump the counter (only after a completed prior rotation)
         // and reshuffle the whole set.
@@ -269,6 +311,55 @@ mod tests {
             destination_mem: name.to_string(),
             rules: None,
             post_actions: None,
+        }
+    }
+
+    /// A3 AC1, the scheduler half: an item that leaves the set mid-rotation
+    /// is never served again, an item that joins is served before the
+    /// rotation ends, and the rotation still completes once over the set.
+    #[test]
+    fn rotation_in_flight_follows_the_item_set() {
+        let cache = tempfile::tempdir().unwrap();
+        let key = "k";
+        let all: Vec<String> = (0..10).map(|i| format!("f{i}")).collect();
+        let first = next_rotation_batch(cache.path(), "m/b", key, all.clone(), 3).unwrap();
+        assert_eq!(first.rotation, 0);
+        assert_eq!(first.files.len(), 3);
+
+        // Deny half the set: no later window of this rotation names a
+        // denied item, and the rotation walks exactly the surviving ones.
+        let kept: Vec<String> = all.iter().filter(|f| f.as_str() > "f4").cloned().collect();
+        let mut served: Vec<String> = Vec::new();
+        for _ in 0..4 {
+            let b = next_rotation_batch(cache.path(), "m/b", key, kept.clone(), 3).unwrap();
+            if b.rotation != 0 {
+                break;
+            }
+            served.extend(b.files);
+        }
+        assert!(
+            served.iter().all(|f| kept.contains(f)),
+            "a denied item was served: {served:?}"
+        );
+        let already: std::collections::BTreeSet<&String> = first.files.iter().collect();
+        for f in &kept {
+            assert!(
+                served.contains(f) || already.contains(f),
+                "{f} was never served in rotation 0: served {served:?}, first {:?}",
+                first.files
+            );
+        }
+
+        // Lift the deny: the returning items are served within the next
+        // rotation's worth of windows (they join the rotation in flight, or
+        // the reshuffle that follows an exhausted one picks them up).
+        let mut seen: Vec<String> = Vec::new();
+        for _ in 0..8 {
+            let b = next_rotation_batch(cache.path(), "m/b", key, all.clone(), 3).unwrap();
+            seen.extend(b.files);
+        }
+        for f in all.iter().filter(|f| f.as_str() <= "f4") {
+            assert!(seen.contains(f), "returning item {f} not served: {seen:?}");
         }
     }
 

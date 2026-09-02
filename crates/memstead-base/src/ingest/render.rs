@@ -252,8 +252,22 @@ pub fn render_sync_brief_for(
     // which a prune removal reaches the mem (F3/A5). Read-only gather.
     let prune = prune_proposals(engine, workspace_root, binding, &resolved);
     let adopt = mem_predates_binding(engine, &resolved);
+    // The exclusion ledger against the binding as declared now: in force,
+    // and dropped (a removed source), reported once here.
+    let exclusions =
+        crate::ingest::advance::reconcile_exclusions(engine, workspace_root, &resolved).map_err(
+            |e| RenderBriefError::FindingsRead {
+                binding: binding_id.clone(),
+                detail: format!("exclusion ledger: {e}"),
+            },
+        )?;
     Ok(render_sync_brief(
-        &resolved, &cursor, &findings, &prune, adopt,
+        &resolved,
+        &cursor,
+        &findings,
+        &prune,
+        adopt,
+        &exclusions,
     ))
 }
 
