@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-02
+
 ### Added
 
 - **The due brief reads `overdue`, and `project@0.5.0` puts milestones on
@@ -4656,7 +4658,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/memstead/memstead/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/memstead/memstead/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/memstead/memstead/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/memstead/memstead/compare/v0.13.0...v0.14.0
