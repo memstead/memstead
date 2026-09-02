@@ -209,6 +209,10 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
         ("friction", "descriptive ledger counts"),
         ("open_questions", "descriptive listing of open questions"),
         (
+            "vital_signs",
+            "descriptive model-truth counts; the remodel skill holds the thresholds",
+        ),
+        (
             "stale_derivations",
             "advisory freshness of derived artifacts",
         ),
@@ -251,6 +255,10 @@ pub const OVERVIEW_COVERAGE: AxisCoverage = AxisCoverage {
         ("anchors", OVERVIEW_SCOPE),
         ("friction", OVERVIEW_SCOPE),
         ("open_questions", OVERVIEW_SCOPE),
+        (
+            "vital_signs",
+            "descriptive model-truth counts; the remodel skill holds the thresholds",
+        ),
         ("stale_derivations", OVERVIEW_SCOPE),
         ("checks", OVERVIEW_SCOPE),
         ("ledger", OVERVIEW_SCOPE),

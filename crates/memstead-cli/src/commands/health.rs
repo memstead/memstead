@@ -34,7 +34,7 @@ pub struct Args {
     /// per verb, with per-code reason breakdowns where the code
     /// carries a closed engine-owned discriminator, whole-ledger plus
     /// a recent 24h window; local-only, values drawn from closed
-    /// engine-defined vocabularies only), open_questions (per-mem
+    /// engine-defined vocabularies only), vital_signs (per-mem model-truth signals: last-resort type share per community, unclaimed and contested source files, zero-outgoing entities folded into their subject, empty declared sections; counts and capped lists, never a verdict), open_questions (per-mem
     /// composed worklist of
     /// what the holding does not know: stubs, anchors that are recheck,
     /// unresolvable (artifact gone), unobserved (not measured) or
@@ -144,6 +144,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         anchors_axis,
         ledger_axis,
         open_questions_axis,
+        vital_signs_axis,
         stale_derivations_axis,
         checks_axis,
         signals_axis,
@@ -417,6 +418,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
     if let Some(axis) = &open_questions_axis {
         obj.insert("open_questions".to_string(), axis.clone());
+    }
+    if let Some(axis) = &vital_signs_axis {
+        obj.insert("vital_signs".to_string(), axis.clone());
     }
     if let Some(axis) = &stale_derivations_axis {
         obj.insert("stale_derivations".to_string(), axis.clone());
@@ -942,6 +946,45 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         lines.push(String::new());
     }
 
+    if let Some(axis) = vital_signs_axis.as_ref().and_then(|a| a.as_object()) {
+        let mems: Vec<(&String, &serde_json::Value)> =
+            axis.iter().filter(|(k, _)| *k != "_item_cap").collect();
+        lines.push(format!("## Vital signs ({} mems)", mems.len()));
+        for (mem, sig) in mems {
+            let count = |k: &str| sig[k]["count"].as_u64().unwrap_or(0);
+            let share = match sig["type_share_by_community"]["status"].as_str() {
+                Some("declared") => format!(
+                    "last-resort type `{}` over {} community(ies)",
+                    sig["type_share_by_community"]["last_resort_type"]
+                        .as_str()
+                        .unwrap_or("?"),
+                    count("type_share_by_community")
+                ),
+                _ => "last-resort type not declared".to_string(),
+            };
+            let unclaimed = match sig["unclaimed_source_files"]["status"].as_str() {
+                Some("enumerated") => {
+                    format!(
+                        "{} unclaimed source file(s)",
+                        count("unclaimed_source_files")
+                    )
+                }
+                _ => "no bound source".to_string(),
+            };
+            lines.push(format!(
+                "- `{mem}`: {share}; {unclaimed}; {} contested unowned file(s); {} zero-outgoing \
+                 entity(ies) in {} community(ies); {} empty declared section(s)",
+                count("contested_unowned_files"),
+                sig["zero_outgoing_entities"]["entities"]
+                    .as_u64()
+                    .unwrap_or(0),
+                count("zero_outgoing_entities"),
+                count("empty_declared_sections"),
+            ));
+        }
+        lines.push(String::new());
+    }
+
     if let Some(axis) = open_questions_axis.as_ref().and_then(|a| a.as_object()) {
         let cap = axis
             .get("_item_cap")
@@ -1326,6 +1369,10 @@ struct GatheredHealth {
     /// open_questions`: the composed per-mem worklist from the shared
     /// `health_open_questions_axis` helper (same axis MCP renders).
     open_questions_axis: Option<serde_json::Value>,
+    /// `Some(...)` when the caller asked for `--include vital_signs`: the
+    /// per-mem model-truth signals from the shared
+    /// `health_vital_signs_axis` helper (same axis MCP renders).
+    vital_signs_axis: Option<serde_json::Value>,
     /// `Some(...)` when the caller asked for `--include
     /// stale_derivations`: per-mem derivation-staleness findings from
     /// the shared `health_stale_derivations_axis` helper.
@@ -1524,6 +1571,11 @@ fn fill_open_questions_axis(
             engine, None,
         ));
     }
+    if include.iter().any(|s| s == "vital_signs") {
+        g.vital_signs_axis = Some(memstead_base::ops::health::health_vital_signs_axis(
+            engine, None,
+        ));
+    }
 }
 
 /// Engine-aware step for `--include stale_derivations` — per-mem
@@ -1663,6 +1715,7 @@ fn gather_from_store(
         config_entries: None,
         anchors_axis: None,
         open_questions_axis: None,
+        vital_signs_axis: None,
         stale_derivations_axis: None,
         checks_axis: None,
         signals_axis: None,

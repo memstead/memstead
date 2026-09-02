@@ -342,6 +342,16 @@ pub enum SchemaLoadError {
     SectionHeadingMismatch {
         violations: Vec<HeadingKeyViolation>,
     },
+    /// Two or more types declare `last_resort: true`. A last resort is
+    /// the one type an author falls back to; two of them is no fallback
+    /// at all, and the `vital_signs` share signal would have nothing to
+    /// count.
+    #[error(
+        "schema declares more than one last-resort type: {}. Fix: keep `last_resort: true` on \
+         exactly one type (the catch-all) and remove it from the others",
+        .types.join(", ")
+    )]
+    MultipleLastResortTypes { types: Vec<String> },
 
     /// Two or more independent semantic violations found in one load
     /// pass. The loader accumulates every violation it can prove on
@@ -1211,6 +1221,19 @@ fn load_with_context(
     // the typo class without over-constraining the endpoint. Skipped
     // when a type file failed to parse — the missing type's sections
     // would make the existence check report noise.
+    // At most one last-resort type: a fallback that is two types is
+    // none (the vital-signs share signal counts exactly one).
+    if !had_type_parse_failure {
+        let mut last_resort: Vec<String> = types_map
+            .values()
+            .filter(|t| t.last_resort)
+            .map(|t| t.name.clone())
+            .collect();
+        if last_resort.len() > 1 {
+            last_resort.sort();
+            errors.push(SchemaLoadError::MultipleLastResortTypes { types: last_resort });
+        }
+    }
     if !had_type_parse_failure {
         let all_section_keys: HashSet<&str> = types_map
             .values()

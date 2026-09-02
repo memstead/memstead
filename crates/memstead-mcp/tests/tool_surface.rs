@@ -1628,6 +1628,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Friction-ledger axis (include=friction) — agent-trust
             // plan 08's refusal-ledger summary.
             "friction",
+            // Vital-signs axis (include=vital_signs, A6).
+            "vital_signs",
             // Standalone anchor-verification axis (include=anchors).
             "anchors",
             "resolves",

@@ -593,6 +593,14 @@ pub fn compose_health(
             memstead_base::ops::health::health_open_questions_axis(engine, args.mem),
         );
     }
+    if include.iter().any(|s| s == "vital_signs") {
+        // The model-truth signals the remodel skill reads (A6): counts
+        // and capped lists, never a verdict.
+        obj.insert(
+            "vital_signs".into(),
+            memstead_base::ops::health::health_vital_signs_axis(engine, args.mem),
+        );
+    }
     if include.iter().any(|s| s == "friction") {
         // The friction ledger's read surface (agent-trust plan 08):
         // counts per code / per verb over the workspace-local refusal
@@ -857,6 +865,64 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
                 counts["population"]
                     .as_str()
                     .unwrap_or("population not stated"),
+            );
+        }
+    }
+
+    // Vital signs — per mem, the five model-truth signal counts (A6);
+    // the lists stay in the structured payload.
+    if let Some(obj) = v.get("vital_signs").and_then(|x| x.as_object()) {
+        let mems: Vec<(&String, &serde_json::Value)> =
+            obj.iter().filter(|(k, _)| *k != "_item_cap").collect();
+        let _ = writeln!(s, "\n## Vital signs ({} mems)", mems.len());
+        for (mem, sig) in mems {
+            let count = |k: &str| sig[k]["count"].as_u64().unwrap_or(0);
+            let share = match sig["type_share_by_community"]["status"].as_str() {
+                Some("declared") => format!(
+                    "last-resort type `{}` over {} communit{}",
+                    sig["type_share_by_community"]["last_resort_type"]
+                        .as_str()
+                        .unwrap_or("?"),
+                    count("type_share_by_community"),
+                    if count("type_share_by_community") == 1 {
+                        "y"
+                    } else {
+                        "ies"
+                    }
+                ),
+                _ => "last-resort type not declared".to_string(),
+            };
+            let unclaimed = match sig["unclaimed_source_files"]["status"].as_str() {
+                Some("enumerated") => format!(
+                    "{} unclaimed source file(s)",
+                    count("unclaimed_source_files")
+                ),
+                _ => "no bound source".to_string(),
+            };
+            let _ = writeln!(
+                s,
+                "- `{mem}`: {share}; {unclaimed}; {} contested unowned file(s); {} zero-outgoing \
+                 entit{} in {} communit{}; {} empty declared section(s)",
+                count("contested_unowned_files"),
+                sig["zero_outgoing_entities"]["entities"]
+                    .as_u64()
+                    .unwrap_or(0),
+                if sig["zero_outgoing_entities"]["entities"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    == 1
+                {
+                    "y"
+                } else {
+                    "ies"
+                },
+                count("zero_outgoing_entities"),
+                if count("zero_outgoing_entities") == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                count("empty_declared_sections"),
             );
         }
     }

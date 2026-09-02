@@ -47,6 +47,15 @@ pub struct TypeDefinition {
     pub title_weight: f32,
     pub text_fields: Vec<String>,
     pub hierarchy_relationship: String,
+    /// The schema's last-resort type: the catch-all an author falls
+    /// back to when no more specific type fits (`spec` in the software
+    /// schemas' own prose). A declaration, so a reader of the model can
+    /// count how much of a cluster sits on it (the `vital_signs` health
+    /// axis) without guessing from names; at most one type per schema
+    /// may declare it (`MultipleLastResortTypes` at load). Default
+    /// false.
+    #[serde(default)]
+    pub last_resort: bool,
     #[serde(default)]
     pub edge_weight_overrides: IndexMap<String, f32>,
     /// Rel-types on which `memstead_relate` refuses a SELF-LOOP

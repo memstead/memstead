@@ -41,21 +41,29 @@ around.
    report only, no writes. `<mem> [<cluster>]` → steps 2-8 for that
    target, cluster hint optional. No argument → ask.
 
-2. SIGNAL SCAN (cheap, read-only, per mem). Build the shape picture:
-   per-cluster entity type distribution (collapse toward the schema's
-   last-resort type signals a flat model); for bound mems the
-   file-to-entity map (large source files no entity anchors or names;
-   files claimed by 2+ entities and owned by none — read the anchors
-   sidecar and Realization-style path claims); entities with zero
-   outgoing relationships; empty definition-test sections (e.g. a
-   decision type whose rejected-alternatives section holds nothing);
-   repeat-repair hotspots from the check ledger. Fold zero-degree
-   entities into their nearest SUBJECT before ranking — a cluster
-   partition computed from the edge graph drops exactly the entities
-   whose defect is "no edges", hiding the defect the round exists to
-   repair. Rank candidates by BOTH uncovered mass AND model shape — a
-   fully anchored cluster can still be badly cut. Report the ranking
-   with evidence one line each.
+2. SIGNAL SCAN (cheap, read-only, per mem). Read the engine's axis,
+   never derive the signals yourself: `memstead health --include
+   vital_signs --json --workspace "$WS"` reports per mem the five
+   counted signals with capped lists and a `more` remainder —
+   `type_share_by_community` (entities on the schema's declared
+   last-resort type per community; `not_declared` when the schema
+   declares none, then this signal is silent), `unclaimed_source_files`
+   (bound-source files no entity anchors, largest first with sizes),
+   `contested_unowned_files` (claimed by 2+ entities, owned by none),
+   `zero_outgoing_entities` (already folded into the community of
+   their subject, so a partition computed from the edge graph cannot
+   hide them), `empty_declared_sections`. The axis names; this step
+   judges. Thresholds live HERE, not in the engine: a community with
+   more than 80 percent of its entities on the last-resort type is a
+   flat model; an unclaimed file above 8 kB is a large unowned file;
+   three or more zero-outgoing entities in one community is a subject
+   the cut missed; any contested unowned file or empty declared
+   section counts. Repeat-repair hotspots come from `health --include
+   checks` (the same call may carry both includes). Rank candidates
+   by BOTH uncovered mass AND model shape — a fully anchored cluster
+   can still be badly cut. Report the ranking with evidence one line
+   each; when no signal crosses a threshold, report quiescent in one
+   line.
 
 3. CONTRACT FIRST. For the chosen cluster's mem, read the full schema
    prose (`memstead_schema`, verbosity full, scoped to the types in

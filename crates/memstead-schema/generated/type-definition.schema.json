@@ -59,6 +59,11 @@
     "hierarchy_relationship": {
       "type": "string"
     },
+    "last_resort": {
+      "description": "The schema's last-resort type: the catch-all an author falls\nback to when no more specific type fits (`spec` in the software\nschemas' own prose). A declaration, so a reader of the model can\ncount how much of a cluster sits on it (the `vital_signs` health\naxis) without guessing from names; at most one type per schema\nmay declare it (`MultipleLastResortTypes` at load). Default\nfalse.",
+      "type": "boolean",
+      "default": false
+    },
     "leaf": {
       "description": "Terminal-by-construction marker: entities of this type are\nleaves — they carry no edges BY DESIGN, so health's orphan\naxis exempts their edge-less entities and reports them as a\nseparate leaf population instead (visible, never vanished).\nLeaf means \"no edges required\", not \"edges forbidden\": a\nleaf-typed entity WITH edges stays legal, and every other\nhealth axis, search, and traversal treats leaf entities\nexactly like any other. Declarative per-type flag (the sixth\ndeclarative form the agent-toolbox constraint vocabulary\nanticipated), served at both schema verbosity levels.",
       "type": "boolean"

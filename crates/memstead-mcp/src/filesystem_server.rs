@@ -1929,6 +1929,7 @@ impl FilesystemMcpServer {
         let wants_constraints = include.iter().any(|s| s == "constraints");
         let wants_friction = include.iter().any(|s| s == "friction");
         let wants_open_questions = include.iter().any(|s| s == "open_questions");
+        let wants_vital_signs = include.iter().any(|s| s == "vital_signs");
         let wants_stale_derivations = include.iter().any(|s| s == "stale_derivations");
         let wants_checks = include.iter().any(|s| s == "checks");
         let wants_signals = include.iter().any(|s| s == "signals");
@@ -1940,6 +1941,7 @@ impl FilesystemMcpServer {
             || wants_constraints
             || wants_friction
             || wants_open_questions
+            || wants_vital_signs
             || wants_stale_derivations
             || wants_checks
             || wants_signals
@@ -1983,6 +1985,10 @@ impl FilesystemMcpServer {
             if wants_open_questions {
                 value["open_questions"] =
                     memstead_base::ops::health::health_open_questions_axis(&engine, mem_scope);
+            }
+            if wants_vital_signs {
+                value["vital_signs"] =
+                    memstead_base::ops::health::health_vital_signs_axis(&engine, mem_scope);
             }
             if wants_stale_derivations {
                 value["stale_derivations"] =

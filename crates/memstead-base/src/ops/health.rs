@@ -50,7 +50,276 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "stale_derivations",
     "checks",
     "ledger",
+    "vital_signs",
 ];
+
+/// Item cap per vital-signs list.
+pub const VITAL_SIGNS_ITEM_CAP: usize = 20;
+
+/// The `include=["vital_signs"]` axis (A6, 2026-09-02): per mem, the
+/// cheap, engine-countable model-truth signals the remodel campaign
+/// specified — each a count plus a capped list with an explicit `more`
+/// remainder, never a verdict, threshold or recommendation (the engine
+/// names what is there; the `/remodel` skill decides). Five signals:
+///
+/// - `type_share_by_community`: per community, how many of its entities
+///   sit on the schema's declared last-resort type (`last_resort: true`
+///   on exactly one type); `not_declared` when the schema declares none,
+///   never a guess from type names.
+/// - `unclaimed_source_files`: files of the mem's bound sources that no
+///   entity's anchor claims, largest first with their sizes (the size
+///   threshold that makes one "large" stays in the skill).
+/// - `contested_unowned_files`: files two or more entities claim through
+///   anchors while none owns them (no `anchored` class anchor).
+/// - `zero_outgoing_entities`: entities with no outgoing edge, folded into
+///   the community of their subject (their own cluster when it has more
+///   members than themselves, else the cluster of an entity that links to
+///   them, else `unplaced`) rather than ranked as singletons.
+/// - `empty_declared_sections`: sections the type declares that an
+///   entity carries empty.
+///
+/// Reuse, never recompute: the community partition, the anchor sidecar
+/// reads and the source enumeration are the ones the other axes use.
+pub fn health_vital_signs_axis(
+    engine: &crate::engine::Engine,
+    mem_filter: Option<&str>,
+) -> serde_json::Value {
+    let cap = VITAL_SIGNS_ITEM_CAP;
+    let capped = |mut items: Vec<serde_json::Value>| -> serde_json::Value {
+        let count = items.len();
+        let more = count.saturating_sub(cap);
+        items.truncate(cap);
+        let mut o = serde_json::Map::new();
+        o.insert("count".into(), serde_json::json!(count));
+        o.insert("items".into(), serde_json::Value::Array(items));
+        if more > 0 {
+            o.insert("more".into(), serde_json::json!(more));
+        }
+        serde_json::Value::Object(o)
+    };
+
+    let mut mems: Vec<String> = engine.mem_names().iter().map(|s| s.to_string()).collect();
+    mems.sort();
+    let communities = engine.communities();
+    let mut out = serde_json::Map::new();
+    for mem in &mems {
+        if let Some(f) = mem_filter
+            && f != mem
+        {
+            continue;
+        }
+        let entities: Vec<&crate::entity::Entity> = engine
+            .store()
+            .all_entities()
+            .filter(|e| !e.stub && e.id.mem() == mem)
+            .collect();
+        let schema = engine.schema_for(mem);
+
+        // --- 1. type share per community ---
+        let last_resort: Option<String> = schema.as_ref().and_then(|s| {
+            s.types
+                .values()
+                .find(|t| t.last_resort)
+                .map(|t| t.name.clone())
+        });
+        let type_share = match &last_resort {
+            None => serde_json::json!({ "status": "not_declared" }),
+            Some(lr) => {
+                let mut per: std::collections::BTreeMap<String, (usize, usize)> =
+                    std::collections::BTreeMap::new();
+                for e in &entities {
+                    let cluster = communities
+                        .entity_cluster_map
+                        .get(&e.id.0)
+                        .cloned()
+                        .unwrap_or_else(|| "unplaced".to_string());
+                    let slot = per.entry(cluster).or_insert((0, 0));
+                    slot.0 += 1;
+                    if e.entity_type == *lr {
+                        slot.1 += 1;
+                    }
+                }
+                let mut rows: Vec<serde_json::Value> = per
+                    .into_iter()
+                    .map(|(community, (total, on_last_resort))| {
+                        serde_json::json!({
+                            "community": community,
+                            "entities": total,
+                            "on_last_resort_type": on_last_resort,
+                        })
+                    })
+                    .collect();
+                // Most concentrated first: the reader sees the flattest
+                // cluster without ranking being a judgement.
+                rows.sort_by(|a, b| {
+                    let share = |v: &serde_json::Value| {
+                        let t = v["entities"].as_u64().unwrap_or(1).max(1) as f64;
+                        v["on_last_resort_type"].as_u64().unwrap_or(0) as f64 / t
+                    };
+                    share(b)
+                        .partial_cmp(&share(a))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a["community"].as_str().cmp(&b["community"].as_str()))
+                });
+                let mut v = capped(rows);
+                v["status"] = serde_json::json!("declared");
+                v["last_resort_type"] = serde_json::json!(lr);
+                v
+            }
+        };
+
+        // --- 2 and 3. the file-to-entity map of the bound sources ---
+        // artifact -> (claiming entities, owned by an `anchored` anchor)
+        let mut claims: std::collections::BTreeMap<
+            String,
+            (std::collections::BTreeSet<String>, bool),
+        > = std::collections::BTreeMap::new();
+        for e in &entities {
+            for a in engine.entity_anchors(&e.id) {
+                let slot = claims.entry(a.artifact.clone()).or_default();
+                slot.0.insert(e.id.0.clone());
+                if a.class == crate::anchor::AnchorProvenanceClass::Anchored {
+                    slot.1 = true;
+                }
+            }
+        }
+        let roots = engine.anchor_source_roots(mem);
+        let mut unclaimed: Vec<serde_json::Value> = Vec::new();
+        let mut sources_enumerated = 0usize;
+        if let Some(ws) = engine.workspace_root() {
+            let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            for join in roots.values() {
+                sources_enumerated += 1;
+                for file in crate::ingest::cursor::enumerate_source_artifacts(
+                    engine,
+                    &join.source,
+                    &join.deny_paths,
+                    ws,
+                ) {
+                    if !seen.insert(file.clone()) || claims.contains_key(&file) {
+                        continue;
+                    }
+                    let size = std::fs::metadata(ws.join(&file))
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    unclaimed.push(serde_json::json!({ "artifact": file, "bytes": size }));
+                }
+            }
+        }
+        unclaimed.sort_by(|a, b| {
+            b["bytes"]
+                .as_u64()
+                .cmp(&a["bytes"].as_u64())
+                .then_with(|| a["artifact"].as_str().cmp(&b["artifact"].as_str()))
+        });
+        let unclaimed_v = if sources_enumerated == 0 {
+            serde_json::json!({ "status": "no_bound_source" })
+        } else {
+            let mut v = capped(unclaimed);
+            v["status"] = serde_json::json!("enumerated");
+            v
+        };
+        let contested: Vec<serde_json::Value> = claims
+            .iter()
+            .filter(|(_, (who, owned))| who.len() >= 2 && !owned)
+            .map(|(artifact, (who, _))| {
+                serde_json::json!({
+                    "artifact": artifact,
+                    "claimed_by": who.iter().cloned().collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+
+        // --- 4. zero-outgoing entities, folded into their subject ---
+        let cluster_size = |c: &str| -> usize {
+            communities
+                .clusters
+                .get(c)
+                .map(|ci| ci.entities.len())
+                .unwrap_or(0)
+        };
+        let mut by_community: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for e in &entities {
+            if !engine.store().outgoing(&e.id).is_empty() {
+                continue;
+            }
+            let own = communities.entity_cluster_map.get(&e.id.0).cloned();
+            let community = match own {
+                Some(c) if cluster_size(&c) > 1 => c,
+                _ => engine
+                    .store()
+                    .incoming(&e.id)
+                    .iter()
+                    .find_map(|edge| communities.entity_cluster_map.get(&edge.from.0).cloned())
+                    .unwrap_or_else(|| "unplaced".to_string()),
+            };
+            by_community
+                .entry(community)
+                .or_default()
+                .push(e.id.0.clone());
+        }
+        let zero_total: usize = by_community.values().map(Vec::len).sum();
+        let zero_rows: Vec<serde_json::Value> = by_community
+            .into_iter()
+            .map(|(community, mut ids)| {
+                ids.sort();
+                let count = ids.len();
+                let more = count.saturating_sub(cap);
+                ids.truncate(cap);
+                let mut o = serde_json::json!({
+                    "community": community,
+                    "count": count,
+                    "items": ids,
+                });
+                if more > 0 {
+                    o["more"] = serde_json::json!(more);
+                }
+                o
+            })
+            .collect();
+        let mut zero_v = capped(zero_rows);
+        zero_v["entities"] = serde_json::json!(zero_total);
+
+        // --- 5. declared sections carried empty ---
+        let mut empty_sections: Vec<serde_json::Value> = Vec::new();
+        if let Some(s) = &schema {
+            for e in &entities {
+                let Some(td) = s.types.get(&e.entity_type) else {
+                    continue;
+                };
+                for sec in &td.sections {
+                    if e.sections
+                        .get(&sec.key)
+                        .is_some_and(|body| body.trim().is_empty())
+                    {
+                        empty_sections.push(serde_json::json!({
+                            "id": e.id.0,
+                            "section": sec.key,
+                        }));
+                    }
+                }
+            }
+        }
+
+        out.insert(
+            mem.clone(),
+            serde_json::json!({
+                "type_share_by_community": type_share,
+                "unclaimed_source_files": unclaimed_v,
+                "contested_unowned_files": capped(contested),
+                "zero_outgoing_entities": zero_v,
+                "empty_declared_sections": capped(empty_sections),
+            }),
+        );
+    }
+    let mut top = serde_json::Map::new();
+    top.insert("_item_cap".into(), serde_json::json!(cap));
+    for (k, v) in out {
+        top.insert(k, v);
+    }
+    serde_json::Value::Object(top)
+}
 
 /// The `include=["anchors"]` axis — per-mem counts of the four
 /// standalone-verification states, computed through the same

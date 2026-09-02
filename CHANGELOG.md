@@ -111,6 +111,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   verification record's own reading, so a superseded self-check stays
   visible beside the grader's). Engine: `Engine::executors_of`,
   `independence_of`, `check_standing_provider`.
+- **The `vital_signs` health axis.** `health --include vital_signs` (CLI,
+  full and lean MCP, one composer) reports per mem the cheap, countable
+  model-truth signals the remodel campaign specified: per community, how
+  many entities sit on the schema's declared last-resort type
+  (`type_share_by_community`; `not_declared` when the schema declares
+  none, never a guess from names); bound-source files no entity's anchor
+  claims, largest first with sizes (`unclaimed_source_files`; the size
+  threshold stays in the skill); files two or more entities claim while
+  none owns them (`contested_unowned_files`); entities with no outgoing
+  edge, folded into the community of their subject rather than ranked as
+  singletons (`zero_outgoing_entities`); declared sections an entity
+  carries empty (`empty_declared_sections`). Each signal is a count plus a
+  capped list with an explicit `more` remainder; the payload carries no
+  verdict, threshold or recommendation. The axis reuses the community
+  partition, the anchor sidecar reads and the source enumeration the other
+  axes use. The schema language gains `last_resort: true` on a type
+  definition, at most one per schema (`MultipleLastResortTypes` at load);
+  the built-in schemas do not declare it yet, so their share signal reads
+  `not_declared` until a version that does. The `/remodel` skill's scan
+  step reads the axis and keeps the thresholds in its own text.
 - **Coverage counts describing entities per artifact.** The fidelity report
   states its unit: an artifact counts once when at least one entity anchors
   it, however many anchor rows it carries; `covered_artifacts`,

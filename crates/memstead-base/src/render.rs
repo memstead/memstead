@@ -2966,6 +2966,7 @@ mod tests {
             title_weight: 1.0,
             text_fields: vec![],
             hierarchy_relationship: "PART_OF".to_string(),
+            last_resort: false,
             edge_weight_overrides: indexmap::IndexMap::new(),
             edge_weights: indexmap::IndexMap::new(),
             no_self_loop_relationships: vec![],
