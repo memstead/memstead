@@ -341,10 +341,26 @@ pub fn health_open_questions_axis(
         // bucket means "none found" only when the check could run at all.
         let (mut recheck, mut unresolvable, mut unobserved, mut dangling_rows) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        // Rows resting on a recorded observation older than today: open
+        // work too (someone has to look again), stated as its age.
+        let mut aging = Vec::new();
         let mut entity_end_unreconciled: Option<String> = None;
         if let Ok(report) = engine.verify_mem_anchors(mem) {
             entity_end_unreconciled = report.unreconciled.clone();
             for a in &report.anchors {
+                if let Some(days) = a.unobserved_for_days
+                    && days > 0
+                {
+                    aging.push(serde_json::json!({
+                        "kind": "anchor_aging",
+                        "id": a.entity_id,
+                        "artifact": a.artifact,
+                        "state": a.state,
+                        "observed_at": a.observed_at,
+                        "unobserved_for_days": days,
+                        "note": format!("unobserved for {days} days"),
+                    }));
+                }
                 let item = serde_json::json!({
                     "kind": format!("anchor_{}", a.state),
                     "id": a.entity_id,
@@ -474,6 +490,7 @@ pub fn health_open_questions_axis(
             + unresolvable.len() as u64
             + unobserved.len() as u64
             + dangling_rows.len() as u64
+            + aging.len() as u64
             + constraints["count"].as_u64().unwrap_or(0)
             + dangling["count"].as_u64().unwrap_or(0)
             + process
@@ -490,6 +507,7 @@ pub fn health_open_questions_axis(
         // and a first version then did exactly that eight lines further down.
         entry.insert("anchors_unobserved".into(), capped(unobserved));
         entry.insert("anchors_dangling".into(), capped(dangling_rows));
+        entry.insert("anchors_aging".into(), capped(aging));
         if let Some(why) = entity_end_unreconciled {
             entry.insert("entity_end_unreconciled".into(), serde_json::json!(why));
         }
@@ -543,6 +561,26 @@ pub fn health_anchors_axis(engine: &crate::engine::Engine) -> serde_json::Value 
                 // over (03/05, criteria 1 and 3).
                 "population": report.population_statement(),
                 "fully_adjudicated": report.fully_adjudicated(),
+                // Rows whose state rests on a recorded observation (url
+                // rows), each with how long it has gone unobserved. A state
+                // observed months ago is not today's state, and the axis
+                // says so beside the count it contributed to.
+                "aging": report
+                    .anchors
+                    .iter()
+                    .filter(|a| a.observed_at.is_some())
+                    .map(|a| {
+                        let days = a.unobserved_for_days.unwrap_or(0);
+                        serde_json::json!({
+                            "id": a.entity_id,
+                            "artifact": a.artifact,
+                            "state": a.state,
+                            "observed_at": a.observed_at,
+                            "unobserved_for_days": days,
+                            "note": format!("unobserved for {days} days"),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
             }),
         );
     }

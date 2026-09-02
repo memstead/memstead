@@ -58,8 +58,14 @@ use serde::{Deserialize, Serialize};
 /// entity deltas.
 pub const ANCHOR_SIDECAR_PATH: &str = ".memstead/anchors.json";
 
-/// Current sidecar document schema version.
-pub const ANCHOR_SIDECAR_VERSION: u32 = 1;
+/// Current sidecar document schema version. Version 2 added the per-row
+/// `last_observed` record; version 1 files load unchanged (the field is
+/// absent) and are rewritten as version 2 on the next sidecar write.
+pub const ANCHOR_SIDECAR_VERSION: u32 = 2;
+
+/// Every sidecar version this engine reads. Anything else refuses typed:
+/// a document written by a later engine is not parsed optimistically.
+pub const ANCHOR_SIDECAR_VERSIONS_READ: &[u32] = &[1, 2];
 
 /// Stable typed error code returned when an `anchors[]` element is
 /// malformed. Mirrors the engine's other typed-envelope codes; the whole
@@ -197,15 +203,26 @@ impl AnchorGrain {
     ///
     /// - `span` / `file` / `tree` require a path-shaped namespace
     ///   (`path` or `path+commit`);
-    /// - `url` requires the `url` namespace;
+    /// - `url` is admitted beside every namespace: a URL is an absolute
+    ///   reference that never enters a path or entity namespace, so it
+    ///   collides with nothing there — and the engine never observes it
+    ///   itself, so no medium capability is claimed by admitting it;
     /// - `entity` requires the `entity` namespace.
     pub fn supported_by_namespace(&self, anchor_namespace: &str) -> bool {
         let path_shaped = matches!(anchor_namespace, "path" | "path+commit");
         match self {
             AnchorGrain::Span | AnchorGrain::File | AnchorGrain::Tree => path_shaped,
-            AnchorGrain::Url => anchor_namespace == "url",
+            AnchorGrain::Url => true,
             AnchorGrain::Entity => anchor_namespace == "entity",
         }
+    }
+
+    /// Whether this grain selects within a path-shaped namespace.
+    pub fn is_path_shaped(&self) -> bool {
+        matches!(
+            self,
+            AnchorGrain::Span | AnchorGrain::File | AnchorGrain::Tree
+        )
     }
 }
 
@@ -338,6 +355,31 @@ pub struct Anchor {
     /// can tell an author-pinned baseline from an engine-inferred one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash_source: Option<AnchorHashSource>,
+    /// The most recent observation recorded for this row (sidecar version
+    /// 2): when it was made, the prepared-content hash it saw, and the state
+    /// it resolved. Written for grains the engine cannot observe itself —
+    /// a `url` row adjudicated from an observer-supplied observation — so
+    /// the row can age visibly (`unobserved for N days`) instead of resting
+    /// in `unobserved` forever. Path and entity rows are observed live on
+    /// every pass and carry none. Absent on every version-1 row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_observed: Option<AnchorObservation>,
+}
+
+/// One recorded observation of an anchor's artifact (the `last_observed`
+/// record of a sidecar row).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnchorObservation {
+    /// When the observation was made — second-granularity ISO-8601 UTC
+    /// (`YYYY-MM-DDTHH:MM:SSZ`), as supplied by the observer or stamped by
+    /// the engine at recording time.
+    pub at: String,
+    /// The prepared-content hash the observation saw; `None` when the
+    /// observer reported the artifact absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    /// The state the row resolved to against that observation.
+    pub state: AnchorState,
 }
 
 /// Who established an anchor's hash baseline (consistency-sweep 03/03,
@@ -688,6 +730,31 @@ pub enum AnchorValidationError {
         medium_type: String,
         anchor_namespace: &'static str,
     },
+    /// A path-shaped grain (`span` / `file` / `tree`) names a URL. A URL
+    /// never enters a path namespace: the web resource is addressed by the
+    /// `url` grain, and a page coordinate inside it is not a path span.
+    #[error(
+        "anchor grain '{grain}' selects within a path namespace, but its artifact '{artifact}'          is a URL — a URL never enters a path namespace; use `grain: url` for the resource"
+    )]
+    PathGrainOnUrlArtifact {
+        grain: &'static str,
+        artifact: String,
+    },
+}
+
+/// Whether an artifact string is URL-shaped (`<scheme>://…`).
+pub fn looks_like_url(artifact: &str) -> bool {
+    let Some((scheme, rest)) = artifact.split_once("://") else {
+        return false;
+    };
+    !rest.is_empty()
+        && scheme
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 impl AnchorValidationError {
@@ -803,6 +870,17 @@ impl AnchorValidationError {
                 d.insert(
                     "anchor_namespace".into(),
                     serde_json::json!(anchor_namespace),
+                );
+            }
+            AnchorValidationError::PathGrainOnUrlArtifact { grain, artifact } => {
+                d.insert("field".into(), "grain".into());
+                d.insert("grain".into(), serde_json::json!(grain));
+                d.insert("got".into(), serde_json::json!(artifact));
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!(
+                        "`grain: url` for a web resource — a URL never enters a path namespace"
+                    ),
                 );
             }
         }
@@ -942,7 +1020,18 @@ impl AnchorInput {
             }
         }
 
-        // Grain must be expressible in the medium's namespace.
+        // A path-shaped grain never names a URL: the resource is the `url`
+        // grain's business, whatever medium the mem sits beside.
+        if grain.is_path_shaped() && looks_like_url(&artifact) {
+            return Err(AnchorValidationError::PathGrainOnUrlArtifact {
+                grain: grain.as_wire(),
+                artifact,
+            });
+        }
+
+        // Grain must be expressible in the medium's namespace (a `url`
+        // grain is admitted beside every medium — see
+        // [`AnchorGrain::supported_by_namespace`]).
         if let Some((medium_type, namespace)) = medium
             && !grain.supported_by_namespace(namespace)
         {
@@ -996,6 +1085,7 @@ impl AnchorInput {
                 .map(str::to_string),
             source,
             span_unvalidated,
+            last_observed: None,
         })
     }
 }
@@ -1051,6 +1141,257 @@ pub struct ObservedArtifactHash {
     pub artifact: String,
     /// The prepared-content hash observed for the artifact.
     pub hash: String,
+}
+
+// ---------------------------------------------------------------------------
+// Supplied observations
+// ---------------------------------------------------------------------------
+
+/// Typed code for a malformed supplied observation row.
+pub const INVALID_OBSERVATION_CODE: &str = "INVALID_OBSERVATION";
+
+/// One observer-supplied observation row, as it arrives on the wire
+/// (`memstead verify-anchors --observations`): permissive and string-typed
+/// so a malformed row refuses with a typed [`ObservationValidationError`]
+/// before any state changes. The engine never fetches; for a grain it
+/// cannot observe itself (`url`) this is how an observation enters the one
+/// resolution funnel.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SuppliedObservationInput {
+    /// The anchor's artifact reference, exactly as stored (a URL for a
+    /// `url` row).
+    #[serde(default)]
+    pub artifact: Option<String>,
+    /// The prepared-content hash the observer computed. Exactly one of
+    /// `hash`, `content`, `absent: true`.
+    #[serde(default)]
+    pub hash: Option<String>,
+    /// The observed artifact CONTENT (UTF-8 text); the engine hashes it
+    /// under the same canonicalization the write path applies to a `url`
+    /// anchor's `content`.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// The observer could not retrieve the artifact.
+    #[serde(default)]
+    pub absent: Option<bool>,
+    /// When the observation was made (ISO-8601 UTC, `YYYY-MM-DDTHH:MM:SSZ`
+    /// or a bare `YYYY-MM-DD`). Defaults to the engine's clock at the run.
+    #[serde(default)]
+    pub observed_at: Option<String>,
+}
+
+/// What an observer saw for one artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuppliedOutcome {
+    /// The artifact was retrieved; `hash` is its prepared-content hash.
+    Present { hash: String },
+    /// The observer could not retrieve the artifact.
+    Absent,
+}
+
+/// A validated supplied observation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuppliedObservation {
+    pub artifact: String,
+    /// ISO-8601 timestamp of the observation.
+    pub at: String,
+    pub outcome: SuppliedOutcome,
+}
+
+/// Why a supplied observation row was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ObservationValidationError {
+    #[error("observation row {row}: `artifact` is required and must be non-empty")]
+    MissingArtifact { row: usize },
+    #[error(
+        "observation row {row} (`{artifact}`): give exactly one of `hash`, `content`, or \
+         `absent: true`"
+    )]
+    OutcomeAmbiguous { row: usize, artifact: String },
+    #[error(
+        "observation row {row} (`{artifact}`): `observed_at` '{got}' is not an ISO-8601 \
+         timestamp (`YYYY-MM-DDTHH:MM:SSZ`) or date (`YYYY-MM-DD`)"
+    )]
+    BadTimestamp {
+        row: usize,
+        artifact: String,
+        got: String,
+    },
+    #[error("observation rows name `{artifact}` more than once (rows {first} and {second})")]
+    DuplicateArtifact {
+        artifact: String,
+        first: usize,
+        second: usize,
+    },
+}
+
+impl ObservationValidationError {
+    /// The stable typed code — always [`INVALID_OBSERVATION_CODE`].
+    pub fn code(&self) -> &'static str {
+        INVALID_OBSERVATION_CODE
+    }
+
+    /// Structured recovery detail for the typed envelope.
+    pub fn detail(&self) -> BTreeMap<String, serde_json::Value> {
+        let mut d = BTreeMap::new();
+        match self {
+            ObservationValidationError::MissingArtifact { row } => {
+                d.insert("row".into(), serde_json::json!(row));
+                d.insert("field".into(), "artifact".into());
+            }
+            ObservationValidationError::OutcomeAmbiguous { row, artifact } => {
+                d.insert("row".into(), serde_json::json!(row));
+                d.insert("artifact".into(), serde_json::json!(artifact));
+                d.insert(
+                    "expected".into(),
+                    serde_json::json!("exactly one of `hash`, `content`, `absent: true`"),
+                );
+            }
+            ObservationValidationError::BadTimestamp { row, artifact, got } => {
+                d.insert("row".into(), serde_json::json!(row));
+                d.insert("artifact".into(), serde_json::json!(artifact));
+                d.insert("field".into(), "observed_at".into());
+                d.insert("got".into(), serde_json::json!(got));
+            }
+            ObservationValidationError::DuplicateArtifact {
+                artifact,
+                first,
+                second,
+            } => {
+                d.insert("artifact".into(), serde_json::json!(artifact));
+                d.insert("rows".into(), serde_json::json!([first, second]));
+            }
+        }
+        d
+    }
+}
+
+/// Accept `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SSZ` (any `T…Z` time part of the
+/// second-granularity form).
+fn timestamp_is_wellformed(ts: &str) -> bool {
+    let b = ts.as_bytes();
+    let date_ok = b.len() >= 10
+        && b[..10].iter().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                *c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    if !date_ok {
+        return false;
+    }
+    if b.len() == 10 {
+        return true;
+    }
+    b.len() == 20
+        && b[10] == b'T'
+        && b[19] == b'Z'
+        && b[11..19].iter().enumerate().all(|(i, c)| {
+            if i == 2 || i == 5 {
+                *c == b':'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
+}
+
+/// Validate a batch of supplied observation rows; all-or-nothing, so a
+/// malformed row refuses before any state changes. `now` is the timestamp
+/// stamped on rows that carry no `observed_at`. Returns the observations
+/// keyed by artifact.
+pub fn validate_supplied_observations(
+    rows: &[SuppliedObservationInput],
+    now: &str,
+) -> Result<BTreeMap<String, SuppliedObservation>, ObservationValidationError> {
+    let mut out: BTreeMap<String, SuppliedObservation> = BTreeMap::new();
+    let mut first_row: BTreeMap<String, usize> = BTreeMap::new();
+    for (i, row) in rows.iter().enumerate() {
+        let n = i + 1;
+        let artifact = row
+            .artifact
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or(ObservationValidationError::MissingArtifact { row: n })?
+            .to_string();
+        let absent = row.absent.unwrap_or(false);
+        let given = usize::from(row.hash.is_some())
+            + usize::from(row.content.is_some())
+            + usize::from(absent);
+        if given != 1 {
+            return Err(ObservationValidationError::OutcomeAmbiguous { row: n, artifact });
+        }
+        let at = match row.observed_at.as_deref().map(str::trim) {
+            None | Some("") => now.to_string(),
+            Some(ts) if timestamp_is_wellformed(ts) => ts.to_string(),
+            Some(ts) => {
+                return Err(ObservationValidationError::BadTimestamp {
+                    row: n,
+                    artifact,
+                    got: ts.to_string(),
+                });
+            }
+        };
+        if let Some(first) = first_row.get(&artifact) {
+            return Err(ObservationValidationError::DuplicateArtifact {
+                artifact,
+                first: *first,
+                second: n,
+            });
+        }
+        let outcome = if absent {
+            SuppliedOutcome::Absent
+        } else if let Some(hash) = &row.hash {
+            SuppliedOutcome::Present {
+                hash: hash.trim().to_string(),
+            }
+        } else {
+            SuppliedOutcome::Present {
+                hash: prepared_content_hash(row.content.as_deref().unwrap_or_default().as_bytes()),
+            }
+        };
+        first_row.insert(artifact.clone(), n);
+        out.insert(
+            artifact.clone(),
+            SuppliedObservation {
+                artifact,
+                at,
+                outcome,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// Days since the Unix epoch of an ISO timestamp's date part, for aging a
+/// recorded observation (`unobserved for N days`). `None` when the string
+/// does not start with a well-formed `YYYY-MM-DD`.
+pub fn iso_days_since_epoch(ts: &str) -> Option<i64> {
+    if !timestamp_is_wellformed(ts) {
+        return None;
+    }
+    let y: i64 = ts[..4].parse().ok()?;
+    let m: u32 = ts[5..7].parse().ok()?;
+    let d: u32 = ts[8..10].parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = ((m + 9) % 12) as i64;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146097 + doe - 719468)
+}
+
+/// Whole days between a recorded observation and `now` (both ISO), floored
+/// at zero; `None` when either fails to parse.
+pub fn days_between(observed_at: &str, now: &str) -> Option<u64> {
+    let a = iso_days_since_epoch(observed_at)?;
+    let b = iso_days_since_epoch(now)?;
+    Some((b - a).max(0) as u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,14 +1560,24 @@ impl AnchorSidecar {
         // today's field names happened to match and verified CLEAN. Reading
         // an unknown format optimistically is how a measurement ends up
         // confidently describing something it does not understand.
-        if sidecar.version != ANCHOR_SIDECAR_VERSION {
+        if !ANCHOR_SIDECAR_VERSIONS_READ.contains(&sidecar.version) {
             return Err(serde::de::Error::custom(format!(
-                "unsupported anchors sidecar version {} (this engine reads version {}) — \
+                "unsupported anchors sidecar version {} (this engine reads versions {}) — \
                  the file was written by a different engine; upgrade, or remove the sidecar \
                  to re-record anchors",
-                sidecar.version, ANCHOR_SIDECAR_VERSION
+                sidecar.version,
+                ANCHOR_SIDECAR_VERSIONS_READ
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )));
         }
+        // An older readable version is upgraded in memory: the rows are
+        // unchanged (a version-2 field is simply absent on them) and the
+        // next write persists the current version.
+        let mut sidecar = sidecar;
+        sidecar.version = ANCHOR_SIDECAR_VERSION;
         Ok(sidecar)
     }
 
@@ -1390,6 +1741,7 @@ mod tests {
                     source: Some("source-tree".into()),
                     span_unvalidated: false,
                     hash_source: None,
+                    last_observed: None,
                 },
                 Anchor {
                     artifact: "docs/summary.md".into(),
@@ -1403,6 +1755,7 @@ mod tests {
                     source: None,
                     span_unvalidated: false,
                     hash_source: None,
+                    last_observed: None,
                 },
             ],
         );
@@ -1451,6 +1804,7 @@ mod tests {
                 source: None,
                 span_unvalidated: false,
                 hash_source: None,
+                last_observed: None,
             }],
         );
         assert!(sidecar.validate_artifact_references().is_err());
@@ -1470,6 +1824,7 @@ mod tests {
                 source: None,
                 span_unvalidated: false,
                 hash_source: None,
+                last_observed: None,
             }],
         );
         assert!(sidecar.validate_artifact_references().is_err());
@@ -1531,7 +1886,9 @@ mod tests {
             assert!(!g.supported_by_namespace("entity"));
         }
         assert!(AnchorGrain::Url.supported_by_namespace("url"));
-        assert!(!AnchorGrain::Url.supported_by_namespace("path"));
+        // A URL is an absolute reference: admitted beside every medium.
+        assert!(AnchorGrain::Url.supported_by_namespace("path"));
+        assert!(AnchorGrain::Url.supported_by_namespace("entity"));
         assert!(AnchorGrain::Entity.supported_by_namespace("entity"));
         assert!(!AnchorGrain::Entity.supported_by_namespace("path"));
     }
@@ -1995,6 +2352,7 @@ three
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         }
     }
 
@@ -2092,6 +2450,7 @@ three
                 source: None,
                 span_unvalidated: false,
                 hash_source: None,
+                last_observed: None,
             },
             Anchor {
                 artifact: "src/".into(),
@@ -2105,6 +2464,7 @@ three
                 source: None,
                 span_unvalidated: false,
                 hash_source: None,
+                last_observed: None,
             },
         ];
         let comp = compose_entity_anchors(&anchors);
@@ -2159,6 +2519,7 @@ three
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         }
     }
 
@@ -2486,5 +2847,178 @@ three
         let json = serde_json::to_string(&sourced).unwrap();
         let back: Anchor = serde_json::from_str(&json).unwrap();
         assert_eq!(back.source.as_deref(), Some("api-docs"));
+    }
+
+    // --- sidecar version 2, supplied observations, the url namespace rule ---
+
+    #[test]
+    fn sidecar_v1_loads_and_upgrades_in_memory_v3_refuses() {
+        let v1 = br#"{"version":1,"entities":{"m--e":[{"artifact":"https://x.test/a","grain":"url","class":"informed-by","hash_stability":"unstable"}]}}"#;
+        let sc = AnchorSidecar::from_bytes(v1).expect("version 1 loads");
+        assert_eq!(sc.version, ANCHOR_SIDECAR_VERSION, "upgraded in memory");
+        assert_eq!(sc.get("m--e").len(), 1);
+        assert!(sc.get("m--e")[0].last_observed.is_none(), "rows unchanged");
+        let rewritten = String::from_utf8(sc.to_bytes()).unwrap();
+        assert!(rewritten.contains("\"version\": 2"), "{rewritten}");
+
+        let v3 = br#"{"version":3,"entities":{}}"#;
+        let err = AnchorSidecar::from_bytes(v3).expect_err("unknown higher version refuses");
+        assert!(
+            err.to_string()
+                .contains("unsupported anchors sidecar version 3"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn last_observed_round_trips_and_is_absent_when_none() {
+        let mut a = valid_input().validate(None).unwrap();
+        let json = serde_json::to_value(&a).unwrap();
+        assert!(json.get("last_observed").is_none());
+        a.last_observed = Some(AnchorObservation {
+            at: "2026-09-01T10:00:00Z".into(),
+            hash: Some("abc".into()),
+            state: AnchorState::Resolves,
+        });
+        let json = serde_json::to_value(&a).unwrap();
+        assert_eq!(json["last_observed"]["state"], "resolves");
+        let back: Anchor = serde_json::from_value(json).unwrap();
+        assert_eq!(back, a);
+    }
+
+    #[test]
+    fn url_grain_is_admitted_beside_a_path_medium_and_path_grains_refuse_a_url_artifact() {
+        let mut i = valid_input();
+        i.grain = Some("url".into());
+        i.artifact = Some("https://example.org/doc.pdf".into());
+        i.class = Some("anchored".into());
+        i.hash = None;
+        i.content = Some("the document text".into());
+        i.hash_stability = None;
+        let a = i
+            .validate(Some(("filesystem", "path")))
+            .expect("url beside a path medium is legal");
+        assert_eq!(a.grain, AnchorGrain::Url);
+        assert_eq!(a.hash_source, Some(AnchorHashSource::Author));
+        assert_eq!(
+            a.hash_stability,
+            AnchorHashStability::Unstable,
+            "url default"
+        );
+
+        for grain in ["span", "file", "tree"] {
+            let mut i = valid_input();
+            i.grain = Some(grain.into());
+            i.artifact = Some("https://example.org/doc.pdf#L1-L3".into());
+            i.class = Some("informed-by".into());
+            i.hash = None;
+            let err = i.validate(Some(("filesystem", "path"))).unwrap_err();
+            assert!(
+                matches!(&err, AnchorValidationError::PathGrainOnUrlArtifact { grain: g, .. } if *g == grain),
+                "{grain}: {err:?}"
+            );
+            assert_eq!(err.code(), INVALID_ANCHOR_CODE);
+            assert!(err.to_string().contains("never enters a path namespace"));
+        }
+        assert!(looks_like_url("https://a.b/c"));
+        assert!(looks_like_url("file://x"));
+        assert!(!looks_like_url("src/main.rs"));
+        assert!(!looks_like_url("://nope"));
+        assert!(!looks_like_url("http://"));
+    }
+
+    #[test]
+    fn supplied_observations_validate_all_or_nothing() {
+        let now = "2026-09-02T12:00:00Z";
+        let rows = vec![
+            SuppliedObservationInput {
+                artifact: Some("https://a.test/1".into()),
+                hash: Some("h1".into()),
+                ..Default::default()
+            },
+            SuppliedObservationInput {
+                artifact: Some("https://a.test/2".into()),
+                content: Some("body\r\n".into()),
+                observed_at: Some("2026-08-01".into()),
+                ..Default::default()
+            },
+            SuppliedObservationInput {
+                artifact: Some("https://a.test/3".into()),
+                absent: Some(true),
+                ..Default::default()
+            },
+        ];
+        let ok = validate_supplied_observations(&rows, now).unwrap();
+        assert_eq!(ok.len(), 3);
+        assert_eq!(ok["https://a.test/1"].at, now);
+        assert_eq!(
+            ok["https://a.test/2"].outcome,
+            SuppliedOutcome::Present {
+                hash: prepared_content_hash(b"body\r\n")
+            },
+            "content hashes under the write path's canonicalization"
+        );
+        assert_eq!(ok["https://a.test/2"].at, "2026-08-01");
+        assert_eq!(ok["https://a.test/3"].outcome, SuppliedOutcome::Absent);
+
+        // hash + content on one row: ambiguous, refused by row number.
+        let bad = vec![SuppliedObservationInput {
+            artifact: Some("https://a.test/1".into()),
+            hash: Some("h".into()),
+            content: Some("c".into()),
+            ..Default::default()
+        }];
+        let err = validate_supplied_observations(&bad, now).unwrap_err();
+        assert!(matches!(
+            err,
+            ObservationValidationError::OutcomeAmbiguous { row: 1, .. }
+        ));
+        assert_eq!(err.code(), INVALID_OBSERVATION_CODE);
+        // nothing at all
+        let bad = vec![SuppliedObservationInput {
+            artifact: Some("https://a.test/1".into()),
+            ..Default::default()
+        }];
+        assert!(matches!(
+            validate_supplied_observations(&bad, now).unwrap_err(),
+            ObservationValidationError::OutcomeAmbiguous { .. }
+        ));
+        let bad = vec![SuppliedObservationInput {
+            artifact: Some("https://a.test/1".into()),
+            hash: Some("h".into()),
+            observed_at: Some("yesterday".into()),
+            ..Default::default()
+        }];
+        assert!(matches!(
+            validate_supplied_observations(&bad, now).unwrap_err(),
+            ObservationValidationError::BadTimestamp { .. }
+        ));
+        let dup = vec![rows[0].clone(), rows[0].clone()];
+        assert!(matches!(
+            validate_supplied_observations(&dup, now).unwrap_err(),
+            ObservationValidationError::DuplicateArtifact {
+                first: 1,
+                second: 2,
+                ..
+            }
+        ));
+        assert!(matches!(
+            validate_supplied_observations(&[SuppliedObservationInput::default()], now)
+                .unwrap_err(),
+            ObservationValidationError::MissingArtifact { row: 1 }
+        ));
+    }
+
+    #[test]
+    fn days_between_ages_by_civil_date() {
+        assert_eq!(days_between("2026-08-01", "2026-09-02T00:00:00Z"), Some(32));
+        assert_eq!(
+            days_between("2026-09-02T23:59:59Z", "2026-09-02T00:00:00Z"),
+            Some(0)
+        );
+        assert_eq!(days_between("2026-09-03", "2026-09-02"), Some(0), "floored");
+        assert_eq!(days_between("garbage", "2026-09-02"), None);
+        assert_eq!(iso_days_since_epoch("1970-01-01"), Some(0));
+        assert_eq!(iso_days_since_epoch("2000-03-01"), Some(11017));
     }
 }

@@ -63,6 +63,25 @@ reported as its own bucket. Measuring authored prose against a source it was nev
 meant to reproduce would manufacture false drift; the contract refuses to do that,
 and says so where the excluded bucket appears.
 
+## Url anchors: observed by you, aged by the engine
+
+The engine never fetches. A `url` anchor therefore has no live observation of its
+own: it is written with the retrieved text as `content` (the engine records the
+hash), and it is re-adjudicated only when someone supplies a fresh observation,
+`memstead verify-anchors --mem <m> --observations <file>` with rows of
+`{artifact, hash | content | absent: true, observed_at?}`. A supplied row runs
+through the same resolution a file anchor does; a row with no observation stays
+`unobserved`, never scored. Each observation is recorded on the anchor row
+(`last_observed`), and from then on every surface that shows the row's state also
+shows how old that state is, `unobserved for N days`, because a state observed
+months ago is not today's state.
+
+Set `hash_stability: stable` on an **immutable** document, a dated PDF, an
+archived page, a versioned standard, so that a changed hash reads as `drifted`.
+Leave the default `unstable` for a living page, where a change is only a
+`recheck`. The choice sits with the author because only the author knows which
+kind of document the URL names.
+
 ## The population a report answers for
 
 A mem can carry several bindings, and the anchors in it are not all the same

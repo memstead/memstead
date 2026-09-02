@@ -2060,6 +2060,415 @@ community:
         }
     }
 
+    /// Url anchors adjudicate from SUPPLIED observations through the one
+    /// funnel (plan: url anchors observable): equal hash resolves, a
+    /// differing hash drifts under `stable` and rechecks under `unstable`,
+    /// `absent` rechecks; a url row without an observation stays unobserved,
+    /// never scored. Recording the observations makes the states visible on
+    /// the per-entity read and dates the rows so they age; the sidecar
+    /// carries version 2 afterwards. A url anchor is legal beside a mem
+    /// whose single binding source is path-shaped.
+    #[test]
+    fn url_anchors_adjudicate_from_supplied_observations_and_age() {
+        use crate::anchor::{
+            AnchorInput, AnchorState, SuppliedObservationInput, validate_supplied_observations,
+        };
+        use crate::vcs::Actor;
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        std::fs::write(
+            mem_dir.join("hello.md"),
+            "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
+        )
+        .unwrap();
+
+        let memstead = tmp.path().join(".memstead");
+        std::fs::create_dir_all(&memstead).unwrap();
+        std::fs::write(
+            memstead.join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                tmp.path(),
+                &crate::workspace::Workspace {
+                    mounts: vec![folder_mount("specs", mem_dir.clone())],
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        // Exactly one path-shaped binding source: the shape that used to
+        // refuse url anchors with the namespace rule.
+        crate::pipeline_store::write_binding(
+            tmp.path(),
+            "specs",
+            "graph",
+            &v2_binding_with_pointer("specs", "src"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+
+        let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
+        let clock_now = "2026-09-02T12:00:00Z";
+        let pinned = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_788_350_400);
+        engine.set_mutation_clock(std::sync::Arc::new(move || pinned));
+        assert_eq!(
+            engine.now_iso(),
+            clock_now,
+            "clock pin is the date the ages count from"
+        );
+
+        let url = |artifact: &str, stability: &str, content: &str| AnchorInput {
+            artifact: Some(artifact.to_string()),
+            grain: Some("url".to_string()),
+            class: Some("anchored".to_string()),
+            content: Some(content.to_string()),
+            hash_stability: Some(stability.to_string()),
+            ..Default::default()
+        };
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Cites the web.".to_string());
+        sections.insert("purpose".to_string(), "Four url anchors.".to_string());
+        let created = engine
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: "Cites".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    anchors: vec![
+                        url("https://w.test/stable", "stable", "immutable text"),
+                        url("https://w.test/living", "unstable", "page v1"),
+                        url("https://w.test/gone", "unstable", "was here"),
+                        url("https://w.test/never", "unstable", "never observed again"),
+                    ],
+                    dry_run: false,
+                },
+                Actor::Agent,
+                None,
+                None,
+            )
+            .expect("url anchors beside a single path source are legal");
+        let before = engine.entity_anchors_resolved(&created.id);
+        assert_eq!(before.len(), 4);
+        assert!(
+            before
+                .iter()
+                .all(|r| r.state.is_none() && r.observed_at.is_none()),
+            "no observation yet: every url row unobserved"
+        );
+        assert!(
+            before
+                .iter()
+                .all(|r| r.anchor.hash_source == Some(crate::anchor::AnchorHashSource::Author)),
+            "content supplied at write: author baseline"
+        );
+
+        // Supplied observations: equal hash, changed content, absent; the
+        // fourth row gets none.
+        let rows = vec![
+            SuppliedObservationInput {
+                artifact: Some("https://w.test/stable".into()),
+                hash: Some(crate::anchor::prepared_content_hash(b"immutable text")),
+                ..Default::default()
+            },
+            SuppliedObservationInput {
+                artifact: Some("https://w.test/living".into()),
+                content: Some("page v2".into()),
+                observed_at: Some("2026-08-03T09:00:00Z".into()),
+                ..Default::default()
+            },
+            SuppliedObservationInput {
+                artifact: Some("https://w.test/gone".into()),
+                absent: Some(true),
+                ..Default::default()
+            },
+            SuppliedObservationInput {
+                artifact: Some("https://elsewhere.test/unrelated".into()),
+                hash: Some("zz".into()),
+                ..Default::default()
+            },
+        ];
+        let supplied = validate_supplied_observations(&rows, clock_now).unwrap();
+        let report = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+        let state_of = |artifact: &str| {
+            report
+                .anchors
+                .iter()
+                .find(|a| a.artifact == artifact)
+                .map(|a| {
+                    (
+                        a.state.clone(),
+                        a.unobserved_for_days,
+                        a.observation_supplied,
+                    )
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            state_of("https://w.test/stable"),
+            ("resolved".into(), Some(0), true)
+        );
+        assert_eq!(
+            state_of("https://w.test/living"),
+            ("recheck".into(), Some(30), true)
+        );
+        assert_eq!(
+            state_of("https://w.test/gone"),
+            ("recheck".into(), Some(0), true)
+        );
+        assert_eq!(
+            state_of("https://w.test/never"),
+            ("unobserved".into(), None, false)
+        );
+        assert_eq!(
+            report.unmatched_observations,
+            vec!["https://elsewhere.test/unrelated"]
+        );
+        assert_eq!(report.recordable_observations.len(), 3);
+        assert_eq!(
+            (report.resolved, report.recheck, report.unobserved),
+            (1, 2, 1)
+        );
+
+        // Nothing was written by the verification itself.
+        assert!(
+            engine
+                .entity_anchors_resolved(&created.id)
+                .iter()
+                .all(|r| r.state.is_none()),
+            "verify writes nothing"
+        );
+
+        // Record: the states land on the rows, the read shows them dated,
+        // and the sidecar is version 2.
+        let written = engine
+            .record_anchor_observations("specs", &report.recordable_observations, None)
+            .unwrap();
+        assert_eq!(written, 3);
+        let after = engine.entity_anchors_resolved(&created.id);
+        let row = |artifact: &str| {
+            after
+                .iter()
+                .find(|r| r.anchor.artifact == artifact)
+                .unwrap()
+        };
+        assert_eq!(
+            row("https://w.test/stable").state,
+            Some(AnchorState::Resolves)
+        );
+        assert_eq!(
+            row("https://w.test/living").state,
+            Some(AnchorState::Recheck)
+        );
+        assert_eq!(
+            row("https://w.test/living").observed_at.as_deref(),
+            Some("2026-08-03T09:00:00Z")
+        );
+        assert_eq!(row("https://w.test/gone").state, Some(AnchorState::Recheck));
+        assert_eq!(row("https://w.test/never").state, None, "still unobserved");
+        let sidecar_bytes = std::fs::read(mem_dir.join(".memstead").join("anchors.json")).unwrap();
+        let sidecar: serde_json::Value = serde_json::from_slice(&sidecar_bytes).unwrap();
+        assert_eq!(sidecar["version"], 2);
+        // A second identical recording stages nothing.
+        assert_eq!(
+            engine
+                .record_anchor_observations("specs", &report.recordable_observations, None)
+                .unwrap(),
+            0
+        );
+
+        // The next verify, with no observations supplied, rests on the
+        // recorded ones and ages them: the living page's observation is
+        // 30 days old; the stable row re-adjudicates DRIFTED when a later
+        // observation brings a different hash.
+        let report2 = engine.verify_mem_anchors("specs").unwrap();
+        let aged = report2
+            .anchors
+            .iter()
+            .find(|a| a.artifact == "https://w.test/living")
+            .unwrap();
+        assert_eq!(aged.unobserved_for_days, Some(30));
+        assert!(!aged.observation_supplied);
+        let axis = crate::ops::health::health_anchors_axis(&engine);
+        let aging = axis["specs"]["aging"].as_array().unwrap();
+        assert!(
+            aging
+                .iter()
+                .any(|a| a["artifact"] == "https://w.test/living"
+                    && a["note"] == "unobserved for 30 days"),
+            "{axis}"
+        );
+        let open = crate::ops::health::health_open_questions_axis(&engine, Some("specs"));
+        assert!(
+            open["specs"]["anchors_aging"]["items"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|i| i["note"] == "unobserved for 30 days")),
+            "{open}"
+        );
+
+        let drift_rows = vec![SuppliedObservationInput {
+            artifact: Some("https://w.test/stable".into()),
+            content: Some("immutable text, edited after all".into()),
+            ..Default::default()
+        }];
+        let supplied = validate_supplied_observations(&drift_rows, clock_now).unwrap();
+        let report3 = engine.verify_mem_anchors_with("specs", &supplied).unwrap();
+        assert_eq!(
+            state_of_report(&report3, "https://w.test/stable"),
+            "drifted"
+        );
+        assert_eq!(report3.drifted, 1);
+    }
+
+    /// A version-1 anchors sidecar from a fixture loads unchanged (its rows
+    /// have no `last_observed`, the file is not touched by reading) and is
+    /// rewritten as version 2 by the next anchor write; a sidecar declaring a
+    /// version this engine does not read refuses at the write seam with the
+    /// existing typed parse error.
+    #[test]
+    fn sidecar_v1_fixture_loads_and_next_anchor_write_rewrites_v2_while_v3_refuses() {
+        use crate::anchor::AnchorInput;
+        use crate::vcs::Actor;
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join("hello.md"),
+            "---\ntype: spec\n---\n# Hello\n\n## Identity\n\nA.\n",
+        )
+        .unwrap();
+        let v1 = r#"{"version":1,"entities":{"specs--hello":[{"artifact":"https://fixture.test/doc","grain":"url","class":"anchored","hash":"author-pinned","hash_stability":"stable","hash_source":"author"}]}}"#;
+        std::fs::write(mem_dir.join(".memstead").join("anchors.json"), v1).unwrap();
+        let memstead = tmp.path().join(".memstead");
+        std::fs::create_dir_all(&memstead).unwrap();
+        std::fs::write(
+            memstead.join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                tmp.path(),
+                &crate::workspace::Workspace {
+                    mounts: vec![folder_mount("specs", mem_dir.clone())],
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let mut engine = Engine::from_workspace_root(tmp.path()).unwrap();
+
+        let rows = engine.entity_anchors_resolved(&crate::EntityId::canonical("specs--hello"));
+        assert_eq!(rows.len(), 1, "the version-1 row loads");
+        assert_eq!(rows[0].anchor.hash.as_deref(), Some("author-pinned"));
+        assert!(rows[0].anchor.last_observed.is_none());
+        assert!(rows[0].state.is_none(), "never observed: unobserved");
+        let on_disk =
+            std::fs::read_to_string(mem_dir.join(".memstead").join("anchors.json")).unwrap();
+        assert_eq!(on_disk, v1, "reading rewrites nothing");
+
+        // The next anchor write persists version 2 and keeps the v1 row's
+        // author hash exactly as it was.
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Second.".to_string());
+        sections.insert("purpose".to_string(), "Second.".to_string());
+        engine
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: "Second".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    anchors: vec![AnchorInput {
+                        artifact: Some("https://fixture.test/other".to_string()),
+                        grain: Some("url".to_string()),
+                        class: Some("informed-by".to_string()),
+                        ..Default::default()
+                    }],
+                    dry_run: false,
+                },
+                Actor::Agent,
+                None,
+                None,
+            )
+            .unwrap();
+        let after: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(mem_dir.join(".memstead").join("anchors.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(after["version"], 2);
+        assert_eq!(
+            after["entities"]["specs--hello"][0]["hash"],
+            "author-pinned"
+        );
+        assert!(
+            after["entities"]["specs--hello"][0]
+                .get("last_observed")
+                .is_none()
+        );
+
+        // A version this engine does not read refuses at the write seam.
+        std::fs::write(
+            mem_dir.join(".memstead").join("anchors.json"),
+            r#"{"version":3,"entities":{}}"#,
+        )
+        .unwrap();
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Third.".to_string());
+        sections.insert("purpose".to_string(), "Third.".to_string());
+        let err = engine
+            .create_entity(
+                crate::CreateEntityArgs {
+                    mem: "specs".to_string(),
+                    title: "Third".to_string(),
+                    entity_type: "spec".to_string(),
+                    sections,
+                    metadata: IndexMap::new(),
+                    relations: Vec::new(),
+                    anchors: vec![AnchorInput {
+                        artifact: Some("https://fixture.test/third".to_string()),
+                        grain: Some("url".to_string()),
+                        class: Some("informed-by".to_string()),
+                        ..Default::default()
+                    }],
+                    dry_run: false,
+                },
+                Actor::Agent,
+                None,
+                None,
+            )
+            .expect_err("a version-3 sidecar refuses");
+        assert!(
+            err.to_string()
+                .contains("unsupported anchors sidecar version 3"),
+            "{err}"
+        );
+    }
+
+    fn state_of_report(
+        report: &crate::engine::query::MemAnchorVerification,
+        artifact: &str,
+    ) -> String {
+        report
+            .anchors
+            .iter()
+            .find(|a| a.artifact == artifact)
+            .map(|a| a.state.clone())
+            .unwrap()
+    }
+
     /// Live per-anchor state (criteria 1, 9 — path-medium subset): a
     /// single-medium `path` mem observes working-tree existence at the current
     /// HEAD. Absent artifact ⇒ `orphaned`; present + non-hash class ⇒

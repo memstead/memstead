@@ -806,6 +806,19 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
                 .join(", ")
         ));
     }
+    // The url grain: the engine never fetches, so the observation is the
+    // author's, and so is the stability call — a page that may change reads
+    // `unstable` (a hash break is a recheck, not drift); an immutable
+    // document must say so to be adjudicated.
+    block.push_str(
+        "For a web document use `grain: url` with the URL as `artifact` and pass the retrieved \
+         text as `content` so the engine records its hash (the engine never fetches). Set \
+         `hash_stability: stable` on an IMMUTABLE document — a dated PDF, an archived page, a \
+         versioned standard — so a later changed hash reads as `drifted`; leave the default \
+         `unstable` for a living page, where a change is only a `recheck`. Url rows are \
+         re-adjudicated when someone supplies a fresh observation (`memstead verify-anchors \
+         --observations`), and every surface shows how long each has gone unobserved.\n\n",
+    );
     // A source under a preparation hashes a PREPARED form, which no agent
     // computes by hand: say so, and say what to do instead.
     for source in &resolved.sources {

@@ -449,6 +449,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         }
     }
 

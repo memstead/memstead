@@ -2888,6 +2888,7 @@ mod tests {
             hash_stability: crate::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
 
         let mut sidecar = AnchorSidecar::default();
@@ -2962,6 +2963,7 @@ mod tests {
                 hash_stability: crate::anchor::AnchorHashStability::Stable,
                 span_unvalidated: false,
                 hash_source: None,
+                last_observed: None,
             }],
         );
         std::fs::write(
@@ -3143,6 +3145,7 @@ mod tests {
             hash_stability: crate::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         // Two holders so the two anchors over one artifact stay distinct rows.
         std::fs::write(
@@ -3542,6 +3545,7 @@ mod tests {
             hash_stability: crate::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         let b_file_hash =
             crate::anchor::prepared_content_hash(&std::fs::read(corpus.join("b.md")).unwrap());
@@ -3810,6 +3814,7 @@ mod tests {
             hash_stability: crate::anchor::AnchorHashStability::Stable,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         let plain_raw = crate::anchor::prepared_content_hash(b"export const N = 1\n");
         let plain_tree = crate::anchor::prepared_content_hash(

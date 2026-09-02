@@ -2572,6 +2572,280 @@ fn verify_anchors_reports_four_states_without_binding() {
     );
 }
 
+/// Url anchors observable (evidence-engine plan 2): a mem with exactly one
+/// path-shaped binding accepts url anchors (a URL never enters a path
+/// namespace) and still refuses a path-shaped grain naming a URL;
+/// `verify-anchors --observations` adjudicates url rows from supplied
+/// observations through the one funnel, records them as `last_observed`
+/// so the anchors read and the health axes show the dated state and its
+/// age, and a malformed row refuses the whole run before anything changes.
+#[test]
+fn verify_anchors_observations_adjudicate_and_age_url_rows() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+
+    // Exactly one path-shaped binding source on the mem.
+    let proj = root.join(".memstead/projections/hold");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("graph.json"),
+        r#"{"version":2,"intent":"t","sources":[{"name":"s","type":"codebase","pointer":".","change_detection":"git","scope":[{"path":"**","mode":"allow"}]}],"reference_mems":[],"destination_mem":"hold","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20}}}"#,
+    )
+    .unwrap();
+
+    // AC2 refusal: a span grain whose artifact is a URL, named by the rule.
+    let refused = memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "--json",
+            "update",
+            "hold--holder",
+            "--auto-hash",
+            "--append",
+            "purpose= Bad span.",
+            "--anchor",
+            r#"{"artifact":"https://w.test/doc#L1-L4","grain":"span","class":"informed-by"}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&refused).unwrap();
+    assert_eq!(e["code"], "INVALID_ANCHOR", "{e}");
+    assert!(
+        e["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("never enters a path namespace")),
+        "{e}"
+    );
+
+    // AC2 assertion: url anchors beside the single path source, on update.
+    let h = |content: &str| memstead_base::anchor::prepared_content_hash(content.as_bytes());
+    memstead()
+        .current_dir(root)
+        .env("MEMSTEAD_OPERATOR_MODE", "1")
+        .args([
+            "update",
+            "hold--holder",
+            "--auto-hash",
+            "--append",
+            "purpose= Url anchors.",
+            "--anchor",
+            r#"{"artifact":"https://w.test/stable","grain":"url","class":"anchored","content":"immutable text","hash_stability":"stable"}"#,
+            "--anchor",
+            r#"{"artifact":"https://w.test/living","grain":"url","class":"anchored","content":"page v1"}"#,
+            "--anchor",
+            r#"{"artifact":"https://w.test/gone","grain":"url","class":"anchored","content":"was here"}"#,
+            "--anchor",
+            r#"{"artifact":"https://w.test/never","grain":"url","class":"anchored","content":"never observed again"}"#,
+        ])
+        .assert()
+        .success();
+    let before = memstead()
+        .current_dir(root)
+        .args(["--json", "anchors", "hold--holder"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&before).unwrap();
+    let url_rows: Vec<&serde_json::Value> = v["anchors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| a["grain"] == "url")
+        .collect();
+    assert_eq!(url_rows.len(), 4, "{v}");
+    assert!(
+        url_rows
+            .iter()
+            .all(|a| a["hash_source"] == "author" && a.get("state").is_none()),
+        "content supplied at write → author hash; nothing observed yet: {v}"
+    );
+
+    // Refusal complement: a row with both hash and content refuses the run
+    // before any state changes.
+    fs::write(
+        root.join("bad.json"),
+        r#"[{"artifact":"https://w.test/stable","hash":"x","content":"y"}]"#,
+    )
+    .unwrap();
+    let refused = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "verify-anchors",
+            "--mem",
+            "hold",
+            "--observations",
+            "bad.json",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&refused).unwrap();
+    assert_eq!(e["code"], "INVALID_OBSERVATION", "{e}");
+
+    // AC1: three observations (equal hash, differing content on an unstable
+    // row, absent), the fourth url row gets none.
+    fs::write(
+        root.join("obs.json"),
+        format!(
+            r#"{{"observations":[
+              {{"artifact":"https://w.test/stable","hash":"{}"}},
+              {{"artifact":"https://w.test/living","content":"page v2","observed_at":"2026-08-03T09:00:00Z"}},
+              {{"artifact":"https://w.test/gone","absent":true}}
+            ]}}"#,
+            h("immutable text")
+        ),
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "verify-anchors",
+            "--mem",
+            "hold",
+            "--observations",
+            "obs.json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let state_of = |v: &serde_json::Value, artifact: &str| -> String {
+        v["anchors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["artifact"] == artifact)
+            .map(|a| a["state"].as_str().unwrap().to_string())
+            .unwrap_or_else(|| panic!("no row for {artifact}: {v}"))
+    };
+    assert_eq!(state_of(&v, "https://w.test/stable"), "resolved");
+    assert_eq!(state_of(&v, "https://w.test/living"), "recheck");
+    assert_eq!(state_of(&v, "https://w.test/gone"), "recheck");
+    assert_eq!(state_of(&v, "https://w.test/never"), "unobserved");
+    assert_eq!(v["observations"]["supplied"], 3, "{v}");
+    assert_eq!(v["observations"]["recorded"], 3, "{v}");
+    let living = v["anchors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["artifact"] == "https://w.test/living")
+        .unwrap();
+    assert_eq!(living["observed_at"], "2026-08-03T09:00:00Z");
+    assert!(
+        living["unobserved_for_days"]
+            .as_u64()
+            .is_some_and(|d| d >= 30),
+        "backdated observation ages: {living}"
+    );
+    // The unobserved row raised no finding: findings are recorded for
+    // measured conditions only.
+    assert!(
+        v["findings"]["items"].as_array().is_some_and(|items| items
+            .iter()
+            .all(|f| { !serde_json::to_string(f).unwrap().contains("w.test/never") })),
+        "{v}"
+    );
+
+    // The recorded states appear on the anchors read, dated ...
+    let read = memstead()
+        .current_dir(root)
+        .args(["--json", "anchors", "hold--holder"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&read).unwrap();
+    let row = |artifact: &str| {
+        v["anchors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["artifact"] == artifact)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(row("https://w.test/stable")["state"], "resolves");
+    assert_eq!(row("https://w.test/living")["state"], "recheck");
+    assert_eq!(
+        row("https://w.test/living")["last_observed"]["state"],
+        "recheck"
+    );
+    assert!(
+        row("https://w.test/living")["unobserved_for_days"]
+            .as_u64()
+            .is_some_and(|d| d >= 30)
+    );
+    assert!(row("https://w.test/never").get("state").is_none());
+
+    // ... and on health's anchors axis, with the age.
+    let health = memstead()
+        .current_dir(root)
+        .args(["--json", "health", "--include", "anchors,open_questions"])
+        .assert()
+        .get_output()
+        .stdout
+        .clone();
+    let hv: serde_json::Value = serde_json::from_slice(&health).unwrap();
+    let text = hv.to_string();
+    assert!(
+        text.contains("unobserved for 3"),
+        "aging note missing: {text}"
+    );
+    assert!(
+        hv["anchors"]["hold"]["aging"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|r| r["artifact"] == "https://w.test/living")),
+        "{hv}"
+    );
+    assert!(
+        hv["open_questions"]["hold"]["anchors_aging"]["items"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|r| r["artifact"] == "https://w.test/living")),
+        "{hv}"
+    );
+
+    // Second run: a differing hash on the stable row drifts.
+    fs::write(
+        root.join("obs2.json"),
+        r#"[{"artifact":"https://w.test/stable","content":"immutable text, edited"}]"#,
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "verify-anchors",
+            "--mem",
+            "hold",
+            "--observations",
+            "obs2.json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(state_of(&v, "https://w.test/stable"), "drifted");
+    // Unsupplied rows rest on their recorded observations, still dated.
+    assert_eq!(state_of(&v, "https://w.test/living"), "recheck");
+    assert_eq!(state_of(&v, "https://w.test/never"), "unobserved");
+}
+
 /// Criterion 3: a mem whose bindings span multiple media no longer
 /// nulls — path anchors resolve against their own recorded paths, and a
 /// grain the mechanism does not reach reports `unobserved` (the pass could

@@ -405,21 +405,32 @@ impl Engine {
     pub fn entity_anchors_resolved(&self, id: &EntityId) -> Vec<ResolvedAnchor> {
         let anchors = self.entity_anchors(id);
         let source_roots = self.anchor_source_roots(id.mem());
+        let none = SuppliedObservations::new();
         anchors
             .into_iter()
-            .map(|anchor| {
-                let observed = self.observe_anchor(&anchor, &source_roots);
-                let (state, observed_hash) = match observed {
-                    Some((state, hash)) => (Some(state), hash),
-                    None => (None, None),
-                };
-                ResolvedAnchor {
-                    anchor,
-                    state,
-                    observed_hash,
-                }
-            })
+            .map(|anchor| self.resolve_one(anchor, &source_roots, &none))
             .collect()
+    }
+
+    /// Observe one stored anchor and pair it with its resolution — the
+    /// shared step behind every anchor read.
+    fn resolve_one(
+        &self,
+        anchor: crate::anchor::Anchor,
+        source_roots: &std::collections::BTreeMap<String, AnchorSourceJoin>,
+        supplied: &SuppliedObservations,
+    ) -> ResolvedAnchor {
+        let observed = self.observe_anchor(&anchor, source_roots, supplied);
+        let (state, observed_hash, observed_at) = match observed {
+            Some(o) => (Some(o.state), o.hash, o.at),
+            None => (None, None, None),
+        };
+        ResolvedAnchor {
+            anchor,
+            state,
+            observed_hash,
+            observed_at,
+        }
     }
 
     /// Per-anchor observation — THE one resolution mechanism, shared by
@@ -448,11 +459,48 @@ impl Engine {
     /// whose single-source assumption nulled every anchor of a mem with
     /// zero or several bindings — the honest per-anchor answer supersedes
     /// the all-or-nothing mem-level one.
+    ///
+    /// A `url` grain is the one grain the engine cannot observe itself: it
+    /// resolves from a SUPPLIED observation when the caller passed one for
+    /// its artifact (`memstead verify-anchors --observations`), else from
+    /// the row's recorded `last_observed` (sidecar version 2) — an
+    /// observation that was made, carrying its own date so the row ages
+    /// visibly — else it is unobserved (`None`), never fabricated. A
+    /// supplied `absent` resolves `recheck`, not `orphaned`: an observer
+    /// failing to retrieve a web resource is not the medium saying the
+    /// artifact is gone, and prune must never act on it.
     fn observe_anchor(
         &self,
         anchor: &crate::anchor::Anchor,
         source_roots: &std::collections::BTreeMap<String, AnchorSourceJoin>,
-    ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
+        supplied: &SuppliedObservations,
+    ) -> Option<Observed> {
+        if anchor.grain == crate::anchor::AnchorGrain::Url {
+            if let Some(obs) = supplied.get(&anchor.artifact) {
+                return Some(match &obs.outcome {
+                    crate::anchor::SuppliedOutcome::Absent => Observed {
+                        state: crate::anchor::AnchorState::Recheck,
+                        hash: None,
+                        at: Some(obs.at.clone()),
+                    },
+                    crate::anchor::SuppliedOutcome::Present { hash } => Observed {
+                        state: crate::anchor::resolve_anchor(
+                            anchor,
+                            &crate::anchor::ArtifactObservation::Present {
+                                current_hash: Some(hash.clone()),
+                            },
+                        ),
+                        hash: Some(hash.clone()),
+                        at: Some(obs.at.clone()),
+                    },
+                });
+            }
+            return anchor.last_observed.as_ref().map(|rec| Observed {
+                state: rec.state,
+                hash: rec.hash.clone(),
+                at: Some(rec.at.clone()),
+            });
+        }
         let join = anchor
             .source
             .as_deref()
@@ -464,10 +512,12 @@ impl Engine {
         // deliberately stale anchor over a changed source entity went unflagged
         // while the capability matrix claimed full parity.
         if anchor.grain == crate::anchor::AnchorGrain::Entity {
-            return self.observe_entity_anchor(anchor, join.and_then(|j| j.preparation.as_deref()));
+            return self
+                .observe_entity_anchor(anchor, join.and_then(|j| j.preparation.as_deref()))
+                .map(Observed::live);
         }
         let root = self.workspace_root.as_deref()?;
-        observe_path_anchor(root, anchor, join)
+        observe_path_anchor(root, anchor, join).map(Observed::live)
     }
 
     /// Observe an `entity`-grain anchor against the live graph — the entity-
@@ -667,6 +717,18 @@ impl Engine {
     }
 
     pub fn mem_anchors_resolved(&self, mem: &str) -> Vec<(EntityId, ResolvedAnchor)> {
+        self.mem_anchors_resolved_with(mem, &SuppliedObservations::new())
+    }
+
+    /// [`Self::mem_anchors_resolved`] with observer-supplied observations
+    /// for the grains the engine cannot observe itself (`url`), keyed by
+    /// artifact. Rows without a supplied observation resolve as they would
+    /// without the map.
+    pub fn mem_anchors_resolved_with(
+        &self,
+        mem: &str,
+        supplied: &SuppliedObservations,
+    ) -> Vec<(EntityId, ResolvedAnchor)> {
         let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
             return Vec::new();
         };
@@ -680,18 +742,9 @@ impl Engine {
         let source_roots = self.anchor_source_roots(mem);
         for (eid, anchors) in &sc.entities {
             for anchor in anchors {
-                let observed = self.observe_anchor(anchor, &source_roots);
-                let (state, observed_hash) = match observed {
-                    Some((state, hash)) => (Some(state), hash),
-                    None => (None, None),
-                };
                 out.push((
                     EntityId(eid.clone()),
-                    ResolvedAnchor {
-                        anchor: anchor.clone(),
-                        state,
-                        observed_hash,
-                    },
+                    self.resolve_one(anchor.clone(), &source_roots, supplied),
                 ));
             }
         }
@@ -711,9 +764,27 @@ impl Engine {
     /// content: pure sidecar read + filesystem observation, no commit on
     /// any backend. A mem with no anchors returns an empty report.
     pub fn verify_mem_anchors(&self, mem: &str) -> Result<MemAnchorVerification, EngineError> {
+        self.verify_mem_anchors_with(mem, &SuppliedObservations::new())
+    }
+
+    /// [`Self::verify_mem_anchors`] with observer-supplied observations
+    /// (the `--observations` file of `memstead verify-anchors`). A `url`
+    /// row whose artifact has a supplied observation adjudicates through
+    /// the shared funnel exactly like a file row; a supplied row matching
+    /// no `url` anchor of the mem is reported in `unmatched_observations`
+    /// and changes nothing. The report's `recordable_observations` are the
+    /// `last_observed` records the caller commits with
+    /// [`Self::record_anchor_observations`] — the verification itself
+    /// writes nothing.
+    pub fn verify_mem_anchors_with(
+        &self,
+        mem: &str,
+        supplied: &SuppliedObservations,
+    ) -> Result<MemAnchorVerification, EngineError> {
         if !self.mem_router.is_visible(mem) {
             return Err(self.unknown_mem_error(mem));
         }
+        let now = self.now_iso();
         let mut report = MemAnchorVerification {
             mem: mem.to_string(),
             unreconciled: self
@@ -723,7 +794,28 @@ impl Engine {
             ..Default::default()
         };
         let reconciled = report.unreconciled.is_none();
-        for (eid, resolved) in self.mem_anchors_resolved(mem) {
+        let mut matched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (eid, resolved) in self.mem_anchors_resolved_with(mem, supplied) {
+            let is_url = resolved.anchor.grain == crate::anchor::AnchorGrain::Url;
+            let supplied_here = is_url && supplied.contains_key(&resolved.anchor.artifact);
+            if supplied_here {
+                matched.insert(resolved.anchor.artifact.clone());
+            }
+            let observed_at = resolved.observed_at.clone();
+            let unobserved_for_days = observed_at
+                .as_deref()
+                .and_then(|at| crate::anchor::days_between(at, &now));
+            if let (true, Some(state), Some(at)) = (supplied_here, resolved.state, &observed_at) {
+                report.recordable_observations.push(RecordedObservation {
+                    entity: eid.to_string(),
+                    artifact: resolved.anchor.artifact.clone(),
+                    observation: crate::anchor::AnchorObservation {
+                        at: at.clone(),
+                        hash: resolved.observed_hash.clone(),
+                        state,
+                    },
+                });
+            }
             // The entity end first: a row whose holder is gone is adjudicated
             // against its artifact alone otherwise, and a matching hash then
             // reports it as `resolved` for an entity that does not exist.
@@ -736,6 +828,9 @@ impl Engine {
                     class: resolved.anchor.class.as_wire().to_string(),
                     state: "dangling".to_string(),
                     observed_hash: resolved.observed_hash,
+                    observed_at,
+                    unobserved_for_days,
+                    observation_supplied: supplied_here,
                 });
                 continue;
             }
@@ -772,8 +867,16 @@ impl Engine {
                 class: resolved.anchor.class.as_wire().to_string(),
                 state: state.to_string(),
                 observed_hash: resolved.observed_hash,
+                observed_at,
+                unobserved_for_days,
+                observation_supplied: supplied_here,
             });
         }
+        report.unmatched_observations = supplied
+            .keys()
+            .filter(|artifact| !matched.contains(*artifact))
+            .cloned()
+            .collect();
         Ok(report)
     }
 
@@ -2731,6 +2834,50 @@ pub struct MemAnchorVerification {
     /// not. `dangling: 0` means "none found" only when this is `None`.
     pub unreconciled: Option<String>,
     pub anchors: Vec<VerifiedAnchor>,
+    /// Supplied observations whose artifact matched no `url` anchor of the
+    /// mem — reported, never silently dropped, never applied to anything.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unmatched_observations: Vec<String>,
+    /// The `last_observed` records this verification produced from supplied
+    /// observations, for the caller to commit through
+    /// [`Engine::record_anchor_observations`]. Engine-internal.
+    #[serde(skip)]
+    pub recordable_observations: Vec<RecordedObservation>,
+}
+
+/// One observation to record onto a sidecar row (the `last_observed`
+/// field), addressed by the `(entity, artifact)` pair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedObservation {
+    pub entity: String,
+    pub artifact: String,
+    pub observation: crate::anchor::AnchorObservation,
+}
+
+/// Observer-supplied observations keyed by artifact — the input of
+/// [`Engine::verify_mem_anchors_with`].
+pub type SuppliedObservations =
+    std::collections::BTreeMap<String, crate::anchor::SuppliedObservation>;
+
+/// What one observation of an anchor yielded: the resolved state, the
+/// hash it saw (when any), and — for an observation that was not made
+/// live this pass — when it was made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Observed {
+    state: crate::anchor::AnchorState,
+    hash: Option<String>,
+    at: Option<String>,
+}
+
+impl Observed {
+    /// A live observation made this pass (path and entity grains).
+    fn live((state, hash): (crate::anchor::AnchorState, Option<String>)) -> Self {
+        Observed {
+            state,
+            hash,
+            at: None,
+        }
+    }
 }
 
 impl MemAnchorVerification {
@@ -2795,6 +2942,19 @@ pub struct VerifiedAnchor {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observed_hash: Option<String>,
+    /// When the observation this row's state rests on was made — present
+    /// only for a row resolved from a supplied or recorded observation (a
+    /// `url` row); live observations carry none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
+    /// Whole days between `observed_at` and this run — how long the row has
+    /// gone unobserved. `Some(0)` for an observation made today.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unobserved_for_days: Option<u64>,
+    /// Whether this row's state came from an observation supplied to this
+    /// run (as opposed to a live or a previously recorded one).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub observation_supplied: bool,
 }
 
 /// Whether `anchor` references `path`. `tree`-grain anchors match `path`
@@ -2828,6 +2988,11 @@ pub struct ResolvedAnchor {
     /// the stored anchor plus `state`.
     #[serde(skip)]
     pub observed_hash: Option<String>,
+    /// When the observation `state` rests on was made, for a row whose
+    /// observation is supplied or recorded rather than live (a `url` row).
+    /// Additive: absent on every live-observed row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
 }
 
 /// What an anchor's `source` name resolves to in its mem's bindings: the

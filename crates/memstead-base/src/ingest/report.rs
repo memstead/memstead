@@ -205,6 +205,20 @@ pub struct AnchorComposition {
     /// evidence of fidelity than one somebody did, and the difference used to
     /// be invisible.
     pub hash_from_backfill: usize,
+    /// Counted rows whose state rests on a RECORDED observation rather than
+    /// a live one (url rows, which the engine never observes itself), each
+    /// with how many whole days that observation is old. Their state counts
+    /// above as observed; this says how current that observation is.
+    pub aging: Vec<AgingAnchor>,
+}
+
+/// One counted row resting on a recorded observation, by age.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgingAnchor {
+    pub entity: String,
+    pub artifact: String,
+    pub observed_at: String,
+    pub unobserved_for_days: u64,
 }
 
 /// One facet's capability-matrix row + resolved change signal (B1 capability
@@ -933,6 +947,29 @@ fn render_hard_required(report: &FidelityReport) -> String {
         "- the figures above count anchor ROWS: {} row(s) over {} distinct artifact(s)\n",
         report.anchors.counted_rows, report.anchors.distinct_artifacts
     ));
+    // Rows adjudicated from a recorded observation (url rows): their state
+    // above is as old as the observation it rests on, so the age travels
+    // with the count.
+    if !report.anchors.aging.is_empty() {
+        md.push_str(&format!(
+            "- {} counted row(s) rest on a recorded observation rather than a live one \
+             (url anchors; the engine never fetches):\n",
+            report.anchors.aging.len()
+        ));
+        const AGING_CAP: usize = 10;
+        for a in report.anchors.aging.iter().take(AGING_CAP) {
+            md.push_str(&format!(
+                "  - `{}` → `{}`: unobserved for {} days (observed {})\n",
+                a.entity, a.artifact, a.unobserved_for_days, a.observed_at
+            ));
+        }
+        if report.anchors.aging.len() > AGING_CAP {
+            md.push_str(&format!(
+                "  - …and {} more\n",
+                report.anchors.aging.len() - AGING_CAP
+            ));
+        }
+    }
     // The population, and what is outside it. Named, never merely counted: a
     // number a reader cannot act on reproduces the defect one level up.
     if report.anchors.excluded_other_binding > 0 || report.anchors.excluded_out_of_scope > 0 {
@@ -1489,6 +1526,24 @@ pub fn compute_fidelity_report(
                 r.anchor.hash_source == Some(crate::anchor::AnchorHashSource::Backfill)
             })
             .count(),
+        aging: {
+            let today = crate::engine::mutation::iso_now();
+            let mut rows: Vec<AgingAnchor> = population
+                .included
+                .iter()
+                .filter_map(|(eid, r)| {
+                    let at = r.observed_at.as_deref()?;
+                    Some(AgingAnchor {
+                        entity: eid.as_ref().to_string(),
+                        artifact: r.anchor.artifact.clone(),
+                        observed_at: at.to_string(),
+                        unobserved_for_days: crate::anchor::days_between(at, &today).unwrap_or(0),
+                    })
+                })
+                .collect();
+            rows.sort_by_key(|a| std::cmp::Reverse(a.unobserved_for_days));
+            rows
+        },
         ..Default::default()
     };
     for (_eid, resolved_anchor) in population.included {
@@ -1746,6 +1801,32 @@ mod tests {
             disposed_excluded_rationales: Vec::new(),
             degradations: vec!["hash-adjudication-deferred — 1 anchor(s) recheck".to_string()],
         }
+    }
+
+    /// A counted row resting on a recorded observation (a url anchor) renders
+    /// with its age beside the resolution figures it contributed to.
+    #[test]
+    fn aging_rows_render_with_their_age() {
+        let mut r = base_report();
+        r.anchors.aging = vec![AgingAnchor {
+            entity: "engine--cites".to_string(),
+            artifact: "https://w.test/living".to_string(),
+            observed_at: "2026-08-03T09:00:00Z".to_string(),
+            unobserved_for_days: 30,
+        }];
+        let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+        assert!(
+            md.contains("1 counted row(s) rest on a recorded observation"),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "`engine--cites` → `https://w.test/living`: unobserved for 30 days (observed 2026-08-03T09:00:00Z)"
+            ),
+            "{md}"
+        );
+        let plain = render_fidelity_report(&base_report(), 8_000, &[]).markdown;
+        assert!(!plain.contains("recorded observation"), "{plain}");
     }
 
     /// B1 — the report renders every required element deterministically, with
@@ -2181,6 +2262,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)

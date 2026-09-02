@@ -431,6 +431,92 @@ impl super::Engine {
         Ok(written)
     }
 
+    /// Record observer-supplied observations onto `url` rows of `mem_name`'s
+    /// anchors sidecar as their `last_observed` record (sidecar version 2)
+    /// — the bookkeeping leg of `memstead verify-anchors --observations`.
+    /// Mutates only the engine-owned sidecar: no entity content, no `_hash`.
+    /// Guards at this seam:
+    ///
+    /// - only a `url` row is written: path and entity rows are observed live
+    ///   on every pass and never carry a recorded observation;
+    /// - a hash-bearing row that has no hash yet takes the observed hash as
+    ///   its baseline (`hash_source: backfill`), exactly as the path
+    ///   backfill does; a row that already carries a hash keeps it;
+    /// - a row that already carries the identical `last_observed` stages
+    ///   nothing, so re-running with the same file produces no commit.
+    ///
+    /// Returns how many rows changed. Zero writes ⇒ no commit.
+    pub fn record_anchor_observations(
+        &mut self,
+        mem_name: &str,
+        observations: &[crate::engine::query::RecordedObservation],
+        note: Option<&str>,
+    ) -> Result<usize, EngineError> {
+        if observations.is_empty() {
+            return Ok(0);
+        }
+        let mount_idx = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem_name)
+            .ok_or_else(|| self.unknown_mem_error(mem_name))?;
+        if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
+            return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
+        }
+        let _warnings = self.reload_if_stale(Some(mem_name));
+
+        let backend = self.mounts[mount_idx].backend.as_ref();
+        let mut sidecar = read_sidecar(backend)?;
+        let mut written = 0usize;
+        for obs in observations {
+            let Some(anchors) = sidecar.entities.get_mut(&obs.entity) else {
+                continue;
+            };
+            for a in anchors {
+                if a.grain != crate::anchor::AnchorGrain::Url || a.artifact != obs.artifact {
+                    continue;
+                }
+                let mut changed = false;
+                if a.last_observed.as_ref() != Some(&obs.observation) {
+                    a.last_observed = Some(obs.observation.clone());
+                    changed = true;
+                }
+                if a.class.is_hash_bearing()
+                    && a.hash.is_none()
+                    && let Some(hash) = &obs.observation.hash
+                {
+                    a.hash = Some(hash.clone());
+                    a.hash_source = Some(crate::anchor::AnchorHashSource::Backfill);
+                    changed = true;
+                }
+                if changed {
+                    written += 1;
+                }
+            }
+        }
+        if written == 0 {
+            return Ok(0);
+        }
+        backend.write_anchors_sidecar(&sidecar.to_bytes())?;
+        let ctx = crate::vcs::CommitContext {
+            actor: crate::vcs::Actor::Agent,
+            client: None,
+            tool: Some("record_anchor_observations"),
+            note: note.map(String::from),
+            role: self.current_role,
+            identity: self.current_identity.clone(),
+            logical_operation_id: None,
+            entity_ids: None,
+        };
+        let write_id = backend.commit(
+            &format!("memstead: anchor observations recorded ({written} row(s))"),
+            &ctx,
+        )?;
+        self.record_self_write(mount_idx, &write_id);
+        let _intervention_has_no_channel_here = self.stamp_mutation_versions(mount_idx);
+        Ok(written)
+    }
+
     /// Record on the mem which engine version and which resolved
     /// schema performed the mutation that just committed
     /// (`MemConfig.mutation_stamp`). Called by every mutation verb
@@ -679,6 +765,14 @@ pub(crate) fn stage_anchors_rename(
 /// the epoch is acceptable for a best-effort timestamp).
 /// Howard-Hinnant civil-from-days for the date half; trivial modular
 /// arithmetic for the time half.
+/// The current wall-clock time as the second-granularity ISO form every
+/// stamping path writes — for callers outside an engine (a CLI validating
+/// input before boot). Engine code uses `Engine::now_iso`, which honours a
+/// pinned test clock.
+pub fn iso_now() -> String {
+    iso_from_system_time(std::time::SystemTime::now())
+}
+
 pub(super) fn iso_from_system_time(t: std::time::SystemTime) -> String {
     let now = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs();

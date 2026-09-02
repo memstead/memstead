@@ -544,11 +544,12 @@ Remove an installed read-mem's workspace-level mount. The global cache copy surv
 
 Verify every anchor in a mem against its declared source — the standalone drift statement, no binding required. Mutates no entity, but records its findings store like any verify run
 
-**Usage:** `memstead verify-anchors --mem <NAME>`
+**Usage:** `memstead verify-anchors [OPTIONS] --mem <NAME>`
 
 ###### **Options:**
 
 * `--mem <NAME>` — Which mem to verify (by name)
+* `--observations <FILE>` — JSON file of observer-supplied observations for the anchors the engine cannot observe itself (`url` grain; the engine never fetches). Either a bare array or `{"observations": [...]}`; each row is `{"artifact": "<url>", "hash": "<prepared-content hash>" | "content": "<retrieved text>" | "absent": true, "observed_at": "<ISO-8601>"?}` — exactly one of `hash` / `content` / `absent`, `observed_at` defaulting to now. `content` is hashed under the same rule the write path applies to an anchor's `content`. A url row with a supplied observation adjudicates like a file anchor (equal hash `resolved`, differing hash `drifted` under `stable` and `recheck` under `unstable`, `absent` → `recheck`); a url row without one stays `unobserved`. Matched observations are recorded on the sidecar rows as `last_observed`, so later runs and every anchor surface show how long each row has gone unobserved. Rows naming no url anchor of the mem are reported as unmatched and change nothing. A malformed row refuses the whole run with `INVALID_OBSERVATION` before any state changes
 
 
 

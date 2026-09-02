@@ -207,7 +207,7 @@ Create a new entity. Read the target mem's schema first (`memstead_schema`). Req
         },
         "grain": {
           "default": null,
-          "description": "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. Must be expressible in the resolving medium's anchor namespace (path-shaped for span/file/tree, `url` for url, `entity` for entity) or the mutation refuses INVALID_ANCHOR. An unknown value refuses INVALID_ANCHOR.",
+          "description": "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. `span`/`file`/`tree` need a path-shaped medium namespace and `entity` the entity namespace, or the mutation refuses INVALID_ANCHOR; `url` is admitted beside every medium (a URL never enters a path namespace). A path-shaped grain whose artifact is a URL refuses INVALID_ANCHOR naming that rule: use `grain: url`. An unknown value refuses INVALID_ANCHOR.",
           "type": [
             "string",
             "null"
@@ -1637,7 +1637,7 @@ Modify an existing entity. Pre-fetch the target mem's schema (`memstead_schema`)
         },
         "grain": {
           "default": null,
-          "description": "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. Must be expressible in the resolving medium's anchor namespace (path-shaped for span/file/tree, `url` for url, `entity` for entity) or the mutation refuses INVALID_ANCHOR. An unknown value refuses INVALID_ANCHOR.",
+          "description": "Granularity of the artifact reference: `span` | `file` | `tree` | `url` | `entity`. `span`/`file`/`tree` need a path-shaped medium namespace and `entity` the entity namespace, or the mutation refuses INVALID_ANCHOR; `url` is admitted beside every medium (a URL never enters a path namespace). A path-shaped grain whose artifact is a URL refuses INVALID_ANCHOR naming that rule: use `grain: url`. An unknown value refuses INVALID_ANCHOR.",
           "type": [
             "string",
             "null"

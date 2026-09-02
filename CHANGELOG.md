@@ -9,6 +9,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Url anchors are observable.** `memstead verify-anchors --mem <m>
+  --observations <file>` takes observer-supplied rows `{artifact, hash |
+  content | absent: true, observed_at?}` for the one grain the engine never
+  observes itself (it never fetches): a url row with a supplied observation
+  adjudicates through the same funnel a file anchor does (equal hash
+  `resolved`, differing hash `drifted` under `stable` and `recheck` under
+  `unstable`, `absent` → `recheck`), `content` is hashed under the write
+  path's rule, and a url row without an observation stays `unobserved`. The
+  matched observations are recorded on the sidecar rows as `last_observed
+  {at, hash, state}` (anchors sidecar version 2; version 1 files load
+  unchanged and are rewritten as version 2 on the next anchor write, an
+  unknown higher version still refuses), so the per-entity read, `health
+  --include anchors` (an `aging` list) and `--include open_questions`
+  (`anchors_aging`), `verify-anchors` and the fidelity report all show
+  `unobserved for N days` for a row resting on an older observation. A
+  malformed observation row refuses the whole run with `INVALID_OBSERVATION`
+  before any state changes; rows naming no url anchor are reported as
+  unmatched. The `url` grain is now admitted beside every medium (a URL
+  never enters a path namespace), so a mem with one filesystem binding
+  accepts url anchors; a path-shaped grain whose artifact is a URL refuses
+  `INVALID_ANCHOR` naming that rule. The run brief's anchor instruction and
+  the docs tell authors to set `hash_stability: stable` on immutable
+  documents.
 - **`memstead schema migrate <dir>` rewrites an authoring package's
   retired keys into the current schema language.** The keys `schema
   validate` refuses (`propagating_relationships`, the metadata-field

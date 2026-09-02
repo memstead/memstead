@@ -6,6 +6,12 @@
 //! and (like the binding-backed verify) backfills first-observed hashes
 //! onto hash-less anchors in the sidecar, so a manual re-pin drains out
 //! of the recheck queue instead of queueing forever.
+//!
+//! `--observations <file>` supplies what the engine cannot observe itself:
+//! a `url` anchor's artifact, retrieved by the caller. Each row adjudicates
+//! through the same funnel a file anchor does, and the resulting state is
+//! recorded on the sidecar row (`last_observed`, sidecar version 2) so the
+//! row ages visibly from then on. The engine never fetches.
 
 use clap::Parser;
 use serde_json::json;
@@ -46,13 +52,105 @@ pub struct Args {
     /// Which mem to verify (by name).
     #[arg(long = "mem", value_name = "NAME")]
     pub mem_name: String,
+
+    /// JSON file of observer-supplied observations for the anchors the
+    /// engine cannot observe itself (`url` grain; the engine never fetches).
+    /// Either a bare array or `{"observations": [...]}`; each row is
+    /// `{"artifact": "<url>", "hash": "<prepared-content hash>" | "content":
+    /// "<retrieved text>" | "absent": true, "observed_at": "<ISO-8601>"?}`
+    /// — exactly one of `hash` / `content` / `absent`, `observed_at`
+    /// defaulting to now. `content` is hashed under the same rule the write
+    /// path applies to an anchor's `content`. A url row with a supplied
+    /// observation adjudicates like a file anchor (equal hash `resolved`,
+    /// differing hash `drifted` under `stable` and `recheck` under
+    /// `unstable`, `absent` → `recheck`); a url row without one stays
+    /// `unobserved`. Matched observations are recorded on the sidecar rows
+    /// as `last_observed`, so later runs and every anchor surface show how
+    /// long each row has gone unobserved. Rows naming no url anchor of the
+    /// mem are reported as unmatched and change nothing. A malformed row
+    /// refuses the whole run with `INVALID_OBSERVATION` before any state
+    /// changes.
+    #[arg(long = "observations", value_name = "FILE")]
+    pub observations: Option<std::path::PathBuf>,
+}
+
+/// Read and validate the `--observations` file: a bare array or an object
+/// with an `observations` array. Refuses typed before the engine boots.
+fn load_observations(
+    path: &std::path::Path,
+    now: &str,
+) -> anyhow::Result<memstead_base::engine::query::SuppliedObservations> {
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        CliError::new(
+            crate::output::ExitKind::Generic,
+            "INVALID_OBSERVATION",
+            format!("reading {}: {e}", path.display()),
+        )
+    })?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        CliError::new(
+            crate::output::ExitKind::Validation,
+            "INVALID_OBSERVATION",
+            format!("{} is not valid JSON: {e}", path.display()),
+        )
+    })?;
+    let rows_value = match &value {
+        serde_json::Value::Array(_) => value.clone(),
+        serde_json::Value::Object(o) if o.get("observations").is_some_and(|v| v.is_array()) => {
+            o["observations"].clone()
+        }
+        _ => {
+            return Err(CliError::new(
+                crate::output::ExitKind::Validation,
+                "INVALID_OBSERVATION",
+                format!(
+                    "{} must be a JSON array of observation rows or an object with an \
+                     `observations` array",
+                    path.display()
+                ),
+            )
+            .into());
+        }
+    };
+    let rows: Vec<memstead_base::anchor::SuppliedObservationInput> =
+        serde_json::from_value(rows_value).map_err(|e| {
+            CliError::new(
+                crate::output::ExitKind::Validation,
+                "INVALID_OBSERVATION",
+                format!("{}: observation rows do not parse: {e}", path.display()),
+            )
+        })?;
+    memstead_base::anchor::validate_supplied_observations(&rows, now).map_err(|e| {
+        CliError::new(crate::output::ExitKind::Validation, e.code(), e.to_string())
+            .with_details(serde_json::Value::Object(e.detail().into_iter().collect()))
+            .into()
+    })
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    // Validate the supplied observations before any engine state is touched:
+    // a malformed row refuses the run, and nothing has changed yet.
+    let now = memstead_base::engine::mutation::iso_now();
+    let supplied = match args.observations.as_deref() {
+        Some(path) => load_observations(path, &now)?,
+        None => memstead_base::engine::query::SuppliedObservations::new(),
+    };
+
     let mut engine = ctx.cli_engine()?.into_base();
 
     let report = engine
-        .verify_mem_anchors(&args.mem_name)
+        .verify_mem_anchors_with(&args.mem_name, &supplied)
+        .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
+
+    // Record the supplied observations on their url rows (`last_observed`),
+    // so the rows carry a dated state from here on and age visibly. An
+    // identical re-run stages nothing.
+    let observations_recorded = engine
+        .record_anchor_observations(
+            &args.mem_name,
+            &report.recordable_observations,
+            Some("verify-anchors: supplied observations recorded"),
+        )
         .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
 
     // Backfill observed hashes onto hash-less anchors, exactly as the
@@ -132,6 +230,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "entity_end_unreconciled": report.unreconciled,
             "anchors": report.anchors,
             "hash_backfilled": backfilled,
+            "observations": {
+                "supplied": supplied.len(),
+                "matched": supplied.len() - report.unmatched_observations.len(),
+                "unmatched": report.unmatched_observations,
+                "recorded": observations_recorded,
+            },
             "findings": findings,
         }))?;
     } else {
@@ -184,6 +288,46 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         "- **{}**: `{}` → `{}` ({} {})\n",
                         a.state, a.entity_id, a.artifact, a.class, a.grain,
                     ));
+                }
+            }
+            // Rows whose state rests on a recorded observation, by age: a
+            // url row is adjudicated only when someone observes it, so how
+            // long ago that was is part of what the state means.
+            let aging: Vec<_> = report
+                .anchors
+                .iter()
+                .filter(|a| a.observed_at.is_some())
+                .collect();
+            if !aging.is_empty() {
+                out.push_str("\n## Observed rows (url)\n\n");
+                for a in aging {
+                    let days = a.unobserved_for_days.unwrap_or(0);
+                    let age = if a.observation_supplied {
+                        "observed this run".to_string()
+                    } else {
+                        format!("unobserved for {days} day(s)")
+                    };
+                    out.push_str(&format!(
+                        "- **{}**: `{}` → `{}` — observed {} ({age})\n",
+                        a.state,
+                        a.entity_id,
+                        a.artifact,
+                        a.observed_at.as_deref().unwrap_or("?"),
+                    ));
+                }
+            }
+        }
+        if !supplied.is_empty() {
+            out.push_str(&format!(
+                "\nObservations supplied: {}, matched {}, recorded on {} row(s).\n",
+                supplied.len(),
+                supplied.len() - report.unmatched_observations.len(),
+                observations_recorded,
+            ));
+            if !report.unmatched_observations.is_empty() {
+                out.push_str("Unmatched (no url anchor of this mem names the artifact):\n");
+                for u in &report.unmatched_observations {
+                    out.push_str(&format!("- `{u}`\n"));
                 }
             }
         }

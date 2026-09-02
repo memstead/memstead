@@ -444,6 +444,7 @@ mod tests {
             source: Some("src".to_string()),
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         }
     }
 

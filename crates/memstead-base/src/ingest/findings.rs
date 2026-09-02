@@ -1782,6 +1782,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         }
     }
 
@@ -2389,6 +2390,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
@@ -2598,6 +2600,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
@@ -2816,6 +2819,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         use AnchorHashStability::{Stable, Unstable};
         // The entity the sidecar is keyed to. Written, because it exists:
@@ -3136,6 +3140,7 @@ mod tests {
                 source: Some("graph".to_string()),
                 span_unvalidated: false,
                 hash_source: None,
+                last_observed: None,
             }],
         );
         std::fs::write(
@@ -3318,6 +3323,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
@@ -4112,6 +4118,7 @@ mod tests {
             source: None,
             span_unvalidated: false,
             hash_source: None,
+            last_observed: None,
         };
         // The entity the sidecar is keyed to. Written, because it exists:
         // a row whose entity does not is DANGLING (consistency-sweep 03/02)
