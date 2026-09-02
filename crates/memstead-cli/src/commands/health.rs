@@ -314,8 +314,14 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
     let mut lines: Vec<String> = Vec::new();
     lines.push("# Graph health".to_string());
     lines.push(String::new());
-    if let Some(cov) = crate::coverage::HEALTH.axis_coverage() {
-        lines.push(format!("**Verdict coverage:** {}", cov.wire_line()));
+    // The line the composer stamped, not a fresh render of the static
+    // declaration: the composer promotes an opt-in axis it rendered
+    // this pass (`--include anchors`) into the examined set, and a
+    // markdown that re-rendered the registry row filed the same axis
+    // as advisory while the JSON of the same run filed it as examined
+    // (C2 grader finding, 2026-09-02).
+    if let Some(cov) = v["verdict_coverage"].as_str() {
+        lines.push(format!("**Verdict coverage:** {cov}"));
         lines.push(String::new());
     }
     if let Some(m) = mem {

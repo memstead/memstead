@@ -22,7 +22,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   taken as "not looked at"; the examined set, the promotion of `anchors`
   on include, and every verdict are unchanged. The coverage registry
   refuses an axis filed in two buckets, and the health and MCP references
-  state the three buckets.
+  state the three buckets. The CLI markdown now prints the line the
+  composer stamped instead of re-rendering the static declaration, so
+  `--include anchors` promotes `anchors` into `examined` on the markdown
+  exactly as the JSON and the MCP payload of the same run do.
 - **The parse-generate fixpoint holds when a merged section ends inside
   an open HTML block.** A non-schema section whose content ends inside an
   HTML block of the kinds no blank line ends (`<!X`, `<!--`, `<?`,
