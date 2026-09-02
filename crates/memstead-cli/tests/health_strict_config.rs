@@ -544,13 +544,13 @@ fn cli_markdown_and_open_questions_name_the_dangling_condition() {
 
 /// A body link to a target that does not exist creates a stub; with
 /// `integrity` included the run refuses on
-/// `DANGLING_LINK_TARGET_MISSING` and `ORPHAN_STUB`, and without the
+/// `DANGLING_LINK_TARGET_MISSING` and `UNRESOLVED_STUB`, and without the
 /// include it does not (the axis is opt-in, like the other
 /// include-gated ones). The other two dangling conditions have their own
 /// coverage in `memstead-base`; this test's subject is the strict gate,
 /// and it pins which condition its fixture actually raises.
 #[test]
-fn strict_with_integrity_refuses_dangling_links_and_orphan_stubs() {
+fn strict_with_integrity_refuses_dangling_links_and_unresolved_stubs() {
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path().join("hold");
     fs::create_dir_all(&dir).unwrap();
@@ -560,7 +560,7 @@ fn strict_with_integrity_refuses_dangling_links_and_orphan_stubs() {
     init_real_mem_repo_from_disk(tmp.path(), &[(&dir, "hold")]);
     // An engine write with a body link to a missing target: the engine
     // auto-creates the stub, which then has exactly one referrer and
-    // no body of its own (`ORPHAN_STUB`).
+    // no body of its own (`UNRESOLVED_STUB`).
     memstead()
         .current_dir(tmp.path())
         .args([
@@ -608,10 +608,10 @@ fn strict_with_integrity_refuses_dangling_links_and_orphan_stubs() {
             && !codes.contains(&"DANGLING_RELATION_TARGET_MISSING"),
         "this fixture produces neither of the other two conditions; {codes:?}"
     );
-    assert!(codes.contains(&"ORPHAN_STUB"), "{codes:?}");
+    assert!(codes.contains(&"UNRESOLVED_STUB"), "{codes:?}");
     assert_eq!(code, 1, "{envelope}");
     assert!(envelope.contains("dangling_links:"), "{envelope}");
-    assert!(envelope.contains("orphan_stubs: 1"), "{envelope}");
+    assert!(envelope.contains("unresolved_stubs: 1"), "{envelope}");
 
     // Without `integrity` the same workspace is not refused.
     let (code, _, envelope) = strict_health(tmp.path(), &["stubs"]);

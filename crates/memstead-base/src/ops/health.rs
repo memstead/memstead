@@ -1201,6 +1201,11 @@ pub fn compute_health(
         .filter(|(id, _)| store.get(id).is_some_and(|e| in_scope(&e.mem)))
         .count();
 
+    // The store iterates a hash map: order the per-entity lists by id so
+    // two processes (the CLI and the MCP server) render the same bytes.
+    stale_entities.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    missing_fields.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+
     HealthSummary {
         stale_entities,
         missing_fields,

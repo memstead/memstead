@@ -6241,7 +6241,7 @@ mod tests {
     /// codes. Fixture: one entity with an undeclared metadata field
     /// (conformance break, `UNKNOWN_METADATA_FIELD`) and a relation to
     /// an absent target (load-time stub → consistency finding
-    /// `ORPHAN_STUB`). Two runs are byte-identical (determinism).
+    /// `UNRESOLVED_STUB`). Two runs are byte-identical (determinism).
     #[test]
     fn health_integrity_include_returns_both_axes_with_write_time_codes() {
         let tmp = TempDir::new().unwrap();
@@ -6290,7 +6290,7 @@ mod tests {
             "undeclared field must lint with the write-time code; got {findings:?}"
         );
         assert!(
-            code_of("consistency", "ORPHAN_STUB"),
+            code_of("consistency", "UNRESOLVED_STUB"),
             "stub target must surface on the consistency axis; got {findings:?}"
         );
         // Determinism: a second identical call is byte-identical on

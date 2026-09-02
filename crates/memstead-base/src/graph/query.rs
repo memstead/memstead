@@ -300,6 +300,9 @@ pub fn find_orphans_with_schemas(
             results.push(entity.id.clone());
         }
     }
+    // The store iterates a hash map: order by id so every renderer
+    // (CLI, MCP) emits the same bytes.
+    results.sort_by(|a, b| a.0.cmp(&b.0));
     results
 }
 

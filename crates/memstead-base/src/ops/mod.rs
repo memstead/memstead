@@ -21,6 +21,7 @@ pub mod coverage;
 pub mod diff;
 pub mod export;
 pub mod health;
+pub mod health_compose;
 pub mod integrity;
 pub mod labelling;
 #[cfg(not(target_arch = "wasm32"))]
@@ -3908,7 +3909,9 @@ pub enum Direction {
 pub struct Status {
     pub entity_count: usize,
     pub edge_count: usize,
-    pub edge_types: HashMap<String, usize>,
+    /// Edge count per relationship type, in name order: a `BTreeMap` so
+    /// every renderer (CLI, MCP, ui-api) emits the same bytes run after run.
+    pub edge_types: std::collections::BTreeMap<String, usize>,
     pub community_count: usize,
     pub mem_count: usize,
     pub types_in_use: Vec<String>,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use memstead_base::Store;
 use memstead_base::ingest::status::{ProjectionStatus, Rollup, projection_overview};
@@ -185,11 +185,10 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
         };
     let stubs = total - real;
 
-    let mut edge_pairs: Vec<_> = status.edge_types.iter().collect();
-    edge_pairs.sort_by(|a, b| b.1.cmp(a.1));
-
-    let mut schema_pairs: Vec<(String, usize)> = schema_counts.into_iter().collect();
-    schema_pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
+    // Name order (A7 AC3): both lists are byte-stable across runs, and the
+    // health composer and the ui-api carry them in the same order.
+    let edge_pairs: Vec<(&String, &usize)> = status.edge_types.iter().collect();
+    let schema_pairs: Vec<(String, usize)> = schema_counts.into_iter().collect();
 
     if ctx.json {
         let payload = StatusPayload {
@@ -334,10 +333,48 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
 
 /// Count real (non-stub) entities by `entity_type`. Both engine
 /// flavours expose a `&Store`, so this helper is engine-agnostic.
-fn count_by_type(store: &Store) -> HashMap<String, usize> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
+fn count_by_type(store: &Store) -> BTreeMap<String, usize> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for e in store.all_entities().filter(|e| !e.stub) {
         *counts.entry(e.entity_type.clone()).or_default() += 1;
     }
     counts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A7 AC3: the JSON lists are rendered from name-ordered maps, so the
+    /// order is pinned at the type (a `BTreeMap`, never a hash map) and
+    /// checked at the render seam.
+    #[test]
+    fn edge_and_type_lists_render_in_name_order() {
+        fn name_ordered(_: &BTreeMap<String, usize>) {}
+        let mut edge_types = BTreeMap::new();
+        for (k, c) in [("USES", 3), ("DEPENDS_ON", 9), ("MENTIONS", 1)] {
+            edge_types.insert(k.to_string(), c);
+        }
+        let status = memstead_base::ops::Status {
+            entity_count: 0,
+            edge_count: 13,
+            edge_types,
+            community_count: 0,
+            mem_count: 0,
+            types_in_use: vec![],
+        };
+        name_ordered(&status.edge_types);
+        let rendered: Vec<EdgeTypeCount> = status
+            .edge_types
+            .iter()
+            .map(|(t, c)| EdgeTypeCount {
+                rel_type: t,
+                count: *c,
+            })
+            .collect();
+        let names: Vec<&str> = rendered.iter().map(|e| e.rel_type).collect();
+        assert_eq!(names, vec!["DEPENDS_ON", "MENTIONS", "USES"]);
+        // `count_by_type` renders from the same ordered map type.
+        name_ordered(&count_by_type(&Store::new()));
+    }
 }

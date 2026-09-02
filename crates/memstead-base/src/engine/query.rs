@@ -2443,7 +2443,8 @@ impl Engine {
         types_in_use.sort();
         types_in_use.dedup();
 
-        let mut edge_types: HashMap<String, usize> = HashMap::new();
+        let mut edge_types: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
         for id in self.store.all_ids() {
             for edge in self.store.outgoing(id) {
                 *edge_types.entry(edge.rel_type.clone()).or_insert(0) += 1;

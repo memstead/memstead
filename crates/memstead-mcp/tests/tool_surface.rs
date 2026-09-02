@@ -1718,7 +1718,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "DANGLING_LINK_TARGET_MISSING",
             "DANGLING_LINK_NOT_RELATED",
             "DANGLING_RELATION_TARGET_MISSING",
-            "ORPHAN_STUB",
+            "UNRESOLVED_STUB",
             // An existing cross-mem edge the workspace grant table no longer
             // permits — a state the default-deny write gate would refuse to
             // create today, reported rather than refused at load (04/07).

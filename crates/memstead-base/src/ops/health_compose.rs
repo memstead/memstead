@@ -1,0 +1,1284 @@
+//! Shared health composer used by the `memstead_health` MCP tool and any
+//! non-MCP caller (CLI, a future HTTP surface).
+//!
+//! Lifted from `memstead-mcp/src/server.rs::memstead_health_unified` so the
+//! health read-envelope is produced by one transport-neutral builder with no
+//! rmcp type in the path — the MCP wrapper handles drift collection, the
+//! schema anchor, the `mem_changed` notice channel, and `CallToolResult`
+//! wrapping; none of that lives here.
+//!
+//! The composer returns the complete health payload as a `serde_json::Value`
+//! (warnings embedded, every `include` detail section applied). Surface state
+//! the engine does not own — the `[mutations]` posture and the opaque
+//! `[plugin.*]` map — is passed in via [`HealthConfig`] as prebuilt JSON so
+//! this crate stays free of the MCP server's config types and the wire bytes
+//! stay identical to the pre-lift handler.
+
+use std::collections::HashMap;
+
+/// Composer input — packed from the MCP `HealthParams` (or a CLI `Args`) at
+/// the call site. Mirrors the field set the pre-lift handler read off
+/// `HealthParams`.
+#[derive(Debug)]
+pub struct HealthArgs<'a> {
+    pub mem: Option<&'a str>,
+    pub include: &'a [String],
+    pub limit: Option<usize>,
+    pub target_schema: Option<&'a str>,
+    pub include_config: bool,
+}
+
+/// Surface-owned config the engine does not carry — supplied prebuilt so the
+/// composer inserts the bytes verbatim. `mutations` is `{"require_notes": …}`;
+/// `plugin` is the opaque `[plugin.*]` pass-through object. Only consulted
+/// when `args.include_config` is set.
+#[derive(Debug, Clone)]
+pub struct HealthConfig {
+    pub mutations: serde_json::Value,
+    pub plugin: serde_json::Value,
+}
+
+/// Typed input failures the composer surfaces. The MCP wrapper maps each
+/// variant to its existing envelope (`UNKNOWN_MEM`, `INVALID_INPUT`) and
+/// the engine fault to its typed translator, so the wire `code` stays put.
+// The engine-fault variant carries the lower-layer error verbatim so the typed
+// translator keeps its input; the size gap is inherent to that lifting, and a
+// health composition runs once per call.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, thiserror::Error)]
+pub enum ComposeHealthError {
+    /// `args.mem` names a mem that isn't writable in this workspace. The
+    /// composer surfaces the sorted writable roster so the wrapper can echo
+    /// it in the `UNKNOWN_MEM` envelope.
+    #[error("unknown mem: \"{name}\"")]
+    UnknownMem {
+        name: String,
+        writable_mems: Vec<String>,
+    },
+    /// `args.mem` names a QUARANTINED mem — the scope refuses with the
+    /// typed quarantine reason rather than reporting the mem unknown
+    /// (agent-trust plan 04). The wrapper maps it through its ordinary
+    /// engine-error path via `Engine::unknown_mem_error`.
+    #[error("mem \"{0}\" is quarantined")]
+    MemQuarantined(String),
+    /// `args.target_schema` did not parse as a `name@x.y.z` ref. `reason` is
+    /// the parser's message, surfaced verbatim in the `INVALID_INPUT`
+    /// envelope's `details.reason`.
+    #[error("invalid target_schema {raw:?}: {reason}")]
+    InvalidTargetSchema { raw: String, reason: String },
+    /// A backend fault from the conformance / consistency scan. The wrapper
+    /// routes it through the typed `EngineError` translator unchanged.
+    #[error(transparent)]
+    Engine(#[from] crate::EngineError),
+}
+
+/// Build the complete health payload. `drift_warnings` are the reload warnings
+/// the wrapper collected before calling in; the composer extends them with the
+/// health report's own warnings, the limit-clamp notice, and unknown-include
+/// notices, then embeds the lot under `warnings`.
+pub fn compose_health(
+    engine: &mut crate::Engine,
+    args: &HealthArgs,
+    drift_warnings: Vec<crate::WarningHint>,
+    config: &HealthConfig,
+) -> Result<serde_json::Value, ComposeHealthError> {
+    let health = engine.health();
+    let stats = engine.status();
+    let include = args.include;
+    const HEALTH_LIMIT_MAX: usize = 100;
+    let requested_limit = args.limit.unwrap_or(10);
+    let limit = requested_limit.min(HEALTH_LIMIT_MAX);
+
+    let mut warnings: Vec<crate::WarningHint> = drift_warnings;
+    warnings.extend(health.warnings.clone());
+    if requested_limit > HEALTH_LIMIT_MAX {
+        warnings.push(crate::WarningHint::LimitClamped {
+            requested: requested_limit,
+            actual: HEALTH_LIMIT_MAX,
+        });
+    }
+
+    for key in include {
+        if !crate::ops::health::HEALTH_INCLUDE_KEYS.contains(&key.as_str()) {
+            warnings.push(crate::WarningHint::UnknownIncludeKey {
+                key: key.clone(),
+                allowed: crate::ops::health::HEALTH_INCLUDE_KEYS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            });
+        }
+    }
+
+    // Mem filter validation — only writable mems accepted.
+    let mem_filter: Option<String> = match args.mem {
+        Some(v) if engine.mem_router().is_writable(v) => Some(v.to_string()),
+        Some(v) if engine.quarantine_reason(v).is_some() => {
+            return Err(ComposeHealthError::MemQuarantined(v.to_string()));
+        }
+        Some(v) => {
+            let mut names: Vec<String> = engine
+                .mem_router()
+                .writable_mems()
+                .iter()
+                .cloned()
+                .collect();
+            names.sort();
+            return Err(ComposeHealthError::UnknownMem {
+                name: v.to_string(),
+                writable_mems: names,
+            });
+        }
+        None => None,
+    };
+    let vf = mem_filter.as_deref();
+
+    // Symmetric with the data filter below: mem-attributable warnings
+    // (SUSPICIOUS_NESTED_PREFIX, DUPLICATE_SECTION_HEADING, etc.) drop out when
+    // their source mem isn't the scoped one. Workspace- and request-scoped
+    // warnings (OUTER_REPO_…, UNKNOWN_INCLUDE_KEY, LIMIT_CLAMPED) report `None`
+    // from `source_mem()` and stay visible — agents should see them
+    // regardless of which mem they're scoping to.
+    if let Some(v) = vf {
+        warnings.retain(|w| w.source_mem().is_none_or(|wv| wv == v));
+    }
+
+    let in_mem = |e: &crate::Entity| -> bool {
+        match vf {
+            Some(v) => e.mem == v,
+            None => true,
+        }
+    };
+    let real_count = engine
+        .store()
+        .all_entities()
+        .filter(|e| !e.stub && in_mem(e))
+        .count();
+    let stub_count = engine
+        .store()
+        .all_entities()
+        .filter(|e| e.stub && in_mem(e))
+        .count();
+    let total_count = real_count + stub_count;
+
+    let orphan_ids: Vec<crate::EntityId> = engine
+        .orphans()
+        .into_iter()
+        .filter(|id| match vf {
+            Some(v) => engine.store().get(id).map(|e| e.mem == v).unwrap_or(false),
+            None => true,
+        })
+        .collect();
+    let stub_pairs: Vec<(crate::EntityId, Vec<crate::EntityId>)> = engine
+        .stubs()
+        .into_iter()
+        .filter(|(id, _)| match vf {
+            Some(v) => engine.store().get(id).map(|e| e.mem == v).unwrap_or(false),
+            None => true,
+        })
+        .collect();
+
+    // Under a `mem` filter, scope the community count to clusters with ≥1
+    // member in that mem (filtering the global partition, not re-running
+    // detection) so it can't contradict the scoped `total_entities` — e.g. an
+    // empty mem reports 0 entities and 0 communities. Mirrors
+    // `memstead_overview` via the shared helper.
+    let community_count = match vf {
+        Some(v) => {
+            crate::graph::community::clusters_in_mem(engine.store(), engine.communities(), v).len()
+        }
+        None => engine.communities().count,
+    };
+
+    // Edge counts: under a mem filter, count only source-in-mem edges
+    // (asymmetric — matches the legacy contract).
+    let (edge_count, edge_types) = {
+        if let Some(v) = vf {
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            let mut total: usize = 0;
+            for id in engine.store().all_ids() {
+                let source_mem = engine.store().get(id).map(|e| e.mem.clone());
+                if let Some(source) = source_mem.as_deref()
+                    && source != v
+                {
+                    continue;
+                }
+                for edge in engine.store().outgoing(id) {
+                    *counts.entry(edge.rel_type.clone()).or_insert(0) += 1;
+                    total += 1;
+                }
+            }
+            // Name order (A7 AC3): the lists are byte-stable across runs.
+            let mut pairs: Vec<_> = counts.into_iter().collect();
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let arr: Vec<serde_json::Value> = pairs
+                .into_iter()
+                .map(|(t, c)| serde_json::json!({"type": t, "count": c}))
+                .collect();
+            (total, arr)
+        } else {
+            // `Status.edge_types` is a `BTreeMap`: already in name order.
+            let arr: Vec<serde_json::Value> = stats
+                .edge_types
+                .iter()
+                .map(|(t, c)| serde_json::json!({"type": t, "count": c}))
+                .collect();
+            (stats.edge_count, arr)
+        }
+    };
+
+    let type_distribution: Vec<serde_json::Value> = {
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for e in engine
+            .store()
+            .all_entities()
+            .filter(|e| !e.stub && in_mem(e))
+        {
+            *counts.entry(&e.entity_type).or_default() += 1;
+        }
+        let mut pairs: Vec<_> = counts.into_iter().collect();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        pairs
+            .into_iter()
+            .map(|(s, c)| serde_json::json!({"type": s, "count": c}))
+            .collect()
+    };
+
+    let writable_mems: Vec<String> = {
+        let mut names: Vec<String> = engine
+            .mem_router()
+            .writable_mems()
+            .iter()
+            .cloned()
+            .collect();
+        names.sort();
+        names
+    };
+    // The stable default an omitted-`mem` mutation lands in — the first
+    // writable mount in declaration order, not `writable_mems[0]` of this
+    // alphabetically-sorted roster. Surfaced so an omitted-`mem` write is
+    // predictable.
+    let default_writable_mem: Option<String> = engine.default_writable_mem().map(|s| s.to_string());
+    let read_mems: Vec<String> = {
+        let writable_set: std::collections::HashSet<&String> =
+            engine.mem_router().writable_mems().iter().collect();
+        let mut names: Vec<String> = engine
+            .mem_router()
+            .visible_mems()
+            .iter()
+            .filter(|n| !writable_set.contains(*n))
+            .cloned()
+            .collect();
+        names.sort();
+        names
+    };
+
+    // Per-mem schema pins. Source from `engine.mount(name).schema` which
+    // carries the pinned `SchemaRef`; render via `as_display()` to get the
+    // same `name@version` form full emits.
+    //
+    // Every *visible* mem appears — writable and read-only alike — each
+    // carrying an explicit `writable` attribute. A read-only mount's pinned
+    // schema is real; surfacing it here (rather than filtering to writable
+    // mems) is what keeps health from reporting "no schema" while the
+    // discovery manifest names one. Writable mems render first (sorted),
+    // then read-only ones (sorted), so a normal writable workspace — which
+    // has no read mems — keeps its existing entry order, gaining only the
+    // `writable: true` attribute.
+    let mem_schemas: Vec<serde_json::Value> = {
+        let mut entries: Vec<serde_json::Value> = Vec::new();
+        let writable_set: std::collections::HashSet<&String> = writable_mems.iter().collect();
+        for name in writable_mems.iter().chain(read_mems.iter()) {
+            if let Some(v) = vf
+                && name != v
+            {
+                continue;
+            }
+            if let Some(m) = engine.mount(name) {
+                // The mem's *settled* pin — `Mount.schema` (now an optional
+                // assertion). During a dual-pin migration this stays the
+                // settled pin; the in-flight target is the separate
+                // `migration_target` surface below.
+                let schema_ref = m
+                    .schema
+                    .as_ref()
+                    .map(|s| s.as_display())
+                    .unwrap_or_default();
+                let mut entry = serde_json::json!({
+                    "mem": name,
+                    "schema": schema_ref,
+                    "writable": writable_set.contains(name),
+                });
+                // Dual-pin confirmation surface: present only while a
+                // migration is in flight, so settled mems' entries stay
+                // byte-identical to before.
+                if let Some(target) = &m.migration_target {
+                    entry["migration_target"] = serde_json::json!(target.as_display());
+                }
+                entries.push(entry);
+            }
+        }
+        entries
+    };
+
+    // #49: segment the orphan / community headlines by the owning mem's
+    // schema. A blended total mixes schemas with opposite norms — ingest
+    // mems, where each finding is an isolated entity (orphan by design),
+    // versus code/spec mems, where an orphan is real debt — so a bare
+    // "54 orphans" reads as 54 units of debt when most are by-design
+    // isolates. The raw `total_orphans` / `total_communities` are retained
+    // in `summary`, and a `mem`-scoped call still exposes per-mem counts
+    // (the refusal AC); these maps only attribute the totals by schema.
+    // `orphan_ids` is already mem-scoped above; scope the community
+    // attribution to the same mem set.
+    let orphans_by_schema = engine.orphans_by_schema(&orphan_ids);
+    let scope_mems: Vec<String> = match vf {
+        Some(v) => vec![v.to_string()],
+        None => writable_mems
+            .iter()
+            .chain(read_mems.iter())
+            .cloned()
+            .collect(),
+    };
+    let communities_by_schema = engine.communities_by_schema(&scope_mems);
+
+    let mut result = serde_json::json!({
+        "mem": mem_filter,
+        // The coverage rule (crate::ops::coverage): the axes
+        // this report's defect statement answers for, stamped by the
+        // composer itself so every consumer of the composition
+        // carries the same declaration.
+        // An opt-in axis the report rendered this pass was examined by it:
+        // `anchors` moves into the examined set when included.
+        "verdict_coverage": crate::ops::coverage::HEALTH_COVERAGE.wire_line_promoting(
+            if include.iter().any(|s| s == "anchors") { &["anchors"] } else { &[] },
+        ),
+        "summary": {
+            "total_entities": real_count,
+            "total_orphans": orphan_ids.len(),
+            "total_stubs": stub_pairs.len(),
+            "total_stale": health.stale_entities.iter().filter(|e| match vf {
+                Some(v) => engine.store().get(&e.id).map(|ent| ent.mem == v).unwrap_or(false),
+                None => true,
+            }).count(),
+            "total_missing_fields": health.missing_fields.iter().filter(|h| match vf {
+                Some(v) => engine.store().get(&h.id).map(|ent| ent.mem == v).unwrap_or(false),
+                None => true,
+            }).count(),
+            "total_communities": community_count,
+            "orphans_by_schema": orphans_by_schema,
+            "communities_by_schema": communities_by_schema,
+        },
+        "total_nodes": total_count,
+        "real_nodes": real_count,
+        "stub_nodes": stub_count,
+        "total_edges": edge_count,
+        "edge_types": edge_types,
+        "type_distribution": type_distribution,
+        "writable_mems": writable_mems,
+        "default_writable_mem": default_writable_mem,
+        "read_mems": read_mems,
+        "mem_schemas": mem_schemas,
+    });
+    let obj = result.as_object_mut().unwrap();
+    // The schema anchor every mem-scoped read carries (`_mem_schema`),
+    // set by the composer so the CLI and the MCP tool render the same
+    // bytes; the MCP wrapper's own anchor step re-inserts the same value.
+    if let Some(v) = vf
+        && let Some(schema) = crate::overview::mem_schema_ref(engine, v)
+    {
+        obj.insert("_mem_schema".into(), serde_json::Value::String(schema));
+    }
+    if !warnings.is_empty() {
+        obj.insert("warnings".into(), serde_json::json!(warnings));
+    }
+    // Quarantine roster — a boot-honesty fact, present whenever
+    // non-empty, never behind an include gate (agent-trust plan 04).
+    if !health.quarantined.is_empty() {
+        obj.insert(
+            "quarantined".into(),
+            serde_json::to_value(&health.quarantined).unwrap_or_default(),
+        );
+    }
+    // Per-file load failures — same boot-honesty class: each entry's
+    // message names the remedy (the merge-conflict refusal names
+    // `memstead conflicts resolve`), so the composed report must carry
+    // them for the failure mode to name its door (backlog-sweep 07).
+    if !health.load_errors.is_empty() {
+        obj.insert(
+            "load_errors".into(),
+            serde_json::to_value(&health.load_errors).unwrap_or_default(),
+        );
+    }
+    if let Some(diag) = &health.boot_diagnosis {
+        obj.insert("boot_diagnosis".into(), diag.clone());
+    }
+    // Leaf populations — visible beside the orphan axis they exempt
+    // (agent-trust plan 06); omitted when no type declares leaf.
+    if !health.leaf_entities_by_type.is_empty() {
+        obj.insert(
+            "leaf_entities_by_type".into(),
+            serde_json::to_value(&health.leaf_entities_by_type).unwrap_or_default(),
+        );
+    }
+
+    if include.iter().any(|s| s == "orphans") {
+        let orphans_list: Vec<serde_json::Value> = orphan_ids
+            .into_iter()
+            .map(|id| {
+                let title = engine
+                    .get_entity(&id)
+                    .map(|e| e.title.clone())
+                    .unwrap_or_default();
+                serde_json::json!({"id": id.to_string(), "title": title})
+            })
+            .collect();
+        obj.insert("orphans".into(), serde_json::json!(orphans_list));
+    }
+    if include.iter().any(|s| s == "stubs") {
+        let stubs_list: Vec<serde_json::Value> = stub_pairs
+            .into_iter()
+            .map(|(id, refs)| {
+                serde_json::json!({
+                    "id": id.to_string(),
+                    "referenced_by": refs.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        obj.insert("stubs".into(), serde_json::json!(stubs_list));
+    }
+    if include.iter().any(|s| s == "most_connected") {
+        use crate::graph::query::{Connectivity, cmp_by_dependency, connectivity_for};
+        // `typed_*` is the dependency degree (excludes auto-emitted mention
+        // edges); the list is ranked by it so a co-mention hub doesn't
+        // outrank a real dependency hub. `total`/`incoming`/`outgoing` keep
+        // the mentions and stay available — mention degree = total - typed.
+        let to_json = |c: Connectivity| {
+            let title = engine
+                .get_entity(&c.id)
+                .map(|e| e.title.clone())
+                .unwrap_or_default();
+            serde_json::json!({
+                "id": c.id.to_string(),
+                "title": title,
+                "total": c.total,
+                "incoming": c.incoming,
+                "outgoing": c.outgoing,
+                "typed_total": c.typed_total,
+                "typed_incoming": c.typed_incoming,
+                "typed_outgoing": c.typed_outgoing,
+            })
+        };
+        let connected: Vec<serde_json::Value> = if let Some(v) = vf {
+            // Source-in-mem scoping, to match this response's `edge_types`
+            // / `total_edges`. The node is in-mem, so all of its outgoing
+            // edges are source-in-mem and counted; an incoming edge counts
+            // only when its source is also in-mem, so a cross-mem edge
+            // the aggregate excluded does not inflate the node's degree here.
+            let mut entries: Vec<Connectivity> = engine
+                .store()
+                .all_entities()
+                .filter(|e| !e.stub && e.mem == v)
+                .map(|e| connectivity_for(engine.store(), &e.id, |in_edge| in_edge.from.mem() == v))
+                .collect();
+            entries.sort_by(cmp_by_dependency);
+            entries.truncate(limit);
+            entries.into_iter().map(to_json).collect()
+        } else {
+            engine
+                .most_connected(limit)
+                .into_iter()
+                .map(to_json)
+                .collect()
+        };
+        obj.insert("most_connected".into(), serde_json::json!(connected));
+    }
+    if include.iter().any(|s| s == "missing_fields") {
+        let missing_fields: Vec<serde_json::Value> = health
+            .missing_fields
+            .iter()
+            .filter(|h| match vf {
+                Some(v) => engine
+                    .store()
+                    .get(&h.id)
+                    .map(|e| e.mem == v)
+                    .unwrap_or(false),
+                None => true,
+            })
+            .map(|h| {
+                // `missing` (bare field names) stays byte-identical for
+                // existing consumers; the per-issue detail rides next
+                // to it so the projection carries WHICH condition each
+                // issue reports (a heading mismatch must never surface
+                // as "missing" only).
+                let missing: Vec<&str> = h.issues.iter().map(|i| i.field.as_str()).collect();
+                let issues: Vec<serde_json::Value> = h
+                    .issues
+                    .iter()
+                    .map(|i| {
+                        serde_json::json!({
+                            "field": i.field,
+                            "code": i.code,
+                            "message": i.message,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "id": h.id.to_string(),
+                    "title": h.title,
+                    "missing": missing,
+                    "issues": issues,
+                })
+            })
+            .collect();
+        obj.insert("missing_fields".into(), serde_json::json!(missing_fields));
+    }
+    if include.iter().any(|s| s == "stale") {
+        let stale: Vec<serde_json::Value> = health
+            .stale_entities
+            .iter()
+            .filter(|e| match vf {
+                Some(v) => engine
+                    .store()
+                    .get(&e.id)
+                    .map(|ent| ent.mem == v)
+                    .unwrap_or(false),
+                None => true,
+            })
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id.to_string(),
+                    "title": e.title,
+                    "days_since_modified": e.days_since_modified,
+                })
+            })
+            .collect();
+        obj.insert("stale".into(), serde_json::json!(stale));
+    }
+    if include.iter().any(|s| s == "dangling_links") {
+        let dangling = crate::ops::health::collect_dangling_links(engine.store(), vf);
+        let arr: Vec<serde_json::Value> = dangling
+            .into_iter()
+            .map(|dl| serde_json::to_value(&dl).unwrap())
+            .collect();
+        obj.insert("dangling_links".into(), serde_json::json!(arr));
+    }
+    if include.iter().any(|s| s == "anchors") {
+        obj.insert(
+            "anchors".into(),
+            crate::ops::health::health_anchors_axis(engine),
+        );
+    }
+    if include.iter().any(|s| s == "stale_derivations") {
+        obj.insert(
+            "stale_derivations".into(),
+            crate::ops::health::health_stale_derivations_axis(engine, args.mem),
+        );
+    }
+    if include.iter().any(|s| s == "checks") {
+        obj.insert(
+            "checks".into(),
+            crate::ops::health::health_checks_axis(engine, args.mem),
+        );
+    }
+    if include.iter().any(|s| s == "signals") {
+        // Declared aggregate signals above `none`, with per-level
+        // counts — the same composer the CLI and the filesystem
+        // flavour serve.
+        obj.insert("signals".into(), engine.health_signals_axis(args.mem));
+    }
+    if include.iter().any(|s| s == "labelling") {
+        // Grounded labelling per declaring mem — counts per label,
+        // defeated/undecided lists with their attacker evidence, and
+        // the excluded cross-mem attack-edge count.
+        obj.insert("labelling".into(), engine.health_labelling_axis(args.mem));
+    }
+    if include.iter().any(|s| s == "open_questions") {
+        obj.insert(
+            "open_questions".into(),
+            crate::ops::health::health_open_questions_axis(engine, args.mem),
+        );
+    }
+    if include.iter().any(|s| s == "vital_signs") {
+        // The model-truth signals the remodel skill reads (A6): counts
+        // and capped lists, never a verdict.
+        obj.insert(
+            "vital_signs".into(),
+            crate::ops::health::health_vital_signs_axis(engine, args.mem),
+        );
+    }
+    if include.iter().any(|s| s == "friction") {
+        // The friction ledger's read surface (agent-trust plan 08):
+        // counts per code / per verb over the workspace-local refusal
+        // ledger, whole-ledger plus a recent 24h window. A workspace
+        // without a root (in-memory boots) or without a ledger yet
+        // serves the empty summary — the axis never fails health.
+        let summary = match engine.workspace_root() {
+            Some(root) => crate::friction::FrictionLedger::for_workspace(root).summarize(),
+            None => serde_json::json!({
+                "total": 0,
+                "by_code": {},
+                "by_verb": {},
+                "recent_24h": { "total": 0, "by_code": {} },
+                "ledger_bytes": 0,
+            }),
+        };
+        obj.insert("friction".into(), summary);
+    }
+    if include.iter().any(|s| s == "missing_required_outgoing") {
+        let reports = engine.missing_required_outgoing(vf);
+        let arr: Vec<serde_json::Value> = reports
+            .into_iter()
+            .map(|r| serde_json::to_value(&r).unwrap())
+            .collect();
+        obj.insert("missing_required_outgoing".into(), serde_json::json!(arr));
+    }
+    if include.iter().any(|s| s == "constraints") {
+        let reports = engine.constraint_findings(vf);
+        let arr: Vec<serde_json::Value> = reports
+            .into_iter()
+            .map(|r| serde_json::to_value(&r).unwrap())
+            .collect();
+        obj.insert("constraints".into(), serde_json::json!(arr));
+        let defects = engine.schema_format_defects();
+        if !defects.is_empty() {
+            obj.insert(
+                "schema_format_defects".into(),
+                serde_json::to_value(&defects).unwrap(),
+            );
+        }
+    }
+    if include.iter().any(|s| s == "tags") {
+        let (distribution, folded, untagged) =
+            crate::ops::health::collect_tag_distribution(engine.store(), vf, limit);
+        obj.insert(
+            "tag_distribution".into(),
+            serde_json::to_value(&distribution).unwrap(),
+        );
+        obj.insert(
+            "tag_distribution_folded".into(),
+            serde_json::to_value(&folded).unwrap(),
+        );
+        obj.insert(
+            "untagged_entities".into(),
+            serde_json::to_value(&untagged).unwrap(),
+        );
+    }
+    // Conformance axis (`conformance`), or both axes (`integrity`). Findings
+    // ride one flat `findings` list in the pinned `{ id, axis, code, detail }`
+    // shape; ids are mem-qualified so the flat list stays unambiguous when
+    // unscoped. Mems scan in sorted order and each mem's findings are
+    // deterministic, so the whole list is.
+    let wants_conformance = include
+        .iter()
+        .any(|s| s == "conformance" || s == "integrity");
+    if wants_conformance {
+        let wants_consistency = include.iter().any(|s| s == "integrity");
+        let target: Option<memstead_schema::SchemaRef> = match args.target_schema {
+            None => None,
+            Some(raw) => match raw.parse::<memstead_schema::SchemaRef>() {
+                Ok(r) => Some(r),
+                Err(reason) => {
+                    return Err(ComposeHealthError::InvalidTargetSchema {
+                        raw: raw.to_string(),
+                        reason,
+                    });
+                }
+            },
+        };
+        let scan_mems: Vec<String> = match vf {
+            Some(v) => vec![v.to_string()],
+            None => {
+                let mut all = writable_mems.clone();
+                all.sort();
+                all
+            }
+        };
+        let mut findings = Vec::new();
+        let mut observations = Vec::new();
+        for v in &scan_mems {
+            findings.extend(engine.conformance_findings(v, target.as_ref())?);
+            // Beside `findings`, never among them: an observation says what an
+            // entity body silently loses, and none of it makes the entity
+            // unconformant.
+            observations.extend(engine.body_observations(v, target.as_ref())?);
+            if wants_consistency {
+                findings.extend(engine.consistency_findings(v)?);
+            }
+        }
+        obj.insert("findings".into(), serde_json::to_value(&findings).unwrap());
+        obj.insert(
+            "body_observations".into(),
+            serde_json::to_value(&observations).unwrap(),
+        );
+    }
+
+    // `include=["ledger"]` — a folder mem's ledger set against its file set
+    // (04/04, criteria 1 and 2). Reads only: no ledger line is written,
+    // rewritten or removed and no file is touched, because writing lines for
+    // edits the engine did not author would fabricate provenance for a change
+    // it cannot attribute. Git-branch mems are absent from the map rather than
+    // present and clean (criterion 4).
+    if include.iter().any(|s| s == "ledger") {
+        obj.insert(
+            "ledger".into(),
+            serde_json::to_value(engine.ledger_reconciliation()).unwrap_or_default(),
+        );
+    }
+
+    // Workspace policy surface — opt-in via `include_config: true`
+    // (the documented boolean alias) OR the catalogue key
+    // `include=["config"]`; both render the same projection, and
+    // passing both renders it once (a single gate). The rendering
+    // itself is shared with the CLI's `--include config` via
+    // `crate::ops::health::config_projection` — one
+    // implementation, every surface. `mutations` + `plugin` are passed
+    // in via [`HealthConfig`] (server-owned copies, inserted verbatim).
+    if args.include_config || include.iter().any(|s| s == "config") {
+        let entries = crate::ops::health::config_projection(
+            engine,
+            &writable_mems,
+            config.mutations.clone(),
+            config.plugin.clone(),
+        );
+        for (k, v) in entries {
+            obj.insert(k, v);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Render a composed health payload as a human-readable markdown report
+/// for the MCP text channel. `structured_content` remains the source of
+/// truth (this is never parsed back); the markdown exists so the text
+/// channel is *chunkable* like `memstead_overview` instead of a wall of
+/// JSON that overflows the response cap under several includes. The
+/// size-driving include arrays each render as their own section so the
+/// chunker can split a large report cleanly.
+pub fn render_health_markdown(v: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "# Graph health");
+    if let Some(mem) = v.get("mem").and_then(|x| x.as_str()) {
+        let _ = writeln!(s, "\nMem filter: `{mem}`");
+    }
+
+    if let Some(sum) = v.get("summary").and_then(|x| x.as_object()) {
+        let _ = writeln!(s, "\n## Summary");
+        for key in [
+            "total_entities",
+            "total_orphans",
+            "total_stubs",
+            "total_stale",
+            "total_missing_fields",
+            "total_communities",
+        ] {
+            if let Some(n) = sum.get(key).and_then(|x| x.as_u64()) {
+                let _ = writeln!(s, "- {}: {n}", key.replace('_', " "));
+            }
+        }
+        render_count_map(&mut s, sum.get("orphans_by_schema"), "Orphans by schema");
+        render_count_map(
+            &mut s,
+            sum.get("communities_by_schema"),
+            "Communities by schema",
+        );
+    }
+
+    for key in ["total_nodes", "real_nodes", "stub_nodes", "total_edges"] {
+        if let Some(n) = v.get(key).and_then(|x| x.as_u64()) {
+            let _ = writeln!(s, "- {}: {n}", key.replace('_', " "));
+        }
+    }
+
+    // Size-driving include arrays — one section each so chunking splits them.
+    for (key, title) in [
+        ("orphans", "Orphans"),
+        ("stubs", "Stubs"),
+        ("most_connected", "Most connected"),
+        ("missing_fields", "Missing fields"),
+        ("stale", "Stale"),
+        ("dangling_links", "Dangling links"),
+        ("missing_required_outgoing", "Missing required outgoing"),
+        ("constraints", "Constraint violations"),
+        ("findings", "Findings"),
+    ] {
+        if let Some(arr) = v.get(key).and_then(|x| x.as_array()) {
+            let _ = writeln!(s, "\n## {title} ({})", arr.len());
+            for item in arr {
+                let _ = writeln!(s, "- {}", summarize_health_item(item));
+            }
+        }
+    }
+
+    // Body observations — their own section, not a row in the table above:
+    // `summarize_health_item` prints an entity id and stops, and an
+    // observation whose fate is not stated says nothing at all. This is the
+    // MCP text channel, so it is what a cold agent reads (04/01, criterion 1).
+    if let Some(arr) = v.get("body_observations").and_then(|x| x.as_array()) {
+        let _ = writeln!(s, "\n## Body observations ({})", arr.len());
+        for item in arr {
+            let detail = &item["detail"];
+            let subject = detail
+                .get("heading")
+                .or_else(|| detail.get("key"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            let _ = writeln!(
+                s,
+                "- {} [{}] `{subject}`: {} ({})",
+                item["id"].as_str().unwrap_or(""),
+                item["code"].as_str().unwrap_or(""),
+                item["fate"].as_str().unwrap_or(""),
+                detail
+                    .get("note")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("no note"),
+            );
+        }
+    }
+
+    // Anchors axis — an object (mem → counts plus the population they cover),
+    // not an array, so it renders its own compact section. The figure and the
+    // population render together (consistency-sweep 03/05, criteria 1 and 3):
+    // this is the MCP text channel, so it is what a cold agent reads, and it
+    // used to print four numbers and stop.
+    if let Some(obj) = v.get("anchors").and_then(|x| x.as_object()) {
+        let _ = writeln!(s, "\n## Anchors ({} mems)", obj.len());
+        for (mem, counts) in obj {
+            if let Some(c) = counts.get("condition").filter(|c| !c.is_null()) {
+                let _ = writeln!(
+                    s,
+                    "- `{mem}`: ANCHORS_SIDECAR_UNREADABLE — {} — {}",
+                    c["reason"].as_str().unwrap_or("reason not stated"),
+                    counts["population"]
+                        .as_str()
+                        .unwrap_or("population not stated"),
+                );
+                continue;
+            }
+            let _ = writeln!(
+                s,
+                "- `{mem}`: resolves {}, drifted {}, recheck {}, unresolvable (artifact gone) \
+                 {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
+                counts["resolves"].as_u64().unwrap_or(0),
+                counts["drifted"].as_u64().unwrap_or(0),
+                counts["recheck"].as_u64().unwrap_or(0),
+                counts["unresolvable"].as_u64().unwrap_or(0),
+                counts["unobserved"].as_u64().unwrap_or(0),
+                counts["dangling"].as_u64().unwrap_or(0),
+                counts["population"]
+                    .as_str()
+                    .unwrap_or("population not stated"),
+            );
+        }
+    }
+
+    // Vital signs — per mem, the five model-truth signal counts (A6);
+    // the lists stay in the structured payload.
+    if let Some(obj) = v.get("vital_signs").and_then(|x| x.as_object()) {
+        let mems: Vec<(&String, &serde_json::Value)> =
+            obj.iter().filter(|(k, _)| *k != "_item_cap").collect();
+        let _ = writeln!(s, "\n## Vital signs ({} mems)", mems.len());
+        for (mem, sig) in mems {
+            let count = |k: &str| sig[k]["count"].as_u64().unwrap_or(0);
+            let share = match sig["type_share_by_community"]["status"].as_str() {
+                Some("declared") => format!(
+                    "last-resort type `{}` over {} communit{}",
+                    sig["type_share_by_community"]["last_resort_type"]
+                        .as_str()
+                        .unwrap_or("?"),
+                    count("type_share_by_community"),
+                    if count("type_share_by_community") == 1 {
+                        "y"
+                    } else {
+                        "ies"
+                    }
+                ),
+                _ => "last-resort type not declared".to_string(),
+            };
+            let unclaimed = match sig["unclaimed_source_files"]["status"].as_str() {
+                Some("enumerated") => format!(
+                    "{} unclaimed source file(s)",
+                    count("unclaimed_source_files")
+                ),
+                _ => "no bound source".to_string(),
+            };
+            let _ = writeln!(
+                s,
+                "- `{mem}`: {share}; {unclaimed}; {} contested unowned file(s); {} zero-outgoing \
+                 entit{} in {} communit{}; {} empty declared section(s)",
+                count("contested_unowned_files"),
+                sig["zero_outgoing_entities"]["entities"]
+                    .as_u64()
+                    .unwrap_or(0),
+                if sig["zero_outgoing_entities"]["entities"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    == 1
+                {
+                    "y"
+                } else {
+                    "ies"
+                },
+                count("zero_outgoing_entities"),
+                if count("zero_outgoing_entities") == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                count("empty_declared_sections"),
+            );
+        }
+    }
+
+    // Checks axis — an object (mem → state counts + independence
+    // gate). Null-is-a-statement (the Friction pattern): a requested
+    // axis with no mems renders the explicit zero heading; an absent
+    // key (not requested) renders nothing.
+    if let Some(obj) = v.get("checks").and_then(|x| x.as_object()) {
+        let _ = writeln!(s, "\n## Checks ({} mems)", obj.len());
+        for (mem, c) in obj {
+            let count = |key: &str| c.get(key).and_then(|x| x.as_u64()).unwrap_or(0);
+            let conf = |key: &str| {
+                c.get("conformance")
+                    .and_then(|g| g.get(key))
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0)
+            };
+            let gate = |key: &str| {
+                c.get("independence")
+                    .and_then(|g| g.get(key))
+                    .and_then(|e| e.get("count"))
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0)
+            };
+            let _ = writeln!(
+                s,
+                "- `{mem}`: never_checked {}, checked_ok {}, check_failed {}, \
+                 check_stale {}; conformance: never_checked {}, \
+                 checked_ok {}, check_failed {}, check_stale {}; \
+                 independence: self_checked {}, \
+                 confirmed_independent {}, unconfirmable {}",
+                count("never_checked"),
+                count("checked_ok"),
+                count("check_failed"),
+                count("check_stale"),
+                conf("never_checked"),
+                conf("checked_ok"),
+                conf("check_failed"),
+                conf("check_stale"),
+                gate("self_checked"),
+                gate("confirmed_independent"),
+                gate("unconfirmable"),
+            );
+            // Foreign `x-` kinds by count and each entity's newest finding —
+            // the same lines the CLI text surface prints, so the two
+            // renderers say the same thing.
+            if let Some(foreign) = c.get("foreign_kinds").and_then(|f| f.as_object())
+                && !foreign.is_empty()
+            {
+                let listed: Vec<String> = foreign
+                    .iter()
+                    .map(|(k, n)| format!("{k} {}", n.as_u64().unwrap_or(0)))
+                    .collect();
+                let _ = writeln!(s, "  - foreign kinds: {}", listed.join(", "));
+            }
+            if let Some(findings) = c.get("findings").and_then(|f| f.as_object()) {
+                for (entity, f) in findings {
+                    let code = f["finding"]["code"].as_str().unwrap_or("?");
+                    let section = f["finding"]["section"]
+                        .as_str()
+                        .map(|x| format!(" [{x}]"))
+                        .unwrap_or_default();
+                    let message = f["finding"]["message"].as_str().unwrap_or("");
+                    let _ = writeln!(
+                        s,
+                        "  - finding on `{entity}` ({} {}): {code}{section} — {message}",
+                        f["kind"].as_str().unwrap_or("verification"),
+                        f["verdict"].as_str().unwrap_or("?"),
+                    );
+                }
+            }
+        }
+    }
+
+    // Stale-derivations axis — an object (mem → findings list). Same
+    // requested-vs-absent contract as the checks axis above.
+    if let Some(obj) = v.get("stale_derivations").and_then(|x| x.as_object()) {
+        let total: usize = obj
+            .values()
+            .filter_map(|a| a.as_array().map(|a| a.len()))
+            .sum();
+        let _ = writeln!(s, "\n## Stale derivations ({total} findings)");
+        for (mem, findings) in obj {
+            for f in findings.as_array().into_iter().flatten() {
+                let _ = writeln!(
+                    s,
+                    "- `{mem}`: {} -[{}]-> {} ({})",
+                    f.get("source").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("rel_type").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("target").and_then(|x| x.as_str()).unwrap_or(""),
+                    f.get("state").and_then(|x| x.as_str()).unwrap_or(""),
+                );
+            }
+        }
+    }
+
+    // Quarantine roster — ungated in the JSON (present whenever
+    // non-empty), so the text channel renders it whenever present:
+    // per mem the reason code plus the message, which carries the
+    // repair command.
+    if let Some(arr) = v.get("quarantined").and_then(|x| x.as_array()) {
+        let _ = writeln!(s, "\n## Quarantined mems ({})", arr.len());
+        for q in arr {
+            let _ = writeln!(
+                s,
+                "- `{}` [{}] {}",
+                q.get("mem").and_then(|x| x.as_str()).unwrap_or(""),
+                q.get("reason_code").and_then(|x| x.as_str()).unwrap_or(""),
+                q.get("reason_message")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or(""),
+            );
+        }
+    }
+
+    if let Some(arr) = v.get("warnings").and_then(|x| x.as_array())
+        && !arr.is_empty()
+    {
+        let _ = writeln!(s, "\n## Warnings ({})", arr.len());
+        for w in arr {
+            let code = w.get("code").and_then(|x| x.as_str()).unwrap_or("");
+            let msg = w.get("message").and_then(|x| x.as_str()).unwrap_or("");
+            let _ = writeln!(s, "- [{code}] {msg}");
+        }
+    }
+
+    s
+}
+
+/// Render a `{ key: count }` map as an indented sub-list under `title`,
+/// skipping an empty/missing map. The empty-string schema key (an unpinned
+/// mem) renders as `(unpinned)`.
+fn render_count_map(s: &mut String, val: Option<&serde_json::Value>, title: &str) {
+    use std::fmt::Write as _;
+    let Some(map) = val.and_then(|x| x.as_object()) else {
+        return;
+    };
+    if map.is_empty() {
+        return;
+    }
+    let _ = writeln!(s, "- {title}:");
+    for (k, n) in map {
+        let label = if k.is_empty() {
+            "(unpinned)"
+        } else {
+            k.as_str()
+        };
+        let _ = writeln!(s, "  - {label}: {}", n.as_u64().unwrap_or(0));
+    }
+}
+
+/// One-line summary of a health detail item: prefer `id` (+ `title`),
+/// else a dangling reference as `[kind] from → target_id`, else the
+/// compact JSON.
+///
+/// The `kind` prefix matters because this is the health TEXT channel —
+/// what an agent reads once the JSON exceeds `token_budget`, or whenever
+/// it passes `chunk`. Without it the three dangling conditions, which
+/// have three different repairs, render as one identical line shape and
+/// the reader is back to the fused report the codes were split to end
+/// (04/06, criteria 2 and 4). Mirrors `overview.rs`'s rendered section
+/// and the CLI's markdown block.
+fn summarize_health_item(item: &serde_json::Value) -> String {
+    if let Some(id) = item.get("id").and_then(|x| x.as_str()) {
+        match item.get("title").and_then(|x| x.as_str()) {
+            Some(t) if !t.is_empty() => format!("{id} — {t}"),
+            _ => id.to_string(),
+        }
+    } else if let Some(from) = item.get("from").and_then(|x| x.as_str()) {
+        let target = item.get("target_id").and_then(|x| x.as_str()).unwrap_or("");
+        match item.get("kind").and_then(|x| x.as_str()) {
+            Some(kind) => format!("[{kind}] {from} → {target}"),
+            None => format!("{from} → {target}"),
+        }
+    } else {
+        serde_json::to_string(item).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_health_markdown;
+    use serde_json::json;
+
+    fn base_payload() -> serde_json::Value {
+        json!({
+            "summary": { "total_entities": 1 },
+            "total_nodes": 1,
+        })
+    }
+
+    /// The description advertises `body_observations` on the conformance
+    /// axis, and a description is not a shipped field: the drift gate
+    /// compares description tokens against an allowlist, so it stayed green
+    /// while no server emitted the key at all (grade, 2026-08-27). This
+    /// pins the text channel end of it; the JSON end is pinned by the
+    /// handler test in `ops::integrity`.
+    #[test]
+    fn body_observations_render_their_code_and_fate_not_just_an_id() {
+        let mut v = base_payload();
+        v["body_observations"] = json!([{
+            "id": "specs--alpha",
+            "code": "ABSORBED_SECTION",
+            "fate": "absorbed",
+            "detail": { "heading": "Rogue", "note": "survives the next write" },
+        }, {
+            "id": "specs--beta",
+            "code": "UNDECLARED_METADATA_KEY",
+            "fate": "dropped",
+            "detail": { "key": "reviewer", "note": "the next write drops it" },
+        }]);
+        let md = render_health_markdown(&v);
+        assert!(md.contains("## Body observations (2)"), "{md}");
+        assert!(
+            md.contains(
+                "- specs--alpha [ABSORBED_SECTION] `Rogue`: absorbed (survives the next write)"
+            ),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "- specs--beta [UNDECLARED_METADATA_KEY] `reviewer`: dropped \
+                 (the next write drops it)"
+            ),
+            "{md}"
+        );
+        // Absent key renders nothing at all.
+        assert!(!render_health_markdown(&base_payload()).contains("Body observations"));
+    }
+
+    /// 04/06, criteria 2 and 4: the text channel names the condition.
+    /// This is the surface an agent gets once the JSON exceeds
+    /// `token_budget`, and it rendered all three dangling conditions as
+    /// one indistinguishable `from → target` line while every other
+    /// surface had been migrated — the last place the fused report
+    /// survived.
+    #[test]
+    fn render_health_markdown_names_the_dangling_condition() {
+        let mut v = base_payload();
+        v["dangling_links"] = json!([
+            {
+                "kind": "DANGLING_LINK_TARGET_MISSING",
+                "from": "specs--a", "target_id": "specs--gone",
+                "target_path": "gone", "section": "purpose",
+            },
+            {
+                "kind": "DANGLING_RELATION_TARGET_MISSING",
+                "from": "specs--b", "target_id": "specs--vanished",
+                "target_path": "vanished", "section": null,
+            },
+        ]);
+        let md = render_health_markdown(&v);
+        assert!(
+            md.contains("[DANGLING_LINK_TARGET_MISSING] specs--a → specs--gone"),
+            "{md}"
+        );
+        assert!(
+            md.contains("[DANGLING_RELATION_TARGET_MISSING] specs--b → specs--vanished"),
+            "{md}"
+        );
+        // The two conditions do not render as the same line shape.
+        assert!(
+            !md.contains("- specs--a → specs--gone"),
+            "the unprefixed form is what fused them: {md}"
+        );
+    }
+
+    /// Text-channel parity: the `checks` / `stale_derivations` axes
+    /// and the quarantine roster render their own sections — content
+    /// when populated, the explicit zero statement when requested but
+    /// empty (null is a statement), and NOTHING when the JSON key is
+    /// absent: a payload without the keys renders byte-identically to
+    /// itself with sections appended, never mutated.
+    #[test]
+    fn render_health_markdown_covers_checks_derivations_and_quarantine() {
+        // Populated.
+        let mut v = base_payload();
+        v["checks"] = json!({
+            "specs": {
+                "never_checked": 2, "checked_ok": 1,
+                "check_failed": 0, "check_stale": 0,
+                "conformance": {
+                    "never_checked": 3, "checked_ok": 0,
+                    "check_failed": 0, "check_stale": 0,
+                },
+                "independence": {
+                    "self_checked": { "count": 0, "items": [] },
+                    "confirmed_independent": { "count": 0, "items": [] },
+                    "unconfirmable": { "count": 1, "items": ["specs--a"] },
+                },
+            }
+        });
+        v["stale_derivations"] = json!({
+            "specs": [{
+                "source": "specs--a", "rel_type": "DERIVES_FROM",
+                "target": "specs--b", "state": "stale",
+                "baseline": "aaa", "current": "bbb",
+            }]
+        });
+        v["quarantined"] = json!([{
+            "mem": "broken",
+            "reason_code": "SCHEMA_NOT_FOUND",
+            "reason_message": "no schema; repair via memstead mem set-schema",
+        }]);
+        let md = render_health_markdown(&v);
+        assert!(md.contains("## Checks (1 mems)"), "{md}");
+        assert!(
+            md.contains(
+                "- `specs`: never_checked 2, checked_ok 1, check_failed 0, \
+                 check_stale 0; conformance: never_checked 3, checked_ok 0, \
+                 check_failed 0, check_stale 0; independence: self_checked 0, \
+                 confirmed_independent 0, unconfirmable 1"
+            ),
+            "{md}"
+        );
+        assert!(md.contains("## Stale derivations (1 findings)"), "{md}");
+        assert!(
+            md.contains("- `specs`: specs--a -[DERIVES_FROM]-> specs--b (stale)"),
+            "{md}"
+        );
+        assert!(md.contains("## Quarantined mems (1)"), "{md}");
+        assert!(
+            md.contains(
+                "- `broken` [SCHEMA_NOT_FOUND] no schema; repair via memstead mem set-schema"
+            ),
+            "{md}"
+        );
+
+        // Requested but empty → the explicit zero statement.
+        let mut empty = base_payload();
+        empty["checks"] = json!({});
+        empty["stale_derivations"] = json!({ "specs": [] });
+        let md = render_health_markdown(&empty);
+        assert!(md.contains("## Checks (0 mems)"), "{md}");
+        assert!(md.contains("## Stale derivations (0 findings)"), "{md}");
+
+        // Keys absent (not requested) → byte-unchanged: no section,
+        // and the populated render is the base render plus appendix.
+        let base_md = render_health_markdown(&base_payload());
+        for heading in ["## Checks", "## Stale derivations", "## Quarantined mems"] {
+            assert!(
+                !base_md.contains(heading),
+                "absent key must render nothing: {base_md}"
+            );
+        }
+        let appended = render_health_markdown(&v);
+        assert!(
+            appended.starts_with(&base_md),
+            "sections append; the base output stays byte-identical"
+        );
+    }
+}

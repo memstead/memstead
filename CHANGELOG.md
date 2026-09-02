@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead health` builds its report through the engine's shared
+  composer, and takes `--mem`.** The CLI no longer assembles the health
+  axes itself: it calls the same `compose_health` the MCP `memstead_health`
+  tool runs (now in `memstead-base`, so the lean CLI build shares it too),
+  so `memstead health --json` is byte-identical to the tool's
+  `structured_content` for every include key and under a mem filter
+  (`--mem <name>`, new on the CLI; an unknown name refuses with
+  `UNKNOWN_MEM` naming the writable roster). The markdown rendering is
+  unchanged and pinned by recorded fixtures; `--strict` reads its Tier-2
+  violations off the composed report. The mem-scoped `_mem_schema` anchor
+  is set by the composer, so both surfaces carry it.
+
 - **`memstead push --all` publishes the whole mem-repo.** Every mounted
   git-branch mem's declared branch plus the mem-repo's `__MEMSTEAD` ref
   (schemas and mem configs, which the single-mem verb had no route for),
@@ -40,6 +52,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   markdown, MCP `memstead_entity`) carries `anchors_sidecar_error`.
 
 ### Changed
+
+- **The stub integrity finding is `UNRESOLVED_STUB`** (was `ORPHAN_STUB`:
+  a stub is by construction referenced, never orphaned; the name said the
+  opposite of the condition). The code changes on every surface that
+  emits or names it (health findings, the MCP tool descriptions, the error
+  index, the `--strict` summary label `unresolved_stubs`); nothing accepts
+  finding codes as input, so there is no retired-name refusal to add.
+- **Health and status lists are byte-stable across runs.** `edge_types`
+  and `type_distribution` (`memstead status --json`, the health
+  composer's summary, the ui-api status endpoint) are ordered by name
+  (`Status.edge_types` is a `BTreeMap`); the health `orphans`,
+  `missing_fields` and `stale` lists are ordered by entity id. They used
+  to follow hash-map iteration order, so two runs, or the CLI and the MCP
+  server, could disagree on the order of identical content.
 
 - **One anchor-state name: `resolves`.** The verify surfaces, the health
   `anchors` axis and their text renderings spelled the matching state

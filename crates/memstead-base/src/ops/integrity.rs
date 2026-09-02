@@ -373,7 +373,7 @@ fn heading_has_body(
 /// graph-coherence checks into the integrity-finding shape: dangling
 /// wiki-links (the `DANGLING_LINK_*` / `DANGLING_RELATION_*` family, on the
 /// linking entity), stubs with
-/// their referrers (`ORPHAN_STUB`, on the stub), and cross-mem edges the
+/// their referrers (`UNRESOLVED_STUB`, on the stub), and cross-mem edges the
 /// workspace no longer permits (`CROSS_MEM_EDGE_UNGRANTED`, on the referrer).
 /// The category collectors are the same ones the dedicated health includes
 /// use — `integrity` is a projection, not a second implementation.
@@ -386,6 +386,13 @@ fn heading_has_body(
 /// create-rule default union changed (04/07, criterion 8). It is a closure
 /// because this module has no `Engine`, and the single Engine-side funnel
 /// supplies it for every caller.
+/// The consistency finding for a stub that is still referenced but never
+/// written (renamed on 2026-09-02, see the changelog: a stub is by
+/// construction referenced, never orphaned, so the former name said the
+/// opposite of the condition). A named constant so the error-code index
+/// scan publishes it beside its dangling-link siblings.
+pub const UNRESOLVED_STUB_CODE: &str = "UNRESOLVED_STUB";
+
 pub fn consistency_findings(
     store: &Store,
     mem: &str,
@@ -459,7 +466,7 @@ pub fn consistency_findings(
         findings.push(IntegrityFinding {
             id: stub_id.to_string(),
             axis: IntegrityAxis::Consistency,
-            code: "ORPHAN_STUB".to_string(),
+            code: UNRESOLVED_STUB_CODE.to_string(),
             detail: serde_json::json!({ "referrers": referrers }),
         });
     }
