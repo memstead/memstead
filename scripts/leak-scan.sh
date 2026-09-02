@@ -35,7 +35,12 @@ PRUNE=( --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules \
 #     deny-logic TEST FIXTURES (verifying the hook denies writes to them).
 #   * the pipeline migration's and workspace-loader's `"projection":"macos/graph"`
 #     strings are test-fixture projection identifiers, not path references.
-ALLOW='leak-scan\.sh:[0-9]+:|LICENSING\.md:[0-9]+:.*(macos/|memstead-registry|inspector/|local-ai/)|deny-meta-files\.test\.js:[0-9]+:.*(dev/plans|macos/)|(pipeline[a-z_]*\.rs|workspace-loader\.test\.js):[0-9]+:.*macos/graph'
+#   * one engineering journal line (engine-written, append-only, immutable)
+#     is the note of the very commit that removed a `graph/` path from an
+#     entity, and names the trap in prose ("reads a graph/ path prefix as a
+#     private-dir leak"); the note cannot be rewritten, so it is exempted by
+#     its own wording.
+ALLOW='leak-scan\.sh:[0-9]+:|LICENSING\.md:[0-9]+:.*(macos/|memstead-registry|inspector/|local-ai/)|deny-meta-files\.test\.js:[0-9]+:.*(dev/plans|macos/)|(pipeline[a-z_]*\.rs|workspace-loader\.test\.js):[0-9]+:.*macos/graph|changes\.jsonl:[0-9]+:.*reads a graph/ path prefix as a private-dir leak'
 
 # Caller-supplied additions (see header). Each non-comment line is OR'd in.
 if [ -n "${LEAK_SCAN_EXTRA_ALLOW_FILE:-}" ] && [ -f "$LEAK_SCAN_EXTRA_ALLOW_FILE" ]; then
@@ -76,7 +81,7 @@ scan "stale-product-name"  '\b[Mm]emgno\b'
 # hyphenated words.
 scan "excluded-private-dirs" '(^|[[:space:]"'"'"'`(:,])(macos|websites|graph|inspector|local-ai)/' \
   --include='*.sh' --include='*.md' --include='*.toml' --include='*.rs' --include='*.mdx' --include='*.yml' \
-  --include='*.mjs' --include='*.js' --include='*.json' --include='*.udl' --include='*.swift' --include='*.py'
+  --include='*.mjs' --include='*.js' --include='*.json' --include='*.jsonl' --include='*.udl' --include='*.swift' --include='*.py'
 scan "legacy-domain"       '(mdgv\.io|dasboe/mdgv|dasboe\.github\.io)'
 
 echo
