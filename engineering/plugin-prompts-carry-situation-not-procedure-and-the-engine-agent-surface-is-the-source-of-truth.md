@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-08-30T00:33:19Z
+last_modified: 2026-09-02T08:53:18Z
 authority: established
 universality: domain-wide
 tags: plugin, skills, ingest, agent-first, single-source-of-truth
@@ -29,7 +29,7 @@ The engine, its MCP tools, and its schemas are built for LLM agents as the prima
 
 ## Exceptions
 
-- **Corrected 2026-08-30: this exception has expired.** It carved out a frozen `plugin--old-ingest-skill` fallback that hard-coded per-medium procedure in prompt templates, retained as a revert path. No such skill ships: the plugin's skills are `ingest`, `interview`, `learn`, `setup`, `sync` and `tidy`, and none of them carries a procedure template. Every prompt-assembling surface in the plugin is now under the rule with no carve-out.
+- **Corrected 2026-08-30: this exception has expired.** It carved out a frozen `plugin--old-ingest-skill` fallback that hard-coded per-medium procedure in prompt templates, retained as a revert path. No such skill ships: the plugin's skills are `ingest`, `interview`, `learn`, `remodel`, `setup`, `sync` and `tidy`, and none of them carries a procedure template. Every prompt-assembling surface in the plugin is now under the rule with no carve-out.
 
 ## Consequences
 

@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:02Z
-last_modified: 2026-08-30T00:33:17Z
+last_modified: 2026-09-02T08:53:12Z
 authority: established
 universality: domain-wide
 tags: plugin, skills, workspace-discovery, front-door, onboarding
@@ -10,7 +10,7 @@ tags: plugin, skills, workspace-discovery, front-door, onboarding
 # Advertised front-door commands serve a fresh non-maintainer workspace
 
 ## Statement
-The plugin's advertised front-door commands (as of 2026-08-30: `/setup`, `/ingest`, `/sync`, `/learn`, `/tidy`, `/interview`, and any slash command a fresh user is invited to run) MUST work on the workspace the shipped `init`/`quickstart` actually produces: a folder-backed workspace carrying only the engine marker `.memstead/workspace.toml`, with no legacy `.memstead.toml` and no dumpable mem-repo. A command that hard-fails with "workspace not found" or a missing-`workspace dump` error on that shape is a broken front door, regardless of working correctly on the maintainer's own mem-repo workspace. (Corrected 2026-08-30: the list previously named `/start`, which the plugin has never shipped and does not ship; the six skills above are the whole advertised surface.)
+The plugin's advertised front-door commands (as of 2026-09-02: `/setup`, `/ingest`, `/sync`, `/learn`, `/tidy`, `/remodel`, `/interview`, and any slash command a fresh user is invited to run) MUST work on the workspace the shipped `init`/`quickstart` actually produces: a folder-backed workspace carrying only the engine marker `.memstead/workspace.toml`, with no legacy `.memstead.toml` and no dumpable mem-repo. A command that hard-fails with "workspace not found" or a missing-`workspace dump` error on that shape is a broken front door, regardless of working correctly on the maintainer's own mem-repo workspace. (Corrected 2026-08-30: the list previously named `/start`, which the plugin has never shipped and does not ship; the seven skills above are the whole advertised surface.)
 
 ## Scope
 Every user-facing skill that discovers or loads the workspace before doing its work — the workspace-root walk-up, the plugin-config loader, and any engine-dump consumer sitting behind an advertised command. It does NOT govern internal/maintainer-only tooling or hooks that fire silently, which may assume richer workspace state.
