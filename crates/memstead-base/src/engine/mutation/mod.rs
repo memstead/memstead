@@ -787,7 +787,28 @@ pub(crate) fn stage_anchors_rename(
 /// input before boot). Engine code uses `Engine::now_iso`, which honours a
 /// pinned test clock.
 pub fn iso_now() -> String {
-    iso_from_system_time(std::time::SystemTime::now())
+    iso_from_system_time(wall_clock_now())
+}
+
+/// The wall clock as a `SystemTime`, on every target. `SystemTime::now()`
+/// is unimplemented on `wasm32-unknown-unknown` — it traps with
+/// `RuntimeError: unreachable` and poisons the instance — so the wasm
+/// build derives the instant from the JS-backed clock instead
+/// (`UNIX_EPOCH` plus the millisecond offset; `SystemTime` arithmetic is
+/// implemented there, only `now()` is not). This is the engine's default
+/// mutation clock and the one every unpinned stamping or adjudication
+/// path reads; a health read that verifies anchors reaches it too, which
+/// is how the wasm health surface came to trap once the stale axis
+/// deferred to anchor state.
+pub fn wall_clock_now() -> std::time::SystemTime {
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::time::UNIX_EPOCH + std::time::Duration::from_millis(js_sys::Date::now() as u64)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+    }
 }
 
 pub(super) fn iso_from_system_time(t: std::time::SystemTime) -> String {

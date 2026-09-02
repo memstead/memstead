@@ -581,7 +581,7 @@ impl Engine {
             recently_unmounted: std::collections::HashSet::new(),
             #[cfg(test)]
             inject_unmount_failure: None,
-            mutation_clock: Arc::new(std::time::SystemTime::now),
+            mutation_clock: Arc::new(crate::engine::mutation::wall_clock_now),
             current_role: crate::vcs::Role::Unspecified,
             current_identity: None,
         })

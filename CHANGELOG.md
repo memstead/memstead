@@ -9,6 +9,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The wasm health surface no longer traps once the stale axis defers to
+  anchor state.** The engine's default mutation clock was
+  `SystemTime::now`, which is unimplemented on `wasm32-unknown-unknown`
+  and traps the instance; every stamping path and, since the stale axis
+  reads anchor state, every `health()` call reached it. The default clock
+  is now `wall_clock_now()`, which derives the instant from the JS-backed
+  clock on wasm and from `SystemTime::now` everywhere else, so the same
+  ISO stamps and the same anchor adjudication come out on every target.
+  The wasm test suite's health test (F11) is the regression guard.
 - **`projection exclude` resolves the artifact id and refuses an unknown
   one.** An exclusion id written in the source-relative form (relative to
   the source's pointer) is resolved through the binding's source join at
