@@ -2094,6 +2094,10 @@ impl Engine {
             // consumer of the axis reaches it through this funnel, so there is
             // no site where a second answer could be written (04/07).
             &|from, to| self.cross_mem_link_allowed(from, to),
+            // The mount set, so an edge into a mem that is not mounted is
+            // reported as the dangling finding it is and never as a grant
+            // the table still names (backlog-decisions plan B8).
+            &|target| self.mount(target).is_some(),
         );
         // The provenance layer's own consistency: a sidecar the engine cannot
         // read is a finding on the mem, beside the entity-level ones. Without

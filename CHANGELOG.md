@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **The integrity axis blames no grant after an unmount.** A cross-mem
+  edge whose target mem is not mounted is reported once, as the dangling
+  finding (`DANGLING_RELATION_TARGET_MISSING`, emitted even when the
+  target lingers as a load-time stub of the vanished mem, which the
+  dangling-link collector alone kept silent about), and never as
+  `CROSS_MEM_EDGE_UNGRANTED` while the grant table still names the pair:
+  the grant check now distinguishes "no grant declared" from "target not
+  mounted" and only the first carries the re-grant repair. A pair with no
+  grant and a mounted target reads exactly as before.
+
 ### Added
 
 - **The stale axis defers to anchor state.** An entity carrying at least

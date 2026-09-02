@@ -100,7 +100,10 @@ pub struct Args {
     /// `UNRESOLVED_STUB`, `DANGLING_LINK_TARGET_MISSING`,
     /// `DANGLING_LINK_NOT_RELATED` and
     /// `DANGLING_RELATION_TARGET_MISSING` and
-    /// `CROSS_MEM_EDGE_UNGRANTED`. Stale entities, drifted
+    /// `CROSS_MEM_EDGE_UNGRANTED` (no grant declared for the pair
+    /// while the target is mounted; an edge into a mem that is not
+    /// mounted is the dangling finding, once, never a grant finding,
+    /// whatever the grant table still names). Stale entities, drifted
     /// anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The
     /// output is rendered first, then the non-zero exit fires; new
     /// Tier-2 codes opt in additively without breaking the flag's

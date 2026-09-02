@@ -393,13 +393,27 @@ fn heading_has_body(
 /// scan publishes it beside its dangling-link siblings.
 pub const UNRESOLVED_STUB_CODE: &str = "UNRESOLVED_STUB";
 
+///
+/// `target_mounted` answers whether a mem is mounted right now. A cross-mem
+/// edge whose target mem is not mounted is one condition, not two: the
+/// edge dangles (`DANGLING_RELATION_TARGET_MISSING`, the same row the
+/// dangling-link collector emits for an absent target, emitted here when
+/// the target survives only as a load-time stub of the vanished mem) and
+/// the grant question is never asked, because "no grant declared" and
+/// "target not mounted" are different facts and only the first carries the
+/// re-grant repair. The grant table may still name the pair; that is not
+/// the condition, and re-granting what is granted repairs nothing.
 pub fn consistency_findings(
     store: &Store,
     mem: &str,
     grant_allows: &dyn Fn(&str, &str) -> bool,
+    target_mounted: &dyn Fn(&str) -> bool,
 ) -> Vec<IntegrityFinding> {
     let mut findings = Vec::new();
+    let mut dangling_reported: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     for link in super::health::collect_dangling_links(store, Some(mem)) {
+        dangling_reported.insert((link.from.to_string(), link.target_id.to_string()));
         findings.push(IntegrityFinding {
             id: link.from.to_string(),
             axis: IntegrityAxis::Consistency,
@@ -433,6 +447,33 @@ pub fn consistency_findings(
             // unconditionally, so asking is correct as well as cheap, but the
             // early skip keeps the scan proportional to cross-mem edges.
             if to_mem == entity.mem {
+                continue;
+            }
+            if !target_mounted(to_mem) {
+                // The target mem is gone from the mount set: the edge
+                // dangles, once. When the collector above already said so
+                // (the target fully absent) nothing is added; when the
+                // target lingers as a load-time stub of the vanished mem the
+                // collector stays silent (a stub is a legitimate forward
+                // reference within a mounted mem), so the row is emitted
+                // here with the collector's own code and repair.
+                let key = (entity.id.to_string(), rel.target.to_string());
+                if !dangling_reported.contains(&key) {
+                    dangling_reported.insert(key);
+                    let kind = crate::ops::DanglingLinkKind::RelationTargetMissing;
+                    findings.push(IntegrityFinding {
+                        id: entity.id.to_string(),
+                        axis: IntegrityAxis::Consistency,
+                        code: kind.code().to_string(),
+                        detail: serde_json::json!({
+                            "from": entity.id,
+                            "target_id": rel.target,
+                            "target_path": rel.target.path(),
+                            "section": serde_json::Value::Null,
+                            "repair": kind.repair(),
+                        }),
+                    });
+                }
                 continue;
             }
             if grant_allows(&entity.mem, to_mem) {
