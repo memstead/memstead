@@ -52,6 +52,7 @@ pub mod mutation;
 pub mod outcomes;
 pub mod query;
 pub mod review;
+pub mod roster;
 
 pub use archive::FromArchiveBytesError;
 pub use error::{
@@ -62,7 +63,9 @@ pub use error::{
 pub use events::DEFAULT_BROADCAST_CAPACITY;
 pub use events::{EventCallback, MemChangedEvent, SubscriptionHandle};
 #[cfg(feature = "file-watcher")]
-pub use file_watcher::{FileWatcherError, MemRepoWatcher, watch_mem_repo};
+pub use file_watcher::{
+    FileWatcherError, MemRepoWatcher, RosterFileChanged, watch_mem_repo, watch_roster,
+};
 pub use history::{
     EntityHistoryReport, EntityTouch, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, StoryStart,
 };
@@ -379,6 +382,18 @@ pub struct Engine {
     /// leak into the next operation's response, so callers that reload
     /// must take.
     pending_mem_changed: Vec<crate::ops::MemChangedNotice>,
+    /// The mount roster as last reconciled (`roster.rs`): `None` until the
+    /// first observation captures the baseline.
+    roster_fingerprint: Option<roster::RosterFingerprint>,
+    /// Subscribers to applied roster changes: `(next id, callbacks)`.
+    roster_subscribers: Arc<roster::RosterSubscribers>,
+    /// Mems that left the roster during this engine's lifetime and have
+    /// not returned — the memory behind the `MEM_UNMOUNTED` refusal.
+    recently_unmounted: std::collections::HashSet<String>,
+    /// Test-only: make the unmount of the named mem fail before it
+    /// touches any state, to prove the roster change stays unapplied.
+    #[cfg(test)]
+    pub(crate) inject_unmount_failure: Option<String>,
     /// Timestamp source for engine-stamped mutation metadata
     /// (`created_date` on create, `last_modified` on update/relate/
     /// rename — every field the schema marks `init_timestamp` /

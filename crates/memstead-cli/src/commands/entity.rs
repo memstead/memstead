@@ -50,7 +50,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // A quarantined mem's entities are deliberately absent — the
         // read names the quarantine (MEM_QUARANTINED with the boot
         // reason), not a phantom ENTITY_NOT_FOUND.
-        if engine.quarantine_reason(id.mem()).is_some() {
+        // Likewise a mem that left the roster: the read names the
+        // unmount (MEM_UNMOUNTED), not a phantom ENTITY_NOT_FOUND.
+        if engine.quarantine_reason(id.mem()).is_some() || engine.recently_unmounted(id.mem()) {
             return CliError::from_engine_op(engine.unknown_mem_error(id.mem()));
         }
         CliError::new(

@@ -72,6 +72,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   source, rationale) and reports a dropped one once with its source named.
   Entries recorded before the field existed are attributed on the next
   brief or verify.
+- **Mem membership follows reload-before-operation.** Before each operation
+  the engine compares a fingerprint of the mount roster
+  (`.memstead/state/mounts.json`; a stat, plus a hash only when size or
+  mtime moved) with the one it last reconciled on. On a change it mounts
+  new entries cold under the boot quarantine rules, unmounts gone entries
+  atomically (store slice, schema entry, router slot, search index,
+  community partition, pending change notices), re-scans the schema
+  sources, and marks the response `MEM_ROSTER_CHANGED` with `added`,
+  `removed`, `quarantined` and `failures`. An operation naming a mem that
+  left refuses `MEM_UNMOUNTED`. Cross-mem edges into an unmounted mem read
+  dangling on the integrity axis. `memstead_reload` `full: true`, `memstead
+  reload --full` and the ui-api reload run the same reconciliation forced
+  and report removals as applied: the `refresh` block's
+  `mem_removals_skipped` is replaced by `mems_unmounted` and
+  `mems_quarantined`. The ui-api emits `mem-roster-changed` on its SSE
+  channel (`added`, `removed`, `quarantined`) and the web app invalidates
+  its mem list and every per-mem read on it. With the `file-watcher`
+  feature, `watch_roster` reports writes to the roster file alongside the
+  mem-repo refs. Engine: `Engine::reconcile_roster`, `subscribe_roster_changes`.
 - **Coverage counts describing entities per artifact.** The fidelity report
   states its unit: an artifact counts once when at least one entity anchors
   it, however many anchor rows it carries; `covered_artifacts`,

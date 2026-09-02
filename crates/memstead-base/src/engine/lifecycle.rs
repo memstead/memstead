@@ -879,7 +879,19 @@ impl Engine {
     /// run_global_passes: false)`: one workspace-global relation
     /// validation, one alias remap, one memo invalidation for the
     /// whole batch of registrations.
-    fn finish_batched_registrations(&mut self) {
+    /// [`Self::register_writable_mem`] without the workspace-global
+    /// passes — the batch form the roster reconciliation uses; the
+    /// caller runs [`Self::finish_batched_registrations`] once after.
+    pub(crate) fn register_writable_mem_batched(
+        &mut self,
+        mount: Mount,
+        backend: Box<dyn MemBackend>,
+        origin: MemOrigin,
+    ) -> Result<(), EngineError> {
+        self.register_writable_mem_inner(mount, backend, origin, false)
+    }
+
+    pub(crate) fn finish_batched_registrations(&mut self) {
         let mount_caps: std::collections::HashMap<String, crate::workspace::MountCapability> = self
             .mounts
             .iter()
@@ -927,7 +939,7 @@ impl Engine {
         let started = std::time::Instant::now();
         let mut report = crate::ops::FullRefreshReport::default();
 
-        let Some(root) = self.workspace_root.clone() else {
+        let Some(_root) = self.workspace_root.clone() else {
             report.failures.push(crate::ops::RefreshFailure {
                 item: "workspace".to_string(),
                 error: "engine has no workspace root (ad-hoc mount-list construction) — \
@@ -943,6 +955,37 @@ impl Engine {
         self.refresh_workspace_settings_if_possible();
 
         // --- Schema sources, additively. ---
+        self.refresh_schema_sources(&mut report);
+
+        // --- Mount roster: the same reconciliation every operation runs
+        // (roster.rs), forced here even when the fingerprint says
+        // unchanged so the report is authoritative. Removals APPLY. ---
+        match self.reconcile_roster_forced() {
+            Ok(change) => {
+                report.mems_mounted = change.added;
+                report.mems_unmounted = change.removed;
+                report.mems_quarantined = change.quarantined;
+                report.failures.extend(change.failures);
+            }
+            Err(e) => report.failures.push(crate::ops::RefreshFailure {
+                item: "mount-manifest".to_string(),
+                error: e.to_string(),
+            }),
+        }
+        report.mems_mounted.sort();
+        report.mems_unmounted.sort();
+        report.mems_quarantined.sort();
+
+        report.elapsed_ms = started.elapsed().as_millis() as u64;
+        report
+    }
+
+    /// Re-scan the schema sources additively into `report`
+    /// (`schemas_added`, `schema_removals_skipped`, per-source failures).
+    pub(crate) fn refresh_schema_sources(&mut self, report: &mut crate::ops::FullRefreshReport) {
+        let Some(root) = self.workspace_root.clone() else {
+            return;
+        };
         use crate::schema_source::SchemaSource as _;
         let mut fresh: Vec<std::sync::Arc<memstead_schema::Schema>> = Vec::new();
         let mut sources_complete = true;
@@ -993,83 +1036,6 @@ impl Engine {
                 .collect::<Vec<_>>();
             report.schema_removals_skipped.sort();
         }
-
-        // --- Mount manifest, additively. ---
-        let store = crate::workspace_store::FileWorkspaceStore::new();
-        match crate::workspace_store::WorkspaceStoreAdapter::load(&store, &root) {
-            Err(e) => {
-                report.failures.push(crate::ops::RefreshFailure {
-                    item: "mount-manifest".to_string(),
-                    error: e.to_string(),
-                });
-            }
-            Ok(workspace) => {
-                let manifest_names: std::collections::HashSet<String> =
-                    workspace.mounts.iter().map(|m| m.mem.clone()).collect();
-                let mut any_mounted = false;
-                for mount in workspace.mounts {
-                    if self.mounts.iter().any(|m| m.mount.mem == mount.mem) {
-                        continue;
-                    }
-                    let name = mount.mem.clone();
-                    if mount.capability != crate::workspace::MountCapability::Write {
-                        report.failures.push(crate::ops::RefreshFailure {
-                            item: format!("mount:{name}"),
-                            error: "only writable mounts attach on a warm refresh — \
-                                    restart the process to attach this mount"
-                                .to_string(),
-                        });
-                        continue;
-                    }
-                    let backend = match (self.backend_factory)(&mount) {
-                        Ok(b) => b,
-                        Err(e) => {
-                            report.failures.push(crate::ops::RefreshFailure {
-                                item: format!("mount:{name}"),
-                                error: e.to_string(),
-                            });
-                            continue;
-                        }
-                    };
-                    match self.register_writable_mem_inner(
-                        mount,
-                        backend,
-                        crate::mem::MemOrigin::ExplicitToml,
-                        false,
-                    ) {
-                        Ok(()) => {
-                            any_mounted = true;
-                            report.mems_mounted.push(name);
-                        }
-                        Err(e) => report.failures.push(crate::ops::RefreshFailure {
-                            item: format!("mount:{name}"),
-                            error: e.to_string(),
-                        }),
-                    }
-                }
-                // Removals: a currently-mounted WRITABLE mem absent
-                // from the manifest. Read-only attachments (archive
-                // read-mems hydrated from per-mem configs) are not
-                // manifest entries and never count as removals.
-                report.mem_removals_skipped = self
-                    .mounts
-                    .iter()
-                    .filter(|m| {
-                        m.mount.capability == crate::workspace::MountCapability::Write
-                            && !manifest_names.contains(&m.mount.mem)
-                    })
-                    .map(|m| m.mount.mem.clone())
-                    .collect();
-                report.mem_removals_skipped.sort();
-                if any_mounted {
-                    // One workspace-global pass for the whole batch.
-                    self.finish_batched_registrations();
-                }
-            }
-        }
-
-        report.elapsed_ms = started.elapsed().as_millis() as u64;
-        report
     }
 
     /// Override the workspace root after construction. The full
@@ -1079,6 +1045,7 @@ impl Engine {
     /// [`Self::from_workspace_root`].
     pub fn set_workspace_root(&mut self, root: PathBuf) {
         self.workspace_root = Some(root);
+        self.capture_roster_fingerprint();
     }
 
     /// Persist the engine's current mount list to the workspace

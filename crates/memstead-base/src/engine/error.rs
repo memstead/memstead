@@ -229,6 +229,17 @@ pub enum EngineError {
     /// "wrong mem name" from "backend failure".
     #[error("unknown mem: {0}")]
     UnknownMem(String),
+    /// The mem left the mount roster during this engine's lifetime (it
+    /// was unregistered or deleted by another process and the roster
+    /// reconciliation unmounted it). Cached ids and hashes for it are
+    /// void; `memstead_health` lists what is mounted now. Typed code
+    /// `MEM_UNMOUNTED`.
+    #[error(
+        "mem `{mem}` was unmounted: it left the mount roster since this engine booted, so \
+         nothing of it is served any more — drop cached ids and hashes for it and re-read \
+         the roster (memstead_health)"
+    )]
+    MemUnmounted { mem: String },
     /// The mem exists in the workspace but failed its mem-level boot
     /// step and is quarantined — it serves nothing until repaired
     /// (degrade, never disappear; quarantine is not tolerance).
@@ -1307,6 +1318,7 @@ impl EngineError {
         match self {
             EngineError::DuplicateMem(_) => "DUPLICATE_MEM",
             EngineError::UnknownMem(_) => "UNKNOWN_MEM",
+            EngineError::MemUnmounted { .. } => "MEM_UNMOUNTED",
             EngineError::MemQuarantined { .. } => "MEM_QUARANTINED",
             EngineError::UnknownRef(_) => "UNKNOWN_REF",
             EngineError::UnknownRemote(_) => "UNKNOWN_REMOTE",

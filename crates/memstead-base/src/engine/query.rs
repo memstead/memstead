@@ -1449,6 +1449,9 @@ impl Engine {
                 reason_code: q.reason_code.clone(),
                 reason_message: q.reason_message.clone(),
             },
+            None if self.recently_unmounted(mem) => EngineError::MemUnmounted {
+                mem: mem.to_string(),
+            },
             None => EngineError::UnknownMem(mem.to_string()),
         }
     }

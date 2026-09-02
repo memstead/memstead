@@ -593,6 +593,7 @@ impl CliError {
                     "failure_cause": failure_cause,
                 })),
             ),
+            MemUnmounted { mem } => (ExitKind::NotFound, Some(serde_json::json!({ "mem": mem }))),
             MemQuarantined {
                 mem,
                 reason_code,

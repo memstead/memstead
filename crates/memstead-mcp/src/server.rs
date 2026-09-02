@@ -886,6 +886,15 @@ fn engine_err_unified(
                 ),
             )
         }
+        E::MemUnmounted { mem } => tool_error_with_payload(
+            "MEM_UNMOUNTED",
+            &message,
+            envelope(
+                "MEM_UNMOUNTED",
+                message.clone(),
+                serde_json::json!({ "mem": mem }),
+            ),
+        ),
         E::MemQuarantined {
             mem,
             reason_code,
@@ -2071,7 +2080,10 @@ impl McpServer {
                 // the store; refusing ENTITY_NOT_FOUND there would be
                 // dishonest ("honest absence beats partial truth" —
                 // the read names the quarantine, not a phantom miss).
-                if engine.quarantine_reason(id.mem()).is_some() {
+                // Likewise a mem that left the roster: MEM_UNMOUNTED.
+                if engine.quarantine_reason(id.mem()).is_some()
+                    || engine.recently_unmounted(id.mem())
+                {
                     let err = engine.unknown_mem_error(id.mem());
                     return attach_drift_to_error(
                         engine_err_unified(err, &engine),

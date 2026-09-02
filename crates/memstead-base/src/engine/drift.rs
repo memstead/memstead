@@ -60,6 +60,45 @@ impl Engine {
     /// Cache invalidation rides on `reload_one_mem` — community
     /// and search-index memos drop when any mem reloads.
     pub fn reload_if_stale(&mut self, mem: Option<&str>) -> Vec<crate::ops::WarningHint> {
+        let mut warnings = Vec::new();
+        // Phase -1 — membership. The roster is probed before content: a
+        // mem that left must not be loaded or served, a mem that arrived
+        // must be there for the operation that follows (roster.rs).
+        match self.reconcile_roster() {
+            Ok(Some(change)) if !change.is_empty() => {
+                warnings.push(crate::ops::WarningHint::MemRosterChanged {
+                    added: change.added,
+                    removed: change.removed,
+                    quarantined: change.quarantined,
+                    failures: change
+                        .failures
+                        .iter()
+                        .map(|f| format!("{}: {}", f.item, f.error))
+                        .collect(),
+                });
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warnings.push(crate::ops::WarningHint::MemRosterChanged {
+                    added: Vec::new(),
+                    removed: Vec::new(),
+                    quarantined: Vec::new(),
+                    failures: vec![e.to_string()],
+                });
+            }
+        }
+        warnings.extend(self.reload_if_stale_content_only(mem));
+        warnings
+    }
+
+    /// The content half of [`Self::reload_if_stale`] alone — the branch-tip
+    /// probe without the roster probe. Exposed for the cost comparison the
+    /// roster probe is held to; every operation goes through the full form.
+    pub fn reload_if_stale_content_only(
+        &mut self,
+        mem: Option<&str>,
+    ) -> Vec<crate::ops::WarningHint> {
+        let mut warnings = Vec::new();
         // Phase 0 — the lazy-mount first-read trigger. Every operation
         // funnels through this check, so a deferred mem the operation's
         // scope touches loads here, before the staleness probes — a
@@ -80,7 +119,7 @@ impl Engine {
             .collect();
 
         if candidates.is_empty() {
-            return Vec::new();
+            return warnings;
         }
 
         // Phase 2 — probe every candidate's current head via the
@@ -100,7 +139,6 @@ impl Engine {
         // Phase 3 — act on each probe. The drift case is the only
         // one that calls `reload_one_mem`; every other arm just
         // (for first-observation) captures the baseline head silently.
-        let mut warnings = Vec::new();
         for (name, cached, new_head) in probes {
             match (cached, new_head.clone()) {
                 (Some(old), Some(new)) if old != new => {

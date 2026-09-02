@@ -1904,7 +1904,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "schemas_added",
             "schema_removals_skipped",
             "mems_mounted",
-            "mem_removals_skipped",
+            "mems_unmounted",
+            "mems_quarantined",
             "failures",
             "elapsed_ms",
             // Auto-reload-on-read warning the description points at.
@@ -3127,12 +3128,15 @@ fn server_info_version_equals_full_build_version_on_both_flavours() {
 /// at plan-05 landing: full ~10.1kB current + ~24% headroom; lean
 /// ~2.0kB current with a roomier 4kB ceiling (the lean surface is
 /// small enough that a doubling is the signal worth tripping on).
+/// Raised consciously on 2026-09-02 (12.5kB → 12.8kB) for the
+/// `MEM_ROSTER_CHANGED` membership marker, the sibling of
+/// `MEM_RELOADED`: a protocol every consumer must know, not decoration.
 #[test]
 fn instruction_length_stays_within_budget() {
     let full_len = memstead_mcp::server::SERVER_INSTRUCTIONS.len();
     assert!(
-        full_len <= 12_500,
-        "full instructions grew past the 12.5kB tripwire ({full_len} bytes) — trim \
+        full_len <= 12_800,
+        "full instructions grew past the 12.8kB tripwire ({full_len} bytes) — trim \
          (the error-code list is the sanctioned cut) or consciously raise the budget"
     );
     let lean_len = memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS.len();

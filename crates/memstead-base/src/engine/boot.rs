@@ -576,6 +576,11 @@ impl Engine {
                 crate::engine::events::SubscriberRegistry::new(),
             )),
             pending_mem_changed: Vec::new(),
+            roster_fingerprint: None,
+            roster_subscribers: Arc::new(std::sync::Mutex::new((0, Vec::new()))),
+            recently_unmounted: std::collections::HashSet::new(),
+            #[cfg(test)]
+            inject_unmount_failure: None,
             mutation_clock: Arc::new(std::time::SystemTime::now),
             current_role: crate::vcs::Role::Unspecified,
             current_identity: None,
@@ -652,6 +657,7 @@ impl Engine {
         engine.quarantined.extend(instantiate_quarantine);
         engine.set_settings(settings);
         engine.workspace_root = Some(workspace_root.to_path_buf());
+        engine.capture_roster_fingerprint();
         // Load the workspace store's pipeline configs — the v2 single-record
         // binding store — and expose them read-only. A malformed config
         // surfaces a typed `StoreError::Parse` naming the file (early
@@ -3012,30 +3018,20 @@ community:
             mount("notes", &mem_b, "authored", semver::Version::new(0, 1, 0)),
         ]);
 
-        // Refusal complement, pre-refresh: the running engine still
-        // refuses — the refresh is what changes the outcome.
+        // Since 2026-09-02 membership follows reload-before-operation: the
+        // first operation would reconcile the roster on its own. The refresh
+        // verb runs the same reconciliation, forced, and reports it.
         let (actor, client) = cli_actor();
         let mut pre = crate::engine::test_helpers::empty_create_args("notes", "Too Early");
         pre.entity_type = "doc".to_string();
         pre.sections = indexmap::IndexMap::from_iter([("body".to_string(), "body".to_string())]);
-        let err = engine
-            .create_entity(pre.clone(), actor, Some(&client), None)
-            .unwrap_err();
-        assert_eq!(err.code(), "UNKNOWN_MEM", "{err:?}");
-        assert!(
-            !engine
-                .workspace_schemas()
-                .iter()
-                .any(|s| s.id().0 == "authored"),
-            "schema catalogue is fixed pre-refresh"
-        );
 
         // --- Full refresh: both become usable, warm. ---
         let report = engine.full_refresh();
         assert_eq!(report.schemas_added, vec!["authored@0.1.0".to_string()]);
         assert_eq!(report.mems_mounted, vec!["notes".to_string()]);
         assert!(report.schema_removals_skipped.is_empty(), "{report:?}");
-        assert!(report.mem_removals_skipped.is_empty(), "{report:?}");
+        assert!(report.mems_unmounted.is_empty(), "{report:?}");
         assert!(report.failures.is_empty(), "{report:?}");
         engine
             .create_entity(pre, actor, Some(&client), None)
@@ -3056,23 +3052,27 @@ community:
             semver::Version::new(0, 1, 0),
         )]);
         let report = engine.full_refresh();
-        assert_eq!(report.mem_removals_skipped, vec!["specs".to_string()]);
+        // Removals APPLY since 2026-09-02: the mem leaves the roster and is
+        // no longer served; the schema removal stays skipped.
+        assert_eq!(report.mems_unmounted, vec!["specs".to_string()]);
+        assert_eq!(engine.mem_names(), vec!["notes"]);
         assert_eq!(
             report.schema_removals_skipped,
             vec!["authored@0.1.0".to_string()]
         );
         assert!(report.schemas_added.is_empty());
         assert!(report.mems_mounted.is_empty());
-        // Both stay live: the unregistered mem still accepts writes,
-        // the removed schema version still resolves for its mem.
-        engine
+        // The unregistered mem is gone: a write naming it refuses with the
+        // typed code; the removed schema version still resolves for its mem.
+        let gone = engine
             .create_entity(
                 crate::engine::test_helpers::empty_create_args("specs", "Still Here"),
                 actor,
                 Some(&client),
                 None,
             )
-            .expect("skipped-removal mem stays writable");
+            .expect_err("an unmounted mem refuses writes");
+        assert_eq!(gone.code(), "MEM_UNMOUNTED", "{gone:?}");
         let mut into_notes =
             crate::engine::test_helpers::empty_create_args("notes", "Still Resolvable");
         into_notes.entity_type = "doc".to_string();
@@ -3092,9 +3092,10 @@ community:
         ]);
         let report = engine.full_refresh();
         assert!(
-            report.failures.iter().any(|f| f.item == "mount:broken"),
-            "failed mount must be reported per-item: {report:?}"
+            report.mems_quarantined.contains(&"broken".to_string()),
+            "a mount that cannot attach is quarantined per-item, as boot would: {report:?}"
         );
+        assert!(engine.quarantine_reason("broken").is_some());
         assert!(
             !report.mems_mounted.contains(&"broken".to_string()),
             "a failed mount never surfaces as newly available"
@@ -4900,5 +4901,363 @@ write_rules: []
             "no lingering nested-prefix warning for a resolved cross-mem link: {:?}",
             engine.load_warnings()
         );
+    }
+
+    /// Shared fixture for the roster tests: a workspace with folder mems
+    /// `alpha` (one entity) and `beta` (one entity linking into alpha), the
+    /// roster saved through the workspace store, the engine booted.
+    fn roster_change(warnings: &[WarningHint]) -> Option<(Vec<String>, Vec<String>)> {
+        warnings.iter().find_map(|w| match w {
+            WarningHint::MemRosterChanged { added, removed, .. } => {
+                Some((added.clone(), removed.clone()))
+            }
+            _ => None,
+        })
+    }
+
+    fn search_scope(mem: Option<&str>, term: &str) -> crate::ops::SearchScope {
+        crate::ops::SearchScope {
+            query: Some(crate::ops::Query {
+                any: vec![term.to_string()],
+                ..Default::default()
+            }),
+            mem: mem.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    fn roster_fixture() -> (TempDir, Engine) {
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        for mem in ["alpha", "beta"] {
+            let dir = root.join(mem);
+            std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+            std::fs::write(
+                dir.join(".memstead").join("config.json"),
+                br#"{"format":1,"schema":"default@1.0.0"}"#,
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            root.join("alpha").join("one.md"),
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# One\n\n## Identity\n\nalpha one\n\n## Purpose\n\nseed\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("beta").join("two.md"),
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Two\n\n## Identity\n\nbeta two\n\n## Purpose\n\nseed\n\n## Relationships\n\n- **DEPENDS_ON**: [[alpha--one]]\n",
+        )
+        .unwrap();
+        let mount = |mem: &str| Mount {
+            mem: mem.to_string(),
+            schema: Some(SchemaRef::new("default", semver::Version::new(1, 0, 0))),
+            storage: MountStorage::Folder {
+                path: root.join(mem),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &crate::workspace::Workspace {
+                    mounts: vec![mount("alpha"), mount("beta")],
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let engine = Engine::from_workspace_root(root).expect("workspace boots");
+        (tmp, engine)
+    }
+
+    fn save_roster(root: &Path, mems: &[(&str, &Path)]) {
+        let with_schema: Vec<(&str, &Path, &str)> =
+            mems.iter().map(|(m, d)| (*m, *d, "default")).collect();
+        save_roster_pinned(root, &with_schema);
+    }
+
+    fn save_roster_pinned(root: &Path, mems: &[(&str, &Path, &str)]) {
+        use crate::workspace_store::WorkspaceStoreAdapter;
+        let mounts = mems
+            .iter()
+            .map(|(mem, dir, schema)| Mount {
+                mem: mem.to_string(),
+                schema: Some(SchemaRef::new(*schema, semver::Version::new(1, 0, 0))),
+                storage: MountStorage::Folder {
+                    path: dir.to_path_buf(),
+                },
+                capability: MountCapability::Write,
+                lifecycle: MountLifecycle::Eager,
+                cross_linkable: true,
+                migration_target: None,
+            })
+            .collect();
+        // A roster write inside the same mtime tick as the previous one is
+        // told apart by its hash, so no sleep is needed here.
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &crate::workspace::Workspace {
+                    mounts,
+                    settings: crate::workspace::WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+    }
+
+    /// A4 AC1 (engine half): a mem that leaves the roster is gone on the
+    /// next operation with `MEM_ROSTER_CHANGED` naming it, its entities are
+    /// not searchable, an operation naming it refuses `MEM_UNMOUNTED`; a mem
+    /// that returns is served again with its entities.
+    #[test]
+    fn roster_membership_follows_reload_before_operation() {
+        let (tmp, mut engine) = roster_fixture();
+        let root = tmp.path();
+        assert_eq!(engine.mem_names(), vec!["alpha", "beta"]);
+        assert!(
+            engine.reload_if_stale(None).is_empty(),
+            "no change, no warning"
+        );
+
+        // beta leaves the roster.
+        save_roster(root, &[("alpha", &root.join("alpha"))]);
+        let warnings = engine.reload_if_stale(None);
+        let (added, removed) = roster_change(&warnings).expect("the roster change is reported");
+        assert_eq!(removed, vec!["beta".to_string()]);
+        assert!(added.is_empty());
+        assert_eq!(engine.mem_names(), vec!["alpha"]);
+        assert!(
+            engine
+                .get_entity(&crate::EntityId("beta--two".into()))
+                .is_none()
+        );
+        let unscoped = engine.search(&search_scope(None, "beta two")).unwrap();
+        assert_eq!(
+            unscoped.total, 0,
+            "no hit from the removed mem: {unscoped:?}"
+        );
+        let scoped = engine
+            .search(&search_scope(Some("beta"), "beta two"))
+            .expect_err("a search scoped to the removed mem refuses");
+        assert_eq!(scoped.code(), "MEM_UNMOUNTED", "{scoped}");
+        let err = engine.unknown_mem_error("beta");
+        assert_eq!(err.code(), "MEM_UNMOUNTED", "{err}");
+        assert!(
+            engine.reload_if_stale(None).is_empty(),
+            "reconciled once, quiet after"
+        );
+
+        // beta returns: mounted cold with its entity.
+        save_roster(
+            root,
+            &[("alpha", &root.join("alpha")), ("beta", &root.join("beta"))],
+        );
+        let warnings = engine.reload_if_stale(None);
+        let (added, _) = roster_change(&warnings).expect("the return is reported");
+        assert_eq!(added, vec!["beta".to_string()]);
+        assert_eq!(engine.mem_names(), vec!["alpha", "beta"]);
+        assert!(
+            engine
+                .get_entity(&crate::EntityId("beta--two".into()))
+                .is_some()
+        );
+        assert_eq!(
+            engine.unknown_mem_error("beta").code(),
+            "UNKNOWN_MEM",
+            "the memory clears"
+        );
+    }
+
+    /// A4 AC1, refusal complement: a roster entry whose storage does not
+    /// exist quarantines on reconciliation exactly as boot would, with the
+    /// boot's reason code, and the other mems keep serving.
+    #[test]
+    fn roster_entry_with_missing_storage_quarantines_like_boot() {
+        let (tmp, mut engine) = roster_fixture();
+        let root = tmp.path();
+        // `ghost` pins a schema no source holds (boot's SCHEMA_NOT_FOUND
+        // quarantine); `hollow` names a folder that does not exist (boot's
+        // MOUNT_UNBACKED quarantine). The reconcile must do exactly the same
+        // for both, and the other mems keep serving.
+        std::fs::create_dir_all(root.join("ghost").join(".memstead")).unwrap();
+        std::fs::write(
+            root.join("ghost").join(".memstead").join("config.json"),
+            br#"{"format":1,"schema":"nope@1.0.0"}"#,
+        )
+        .unwrap();
+        save_roster_pinned(
+            root,
+            &[
+                ("alpha", &root.join("alpha"), "default"),
+                ("beta", &root.join("beta"), "default"),
+                ("ghost", &root.join("ghost"), "nope"),
+                ("hollow", &root.join("does-not-exist"), "default"),
+            ],
+        );
+        let warnings = engine.reload_if_stale(None);
+        let quarantined = warnings
+            .iter()
+            .find_map(|w| match w {
+                WarningHint::MemRosterChanged { quarantined, .. } => Some(quarantined.clone()),
+                _ => None,
+            })
+            .expect("reported");
+        assert_eq!(quarantined, vec!["ghost".to_string(), "hollow".to_string()]);
+        let q = engine
+            .quarantine_reason("ghost")
+            .expect("on the quarantine roster");
+        // Boot quarantines the same entry under the same code.
+        let booted = Engine::from_workspace_root(root).unwrap();
+        let at_boot = booted
+            .quarantine_reason("ghost")
+            .expect("boot quarantines it too");
+        assert_eq!(q.reason_code, at_boot.reason_code);
+        assert_eq!(q.reason_code, "SCHEMA_NOT_FOUND");
+        // The hollow mount: whatever boot does with it (quarantine or an
+        // empty mount), the reconcile does the same.
+        for name in ["ghost", "hollow"] {
+            assert_eq!(
+                engine
+                    .quarantine_reason(name)
+                    .map(|q| q.reason_code.clone()),
+                booted
+                    .quarantine_reason(name)
+                    .map(|q| q.reason_code.clone()),
+                "{name}: quarantine parity with boot"
+            );
+            assert_eq!(
+                engine.mem_names().contains(&name),
+                booted.mem_names().contains(&name),
+                "{name}: membership parity with boot (reconciled {:?}, boot {:?})",
+                engine.mem_names(),
+                booted.mem_names()
+            );
+        }
+        assert!(engine.mem_names().contains(&"alpha") && engine.mem_names().contains(&"beta"));
+        assert!(
+            engine
+                .get_entity(&crate::EntityId("alpha--one".into()))
+                .is_some()
+        );
+        assert_eq!(engine.unknown_mem_error("ghost").code(), "MEM_QUARANTINED");
+    }
+
+    /// A4 AC2: after the unmount, the cross-mem edge from beta into alpha
+    /// reads dangling on the integrity axis, search has no hit from the
+    /// removed mem, and the community partition and search indexes carry no
+    /// reference to it; the probe cost over one hundred operations stays in
+    /// the branch-tip probe's band (printed as a benchmark line).
+    #[test]
+    fn unmount_is_atomic_and_cross_mem_edges_go_dangling() {
+        let (tmp, mut engine) = roster_fixture();
+        let root = tmp.path();
+        // beta depends on alpha; alpha leaves.
+        save_roster(root, &[("beta", &root.join("beta"))]);
+        let _ = engine.reload_if_stale(None);
+        assert_eq!(engine.mem_names(), vec!["beta"]);
+        let findings = engine.consistency_findings("beta").unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.code == "DANGLING_RELATION_TARGET_MISSING" && f.id == "beta--two"),
+            "the edge into the unmounted mem is dangling: {findings:?}"
+        );
+        let hits = engine.search(&search_scope(None, "alpha one")).unwrap();
+        assert_eq!(hits.total, 0, "{hits:?}");
+        // Derived structures: no community member and no index for alpha.
+        let communities = engine.communities();
+        assert!(
+            communities
+                .entity_cluster_map
+                .keys()
+                .all(|id| !id.starts_with("alpha--")),
+            "the community partition carries no entity of the removed mem"
+        );
+        assert!(
+            communities
+                .clusters
+                .values()
+                .all(|c| c.entities.iter().all(|e| !e.starts_with("alpha--")))
+        );
+        assert!(engine.store().all_entities().all(|e| e.mem != "alpha"));
+
+        // Benchmark: one hundred reload probes with no change, roster
+        // probe included, against one hundred branch-tip-only probes.
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let _ = engine.reload_if_stale(None);
+        }
+        let with_roster = start.elapsed();
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let _ = engine.reload_if_stale_content_only(None);
+        }
+        let content_only = start.elapsed();
+        eprintln!(
+            "BENCH roster probe: 100 ops with roster {with_roster:?}, content-only {content_only:?}"
+        );
+        assert!(
+            with_roster < content_only * 4 + std::time::Duration::from_millis(50),
+            "roster probe left the branch-tip band: {with_roster:?} vs {content_only:?}"
+        );
+    }
+
+    /// A4 AC2, refusal complement: an unmount that fails mid-way leaves the
+    /// roster unapplied and the mem fully served, and the response names
+    /// the failure.
+    #[test]
+    fn failed_unmount_leaves_the_roster_unapplied_and_the_mem_served() {
+        let (tmp, mut engine) = roster_fixture();
+        let root = tmp.path();
+        engine.inject_unmount_failure = Some("beta".to_string());
+        save_roster(root, &[("alpha", &root.join("alpha"))]);
+        let warnings = engine.reload_if_stale(None);
+        let (removed, failures) = warnings
+            .iter()
+            .find_map(|w| match w {
+                WarningHint::MemRosterChanged {
+                    removed, failures, ..
+                } => Some((removed.clone(), failures.clone())),
+                _ => None,
+            })
+            .expect("reported");
+        assert!(removed.is_empty());
+        assert!(
+            failures
+                .iter()
+                .any(|f| f.contains("unmount:beta") && f.contains("injected")),
+            "{failures:?}"
+        );
+        assert_eq!(
+            engine.mem_names(),
+            vec!["alpha", "beta"],
+            "beta still served"
+        );
+        assert!(
+            engine
+                .get_entity(&crate::EntityId("beta--two".into()))
+                .is_some()
+        );
+        assert_eq!(
+            engine.unknown_mem_error("beta").code(),
+            "UNKNOWN_MEM",
+            "not remembered as unmounted"
+        );
+        // The baseline was kept: lifting the injection, the next operation
+        // applies the pending change.
+        engine.inject_unmount_failure = None;
+        let warnings = engine.reload_if_stale(None);
+        let (_, removed) = roster_change(&warnings).expect("retried");
+        assert_eq!(removed, vec!["beta".to_string()]);
+        assert_eq!(engine.mem_names(), vec!["alpha"]);
     }
 }

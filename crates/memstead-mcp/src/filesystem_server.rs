@@ -989,6 +989,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         | e @ EngineError::DuplicateMem(_)
         | e @ EngineError::MemQuarantined { .. }
         | e @ EngineError::UnknownMem(_)
+        | e @ EngineError::MemUnmounted { .. }
         | e @ EngineError::UnknownRef(_)
         | e @ EngineError::UnknownRemote(_)
         | e @ EngineError::LocalDivergence { .. }

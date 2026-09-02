@@ -640,6 +640,20 @@ pub enum WarningHint {
         new_head: String,
         entities_loaded: usize,
     },
+    /// `MEM_ROSTER_CHANGED`: the mount roster changed since the engine last
+    /// reconciled it (a mem registered or unregistered by another process),
+    /// and the engine applied the change before serving this call: `added`
+    /// mems mounted cold, `removed` mems unmounted (their cached hashes are
+    /// void, an operation naming one refuses `MEM_UNMOUNTED`),
+    /// `quarantined` mems failed to mount under the boot rules and are on
+    /// the quarantine roster with their reason, `failures` names anything
+    /// that could not be applied (that part is retried next operation).
+    MemRosterChanged {
+        added: Vec<String>,
+        removed: Vec<String>,
+        quarantined: Vec<String>,
+        failures: Vec<String>,
+    },
     /// `OUT_OF_BAND_EDITS_UNDETECTED`: this folder mem's drift cursor is its
     /// own change ledger, which only the engine writes, so an edit made to the
     /// files by anything else advances nothing (04/04, criterion 3).
@@ -1652,6 +1666,25 @@ impl fmt::Display for WarningHint {
                  `memstead_changes_since since={old_head}` for the per-entity \
                  diff."
             ),
+            WarningHint::MemRosterChanged {
+                added,
+                removed,
+                quarantined,
+                failures,
+            } => write!(
+                f,
+                "the mount roster changed and the engine reconciled it before serving this \
+                 call — added: [{}], removed: [{}], quarantined: [{}]{}. Cached hashes for a \
+                 removed mem are void; an operation naming it refuses MEM_UNMOUNTED.",
+                added.join(", "),
+                removed.join(", "),
+                quarantined.join(", "),
+                if failures.is_empty() {
+                    String::new()
+                } else {
+                    format!("; not applied: {}", failures.join("; "))
+                }
+            ),
             WarningHint::AutoStubCreated { stub_id, pending } => {
                 if *pending {
                     write!(
@@ -2000,6 +2033,7 @@ impl WarningHint {
             Self::ConstraintUnsatisfied { .. } => "CONSTRAINT_UNSATISFIED",
             Self::DuplicateSectionHeading { .. } => "DUPLICATE_SECTION_HEADING",
             Self::MemReloaded { .. } => "MEM_RELOADED",
+            Self::MemRosterChanged { .. } => "MEM_ROSTER_CHANGED",
             Self::ConfigWriteIntervened { .. } => "CONFIG_WRITE_INTERVENED",
             Self::OutOfBandEditsUndetected { .. } => "OUT_OF_BAND_EDITS_UNDETECTED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
@@ -2049,6 +2083,7 @@ impl WarningHint {
             Self::SchemaHeadingRoundtripViolation { mem, .. } => Some(mem.as_str()),
             Self::SectionHeadingDivergence { entity_id, .. } => Some(entity_id.mem()),
             Self::MemReloaded { mem, .. } => Some(mem.as_str()),
+            Self::MemRosterChanged { .. } => None,
             Self::MemFilesNotDeleted { mem, .. } => Some(mem.as_str()),
             Self::MemReattachedAfterUnregister { mem, .. } => Some(mem.as_str()),
             Self::ReadMemsMigratedToMounts { .. } => None,
@@ -2271,6 +2306,12 @@ impl WarningHint {
                 old_head: "abc123".into(),
                 new_head: "def456".into(),
                 entities_loaded: 42,
+            },
+            WarningHint::MemRosterChanged {
+                added: vec!["arrived".into()],
+                removed: vec!["departed".into()],
+                quarantined: vec![],
+                failures: vec![],
             },
             WarningHint::AutoStubCreated {
                 stub_id: EntityId("specs--future-target".into()),
@@ -2554,6 +2595,17 @@ impl WarningHint {
                 "old_head": old_head,
                 "new_head": new_head,
                 "entities_loaded": entities_loaded,
+            }),
+            Self::MemRosterChanged {
+                added,
+                removed,
+                quarantined,
+                failures,
+            } => serde_json::json!({
+                "added": added,
+                "removed": removed,
+                "quarantined": quarantined,
+                "failures": failures,
             }),
             Self::AutoStubCreated { stub_id, .. } => serde_json::json!({ "stub_id": stub_id }),
             Self::DerivationBaselineRefreshed { from, rel_type, to } => serde_json::json!({
@@ -3912,9 +3964,13 @@ pub struct FullRefreshReport {
     pub schema_removals_skipped: Vec<String>,
     /// Mems newly mounted (cold-loaded like any boot-time mount).
     pub mems_mounted: Vec<String>,
-    /// Mounted writable mems absent from the re-scanned manifest —
-    /// the removal was skipped; they stay live until restart.
-    pub mem_removals_skipped: Vec<String>,
+    /// Mounted writable mems absent from the re-scanned roster — unmounted
+    /// atomically, no longer served (applied since 2026-09-02; the former
+    /// `mem_removals_skipped` reported them as left live until restart).
+    pub mems_unmounted: Vec<String>,
+    /// Roster entries that failed to mount and sit on the quarantine
+    /// roster with their reason.
+    pub mems_quarantined: Vec<String>,
     /// Per-item failures: a source or mount that failed to refresh.
     /// Failed items never surface as newly available; the others
     /// proceed.
@@ -3925,7 +3981,7 @@ pub struct FullRefreshReport {
 
 /// One failed refresh item — `item` is `schema-source:<which>`,
 /// `mount:<mem>`, `mount-manifest`, or `workspace`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefreshFailure {
     pub item: String,
     pub error: String,

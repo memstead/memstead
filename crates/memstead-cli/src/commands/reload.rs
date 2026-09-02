@@ -27,8 +27,8 @@ pub struct Args {
     /// Additive full refresh: re-scan the schema sources and the
     /// mount manifest on top of the workspace-wide content reload.
     /// Out-of-band schema installs become resolvable and out-of-band
-    /// mem registrations mount cold; removals are skipped and
-    /// reported (they take effect on restart). Workspace-scoped —
+    /// mem registrations mount cold and removals unmount (the same
+    /// roster reconciliation every operation runs). Workspace-scoped —
     /// conflicts with `--mem`. Mirrors MCP `memstead_reload
     /// full=true`. (Mostly useful against a live server via MCP; in a
     /// fresh CLI process boot already sees everything — the flag
@@ -91,8 +91,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 render_list(&refresh.mems_mounted)
             ));
             lines.push(format!(
-                "- mem removals skipped: {}",
-                render_list(&refresh.mem_removals_skipped)
+                "- mems unmounted: {}",
+                render_list(&refresh.mems_unmounted)
+            ));
+            lines.push(format!(
+                "- mems quarantined: {}",
+                render_list(&refresh.mems_quarantined)
             ));
             for f in &refresh.failures {
                 lines.push(format!("- ✗ {} — {}", f.item, f.error));

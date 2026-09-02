@@ -182,6 +182,69 @@ pub fn watch_mem_repo(
 /// 40-char SHA. The map this returns seeds the per-mem state so the
 /// first event emitted for any mem carries the right `previous`
 /// value (rather than always an empty string).
+/// A roster-file change, as the roster watcher reports it. Carries no
+/// diff: the consumer runs the engine's reconciliation (every operation
+/// does, and `memstead_reload` / the ui-api reload force it), which
+/// computes the applied change from the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterFileChanged {
+    /// The roster file that moved (`<workspace>/.memstead/state/mounts.json`).
+    pub path: PathBuf,
+}
+
+/// Watch the workspace's mount roster (`.memstead/state/mounts.json`)
+/// alongside the mem-repo refs: one event per observed write, over the
+/// same polling watcher and cadence [`watch_mem_repo`] uses. The
+/// workspace store directory is watched (not the file), so a roster
+/// written by rename-into-place still surfaces. `RefsHeadsMissing` is
+/// reused for a workspace whose store directory does not exist.
+pub fn watch_roster(
+    workspace_root: &Path,
+) -> Result<(MemRepoWatcher, Receiver<RosterFileChanged>), FileWatcherError> {
+    let state_dir = workspace_root
+        .join(crate::workspace_store::WORKSPACE_STORE_DIR)
+        .join("state");
+    if !state_dir.is_dir() {
+        return Err(FileWatcherError::RefsHeadsMissing(state_dir));
+    }
+    let roster = state_dir.join("mounts.json");
+    let (event_tx, event_rx) = channel::<RosterFileChanged>();
+    let (notify_tx, notify_rx) = channel::<notify::Result<Event>>();
+    let mut watcher = PollWatcher::new(
+        move |res: notify::Result<Event>| {
+            let _ = notify_tx.send(res);
+        },
+        Config::default()
+            .with_poll_interval(POLL_INTERVAL)
+            .with_compare_contents(true),
+    )?;
+    watcher.watch(&state_dir, RecursiveMode::NonRecursive)?;
+    let join = thread::Builder::new()
+        .name("memstead-roster-watcher".to_string())
+        .spawn(move || {
+            while let Ok(res) = notify_rx.recv() {
+                let Ok(event) = res else { continue };
+                if event.paths.iter().any(|p| p == &roster)
+                    && event_tx
+                        .send(RosterFileChanged {
+                            path: roster.clone(),
+                        })
+                        .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .expect("spawning roster-watcher thread must succeed");
+    Ok((
+        MemRepoWatcher {
+            _watcher: watcher,
+            _thread: Some(join),
+        },
+        event_rx,
+    ))
+}
+
 fn scan_initial_state(refs_heads: &Path) -> Result<HashMap<String, String>, std::io::Error> {
     let mut out = HashMap::new();
     scan_dir(refs_heads, refs_heads, &mut out)?;
@@ -445,5 +508,26 @@ mod tests {
             recv_event_for(&rx, "specs", Duration::from_millis(200)).is_none(),
             "dropped watcher must not deliver further events",
         );
+    }
+
+    /// A4: the roster file is watched alongside the refs — a write to
+    /// `.memstead/state/mounts.json` surfaces as one event.
+    #[test]
+    fn roster_watcher_reports_a_roster_write() {
+        let tmp = TempDir::new().unwrap();
+        let state = tmp.path().join(".memstead").join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("mounts.json"), b"{\"mounts\":[]}").unwrap();
+        let (_watcher, rx) = watch_roster(tmp.path()).unwrap();
+        std::thread::sleep(POLL_INTERVAL * 3);
+        std::fs::write(state.join("mounts.json"), b"{\"mounts\":[{\"mem\":\"x\"}]}").unwrap();
+        let ev = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the roster write is reported");
+        assert!(ev.path.ends_with("mounts.json"));
+        assert!(matches!(
+            watch_roster(&tmp.path().join("nope")),
+            Err(FileWatcherError::RefsHeadsMissing(_))
+        ));
     }
 }
