@@ -344,7 +344,8 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
     match err {
         EngineError::RetypeRefused { .. }
         | EngineError::RetypeNoOp { .. }
-        | EngineError::RetypeReferrerUnprobeable { .. } => {
+        | EngineError::RetypeReferrerUnprobeable { .. }
+        | EngineError::InvalidCheckFinding { .. } => {
             tool_error_with_details(err.code(), &display, Some(err.details()))
         }
         // 04/02, criterion 5: the parity twin of the mem-repo server's arm.
@@ -2421,18 +2422,38 @@ impl FilesystemMcpServer {
             );
         };
         let kind = match p.kind.as_deref() {
-            None => memstead_base::check::CheckKind::Verification,
-            Some(s) => match memstead_base::check::CheckKind::from_wire(s) {
+            None => memstead_base::check::RecordKind::Engine(
+                memstead_base::check::CheckKind::Verification,
+            ),
+            Some(s) => match memstead_base::check::RecordKind::from_wire(s) {
                 Some(k) => k,
                 None => {
                     return tool_error_with_details(
                         "INVALID_CHECK_KIND",
                         &format!(
                             "unknown check kind {s:?} — the vocabulary is: {}",
-                            memstead_base::check::CHECK_KINDS.join(", ")
+                            memstead_base::check::RecordKind::vocabulary_hint()
                         ),
                         Some(serde_json::json!({
-                            "allowed": memstead_base::check::CHECK_KINDS
+                            "allowed": memstead_base::check::CHECK_KINDS,
+                            "foreign_prefix": memstead_base::check::FOREIGN_KIND_PREFIX,
+                        })),
+                    );
+                }
+            },
+        };
+        let finding = match p.finding.as_ref() {
+            None => None,
+            Some(f) => match memstead_base::check::CheckFinding::from_json(
+                serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
+            ) {
+                Ok(f) => Some(f),
+                Err(reason) => {
+                    return tool_error_with_details(
+                        memstead_base::check::INVALID_CHECK_FINDING_CODE,
+                        &reason,
+                        Some(serde_json::json!({
+                            "shape": memstead_base::check::CheckFinding::SHAPE
                         })),
                     );
                 }
@@ -2449,23 +2470,22 @@ impl FilesystemMcpServer {
         }
         let (actor, client) = self.actor_and_client();
         let id = EntityId(p.entity);
-        match engine.record_check(
+        match engine.record_check_with(
             id.mem(),
             id.as_ref(),
             verdict,
-            kind,
+            &kind,
             p.method.as_deref(),
+            finding,
             actor,
             client.as_ref(),
         ) {
             Ok(record) => {
-                let state_result = match kind {
-                    memstead_base::check::CheckKind::Verification => {
-                        engine.entity_check_state(id.mem(), id.as_ref())
-                    }
-                    memstead_base::check::CheckKind::Conformance => {
+                let state_result = match kind.engine_kind() {
+                    Some(memstead_base::check::CheckKind::Conformance) => {
                         engine.entity_conformance_state(id.mem(), id.as_ref())
                     }
+                    _ => engine.entity_check_state(id.mem(), id.as_ref()),
                 };
                 let (state, _) = match state_result {
                     Ok(pair) => pair,
@@ -2481,6 +2501,7 @@ impl FilesystemMcpServer {
                     "identity": record.identity,
                     "ts": record.ts,
                     "method": record.method,
+                    "finding": record.finding,
                 }))
             }
             Err(e) => engine_op_error(e),

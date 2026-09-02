@@ -80,7 +80,7 @@ Per-mem change feed. **`since` is backend-specific and NEVER a mutation's `write
 
 **Flavour:** lean + full
 
-Record a check: "entity E checked, verdict ok | failed, via method M" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash`, and mem commits are untouched; that non-mutation is what makes check-staleness computable). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger — a newer check of the same kind supersedes older ones for state derivation but never erases them. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — stale means the entity changed after its last check, computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed in this response as `check_state`. Verdict vocabulary is closed (`ok` | `failed`) — nuance goes in `method` or in process-mem entities; an unknown verdict refuses `INVALID_VERDICT`. The check `kind` vocabulary is closed too (`verification` | `conformance`; omitted = `verification`, exactly the prior behaviour): a `conformance` record is the semantic judgment "this entity satisfies its type's schema prose", carries the mem's schema pin as `schema_ref` stamped by the engine (never caller-supplied), and derives stale when the content hash OR the pin moves; state derives per (entity, kind), the kinds never supersede each other, and an unknown kind refuses `INVALID_CHECK_KIND` naming the vocabulary. Conformance verdicts are advisory — nothing gates a write or read on them. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), unknown/quarantined mems, read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED` — recording is never best-effort). A check with an unspecified role records honestly but cannot confirm independence downstream.
+Record a check: "entity E checked, verdict ok | failed, via method M" — the engine-recorded act of verification (never a mutation: entity markdown, `_hash` and mem commits are untouched, which is what makes check-staleness computable). The record carries the caller-declared `role` plus actor/client identity and the entity's `_hash` at check time, appended to the workspace's append-only check ledger — a newer check of the same kind supersedes older ones for state, never erases them. Derived check state (`never_checked` | `checked_ok` | `check_failed` | `check_stale` — stale means the entity changed after its last check, computed by hash comparison, never stamped) is served in `memstead_entity`'s opt-in `mutation_provenance` block and echoed in this response as `check_state`. Verdict vocabulary is closed (`ok` | `failed`) — nuance goes in `method` or in process-mem entities; an unknown verdict refuses `INVALID_VERDICT`. The check `kind` vocabulary is closed too (`verification` | `conformance`; omitted = `verification`, exactly the prior behaviour): a `conformance` record is the semantic judgment "this entity satisfies its type's schema prose", carries the mem's schema pin as `schema_ref` stamped by the engine (never caller-supplied), and derives stale when the content hash OR the pin moves; state derives per (entity, kind), the kinds never supersede each other, a caller-declared `x-<name>` kind is recorded verbatim and never interpreted (no pin, no state, listed by count in health), and any other kind refuses `INVALID_CHECK_KIND` naming the vocabulary. An optional structured `finding` (`code`, `message`, `section`?, `evidence`?) rides the record and is served under the entity's latest verdict in health; a malformed one refuses `INVALID_CHECK_FINDING` naming the shape. Refuses typed on unknown entity (`ENTITY_NOT_FOUND`), unknown/quarantined mems, read-only mems (`READ_ONLY_MOUNT`), and persistence failure (`CHECK_NOT_RECORDED` — recording is never best-effort).
 
 **Hints:** `read_only` = false, `destructive` = false, `idempotent` = false, `open_world` = false
 
@@ -88,11 +88,56 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — the en
 
 ```json
 {
+  "$defs": {
+    "CheckFindingParam": {
+      "description": "One `finding` on `memstead_check` — the wire shape of\n`memstead_base::check::CheckFinding`, validated as a whole by the\nengine type (unknown keys refuse there).",
+      "properties": {
+        "code": {
+          "description": "The checker's finding code, its own vocabulary (`hidden-premise`, `stale-source`). Required, non-empty.",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "What the finding rests on: a quote, a coordinate, a reference.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "One or two sentences a reader can act on. Required, non-empty.",
+          "type": "string"
+        },
+        "section": {
+          "description": "The section key the finding concerns, when it concerns one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "entity": {
       "description": "Full entity id (`mem--slug`) of the entity that was checked",
       "type": "string"
+    },
+    "finding": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CheckFindingParam"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional structured finding: `{code, message, section?, evidence?}` — `code` is your own vocabulary (`hidden-premise`, `stale-source`), `message` one or two sentences a reader can act on, `section` the section key it concerns, `evidence` what it rests on. Persisted on the ledger line, echoed in this response, rendered by `memstead_health` `include: [\"checks\"]` under the entity's latest verdict. The wrapper shape is fixed: a missing `code` or `message`, an empty value, or an unknown key refuses `INVALID_CHECK_FINDING` naming the shape, and nothing is recorded."
     },
     "identity": {
       "description": "WHO is checking: an opaque identity string (agent-trust plan 15), recorded immutably on the check record. The independence gate compares the author's recorded identity against this one and nothing else — declare a stable identity per agent/session and author≠checker becomes machine-checkable. Omit to record the session default, or nothing (the check then reads unconfirmable). Over-length refuses INVALID_IDENTITY (cap 128 chars).",
@@ -102,7 +147,7 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — the en
       ]
     },
     "kind": {
-      "description": "The check kind, from the closed vocabulary `verification` | `conformance`. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, kind) — the kinds never supersede each other. An unknown value refuses `INVALID_CHECK_KIND` naming the vocabulary.",
+      "description": "The check kind: `verification` | `conformance` (the engine's two kinds), or a caller-declared `x-<name>` kind (lowercase letters, digits, hyphens) the engine records verbatim and never interprets — it stamps no pin, moves no `check_state`, and health lists it by count. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, engine kind) — the kinds never supersede each other. Any other value refuses `INVALID_CHECK_KIND` naming the vocabulary.",
       "type": [
         "string",
         "null"

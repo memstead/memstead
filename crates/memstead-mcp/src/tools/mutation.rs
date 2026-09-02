@@ -480,7 +480,28 @@ pub struct CheckParams {
     )]
     pub identity: Option<String>,
     #[schemars(
-        description = "The check kind, from the closed vocabulary `verification` | `conformance`. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, kind) — the kinds never supersede each other. An unknown value refuses `INVALID_CHECK_KIND` naming the vocabulary."
+        description = "The check kind: `verification` | `conformance` (the engine's two kinds), or a caller-declared `x-<name>` kind (lowercase letters, digits, hyphens) the engine records verbatim and never interprets — it stamps no pin, moves no `check_state`, and health lists it by count. Omit for `verification` — exactly today's behaviour. `conformance` records a semantic judgment (\"does this entity satisfy its type's schema prose\"): the engine stamps the mem's schema pin into the record (never caller-supplied), and the verdict derives stale when the content hash moves OR the pin changes; a mem with no pin refuses `INVALID_INPUT`. State derives per (entity, engine kind) — the kinds never supersede each other. Any other value refuses `INVALID_CHECK_KIND` naming the vocabulary."
     )]
     pub kind: Option<String>,
+    #[schemars(
+        description = "Optional structured finding: `{code, message, section?, evidence?}` — `code` is your own vocabulary (`hidden-premise`, `stale-source`), `message` one or two sentences a reader can act on, `section` the section key it concerns, `evidence` what it rests on. Persisted on the ledger line, echoed in this response, rendered by `memstead_health` `include: [\"checks\"]` under the entity's latest verdict. The wrapper shape is fixed: a missing `code` or `message`, an empty value, or an unknown key refuses `INVALID_CHECK_FINDING` naming the shape, and nothing is recorded."
+    )]
+    pub finding: Option<CheckFindingParam>,
+}
+
+/// One `finding` on `memstead_check` — the wire shape of
+/// `memstead_base::check::CheckFinding`, validated as a whole by the
+/// engine type (unknown keys refuse there).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CheckFindingParam {
+    #[schemars(
+        description = "The checker's finding code, its own vocabulary (`hidden-premise`, `stale-source`). Required, non-empty."
+    )]
+    pub code: String,
+    #[schemars(description = "One or two sentences a reader can act on. Required, non-empty.")]
+    pub message: String,
+    #[schemars(description = "The section key the finding concerns, when it concerns one.")]
+    pub section: Option<String>,
+    #[schemars(description = "What the finding rests on: a quote, a coordinate, a reference.")]
+    pub evidence: Option<String>,
 }

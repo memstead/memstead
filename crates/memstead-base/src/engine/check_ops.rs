@@ -45,6 +45,39 @@ impl Engine {
         actor: Actor,
         client: Option<&ClientId>,
     ) -> Result<CheckRecord, EngineError> {
+        self.record_check_with(
+            mem_name,
+            entity_id,
+            verdict,
+            &crate::check::RecordKind::Engine(kind),
+            method,
+            None,
+            actor,
+            client,
+        )
+    }
+
+    /// [`Self::record_check`] with the full record shape: a kind that may
+    /// be a caller-declared foreign `x-<name>` kind (recorded verbatim,
+    /// never interpreted — it stamps no schema pin and moves no state),
+    /// and an optional structured finding (validated before anything is
+    /// appended; a malformed one refuses `INVALID_CHECK_FINDING`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_check_with(
+        &mut self,
+        mem_name: &str,
+        entity_id: &str,
+        verdict: Verdict,
+        kind: &crate::check::RecordKind,
+        method: Option<&str>,
+        finding: Option<crate::check::CheckFinding>,
+        actor: Actor,
+        client: Option<&ClientId>,
+    ) -> Result<CheckRecord, EngineError> {
+        if let Some(f) = &finding {
+            f.validate()
+                .map_err(|reason| EngineError::InvalidCheckFinding { reason })?;
+        }
         let mount_idx = self
             .mounts
             .iter()
@@ -53,9 +86,9 @@ impl Engine {
         if self.mounts[mount_idx].mount.capability != crate::workspace::MountCapability::Write {
             return Err(EngineError::ReadOnlyMount(mem_name.to_string()));
         }
-        let schema_ref = match kind {
-            CheckKind::Verification => None,
-            CheckKind::Conformance => Some(
+        let schema_ref = match kind.engine_kind() {
+            None | Some(CheckKind::Verification) => None,
+            Some(CheckKind::Conformance) => Some(
                 self.mounts[mount_idx]
                     .mount
                     .schema
@@ -110,10 +143,11 @@ impl Engine {
             // kind-omitted caller's ledger lines stay byte-identical
             // to the pre-kind shape.
             kind: match kind {
-                CheckKind::Verification => None,
-                CheckKind::Conformance => Some(kind.as_str().to_string()),
+                crate::check::RecordKind::Engine(CheckKind::Verification) => None,
+                other => Some(other.as_wire().to_string()),
             },
             schema_ref,
+            finding,
         };
         ledger
             .record(&record)

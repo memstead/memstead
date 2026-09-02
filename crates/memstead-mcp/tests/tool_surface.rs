@@ -1574,6 +1574,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "note",
         ],
         "memstead_check" => &[
+            // The open kind form and the finding refusal code, named
+            // literally.
+            "x-<name>",
+            "INVALID_CHECK_FINDING",
             // Response field + derived-state vocabulary (agent-trust
             // plan 14).
             "check_state",

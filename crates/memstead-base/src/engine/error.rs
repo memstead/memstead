@@ -364,6 +364,11 @@ pub enum EngineError {
     /// The entity already has the requested type.
     #[error("retype of {id} is a no-op: it already has type '{entity_type}'")]
     RetypeNoOp { id: String, entity_type: String },
+    /// A check's structured finding does not match the fixed wrapper
+    /// shape (`code` and `message` required and non-empty, `section`
+    /// and `evidence` optional, no other keys). Nothing is appended.
+    #[error("check finding refused: {reason}")]
+    InvalidCheckFinding { reason: String },
     /// A deferred (lazy, unloaded) mem's storage could not be enumerated,
     /// so its edges into the entity could not be re-checked. The retype
     /// refuses rather than assuming those edges fit the target type.
@@ -1343,6 +1348,7 @@ impl EngineError {
                 }
             }
             EngineError::RetypeNoOp { .. } => "RETYPE_NO_OP",
+            EngineError::InvalidCheckFinding { .. } => crate::check::INVALID_CHECK_FINDING_CODE,
             EngineError::RetypeReferrerUnprobeable { .. } => "RETYPE_REFERRER_UNPROBEABLE",
             EngineError::EmptyUpdate { .. } => "EMPTY_UPDATE",
             EngineError::RenameBlockedByCrossMemPolicy { .. } => {
@@ -1449,6 +1455,10 @@ impl EngineError {
             EngineError::RetypeNoOp { id, entity_type } => {
                 serde_json::json!({ "id": id, "entity_type": entity_type })
             }
+            EngineError::InvalidCheckFinding { reason } => serde_json::json!({
+                "reason": reason,
+                "shape": crate::check::CheckFinding::SHAPE,
+            }),
             EngineError::RetypeReferrerUnprobeable { id, mem, reason } => {
                 serde_json::json!({ "id": id, "mem": mem, "reason": reason })
             }

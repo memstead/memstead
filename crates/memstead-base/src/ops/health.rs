@@ -106,14 +106,32 @@ pub fn health_checks_axis(
         std::collections::BTreeMap::new();
     let mut latest_conformance: std::collections::BTreeMap<String, crate::check::CheckRecord> =
         std::collections::BTreeMap::new();
+    // Foreign `x-<name>` kinds: recorded verbatim, never aggregated into
+    // a state — listed by count per mem so a reader sees that another
+    // checker has been here. Keyed by entity for the per-mem tally.
+    let mut foreign_by_entity: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    // The newest record of ANY kind per entity, for the finding it may
+    // carry: a finding is served under the entity's latest verdict.
+    let mut newest_any: std::collections::BTreeMap<String, crate::check::CheckRecord> =
+        std::collections::BTreeMap::new();
     if let Some(l) = &ledger {
         for rec in l.all() {
+            newest_any.insert(rec.entity.clone(), rec.clone());
             match rec.resolved_kind() {
-                crate::check::CheckKind::Verification => {
+                Some(crate::check::CheckKind::Verification) => {
                     latest.insert(rec.entity.clone(), rec);
                 }
-                crate::check::CheckKind::Conformance => {
+                Some(crate::check::CheckKind::Conformance) => {
                     latest_conformance.insert(rec.entity.clone(), rec);
+                }
+                None => {
+                    if let Some(k) = rec.foreign_kind() {
+                        foreign_by_entity
+                            .entry(rec.entity.clone())
+                            .or_default()
+                            .push(k.to_string());
+                    }
                 }
             }
         }
@@ -152,8 +170,30 @@ pub fn health_checks_axis(
         let mut self_checked: Vec<String> = Vec::new();
         let mut confirmed_independent: Vec<String> = Vec::new();
         let mut unconfirmable: Vec<String> = Vec::new();
+        let mut foreign_kinds: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let mut findings = serde_json::Map::new();
         for e in engine.store().all_entities().filter(|e| e.mem == mem) {
             let id = e.id.0.clone();
+            if let Some(kinds) = foreign_by_entity.get(&id) {
+                for k in kinds {
+                    *foreign_kinds.entry(k.clone()).or_insert(0) += 1;
+                }
+            }
+            if let Some(rec) = newest_any.get(&id)
+                && let Some(f) = &rec.finding
+            {
+                findings.insert(
+                    id.clone(),
+                    serde_json::json!({
+                        "verdict": rec.verdict,
+                        "kind": rec.kind.as_deref().unwrap_or("verification"),
+                        "ts": rec.ts,
+                        "identity": rec.identity,
+                        "finding": f,
+                    }),
+                );
+            }
             let state = crate::check::derive_state(latest.get(&id), &e.content_hash);
             *counts.entry(state.as_str()).or_insert(0) += 1;
             let cstate = crate::check::derive_state_pinned(
@@ -196,6 +236,14 @@ pub fn health_checks_axis(
             c.insert(k.to_string(), serde_json::json!(v));
         }
         m.insert("conformance".into(), serde_json::Value::Object(c));
+        // Foreign kinds by count, and the structured finding each
+        // entity's newest record carries — recorded, rendered, never
+        // interpreted.
+        m.insert(
+            "foreign_kinds".into(),
+            serde_json::to_value(&foreign_kinds).unwrap_or(serde_json::json!({})),
+        );
+        m.insert("findings".into(), serde_json::Value::Object(findings));
         m.insert(
             "independence".into(),
             serde_json::json!({

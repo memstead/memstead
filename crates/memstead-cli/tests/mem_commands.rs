@@ -2846,6 +2846,204 @@ fn verify_anchors_observations_adjudicate_and_age_url_rows() {
     assert_eq!(state_of(&v, "https://w.test/never"), "unobserved");
 }
 
+/// Check findings and open kinds (evidence-engine plan 5): a batch entry
+/// with a `finding` persists it on the ledger line, the health checks
+/// axis renders it under the entity's latest verdict, an `x-` kind is
+/// recorded verbatim and listed by count without moving the state, a
+/// malformed finding and an unprefixed unknown kind refuse with nothing
+/// appended, and a conformance check still stamps the schema pin.
+#[test]
+fn check_findings_persist_and_open_kinds_are_recorded_not_interpreted() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    make_anchor_workspace(root);
+    let ledger = root.join(".memstead/state/checks/checks.jsonl");
+    let lines = || {
+        fs::read_to_string(&ledger)
+            .map(|t| t.lines().count())
+            .unwrap_or(0)
+    };
+
+    // Finding on a failed verdict, via --from.
+    fs::write(
+        root.join("f.json"),
+        r#"{"checks":[{"id":"hold--holder","verdict":"failed","method":"walked the step","finding":{"code":"hidden-premise","section":"purpose","message":"The purpose assumes a premise the identity never states."}}]}"#,
+    )
+    .unwrap();
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "--from",
+            "f.json",
+            "--identity",
+            "checker-one",
+            "--role",
+            "checker",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["checks"][0]["finding"]["code"], "hidden-premise", "{v}");
+    assert_eq!(lines(), 1);
+    let line = fs::read_to_string(&ledger).unwrap();
+    assert!(
+        line.contains("\"finding\":{\"code\":\"hidden-premise\""),
+        "{line}"
+    );
+
+    // Rendered under the entity's latest verdict.
+    let health = memstead()
+        .current_dir(root)
+        .args(["--json", "health", "--include", "checks"])
+        .assert()
+        .get_output()
+        .stdout
+        .clone();
+    let h: serde_json::Value = serde_json::from_slice(&health).unwrap();
+    let f = &h["checks"]["hold"]["findings"]["hold--holder"];
+    assert_eq!(f["verdict"], "failed", "{h}");
+    assert_eq!(f["finding"]["section"], "purpose", "{h}");
+    assert_eq!(h["checks"]["hold"]["check_failed"], 1, "{h}");
+
+    // Refusal: a finding lacking `message`, and one with an unknown key —
+    // typed, nothing appended.
+    for bad in [
+        r#"{"checks":[{"id":"hold--holder","verdict":"ok","finding":{"code":"x"}}]}"#,
+        r#"{"checks":[{"id":"hold--holder","verdict":"ok","finding":{"code":"x","message":"m","severity":"high"}}]}"#,
+    ] {
+        fs::write(root.join("bad.json"), bad).unwrap();
+        let out = memstead()
+            .current_dir(root)
+            .args(["--json", "check", "--from", "bad.json"])
+            .assert()
+            .failure()
+            .get_output()
+            .stdout
+            .clone();
+        let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(e["code"], "BATCH_REFUSED", "{e}");
+        assert_eq!(
+            e["details"]["failed_entries"][0]["errors"][0]["code"], "INVALID_CHECK_FINDING",
+            "{e}"
+        );
+        assert_eq!(lines(), 1, "nothing appended on refusal");
+    }
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "hold--holder",
+            "--verdict",
+            "ok",
+            "--finding",
+            r#"{"message":"no code"}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(e["code"], "INVALID_CHECK_FINDING", "{e}");
+    assert!(e["message"].as_str().unwrap().contains("shape"), "{e}");
+    assert_eq!(lines(), 1);
+
+    // Open kind: accepted verbatim, listed by count, state unmoved.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "hold--holder",
+            "--verdict",
+            "ok",
+            "--kind",
+            "x-step-walk",
+            "--identity",
+            "checker-one",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["kind"], "x-step-walk", "{v}");
+    assert_eq!(
+        v["check_state"], "check_failed",
+        "a foreign ok moves no verification state: {v}"
+    );
+    assert_eq!(lines(), 2);
+    let health = memstead()
+        .current_dir(root)
+        .args(["--json", "health", "--include", "checks"])
+        .assert()
+        .get_output()
+        .stdout
+        .clone();
+    let h: serde_json::Value = serde_json::from_slice(&health).unwrap();
+    assert_eq!(
+        h["checks"]["hold"]["foreign_kinds"]["x-step-walk"], 1,
+        "{h}"
+    );
+    assert_eq!(h["checks"]["hold"]["check_failed"], 1, "{h}");
+
+    // Unprefixed unknown kind refuses with the vocabulary, appends nothing.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "hold--holder",
+            "--verdict",
+            "ok",
+            "--kind",
+            "step-walk",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let e: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(e["code"], "INVALID_CHECK_KIND", "{e}");
+    assert!(e["message"].as_str().unwrap().contains("x-<name>"), "{e}");
+    assert_eq!(lines(), 2);
+
+    // Conformance still stamps the pin.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "check",
+            "hold--holder",
+            "--verdict",
+            "ok",
+            "--kind",
+            "conformance",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["kind"], "conformance");
+    assert!(
+        v["schema_ref"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("default@")),
+        "{v}"
+    );
+    assert_eq!(lines(), 3);
+}
+
 /// Criterion 3: a mem whose bindings span multiple media no longer
 /// nulls — path anchors resolve against their own recorded paths, and a
 /// grain the mechanism does not reach reports `unobserved` (the pass could

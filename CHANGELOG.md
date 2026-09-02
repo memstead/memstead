@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Check records carry a structured finding and accept an open `x-`
+  kind.** `memstead check` (single and `--from`) and `memstead_check` take
+  an optional `finding {code, message, section?, evidence?}`: persisted on
+  the ledger line (serde-default, every existing line still parses),
+  echoed on the output, rendered by `health --include checks` under the
+  entity's latest verdict (`findings`); a missing `code` or `message`, an
+  empty value or an unknown key refuses `INVALID_CHECK_FINDING` naming the
+  shape, and nothing is appended. A kind of the form `x-<name>` is
+  accepted and recorded verbatim: the engine aggregates only its own two
+  kinds, never stamps a pin or moves `check_state` for a foreign kind, and
+  lists foreign kinds by count (`foreign_kinds`); any other unknown kind
+  keeps refusing `INVALID_CHECK_KIND` with the vocabulary named. The
+  independence derivation is unchanged.
 - **Chain export: `memstead export --root <id> --via REL[,REL]
   [--direction out|in|both] [--depth N]`** renders, for `--format json`,
   `html` and `llms-txt`, only the subgraph reachable from the root along

@@ -276,9 +276,10 @@ impl CliError {
                 ExitKind::Validation,
                 Some(serde_json::json!({ "id": id, "new_title": new_title })),
             ),
-            RetypeRefused { .. } | RetypeNoOp { .. } | RetypeReferrerUnprobeable { .. } => {
-                (ExitKind::Validation, Some(e.details()))
-            }
+            RetypeRefused { .. }
+            | RetypeNoOp { .. }
+            | RetypeReferrerUnprobeable { .. }
+            | InvalidCheckFinding { .. } => (ExitKind::Validation, Some(e.details())),
             StubCannotRelate { id } | StubNotUpdatable { id } | StubNotRenamable { id } => {
                 (ExitKind::Validation, Some(serde_json::json!({ "id": id })))
             }

@@ -53,11 +53,144 @@ pub const VERDICTS: [&str; 2] = ["ok", "failed"];
 /// verdict vocabulary.
 pub const CHECK_KINDS: [&str; 2] = ["verification", "conformance"];
 
+/// Prefix of a caller-declared check kind the engine records verbatim
+/// and never interprets: `x-<name>`, `name` lowercase letters, digits
+/// and hyphens. The prefix makes the declaration deliberate — a typo of
+/// an engine kind cannot silently become a new kind — mirroring the
+/// rule that a third ENGINE kind is a separate decision. Foreign kinds
+/// never influence `check_state`; health lists them by count.
+pub const FOREIGN_KIND_PREFIX: &str = "x-";
+
+/// The typed code for a malformed finding.
+pub const INVALID_CHECK_FINDING_CODE: &str = "INVALID_CHECK_FINDING";
+
 /// A check kind from the closed vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckKind {
     Verification,
     Conformance,
+}
+
+/// What a caller may declare as a check's kind: one of the engine's
+/// two kinds, or a foreign `x-<name>` kind recorded verbatim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordKind {
+    Engine(CheckKind),
+    Foreign(String),
+}
+
+impl RecordKind {
+    /// Parse a wire kind: an engine kind, an `x-` kind (name non-empty,
+    /// lowercase letters, digits and hyphens), or `None` for anything
+    /// else — the vocabulary the refusal names is [`CHECK_KINDS`] plus
+    /// the `x-<name>` form.
+    pub fn from_wire(s: &str) -> Option<Self> {
+        if let Some(k) = CheckKind::from_wire(s) {
+            return Some(Self::Engine(k));
+        }
+        let name = s.strip_prefix(FOREIGN_KIND_PREFIX)?;
+        let well_formed = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            && !name.starts_with('-')
+            && !name.ends_with('-');
+        well_formed.then(|| Self::Foreign(s.to_string()))
+    }
+
+    /// The engine kind, when this is one.
+    pub fn engine_kind(&self) -> Option<CheckKind> {
+        match self {
+            Self::Engine(k) => Some(*k),
+            Self::Foreign(_) => None,
+        }
+    }
+
+    /// Stable wire form.
+    pub fn as_wire(&self) -> &str {
+        match self {
+            Self::Engine(k) => k.as_str(),
+            Self::Foreign(s) => s.as_str(),
+        }
+    }
+
+    /// The vocabulary sentence a refusal carries.
+    pub fn vocabulary_hint() -> String {
+        format!(
+            "{}, or a caller-declared `{FOREIGN_KIND_PREFIX}<name>` kind (lowercase letters, digits, hyphens) the engine records verbatim and never interprets",
+            CHECK_KINDS.join(", ")
+        )
+    }
+}
+
+/// A structured finding riding a check record: WHAT failed (or what was
+/// observed) in a locatable form, so a `failed` verdict never forces
+/// the author to re-derive the failure from a free-text method note.
+/// `code` is the checker's own vocabulary (free for callers); the
+/// wrapper shape is fixed and refuses unknown keys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckFinding {
+    /// The checker's finding code (`hidden-premise`, `stale-source`, …).
+    pub code: String,
+    /// The section key the finding concerns, when it concerns one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    /// One or two sentences a reader can act on.
+    pub message: String,
+    /// What the finding rests on: a quote, a coordinate, a reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+impl CheckFinding {
+    /// The shape sentence every refusal names.
+    pub const SHAPE: &'static str =
+        "{code: <non-empty>, message: <non-empty>, section?: <key>, evidence?: <text>}";
+
+    /// `code` and `message` are required and non-empty; `section` and
+    /// `evidence`, when present, are non-empty too.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.code.trim().is_empty() {
+            return Err(format!(
+                "finding.code is required and must be non-empty — shape {}",
+                Self::SHAPE
+            ));
+        }
+        if self.message.trim().is_empty() {
+            return Err(format!(
+                "finding.message is required and must be non-empty — shape {}",
+                Self::SHAPE
+            ));
+        }
+        if self.section.as_deref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(format!(
+                "finding.section, when given, must be non-empty — shape {}",
+                Self::SHAPE
+            ));
+        }
+        if self
+            .evidence
+            .as_deref()
+            .is_some_and(|s| s.trim().is_empty())
+        {
+            return Err(format!(
+                "finding.evidence, when given, must be non-empty — shape {}",
+                Self::SHAPE
+            ));
+        }
+        Ok(())
+    }
+
+    /// Parse and validate a finding from JSON (the CLI's `--finding` and
+    /// batch entries, the MCP param). An unknown key, a missing required
+    /// key, or an empty value is one typed refusal naming the shape.
+    pub fn from_json(value: serde_json::Value) -> Result<Self, String> {
+        let finding: CheckFinding = serde_json::from_value(value)
+            .map_err(|e| format!("finding does not match the shape {} ({e})", Self::SHAPE))?;
+        finding.validate()?;
+        Ok(finding)
+    }
 }
 
 impl CheckKind {
@@ -148,17 +281,32 @@ pub struct CheckRecord {
     /// caller never read. Absent on `verification` records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_ref: Option<String>,
+    /// The structured finding the checker attached, when one was.
+    /// Absent on every line written before findings existed and on
+    /// finding-less checks — serde-default, so every existing line
+    /// still parses and finding-less lines stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding: Option<CheckFinding>,
 }
 
 impl CheckRecord {
-    /// The record's kind, legacy lines included: an absent or
-    /// unrecognised kind reads as `verification`, which is exactly
-    /// what every pre-kind line was.
-    pub fn resolved_kind(&self) -> CheckKind {
+    /// The record's ENGINE kind, legacy lines included: an absent or
+    /// unrecognised kind reads as `verification`, which is exactly what
+    /// every pre-kind line was; a foreign `x-<name>` kind is `None` —
+    /// recorded, listed, never aggregated into a state.
+    pub fn resolved_kind(&self) -> Option<CheckKind> {
+        match self.kind.as_deref() {
+            None => Some(CheckKind::Verification),
+            Some(k) if k.starts_with(FOREIGN_KIND_PREFIX) => None,
+            Some(k) => Some(CheckKind::from_wire(k).unwrap_or(CheckKind::Verification)),
+        }
+    }
+
+    /// The foreign kind, when the record carries one.
+    pub fn foreign_kind(&self) -> Option<&str> {
         self.kind
             .as_deref()
-            .and_then(CheckKind::from_wire)
-            .unwrap_or(CheckKind::Verification)
+            .filter(|k| k.starts_with(FOREIGN_KIND_PREFIX))
     }
 }
 
@@ -286,7 +434,7 @@ impl CheckLedger {
         self.all()
             .into_iter()
             .rev()
-            .find(|r| r.entity == entity && r.resolved_kind() == kind)
+            .find(|r| r.entity == entity && r.resolved_kind() == Some(kind))
     }
 }
 
@@ -308,6 +456,7 @@ mod tests {
             identity: None,
             kind: None,
             schema_ref: None,
+            finding: None,
         }
     }
 
@@ -370,7 +519,7 @@ mod tests {
     fn legacy_lines_read_as_verification() {
         let legacy = r#"{"ts":1,"entity":"m--e","verdict":"ok","entity_hash":"h1","actor":"cli","role":"checker"}"#;
         let parsed: CheckRecord = serde_json::from_str(legacy).unwrap();
-        assert_eq!(parsed.resolved_kind(), CheckKind::Verification);
+        assert_eq!(parsed.resolved_kind(), Some(CheckKind::Verification));
         // A freshly built verification record serialises with no kind
         // and no schema_ref key at all.
         let fresh = rec("m--e", "ok", "h1");
@@ -433,5 +582,102 @@ mod tests {
             CheckState::CheckedOk
         );
         assert_eq!(derive_state(Some(&v), "h1"), CheckState::CheckedOk);
+    }
+
+    // --- findings and open kinds ---
+
+    #[test]
+    fn finding_shape_is_fixed_and_validated_whole() {
+        let ok = CheckFinding::from_json(serde_json::json!({
+            "code": "hidden-premise", "message": "The step assumes X.", "section": "step"
+        }))
+        .unwrap();
+        assert_eq!(ok.code, "hidden-premise");
+        assert_eq!(ok.section.as_deref(), Some("step"));
+        for bad in [
+            serde_json::json!({ "message": "no code" }),
+            serde_json::json!({ "code": "x" }),
+            serde_json::json!({ "code": "", "message": "empty code" }),
+            serde_json::json!({ "code": "x", "message": "   " }),
+            serde_json::json!({ "code": "x", "message": "m", "severity": "high" }),
+            serde_json::json!({ "code": "x", "message": "m", "section": "" }),
+        ] {
+            let err = CheckFinding::from_json(bad.clone()).unwrap_err();
+            assert!(err.contains("shape"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn open_kinds_parse_only_with_the_prefix_and_never_resolve_to_an_engine_kind() {
+        assert_eq!(
+            RecordKind::from_wire("verification"),
+            Some(RecordKind::Engine(CheckKind::Verification))
+        );
+        assert_eq!(
+            RecordKind::from_wire("x-step-walk"),
+            Some(RecordKind::Foreign("x-step-walk".to_string()))
+        );
+        for bad in ["step-walk", "x-", "x-Step", "x--a", "x-a-", "X-a"] {
+            assert!(RecordKind::from_wire(bad).is_none(), "{bad}");
+        }
+        assert!(RecordKind::vocabulary_hint().contains("x-<name>"));
+        let mut r = rec("m--e", "ok", "h");
+        r.kind = Some("x-step-walk".to_string());
+        assert_eq!(r.resolved_kind(), None);
+        assert_eq!(r.foreign_kind(), Some("x-step-walk"));
+        r.kind = None;
+        assert_eq!(r.resolved_kind(), Some(CheckKind::Verification));
+        r.kind = Some("conformance".to_string());
+        assert_eq!(r.resolved_kind(), Some(CheckKind::Conformance));
+        // A pre-`x-` unrecognised kind keeps its legacy reading.
+        r.kind = Some("mystery".to_string());
+        assert_eq!(r.resolved_kind(), Some(CheckKind::Verification));
+    }
+
+    #[test]
+    fn pre_finding_ledger_lines_parse_and_derive_unchanged_and_findings_round_trip() {
+        let tmp = TempDir::new().unwrap();
+        let ledger = CheckLedger::for_workspace(tmp.path());
+        let dir = check_ledger_path(tmp.path());
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        // A line written before findings existed: no `finding`, no `kind`.
+        std::fs::write(
+            &dir,
+            "{\"ts\":1,\"entity\":\"m--e\",\"verdict\":\"failed\",\"entity_hash\":\"h\",\"actor\":\"cli\",\"role\":\"unspecified\"}\n",
+        )
+        .unwrap();
+        let old = ledger
+            .latest_for_kind("m--e", CheckKind::Verification)
+            .unwrap();
+        assert!(old.finding.is_none());
+        assert_eq!(derive_state(Some(&old), "h"), CheckState::CheckFailed);
+
+        let mut with = rec("m--e", "failed", "h");
+        with.ts = 2;
+        with.finding = Some(CheckFinding {
+            code: "hidden-premise".into(),
+            section: Some("step".into()),
+            message: "The step assumes X.".into(),
+            evidence: None,
+        });
+        ledger.record(&with).unwrap();
+        // A foreign-kind line beside it moves no verification state.
+        let mut foreign = rec("m--e", "ok", "h");
+        foreign.ts = 3;
+        foreign.kind = Some("x-step-walk".into());
+        ledger.record(&foreign).unwrap();
+        let latest = ledger
+            .latest_for_kind("m--e", CheckKind::Verification)
+            .unwrap();
+        assert_eq!(
+            latest.ts, 2,
+            "the foreign record is not the latest verification record"
+        );
+        assert_eq!(latest.finding.as_ref().unwrap().code, "hidden-premise");
+        assert_eq!(derive_state(Some(&latest), "h"), CheckState::CheckFailed);
+        let text = std::fs::read_to_string(&dir).unwrap();
+        assert!(text.contains("\"finding\":{\"code\":\"hidden-premise\",\"section\":\"step\",\"message\":\"The step assumes X.\"}"), "{text}");
+        assert!(text.contains("\"kind\":\"x-step-walk\""));
+        assert_eq!(text.lines().count(), 3, "append-only");
     }
 }

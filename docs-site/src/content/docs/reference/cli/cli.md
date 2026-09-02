@@ -1057,8 +1057,9 @@ Record a check: "entity E checked, verdict ok | failed, via method M" — an eng
 
 * `--verdict <VERDICT>` — The verdict: `ok` | `failed`. The vocabulary is closed — nuance goes in `--method` or in process-mem entities
 * `--method <METHOD>` — Free-text method note — how the check was performed. For a conformance check, name the judging model here
-* `--kind <KIND>` — The check kind: `verification` (default — "I checked this entity's content") | `conformance` (a semantic judgment against the type's schema prose; the engine stamps the mem's schema pin into the record, and the verdict goes stale when the content hash moves OR the pin changes). The vocabulary is closed
-* `--from <PATH>` — Record a batch of checks from a JSON file in one engine boot: `{"checks": [{"id": "...", "verdict": "ok", "method": "...", "kind": "..."}, ...]}` — `method` and `kind` optional per entry, mirroring the single form. All-or-nothing: any invalid entry (unknown verdict or kind, missing entity) refuses the whole batch and names EVERY failing entry; nothing is recorded
+* `--kind <KIND>` — The check kind: `verification` (default — "I checked this entity's content") | `conformance` (a semantic judgment against the type's schema prose; the engine stamps the mem's schema pin into the record, and the verdict goes stale when the content hash moves OR the pin changes) | `x-<name>` (a caller-declared kind the engine records verbatim and never interprets: it stamps no pin, moves no state, and health lists it by count). Anything else refuses `INVALID_CHECK_KIND`
+* `--finding <JSON>` — A structured finding as JSON: `{"code": "...", "message": "...", "section"?: "<key>", "evidence"?: "..."}`. Persisted on the ledger line, echoed on the output, rendered by `health --include checks` under the entity's latest verdict. `code` is your own vocabulary; the wrapper shape is fixed and refuses unknown keys (`INVALID_CHECK_FINDING`)
+* `--from <PATH>` — Record a batch of checks from a JSON file in one engine boot: `{"checks": [{"id": "...", "verdict": "ok", "method": "...", "kind": "...", "finding": {...}}, ...]}` — `method`, `kind` and `finding` optional per entry, mirroring the single form. All-or-nothing: any invalid entry (unknown verdict or kind, missing entity) refuses the whole batch and names EVERY failing entry; nothing is recorded
 
 
 

@@ -1645,13 +1645,14 @@ fn engine_err_unified(
         // Retype refusals carry their report-all payload from `details()`
         // so the CLI and MCP envelopes cannot drift; the code is the
         // shared problem code or `RETYPE_REFUSED` (see `EngineError::code`).
-        E::RetypeRefused { .. } | E::RetypeNoOp { .. } | E::RetypeReferrerUnprobeable { .. } => {
-            tool_error_with_payload(
-                e.code(),
-                &message,
-                envelope(e.code(), message.clone(), e.details()),
-            )
-        }
+        E::RetypeRefused { .. }
+        | E::RetypeNoOp { .. }
+        | E::RetypeReferrerUnprobeable { .. }
+        | E::InvalidCheckFinding { .. } => tool_error_with_payload(
+            e.code(),
+            &message,
+            envelope(e.code(), message.clone(), e.details()),
+        ),
         E::RenameNoOp { id, new_title } => tool_error_with_payload(
             "RENAME_NO_OP",
             &message,
@@ -3440,13 +3441,15 @@ impl McpServer {
             );
         };
         let kind = match p.kind.as_deref() {
-            None => memstead_base::check::CheckKind::Verification,
-            Some(s) => match memstead_base::check::CheckKind::from_wire(s) {
+            None => memstead_base::check::RecordKind::Engine(
+                memstead_base::check::CheckKind::Verification,
+            ),
+            Some(s) => match memstead_base::check::RecordKind::from_wire(s) {
                 Some(k) => k,
                 None => {
                     let msg = format!(
                         "unknown check kind {s:?} — the vocabulary is: {}",
-                        memstead_base::check::CHECK_KINDS.join(", ")
+                        memstead_base::check::RecordKind::vocabulary_hint()
                     );
                     return tool_error_with_payload(
                         "INVALID_CHECK_KIND",
@@ -3454,7 +3457,29 @@ impl McpServer {
                         envelope(
                             "INVALID_CHECK_KIND",
                             msg.clone(),
-                            serde_json::json!({ "allowed": memstead_base::check::CHECK_KINDS }),
+                            serde_json::json!({
+                                "allowed": memstead_base::check::CHECK_KINDS,
+                                "foreign_prefix": memstead_base::check::FOREIGN_KIND_PREFIX,
+                            }),
+                        ),
+                    );
+                }
+            },
+        };
+        let finding = match p.finding.as_ref() {
+            None => None,
+            Some(f) => match memstead_base::check::CheckFinding::from_json(
+                serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
+            ) {
+                Ok(f) => Some(f),
+                Err(reason) => {
+                    return tool_error_with_payload(
+                        memstead_base::check::INVALID_CHECK_FINDING_CODE,
+                        &reason,
+                        envelope(
+                            memstead_base::check::INVALID_CHECK_FINDING_CODE,
+                            reason.clone(),
+                            serde_json::json!({ "shape": memstead_base::check::CheckFinding::SHAPE }),
                         ),
                     );
                 }
@@ -3475,23 +3500,24 @@ impl McpServer {
         engine.set_role(role);
         engine.set_identity(identity);
         let client = self.client.get().cloned();
-        match engine.record_check(
+        match engine.record_check_with(
             id.mem(),
             id.as_ref(),
             verdict,
-            kind,
+            &kind,
             p.method.as_deref(),
+            finding,
             Actor::Agent,
             client.as_ref(),
         ) {
             Ok(record) => {
-                let state_result = match kind {
-                    memstead_base::check::CheckKind::Verification => {
-                        engine.entity_check_state(id.mem(), id.as_ref())
-                    }
-                    memstead_base::check::CheckKind::Conformance => {
+                // A foreign kind moves no state: the response reports the
+                // verification state, unchanged by this record.
+                let state_result = match kind.engine_kind() {
+                    Some(memstead_base::check::CheckKind::Conformance) => {
                         engine.entity_conformance_state(id.mem(), id.as_ref())
                     }
+                    _ => engine.entity_check_state(id.mem(), id.as_ref()),
                 };
                 let (state, _) = match state_result {
                     Ok(pair) => pair,
@@ -3507,6 +3533,7 @@ impl McpServer {
                     "identity": record.identity,
                     "ts": record.ts,
                     "method": record.method,
+                    "finding": record.finding,
                 });
                 md_with_structured(
                     format!(
