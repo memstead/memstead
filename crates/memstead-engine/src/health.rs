@@ -886,6 +886,34 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
                 gate("confirmed_independent"),
                 gate("unconfirmable"),
             );
+            // Foreign `x-` kinds by count and each entity's newest finding —
+            // the same lines the CLI text surface prints, so the two
+            // renderers say the same thing.
+            if let Some(foreign) = c.get("foreign_kinds").and_then(|f| f.as_object())
+                && !foreign.is_empty()
+            {
+                let listed: Vec<String> = foreign
+                    .iter()
+                    .map(|(k, n)| format!("{k} {}", n.as_u64().unwrap_or(0)))
+                    .collect();
+                let _ = writeln!(s, "  - foreign kinds: {}", listed.join(", "));
+            }
+            if let Some(findings) = c.get("findings").and_then(|f| f.as_object()) {
+                for (entity, f) in findings {
+                    let code = f["finding"]["code"].as_str().unwrap_or("?");
+                    let section = f["finding"]["section"]
+                        .as_str()
+                        .map(|x| format!(" [{x}]"))
+                        .unwrap_or_default();
+                    let message = f["finding"]["message"].as_str().unwrap_or("");
+                    let _ = writeln!(
+                        s,
+                        "  - finding on `{entity}` ({} {}): {code}{section} — {message}",
+                        f["kind"].as_str().unwrap_or("verification"),
+                        f["verdict"].as_str().unwrap_or("?"),
+                    );
+                }
+            }
         }
     }
 
