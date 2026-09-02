@@ -240,6 +240,19 @@ impl crate::Engine {
         mem: &str,
         ctx: &LlmsTxtContext,
     ) -> Result<String, crate::engine::EngineError> {
+        self.render_llms_txt_scoped(mem, ctx, None)
+    }
+
+    /// [`Self::render_llms_txt`] reduced to a chain: only the mem's
+    /// entities in `chain` are rendered, wiki-links to entities outside
+    /// it stay raw (unresolved), and the header names the chain. `None`
+    /// is the whole mem, byte-identical to the unscoped document.
+    pub fn render_llms_txt_scoped(
+        &self,
+        mem: &str,
+        ctx: &LlmsTxtContext,
+        chain: Option<&crate::graph::chain::ChainSet>,
+    ) -> Result<String, crate::engine::EngineError> {
         let mounted = self
             .mounts
             .iter()
@@ -275,16 +288,26 @@ impl crate::Engine {
             }
         };
 
-        // Every non-stub entity of THIS mem, once, in stable id order.
-        let id_titles = self.entity_id_titles();
+        // Every non-stub entity of THIS mem, once, in stable id order —
+        // reduced to the chain when one is given. The link table is
+        // reduced the same way, so a link to an entity outside the chain
+        // stays raw text rather than pointing at a page this document
+        // does not contain.
+        let mut id_titles = self.entity_id_titles();
+        if let Some(chain) = chain {
+            id_titles.retain(|(id, _)| chain.contains(&EntityId::canonical(id)));
+        }
         let mut ids: Vec<String> = self
             .store
             .all_entities()
-            .filter(|e| e.mem == mem && !e.stub)
+            .filter(|e| e.mem == mem && !e.stub && chain.is_none_or(|c| c.contains(&e.id)))
             .map(|e| e.id.to_string())
             .collect();
         ids.sort();
         let count = ids.len();
+        let chain_line = chain
+            .map(|c| format!("Chain: {}\n", c.describe()))
+            .unwrap_or_default();
 
         // The header names an authority only when one is serving. A CLI export
         // names the mem: no deployment is vouching for these bytes, and saying
@@ -318,15 +341,23 @@ impl crate::Engine {
             "Entity references are absolute links to that entity's own page."
         };
 
+        let scope_sentence = if chain.is_some() {
+            "Every non-stub entity of this Memstead graph that the chain above reaches follows, \
+             once, with its type and sections; references to entities outside the chain are left \
+             as raw wiki-links."
+        } else {
+            "Every non-stub entity of this Memstead graph follows, once, with its type and \
+             sections."
+        };
         let mut out = format!(
             "{heading}\
 Subject: {subject}\n\
 Schema: {schema_pin}\n\
+{chain_line}\
 Entities: {count}\n\
 Provenance: {provenance}\n\n\
 {wider}\
-Every non-stub entity of this Memstead graph follows, once, with its type and \
-sections. {links_sentence}\n\n\
+{scope_sentence} {links_sentence}\n\n\
 ---\n\n"
         );
 

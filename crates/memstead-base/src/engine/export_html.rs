@@ -223,6 +223,21 @@ impl Engine {
         mem: &str,
         export_date: &str,
     ) -> Result<String, crate::engine::EngineError> {
+        self.render_html_export_scoped(mem, export_date, None)
+    }
+
+    /// [`Self::render_html_export`] reduced to a chain: only the mem's
+    /// entities in `chain` are rendered (stubs in the chain listed as
+    /// such), links to entities outside it render as unresolved markers,
+    /// and the identity block names the chain. `None` is the whole mem,
+    /// byte-identical to the unscoped export.
+    pub fn render_html_export_scoped(
+        &self,
+        mem: &str,
+        export_date: &str,
+        chain: Option<&crate::graph::chain::ChainSet>,
+    ) -> Result<String, crate::engine::EngineError> {
+        let in_scope = |e: &Entity| chain.is_none_or(|c| c.contains(&e.id));
         let mounted = self
             .mounts
             .iter()
@@ -248,7 +263,7 @@ impl Engine {
         let mut entities: Vec<&Entity> = self
             .store
             .all_entities()
-            .filter(|e| e.mem == mem && !e.stub)
+            .filter(|e| e.mem == mem && !e.stub && in_scope(e))
             .collect();
         entities.sort_by(|a, b| {
             a.entity_type
@@ -258,7 +273,7 @@ impl Engine {
         let mut stubs: Vec<&Entity> = self
             .store
             .all_entities()
-            .filter(|e| e.mem == mem && e.stub)
+            .filter(|e| e.mem == mem && e.stub && in_scope(e))
             .collect();
         stubs.sort_by(|a, b| a.id.as_ref().cmp(b.id.as_ref()));
         let exported_ids: Vec<String> = entities.iter().map(|e| e.id.to_string()).collect();
@@ -325,6 +340,14 @@ impl Engine {
             "first-party (writable mem of this workspace)"
         };
         let _ = writeln!(out, "<div><strong>Origin:</strong> {trust}</div>");
+        if let Some(chain) = chain {
+            let _ = writeln!(
+                out,
+                "<div><strong>Chain:</strong> {} — only the entities reachable from the root are \
+                 rendered; links to entities outside the chain are marked unresolved</div>",
+                esc(&chain.describe())
+            );
+        }
         let _ = write!(
             out,
             "<div><strong>Exported:</strong> {} · {} entities</div>\n</div>\n",

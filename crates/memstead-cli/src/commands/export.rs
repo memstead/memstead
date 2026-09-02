@@ -56,6 +56,37 @@ pub struct Args {
     #[arg(long = "mem", value_name = "NAME")]
     pub mem_name: Option<String>,
 
+    /// Export only the chain reachable from this entity (`mem--slug`)
+    /// instead of the whole mem — for `--format json`, `html` and
+    /// `llms-txt`. Requires `--via`. The root itself is always included;
+    /// each rendered entity keeps its metadata, sections, relationships
+    /// and (json) its anchors with live state; stubs in the chain are
+    /// marked; references to entities outside the chain render as
+    /// unresolved markers, never as broken links. Without `--root` the
+    /// export is the whole mem, byte-identical to before.
+    #[arg(long, value_name = "ID")]
+    pub root: Option<String>,
+
+    /// Rel-types the chain follows, comma-separated or repeatable
+    /// (`--via SUPPORTS,DERIVES_FROM`). Validated against the mem's
+    /// schema vocabulary: an unknown name refuses `INVALID_REL_TYPE`
+    /// naming the declared rel-types. Only with `--root`.
+    #[arg(long, value_name = "REL", value_delimiter = ',')]
+    pub via: Vec<String>,
+
+    /// Direction applied at EVERY hop of the chain: `out` follows edges
+    /// pointing away from the root (what the root rests on), `in`
+    /// follows edges pointing at it (what rests on the root), `both`
+    /// the undirected walk. A pure transitive closure in the chosen
+    /// direction, the same contract `memstead search` uses.
+    #[arg(long, value_enum, default_value_t = ChainDirection::Out)]
+    pub direction: ChainDirection,
+
+    /// Maximum hops from the root (default: unbounded). `--depth 1` is
+    /// the root and its direct neighbours along `--via`.
+    #[arg(long, value_name = "N")]
+    pub depth: Option<usize>,
+
     /// For `--format mem`: make the archive self-contained by dropping
     /// every `## Relationships` row whose target lives in another mem,
     /// then re-pack and strictly validate it (the same pass `install`
@@ -87,6 +118,37 @@ pub struct Args {
     pub include: Vec<String>,
 }
 
+/// `--direction` for a chain export — the wire words of the engine's
+/// `TraversalDirection`, one value each.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChainDirection {
+    Out,
+    In,
+    Both,
+}
+
+impl From<ChainDirection> for memstead_base::graph::query::TraversalDirection {
+    fn from(d: ChainDirection) -> Self {
+        match d {
+            ChainDirection::Out => Self::Out,
+            ChainDirection::In => Self::In,
+            ChainDirection::Both => Self::Both,
+        }
+    }
+}
+
+/// The chain scope a caller asked for, or `None` for the whole mem.
+fn chain_scope(args: &Args) -> Option<memstead_base::graph::chain::ChainScope> {
+    args.root
+        .as_deref()
+        .map(|root| memstead_base::graph::chain::ChainScope {
+            root: memstead_base::EntityId::canonical(root),
+            via: args.via.clone(),
+            direction: args.direction.into(),
+            depth: args.depth.unwrap_or(usize::MAX),
+        })
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum Format {
     /// Regenerate markdown files in place.
@@ -105,6 +167,36 @@ pub enum Format {
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
+    // The chain flags travel together, refused typed (not as a clap usage
+    // error) so an agent reads the same envelope every other refusal has.
+    if args.root.is_some() && args.via.is_empty() {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--root selects a chain and needs --via <REL[,REL]>: the rel-types the chain follows",
+        )
+        .with_details(json!({ "field": "via" }))
+        .into());
+    }
+    if args.root.is_none() && (!args.via.is_empty() || args.depth.is_some()) {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--via and --depth describe a chain and need --root <ID>",
+        )
+        .with_details(json!({ "field": "root" }))
+        .into());
+    }
+    if args.root.is_some() && !matches!(args.format, Format::Json | Format::Html | Format::LlmsTxt)
+    {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "INVALID_INPUT",
+            "--root selects a chain within a rendered export (json, html, llms-txt); the \
+             markdown regeneration and the .mem archive always carry the whole mem",
+        )
+        .into());
+    }
     if !args.include.is_empty() && !matches!(args.format, Format::Json) {
         return Err(CliError::new(
             ExitKind::Validation,
@@ -199,11 +291,30 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let cli_engine = ctx.cli_engine()?;
     let engine = cli_engine.base();
 
+    // A chain is resolved once, against the root's mem (the mem is
+    // implied by the root when `--mem` is omitted).
+    let scope = chain_scope(&args);
+    let chain = match &scope {
+        Some(scope) => {
+            let mem = args
+                .mem_name
+                .clone()
+                .unwrap_or_else(|| scope.root.mem().to_string());
+            Some((
+                mem.clone(),
+                engine
+                    .chain_set(&mem, scope)
+                    .map_err(CliError::from_engine_op)?,
+            ))
+        }
+        None => None,
+    };
+
     let all_names: Vec<String> = engine.mem_names().into_iter().map(String::from).collect();
     // Named mem: any loaded mount qualifies, read-only included — an
     // explicit name is the opt-in. Workspace-wide default: writable
     // mems only; read-only mounts are someone else's published content.
-    let selected: Vec<String> = match &args.mem_name {
+    let selected: Vec<String> = match chain.as_ref().map(|(m, _)| m).or(args.mem_name.as_ref()) {
         Some(name) => {
             if !all_names.iter().any(|n| n == name) {
                 return Err(CliError::new(
@@ -241,6 +352,7 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .store()
             .all_entities()
             .filter(|e| !e.stub && e.mem == *mem_name)
+            .filter(|e| chain.as_ref().is_none_or(|(_, c)| c.contains(&e.id)))
             .collect();
         entities.sort_by(|a, b| a.id.as_ref().cmp(b.id.as_ref()));
 
@@ -276,6 +388,20 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         serde_json::to_value(&anchors).unwrap_or(serde_json::Value::Null),
                     );
                 }
+                // A chain export is an auditor's read: every node carries
+                // its anchors WITH live state (artifact, grain, class,
+                // state), so one export answers what each link in the
+                // chain rests on and whether it still holds.
+                if chain.is_some()
+                    && !include_anchors
+                    && let Some(obj) = envelope.as_object_mut()
+                {
+                    let resolved = engine.entity_anchors_resolved(&entity.id);
+                    obj.insert(
+                        "anchors".to_string(),
+                        serde_json::to_value(&resolved).unwrap_or(serde_json::Value::Null),
+                    );
+                }
                 envelope
             })
             .collect();
@@ -290,6 +416,32 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         );
         group.insert("entity_count".to_string(), json!(envelopes.len()));
         group.insert("entities".to_string(), serde_json::Value::Array(envelopes));
+        // The chain itself: what was asked for, and the induced subgraph
+        // (nodes in this mem, edges with both ends in the chain) — the
+        // same node and edge set the ui-api topology endpoint returns for
+        // the same scope, so the two surfaces can be compared directly.
+        if let Some((_, chain_set)) = &chain {
+            let topology = engine
+                .mem_topology_scoped(mem_name, Some(chain_set))
+                .map_err(CliError::from_engine_op)?;
+            group.insert(
+                "chain".to_string(),
+                json!({
+                    "root": chain_set.scope.root.to_string(),
+                    "via": chain_set.scope.via,
+                    "direction": chain_set.scope.direction.as_wire(),
+                    "depth": (chain_set.scope.depth != usize::MAX).then_some(chain_set.scope.depth),
+                    "nodes": topology.nodes.iter().map(|n| &n.id).collect::<Vec<_>>(),
+                    "edges": topology.edges,
+                    "reached": chain_set.reached.iter().map(|r| json!({
+                        "id": r.id.to_string(),
+                        "via_edge": r.via_edge,
+                        "depth": r.depth,
+                        "direction": r.direction.as_wire(),
+                    })).collect::<Vec<_>>(),
+                }),
+            );
+        }
         mems.insert(mem_name.clone(), serde_json::Value::Object(group));
     }
 
@@ -725,7 +877,12 @@ fn default_output_path(
 fn run_llms_txt(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let engine_holder = ctx.cli_engine()?;
     let engine = engine_holder.base();
-    let mem = resolve_single_mem(engine, args.mem_name.as_deref())?;
+    // A chain's root implies the mem when `--mem` is omitted.
+    let implied_mem = args
+        .root
+        .as_deref()
+        .map(|r| memstead_base::EntityId::canonical(r).mem().to_string());
+    let mem = resolve_single_mem(engine, args.mem_name.as_deref().or(implied_mem.as_deref()))?;
 
     let ctx_opts = memstead_base::engine::export_llms_txt::LlmsTxtContext {
         authority: None,
@@ -736,8 +893,16 @@ fn run_llms_txt(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .unwrap_or_default(),
         wider_project: Vec::new(),
     };
+    let chain = match chain_scope(&args) {
+        Some(scope) => Some(
+            engine
+                .chain_set(&mem, &scope)
+                .map_err(CliError::from_engine_op)?,
+        ),
+        None => None,
+    };
     let doc = engine
-        .render_llms_txt(&mem, &ctx_opts)
+        .render_llms_txt_scoped(&mem, &ctx_opts, chain.as_ref())
         .map_err(CliError::from_engine_op)?;
 
     match &args.output {
@@ -809,8 +974,13 @@ fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let engine_holder = ctx.cli_engine()?;
     let engine = engine_holder.base();
     // Resolve the target mem like `--format mem`: explicit name wins
-    // (read-only mounts allowed); otherwise the sole writable mem.
-    let mem = match &args.mem_name {
+    // (read-only mounts allowed); a chain's root implies its mem;
+    // otherwise the sole writable mem.
+    let implied_mem = args
+        .root
+        .as_deref()
+        .map(|r| memstead_base::EntityId::canonical(r).mem().to_string());
+    let mem = match args.mem_name.as_ref().or(implied_mem.as_ref()) {
         Some(m) => m.clone(),
         None => {
             let writables: Vec<String> = engine
@@ -849,8 +1019,16 @@ fn run_html(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         u8::from(now.month()),
         now.day()
     );
+    let chain = match chain_scope(&args) {
+        Some(scope) => Some(
+            engine
+                .chain_set(&mem, &scope)
+                .map_err(CliError::from_engine_op)?,
+        ),
+        None => None,
+    };
     let html = engine
-        .render_html_export(&mem, &export_date)
+        .render_html_export_scoped(&mem, &export_date, chain.as_ref())
         .map_err(CliError::from_engine_op)?;
     let out_path = args
         .output

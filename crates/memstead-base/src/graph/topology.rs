@@ -83,6 +83,19 @@ impl crate::Engine {
     /// the next projection. Unknown mems refuse with
     /// [`crate::EngineError::UnknownMem`].
     pub fn mem_topology(&self, mem: &str) -> Result<MemTopology, crate::EngineError> {
+        self.mem_topology_scoped(mem, None)
+    }
+
+    /// [`Self::mem_topology`] reduced to a chain: only the mem's entities
+    /// in `chain` become nodes, and only the edges whose both ends are in
+    /// the chain (the target possibly in another mem, marked) become
+    /// edges — the subgraph the chain induces. `None` is the whole mem,
+    /// byte-identical to the unscoped projection.
+    pub fn mem_topology_scoped(
+        &self,
+        mem: &str,
+        chain: Option<&crate::graph::chain::ChainSet>,
+    ) -> Result<MemTopology, crate::EngineError> {
         if self.mount(mem).is_none() {
             return Err(self.unknown_mem_error(mem));
         }
@@ -98,6 +111,11 @@ impl crate::Engine {
             if entity.mem != mem {
                 continue;
             }
+            if let Some(chain) = chain
+                && !chain.contains(&entity.id)
+            {
+                continue;
+            }
             let id = entity.id.to_string();
             let community = louvain.entity_cluster_map.get(&id).cloned();
             if let Some(cluster) = &community {
@@ -111,6 +129,11 @@ impl crate::Engine {
                 stub: entity.stub,
             });
             for edge in store.outgoing(&entity.id) {
+                if let Some(chain) = chain
+                    && !chain.contains(&edge.target)
+                {
+                    continue;
+                }
                 let target_in_mem = store
                     .get(&edge.target)
                     .map(|t| t.mem == mem)

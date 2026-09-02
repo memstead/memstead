@@ -9,6 +9,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Chain export: `memstead export --root <id> --via REL[,REL]
+  [--direction out|in|both] [--depth N]`** renders, for `--format json`,
+  `html` and `llms-txt`, only the subgraph reachable from the root along
+  the named rel-types in the given direction — direction applied at every
+  hop, the same transitive-closure contract `memstead search` uses — each
+  entity with its metadata, sections, relationships and (json) its anchors
+  with live state, stubs in the chain marked, references to entities
+  outside the chain left unresolved rather than rendered as broken links.
+  The json export carries a `chain` block (root, via, direction, depth,
+  the nodes and the induced edges with cross-mem targets marked) that
+  matches the ui-api topology endpoint for the same scope, whose
+  `GET /mems/{mem}/topology` now accepts `root`, `via`, `direction` and
+  `depth`. Without `--root` every export is byte-identical to before. An
+  unknown rel-type refuses `INVALID_REL_TYPE` naming the vocabulary, an
+  unknown root `ENTITY_NOT_FOUND`, `--root` without `--via` (and the
+  reverse) `INVALID_INPUT`. No MCP tool: bulk export stays CLI-only.
 - **`memstead retype <id> --type <target>` and `memstead_retype`: change
   an entity's type in place.** The id, file path and every incoming edge
   stay; nothing is deleted or re-created. The existing sections and

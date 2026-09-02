@@ -1,5 +1,6 @@
 //! Graph algorithms — BFS traversal, community detection, neighborhood queries.
 
+pub mod chain;
 pub mod community;
 pub mod query;
 pub mod relations;
