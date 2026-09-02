@@ -441,7 +441,7 @@ Export a mem: markdown in place, a portable `.mem` archive, JSON, one self-conta
 
 ###### **Options:**
 
-* `--format <FORMAT>` — Output format. `markdown` regenerates the mem directory in place (folder-backed mems only); `mem` writes a portable `.mem` zip suitable for sharing (every backend); `json` prints every non-stub entity of the selected mem(s) as one structured JSON document on stdout (every backend, read-only); `html` writes one self-contained page; `llms-txt` prints the whole mem as one agent-readable Markdown document (every backend, read-only) — the same shape a Memstead deployment serves at `/llms-full.txt`, rendered by the same engine code so the two cannot drift
+* `--format <FORMAT>` — Output format. `markdown` regenerates the mem directory in place (folder-backed mems only); `mem` writes a portable `.mem` zip suitable for sharing (every backend); `json` prints every non-stub entity of the selected mem(s) as one structured JSON document on stdout (every backend, read-only); `html` writes one self-contained page; `llms-txt` prints the whole mem as one agent-readable Markdown document (every backend, read-only) — the same shape a Memstead deployment serves at `/llms-full.txt`, rendered by the same engine code so the two cannot drift. A `mem` archive's authoring provenance (`.memstead/provenance.json`) has every private-pattern span redacted to `[redacted:<class>]` — the leak scan's classes, one vocabulary — never stripped; the report counts redactions per class. Entity bodies are not rewritten
 
   Default value: `markdown`
 

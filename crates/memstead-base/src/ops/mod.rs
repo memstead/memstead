@@ -24,6 +24,7 @@ pub mod health;
 pub mod health_compose;
 pub mod integrity;
 pub mod labelling;
+pub mod redaction;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
 pub mod signals;
@@ -3760,6 +3761,11 @@ pub struct MemExportResult {
     /// export.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dangling_cross_mem_edges: Vec<crate::validator::DanglingCrossMemEdge>,
+    /// Private-pattern spans redacted in the archive's authoring
+    /// provenance, counted per class (`ops::redaction`); empty when no
+    /// rationale carried one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redactions: Vec<crate::ops::redaction::RedactionCount>,
     /// Ids in the exported slice whose stored body ends inside an
     /// unterminated code fence. `install` refuses the archive for each one
     /// (the repack would bury the sections that fence absorbed), so the

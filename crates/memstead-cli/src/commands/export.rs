@@ -33,7 +33,12 @@ pub struct Args {
     /// self-contained page; `llms-txt` prints the whole mem as one
     /// agent-readable Markdown document (every backend, read-only) —
     /// the same shape a Memstead deployment serves at `/llms-full.txt`,
-    /// rendered by the same engine code so the two cannot drift.
+    /// rendered by the same engine code so the two cannot drift. A `mem`
+    /// archive's authoring provenance (`.memstead/provenance.json`) has
+    /// every private-pattern span redacted to `[redacted:<class>]` —
+    /// the leak scan's classes, one vocabulary — never stripped; the
+    /// report counts redactions per class. Entity bodies are not
+    /// rewritten.
     #[arg(long, value_enum, default_value_t = Format::Markdown)]
     pub format: Format,
 
@@ -592,6 +597,7 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
             "entity_count": result.entity_count,
             "size_bytes": result.size_bytes,
             "self_contained": args.self_contained,
+            "redactions": result.redactions,
             "warnings": warnings,
         }))?;
     } else {
@@ -605,6 +611,17 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
         );
         if args.self_contained {
             block.push_str("\n- Self-contained: yes");
+        }
+        if !result.redactions.is_empty() {
+            let listed: Vec<String> = result
+                .redactions
+                .iter()
+                .map(|r| format!("{} {}", r.class, r.count))
+                .collect();
+            block.push_str(&format!(
+                "\n- Redacted in provenance: {} (each span reads `[redacted:<class>]`)",
+                listed.join(", ")
+            ));
         }
         // `install` will refuse the archive for each of these, so the operator
         // learns it here rather than after sharing.
@@ -755,9 +772,10 @@ fn run_mem_filesystem(
     // F6). One exporter for every backend also keeps the typed
     // refusals backend-symmetric (MEM_CONFIG_INCOMPLETE on a missing
     // version, F1) without a special-cased mapping.
-    let bytes = engine
-        .export_mem_to_bytes(&workspace_mem)
+    let report = engine
+        .export_mem_bytes_report(&workspace_mem)
         .map_err(CliError::from_engine_op)?;
+    let bytes = report.bytes;
 
     let output = match args.output {
         Some(p) => p,
@@ -816,6 +834,7 @@ fn run_mem_filesystem(
             "entity_count": entity_count,
             "size_bytes": size_bytes,
             "self_contained": args.self_contained,
+            "redactions": report.redactions,
             "warnings": warnings,
         }))?;
     } else {
@@ -825,6 +844,17 @@ fn run_mem_filesystem(
             entity_count,
             size_bytes,
         );
+        if !report.redactions.is_empty() {
+            let listed: Vec<String> = report
+                .redactions
+                .iter()
+                .map(|r| format!("{} {}", r.class, r.count))
+                .collect();
+            block.push_str(&format!(
+                "\n- Redacted in provenance: {} (each span reads `[redacted:<class>]`)",
+                listed.join(", ")
+            ));
+        }
         if args.self_contained {
             block.push_str("\n- Self-contained: yes");
             let n = dropped.as_ref().map(|d| d.len()).unwrap_or(0);

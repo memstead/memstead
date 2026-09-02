@@ -94,6 +94,21 @@ Every refusal carries a typed code (add `--json` and branch on `.code`):
 - **`RATE_LIMITED`** — too many publishes in a window; the message says how many seconds to wait.
 - **`FORBIDDEN`** — you tried to publish into a scope that isn't yours (`--scope` overrides are reserved for registry admins; normal publishes never need it).
 
+## Provenance is redacted at export
+
+A `.mem` archive carries each entity's latest authoring rationale in
+`.memstead/provenance.json` (the note recorded with the mutation). Those
+notes are written inside your workspace and can name what a public archive
+must not: internal plan paths, a legacy domain, an absolute user path, a
+credential. `memstead export --format mem` redacts every such span to
+`[redacted:<class>]` before the archive is written and never strips the
+record: the row keeps its timestamp, kind and actor, and the rest of the
+sentence stays readable. The classes are the same seven the engine's leak
+scan enforces, held equal by a test, and the export report counts what it
+redacted per class (`redactions` in the JSON envelope). Entity bodies are
+not rewritten: a private string in a body is yours to fix, and the leak
+scan keeps flagging it.
+
 ## Publishing over a private source: `--redact-anchors`
 
 A mem built from a source carries provenance anchors — durable records tying

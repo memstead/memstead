@@ -42,10 +42,26 @@ use crate::validator::canonical::canonical_json;
 /// entity carried a note — the export then ships no provenance member,
 /// distinct from an empty payload.
 pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvenance> {
+    build_redacted_archive_provenance(records).0
+}
+
+/// The builder proper: every rationale passes through the private-pattern
+/// redaction (`ops::redaction`, the leak scan's classes) before it is
+/// summarised, so an archive never carries a span the public tree refuses;
+/// the per-class counts of the rationales that ship travel to the export
+/// result (a superseded note's redactions never reach the archive and are
+/// not counted).
+pub fn build_redacted_archive_provenance(
+    records: &[Provenance],
+) -> (
+    Option<ArchiveProvenance>,
+    Vec<crate::ops::redaction::RedactionCount>,
+) {
     use std::collections::BTreeMap;
     use std::time::SystemTime;
 
-    let mut by_path: BTreeMap<String, (SystemTime, EntityProvenance)> = BTreeMap::new();
+    type Counted = (EntityProvenance, BTreeMap<&'static str, usize>);
+    let mut by_path: BTreeMap<String, (SystemTime, Counted)> = BTreeMap::new();
     for r in records {
         let Some(entity) = r.entity.as_deref() else {
             continue;
@@ -57,8 +73,9 @@ pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvena
         if path.is_empty() {
             continue;
         }
+        let (note, counts) = crate::ops::redaction::redact(note);
         let candidate = EntityProvenance {
-            rationale: Some(note.to_string()),
+            rationale: Some(note),
             kind: Some(r.kind.as_str().to_string()),
             timestamp: Some(crate::filesystem::changelog::format_rfc3339_utc(
                 r.timestamp,
@@ -69,16 +86,23 @@ pub fn build_archive_provenance(records: &[Provenance]) -> Option<ArchiveProvena
             // Keep the existing entry when it is at least as recent.
             Some((ts, _)) if *ts >= r.timestamp => {}
             _ => {
-                by_path.insert(path, (r.timestamp, candidate));
+                by_path.insert(path, (r.timestamp, (candidate, counts)));
             }
         }
     }
     if by_path.is_empty() {
-        return None;
+        return (None, Vec::new());
     }
-    Some(ArchiveProvenance::summarised(
-        by_path.into_iter().map(|(k, (_, v))| (k, v)).collect(),
-    ))
+    let mut redacted_total: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut entities = BTreeMap::new();
+    for (k, (_, (v, counts))) in by_path {
+        crate::ops::redaction::tally(&mut redacted_total, counts);
+        entities.insert(k, v);
+    }
+    (
+        Some(ArchiveProvenance::summarised(entities)),
+        crate::ops::redaction::counts_to_list(&redacted_total),
+    )
 }
 
 /// Byte-shaped output of [`export_mem_to_bytes`]. Bundles the
@@ -95,6 +119,9 @@ pub struct MemExportBytes {
     pub version: String,
     /// `.md` entity count in the produced archive.
     pub entity_count: usize,
+    /// Per-class private-pattern redactions in the provenance member
+    /// (mirrors `MemExportResult.redactions`); empty when none.
+    pub redactions: Vec<crate::ops::redaction::RedactionCount>,
     /// Cross-mem edges whose target won't travel inside this archive —
     /// `install` will reject each. Mirrors
     /// `MemExportResult.dangling_cross_mem_edges`; empty for a
@@ -179,6 +206,7 @@ pub fn export_mem(
         entity_count: out.entity_count,
         size_bytes,
         dangling_cross_mem_edges: out.dangling_cross_mem_edges,
+        redactions: out.redactions,
     })
 }
 
@@ -228,10 +256,11 @@ pub fn export_mem_to_bytes(
     // yields no records → no provenance member (absent, not empty).
     use crate::backend::MemBackend;
     let backend = crate::storage::FilesystemMemWriter::new(mem_dir.to_path_buf());
-    let provenance = backend
+    let (provenance, redactions) = backend
         .read_provenance(None)
         .ok()
-        .and_then(|records| build_archive_provenance(&records));
+        .map(|records| build_redacted_archive_provenance(&records))
+        .unwrap_or((None, Vec::new()));
 
     // Source the engine-owned anchors sidecar (`.memstead/anchors.json`)
     // through the same backend so it travels inside the `.mem` archive.
@@ -250,6 +279,10 @@ pub fn export_mem_to_bytes(
         anchors_bytes.as_deref(),
         ref_schema_source,
     )
+    .map(|mut r| {
+        r.redactions = redactions;
+        r
+    })
 }
 
 /// Seal already-collected entity bytes into a portable `.mem` archive —
@@ -359,6 +392,7 @@ pub fn export_entries_to_bytes(
         version: published.version.to_string(),
         entity_count,
         dangling_cross_mem_edges: validated.dangling_cross_mem_edges,
+        redactions: Vec::new(),
     })
 }
 

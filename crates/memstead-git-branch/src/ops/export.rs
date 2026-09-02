@@ -207,6 +207,7 @@ pub fn export_mem_from_branch(
         entity_count: out.entity_count,
         size_bytes,
         dangling_cross_mem_edges: out.dangling_cross_mem_edges,
+        redactions: out.redactions,
     })
 }
 
@@ -373,6 +374,7 @@ pub fn export_mem_from_branch_to_bytes(
         version: published.version.to_string(),
         entity_count,
         dangling_cross_mem_edges,
+        redactions: Vec::new(),
     })
 }
 

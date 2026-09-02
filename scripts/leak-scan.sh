@@ -23,8 +23,12 @@ HITS=0
 # Skip build artifacts.
 # Exclude the guard scripts themselves: they *define* the leak patterns
 # (dev/plans, macos/, …) as regex literals, so scanning them self-matches.
+# The engine's redaction vocabulary (crates/memstead-base/src/ops/redaction.rs)
+# carries the same patterns verbatim — a test holds it equal to this file —
+# and is exempted for the same reason.
 PRUNE=( --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules \
-  --exclude=leak-scan.sh --exclude=check-no-plan-refs.sh --exclude=check-no-mechanism-leak.sh )
+  --exclude=leak-scan.sh --exclude=check-no-plan-refs.sh --exclude=check-no-mechanism-leak.sh \
+  --exclude=redaction.rs )
 
 # Allowlist — path-anchored references that match a leak pattern but are
 # legitimate and must stay, so they don't mask real leaks elsewhere:

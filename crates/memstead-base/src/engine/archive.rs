@@ -164,6 +164,17 @@ impl Engine {
     /// path lifts in a follow-up; today it surfaces as
     /// [`EngineError::Backend`] wrapping the unmounted-hook message.
     pub fn export_mem_to_bytes(&self, mem_name: &str) -> Result<Vec<u8>, EngineError> {
+        self.export_mem_bytes_report(mem_name).map(|out| out.bytes)
+    }
+
+    /// The bytes export with its report: the archive bytes plus the
+    /// counts the disk export reports (entities, dangling cross-mem
+    /// edges, per-class provenance redactions), so a caller that never
+    /// touches disk can still say what the archive carries.
+    pub fn export_mem_bytes_report(
+        &self,
+        mem_name: &str,
+    ) -> Result<crate::ops::export::MemExportBytes, EngineError> {
         let mount = self
             .mounts
             .iter()
@@ -193,7 +204,6 @@ impl Engine {
                 mem_name,
                 self.ref_schema_source_for(config),
             )
-            .map(|out| out.bytes)
             .map_err(|e| {
                 EngineError::Backend(crate::backend::BackendError::Other(format!(
                     "export_mem_to_bytes: {e}"
@@ -213,12 +223,13 @@ impl Engine {
                 // log (commit trailers) via the mount's backend and hand the
                 // serialised payload to the hook to embed — the hook walks
                 // no history itself.
-                let provenance_bytes = mount
+                let (provenance, redactions) = mount
                     .backend
                     .read_provenance(None)
                     .ok()
-                    .and_then(|records| crate::ops::export::build_archive_provenance(&records))
-                    .and_then(|prov| prov.to_archive_bytes().ok());
+                    .map(|records| crate::ops::export::build_redacted_archive_provenance(&records))
+                    .unwrap_or((None, Vec::new()));
+                let provenance_bytes = provenance.and_then(|prov| prov.to_archive_bytes().ok());
                 // Source the anchors sidecar from the branch tip so the
                 // git-branch `.mem` carries anchors like the other backends.
                 let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
@@ -232,7 +243,10 @@ impl Engine {
                     provenance_bytes.as_deref(),
                     anchors_bytes.as_deref(),
                 )
-                .map(|out| out.bytes)
+                .map(|mut out| {
+                    out.redactions = redactions;
+                    out
+                })
                 .map_err(EngineError::Backend)
             }
             // In-memory mems have no directory to walk: list the
@@ -253,10 +267,11 @@ impl Engine {
                 // Source per-entity provenance from the backend's mutation
                 // log so an in-memory mem exports a provenance-bearing
                 // `.mem` identical in shape to the folder/git-branch paths.
-                let provenance = backend
+                let (provenance, redactions) = backend
                     .read_provenance(None)
                     .ok()
-                    .and_then(|records| crate::ops::export::build_archive_provenance(&records));
+                    .map(|records| crate::ops::export::build_redacted_archive_provenance(&records))
+                    .unwrap_or((None, Vec::new()));
                 // Source the anchors sidecar from the in-memory backend so a
                 // sketch-session mem exports a `.mem` carrying its anchors —
                 // the serve session-export → re-import round-trip.
@@ -273,7 +288,10 @@ impl Engine {
                     anchors_bytes.as_deref(),
                     self.ref_schema_source_for(config),
                 )
-                .map(|out| out.bytes)
+                .map(|mut out| {
+                    out.redactions = redactions;
+                    out
+                })
                 .map_err(|e| {
                     EngineError::Backend(crate::backend::BackendError::Other(format!(
                         "export_mem_to_bytes: {e}"

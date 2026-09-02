@@ -1705,12 +1705,13 @@ impl Engine {
                 // Source per-entity provenance from the git-branch mutation
                 // log (commit trailers) and hand the serialised payload to
                 // the export hook to embed — symmetric with the bytes path.
-                let provenance_bytes = mount
+                let (provenance, redactions) = mount
                     .backend
                     .read_provenance(None)
                     .ok()
-                    .and_then(|records| crate::ops::export::build_archive_provenance(&records))
-                    .and_then(|prov| prov.to_archive_bytes().ok());
+                    .map(|records| crate::ops::export::build_redacted_archive_provenance(&records))
+                    .unwrap_or((None, Vec::new()));
+                let provenance_bytes = provenance.and_then(|prov| prov.to_archive_bytes().ok());
                 // Source the anchors sidecar from the branch tip — symmetric
                 // with the bytes-export path so the disk `.mem` carries anchors.
                 let anchors_bytes = mount.backend.read_anchors_sidecar().ok().flatten();
@@ -1725,6 +1726,10 @@ impl Engine {
                     provenance_bytes.as_deref(),
                     anchors_bytes.as_deref(),
                 )
+                .map(|mut r| {
+                    r.redactions = redactions;
+                    r
+                })
                 .map_err(EngineError::Backend)
             }
             MountStorage::Archive { .. } => Err(EngineError::Backend(BackendError::Sealed)),

@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead export --format mem` redacts private patterns in the
+  archive's authoring provenance.** Every mutation rationale that ships in
+  `.memstead/provenance.json` passes through the engine's redaction
+  vocabulary: each matched span becomes `[redacted:<class>]` and the
+  record keeps its shape and its other fields (redact, never strip). The
+  classes are the leak scan's seven `scan` lines, label and pattern
+  verbatim, held equal by a test (`ops::redaction`) so a class added to
+  one without the other fails naming it. The export report and its JSON
+  count redactions per class (`redactions`); the bytes export carries the
+  same report (`Engine::export_mem_bytes_report`). Entity bodies are not
+  rewritten: the leak scan keeps guarding them, and an archive whose
+  bodies carry a private string still refuses at the seal gate.
+
 - **`memstead health` builds its report through the engine's shared
   composer, and takes `--mem`.** The CLI no longer assembles the health
   axes itself: it calls the same `compose_health` the MCP `memstead_health`
