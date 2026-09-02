@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`engineering@0.4.0`: the decision type sanctions the dated in-place
+  amendment.** A later change that keeps a decision's meaning (a corrected
+  count, a moved path, a later confirmation, a figure re-measured at a newer
+  release) is recorded in place as a dated sentence or paragraph opening
+  `Corrected <date>:` or `<date> amendment:`; a change of meaning still
+  means a new decision with `SUPERSEDES` and the old body left as history.
+  The 0.3.0 rule forbade every in-place edit while the house practice was
+  dozens of dated amendments, so the rule was one nobody could enforce. A
+  new generation under the append-only rule (0.3.0 is byte-identical in the
+  binary); the migration is a pin move, entities that already practise the
+  form validate unchanged.
+
 - **`memstead export --format mem` redacts private patterns in the
   archive's authoring provenance.** Every mutation rationale that ships in
   `.memstead/provenance.json` passes through the engine's redaction

@@ -1,0 +1,7 @@
+{
+  "description": "<ONE_SENTENCE_DESCRIPTION_OF_WHOSE_STANDING_KNOWLEDGE_THIS_IS>",
+  "language": "English",
+  "writeGuidance": {
+    "subjects": "<REQUIRED: one paragraph naming the system(s) this knowledge is about and the sibling mems that model their current state (the cross-mem link targets). If this placeholder is still present when the agent runs, stop and ask the operator — do not invent subject facts.>"
+  }
+}

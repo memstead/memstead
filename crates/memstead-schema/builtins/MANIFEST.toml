@@ -129,3 +129,8 @@ sha256 = "bd184559b1f98e2b4be1f0350259f7bb95c4f52a7ba79db04d30cf8e1a009629"
 name = "obligation"
 version = "0.1.0"
 sha256 = "ac44e44cb3d47acf593162a04cd52f8d7b06ca8ad131d90a101cc52d9a87af5f"
+
+[[shipped]]
+name = "engineering"
+version = "0.4.0"
+sha256 = "e7dac0a27b9a6a8299fa6d9ad673f4c498986f62f816645bc8029853193ff414"
