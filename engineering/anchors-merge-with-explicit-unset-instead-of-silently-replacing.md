@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-06T06:41:20Z
-last_modified: 2026-08-27T01:04:22Z
+last_modified: 2026-09-02T20:10:22Z
 status: accepted
 decided_on: 2026-08-06
 deciders: operator (stability-sweep plan 01), implementing agent
@@ -23,6 +23,7 @@ Incremental anchoring works: sync/ingest batches accumulate instead of displacin
 ## Relationships
 - **REFERENCES**: [[engine:anchor-primitive]]
 - **REFERENCES**: [[engine:update-mutation]]
+- **REFERENCES**: [[a-same-triple-anchor-re-pin-replaces-the-row-hash-less-unless-it-restates-the-stored-one]]
 
 ## Options
 
@@ -31,3 +32,6 @@ Incremental anchoring works: sync/ingest batches accumulate instead of displacin
 ## Notes
 
 Two refinements landed with consistency-sweep 03/03, both about the same merge key. Within ONE payload the `(artifact, grain, class)` triple must appear at most once: repeats collapsed to the last occurrence and the caller was never told an anchor it sent had gone, which is the same silent loss this decision removed one level up. A later call carrying the triple still replaces the stored row, which is what the merge is for. And a replacing row that omits `hash` now inherits the stored one: dropping it made the next verify re-baseline silently, so drift became unfalsifiable. Supplying a hash still replaces it; unsetting the row before writing it fresh is the explicit clear.
+
+
+2026-09-02 amendment: the hash-inheritance refinement above is reversed by [[engineering--a-same-triple-anchor-re-pin-replaces-the-row-hash-less-unless-it-restates-the-stored-one]] (bundle B plan 10). A same-triple re-pin now replaces the row hash-less unless it restates the stored row on every caller-supplied field, and an update that also changed the entity's content re-baselines even a restated row; the carry-forward had left the sync brief's one-update repair reading `drifted` against the content it had just repaired. The merge itself, and explicit unset as the only removal, stand.
