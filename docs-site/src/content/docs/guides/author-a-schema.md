@@ -230,6 +230,32 @@ relationships:
       terminal_types: [evidence]
 ```
 
+## 8b. Declare what is due
+
+A type whose entities carry a deadline can declare a **due axis**, so the
+engine can say what is due next without knowing your vocabulary:
+
+```yaml
+due:
+  date_field: target_date      # a date-typed metadata field of this type
+  status_field: status         # an enum-typed metadata field
+  open_values: [planned, active]
+  lead_section: blockers       # optional: quoted beside the entry
+```
+
+`memstead due` renders the brief across every mounted mem whose schema
+declares the axis: open entities whose date has gone by under **overdue**
+with the days past, open entities due inside the window (default 90 days,
+`--within 30d`) under **due_soon** with the days until, each quoting the
+lead section when the entity carries it. `--json` carries both lists as
+data beside the prose. The reading rides the declaration and nothing
+else: the engine names the state and never judges it (no severity, no
+recommendation), the stale axis keeps measuring edit recency, and a type
+without `due:` contributes nothing. A closed entity (its status outside
+`open_values`) never appears. The loader validates the declaration at
+install: the fields must exist with those shapes and every open value
+must be in the status enum.
+
 ## 9. Declare a section's markdown shape
 
 A section declaration can also pin the markdown structure of its body — a flat `content` expression over the mdast block vocabulary (`paragraph`, `list`, `table`, `code`, `blockquote`, `heading`, `thematicBreak`, `html`), with attribute forms (`list(bullet)`, `list(ordered)`, `heading(3)`–`heading(6)`, `code(lang=json)`) and regular operators: sequence by space, alternation `(paragraph | list)`, repetition `+` `*` `?`. Optional companions:
