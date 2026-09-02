@@ -767,6 +767,96 @@ impl Engine {
         self.verify_mem_anchors_with(mem, &SuppliedObservations::new())
     }
 
+    /// The stale axis defers to anchor state: an entity carrying at least
+    /// one adjudicated hash-bearing anchor (`resolves`, `drifted` or
+    /// `recheck`) reads by its anchors, not by the day threshold. `drifted`
+    /// and `recheck` list the entity as their own condition whatever its
+    /// age; `resolves` keeps it off the list, and when the threshold would
+    /// have listed it the row moves to `anchor_fresh` so the reading names
+    /// the clock that overruled the threshold. Entities with no adjudicated
+    /// anchor (none at all, or only `unresolvable` / `unobserved` rows)
+    /// keep the day-threshold reading, byte for byte. Derived at read time
+    /// from the same verification the anchors axis runs; nothing stored.
+    fn apply_anchor_clock(&self, summary: &mut crate::ops::HealthSummary, mem: Option<&str>) {
+        use std::collections::HashMap;
+        // Dominant adjudicated state per entity: drifted > recheck > resolves.
+        fn rank(state: &str) -> Option<u8> {
+            match state {
+                "drifted" => Some(3),
+                "recheck" => Some(2),
+                "resolves" => Some(1),
+                _ => None,
+            }
+        }
+        let mut by_entity: HashMap<String, (u8, String)> = HashMap::new();
+        let mut mems: Vec<String> = self.mem_names().iter().map(|s| s.to_string()).collect();
+        mems.retain(|m| mem.is_none_or(|scope| scope == m));
+        for m in mems {
+            let Ok(report) = self.verify_mem_anchors(&m) else {
+                continue;
+            };
+            for row in &report.anchors {
+                let Some(r) = rank(&row.state) else { continue };
+                let entry = by_entity
+                    .entry(row.entity_id.clone())
+                    .or_insert((0, String::new()));
+                if r > entry.0 {
+                    *entry = (r, row.state.clone());
+                }
+            }
+        }
+        if by_entity.is_empty() {
+            return;
+        }
+        let today = crate::ops::health::days_since_epoch();
+        let mut stale = std::mem::take(&mut summary.stale_entities);
+        // Day-threshold rows on anchored entities leave the list: a
+        // resolving anchor makes them fresh, a drifted or recheck one is
+        // re-listed below under its own condition.
+        let mut fresh = Vec::new();
+        stale.retain(|row| match by_entity.get(row.id.0.as_str()) {
+            None => true,
+            Some((_, state)) => {
+                if state == "resolves" {
+                    fresh.push(crate::ops::StaleEntity {
+                        id: row.id.clone(),
+                        title: row.title.clone(),
+                        days_since_modified: row.days_since_modified,
+                        anchor_state: Some(state.clone()),
+                    });
+                }
+                false
+            }
+        });
+        let mut by_anchor: Vec<crate::ops::StaleEntity> = by_entity
+            .iter()
+            .filter(|(_, (_, state))| state != "resolves")
+            .filter_map(|(id, (_, state))| {
+                let entity = self.store.get(&crate::EntityId(id.clone()))?;
+                if entity.stub || mem.is_some_and(|scope| entity.mem != scope) {
+                    return None;
+                }
+                let days = entity
+                    .metadata
+                    .get("last_modified")
+                    .and_then(|v| crate::ops::health::parse_iso_to_days(&v.to_frontmatter_string()))
+                    .map(|d| today.saturating_sub(d))
+                    .unwrap_or(0);
+                Some(crate::ops::StaleEntity {
+                    id: entity.id.clone(),
+                    title: entity.title.clone(),
+                    days_since_modified: days,
+                    anchor_state: Some(state.clone()),
+                })
+            })
+            .collect();
+        stale.append(&mut by_anchor);
+        stale.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        fresh.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        summary.stale_entities = stale;
+        summary.anchor_fresh = fresh;
+    }
+
     /// [`Self::verify_mem_anchors`] with observer-supplied observations
     /// (the `--observations` file of `memstead verify-anchors`). A `url`
     /// row whose artifact has a supplied observation adjudicates through
@@ -2105,6 +2195,7 @@ impl Engine {
         let fallback = engine_fallback_type();
         let mut summary =
             crate::ops::health::compute_health(&self.store, fallback.as_ref(), &self.schemas, mem);
+        self.apply_anchor_clock(&mut summary, mem);
         // Merge in load-time drift warnings so every caller of
         // Engine::health — MCP handler, Swift FFI, direct CLI —
         // sees the SuspiciousNestedPrefix / DuplicateSectionHeading

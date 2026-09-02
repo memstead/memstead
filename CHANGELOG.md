@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The stale axis defers to anchor state.** An entity carrying at least
+  one adjudicated hash-bearing anchor reads by its anchors instead of the
+  wall clock: `resolves` keeps it off the stale list (and lists it under
+  `anchor_fresh` when the day threshold would have named it), `drifted`
+  and `recheck` list it as their own condition whatever its age, each
+  such row carrying `clock: anchors` and its `anchor_state`; entities with
+  no adjudicated anchor keep the `staleness_threshold_days` reading, their
+  rows byte-identical to before, and an anchor-less workspace renders
+  unchanged. Derived at read time from the same verification the anchors
+  axis runs; nothing stored. `MEMSTEAD_TODAY=YYYY-MM-DD` pins the health
+  clock for fixtures, honoured by the CLI and the MCP server alike.
+
 - **`software@0.5.0`: a code mem says only true things.** A new built-in
   generation (0.4.0 stays byte-identical): `contract` gains the `protocol`
   value `engine_state` and an optional `version_axes` field (a csv list of

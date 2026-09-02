@@ -545,15 +545,27 @@ pub fn compose_health(
                     .unwrap_or(false),
                 None => true,
             })
-            .map(|e| {
-                serde_json::json!({
-                    "id": e.id.to_string(),
-                    "title": e.title,
-                    "days_since_modified": e.days_since_modified,
-                })
-            })
+            .map(stale_row)
             .collect();
         obj.insert("stale".into(), serde_json::json!(stale));
+        // Fresh by the anchor clock: only present when an anchor overruled
+        // the day threshold, so an anchor-less workspace renders unchanged.
+        let fresh: Vec<serde_json::Value> = health
+            .anchor_fresh
+            .iter()
+            .filter(|e| match vf {
+                Some(v) => engine
+                    .store()
+                    .get(&e.id)
+                    .map(|ent| ent.mem == v)
+                    .unwrap_or(false),
+                None => true,
+            })
+            .map(stale_row)
+            .collect();
+        if !fresh.is_empty() {
+            obj.insert("anchor_fresh".into(), serde_json::json!(fresh));
+        }
     }
     if include.iter().any(|s| s == "dangling_links") {
         let dangling = crate::ops::health::collect_dangling_links(engine.store(), vf);
@@ -1107,6 +1119,24 @@ fn summarize_health_item(item: &serde_json::Value) -> String {
     } else {
         serde_json::to_string(item).unwrap_or_default()
     }
+}
+
+/// One stale-axis row. A row the day threshold produced carries the three
+/// historical keys and nothing else (the anchor-less render is byte for
+/// byte what it was); a row the anchor clock produced adds `clock:
+/// "anchors"` and the `anchor_state` that made it.
+fn stale_row(e: &crate::ops::StaleEntity) -> serde_json::Value {
+    let mut row = serde_json::json!({
+        "id": e.id.to_string(),
+        "title": e.title,
+        "days_since_modified": e.days_since_modified,
+    });
+    if let Some(state) = &e.anchor_state {
+        let obj = row.as_object_mut().unwrap();
+        obj.insert("clock".into(), serde_json::json!("anchors"));
+        obj.insert("anchor_state".into(), serde_json::json!(state));
+    }
+    row
 }
 
 #[cfg(test)]

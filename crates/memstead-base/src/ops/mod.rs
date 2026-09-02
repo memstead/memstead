@@ -3440,6 +3440,11 @@ pub struct LoadErrorReport {
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthSummary {
     pub stale_entities: Vec<StaleEntity>,
+    /// Entities the day threshold would list as stale but whose anchors
+    /// resolve: fresh by the anchor clock, absent from `stale_entities`,
+    /// listed here so the reading names the clock that overruled the
+    /// threshold. Empty whenever no anchor spoke.
+    pub anchor_fresh: Vec<StaleEntity>,
     pub missing_fields: Vec<HealthReport>,
     pub orphan_count: usize,
     pub stub_count: usize,
@@ -3528,6 +3533,13 @@ pub struct StaleEntity {
     pub id: EntityId,
     pub title: String,
     pub days_since_modified: u64,
+    /// The anchor state that produced this row when the anchor clock
+    /// spoke (`drifted` or `recheck`, or `resolves` on a fresh-by-anchor
+    /// row); `None` means the day threshold produced it. The two clocks
+    /// never both speak for one entity: an entity with an adjudicated
+    /// hash-bearing anchor reads by its anchors, the rest by the day
+    /// threshold.
+    pub anchor_state: Option<String>,
 }
 
 /// One entry in the tag distribution surface: an authored tag string, the

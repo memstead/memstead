@@ -1225,6 +1225,7 @@ pub fn compute_health(
                         id: entity.id.clone(),
                         title: entity.title.clone(),
                         days_since_modified: days_since,
+                        anchor_state: None,
                     });
                 }
             }
@@ -1284,6 +1285,7 @@ pub fn compute_health(
 
     HealthSummary {
         stale_entities,
+        anchor_fresh: Vec::new(),
         missing_fields,
         orphan_count,
         stub_count,
@@ -2753,7 +2755,17 @@ pub fn entity_health(entity: &crate::entity::Entity, schema: &TypeDefinition) ->
 /// it traps with `RuntimeError: unreachable` and poisons the wasm
 /// instance (cold-start F11) — so the wasm build reads the JS-backed
 /// clock instead. Same value, same summary shape on every target.
-fn days_since_epoch() -> u64 {
+/// Today as whole days since the Unix epoch, the clock every day-threshold
+/// reading in health uses. `MEMSTEAD_TODAY=YYYY-MM-DD` pins it (the
+/// injection a fixture needs to age entities without waiting), honoured
+/// by every binary alike so the CLI and the MCP server read the same day.
+pub fn days_since_epoch() -> u64 {
+    if let Some(pinned) = std::env::var("MEMSTEAD_TODAY")
+        .ok()
+        .and_then(|s| crate::engine::due::pinned_days_since_epoch(&s))
+    {
+        return pinned;
+    }
     #[cfg(target_arch = "wasm32")]
     {
         (js_sys::Date::now() / 1000.0) as u64 / 86400
@@ -2770,7 +2782,7 @@ fn days_since_epoch() -> u64 {
 
 /// Parse an ISO 8601 date string to days since epoch.
 /// Supports `YYYY-MM-DD` and `YYYY-MM-DDTHH:MM:SSZ`.
-fn parse_iso_to_days(date: &str) -> Option<u64> {
+pub fn parse_iso_to_days(date: &str) -> Option<u64> {
     let date_part = date.split('T').next()?;
     let parts: Vec<&str> = date_part.split('-').collect();
     if parts.len() != 3 {

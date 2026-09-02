@@ -1685,6 +1685,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "typed_incoming",
             "typed_outgoing",
             "orphans_by_schema",
+            "anchor_fresh",
             "communities_by_schema",
             "tags",
             "tag_distribution",

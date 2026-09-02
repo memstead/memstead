@@ -27,7 +27,14 @@ pub struct Args {
     pub mem: Option<String>,
 
     /// Opt heavy content into the response: orphans, stubs,
-    /// most_connected, missing_fields, stale, dangling_links, tags,
+    /// most_connected, missing_fields, stale (two clocks, one per
+    /// entity: an entity with an adjudicated hash-bearing anchor reads
+    /// by its anchors, `drifted` and `recheck` listed as their own
+    /// condition and `resolves` kept off the list, the row naming the
+    /// anchor clock and its state, with `anchor_fresh` holding the
+    /// entities the day threshold would have listed; every other entity
+    /// reads by the type's `staleness_threshold_days` as before, its row
+    /// unchanged), dangling_links, tags,
     /// missing_required_outgoing, constraints (standing violations of
     /// declared schema constraints), conformance, integrity, config,
     /// anchors (per-mem counts of the standalone anchor-verification
@@ -406,12 +413,14 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
     if let Some(items) = v.get("stale").and_then(Value::as_array) {
         lines.push("## Stale entities".to_string());
         for item in items {
-            lines.push(format!(
-                "- {} — {} ({} days)",
-                s(item, "id"),
-                s(item, "title"),
-                n(item, "days_since_modified")
-            ));
+            lines.push(stale_line(item));
+        }
+        lines.push(String::new());
+    }
+    if let Some(items) = v.get("anchor_fresh").and_then(Value::as_array) {
+        lines.push("## Fresh by anchor clock".to_string());
+        for item in items {
+            lines.push(stale_line(item));
         }
         lines.push(String::new());
     }
@@ -912,6 +921,21 @@ fn strict_exit(strict: bool, violations: &[(&'static str, usize)]) -> anyhow::Re
         format!("strict mode: tier-2 violations present ({summary})"),
     )
     .into())
+}
+
+/// One stale-axis line: the day-threshold form unchanged, the anchor-clock
+/// form naming the state that produced the row.
+fn stale_line(item: &Value) -> String {
+    let base = format!(
+        "- {} — {} ({} days)",
+        s(item, "id"),
+        s(item, "title"),
+        n(item, "days_since_modified")
+    );
+    match item.get("anchor_state").and_then(Value::as_str) {
+        Some(state) => format!("{base} (anchor clock: {state})"),
+        None => base,
+    }
 }
 
 #[cfg(test)]

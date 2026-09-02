@@ -58,6 +58,14 @@ pub fn parse_due_window(input: &str) -> Result<DueWindow, String> {
 /// math without a date dependency (Howard Hinnant's `days_from_civil`
 /// algorithm). Entities store dates as ISO strings, which order
 /// lexically; arithmetic converts through day numbers.
+/// `YYYY-MM-DD` to whole days since the Unix epoch, for the
+/// `MEMSTEAD_TODAY` clock pin the health axes honour; `None` for a
+/// string that is not a civil date.
+pub fn pinned_days_since_epoch(s: &str) -> Option<u64> {
+    let (y, m, d) = parse_ymd(s)?;
+    u64::try_from(days_from_civil(y, m, d)).ok()
+}
+
 fn parse_ymd(s: &str) -> Option<(i64, u32, u32)> {
     let mut it = s.splitn(3, '-');
     let y: i64 = it.next()?.parse().ok()?;
