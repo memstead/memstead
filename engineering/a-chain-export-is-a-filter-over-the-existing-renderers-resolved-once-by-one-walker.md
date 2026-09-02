@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T02:43:35Z
-last_modified: 2026-09-02T02:43:35Z
+last_modified: 2026-09-02T02:50:54Z
 status: accepted
 decided_on: 2026-09-02
 deciders: execute-graph-plan loop, evidence-engine bundle
@@ -40,4 +40,4 @@ An auditor of an investigative evidence mem asks one question of the graph: what
 
 ## Notes
 
-Landed in the engine's 0.15.0 line (`graph/chain.rs`, the scoped renderer and topology variants, the CLI flags, the changelog and regenerated references) and in the private `ui-api` (query parameters, regenerated `openapi.json`) with the app's `api-types` regenerated. Tests cover the set semantics per direction and depth, the refusals, the byte-identity of the unscoped paths, the reduced renderings, and the ui-api endpoint.
+Landed in the engine's 0.15.0 line (the `graph::chain` module, the scoped renderer and topology variants, the CLI flags, the changelog and regenerated references) and in the private `ui-api` (query parameters, regenerated `openapi.json`) with the app's `api-types` regenerated. Tests cover the set semantics per direction and depth, the refusals, the byte-identity of the unscoped paths, the reduced renderings, and the ui-api endpoint.
