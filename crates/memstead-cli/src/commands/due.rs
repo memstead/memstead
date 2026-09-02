@@ -47,10 +47,20 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .render_due_brief(&today, &window, args.mem.as_deref())
         .map_err(|msg| CliError::new(ExitKind::Validation, "INVALID_INPUT", msg))?;
     if ctx.json {
+        // The reading as data beside the prose: `overdue` rows carry the
+        // days past, `due_soon` rows the days until; no severity, no verdict.
+        let data = engine
+            .base()
+            .due_brief(&today, &window, args.mem.as_deref())
+            .map_err(|msg| CliError::new(ExitKind::Validation, "INVALID_INPUT", msg))?;
         print_json(&json!({
             "today": today,
             "within": args.within,
+            "through": data.through,
             "mem": args.mem,
+            "mems": data.mems,
+            "overdue": data.overdue,
+            "due_soon": data.due_soon,
             "brief": brief,
         }))?;
     } else {

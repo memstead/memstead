@@ -147,6 +147,50 @@ struct DueEntry {
     status: String,
     lead: Option<(String, String)>,
     overdue: bool,
+    /// Signed distance from today in days: negative past the date.
+    days_until: i64,
+}
+
+/// One row of the due brief: an open entity whose declared due date falls
+/// inside the window. The engine names the reading (`overdue` with the
+/// days past, or due within the window with the days until) and never
+/// judges it: no severity, no recommendation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DueRow {
+    pub mem: String,
+    pub id: String,
+    pub title: String,
+    pub date: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub third_party: bool,
+    /// Days past the due date (`overdue` rows only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days_past: Option<u32>,
+    /// Days until the due date (`due_soon` rows only; 0 on the day).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days_until: Option<u32>,
+    /// The declared lead section, quoted when the entity carries it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead: Option<DueLead>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DueLead {
+    pub section: String,
+    pub body: String,
+}
+
+/// The due brief as data: what the markdown renders, for callers that
+/// consume the reading rather than the prose.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DueBrief {
+    pub today: String,
+    pub through: String,
+    /// Mems whose schema declares a due axis; empty when none does.
+    pub mems: Vec<String>,
+    pub overdue: Vec<DueRow>,
+    pub due_soon: Vec<DueRow>,
 }
 
 impl Engine {
@@ -163,9 +207,63 @@ impl Engine {
         window: &DueWindow,
         mem_filter: Option<&str>,
     ) -> Result<String, String> {
+        let (today_iso, end, declaring_mems, entries) =
+            self.collect_due(today, window, mem_filter)?;
+        Ok(render_due_entries(
+            &today_iso,
+            &end,
+            window,
+            &declaring_mems,
+            &entries,
+        ))
+    }
+
+    /// The due brief as data ([`DueBrief`]): every open entity whose
+    /// declared due date lies before `today` under `overdue` with the
+    /// days past, every one due from today through the window's end
+    /// under `due_soon` with the days until; a type without a `due`
+    /// declaration contributes nothing and raises nothing.
+    pub fn due_brief(
+        &self,
+        today: &str,
+        window: &DueWindow,
+        mem_filter: Option<&str>,
+    ) -> Result<DueBrief, String> {
+        let (today_iso, end, mems, entries) = self.collect_due(today, window, mem_filter)?;
+        let row = |e: &DueEntry| DueRow {
+            mem: e.mem.clone(),
+            id: e.id.clone(),
+            title: e.title.clone(),
+            date: e.date.clone(),
+            status: e.status.clone(),
+            third_party: e.third_party,
+            days_past: e.overdue.then_some((-e.days_until) as u32),
+            days_until: (!e.overdue).then_some(e.days_until as u32),
+            lead: e.lead.as_ref().map(|(section, body)| DueLead {
+                section: section.clone(),
+                body: body.clone(),
+            }),
+        };
+        Ok(DueBrief {
+            today: today_iso,
+            through: end,
+            mems,
+            overdue: entries.iter().filter(|e| e.overdue).map(row).collect(),
+            due_soon: entries.iter().filter(|e| !e.overdue).map(row).collect(),
+        })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn collect_due(
+        &self,
+        today: &str,
+        window: &DueWindow,
+        mem_filter: Option<&str>,
+    ) -> Result<(String, String, Vec<String>, Vec<DueEntry>), String> {
         let today_ymd = parse_ymd(today)
             .ok_or_else(|| format!("invalid date {today:?}: expected YYYY-MM-DD"))?;
         let today_iso = format!("{:04}-{:02}-{:02}", today_ymd.0, today_ymd.1, today_ymd.2);
+        let today_days = days_from_civil(today_ymd.0, today_ymd.1, today_ymd.2);
         let end = window_end(today_ymd, window);
 
         // Mem → (schema, third_party) for every mount, capability
@@ -212,12 +310,13 @@ impl Engine {
                 // malformed values silently (they never entered via
                 // the validated write path).
                 let date_part = date.get(..10).unwrap_or(&date).to_string();
-                if parse_ymd(&date_part).is_none() {
+                let Some((dy, dm, dd)) = parse_ymd(&date_part) else {
                     continue;
-                }
+                };
                 if date_part.as_str() > end.as_str() {
                     continue;
                 }
+                let days_until = days_from_civil(dy, dm, dd) - today_days;
                 let lead = due.lead_section.as_ref().and_then(|key| {
                     entity
                         .sections
@@ -234,6 +333,7 @@ impl Engine {
                     status,
                     lead,
                     overdue: date_part.as_str() < today_iso.as_str(),
+                    days_until,
                 });
             }
         }
@@ -246,7 +346,20 @@ impl Engine {
                 .then_with(|| a.date.cmp(&b.date))
                 .then_with(|| a.id.cmp(&b.id))
         });
+        declaring_mems.sort();
+        declaring_mems.dedup();
+        Ok((today_iso, end, declaring_mems, entries))
+    }
+}
 
+fn render_due_entries(
+    today_iso: &str,
+    end: &str,
+    window: &DueWindow,
+    declaring_mems: &[String],
+    entries: &[DueEntry],
+) -> String {
+    {
         let window_label = match window {
             DueWindow::Days(n) => format!("{n}d"),
             DueWindow::Months(n) => format!("{n}m"),
@@ -261,14 +374,12 @@ impl Engine {
                 "No mounted mem's schema declares a due axis (`due:` on a type). \
                  Nothing to render.\n",
             );
-            return Ok(out);
+            return out;
         }
-        declaring_mems.sort();
-        declaring_mems.dedup();
         out.push_str(&format!("Mems: {}\n\n", declaring_mems.join(", ")));
         if entries.is_empty() {
             out.push_str("Nothing open is due in this window.\n");
-            return Ok(out);
+            return out;
         }
         let overdue_count = entries.iter().filter(|e| e.overdue).count();
         out.push_str(&format!(
@@ -277,8 +388,12 @@ impl Engine {
             if entries.len() == 1 { "y" } else { "ies" },
             overdue_count
         ));
-        for e in &entries {
-            let marker = if e.overdue { " **OVERDUE**" } else { "" };
+        for e in entries {
+            let marker = if e.overdue {
+                format!(" **OVERDUE** ({} days past)", -e.days_until)
+            } else {
+                format!(" (in {} days)", e.days_until)
+            };
             let origin = if e.third_party { " [third-party]" } else { "" };
             out.push_str(&format!(
                 "- `{}` — {} — **{}**{} (status: {}, mem: {}{})\n",
@@ -300,7 +415,7 @@ impl Engine {
                 }
             }
         }
-        Ok(out)
+        out
     }
 }
 

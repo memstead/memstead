@@ -9,6 +9,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The due brief reads `overdue`, and `project@0.5.0` puts milestones on
+  the due axis.** `memstead due` names, beside the entities due inside the
+  window (`due_soon`, with the days until), every open entity whose
+  declared due date has gone by (`overdue`, with the days past); the JSON
+  envelope carries both lists as data (`overdue`, `due_soon`, `mems`,
+  `through`) beside the prose, each row the entity, its date and status
+  and the quoted lead section, no severity and no recommendation. The
+  reading rides a type's `due` declaration: the `obligation` built-in has
+  it already, and the new `project@0.5.0` generation declares it on
+  `milestone` (`target_date` over `status`, open on `planned` and `active`,
+  quoting the blockers), so an overdue milestone that was edited yesterday
+  finally reads as what it is; the stale axis keeps measuring edit
+  recency alone.
+
 - **`engineering@0.4.0`: the decision type sanctions the dated in-place
   amendment.** A later change that keeps a decision's meaning (a corrected
   count, a moved path, a later confirmation, a figure re-measured at a newer
