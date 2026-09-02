@@ -115,11 +115,20 @@ pub fn health_checks_axis(
     // carry: a finding is served under the entity's latest verdict.
     let mut newest_any: std::collections::BTreeMap<String, crate::check::CheckRecord> =
         std::collections::BTreeMap::new();
+    // Every verification record per entity, oldest first: the per-record
+    // readings (engine::independence) show each check's standing, not
+    // only the newest one's — a superseded self-check stays visible.
+    let mut all_verification: std::collections::BTreeMap<String, Vec<crate::check::CheckRecord>> =
+        std::collections::BTreeMap::new();
     if let Some(l) = &ledger {
         for rec in l.all() {
             newest_any.insert(rec.entity.clone(), rec.clone());
             match rec.resolved_kind() {
                 Some(crate::check::CheckKind::Verification) => {
+                    all_verification
+                        .entry(rec.entity.clone())
+                        .or_default()
+                        .push(rec.clone());
                     latest.insert(rec.entity.clone(), rec);
                 }
                 Some(crate::check::CheckKind::Conformance) => {
@@ -170,6 +179,12 @@ pub fn health_checks_axis(
         let mut self_checked: Vec<String> = Vec::new();
         let mut confirmed_independent: Vec<String> = Vec::new();
         let mut unconfirmable: Vec<String> = Vec::new();
+        // Which identities each ok-checked criterion was compared against
+        // (engine::independence), rendered so a reader can see who counted
+        // as an executor. One provenance pass per mem.
+        let mut executors = serde_json::Map::new();
+        let mut readings = serde_json::Map::new();
+        let touches = engine.mem_touches(&mem);
         let mut foreign_kinds: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
         let mut findings = serde_json::Map::new();
@@ -196,6 +211,25 @@ pub fn health_checks_axis(
             }
             let state = crate::check::derive_state(latest.get(&id), &e.content_hash);
             *counts.entry(state.as_str()).or_insert(0) += 1;
+            if let Some(records) = all_verification.get(&id) {
+                let rows: Vec<serde_json::Value> = records
+                    .iter()
+                    .map(|rec| {
+                        let reading = if rec.verdict == "ok" {
+                            engine.independence_of(e, rec, &touches).0.as_str()
+                        } else {
+                            "failed"
+                        };
+                        serde_json::json!({
+                            "ts": rec.ts,
+                            "identity": rec.identity,
+                            "verdict": rec.verdict,
+                            "reading": reading,
+                        })
+                    })
+                    .collect();
+                readings.insert(id.clone(), serde_json::Value::Array(rows));
+            }
             let cstate = crate::check::derive_state_pinned(
                 latest_conformance.get(&id),
                 &e.content_hash,
@@ -205,26 +239,26 @@ pub fn health_checks_axis(
             if state != crate::check::CheckState::CheckedOk {
                 continue;
             }
-            // Identity-only comparison (plan 15): the caller-declared
-            // identity on the creation record against the one on the
-            // newest ok-check. The (actor, client) transport pair is
-            // recorded context and never a comparator — a same pair
-            // does not establish the same actor, different pairs do
-            // not establish different actors. Either side lacking an
-            // identity (undeclared caller, records predating the
-            // field) is unconfirmable, never a guessed category.
+            // Identity-only comparison (plan 15, comparator widened
+            // 2026-09-02): the newest ok-check's identity against every
+            // identity that mutated the verified plan, its criteria or
+            // its session-log notes since this criterion was written
+            // (engine::independence); a non-criterion compares against
+            // its own author. The (actor, client) transport pair is
+            // recorded context and never a comparator. Either side
+            // lacking an identity is unconfirmable, never a guessed
+            // category.
             let check = latest.get(&id).expect("checked_ok implies a record");
-            // Author identity from the append-only mutation record.
-            // Provenance lookup is bounded to ok-checked entities.
-            let author_identity = engine
-                .entity_provenance(&mem, &id)
-                .ok()
-                .and_then(|p| p.created_by)
-                .and_then(|r| r.identity);
-            match (author_identity, check.identity.as_ref()) {
-                (Some(a), Some(c)) if a == *c => self_checked.push(id),
-                (Some(_), Some(_)) => confirmed_independent.push(id),
-                _ => unconfirmable.push(id),
+            let (reading, execs) = engine.independence_of(e, check, &touches);
+            if let Some(execs) = execs {
+                executors.insert(id.clone(), serde_json::json!(execs.identities));
+            }
+            match reading {
+                crate::engine::independence::Independence::SelfChecked => self_checked.push(id),
+                crate::engine::independence::Independence::ConfirmedIndependent => {
+                    confirmed_independent.push(id)
+                }
+                crate::engine::independence::Independence::Unconfirmable => unconfirmable.push(id),
             }
         }
         let mut m = serde_json::Map::new();
@@ -250,6 +284,9 @@ pub fn health_checks_axis(
                 "self_checked": capped(self_checked),
                 "confirmed_independent": capped(confirmed_independent),
                 "unconfirmable": capped(unconfirmable),
+                "comparator": "every identity that mutated the verified plan, its criteria or its session-log notes since the criterion was written; a non-criterion compares against its own author",
+                "executors": serde_json::Value::Object(executors),
+                "readings": serde_json::Value::Object(readings),
             }),
         );
         out.insert(mem, serde_json::Value::Object(m));
@@ -1406,7 +1443,8 @@ pub struct UncheckedRelated {
 /// access — a workspace-less engine, or a call path that cannot reach
 /// one) derives every related entity as `never_checked`, so a
 /// declared gate refuses honestly rather than passing unverified.
-pub type CheckStateProvider<'a> = &'a dyn Fn(&crate::entity::Entity) -> crate::check::CheckState;
+pub type CheckStateProvider<'a> =
+    &'a dyn Fn(&crate::entity::Entity) -> crate::engine::independence::CheckStanding;
 
 /// Evaluate one entity's declared per-entity `constraints` against its
 /// current state (and, for the store-aware forms, against the rest of
@@ -1605,16 +1643,22 @@ pub fn transition_gate_standing(
     let mut unchecked: Vec<UncheckedRelated> = related
         .into_iter()
         .filter_map(|rel_entity| {
-            let state = match checks {
+            // An ok check confirms only when it is independent of the
+            // executors (engine::independence): the executor's own ok
+            // reads `self_checked` here and does not close the gate.
+            let standing = match checks {
                 Some(provider) => provider(rel_entity),
-                None => crate::check::CheckState::NeverChecked,
+                None => crate::engine::independence::CheckStanding {
+                    state: crate::check::CheckState::NeverChecked,
+                    independence: None,
+                },
             };
-            if state == crate::check::CheckState::CheckedOk {
+            if standing.confirms() {
                 None
             } else {
                 Some(UncheckedRelated {
                     id: rel_entity.id.0.clone(),
-                    state: state.as_str().to_string(),
+                    state: standing.label().to_string(),
                 })
             }
         })
@@ -4315,12 +4359,15 @@ community:
             store.upsert(e.id.clone(), e);
         }
 
-        let provider = |e: &crate::entity::Entity| {
+        let state_of = |e: &crate::entity::Entity| {
             if e.id.0.contains("ok-crit") {
                 CheckState::CheckedOk
             } else {
                 CheckState::CheckStale
             }
+        };
+        let provider = |e: &crate::entity::Entity| {
+            crate::engine::independence::CheckStanding::assumed_independent(state_of(e))
         };
         let violations = unsatisfied_constraints(&store, &plan, &td, None, Some(&provider));
         assert_eq!(violations.len(), 1, "{violations:?}");
@@ -4349,7 +4396,9 @@ community:
         );
 
         // Every related entity confirmed -> satisfied.
-        let all_ok = |_: &crate::entity::Entity| CheckState::CheckedOk;
+        let all_ok = |_: &crate::entity::Entity| {
+            crate::engine::independence::CheckStanding::assumed_independent(CheckState::CheckedOk)
+        };
         assert!(
             unsatisfied_constraints(&store, &plan, &td, None, Some(&all_ok)).is_empty(),
             "all confirmed satisfies the gate"

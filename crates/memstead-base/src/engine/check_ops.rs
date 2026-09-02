@@ -157,27 +157,6 @@ impl Engine {
         Ok(record)
     }
 
-    /// A [`crate::ops::health::CheckStateProvider`]-shaped closure over
-    /// this engine's check ledger — the `transition_requires_checks`
-    /// constraint's window into derived verification state. One ledger
-    /// handle per closure; an engine without a workspace root derives
-    /// every entity as `never_checked`, so a declared gate refuses
-    /// honestly rather than passing unverified.
-    pub(crate) fn check_state_provider(
-        &self,
-    ) -> impl Fn(&crate::entity::Entity) -> CheckState + '_ {
-        let ledger = self.workspace_root().map(CheckLedger::for_workspace);
-        move |entity: &crate::entity::Entity| match &ledger {
-            None => CheckState::NeverChecked,
-            Some(ledger) => derive_state(
-                ledger
-                    .latest_for_kind(&entity.id.0, CheckKind::Verification)
-                    .as_ref(),
-                &entity.content_hash,
-            ),
-        }
-    }
-
     /// Derive one entity's check state and newest check record.
     /// Refuses typed on unknown mem/entity; an engine with no
     /// workspace root has no check store and honestly derives

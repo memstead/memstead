@@ -47,6 +47,7 @@ pub mod export_llms_txt;
 pub mod file_watcher;
 pub mod gates;
 pub mod history;
+pub mod independence;
 pub mod lifecycle;
 pub mod mutation;
 pub mod outcomes;

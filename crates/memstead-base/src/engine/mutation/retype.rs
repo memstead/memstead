@@ -359,7 +359,7 @@ impl Engine {
             });
         }
         {
-            let check_provider = self.check_state_provider();
+            let check_provider = self.check_standing_provider();
             let violated = crate::ops::health::unsatisfied_constraints(
                 &self.store,
                 &next,

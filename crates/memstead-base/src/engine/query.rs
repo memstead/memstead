@@ -1770,7 +1770,7 @@ impl Engine {
         &self,
         mem_filter: Option<&str>,
     ) -> Vec<crate::ops::health::ConstraintFindingReport> {
-        let check_provider = self.check_state_provider();
+        let check_provider = self.check_standing_provider();
         crate::ops::health::collect_constraint_findings(
             &self.store,
             mem_filter,

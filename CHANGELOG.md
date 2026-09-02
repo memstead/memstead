@@ -91,6 +91,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   its mem list and every per-mem read on it. With the `file-watcher`
   feature, `watch_roster` reports writes to the roster file alongside the
   mem-repo refs. Engine: `Engine::reconcile_roster`, `subscribe_roster_changes`.
+- **The independence gate compares the executor, not the criterion's
+  author.** A check on an acceptance criterion reads
+  `confirmed_independent` only when its identity differs from every
+  identity that mutated the verified plan, its criteria or its session-log
+  notes since the criterion was written; a check under one of those
+  identities reads `self_checked`; a check or a record without an identity
+  stays `unconfirmable`. Until now the reading compared against the
+  criterion entity's creator, so the executing session's own checks read
+  independent (found by the evidence-engine bundle, once on a wrong check).
+  The `transition_requires_checks` gate consumes the same reading: a plan
+  cannot complete on the executor's own checks, and the gate names
+  `self_checked` or `unconfirmable` on the entity that holds it open. The
+  reading is derived at read time from the append-only provenance record
+  (commit trailers on git-branch mems, the ledger on folder mems); no field
+  is stamped and every existing check ledger parses unchanged. `health
+  --include checks` renders `comparator`, `executors` (the identities each
+  ok-checked criterion was compared against) and `readings` (every
+  verification record's own reading, so a superseded self-check stays
+  visible beside the grader's). Engine: `Engine::executors_of`,
+  `independence_of`, `check_standing_provider`.
 - **Coverage counts describing entities per artifact.** The fidelity report
   states its unit: an artifact counts once when at least one entity anchors
   it, however many anchor rows it carries; `covered_artifacts`,

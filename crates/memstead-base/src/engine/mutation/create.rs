@@ -739,7 +739,7 @@ impl Engine {
         // same single evaluation the health `constraints` include
         // runs. Block-tier violations refuse; warn-tier violations
         // warn and the write proceeds.
-        let check_provider = self.check_state_provider();
+        let check_provider = self.check_standing_provider();
         let violated = crate::ops::health::unsatisfied_constraints(
             &self.store,
             &entity_for_render,

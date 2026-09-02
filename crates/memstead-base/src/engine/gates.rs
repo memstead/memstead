@@ -40,7 +40,7 @@ impl Engine {
     /// declares the constraint. Deterministic given the store and the
     /// check ledger.
     pub fn render_gates_brief(&self, mem_filter: Option<&str>) -> String {
-        let checks = self.check_state_provider();
+        let checks = self.check_standing_provider();
         let mut sections: Vec<String> = Vec::new();
         let mut declaring_mems: Vec<String> = Vec::new();
 
