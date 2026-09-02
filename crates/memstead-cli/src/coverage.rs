@@ -228,6 +228,11 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         ),
         no_verdict("schema new", MUTATION),
         no_verdict("schema install", MUTATION),
+        no_verdict(
+            "schema migrate",
+            "previews or applies rewrites of the caller-named schema package; reports \
+             the rewrites, never an all-clear over any workspace axis",
+        ),
         // Mutations and setup.
         no_verdict("create", MUTATION),
         no_verdict("update", MUTATION),

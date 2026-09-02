@@ -9,6 +9,26 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead schema migrate <dir>` rewrites an authoring package's
+  retired keys into the current schema language.** The keys `schema
+  validate` refuses (`propagating_relationships`, the metadata-field
+  `optional:`, the retired `examples:` list, the exemplar-relation
+  `to:`/`type:` spelling) are rewritten by exactly the translations the
+  loader applies to sealed content: one table (`memstead_schema::migrate::
+  LEGACY_KEYS`) pinned by the suite against the loader's serde sentinels,
+  and a run-time faithfulness check that loads the original through the
+  sealed-style read and the rewrite through the authoring read and
+  refuses to write unless both resolve the same schema. Dry run by
+  default (one line per rewrite, nothing written); `--write` edits the
+  files in place, comments and key order preserved. A package that
+  carries `optional:` was written when an absent key meant required, so
+  its fields declaring neither key get `required: true` — the meaning
+  their sealed copies already have, shown in the dry run for the author
+  to keep or delete. Never bumps `version`, never touches a sealed copy;
+  the report closes with the `validate` → `install` → `mem set-schema`
+  steps. Refuses with `SCHEMA_MIGRATE_FAILED` (a `reason` in details)
+  when a value cannot be rewritten mechanically or the package fails to
+  load for a reason no retired key explains.
 - **`memstead schema <pin>` renders workspace-installed packages, not
   only built-ins.** A pinned reference that is no built-in now falls
   through to the workspace's installed stores (the filesystem

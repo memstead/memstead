@@ -708,10 +708,23 @@ pub fn check_package_reauthorable(
     manifest_yaml: &str,
     types_yamls: &[(String, String)],
 ) -> Result<(), SchemaLoadError> {
+    load_authoring_package_from_memory(manifest_yaml, types_yamls).map(|_| ())
+}
+
+/// Load in-memory package content under the AUTHORING tier — the same
+/// strictness as [`load_schema_from_dir`] (retired keys refuse, the
+/// current metadata polarity), without a directory. The schema comes
+/// back for callers that need to compare what the strict read resolves
+/// (the migrate verb's faithfulness check); [`check_package_reauthorable`]
+/// is the yes/no form.
+pub fn load_authoring_package_from_memory(
+    manifest_yaml: &str,
+    types_yamls: &[(String, String)],
+) -> Result<Schema, SchemaLoadError> {
     // The `types_dir: Some(..)` context is what selects the authoring-
     // strict legacy-key gates; the path itself only labels error
     // messages.
-    let strict_context = Path::new("<sealed package>");
+    let strict_context = Path::new("<authoring package>");
     load_with_context(
         manifest_yaml,
         types_yamls,
@@ -719,7 +732,6 @@ pub fn check_package_reauthorable(
         Some(strict_context),
         MetadataPolarityFormat::RequiredOptIn,
     )
-    .map(|_| ())
 }
 
 /// Load a schema from in-memory YAML strings with an explicit

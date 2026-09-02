@@ -23,7 +23,15 @@
 //! runs the same validation gate as the booted `Engine::install_schema`
 //! and seals the package onto the `__MEMSTEAD:schemas/` ref.
 //!
-//! `validate` is flavour-agnostic and touches no workspace. `install`
+//! `memstead schema migrate <path>` rewrites the retired keys of an
+//! authoring package into the current schema language — by exactly the
+//! translations the loader applies to sealed content
+//! (`memstead_schema::migrate`). Dry run by default: it prints one line
+//! per rewrite and writes nothing; `--write` applies them in place,
+//! comments and key order preserved. It never bumps `version` and never
+//! touches a sealed copy.
+//!
+//! `validate` and `migrate` are flavour-agnostic and touch no workspace. `install`
 //! never boots the workspace on either flavour — it is a named remedy
 //! for boot-blocking states (repair-below-boot rule), so it operates on
 //! configuration and schema storage only: the folder flavour writes
@@ -97,6 +105,37 @@ pub enum SchemaCommand {
     /// engine; the detection command and details are in the docs-site
     /// schema-authoring guide.
     Install(InstallArgs),
+
+    /// Rewrite an authoring package's retired keys into the current
+    /// schema language — the keys `schema validate` refuses
+    /// (`propagating_relationships`, `optional:`, the retired `examples:`
+    /// list, the exemplar-relation `to:`/`type:` spelling) — by exactly
+    /// the translations the engine applies when it reads sealed
+    /// content. Dry run by default: prints one line per rewrite and
+    /// writes nothing. `--write` applies the rewrites in place, keeping
+    /// comments, key order and spacing. A package that carried
+    /// `optional:` was written when an absent key meant required, so
+    /// its fields declaring neither key get `required: true` — the
+    /// meaning they already have when sealed; delete the line where you
+    /// did not mean it. Never bumps `version` (whether a spelling
+    /// migration deserves one is yours to decide) and never touches a
+    /// sealed copy inside a mem. Exits non-zero (`SCHEMA_MIGRATE_FAILED`)
+    /// when a value cannot be rewritten mechanically, when the package
+    /// fails to load for a reason no retired key explains, or when the
+    /// rewrite would not reproduce the engine's own translation.
+    Migrate(MigrateArgs),
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct MigrateArgs {
+    /// Path to the schema package directory (the folder containing
+    /// `schema.yaml`).
+    pub path: PathBuf,
+
+    /// Apply the rewrites in place. Without it the command is a dry run
+    /// that reports what would change and writes nothing.
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -132,7 +171,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // read-only workspace, or none at all, still runs the command.
     if matches!(
         args.command,
-        Some(SchemaCommand::New(_) | SchemaCommand::Validate(_) | SchemaCommand::Install(_))
+        Some(
+            SchemaCommand::New(_)
+                | SchemaCommand::Validate(_)
+                | SchemaCommand::Install(_)
+                | SchemaCommand::Migrate(_)
+        )
     ) && let Some((_, root)) = ctx.workspace_shape()
     {
         let _ = memstead_schema::meta_schema::publish_meta_schemas(&root);
@@ -141,6 +185,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         (Some(SchemaCommand::New(a)), _) => scaffold_new(ctx, a),
         (Some(SchemaCommand::Validate(a)), _) => validate(ctx, a),
         (Some(SchemaCommand::Install(a)), _) => install(ctx, a),
+        (Some(SchemaCommand::Migrate(a)), _) => migrate(ctx, a),
         (None, Some(reference)) => show_builtin(ctx, &reference),
         (None, None) => Err(CliError::new(
             ExitKind::Validation,
@@ -173,7 +218,12 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
                     .iter()
                     .find(|(path, _)| path == memstead_schema::builtins::PACKAGE_README_FILE)
                     .map(|(_, bytes)| bytes.to_vec());
-                ("builtin", pkg.name.to_string(), pkg.version.to_string(), bytes)
+                (
+                    "builtin",
+                    pkg.name.to_string(),
+                    pkg.version.to_string(),
+                    bytes,
+                )
             }
             None => match workspace_installed_readme(ctx, &schema_ref) {
                 Some(bytes) => (
@@ -220,7 +270,9 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
         Some(text) => print_markdown(&format!(
             "<!-- {pin}: {label} package README, rendered for this generation -->\n{text}"
         )),
-        None => print_markdown(&format!("`{pin}` is a {label} package that ships no README.\n")),
+        None => print_markdown(&format!(
+            "`{pin}` is a {label} package that ships no README.\n"
+        )),
     }
     Ok(())
 }
@@ -230,10 +282,7 @@ fn show_builtin(ctx: &CliContext, reference: &str) -> anyhow::Result<()> {
 /// the mem-repo's `__MEMSTEAD:schemas/` ref (where `memstead schema
 /// install` writes on git-backed workspaces). `None` outside a
 /// workspace or when the package (or its README) is absent.
-fn workspace_installed_readme(
-    ctx: &CliContext,
-    schema_ref: &SchemaRef,
-) -> Option<Vec<u8>> {
+fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Option<Vec<u8>> {
     let (_, root) = ctx.workspace_shape()?;
     let fs_readme = root
         .join(".memstead")
@@ -870,6 +919,150 @@ fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
     }
 }
 
+fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
+    use memstead_schema::migrate::{MigrateError, migrate_package, next_steps, write_migration};
+
+    let map_err = |e: MigrateError| -> anyhow::Error {
+        let reason = match &e {
+            MigrateError::NotAPackage { .. } => "not_a_package",
+            MigrateError::SealedPackage { .. } => "sealed_package",
+            MigrateError::Io { .. } | MigrateError::NotUtf8 { .. } => "io",
+            MigrateError::UnmigratableValue { .. } => "unmigratable_value",
+            MigrateError::PackageDoesNotLoad { .. } => "package_does_not_load",
+            MigrateError::RewriteLeavesViolations { .. } => "rewrite_leaves_violations",
+            MigrateError::Unfaithful { .. } => "unfaithful_rewrite",
+        };
+        CliError::new(
+            ExitKind::Validation,
+            "SCHEMA_MIGRATE_FAILED",
+            format!("schema migrate at {}: {e}", args.path.display()),
+        )
+        .with_details(json!({ "path": args.path, "reason": reason, "error": e.to_string() }))
+        .into()
+    };
+
+    let report = migrate_package(&args.path).map_err(map_err)?;
+    let wrote = args.write && !report.is_noop();
+    if wrote {
+        write_migration(&report).map_err(map_err)?;
+    }
+    let steps = next_steps(&args.path, &report.schema);
+
+    if ctx.json {
+        let rewrites: Vec<serde_json::Value> = report
+            .files
+            .iter()
+            .flat_map(|f| {
+                f.rewrites.iter().map(move |r| {
+                    json!({
+                        "file": f.rel_path,
+                        "line": r.line,
+                        "key": r.key,
+                        "path": r.path,
+                        "action": r.action.to_string(),
+                    })
+                })
+            })
+            .collect();
+        print_json(&json!({
+            "ok": true,
+            "schema": report.schema,
+            "path": report.package,
+            "dry_run": !args.write,
+            "wrote": wrote,
+            "rewrites": rewrites,
+            "files_changed": report.changed_files().map(|f| &f.rel_path).collect::<Vec<_>>(),
+            "legacy_polarity": report.legacy_polarity,
+            "required_added": report.required_added.iter().map(|b| json!({
+                "type": b.type_name, "field": b.field,
+            })).collect::<Vec<_>>(),
+            "next_steps": if report.is_noop() { Vec::new() } else { steps },
+        }))?;
+        return Ok(());
+    }
+
+    let mut out = String::new();
+    if report.is_noop() {
+        out.push_str(&format!(
+            "# Schema migrate
+
+Nothing to migrate: `{}` at `{}` carries no retired key. No file written.
+",
+            report.schema,
+            report.package.display(),
+        ));
+        print_markdown(&out);
+        return Ok(());
+    }
+    let mode = if wrote {
+        "written"
+    } else {
+        "dry run, nothing written"
+    };
+    out.push_str(&format!(
+        "# Schema migrate — {mode}
+
+`{}` at `{}` — {} rewrite(s) in {} file(s)
+",
+        report.schema,
+        report.package.display(),
+        report.rewrite_count(),
+        report.changed_files().count(),
+    ));
+    for file in report.changed_files() {
+        out.push_str(&format!(
+            "
+## {}
+
+",
+            file.rel_path
+        ));
+        for r in &file.rewrites {
+            out.push_str(&format!(
+                "- {r}
+"
+            ));
+        }
+    }
+    if report.legacy_polarity {
+        out.push_str(
+            "
+## Polarity
+
+This package carries the retired `optional:` key, so it was written when an absent key meant required — the meaning its sealed copies still have. The rewrite keeps that meaning: every metadata field declaring neither key gets `required: true`. Delete the line where you did not mean it.
+",
+        );
+    }
+    out.push_str(
+        "
+## Next steps
+
+",
+    );
+    if !wrote {
+        out.push_str(&format!(
+            "1. Review the rewrites above, then apply them: `memstead schema migrate {} --write`
+",
+            args.path.display()
+        ));
+    }
+    let offset = if wrote { 1 } else { 2 };
+    for (i, step) in steps.iter().enumerate() {
+        out.push_str(&format!(
+            "{}. `{step}`
+",
+            i + offset
+        ));
+    }
+    out.push_str(
+        "
+`version` was not bumped: whether a spelling migration deserves a new version is your call. Sealed copies inside mems are untouched; they keep loading as they are.
+",
+    );
+    print_markdown(&out);
+    Ok(())
+}
+
 fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
     let (shape, root) = ctx.workspace_shape().ok_or_else(|| {
         CliError::new(
@@ -880,7 +1073,10 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
                 .to_string(),
         )
     })?;
-    let (schema_ref, files) = resolve_source(&args.source, ctx.workspace_shape().map(|(_, r)| r).as_deref())?;
+    let (schema_ref, files) = resolve_source(
+        &args.source,
+        ctx.workspace_shape().map(|(_, r)| r).as_deref(),
+    )?;
 
     match shape {
         WorkspaceShape::Filesystem => {
@@ -1331,6 +1527,79 @@ mod tests {
                 std::fs::copy(entry.path(), &target).unwrap();
             }
         }
+    }
+
+    /// The migrate verb on the sealed default-1.3 copy (retired exemplar
+    /// spelling): the dry run writes nothing and reports the rewrites;
+    /// `--write` makes the copy validate as authoring input.
+    #[test]
+    fn migrate_dry_run_then_write_makes_legacy_copy_validate() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../memstead-schema/builtins/schemas/default-1.3");
+        let dir = tempfile::tempdir().unwrap();
+        let dst = dir.path().join("authoring");
+        copy_dir_without_marker(&src, &dst);
+        let snapshot = |d: &Path| -> Vec<(String, Vec<u8>)> {
+            let mut files = Vec::new();
+            for entry in std::fs::read_dir(d.join("types")).unwrap() {
+                let entry = entry.unwrap();
+                files.push((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(entry.path()).unwrap(),
+                ));
+            }
+            files.sort();
+            files
+        };
+        let before = snapshot(&dst);
+        validate(&ctx(), ValidateArgs { path: dst.clone() })
+            .expect_err("legacy copy refuses before migration");
+
+        migrate(
+            &ctx(),
+            MigrateArgs {
+                path: dst.clone(),
+                write: false,
+            },
+        )
+        .expect("dry run computes");
+        assert_eq!(snapshot(&dst), before, "dry run writes nothing");
+
+        migrate(
+            &ctx(),
+            MigrateArgs {
+                path: dst.clone(),
+                write: true,
+            },
+        )
+        .expect("write applies");
+        assert_ne!(snapshot(&dst), before, "--write rewrites the files");
+        validate(&ctx(), ValidateArgs { path: dst.clone() }).expect("migrated copy validates");
+
+        // A second run finds nothing and leaves the bytes alone.
+        let after = snapshot(&dst);
+        migrate(
+            &ctx(),
+            MigrateArgs {
+                path: dst.clone(),
+                write: true,
+            },
+        )
+        .expect("noop run");
+        assert_eq!(snapshot(&dst), after);
+    }
+
+    /// A sealed package is refused by the migrate verb the same way
+    /// `validate` refuses it — the verb never edits a sealed copy.
+    #[test]
+    fn migrate_refuses_sealed_package() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../memstead-schema/builtins/schemas/default-1.3");
+        let err = migrate(&ctx(), MigrateArgs { path, write: true })
+            .expect_err("sealed package must refuse");
+        let cli = err.downcast_ref::<CliError>().expect("typed CLI error");
+        assert_eq!(cli.code, "SCHEMA_MIGRATE_FAILED");
+        assert_eq!(cli.details.as_ref().unwrap()["reason"], "sealed_package");
     }
 
     /// A directory carrying `schema-format.json` — a sealed package —

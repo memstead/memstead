@@ -91,6 +91,7 @@ This document contains the help content for the `memstead` command-line program.
 * [`memstead schema new`↴](#memstead-schema-new)
 * [`memstead schema validate`↴](#memstead-schema-validate)
 * [`memstead schema install`↴](#memstead-schema-install)
+* [`memstead schema migrate`↴](#memstead-schema-migrate)
 * [`memstead projection`↴](#memstead-projection)
 * [`memstead projection brief`↴](#memstead-projection-brief)
 * [`memstead projection init`↴](#memstead-projection-init)
@@ -1606,6 +1607,7 @@ Author-time schema tooling. `memstead schema validate <path>` checks a schema pa
 * `new` — Scaffold a new schema package at `./<name>/` — a manifest plus one commented example type — that `memstead schema validate` passes unmodified. Prints the follow-up commands that take the package from folder to pinned mem
 * `validate` — Validate a schema package directory (`schema.yaml` plus an optional `types/*.yaml`) against the engine's schema loader, as the package you are AUTHORING — always read in the current schema language, so retired keys (`optional:`, `propagating_relationships`) refuse here by design. A package already sealed under an older language can therefore be refused by this command and still load: sealed content is read under the generation it was sealed in, and that is the point of sealing. Validate what you write, not what you installed. Exits non-zero (`SCHEMA_VALIDATION_FAILED`) on any conformance error, with the YAML line/column in the message where the parse layer provides it
 * `install` — Install a schema package into the current folder workspace's `.memstead/schemas/<name>@<version>/` so a mem can pin it. `<source>` is a built-in name (`planning`, `planning@0.1.0`) or a path to a package directory. Validates before copying; idempotent
+* `migrate` — Rewrite an authoring package's retired keys into the current schema language — the keys `schema validate` refuses (`propagating_relationships`, `optional:`, the retired `examples:` list, the exemplar-relation `to:`/`type:` spelling) — by exactly the translations the engine applies when it reads sealed content. Dry run by default: prints one line per rewrite and writes nothing. `--write` applies the rewrites in place, keeping comments, key order and spacing. A package that carried `optional:` was written when an absent key meant required, so its fields declaring neither key get `required: true` — the meaning they already have when sealed; delete the line where you did not mean it. Never bumps `version` (whether a spelling migration deserves one is yours to decide) and never touches a sealed copy inside a mem. Exits non-zero (`SCHEMA_MIGRATE_FAILED`) when a value cannot be rewritten mechanically, when the package fails to load for a reason no retired key explains, or when the rewrite would not reproduce the engine's own translation
 
 ###### **Arguments:**
 
@@ -1648,6 +1650,22 @@ Repair note — engines 0.6.0 through 0.8.1 mis-stamped LEGACY packages as curre
 ###### **Arguments:**
 
 * `<SOURCE>` — Built-in schema name (`planning`, `planning@0.1.0`) or a path to a schema package directory
+
+
+
+## `memstead schema migrate`
+
+Rewrite an authoring package's retired keys into the current schema language — the keys `schema validate` refuses (`propagating_relationships`, `optional:`, the retired `examples:` list, the exemplar-relation `to:`/`type:` spelling) — by exactly the translations the engine applies when it reads sealed content. Dry run by default: prints one line per rewrite and writes nothing. `--write` applies the rewrites in place, keeping comments, key order and spacing. A package that carried `optional:` was written when an absent key meant required, so its fields declaring neither key get `required: true` — the meaning they already have when sealed; delete the line where you did not mean it. Never bumps `version` (whether a spelling migration deserves one is yours to decide) and never touches a sealed copy inside a mem. Exits non-zero (`SCHEMA_MIGRATE_FAILED`) when a value cannot be rewritten mechanically, when the package fails to load for a reason no retired key explains, or when the rewrite would not reproduce the engine's own translation
+
+**Usage:** `memstead schema migrate [OPTIONS] <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Path to the schema package directory (the folder containing `schema.yaml`)
+
+###### **Options:**
+
+* `--write` — Apply the rewrites in place. Without it the command is a dry run that reports what would change and writes nothing
 
 
 

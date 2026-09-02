@@ -53,6 +53,18 @@ memstead schema validate cookbook
 
 This is the same validation the engine runs at load, without touching the workspace. Any conformance error exits non-zero (`SCHEMA_VALIDATION_FAILED`) with the YAML line and column where the parse layer provides it — re-run after every edit.
 
+### Retired keys: migrate instead of hand-editing
+
+A package written under an older schema language can fail validation on nothing but retired spellings — `propagating_relationships` (now `no_self_loop_relationships`), the metadata-field `optional:` (now `required:`, opposite polarity), the `examples:` list (replaced by the validated `exemplar:`), the exemplar-relation `to:`/`type:` pair (now `target:`/`rel_type:`). `memstead schema migrate` rewrites them by exactly the translations the engine applies when it reads sealed content:
+
+```bash
+memstead schema migrate cookbook            # dry run: one line per rewrite, nothing written
+memstead schema migrate cookbook --write    # apply in place; comments and key order stay
+memstead schema validate cookbook
+```
+
+The dry run is the review step. One thing to read carefully there: a package that carries `optional:` was written when an absent key meant *required*, and its sealed copies still read that way. The migration conserves that meaning by inserting `required: true` on every metadata field that declared neither key — delete the line where you did not mean it. The verb never bumps `version` (whether a spelling change deserves a new one is your call) and never edits a sealed copy inside a mem; those keep loading as they are.
+
 ## 3. Install into the workspace
 
 ```bash
