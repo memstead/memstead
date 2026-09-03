@@ -97,6 +97,18 @@ this binding's scope, and lists the artifacts. Exclusion is a reporting decision
 nothing is deleted, rewritten, or marked invalid, and an excluded anchor cannot
 raise a finding against a binding that does not answer for it.
 
+The coverage axis handles its own exclusions the other way round, and the
+difference is deliberate. An artifact you rule out with `memstead projection
+exclude` is **dropped** from `coverage.uncovered` and counted beside the figure
+as `coverage.excluded`, because that array answers a different question: what is
+still owed. A reader counts it and a gate reads it, so an entry left inside it
+stays owed however it is annotated, whereas an anchor excluded from a population
+is not owed by anyone and naming it is the whole point. Nothing is lost either
+way: each dropped artifact keeps its reasoning under "Excluded on purpose" in the
+rendered report and in `disposed_excluded_rationales` in the JSON. The rule, in
+one line: a population exclusion is **named in place**, a coverage exclusion is
+**moved out and counted**.
+
 The report also states **what its denominator counted**. One artifact legitimately
 carries several anchors at different grains or classes, so the row count and the
 distinct-artifact count are printed side by side rather than the rows being merged

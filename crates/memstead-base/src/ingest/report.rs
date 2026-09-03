@@ -903,10 +903,10 @@ fn render_hard_required(report: &FidelityReport) -> String {
             let backlog = report.coverage.uncovered.len();
             md.push_str(&format!(
                 "**Exhaustive coverage (onboarding):** {backlog} in-scope artifact(s) carry no \
-                 entity yet ({} disposed excluded, already out of the count above) — the \
-                 expected first-sync backfill worklist for a mem that predates its binding, \
-                 not defects.\n\n",
-                report.disposed_excluded
+                 entity yet ({} disposed excluded{}) — the expected first-sync backfill \
+                 worklist for a mem that predates its binding, not defects.\n\n",
+                report.disposed_excluded,
+                already_out_clause(report.disposed_excluded)
             ));
         }
         CoverageSemantics::Exhaustive => {
@@ -914,9 +914,10 @@ fn render_hard_required(report: &FidelityReport) -> String {
             let findings = report.coverage.uncovered.len();
             md.push_str(&format!(
                 "**Exhaustive coverage:** {findings} unaccounted artifact(s) — not anchored, not \
-                 declared-excluded, no persisted disposition ({} disposed excluded, already out \
-                 of that count) — are **findings**.\n\n",
-                report.disposed_excluded
+                 declared-excluded, no persisted disposition ({} disposed excluded{}) — are \
+                 **findings**.\n\n",
+                report.disposed_excluded,
+                already_out_clause(report.disposed_excluded)
             ));
         }
         CoverageSemantics::Curated => {
@@ -1175,6 +1176,19 @@ fn heavy_sections(report: &FidelityReport) -> Vec<(&'static str, String)> {
     out.push(("superseded_findings", s));
 
     out
+}
+
+/// The clause that tells a reader the disposed-excluded artifacts are already
+/// out of the headline count (C7). Empty when there are none: a binding with
+/// no exclusions must render byte-identical to its pre-C7 output, which the
+/// plan states as a constraint and which an ungated clause quietly broke for
+/// every exhaustive binding in the workspace.
+fn already_out_clause(disposed_excluded: usize) -> &'static str {
+    if disposed_excluded > 0 {
+        ", already out of that count"
+    } else {
+        ""
+    }
 }
 
 /// Render the tier-1 fidelity report into markdown, token-budgeted in the house
@@ -2124,6 +2138,8 @@ mod tests {
             md.contains("1 disposed excluded, already out of that count"),
             "{md}"
         );
+        // …and the clause is GATED: see
+        // `c7_no_exclusions_renders_byte_identically_to_the_pre_plan_output`.
         // The figure beside the coverage numbers carries the excluded count,
         // so a reader is not left to wonder where the artifact went.
         assert!(
@@ -2132,11 +2148,21 @@ mod tests {
         );
     }
 
-    /// C7 — a binding with no exclusions renders the uncovered figure exactly
-    /// as before: the count alone, no trailing clause. The plan's constraint
-    /// is that coverage arithmetic changes only by the excluded set.
+    /// C7 — a binding with no exclusions renders BYTE-IDENTICALLY to the
+    /// pre-plan output, which is the plan's constraint and its refusal
+    /// complement. Both C7 additions are gated on there being an exclusion:
+    /// the trailing clause on the uncovered figure, and the "already out of
+    /// that count" clause on the exhaustive headline.
+    ///
+    /// The first version of this test asserted only the bare uncovered line
+    /// and the absence of "excluded on purpose". It passed while the
+    /// exhaustive headline had gained an ungated clause, so every exhaustive
+    /// binding in the world rendered differently and the constraint was
+    /// broken with a green test. The grader caught it by diffing two
+    /// binaries; these assertions pin BOTH lines exactly so a future
+    /// addition cannot slip in the same way.
     #[test]
-    fn c7_no_exclusions_renders_the_bare_uncovered_figure() {
+    fn c7_no_exclusions_renders_byte_identically_to_the_pre_plan_output() {
         let mut r = base_report();
         r.coverage_semantics = CoverageSemantics::Exhaustive;
         r.coverage.uncovered = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
@@ -2145,7 +2171,19 @@ mod tests {
         let md = render_fidelity_report(&r, 8_000, &[]).markdown;
         assert!(md.contains("- uncovered (no anchor): 2\n"), "{md}");
         assert!(!md.contains("excluded on purpose"), "{md}");
-        assert!(md.contains("2 unaccounted artifact(s)"), "{md}");
+        // The pre-plan wording of the headline, to the closing parenthesis.
+        assert!(
+            md.contains("2 unaccounted artifact(s)") && md.contains("(0 disposed excluded)"),
+            "{md}"
+        );
+        assert!(!md.contains("already out of that count"), "{md}");
+
+        // The onboarding branch renders its pre-plan wording too.
+        let mut adopt = r.clone();
+        adopt.adopt = true;
+        let md = render_fidelity_report(&adopt, 8_000, &[]).markdown;
+        assert!(md.contains("(0 disposed excluded)"), "{md}");
+        assert!(!md.contains("already out of that count"), "{md}");
     }
 
     /// B4 — the authored-exclusion ledger renders each excluded artifact with

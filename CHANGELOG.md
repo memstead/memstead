@@ -31,8 +31,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   because a reader counts the array. The reasoning stays visible in the
   "Excluded on purpose" block and in `disposed_excluded_rationales`, the
   findings axis is unchanged, and a binding with no exclusions renders
-  exactly as before. The subtraction that used to happen in the renderer is
-  gone, since the array now arrives net.
+  byte-identically to before: both new clauses are gated on there being an
+  exclusion. The subtraction that used to happen in the renderer is gone,
+  since the array now arrives net. The fidelity-contract reference states why
+  coverage drops what the anchor population names in place.
 - **A bare `projection verify` no longer advances the `#verified` baseline.**
   The freshness token the selection loop reads now moves only under a new
   `projection verify --advance` flag, so a gate or a grader that verifies in
