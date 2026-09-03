@@ -765,14 +765,36 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
         // `reconcile_exclusions`, which prunes authored exclusions whose
         // sources appear to hold nothing — the 181 lost dispositions in the
         // filed incident. Refuse above it, not after.
-        if let Ok(configs) = load_pipeline_configs(&root)
-            && let Some(record) = configs
-                .bindings
-                .iter()
-                .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
-            && let Ok(resolved) = resolve_binding_run(&binding_id, &record.config)
-            && let Some(q) = engine.quarantine_reason(&resolved.destination_mem)
+        // Deliberately NOT an `if let … && let …` chain: an `Err` anywhere in
+        // the resolution would fall through to the unguarded render, which is
+        // the very path that reaches `reconcile_exclusions`. A guard that can
+        // silently skip is not a guard. Each step propagates its own typed
+        // failure instead, exactly as the render below would have.
+        let configs = load_pipeline_configs(&root).map_err(|e| {
+            CliError::new(
+                ExitKind::Generic,
+                "PROJECTION_LOAD_FAILED",
+                format!("could not load binding store: {e}"),
+            )
+            .with_details(json!({ "error": e.to_string() }))
+        })?;
+        let quarantine = match configs
+            .bindings
+            .iter()
+            .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
         {
+            Some(record) => {
+                let resolved = resolve_binding_run(&binding_id, &record.config)
+                    .map_err(|e| map_resolve_err(&binding_id, e))?;
+                engine
+                    .quarantine_reason(&resolved.destination_mem)
+                    .map(|q| (resolved.destination_mem.clone(), q.clone()))
+            }
+            // An unknown binding is the render's own refusal to make, with
+            // its nearest-name help; not this guard's.
+            None => None,
+        };
+        if let Some((destination_mem, q)) = quarantine {
             return Err(CliError::new(
                 ExitKind::Validation,
                 "MEM_QUARANTINED",
@@ -780,12 +802,12 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                     "brief refused for `{binding_id}`: the destination mem `{}` is \
 quarantined ({}) — it serves no entities, so the brief would describe a mem \
 that is not there. Repair the mem, then re-run",
-                    resolved.destination_mem, q.reason_message
+                    destination_mem, q.reason_message
                 ),
             )
             .with_details(json!({
                 "binding": binding_id,
-                "mem": resolved.destination_mem,
+                "mem": destination_mem,
                 "reason_code": q.reason_code,
                 "reason": q.reason_message,
             }))

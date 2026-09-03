@@ -3370,10 +3370,25 @@ fn a_quarantined_destination_is_refused_and_all_three_stores_are_untouched() {
         "fixture must carry an authored exclusion"
     );
 
-    // Quarantine the DESTINATION: repoint its schema pin at a version no
-    // installed schema resolves to. The binding record itself stays valid.
-    std::fs::write(&config_path, r#"{ "schema": "default@9.9.9" }"#).unwrap();
+    // Quarantine the DESTINATION: repoint ONLY the schema pin at a version no
+    // installed schema resolves to, leaving `syncState` in place. The binding
+    // record itself stays valid.
+    //
+    // Rewriting the whole config would have dropped the `#verified` token, and
+    // the comparison below would then have proved only that an absent token
+    // stayed absent — which is not what its message claims (grader finding,
+    // 2026-09-03). Preserving the token makes the assertion mean what it says.
+    let quarantined_cfg = {
+        let mut cfg: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        cfg["schema"] = Value::String("default@9.9.9".to_string());
+        serde_json::to_vec_pretty(&cfg).unwrap()
+    };
+    std::fs::write(&config_path, &quarantined_cfg).unwrap();
     let config_quarantined = std::fs::read(&config_path).unwrap();
+    assert!(
+        String::from_utf8_lossy(&config_quarantined).contains("#verified"),
+        "the quarantined fixture must still carry the token the comparison is about"
+    );
 
     for (label, args) in [
         ("verify", vec!["projection", "verify", "engine/graph"]),
