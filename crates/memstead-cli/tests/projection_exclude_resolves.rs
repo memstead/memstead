@@ -248,6 +248,104 @@ fn exercise(pointer: &str, canonical_a: &str, canonical_b: &str) {
     assert_eq!(ledger(&root), before, "a refused call records nothing");
 }
 
+/// A two-source binding: both sources carry `docs/a.md`, so the
+/// source-relative spelling denotes two different files.
+fn two_source_workspace(tmp: &TempDir) -> std::path::PathBuf {
+    let root = tmp.path().join("ws");
+    std::fs::create_dir_all(root.join("engine-mem").join(".memstead")).unwrap();
+    std::fs::write(
+        root.join("engine-mem")
+            .join(".memstead")
+            .join("config.json"),
+        r#"{ "schema": "default@1.0.0" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("engine-mem").join("seed.md"),
+        "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# Seed\n\n## Identity\n\nThe seed.\n\n## Purpose\n\nExists.\n",
+    )
+    .unwrap();
+    write_store(
+        &root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        &root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+    write_store(
+        &root,
+        "projections/engine/docs.json",
+        r#"{"version":2,"intent":"model both trees","sources":[{"name":"one","type":"codebase","pointer":"srcone","change_detection":"git","scope":[{"path":"**/*.md","mode":"allow"}]},{"name":"two","type":"codebase","pointer":"srctwo","change_detection":"git","scope":[{"path":"**/*.md","mode":"allow"}]}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"manual","batch_size":20},"verify":{"trigger":"manual","batch_size":20,"adjudication_mode":"strict"}}}"#,
+    );
+    for ptr in ["srcone", "srctwo"] {
+        let src = root.join(ptr);
+        std::fs::create_dir_all(src.join("docs")).unwrap();
+        std::fs::write(src.join("docs").join("a.md"), format!("# A in {ptr}\n")).unwrap();
+        git(&src, &["init", "-q"]);
+        git(&src, &["add", "-A"]);
+        git(&src, &["commit", "-q", "-m", "init"]);
+    }
+    root
+}
+
+/// C8 AC1: a source-relative id carried by two sources is REFUSED naming both
+/// canonical ids, and records nothing; either canonical id succeeds.
+///
+/// The entry was filed on the opposite behaviour: the fold took the first
+/// source that matched, so the source listed earliest in the binding silently
+/// won and the exclusion landed on an artifact the caller never named.
+#[test]
+fn an_ambiguous_source_relative_id_is_refused_naming_both_canonical_ids() {
+    let tmp = TempDir::new().unwrap();
+    let root = two_source_workspace(&tmp);
+    let ledger_path = root
+        .join(".memstead")
+        .join("state")
+        .join("advance")
+        .join("engine")
+        .join("docs.json");
+
+    // Ambiguous: `docs/a.md` exists under both pointers.
+    let (ok, err) = exclude(&root, r#"{"docs/a.md": "probe"}"#);
+    assert!(!ok, "an ambiguous id must refuse: {err}");
+    assert_eq!(
+        err["code"], "PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT",
+        "{err}"
+    );
+    let named = err["details"]["ambiguous"]["docs/a.md"].to_string();
+    assert!(
+        named.contains("srcone/docs/a.md") && named.contains("srctwo/docs/a.md"),
+        "both canonical ids are named: {err}"
+    );
+    // The message carries them too, for a reader who never parses details.
+    let msg = err["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("srcone/docs/a.md") && msg.contains("srctwo/docs/a.md"),
+        "{err}"
+    );
+    assert!(
+        !ledger_path.exists(),
+        "a refused call records nothing: the ledger must not exist"
+    );
+
+    // Either canonical id is unambiguous and succeeds.
+    let (ok, v) = exclude(&root, r#"{"srctwo/docs/a.md": "probe"}"#);
+    assert!(ok, "{v}");
+    assert_eq!(v["recorded"][0]["canonical"], "srctwo/docs/a.md", "{v}");
+    let stored: Value = serde_json::from_slice(&std::fs::read(&ledger_path).unwrap()).unwrap();
+    assert!(
+        stored["exclusions"]["srctwo/docs/a.md"].is_string(),
+        "the id the caller named is the one recorded: {stored}"
+    );
+    assert!(
+        stored["exclusions"]["srcone/docs/a.md"].is_null(),
+        "the other source's artifact is untouched: {stored}"
+    );
+}
+
 /// B11 AC1 on a sub-tree pointer inside the workspace.
 #[test]
 fn a_source_relative_exclude_takes_effect_and_an_unknown_id_is_refused() {

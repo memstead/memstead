@@ -20,6 +20,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **An ambiguous artifact id is refused with both names.** On a binding with
+  several primary sources, a source-relative id carried by more than one of
+  them (`docs/a.md` under two pointers) now refuses the whole
+  `projection exclude` call with `PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT`,
+  naming every canonical id it could denote in the message and under
+  `details.ambiguous`, and recording nothing. Before, the fold took the first
+  source that matched, so the source listed earliest in the binding silently
+  won and the exclusion landed on an artifact the caller never named. Either
+  canonical (workspace-relative) id is the unambiguous recovery. A binding
+  with one source is unaffected in every response. The cross-source rule now
+  sits beside the within-source resolver it is often confused with: the
+  latter settles which reading wins under ONE pointer and has no opinion on
+  two sources carrying the same relative path.
 - **Coverage drops the artifacts you excluded on purpose.** After a
   `projection exclude`, the fidelity report no longer lists the excluded
   artifact under `coverage.uncovered` or in the "Uncovered artifacts"

@@ -178,7 +178,13 @@ pub enum ProjectionCommand {
     /// canonical workspace-relative id, and the response lists what was
     /// recorded. An id that resolves to no artifact of `S(D)` refuses the
     /// whole call atomically (`PROJECTION_EXCLUDE_NOT_SOURCE_MEMBER`, naming
-    /// the nearest known ids); re-declaring merges into the ledger. The write
+    /// the nearest known ids); re-declaring merges into the ledger. On a
+    /// binding with several primary sources, a source-relative id that
+    /// resolves under MORE THAN ONE of them is likewise refused whole
+    /// (`PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT`), naming every canonical id
+    /// it could denote in the message and under `details.ambiguous`: the
+    /// engine never picks a source the caller did not name, and either
+    /// canonical id is the unambiguous recovery. The write
     /// path for the option-(a)
     /// process-mem judgment migration, and the general "this in-scope artifact is
     /// mined and warrants no destination entity, because …" capability.
@@ -2101,6 +2107,17 @@ fn map_exclude_err(binding_id: &str, err: ExcludeError) -> CliError {
             CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
                 .with_details(json!({ "binding": binding_id }))
         }
+        // The recovery IS the candidate list, so it rides `details` under a
+        // key a caller can branch on, not only the prose.
+        ExcludeError::AmbiguousArtifact { ambiguous } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_EXCLUDE_AMBIGUOUS_ARTIFACT",
+            message,
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "ambiguous": ambiguous,
+        })),
         ExcludeError::NotSourceMember {
             artifacts, nearest, ..
         } => CliError::new(

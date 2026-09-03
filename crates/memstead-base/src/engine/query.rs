@@ -3404,6 +3404,59 @@ pub(crate) fn join_pointer(pointer: &str, base: &str) -> String {
     }
 }
 
+/// How a source-relative artifact id resolved ACROSS a binding's primary
+/// sources — the cross-source counterpart of [`artifact_candidates`], which
+/// answers only within ONE source.
+///
+/// The two questions are genuinely different and only this one can be
+/// ambiguous. `artifact_candidates` settles which reading wins under a single
+/// pointer (decision 29: source-join first, workspace-relative fallback). It
+/// takes one pointer and has no opinion on two sources both carrying
+/// `docs/a.md`. That case has exactly one home, the exclude fold, and used to
+/// take the first source that matched — so the source listed first in the
+/// binding silently won, which is the wrong-target write this type exists to
+/// prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CrossSourceArtifact {
+    /// No source's join lands on a member of the enumerated set.
+    Unresolved,
+    /// Exactly one does; this is the canonical id to record.
+    Unique(String),
+    /// Several do. Sorted and deduplicated, so the refusal names them in a
+    /// stable order and the caller never has to pick.
+    Ambiguous(Vec<String>),
+}
+
+/// Resolve a requested artifact id against a binding's primary sources.
+///
+/// `canonical_for` maps one source's base and the requested id to the
+/// workspace-relative form, returning `None` when that form is not a member
+/// of the enumerated source set. The caller owns that predicate because the
+/// membership test differs by surface; what is shared, and what lives here,
+/// is the rule that several matches are an ambiguity to refuse rather than a
+/// choice to make silently.
+pub(crate) fn resolve_across_sources<'a, I, F>(
+    bases: I,
+    requested: &str,
+    canonical_for: F,
+) -> CrossSourceArtifact
+where
+    I: IntoIterator<Item = &'a std::path::PathBuf>,
+    F: Fn(&std::path::PathBuf, &str) -> Option<String>,
+{
+    let mut hits: Vec<String> = bases
+        .into_iter()
+        .filter_map(|base| canonical_for(base, requested))
+        .collect();
+    hits.sort();
+    hits.dedup();
+    match hits.len() {
+        0 => CrossSourceArtifact::Unresolved,
+        1 => CrossSourceArtifact::Unique(hits.remove(0)),
+        _ => CrossSourceArtifact::Ambiguous(hits),
+    }
+}
+
 /// The candidate workspace-relative forms an anchor artifact could denote
 /// under its declaring source's pointer, in the ratified priority (bundle
 /// decision 29): the source-join first, the workspace-relative form as the

@@ -797,6 +797,22 @@ pub enum ExcludeError {
         /// Why the enumeration is incomplete, naming the offending patterns.
         reason: String,
     },
+    /// A source-relative id resolves under MORE THAN ONE of the binding's
+    /// primary sources, so recording it would pick a source the caller never
+    /// named. Refused whole, nothing written; the canonical ids are the
+    /// recovery, and either one is unambiguous.
+    #[error(
+        "exclusion id {} is ambiguous: it resolves under {} of the binding's sources, as {}; \
+         re-declare it with one of those workspace-relative ids",
+        fmt_list(&ambiguous.keys().cloned().collect::<Vec<_>>()),
+        ambiguous.values().map(|c| c.len()).max().unwrap_or(0),
+        fmt_list(&ambiguous.values().flatten().cloned().collect::<Vec<_>>())
+    )]
+    AmbiguousArtifact {
+        /// For each ambiguous requested id, every canonical id it resolves
+        /// to, sorted. The caller re-declares with one of them.
+        ambiguous: BTreeMap<String, Vec<String>>,
+    },
     /// Reading or writing the durable advance store failed.
     #[error("advance store error: {0}")]
     Store(#[source] StoreError),
@@ -875,24 +891,39 @@ pub fn record_exclusions(
         .collect();
     let mut canonical: BTreeMap<String, String> = BTreeMap::new();
     let mut not_member: Vec<String> = Vec::new();
+    let mut ambiguous: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for requested in exclusions.keys() {
         if s_d.contains(requested.as_str()) {
             canonical.insert(requested.clone(), requested.clone());
             continue;
         }
-        let joined = bases.iter().find_map(|base| {
-            let candidate =
-                relative_path(workspace_root, &normalize_lexical(&base.join(requested)))
-                    .to_string_lossy()
-                    .to_string();
+        // Every source that resolves it, not the first (C8). Taking the first
+        // meant the source listed earliest in the binding silently won, which
+        // records an exclusion against an artifact the caller never named.
+        // The cross-source rule itself lives beside the within-source one in
+        // `engine::query`; the membership predicate stays here, because what
+        // counts as resolved is this surface's business.
+        match crate::engine::query::resolve_across_sources(bases.iter(), requested, |base, id| {
+            let candidate = relative_path(workspace_root, &normalize_lexical(&base.join(id)))
+                .to_string_lossy()
+                .to_string();
             s_d.contains(candidate.as_str()).then_some(candidate)
-        });
-        match joined {
-            Some(c) => {
+        }) {
+            crate::engine::query::CrossSourceArtifact::Unique(c) => {
                 canonical.insert(requested.clone(), c);
             }
-            None => not_member.push(requested.clone()),
+            crate::engine::query::CrossSourceArtifact::Ambiguous(cands) => {
+                ambiguous.insert(requested.clone(), cands);
+            }
+            crate::engine::query::CrossSourceArtifact::Unresolved => {
+                not_member.push(requested.clone())
+            }
         }
+    }
+    // Ambiguity before non-membership: an id that resolves several ways is a
+    // spelling the caller must narrow, not one they got wrong.
+    if !ambiguous.is_empty() {
+        return Err(ExcludeError::AmbiguousArtifact { ambiguous });
     }
     if !not_member.is_empty() {
         not_member.sort();
