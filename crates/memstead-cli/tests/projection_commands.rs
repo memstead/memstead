@@ -3234,6 +3234,12 @@ fn verify_workspace() -> TempDir {
 /// sidecar (`hash_backfilled: 1`); a re-run backfills nothing (idempotent);
 /// after a source change a verify adjudicates `drifted` deterministically —
 /// no queued deferral, no LLM leg.
+///
+/// Deliberately a BARE verify throughout (C6, 2026-09-03): `--advance` gates
+/// the `#verified` freshness token only. The backfill is measurement
+/// machinery, and this test is the evidence for that split — gating it too
+/// was tried and reverted when the anchor stayed in `recheck` and the third
+/// leg's drift never appeared.
 #[test]
 fn verify_backfills_hashless_anchor_then_adjudicates_drift() {
     let tmp = verify_workspace();
@@ -3307,6 +3313,136 @@ fn verify_backfills_hashless_anchor_then_adjudicates_drift() {
     assert_eq!(
         env["backlog"], 0,
         "nothing queued — the hash leg needs no sampling: {env}"
+    );
+}
+
+/// C6 AC1: a BARE `projection verify` leaves the destination mem's config
+/// byte-identical, findings and report unaffected; the same call with
+/// `--advance` moves the `#verified` token. The entry this pins was filed on
+/// a grader that verified in order to READ and dirtied the tree it was
+/// checking, then reverted its own bump by hand.
+///
+/// The config is the right thing to compare: `#verified` is written through
+/// `set_mem_sync_state`, which merges into the mem's `.memstead/config.json`.
+/// The fixture seeds a STALE token first, so "unchanged" cannot pass by the
+/// key simply being absent on both sides.
+///
+/// The anchors sidecar is deliberately NOT part of this comparison. The
+/// prepared-hash backfill writes it on every completed run, gated or not,
+/// because it is measurement machinery rather than a freshness claim:
+/// withheld, an anchor never leaves `recheck` and drift stops being
+/// adjudicated. What the plan was filed on is the freshness token, and that
+/// is what the flag gates.
+#[test]
+fn bare_verify_leaves_the_mem_config_untouched_and_advance_moves_the_token() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+    let config_path = root.join("engine-mem/.memstead/config.json");
+
+    // Let the prepared-hash backfill land first. It writes the anchors
+    // sidecar and so commits to the mem, which stamps the config — real, and
+    // outside what this criterion is about. Once the anchor carries its hash
+    // the backfill is idempotent and the settled state is the one a gate
+    // actually re-verifies.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph"])
+        .assert()
+        .success();
+
+    // Seed a stale baseline, so the key is present and WRONG before the
+    // measurement runs: "unchanged" must not be able to pass by the key
+    // simply being absent on both sides. Written into the config directly,
+    // the way this fixture writes its store and its anchors sidecar — the
+    // `mem set-sync-state` verb belongs to the mem-repo feature and this
+    // file's workspace is the filesystem flavour, which the lean build runs.
+    let seeded = {
+        let mut cfg: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        cfg["syncState"]["engine/graph/source-tree#verified"] =
+            Value::String("staletoken".to_string());
+        serde_json::to_vec_pretty(&cfg).unwrap()
+    };
+    std::fs::write(&config_path, &seeded).unwrap();
+    let before = std::fs::read(&config_path).unwrap();
+    assert!(
+        String::from_utf8_lossy(&before).contains("staletoken"),
+        "fixture must seed the stale token"
+    );
+
+    // (1) Bare verify: measures, records findings, writes nothing into the mem.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["advanced"], false, "a bare run does not advance: {env}");
+    assert!(
+        env["verified_baseline"].as_array().unwrap().is_empty(),
+        "no baseline key written: {env}"
+    );
+    assert!(
+        env["report"].is_object(),
+        "the measurement still happened and rendered: {env}"
+    );
+    let after_bare = std::fs::read(&config_path).unwrap();
+    assert_eq!(
+        after_bare,
+        before,
+        "a bare verify must leave the mem config byte-identical\nbefore: {}\nafter:  {}",
+        String::from_utf8_lossy(&before),
+        String::from_utf8_lossy(&after_bare),
+    );
+
+    // The human surface says so rather than staying silent, so an empty
+    // baseline is never read as "there was nothing to record".
+    let human = memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(
+        String::from_utf8_lossy(&human).contains("Baseline not advanced"),
+        "the bare run must announce that it did not advance the baseline: {}",
+        String::from_utf8_lossy(&human)
+    );
+    assert_eq!(
+        std::fs::read(&config_path).unwrap(),
+        before,
+        "the human-mode run writes no more than the JSON one"
+    );
+
+    // (2) `--advance`: the token moves off the seeded stale value.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "verify",
+            "engine/graph",
+            "--advance",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["advanced"], true, "the flag advances: {env}");
+    assert!(
+        !env["verified_baseline"].as_array().unwrap().is_empty(),
+        "the baseline keys are reported: {env}"
+    );
+    let after = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !after.contains("staletoken"),
+        "--advance replaces the stale token: {after}"
     );
 }
 
@@ -4624,8 +4760,18 @@ fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
 
     // (2) VERIFY: a real enumerated denominator AND a real snapshot token.
     //     The token is the half a folder-mem source can never produce.
-    let env: Value =
-        serde_json::from_slice(&run(&["--json", "projection", "verify", "dest/mirror"])).unwrap();
+    //     `--advance` because the leg below asserts what the `#verified`
+    //     baseline holds after a sync advances `#synced`; since C6 the
+    //     baseline moves only when asked for, so a test about the baseline
+    //     has to ask (2026-09-03).
+    let env: Value = serde_json::from_slice(&run(&[
+        "--json",
+        "projection",
+        "verify",
+        "dest/mirror",
+        "--advance",
+    ]))
+    .unwrap();
     assert_eq!(
         env["report"]["coverage"]["denominator"]["count"], 3,
         "the git-backed source mem's three entities are S(D): {env}"

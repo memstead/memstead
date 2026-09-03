@@ -148,7 +148,7 @@
       "additionalProperties": false
     },
     "verifyOperation": {
-      "description": "The verify operation — measurement. Mutates no entity, but records findings, backfills observed anchor hashes, and writes a `#verified` baseline. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.",
+      "description": "The verify operation — measurement. Mutates no entity: it records findings into the verify surface's own store and backfills observed anchor hashes (measurement machinery). The `#verified` freshness baseline, its one write into the mem's config, moves only under `projection verify --advance`. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.",
       "type": "object",
       "required": [
         "trigger",

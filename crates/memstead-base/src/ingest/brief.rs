@@ -1052,9 +1052,11 @@ pub fn render_verify_brief(resolved: &ResolvedIngest, backlog: usize) -> String 
         "You are measuring the fidelity of `{}` — how faithfully the destination mem \
          `{}` still matches its source. This pass **only measures**: read the source \
          and the mem's anchors, judge whether the graph still holds, and record what \
-         you find. **You** write nothing into the destination mem — the run itself \
-         records its findings store, backfills observed anchor hashes, and writes a \
-         `#verified` baseline, which is engine bookkeeping, not your edits.",
+         you find. **You** write nothing into the destination mem. The run itself records \
+         its findings store, which is the verify surface's own state outside the mem, and \
+         backfills observed anchor hashes, which is measurement machinery. Its one write \
+         into the mem's config, the `#verified` baseline, rides `--advance` and is off by \
+         default, so a bare verify leaves that config byte-identical.",
         resolved.name, resolved.destination_mem
     ));
     lines.push(String::new());
@@ -1095,9 +1097,10 @@ pub fn render_verify_brief(resolved: &ResolvedIngest, backlog: usize) -> String 
          `specifies` / `constraints` section, do not create or delete an entity, do not \
          add or remove a relationship. When measurement shows the graph is wrong, that \
          is a **finding** — the sync brief (`memstead projection brief --sync`) is the \
-         one place those repairs are made. Leave every fix to it. (The run itself does \
-         record its findings store, backfill observed anchor hashes, and write a \
-         `#verified` baseline — engine bookkeeping, not your edits.)"
+         one place those repairs are made. Leave every fix to it. (The run itself records \
+         its findings store, which lives outside the mem, and backfills observed anchor \
+         hashes; it writes a `#verified` baseline only under `--advance` — engine \
+         bookkeeping, not your edits.)"
             .to_string(),
     );
     lines.push(String::new());
@@ -2419,15 +2422,24 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         // opposite, and hands repairs to the sync brief.
         //
         // Reworded 2026-08-20. This assertion used to pin "Verify writes
-        // **nothing** into the destination mem", which was false: a completed
-        // run records its findings store, backfills observed anchor hashes and
-        // writes a `#verified` baseline. The refusal this test exists to
-        // protect is about ENTITY CONTENT — that is what an agent reading the
-        // brief must not touch — so the claim is narrowed to what is true
-        // rather than deleted, and the bookkeeping is asserted alongside it so
-        // the correction cannot silently regress.
+        // **nothing** into the destination mem", which was false at the time: a
+        // completed run recorded its findings store, backfilled observed anchor
+        // hashes and wrote a `#verified` baseline. The refusal this test exists
+        // to protect is about ENTITY CONTENT — that is what an agent reading the
+        // brief must not touch — so the claim was narrowed to what is true
+        // rather than deleted, and the bookkeeping asserted alongside it so the
+        // correction cannot silently regress.
+        //
+        // Amended 2026-09-03 (C6): the `#verified` baseline now rides
+        // `--advance`, so a bare run leaves the mem's CONFIG alone again. The
+        // findings store and the anchor-hash backfill still happen on every
+        // run, so the narrowed entity-content claim stands unchanged — it was
+        // the honest one either way — and the brief must now also name the
+        // flag, so a reader is never told a bare verify records a baseline it
+        // does not.
         assert!(out.contains("Verify writes **no entity content**"));
         assert!(out.contains("`#verified` baseline"));
+        assert!(out.contains("`--advance`"));
         assert!(out.contains("memstead projection brief --sync"));
         // No create/update/relate/delete *instruction* — the only occurrences of
         // those verbs are in the negated "do not …" refusal line.

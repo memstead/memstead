@@ -162,9 +162,12 @@ fn render(schema: &Value) -> String {
         "Each operation under `operations` is optional. An absent **build** or **sync** makes \
          that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an \
          absent **verify** means engine defaults (verify never refuses on an absent \
-         operation block). Verify mutates no entity, but it is not a pure read: a \
-         completed run records its findings store, backfills observed hashes onto \
-         hash-less anchors, and records a `#verified` baseline.\n\n",
+         operation block). Verify mutates no entity: a completed run records its \
+         findings store, which is the verify surface's own state outside the mem, and \
+         backfills observed hashes onto hash-less anchors, which is measurement \
+         machinery. Its one write into the mem's own config, the `#verified` freshness \
+         baseline, rides `projection verify --advance`, so a gate or a grader that \
+         verifies in order to read leaves that config byte-identical.\n\n",
     );
     for (op_key, def_name) in [
         ("build", "buildOperation"),

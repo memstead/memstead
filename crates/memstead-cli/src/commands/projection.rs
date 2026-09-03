@@ -193,8 +193,11 @@ pub enum ProjectionCommand {
     /// binding-declaration edit changes `hash(D)` and segregates prior
     /// findings as superseded, never presented as current. Verify mutates no entity — any
     /// repair routes through the (later) sync brief — but it is not a pure read:
-    /// a completed run records the findings store, backfills observed content
-    /// hashes onto hash-less anchors, and records a `#verified` baseline. It then renders the
+    /// a completed run records the findings store and backfills observed content
+    /// hashes onto hash-less anchors (measurement machinery, without which an anchor
+    /// never leaves `recheck`). The `#verified` freshness baseline moves only under
+    /// `--advance`, so a gate that verifies in order to read leaves the mem's config
+    /// byte-identical. It then renders the
     /// deterministic, token-budgeted **tier-1 fidelity report** (group B) over
     /// the findings just recorded: grain-classed coverage with tree-anchor
     /// fan-out on its own axis, anchor-resolution %, freshness vs. both
@@ -517,6 +520,19 @@ pub struct VerifyArgs {
     /// inconclusive run keeps its long-standing exit 0.
     #[arg(long)]
     pub fail_on_inconclusive: bool,
+    /// Advance the `<binding>/<facet>#verified` baseline, the freshness
+    /// token the selection loop reads to decide when a verify is due
+    /// again. Off by default: a bare verify measures without moving the
+    /// mem's config, so a gate or a grader that verifies in order to READ
+    /// leaves that config byte-identical and the next run still sees the
+    /// binding as unverified. Two writes deliberately do NOT ride this
+    /// flag, because neither is a freshness claim: the findings store,
+    /// which is the verify surface's own state outside the mem, and the
+    /// prepared-hash backfill onto hash-less anchors, which is measurement
+    /// machinery. Withhold that backfill and an anchor never leaves
+    /// `recheck`, so drift stops being adjudicated at all.
+    #[arg(long)]
+    pub advance: bool,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -2256,11 +2272,15 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
 }
 
 /// `projection verify <binding>` — measure fidelity and record durable findings
-/// (group A). Read-only on the destination mem's *entities*; a completed run
-/// makes three sanctioned bookkeeping writes — the findings store, the
-/// prepared-hash backfill onto hash-less anchors, and the `#verified` baseline
-/// through the engine's sync-state writer. An aborted or failed run makes none
-/// of them; in particular it never advances the baseline token.
+/// (group A). Read-only on the destination mem's *entities*. A completed run
+/// always records two things: the findings store, which is the verify surface's
+/// own state outside the mem, and the prepared-hash backfill onto hash-less
+/// anchors, which is measurement machinery (withhold it and an anchor never
+/// leaves `recheck`, so drift stops being adjudicated). Its one FRESHNESS write,
+/// the `#verified` baseline through the engine's sync-state writer, rides
+/// `--advance` and is off by default, so a caller that verifies in order to read
+/// leaves the mem's config byte-identical. An aborted or failed run makes none
+/// of the three; in particular it never advances the baseline token.
 fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
         workspace_not_initialised_error(
@@ -2383,6 +2403,15 @@ remove the sidecar and re-run",
     // returning here would hand a CI job a red build with nothing to read.
     // Same render-then-fail ordering the findings gate uses, extended to the
     // paths that can fail between the measurement and the render.
+    // The backfill is NOT gated on `--advance`, and the distinction is the
+    // point: it is measurement machinery, not a freshness baseline. A
+    // hash-less anchor that never receives its observed hash stays in
+    // `recheck` forever, so drift is never adjudicated deterministically and
+    // the verdict itself changes. Gating it was tried and reverted (C6,
+    // 2026-09-03) on that evidence: seven projection tests moved from
+    // `drifted` to `clean` with the backfill withheld. What `--advance`
+    // gates is the `#verified` token, which is the freshness claim a later
+    // run reads, and which is what the entry was filed on.
     let backfill_result = record_anchor_hash_backfill(
         engine,
         &resolved.destination_mem,
@@ -2400,12 +2429,16 @@ remove the sidecar and re-run",
     // The run completed — record its `#verified` baseline per observed facet
     // head through the engine's sync-state writer (the backlog-prescribed
     // writer; a failed run returned above and never reaches this).
-    let baseline_result = record_verified_baseline(
-        engine,
-        &resolved.destination_mem,
-        &outcome,
-        Some("projection verify: completed-run #verified baseline"),
-    );
+    let baseline_result = if args.advance {
+        record_verified_baseline(
+            engine,
+            &resolved.destination_mem,
+            &outcome,
+            Some("projection verify --advance: completed-run #verified baseline"),
+        )
+    } else {
+        Ok(Vec::new())
+    };
     let verified_baseline = baseline_result.as_ref().cloned().unwrap_or_default();
 
     // The rollup is derived from the assembled report, so the headline a
@@ -2440,8 +2473,13 @@ remove the sidecar and re-run",
             // (never a silent skip): whether a scheduled full walk fired, is not
             // yet due, is disabled, and any typed non-enumerable refusals.
             "full_resync": outcome.full_resync,
+            // Whether this run advanced the `#verified` freshness baseline
+            // (`--advance`). False is the default, so an empty
+            // `verified_baseline` below means "not asked for", not "nothing
+            // to record". The backfill count is unaffected by this flag.
+            "advanced": args.advance,
             // The completed run's `#verified` baseline keys, written through
-            // the engine's sync-state writer.
+            // the engine's sync-state writer. Empty without `--advance`.
             "verified_baseline": verified_baseline,
             // How many hash-less hash-bearing anchors gained a recorded
             // prepared-content hash this run (the completed-run backfill
@@ -2458,7 +2496,14 @@ remove the sidecar and re-run",
         // sweep, or a non-enumerable refusal) is never silent in human mode,
         // and append the recorded `#verified` baseline so the completed-run
         // write is visible.
-        let baseline_note = if verified_baseline.is_empty() {
+        let baseline_note = if !args.advance {
+            // Never silent: a reader must be able to tell "wrote nothing
+            // because that is the default" from "had nothing to write".
+            "\n> **Baseline not advanced** \u{2014} this run measured without moving the \
+             `#verified` token, so the mem's config is untouched and the next run still \
+             sees the binding as unverified. Pass `--advance` to record it.\n"
+                .to_string()
+        } else if verified_baseline.is_empty() {
             String::new()
         } else {
             format!(

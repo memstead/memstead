@@ -47,7 +47,7 @@ One inline source — the full description of a body of information the pipeline
 
 ## Operations
 
-Each operation under `operations` is optional. An absent **build** or **sync** makes that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an absent **verify** means engine defaults (verify never refuses on an absent operation block). Verify mutates no entity, but it is not a pure read: a completed run records its findings store, backfills observed hashes onto hash-less anchors, and records a `#verified` baseline.
+Each operation under `operations` is optional. An absent **build** or **sync** makes that *mutating* operation refuse at run time with a `projection enable <op>` remedy; an absent **verify** means engine defaults (verify never refuses on an absent operation block). Verify mutates no entity: a completed run records its findings store, which is the verify surface's own state outside the mem, and backfills observed hashes onto hash-less anchors, which is measurement machinery. Its one write into the mem's own config, the `#verified` freshness baseline, rides `projection verify --advance`, so a gate or a grader that verifies in order to read leaves that config byte-identical.
 
 ### `build`
 
@@ -71,7 +71,7 @@ The sync operation — the sole maintenance writer. Carries no mode. An absent s
 
 ### `verify`
 
-The verify operation — measurement. Mutates no entity, but records findings, backfills observed anchor hashes, and writes a `#verified` baseline. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.
+The verify operation — measurement. Mutates no entity: it records findings into the verify surface's own store and backfills observed anchor hashes (measurement machinery). The `#verified` freshness baseline, its one write into the mem's config, moves only under `projection verify --advance`. Carries no mode. adjudication_cap and full_resync_every are additive tier-3 scheduling knobs that default to the engine's dogfood-tuned values when absent.
 
 | Field | Type | Required | Allowed values | Description |
 | --- | --- | --- | --- | --- |

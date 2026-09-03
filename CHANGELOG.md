@@ -20,6 +20,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **A bare `projection verify` no longer advances the `#verified` baseline.**
+  The freshness token the selection loop reads now moves only under a new
+  `projection verify --advance` flag, so a gate or a grader that verifies in
+  order to READ leaves the destination mem's config byte-identical. Before,
+  every completed run bumped it, and the surface's read-only claim was false.
+  A run without the flag says so on the report ("Baseline not advanced") and
+  carries `advanced: false` in the JSON envelope, so an empty
+  `verified_baseline` is never mistaken for a run that had nothing to record.
+  Two writes deliberately stay ungated, because neither is a freshness claim:
+  the findings store, which is the verify surface's own state outside the
+  mem, and the prepared-hash backfill onto hash-less anchors, which is
+  measurement machinery. Gating that backfill too was tried and reverted on
+  the evidence: withheld, an anchor never leaves `recheck`, and seven
+  projection tests went from reporting drift to reporting clean.
 - **The short-id rule reaches `retype` and the batch renderer.** `retype`
   with `--auto-hash` or `--force` read the id the caller typed in its hash
   preflight and refused a bare slug with `ENTITY_NOT_FOUND` before the
