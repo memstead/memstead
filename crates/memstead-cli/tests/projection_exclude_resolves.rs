@@ -138,6 +138,22 @@ fn exercise(pointer: &str, canonical_a: &str, canonical_b: &str) {
     // Before any exclusion: both artifacts are the uncovered backfill.
     let report = verify(&root);
     assert_eq!(report["report"]["disposed_excluded"], 0, "{report}");
+    // C7 baseline: with no exclusion the coverage section is what it always
+    // was — both artifacts in the array, no excluded count, no extra clause
+    // on the figure. This is the plan's refusal complement, taken on the
+    // same fixture the assertion runs on.
+    let uncovered_before = report["report"]["coverage"]["uncovered"].to_string();
+    assert!(
+        uncovered_before.contains(canonical_a) && uncovered_before.contains(canonical_b),
+        "{report}"
+    );
+    assert_eq!(report["report"]["coverage"]["excluded"], 0, "{report}");
+    let md_before = report["report_markdown"].as_str().unwrap();
+    assert!(
+        md_before.contains("- uncovered (no anchor): 2\n"),
+        "the bare figure, no excluded clause: {md_before}"
+    );
+    assert!(!md_before.contains("excluded on purpose"), "{md_before}");
 
     // The source-relative form resolves to the canonical id.
     let (ok, v) = exclude(&root, r#"{"docs/a.md": "probe"}"#);
@@ -169,6 +185,50 @@ fn exercise(pointer: &str, canonical_a: &str, canonical_b: &str) {
     let rationales = report["report"]["disposed_excluded_rationales"].to_string();
     assert!(rationales.contains(canonical_a), "{rationales}");
     assert!(!rationales.contains(canonical_b), "{rationales}");
+
+    // C7: and it LEAVES the uncovered set rather than being annotated inside
+    // it. A reader counts that array and a gate reads it, so an excluded
+    // entry left in it stays owed however it is marked. The count rides
+    // beside the figures instead, and the two renderings agree.
+    let uncovered = report["report"]["coverage"]["uncovered"].to_string();
+    assert!(
+        !uncovered.contains(canonical_a),
+        "the excluded artifact is dropped from `coverage.uncovered`: {report}"
+    );
+    assert!(
+        uncovered.contains(canonical_b),
+        "the artifact still owed stays: {report}"
+    );
+    assert_eq!(report["report"]["coverage"]["excluded"], 1, "{report}");
+    let md = report["report_markdown"].as_str().unwrap();
+    assert!(
+        md.contains("- uncovered (no anchor): 1; excluded on purpose (not owed): 1"),
+        "markdown agrees with the JSON count: {md}"
+    );
+    // Scoped to the section itself: the artifact legitimately appears
+    // elsewhere in the report (the "Excluded on purpose" ledger names it with
+    // its rationale, which is the point of that block).
+    let uncovered_section = md
+        .split("## Uncovered artifacts")
+        .nth(1)
+        .map(|rest| rest.split("\n## ").next().unwrap_or(rest).to_string())
+        .unwrap_or_default();
+    assert!(
+        !uncovered_section.contains(canonical_a),
+        "the excluded artifact is gone from the Uncovered artifacts section: {uncovered_section}"
+    );
+    assert!(
+        uncovered_section.contains(canonical_b),
+        "the artifact still owed is listed there: {uncovered_section}"
+    );
+    // This fixture renders the adopt/onboarding branch. Either wording is
+    // fine; what must hold is that the headline counts ONE, not zero: the
+    // renderer no longer subtracts a set the composer already removed.
+    assert!(
+        md.contains("1 in-scope artifact(s) carry no entity yet")
+            || md.contains("1 unaccounted artifact(s)"),
+        "the exhaustive line does not double-count the exclusion: {md}"
+    );
 
     // An id resolving to no artifact refuses, naming the nearest known ids,
     // and records nothing.

@@ -20,6 +20,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **Coverage drops the artifacts you excluded on purpose.** After a
+  `projection exclude`, the fidelity report no longer lists the excluded
+  artifact under `coverage.uncovered` or in the "Uncovered artifacts"
+  section: it leaves that set and is counted beside the figures as
+  `coverage.excluded` (rendered as `uncovered (no anchor): N; excluded on
+  purpose (not owed): M`), so the number a reader or a gate sees is the
+  number still owed. Before, an artifact ruled out on purpose kept showing
+  up as uncovered and kept being counted. Dropped rather than marked,
+  because a reader counts the array. The reasoning stays visible in the
+  "Excluded on purpose" block and in `disposed_excluded_rationales`, the
+  findings axis is unchanged, and a binding with no exclusions renders
+  exactly as before. The subtraction that used to happen in the renderer is
+  gone, since the array now arrives net.
 - **A bare `projection verify` no longer advances the `#verified` baseline.**
   The freshness token the selection loop reads now moves only under a new
   `projection verify --advance` flag, so a gate or a grader that verifies in

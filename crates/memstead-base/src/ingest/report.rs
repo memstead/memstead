@@ -142,6 +142,12 @@ pub struct GrainCoverage {
     pub tree_only_covered: usize,
     /// `S(D)` files with no anchor at all (the heavy artifact list).
     pub uncovered: Vec<String>,
+    /// In-scope artifacts carrying no anchor that a `projection exclude`
+    /// declared out of intent, and which are therefore NOT in `uncovered`
+    /// (C7). Dropped rather than marked: a reader counts the array and a gate
+    /// reads it, so an entry left in it stays owed however it is annotated.
+    /// The rationales ride `disposed_excluded_rationales` on the report.
+    pub excluded: usize,
     /// Per tree anchor, its fan-out over `S(D)` (the heavy detail list).
     pub tree_anchors: Vec<TreeFanout>,
 }
@@ -861,8 +867,16 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.coverage.tree_only_covered
     ));
     md.push_str(&format!(
-        "- uncovered (no anchor): {}\n",
-        report.coverage.uncovered.len()
+        "- uncovered (no anchor): {}{}\n",
+        report.coverage.uncovered.len(),
+        if report.coverage.excluded > 0 {
+            format!(
+                "; excluded on purpose (not owed): {}",
+                report.coverage.excluded
+            )
+        } else {
+            String::new()
+        }
     ));
     // The unit, stated beside the figures (A3 AC4): the count is over
     // artifacts described, never over anchor rows.
@@ -884,28 +898,24 @@ fn render_hard_required(report: &FidelityReport) -> String {
     // red verdict caused solely by pre-binding history.
     match report.coverage_semantics {
         CoverageSemantics::Exhaustive if report.adopt => {
-            let backlog = report
-                .coverage
-                .uncovered
-                .len()
-                .saturating_sub(report.disposed_excluded);
+            // `uncovered` is already net of the declared exclusions (C7), so
+            // its length IS the backlog; subtracting again would double-count.
+            let backlog = report.coverage.uncovered.len();
             md.push_str(&format!(
                 "**Exhaustive coverage (onboarding):** {backlog} in-scope artifact(s) carry no \
-                 entity yet ({} disposed excluded) — the expected first-sync backfill worklist \
-                 for a mem that predates its binding, not defects.\n\n",
+                 entity yet ({} disposed excluded, already out of the count above) — the \
+                 expected first-sync backfill worklist for a mem that predates its binding, \
+                 not defects.\n\n",
                 report.disposed_excluded
             ));
         }
         CoverageSemantics::Exhaustive => {
-            let findings = report
-                .coverage
-                .uncovered
-                .len()
-                .saturating_sub(report.disposed_excluded);
+            // `uncovered` is already net of the declared exclusions (C7).
+            let findings = report.coverage.uncovered.len();
             md.push_str(&format!(
                 "**Exhaustive coverage:** {findings} unaccounted artifact(s) — not anchored, not \
-                 declared-excluded, no persisted disposition ({} disposed excluded) — are \
-                 **findings**.\n\n",
+                 declared-excluded, no persisted disposition ({} disposed excluded, already out \
+                 of that count) — are **findings**.\n\n",
                 report.disposed_excluded
             ));
         }
@@ -1509,6 +1519,34 @@ pub fn compute_fidelity_report(
         })
         .collect();
 
+    // --- Durable authored-exclusion ledger (B4), applied to coverage (C7) ---
+    // The advance store's `exclusions` map survives advance completion (unlike
+    // its transient `dispositions`), and holds each artifact under the
+    // canonical workspace-relative id `record_exclusions` resolved it to, which
+    // is the spelling `s_d` enumerates. An artifact declared excluded is
+    // therefore DROPPED from `uncovered` rather than marked: a reader counts
+    // the array, and a gate reads it, so an entry that stays in it stays owed
+    // however it is annotated. The count rides beside the figures as
+    // `excluded`, and the rationales keep their own block below.
+    let mut disposed_excluded_rationales: Vec<(String, String)> = Vec::new();
+    if let Some((mem, name)) = binding_id.split_once('/')
+        && let Ok(Some(state)) = read_advance_store(workspace_root, mem, name)
+    {
+        let uncovered_set: std::collections::BTreeSet<&str> =
+            uncovered.iter().map(String::as_str).collect();
+        for (artifact, rationale) in &state.exclusions {
+            if uncovered_set.contains(artifact.as_str()) {
+                disposed_excluded_rationales.push((artifact.clone(), rationale.clone()));
+            }
+        }
+    }
+    let disposed_excluded = disposed_excluded_rationales.len();
+    let excluded_set: std::collections::BTreeSet<&str> = disposed_excluded_rationales
+        .iter()
+        .map(|(a, _)| a.as_str())
+        .collect();
+    uncovered.retain(|f| !excluded_set.contains(f.as_str()));
+
     let coverage = GrainCoverage {
         denominator,
         covered_artifacts: direct_covered + tree_only_covered,
@@ -1517,6 +1555,7 @@ pub fn compute_fidelity_report(
         direct_covered,
         tree_only_covered,
         uncovered: uncovered.clone(),
+        excluded: disposed_excluded,
         tree_anchors,
     };
 
@@ -1639,25 +1678,6 @@ pub fn compute_fidelity_report(
             ));
         }
     }
-
-    // --- Durable authored-exclusion ledger (B4) ---
-    // The advance store's `exclusions` map survives advance completion (unlike
-    // its transient `dispositions`), so an artifact mined-and-deliberately-
-    // excluded no longer re-surfaces as `uncovered` on every verify — and keeps
-    // its reasoning. Consult it for every uncovered artifact.
-    let mut disposed_excluded_rationales: Vec<(String, String)> = Vec::new();
-    if let Some((mem, name)) = binding_id.split_once('/')
-        && let Ok(Some(state)) = read_advance_store(workspace_root, mem, name)
-    {
-        let uncovered_set: std::collections::BTreeSet<&str> =
-            uncovered.iter().map(String::as_str).collect();
-        for (artifact, rationale) in &state.exclusions {
-            if uncovered_set.contains(artifact.as_str()) {
-                disposed_excluded_rationales.push((artifact.clone(), rationale.clone()));
-            }
-        }
-    }
-    let disposed_excluded = disposed_excluded_rationales.len();
 
     // --- Degradation flags (B1) ---
     let mut degradations: Vec<String> = Vec::new();
@@ -1807,6 +1827,7 @@ mod tests {
                 direct_covered: 6,
                 tree_only_covered: 3,
                 uncovered: vec!["src/a.rs".to_string()],
+                excluded: 0,
                 tree_anchors: vec![TreeFanout {
                     entity: "engine--big".to_string(),
                     artifact: "src/".to_string(),
@@ -2079,18 +2100,52 @@ mod tests {
         );
     }
 
-    /// B4 — a persisted disposition removes an uncovered artifact from the
-    /// exhaustive findings count.
+    /// B4 — a persisted disposition keeps an artifact out of the exhaustive
+    /// findings count.
+    ///
+    /// Reworked 2026-09-03 (C7): the subtraction moved OUT of the renderer.
+    /// The composer now drops declared-excluded artifacts from
+    /// `coverage.uncovered` itself, so the array a gate reads is already net
+    /// and the renderer must not subtract again. The fixture therefore holds
+    /// the post-composer shape (one uncovered, one excluded) rather than the
+    /// pre-subtraction one, and the renderer is checked for NOT
+    /// double-counting.
     #[test]
     fn b4_disposition_excludes_from_exhaustive_findings() {
         let mut r = base_report();
         r.coverage_semantics = CoverageSemantics::Exhaustive;
-        r.coverage.uncovered = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+        // `src/b.rs` was excluded and is already out of `uncovered`.
+        r.coverage.uncovered = vec!["src/a.rs".to_string()];
+        r.coverage.excluded = 1;
         r.disposed_excluded = 1;
         let md = render_fidelity_report(&r, 8_000, &[]).markdown;
-        // 2 uncovered − 1 disposed = 1 finding.
-        assert!(md.contains("1 unaccounted artifact(s)"));
-        assert!(md.contains("(1 disposed excluded)"));
+        assert!(md.contains("1 unaccounted artifact(s)"), "{md}");
+        assert!(
+            md.contains("1 disposed excluded, already out of that count"),
+            "{md}"
+        );
+        // The figure beside the coverage numbers carries the excluded count,
+        // so a reader is not left to wonder where the artifact went.
+        assert!(
+            md.contains("- uncovered (no anchor): 1; excluded on purpose (not owed): 1"),
+            "{md}"
+        );
+    }
+
+    /// C7 — a binding with no exclusions renders the uncovered figure exactly
+    /// as before: the count alone, no trailing clause. The plan's constraint
+    /// is that coverage arithmetic changes only by the excluded set.
+    #[test]
+    fn c7_no_exclusions_renders_the_bare_uncovered_figure() {
+        let mut r = base_report();
+        r.coverage_semantics = CoverageSemantics::Exhaustive;
+        r.coverage.uncovered = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+        r.coverage.excluded = 0;
+        r.disposed_excluded = 0;
+        let md = render_fidelity_report(&r, 8_000, &[]).markdown;
+        assert!(md.contains("- uncovered (no anchor): 2\n"), "{md}");
+        assert!(!md.contains("excluded on purpose"), "{md}");
+        assert!(md.contains("2 unaccounted artifact(s)"), "{md}");
     }
 
     /// B4 — the authored-exclusion ledger renders each excluded artifact with
@@ -2633,6 +2688,7 @@ mod rollup_tests {
                 direct_covered: 4,
                 tree_only_covered: 0,
                 uncovered: Vec::new(),
+                excluded: 0,
                 tree_anchors: Vec::new(),
             },
             anchors: AnchorComposition {

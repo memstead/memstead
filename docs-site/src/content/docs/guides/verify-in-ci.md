@@ -64,6 +64,14 @@ artifacts — real work, but onboarding rather than drift. The rollup says
 so (`verdict: inconclusive`, with the backfill framing); the exit code
 does not distinguish. Finish the backfill before turning the gate on.
 
+An artifact you have deliberately ruled out with `memstead projection
+exclude` is not in that set. It is dropped from `coverage.uncovered`
+rather than annotated inside it, and counted beside the figure as
+`coverage.excluded`, so the number your gate reads is the number still
+owed. The reasoning stays visible: each excluded artifact is listed with
+its rationale under "Excluded on purpose" in the rendered report and in
+`disposed_excluded_rationales` in the JSON.
+
 ## The job
 
 ```yaml

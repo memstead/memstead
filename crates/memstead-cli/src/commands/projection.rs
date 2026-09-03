@@ -199,7 +199,10 @@ pub enum ProjectionCommand {
     /// `--advance`, so a gate that verifies in order to read leaves the mem's config
     /// byte-identical. It then renders the
     /// deterministic, token-budgeted **tier-1 fidelity report** (group B) over
-    /// the findings just recorded: grain-classed coverage with tree-anchor
+    /// the findings just recorded: grain-classed coverage (an artifact ruled out
+    /// by `projection exclude` is dropped from `coverage.uncovered` and counted
+    /// beside it as `coverage.excluded`, so the uncovered figure is the number
+    /// still owed) with tree-anchor
     /// fan-out on its own axis, anchor-resolution %, freshness vs. both
     /// `sync_state` tokens (`signal: none` → freshness unknowable), the
     /// capability-matrix block, and the tier-3 backlog depth — aggregates always
