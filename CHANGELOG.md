@@ -20,6 +20,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **The short-id rule reaches `retype` and the batch renderer.** `retype`
+  with `--auto-hash` or `--force` read the id the caller typed in its hash
+  preflight and refused a bare slug with `ENTITY_NOT_FOUND` before the
+  engine resolver ran; it now routes that preflight through the same seam
+  `update`, `delete` and `rename` use. The batch commands' markdown render
+  gained the warnings line their `--json` envelope already carried, so a
+  `SHORT_ID_RESOLVED` announcement in a batch is no longer JSON-only.
 - **`rename` and `delete` print their warnings on the human surface.**
   On a mem-repo workspace both verbs rendered their markdown outcome
   without the `- Warnings:` line every sibling verb carries, so a

@@ -822,6 +822,67 @@ fn short_id_resolution_is_announced_in_markdown_for_rename_and_delete() {
         .stdout(contains("Warnings:").and(contains("carried no mem prefix")));
 }
 
+/// C5 constraint 1: the short-id rule holds on EVERY id-taking verb.
+/// `retype`'s hash preflight read the raw id and raised its own
+/// `ENTITY_NOT_FOUND` before the engine resolver ran, so `--auto-hash`
+/// and `--force` refused a bare slug the sibling verbs resolve. The
+/// batch renderer had the sibling gap: it announced the resolution only
+/// under `--json`.
+#[test]
+fn short_id_resolves_on_retype_and_is_announced_by_batch_update() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--title",
+            "Retype Me",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
+        ])
+        .assert()
+        .success();
+
+    // `--auto-hash` refetches the hash: the refetch must resolve the
+    // bare slug, not refuse it.
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "retype",
+            "retype-me",
+            "--type",
+            "memo",
+            "--section-map",
+            "identity=claim,purpose=context",
+            "--drop-metadata",
+            "level",
+            "--auto-hash",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("cli-write--retype-me").and(contains("carried no mem prefix")));
+
+    // The batch renderer announces the resolution in markdown too.
+    let batch = tmp.path().join("batch.json");
+    fs::write(
+        &batch,
+        r#"{ "updates": [ { "id": "retype-me", "sections": { "substance": "batched" },
+             "auto_hash": true, "note": "short id in a batch" } ] }"#,
+    )
+    .unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["batch-update", "--from", batch.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(contains("Warnings:").and(contains("carried no mem prefix")));
+}
+
 #[test]
 fn batch_update_from_file() {
     let tmp = TempDir::new().unwrap();

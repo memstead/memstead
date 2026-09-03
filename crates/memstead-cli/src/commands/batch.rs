@@ -79,6 +79,14 @@ pub(crate) fn render_batch_markdown(
             result.errors_suppressed
         ));
     }
+    // Batch-level warnings, the same line the single verbs render. A
+    // per-item `SHORT_ID_RESOLVED` announcement rides here, so leaving
+    // it out made the resolution visible only under `--json`.
+    if !result.warnings.is_empty() {
+        let parts: Vec<String> = result.warnings.iter().map(|w| w.to_string()).collect();
+        lines.push(String::new());
+        lines.push(format!("- Warnings: {}", parts.join("; ")));
+    }
     if result.applied && !result.write_id.is_empty() {
         lines.push(String::new());
         lines.push(format!("Write: `{}`", result.write_id));

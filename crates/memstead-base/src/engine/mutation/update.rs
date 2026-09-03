@@ -1922,11 +1922,6 @@ mod tests {
     use crate::storage::{ArchiveBackend, FilesystemMemWriter};
     use crate::vcs::Actor;
 
-    /// A mutation writing a section whose declared heading differs
-    /// from a heading the file already carried for the same key warns
-    /// (`SECTION_HEADING_DIVERGENCE`, naming both headings) and still
-    /// commits. Refusal complement: once the file carries the matching
-    /// heading, the same update emits no such warning.
     /// A bare slug resolves when exactly one mounted mem carries it,
     /// announced as `SHORT_ID_RESOLVED`; refuses
     /// `ENTITY_ID_MISSING_MEM` naming every carrier when two do, and
@@ -2026,6 +2021,11 @@ mod tests {
         );
     }
 
+    /// A mutation writing a section whose declared heading differs
+    /// from a heading the file already carried for the same key warns
+    /// (`SECTION_HEADING_DIVERGENCE`, naming both headings) and still
+    /// commits. Refusal complement: once the file carries the matching
+    /// heading, the same update emits no such warning.
     #[test]
     fn update_warns_on_section_heading_divergence_and_still_commits() {
         let tmp = TempDir::new().unwrap();

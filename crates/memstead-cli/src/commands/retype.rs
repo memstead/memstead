@@ -115,7 +115,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let outcome = match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
-            let expected_hash = resolve_expected_hash(&engine, &id, &args)?;
+            // The hash preflight reads the entity the verb will act on,
+            // so a bare slug has to be resolved through the engine's one
+            // rule first — same seam `update`, `delete` and `rename` use.
+            // Reading the raw id here refused a short id with
+            // `ENTITY_NOT_FOUND` before the resolver ever ran.
+            let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
+            let expected_hash = resolve_expected_hash(&engine, &lookup_id, &args)?;
             let mem_repo_ctx = crate::setup::cli_ctx_with_note(args.note.clone());
             engine.set_role(mem_repo_ctx.role);
             engine.set_identity(mem_repo_ctx.identity.clone());
@@ -138,7 +144,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             (outcome, mem_changed)
         }
         CliEngine::Filesystem(mut engine) => {
-            let expected_hash = resolve_expected_hash(&engine, &id, &args)?;
+            let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
+            let expected_hash = resolve_expected_hash(&engine, &lookup_id, &args)?;
             let outcome = engine
                 .retype_entity(
                     RetypeEntityArgs {
