@@ -544,6 +544,13 @@ pub fn compose_overview(
         let subject_scope = engine
             .mem_config_for(name)
             .and_then(|cfg| cfg.subject.as_ref().map(|sub| sub.scope.clone()));
+        // The engine-owned stamp of the last validated mutation — the
+        // marker `ENGINE_VERSION_SKEW` reads: which generation the last
+        // write validated against and which binary performed it.
+        let mutation_stamp = engine
+            .mem_config_for(name)
+            .and_then(|cfg| cfg.mutation_stamp.as_ref())
+            .map(|st| serde_json::json!({ "engine_version": st.engine_version, "schema": st.schema }));
         let mut entity_count: usize = 0;
         let mut type_dist: BTreeMap<String, usize> = Default::default();
         for e in engine.store().all_entities() {
@@ -583,6 +590,7 @@ pub fn compose_overview(
             "durable": durable,
             "review_mark": review_mark,
             "unreviewed": unreviewed,
+            "mutation_stamp": mutation_stamp,
         });
         let mut full = serde_json::json!({
             "name": name,
@@ -598,6 +606,7 @@ pub fn compose_overview(
             "durable": durable,
             "review_mark": review_mark,
             "unreviewed": unreviewed,
+            "mutation_stamp": mutation_stamp,
         });
         if let Some(u) = unbacked {
             lite["unbacked"] = u.clone();
@@ -1099,6 +1108,18 @@ pub fn compose_overview(
             }
             if let Some(ver) = version {
                 md.push_str(&format!("- **Version:** {ver}\n"));
+            }
+            // The last validated mutation's stamp, rendered when the mem
+            // carries one: the generation the last write validated
+            // against and the binary that wrote it, so a reader of the
+            // roster sees the marker the skew hint compares against.
+            if let (Some(schema), Some(engine_version)) = (
+                v["mutation_stamp"]["schema"].as_str(),
+                v["mutation_stamp"]["engine_version"].as_str(),
+            ) {
+                md.push_str(&format!(
+                    "- **Last mutation:** {schema} by engine {engine_version}\n"
+                ));
             }
             // The review mark rides the roster only when one is set —
             // markless is the ordinary state, never flagged. The line

@@ -75,7 +75,11 @@ pub enum MemAction {
     /// trigger. Already-integral mems switch immediately; otherwise
     /// the mem enters dual-pin migration (writes validate against
     /// the target) and the response lists the non-integral entities.
-    /// Re-issue after repairing to complete the switch.
+    /// Re-issue after repairing to complete the switch. A completed
+    /// switch re-stamps the mem's mutation stamp (the marker the
+    /// `ENGINE_VERSION_SKEW` hint reads) with the target; a dual-pin
+    /// entry leaves it on the old generation, and `stamped_schema` in
+    /// the response names what the marker carries after the call.
     #[command(name = "set-schema")]
     SetSchema(SetSchemaArgs),
     /// Set a mem's one-line `description` — embedded in `.mem` archive
@@ -1309,11 +1313,12 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
             format!("\n\n## Non-integral entities\n\n{}", rendered.join("\n"))
         };
         crate::output::print_markdown(&format!(
-            "# Mem `{}` schema: {:?}\n\n- Pin: {}\n- Migration target: {}{}",
+            "# Mem `{}` schema: {:?}\n\n- Pin: {}\n- Migration target: {}\n- Stamped schema: {}{}",
             outcome.mem,
             outcome.outcome,
             outcome.schema_pin,
             outcome.migration_target.as_deref().unwrap_or("<none>"),
+            outcome.stamped_schema.as_deref().unwrap_or("<none>"),
             findings,
         ));
     }
@@ -1442,6 +1447,11 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             "version": cfg.and_then(|c| c.version.clone()),
             "entity_count": entity_count,
             "capability": capability,
+            // The engine-owned stamp of the last validated mutation —
+            // the marker `ENGINE_VERSION_SKEW` reads — so a reader can
+            // see which generation and which binary last wrote the mem
+            // without opening its config.
+            "mutation_stamp": cfg.and_then(|c| c.mutation_stamp.clone()),
         }));
     }
 

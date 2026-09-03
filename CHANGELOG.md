@@ -9,6 +9,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A completed schema migration re-stamps the mem's mutation stamp.**
+  `memstead mem set-schema` / `memstead_mem_set_schema` now re-stamps the
+  engine-owned mutation stamp (the marker the `ENGINE_VERSION_SKEW` hint
+  reads) with the target generation when the switch completes, so a
+  reader of the marker after a migration sees the generation the mem now
+  sits on instead of the one the last entity write validated against. A
+  dual-pin entry leaves the marker on the old generation, and the
+  response's new `stamped_schema` field names what the marker carries
+  after every call. The stamp is now readable without opening the config:
+  `memstead mem list --json` carries `mutation_stamp` per mem, and the
+  overview's mem entry renders a `Last mutation` line when a stamp exists.
 - **The verdict-coverage line files advisory axes under a name that
   says so.** Every verdict surface (`health`, `overview`, `status`,
   `verify-anchors`, `projection verify`, `workspace dump`, and the MCP

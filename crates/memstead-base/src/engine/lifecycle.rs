@@ -1246,6 +1246,7 @@ impl Engine {
                     migration_target: in_flight.map(|t| t.as_display()),
                     outcome: SetSchemaResult::Noop,
                     findings: Vec::new(),
+                    stamped_schema: self.stamped_schema_of(mount_idx),
                 });
             }
             self.mounts[mount_idx].mount.schema = Some(target.clone());
@@ -1257,6 +1258,7 @@ impl Engine {
                 migration_target: None,
                 outcome: SetSchemaResult::Switched,
                 findings: Vec::new(),
+                stamped_schema: self.stamped_schema_of(mount_idx),
             });
         }
 
@@ -1291,12 +1293,23 @@ impl Engine {
             // rebuilt against the new field set.
             self.invalidate_search_indexes();
             self.persist_state()?;
+            // The completed migration re-stamps the mutation stamp (the
+            // marker `ENGINE_VERSION_SKEW` reads) with the generation
+            // the mem now sits on. Without this the marker kept naming
+            // the old pin until the next entity write, and an agent
+            // reading it after the migration re-derived from a stale
+            // generation (B5 grader finding, 2026-09-02). The stamp
+            // writer's equality guard keeps a no-move write from
+            // happening; its warnings ride entity mutations and have no
+            // channel on this outcome, the same standing as the sweep.
+            let _stamp_warnings_have_no_channel_here = self.stamp_mutation_versions(mount_idx);
             return Ok(SetSchemaOutcome {
                 mem: mem.to_string(),
                 schema_pin: target.as_display(),
                 migration_target: None,
                 outcome: SetSchemaResult::Switched,
                 findings: Vec::new(),
+                stamped_schema: self.stamped_schema_of(mount_idx),
             });
         }
 
@@ -1313,13 +1326,28 @@ impl Engine {
         // Same field-set dependency as the atomic-switch branch above.
         self.invalidate_search_indexes();
         self.persist_state()?;
+        // A dual-pin entry never moves the marker: the mem still sits
+        // on the old generation until every entity is integral, and
+        // the outcome says which generation the marker carries.
         Ok(SetSchemaOutcome {
             mem: mem.to_string(),
             schema_pin: current_pin_display,
             migration_target: Some(target.as_display()),
             outcome,
             findings,
+            stamped_schema: self.stamped_schema_of(mount_idx),
         })
+    }
+
+    /// The resolved schema the mem's mutation stamp names, from the
+    /// engine's cached config (kept current by the shared config
+    /// writer), or `None` when the mem carries no stamp.
+    fn stamped_schema_of(&self, mount_idx: usize) -> Option<String> {
+        self.mounts
+            .get(mount_idx)
+            .and_then(|m| m.mem_config.as_ref())
+            .and_then(|c| c.mutation_stamp.as_ref())
+            .map(|st| st.schema.clone())
     }
 
     /// Persist a mem's new schema pin into the authoritative backend
@@ -2344,12 +2372,22 @@ impl Engine {
         // outcome reports the switch, the roster reports any
         // remaining cause.
         let _ = self.reattach_quarantined_mem(mem);
+        // The below-gate repair path validated nothing, so it stamps
+        // nothing: the marker reports what the last validated mutation
+        // stamped (read from the re-attached mount when the repair
+        // succeeded), and the next entity write re-stamps it.
+        let stamped_schema = self
+            .mounts
+            .iter()
+            .position(|m| m.mount.mem == mem)
+            .and_then(|idx| self.stamped_schema_of(idx));
         Ok(SetSchemaOutcome {
             mem: mem.to_string(),
             schema_pin: target.as_display(),
             migration_target: None,
             outcome: SetSchemaResult::Switched,
             findings: Vec::new(),
+            stamped_schema,
         })
     }
 
@@ -5252,6 +5290,91 @@ community:
             cfg["schema"], "mig-a@0.2.0",
             "atomic switch must update the authoritative backend config"
         );
+    }
+
+    /// A completed migration re-stamps the mutation stamp (the marker
+    /// `ENGINE_VERSION_SKEW` reads) with the target; a dual-pin entry
+    /// leaves it on the old generation and says so; a set-schema to
+    /// the pin the mem already carries changes no byte of the config.
+    #[test]
+    fn set_schema_completed_switch_restamps_marker_and_dual_pin_leaves_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let schemas_dir = tmp.path().join("schemas");
+        write_mig_schema(&schemas_dir, "mig-a-1", "mig-a", "0.1.0", false);
+        write_mig_schema(&schemas_dir, "mig-a-2", "mig-a", "0.2.0", false);
+        write_mig_schema(&schemas_dir, "mig-b-1", "mig-b", "0.1.0", true);
+        let mem_dir = tmp.path().join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        let config_path = mem_dir.join(".memstead").join("config.json");
+        // A stamp from an earlier mutation on the old generation.
+        std::fs::write(
+            &config_path,
+            br#"{"schema":"mig-a@0.1.0","mutationStamp":{"engineVersion":"0.0.1","schema":"mig-a@0.1.0"}}"#,
+        )
+        .unwrap();
+        let writer = crate::storage::FilesystemMemWriter::new(mem_dir.clone());
+        let mut mount = folder_mount("specs", mem_dir.clone());
+        mount.schema = Some("mig-a@0.1.0".parse().unwrap());
+        let mut engine = Engine::from_mounts_with_schemas_dir(
+            vec![(
+                mount,
+                Box::new(writer) as Box<dyn crate::backend::MemBackend>,
+            )],
+            Some(&schemas_dir),
+        )
+        .unwrap();
+        let stamp_of = |path: &std::path::Path| -> serde_json::Value {
+            let cfg: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            cfg["mutationStamp"].clone()
+        };
+
+        // Refusal complement: the same pin moves no byte.
+        let before = std::fs::read(&config_path).unwrap();
+        let out = engine
+            .set_mem_schema("specs", &sref("mig-a@0.1.0"))
+            .unwrap();
+        assert_eq!(out.outcome, crate::engine::SetSchemaResult::Noop);
+        assert_eq!(out.stamped_schema.as_deref(), Some("mig-a@0.1.0"));
+        assert_eq!(
+            std::fs::read(&config_path).unwrap(),
+            before,
+            "a noop set-schema changes no byte of the mem config"
+        );
+
+        // Dual-pin entry (mig-b requires a section the entities lack):
+        // the marker stays on the old generation and the outcome says so.
+        for title in ["One", "Two"] {
+            let mut args = empty_create_args("specs", title);
+            args.entity_type = "doc".to_string();
+            args.sections =
+                indexmap::IndexMap::from_iter([("body".to_string(), "content".to_string())]);
+            engine
+                .create_entity(args, crate::vcs::Actor::Cli, None, None)
+                .expect("conformant create under mig-a");
+        }
+        let out = engine
+            .set_mem_schema("specs", &sref("mig-b@0.1.0"))
+            .unwrap();
+        assert_eq!(
+            out.outcome,
+            crate::engine::SetSchemaResult::MigrationStarted
+        );
+        assert!(!out.findings.is_empty());
+        assert_eq!(out.stamped_schema.as_deref(), Some("mig-a@0.1.0"));
+        assert_eq!(stamp_of(&config_path)["schema"], "mig-a@0.1.0");
+
+        // Completed switch (mig-a@0.2.0 is shape-identical, so the
+        // in-flight mig-b target is replaced by an integral switch): the
+        // marker names the new generation, stamped by this engine.
+        let out = engine
+            .set_mem_schema("specs", &sref("mig-a@0.2.0"))
+            .unwrap();
+        assert_eq!(out.outcome, crate::engine::SetSchemaResult::Switched);
+        assert_eq!(out.stamped_schema.as_deref(), Some("mig-a@0.2.0"));
+        let stamp = stamp_of(&config_path);
+        assert_eq!(stamp["schema"], "mig-a@0.2.0");
+        assert_eq!(stamp["engineVersion"], crate::build_info::full_version());
     }
 
     #[test]

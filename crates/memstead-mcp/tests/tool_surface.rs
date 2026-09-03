@@ -2071,6 +2071,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "findings",
             "schema_pin",
             "migration_target",
+            // The marker the skew hint reads, re-stamped by a completed
+            // switch (backlog-repairs C3).
+            "stamped_schema",
+            "ENGINE_VERSION_SKEW",
             "relations_unset",
             "memstead_schema",
             "memstead_update",

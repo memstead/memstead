@@ -818,7 +818,7 @@ pub enum SetSchemaResult {
     MigrationPending,
 }
 
-/// Stable response shape of [`Engine::set_mem_schema`] — all five
+/// Stable response shape of [`Engine::set_mem_schema`] — all six
 /// fields are always present, populated per outcome.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SetSchemaOutcome {
@@ -832,4 +832,12 @@ pub struct SetSchemaOutcome {
     /// the entities not yet integral against the target; empty unless
     /// a migration is in progress.
     pub findings: Vec<crate::ops::integrity::IntegrityFinding>,
+    /// The resolved schema the mem's mutation stamp names after this
+    /// call — the marker the `ENGINE_VERSION_SKEW` hint reads. A
+    /// completed switch re-stamps it with the target; a dual-pin entry
+    /// leaves it where the last mutation put it, so a reader sees here
+    /// which generation the marker still carries. `None` when the mem
+    /// carries no stamp (config-less, or never mutated by a stamping
+    /// engine).
+    pub stamped_schema: Option<String>,
 }
