@@ -748,6 +748,23 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     Ok(engine)
 }
 
+/// The id a command looks up BEFORE it calls the engine (a hash
+/// refetch, a template-identity check, a referrer preview): a bare
+/// slug is resolved through the engine's one rule
+/// (`Engine::resolve_entity_id`) so the preflight reads the entity the
+/// verb will act on, while the verb itself still receives the id the
+/// user typed and announces the resolution on its outcome. A full id
+/// returns unchanged.
+pub fn preflight_id(
+    engine: &mut BaseEngine,
+    id: &memstead_base::EntityId,
+) -> anyhow::Result<memstead_base::EntityId> {
+    Ok(engine
+        .resolve_entity_id(id)
+        .map_err(crate::CliError::from_engine_op)?
+        .0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,21 +833,4 @@ mod tests {
         let found = find_workspace_root(&deep).expect("walk should find the inner marker");
         assert_eq!(found.canonicalize().unwrap(), inner.canonicalize().unwrap());
     }
-}
-
-/// The id a command looks up BEFORE it calls the engine (a hash
-/// refetch, a template-identity check, a referrer preview): a bare
-/// slug is resolved through the engine's one rule
-/// (`Engine::resolve_entity_id`) so the preflight reads the entity the
-/// verb will act on, while the verb itself still receives the id the
-/// user typed and announces the resolution on its outcome. A full id
-/// returns unchanged.
-pub fn preflight_id(
-    engine: &mut BaseEngine,
-    id: &memstead_base::EntityId,
-) -> anyhow::Result<memstead_base::EntityId> {
-    Ok(engine
-        .resolve_entity_id(id)
-        .map_err(crate::CliError::from_engine_op)?
-        .0)
 }

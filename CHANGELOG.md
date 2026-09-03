@@ -20,6 +20,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **`rename` and `delete` print their warnings on the human surface.**
+  On a mem-repo workspace both verbs rendered their markdown outcome
+  without the `- Warnings:` line every sibling verb carries, so a
+  `NOTE_MISSING` hint (and, since the short-id rule landed,
+  `SHORT_ID_RESOLVED`) reached only `--json` callers. Both now render the
+  same line as `update`, `retype` and `relate`; the JSON envelope is
+  unchanged.
 - **The lite schema skeleton carries a field's `value_pattern` and a
   type's `last_resort` flag.** The `memstead_schema` lite reply (and the
   CLI `type` markdown that shares the renderer) now renders a metadata

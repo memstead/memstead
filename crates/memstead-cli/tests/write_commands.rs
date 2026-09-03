@@ -781,6 +781,47 @@ fn rename_changes_id() {
         .stdout(contains("# New Name"));
 }
 
+/// C5: the short-id resolution is announced on the human surface too.
+/// `rename` and `delete` on a mem-repo workspace rendered their outcome
+/// without the warnings line, so `SHORT_ID_RESOLVED` (and `NOTE_MISSING`)
+/// reached only `--json` callers — the plan's "never silent" constraint
+/// read as satisfied while the default mode said nothing.
+#[test]
+fn short_id_resolution_is_announced_in_markdown_for_rename_and_delete() {
+    let tmp = TempDir::new().unwrap();
+    let _mem = make_mem(tmp.path());
+    memstead()
+        .current_dir(tmp.path())
+        .args([
+            "create",
+            "--title",
+            "Announce Me",
+            "--type",
+            "spec",
+            "--section",
+            "identity=x",
+            "--section",
+            "purpose=x",
+        ])
+        .assert()
+        .success();
+
+    // Bare slug, markdown mode: the resolution warning must be on stdout.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["rename", "announce-me", "Announced", "--auto-hash"])
+        .assert()
+        .success()
+        .stdout(contains("Warnings:").and(contains("carried no mem prefix")));
+
+    memstead()
+        .current_dir(tmp.path())
+        .args(["delete", "announced"])
+        .assert()
+        .success()
+        .stdout(contains("Warnings:").and(contains("carried no mem prefix")));
+}
+
 #[test]
 fn batch_update_from_file() {
     let tmp = TempDir::new().unwrap();

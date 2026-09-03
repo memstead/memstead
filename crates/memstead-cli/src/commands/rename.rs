@@ -66,15 +66,25 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 super::merge_mem_changed_json(&mut body, &mem_changed);
                 print_json(&body)?;
             } else {
-                print_markdown(&format!(
-                    "# Renamed\n\n- `{}` → `{}`\n- Path: {} → {}\n- Hash: `{}`{}",
+                let mut body = format!(
+                    "# Renamed\n\n- `{}` → `{}`\n- Path: {} → {}\n- Hash: `{}`",
                     result.old_id,
                     result.new_id,
                     result.old_path,
                     result.new_path,
                     result.content_hash,
-                    super::render_mem_changed_block(&mem_changed),
-                ));
+                );
+                // The same warnings line the filesystem branch and the
+                // sibling verbs render: a `SHORT_ID_RESOLVED` or
+                // `NOTE_MISSING` hint must not be visible only under
+                // `--json`.
+                if !result.warnings.is_empty() {
+                    let parts: Vec<String> =
+                        result.warnings.iter().map(|w| w.to_string()).collect();
+                    body.push_str(&format!("\n- Warnings: {}", parts.join("; ")));
+                }
+                body.push_str(&super::render_mem_changed_block(&mem_changed));
+                print_markdown(&body);
             }
         }
         CliEngine::Filesystem(mut engine) => {
