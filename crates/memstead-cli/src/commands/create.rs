@@ -73,6 +73,11 @@ pub struct Args {
     /// `--note` still applies (winning over the file's `note`), and
     /// `--dry-run` ORs with the file's `dry_run` — same semantics as
     /// `update --from`, so one template feeds both commands.
+    /// `--mem` also still applies: it fills in a file that names no mem,
+    /// and a `--mem` naming a DIFFERENT mem than the file refuses rather
+    /// than picking one. Landing an entity in the wrong mem is not a
+    /// recoverable typo, so the two statements are never reconciled
+    /// silently.
     /// The JSON type field is `entity_type` (not `type`), matching the
     /// response envelopes — a previous `--json` response pipes back in
     /// unchanged.
@@ -183,6 +188,33 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         // `--dry-run` and the file's `dry_run` OR — same semantics as
         // `update --from`; the flag can force a preview, never disable one.
         parsed.dry_run |= args.dry_run;
+        // `--mem` is NOT one of the ignored flags. The payload used to be
+        // read as the whole truth about destination, so `--mem other-mem`
+        // beside a mem-less file silently created the entity in the default
+        // writable mem — a wrong-mem write with no diagnostic, and a create
+        // cannot be moved by re-running it. So: the flag fills in a silent
+        // file, and two explicit disagreeing statements refuse. Agreement is
+        // accepted, since there is nothing to decide.
+        match (args.mem.as_deref(), parsed.mem.as_deref()) {
+            (Some(flag_mem), Some(payload_mem)) if flag_mem != payload_mem => {
+                return Err(CliError::new(
+                    ExitKind::Validation,
+                    "INVALID_INPUT",
+                    format!(
+                        "--mem {flag_mem} conflicts with the mem named in {}: {payload_mem}. Drop one of the two - they must not disagree about where the entity lands.",
+                        file.display()
+                    ),
+                )
+                .with_details(serde_json::json!({
+                    "flag_mem": flag_mem,
+                    "payload_mem": payload_mem,
+                    "path": file.display().to_string(),
+                }))
+                .into());
+            }
+            (Some(flag_mem), None) => parsed.mem = Some(flag_mem.to_string()),
+            _ => {}
+        }
         parsed
     } else {
         let title = args.title.clone().ok_or_else(|| {

@@ -9,6 +9,39 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A released binary reports a bare version, and the plugin's capability
+  gate can finally tell a release from a dev build.** `memstead --version`
+  used to carry `+g<sha>` build metadata on every build, published releases
+  included, so a version string alone could not say whether it named a
+  release. That mattered because the plugin's capability thresholds ARE
+  release numbers, and the crate version does not move between releases: a
+  build from any commit after the 0.17.0 tag still called itself 0.17.0,
+  including builds predating the commit that added the capability, and the
+  gate read it as "at least 0.17.0, therefore capable" and sent a parameter
+  the engine rejected. A clean build whose HEAD carries the tag of the
+  version it is building (or whose builder sets `MEMSTEAD_RELEASE_VERSION`)
+  now omits the sha, so bare semver means release; every other build keeps
+  `+g<sha>`. The gate degrades on the sha-bearing form with a "cannot
+  confirm" reason naming the build, which is its stated fail-closed
+  contract. Engine-version skew is unaffected: it compares semver, which
+  ignores build metadata either way.
+- **The capability record follows the binary across an upgrade.** `/setup`
+  recorded the installed version once and nothing re-recorded it, so the
+  record silently described a version that was no longer installed
+  (observed: 0.14.0 recorded against 0.17.0 on PATH, understating the
+  binary on every gate). Each gate now re-measures the live binary and
+  rewrites the record when the two disagree, in both directions. A probe
+  that cannot run or cannot be parsed leaves the existing record in force:
+  an unreachable binary is not evidence about the version recorded when it
+  was reachable.
+- **`create --from <file> --mem <name>` no longer drops the `--mem`.** The
+  `--from` branch built the payload wholly from the file, so a `--mem`
+  beside a mem-less file was ignored and the entity landed in the default
+  writable mem. `--mem` now fills in a file that names no mem, and a
+  `--mem` naming a different mem than the file refuses `INVALID_INPUT`
+  naming both rather than picking one. A create cannot be moved by
+  re-running it, which is why the two explicit statements are never
+  reconciled silently.
 - **A short entity id names its missing prefix.** Every id-taking
   mutation verb (`update`, `delete`, `rename`, `retype`, `relate`, the
   batch forms, and their MCP tools) given a bare slug without the `mem--`

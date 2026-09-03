@@ -133,6 +133,74 @@ fn create_from_json_file() {
         .stdout(contains("cli-write--gamma"));
 }
 
+/// `--mem` is not one of the flags `--from` ignores.
+///
+/// The payload used to be read as the whole truth about destination, so a
+/// `--mem` beside a mem-less file was dropped on the floor and the entity
+/// landed in the default writable mem. A create cannot be moved by
+/// re-running it, so a silent wrong-mem write is not a recoverable typo.
+#[test]
+fn create_from_honors_mem_flag_and_refuses_a_conflicting_one() {
+    let tmp = TempDir::new().unwrap();
+    let first = tmp.path().join("cli-write");
+    let second = tmp.path().join("cli-other");
+    for (dir, _name) in [(&first, "cli-write"), (&second, "cli-other")] {
+        fs::create_dir_all(dir.join(".memstead")).unwrap();
+        fs::write(
+            dir.join(".memstead").join("config.json"),
+            r#"{ "schema": "default@1.0.0" }"#,
+        )
+        .unwrap();
+    }
+    init_real_mem_repo_from_disk(tmp.path(), &[(&first, "cli-write"), (&second, "cli-other")]);
+
+    // A file that names no mem: the flag supplies one, and it is NOT the
+    // default writable mem — the whole point of passing it.
+    let silent = tmp.path().join("silent.json");
+    fs::write(
+        &silent,
+        r#"{ "title": "Routed", "entity_type": "spec",
+             "sections": { "identity": "Routed by the flag.", "purpose": "Covers --mem under --from." } }"#,
+    )
+    .unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["create", "--from"])
+        .arg(&silent)
+        .args(["--mem", "cli-other"])
+        .assert()
+        .success()
+        .stdout(contains("cli-other--routed"));
+
+    // Two explicit statements that disagree are never reconciled silently.
+    let conflicting = tmp.path().join("conflicting.json");
+    fs::write(
+        &conflicting,
+        r#"{ "title": "Contested", "entity_type": "spec", "mem": "cli-write",
+             "sections": { "identity": "Names its own mem.", "purpose": "Covers the conflict refusal." } }"#,
+    )
+    .unwrap();
+    memstead()
+        .current_dir(tmp.path())
+        .args(["create", "--from"])
+        .arg(&conflicting)
+        .args(["--mem", "cli-other"])
+        .assert()
+        .failure()
+        .stderr(contains("--mem cli-other conflicts with the mem named in"))
+        .stderr(contains("cli-write"));
+
+    // Agreement has nothing to decide and is accepted.
+    memstead()
+        .current_dir(tmp.path())
+        .args(["create", "--from"])
+        .arg(&conflicting)
+        .args(["--mem", "cli-write"])
+        .assert()
+        .success()
+        .stdout(contains("cli-write--contested"));
+}
+
 #[test]
 fn full_round_trip_create_update_delete() {
     let tmp = TempDir::new().unwrap();

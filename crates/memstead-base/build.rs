@@ -9,6 +9,18 @@
 //! git checkout, the empty string everywhere else (crates.io builds,
 //! vendored trees): a failing git probe must never break the build.
 //! `crate::build_info` turns the value into the full build version.
+//!
+//! One case inside a checkout is deliberately sha-LESS: a clean build
+//! whose HEAD carries the tag of the crate version it is building. That
+//! is a release build, and its bare semver is the whole truth about it —
+//! the tag pins the commit, so the sha adds nothing a consumer cannot
+//! already look up. The distinction is load-bearing beyond cosmetics:
+//! it is the only signal by which a consumer holding just a version
+//! string (the plugin capability gate, which owns no repository) can
+//! tell "this IS release 0.18.0" from "this is some build that calls
+//! itself 0.18.0". Version thresholds are release numbers, so a build
+//! that is not a release cannot be placed on that ladder at all, and
+//! the gate has to fail closed instead of guessing.
 
 use std::process::Command;
 
@@ -22,6 +34,40 @@ fn git(args: &[&str]) -> Option<String> {
     let s = String::from_utf8(out.stdout).ok()?;
     let s = s.trim().to_string();
     if s.is_empty() { None } else { Some(s) }
+}
+
+/// Is this build a release of `version`?
+///
+/// Two signals, both requiring the version to match, so neither can
+/// declare some other release's build a release of this one.
+///
+/// `MEMSTEAD_RELEASE_VERSION` is the explicit escape hatch: a builder
+/// that knows it is cutting a release says so, for the case where no
+/// usable git identity is at hand. It is checked first and it is the
+/// only signal that works without git.
+///
+/// Otherwise HEAD's own tags decide. `git tag --points-at HEAD` reads
+/// the local tag refs, which is what a tag-ref checkout leaves behind —
+/// verified against a depth-1 `fetch`+`checkout` of `refs/tags/v0.17.0`,
+/// the shape the release workflow's checkout produces, where the tag is
+/// present and the sha matches the published artifact's. No tags, no
+/// git, or a tag naming a different version all read as "not a release
+/// build": the sha-bearing form is the conservative answer everywhere.
+fn is_release_build(version: &str) -> bool {
+    println!("cargo:rerun-if-env-changed=MEMSTEAD_RELEASE_VERSION");
+    if let Ok(declared) = std::env::var("MEMSTEAD_RELEASE_VERSION") {
+        let declared = declared.trim();
+        let declared = declared.strip_prefix('v').unwrap_or(declared);
+        if !declared.is_empty() {
+            return declared == version;
+        }
+    }
+    let Some(tags) = git(&["tag", "--points-at", "HEAD"]) else {
+        return false;
+    };
+    tags.lines()
+        .map(str::trim)
+        .any(|tag| tag == format!("v{version}") || tag == version)
 }
 
 fn main() {
@@ -90,5 +136,15 @@ fn main() {
             if dirty { format!("{sha}-dirty") } else { sha }
         })
         .unwrap_or_default();
+    // A clean build at the crate version's own tag is a release build:
+    // report the bare semver. A dirty tree keeps its sha even at the tag —
+    // the tree no longer IS the tag, and that is exactly the build a
+    // release-only claim must not cover.
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let sha = if sha.is_empty() || sha.ends_with("-dirty") || !is_release_build(&version) {
+        sha
+    } else {
+        String::new()
+    };
     println!("cargo:rustc-env=MEMSTEAD_BUILD_SHA={sha}");
 }

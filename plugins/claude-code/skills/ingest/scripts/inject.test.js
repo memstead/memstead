@@ -36,6 +36,15 @@ if (process.env.STUB_LOG) appendFileSync(process.env.STUB_LOG, JSON.stringify(ar
 const mode = process.env.STUB_MODE || '';
 const out = (s) => process.stdout.write(s);
 const err = (s) => process.stderr.write(s);
+// The capability gate re-measures the live binary before deciding, so the
+// stub must answer a --version call. Silent by default (the gate then keeps
+// the recorded version, which is what the gate tests below are about);
+// $STUB_VERSION makes it answer, for the upgrade case. No backticks in here:
+// this whole source sits inside a template literal.
+if (args.length === 1 && args[0] === '--version') {
+  if (process.env.STUB_VERSION) out('memstead ' + process.env.STUB_VERSION + '\\n');
+  process.exit(0);
+}
 switch (mode) {
   case 'brief-nobind': out(JSON.stringify({ no_bindings: true })); process.exit(0);
   case 'brief-ok': out(JSON.stringify({ brief: '# Build brief\\nDo the thing.\\n' })); process.exit(0);
@@ -85,17 +94,22 @@ function workspaceWithRecord(version) {
 /** Run the router with the given args and STUB_MODE; return {stdout, calls}.
  * `cwd` defaults to a workspace whose recorded binary is 0.10.0, so the
  * capability-gated flags are on; pass another workspace to test the gates. */
-function runRouter(routerArgs, mode, cwd = workspaceWithRecord('0.10.0')) {
+function runRouter(routerArgs, mode, cwd = workspaceWithRecord('0.10.0'), extraEnv = {}) {
   if (existsSync(logFile)) rmSync(logFile);
   const res = spawnSync('node', [ROUTER, ...routerArgs], {
     encoding: 'utf-8',
     cwd,
-    env: { ...process.env, MEMSTEAD_BIN: stub, STUB_MODE: mode, STUB_LOG: logFile },
+    env: { ...process.env, MEMSTEAD_BIN: stub, STUB_MODE: mode, STUB_LOG: logFile, ...extraEnv },
   });
-  const calls = existsSync(logFile)
+  const logged = existsSync(logFile)
     ? readFileSync(logFile, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
     : [];
-  return { stdout: res.stdout ?? '', status: res.status, calls };
+  // The gate's `--version` re-measure is separated out: it is a capability
+  // question, not a routing decision, and every assertion below is about
+  // which ENGINE call the router made. `probes` keeps it assertable.
+  const probes = logged.filter((c) => c.length === 1 && c[0] === '--version');
+  const calls = logged.filter((c) => !(c.length === 1 && c[0] === '--version'));
+  return { stdout: res.stdout ?? '', status: res.status, calls, probes };
 }
 
 describe('ingest router — brief routing', () => {
@@ -116,6 +130,18 @@ describe('ingest router — brief routing', () => {
     const ok = runRouter(['--all'], 'brief-ok');
     assert.deepEqual(ok.calls[0], ['--json', 'projection', 'brief', '--all', '--consume']);
     assert.doesNotMatch(ok.stdout, /recorded binary/);
+  });
+
+  it('re-measures the live binary, so an upgraded one is used without re-running /setup', () => {
+    // The record says 0.9.0, the binary on PATH answers 0.10.0. Before the
+    // gate re-measured, the stale record understated the binary forever and
+    // `--consume` stayed off after every upgrade.
+    const upgraded = runRouter(['--all'], 'brief-ok', workspaceWithRecord('0.9.0'), {
+      STUB_VERSION: '0.10.0',
+    });
+    assert.deepEqual(upgraded.calls[0], ['--json', 'projection', 'brief', '--all', '--consume']);
+    assert.doesNotMatch(upgraded.stdout, /predates/);
+    assert.equal(upgraded.probes.length, 1, 'the binary is measured once, not per decision');
   });
 
   it('routes a named binding to `projection brief <binding>`', () => {

@@ -5,7 +5,8 @@
 //! re-read the tool roster" hint and the plan-02 mutation-stamp /
 //! `ENGINE_VERSION_SKEW` comparison — could never fire in dogfood or
 //! field use. `build.rs` captures the git commit at build time
-//! (`MEMSTEAD_BUILD_SHA`, empty outside a git checkout); this module
+//! (`MEMSTEAD_BUILD_SHA`, empty outside a git checkout and for a
+//! clean release build); this module
 //! renders the full build version every version-carrying surface
 //! serves: CLI `--version`, both MCP flavours' `serverInfo.version`,
 //! the overview's `_engine_version`, and the per-mem mutation stamp.
@@ -13,17 +14,33 @@
 /// The short git sha of the commit this binary was built from, with a
 /// `-dirty` suffix when tracked build inputs (`crates/`, `Cargo.toml`,
 /// `Cargo.lock`) were modified at build time.
-/// Empty for builds outside a git checkout (crates.io, vendored
-/// trees) — emptiness, not absence, is the sha-less signal.
+///
+/// Empty in exactly two cases, and emptiness (not absence) is the
+/// sha-less signal in both: a build with no git identity to capture
+/// (crates.io, vendored trees), and a clean RELEASE build — one whose
+/// HEAD carries the tag of the version being built, or whose builder
+/// declared `MEMSTEAD_RELEASE_VERSION`. Both are builds whose bare
+/// semver is the whole truth: the release number identifies them
+/// completely, and a sha would only repeat what the tag already pins.
+///
+/// The release case is what lets a consumer holding nothing but a
+/// version string decide whether that string is a release guarantee.
+/// Capability thresholds are release numbers, so a build carrying
+/// `+g<sha>` cannot be placed on the threshold ladder at all — the
+/// plugin's capability gate reads exactly this distinction and fails
+/// closed on the sha-bearing form rather than assuming a dev build at
+/// `0.18.0` has everything release 0.18.0 has.
 pub const BUILD_SHA: &str = env!("MEMSTEAD_BUILD_SHA");
 
 /// The full build version of the running binary: the bare crate
-/// semver ([`crate::ENGINE_VERSION`]) when no build sha exists, else
+/// semver ([`crate::ENGINE_VERSION`]) when no build sha exists — a
+/// release build, or one with no git identity — else
 /// `<semver>+g<sha>[-dirty]` (semver build-metadata syntax, so the
 /// value still parses as a `semver::Version`). Two dev builds of the
 /// same crate version compare unequal whenever their commits differ —
 /// exactly the property the skew stamp and the roster-refresh hint
-/// need.
+/// need, and it is unaffected by the release case, which by definition
+/// has no second build to differ from.
 pub fn full_version() -> &'static str {
     static FULL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     FULL.get_or_init(|| {

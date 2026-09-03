@@ -81,7 +81,7 @@ The `--repo` form is version-gated on the recorded binary (a binary older than 0
 node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" gate "$(pwd)" repo
 ```
 
-**capable** → use `--repo .` as decided above; **not capable** (no record, or a recorded version below 0.10.0) → run the plain form and say the gate's `reason` sentence verbatim (it names the recorded version and the version the flag needs). On a first-ever `/setup` there is no record yet; the plain form is the safe one until step 2.5 records the binary, after which the next `/setup` in a repository can use `--repo .`.
+**capable** → use `--repo .` as decided above; **not capable** (no record, a version below 0.10.0, or a binary that is not a release build and so cannot be placed on the version ladder at all) → run the plain form and say the gate's `reason` sentence verbatim (it names what was found and what the flag needs). On a first-ever `/setup` there is no record yet; the plain form is the safe one until step 2.5 records the binary, after which the next `/setup` in a repository can use `--repo .`.
 
 Handle its outcomes:
 
@@ -118,7 +118,7 @@ Record the resolved binary's version into the workspace so later skills can gate
 node "${CLAUDE_PLUGIN_ROOT}/scripts/binary-version.mjs" record "$(pwd)"
 ```
 
-This writes `.memstead.cache/plugin/binary-version.json` — a **gitignored plugin-cache file, never mem-repo state**. It is a **generic mechanism**: any version-gated capability reads it, not just one skill. It is **best-effort** — if it fails (e.g. `memstead` resolves only by an absolute source-build path, not on `PATH`), say so and continue: capability-gated skills fail closed to their degraded path and never break. Skip it only when no working binary resolved at all.
+This writes `.memstead.cache/plugin/binary-version.json` — a **gitignored plugin-cache file, never mem-repo state**. It is a **generic mechanism**: any version-gated capability reads it, not just one skill. It is **best-effort** — if it fails (e.g. `memstead` resolves only by an absolute source-build path, not on `PATH`), say so and continue: capability-gated skills fail closed to their degraded path and never break. Skip it only when no working binary resolved at all. The record does not go stale across an upgrade: every gate re-measures the live binary and rewrites the record when the two disagree, so a later `/setup` is not needed to teach the plugin about a new binary.
 
 ## Step 4 — Tell the user to restart Claude Code
 
