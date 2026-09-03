@@ -7,6 +7,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-03
+
 ### Fixed
 
 - **A released binary reports a bare version, and the plugin's capability
@@ -4953,7 +4955,8 @@ First tagged release, with pre-built binaries for macOS, Linux, and Windows
   store, the folder and git-branch storage backends, the `memstead` CLI, and the
   `memstead-mcp` MCP server.
 
-[Unreleased]: https://github.com/memstead/memstead/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/memstead/memstead/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/memstead/memstead/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/memstead/memstead/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/memstead/memstead/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/memstead/memstead/compare/v0.14.0...v0.15.0
