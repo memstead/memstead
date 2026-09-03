@@ -73,13 +73,13 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    for the rest (skipped or out-of-intent), using only ids the brief
    listed. The baseline advances once the slice is fully dispositioned.
 
-6. `--verify <binding>`: run `memstead --workspace "$WS" projection verify <binding>` —
-   findings, never entities; it measures the mem, not your project's
-   changes. Present the engine's report as ordered, verdict first, never
-   re-ranked. A near-zero first report is onboarding — `/ingest`, then `/sync`.
+6. `--verify <binding>`: run `memstead --workspace "$WS" projection verify
+   <binding> --advance` (the flag records the `#verified` baseline; a gate that
+   only reads omits it) — findings, never entities. Present the report verdict
+   first, never re-ranked. A near-zero first report is onboarding — `/ingest`.
 
 7. `--inventory <binding>`: the full stock-take. Measure completely with
-   `memstead --workspace "$WS" projection verify <binding> --full`, then
+   `memstead --workspace "$WS" projection verify <binding> --full --advance`, then
    repair in passes (steps 2–5 off the sync brief, re-verify, repeat). Done
    when the brief has nothing to sync AND the re-verify is clean or every
    remaining finding carries a disposition. **Hard rule — monotone

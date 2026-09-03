@@ -118,8 +118,14 @@ DOCUMENTED_CONTRACT = [
     # The recipe that works on the two-document gate path. A plain
     # `jq -r .code` does not, and the guide used to print it.
     "jq -s -r '.[-1].code'",
-    # The claim four grading rounds kept finding falsified elsewhere.
-    "It is not a read-only command",
+    # The claim four grading rounds kept finding falsified elsewhere. Reworded
+    # 2026-09-03 (C6): the `#verified` baseline now rides `--advance`, so the
+    # blanket "not read-only" claim became wrong in the other direction — a
+    # gate run leaves the mem's CONFIG byte-identical. What a consumer must
+    # still implement against is the sidecar write, so that is what is pinned,
+    # together with the sentence that keeps the config promise honest.
+    "It is not a pure read",
+    "The mem's config is a different matter: a bare verify leaves it untouched.",
 ]
 
 # The generated CLI reference renders from the clap epilog, and it is the

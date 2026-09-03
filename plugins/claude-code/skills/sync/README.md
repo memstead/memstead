@@ -6,11 +6,14 @@ any open verify findings, with the conservatism rules baked in — and applies o
 the updates the brief calls for, inside the destination mem.
 
 `/sync --verify <binding>` is the measurement mode (absorbed from the former
-standalone `/verify` skill, 2026-07-11): it runs `memstead projection verify`,
-presents the engine's deterministic fidelity report verdict-first, and frames a
-near-zero first report on an adopted mem as onboarding, not failure. It writes no
-entity — but it is not a pure read: it records findings (input for the next
-`/sync`), backfills observed anchor hashes, and records a `#verified` baseline.
+standalone `/verify` skill, 2026-07-11): it runs `memstead projection verify
+--advance`, presents the engine's deterministic fidelity report verdict-first,
+and frames a near-zero first report on an adopted mem as onboarding, not failure.
+It writes no entity — but it is not a pure read: it records findings (input for
+the next `/sync`) and backfills observed anchor hashes, and `--advance` records
+the `#verified` baseline the selection loop reads. Without that flag a verify
+measures and leaves the mem's config untouched, which is what a CI gate wants
+and what a maintenance run does not.
 
 - Reads your source, writes your mem — never the reverse. Not a version-control
   operation.

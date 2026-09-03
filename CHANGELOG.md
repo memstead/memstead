@@ -33,7 +33,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   mem, and the prepared-hash backfill onto hash-less anchors, which is
   measurement machinery. Gating that backfill too was tried and reverted on
   the evidence: withheld, an anchor never leaves `recheck`, and seven
-  projection tests went from reporting drift to reporting clean.
+  projection tests went from reporting drift to reporting clean. The `/sync`
+  skill's `--verify` and `--inventory` recipes pass the flag, so the token
+  keeps a producer now that a bare run no longer writes it; the verify-in-CI
+  guide, which documents the gate case, states the opposite and says why.
 - **The short-id rule reaches `retype` and the batch renderer.** `retype`
   with `--auto-hash` or `--force` read the id the caller typed in its hash
   preflight and refused a bare slug with `ENTITY_NOT_FOUND` before the

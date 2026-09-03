@@ -36,8 +36,8 @@ nothing changes) — or read `rollup.verdict` in a second step, as the job
 below does.
 
 One more case the table cannot show: a run that records findings **and**
-then fails to write its bookkeeping (an unwritable `#verified` baseline,
-say) exits `1`, not `6` — the measurement's answer is on stdout, but the
+then fails to write its bookkeeping (an unwritable anchors sidecar, or an
+unwritable `#verified` baseline under `--advance`) exits `1`, not `6` — the measurement's answer is on stdout, but the
 run could not finish recording it, and that is an operational failure.
 Rare, and the report is still there to read.
 
@@ -135,7 +135,8 @@ ranked next actions:
 **Do next:**
 
 1. 1 anchored artifact(s) moved since the entity was written — re-read the
-   source and update the entity, then re-verify to advance the baseline
+   source and update the entity, then re-verify with `--advance` to move the
+   baseline
 ```
 
 ## Machine-readable output
@@ -231,12 +232,15 @@ A gate is only worth what its measurement covers. These caps are real
 today, and the report names each one it hits rather than quietly
 rendering green.
 
-**Verify writes.** It is not a read-only command. A completed run
-records a findings store, backfills observed content hashes into the
-mem's anchors sidecar, and records a `#verified` baseline — on a
-mem-repo workspace, that is a commit. On CI's ephemeral checkout this is
-harmless and nothing needs pushing back. Do not run it in a working tree
-you need to stay pristine.
+**Verify writes, though not to the mem's config.** It is not a pure read.
+A completed run records a findings store and backfills observed content
+hashes into the mem's anchors sidecar — on a mem-repo workspace, that
+sidecar write is a commit.
+The mem's config is a different matter: a bare verify leaves it untouched.
+The `#verified` freshness baseline rides `--advance`, which a gate should
+not pass, so the config comes through a gate run byte-identical. On CI's ephemeral
+checkout the sidecar write is harmless and nothing needs pushing back.
+In a working tree you need to stay pristine, expect the sidecar.
 
 **The anchor figures answer for this binding only.** On a mem carrying
 several bindings, each binding's report counts its own anchors and names the

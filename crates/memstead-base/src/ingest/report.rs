@@ -443,7 +443,7 @@ fn class_action(class: &str, n: usize, binding: &str) -> String {
         ),
         "drifted" => format!(
             "{n} anchored artifact(s) moved since the entity was written — re-read the source \
-             and update the entity, then re-verify to advance the baseline"
+             and update the entity, then re-verify with `--advance` to move the baseline"
         ),
         "unresolvable-anchor" => format!(
             "{n} anchor(s) no longer resolve to anything — repoint them at the artifact's new \
