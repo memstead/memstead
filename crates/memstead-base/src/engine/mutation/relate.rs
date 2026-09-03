@@ -87,6 +87,13 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<RelateEntityOutcome, EngineError> {
+        // Short ids on either end resolve (or refuse) before anything
+        // reads their mems; the announcements lead the warnings.
+        let mut args = args;
+        let (source, source_hint) = self.resolve_entity_id(&args.source)?;
+        args.source = source;
+        let (target, target_hint) = self.resolve_entity_id(&args.target)?;
+        args.target = target;
         let source_mem = args.source.mem().to_string();
         let target_mem = args.target.mem().to_string();
 
@@ -97,7 +104,9 @@ impl Engine {
         // The drift notice rides the outcome's `warnings`. Hoisted
         // out of `prepare_relate` so `batch_relate` can probe every
         // touched mem exactly once up front instead of per entry.
-        let mut drift_warnings = self.reload_if_stale(Some(&source_mem));
+        let mut drift_warnings: Vec<WarningHint> =
+            source_hint.into_iter().chain(target_hint).collect();
+        drift_warnings.extend(self.reload_if_stale(Some(&source_mem)));
         if target_mem != source_mem && !self.mem_is_deferred(&target_mem) {
             // A DEFERRED target mem is deliberately not probed here:
             // the funnel's phase-0 trigger would full-load it, and
@@ -1073,6 +1082,32 @@ impl Engine {
         // Reload every touched mem (sources and targets) once, up
         // front — the per-entry probe is hoisted out of
         // `prepare_relate` for exactly this.
+        // Short ids on either end resolve once, before the touched-mem
+        // probe reads each item's mems; an item that does not resolve
+        // fails as its own error below, never the whole batch.
+        let mut short_hints: Vec<WarningHint> = Vec::new();
+        let mut short_errors: Vec<(usize, EngineError)> = Vec::new();
+        let relates: Vec<(RelateEntityArgs, Option<String>)> = relates
+            .into_iter()
+            .enumerate()
+            .map(|(i, (mut a, n))| {
+                match self.resolve_entity_id(&a.source) {
+                    Ok((s, hint)) => {
+                        a.source = s;
+                        short_hints.extend(hint);
+                    }
+                    Err(e) => short_errors.push((i, e)),
+                }
+                match self.resolve_entity_id(&a.target) {
+                    Ok((t, hint)) => {
+                        a.target = t;
+                        short_hints.extend(hint);
+                    }
+                    Err(e) => short_errors.push((i, e)),
+                }
+                (a, n)
+            })
+            .collect();
         let mut touched_mems: Vec<String> = relates
             .iter()
             .flat_map(|(a, _)| [a.source.mem().to_string(), a.target.mem().to_string()])
@@ -1132,6 +1167,12 @@ impl Engine {
 
         for (i, (args, note)) in relates.into_iter().enumerate() {
             let source_id = args.source.clone();
+            if let Some(pos) = short_errors.iter().position(|(j, _)| *j == i) {
+                let (_, e) = short_errors.remove(pos);
+                items.push((source_id, ItemState::Error));
+                errors.push((i, e));
+                continue;
+            }
             // Rehearsal is batch-level (the `dry_run` parameter) —
             // per-entry dry-run stays forced off; the staging below is
             // what gives later entries in-order semantics, and the
@@ -1356,7 +1397,7 @@ impl Engine {
         }
 
         // Provenance per entry, self-write markers per mount.
-        let mut batch_warnings: Vec<WarningHint> = Vec::new();
+        let mut batch_warnings: Vec<WarningHint> = short_hints;
         for (p, note) in prepared.iter().zip(notes.iter()) {
             let write_id = mount_commits
                 .iter()

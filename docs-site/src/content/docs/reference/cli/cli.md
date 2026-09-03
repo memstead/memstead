@@ -788,7 +788,7 @@ Modify an existing entity. `--expected-hash` is required for an update that chan
 
 ###### **Arguments:**
 
-* `<ID>` — Full entity ID (e.g. `specs--my-entity`). Required unless `--from` is given
+* `<ID>` — Full entity ID (e.g. `specs--my-entity`). Required unless `--from` is given. A bare slug without the `mem--` prefix resolves when exactly one mounted mem carries an entity of that slug (announced as `SHORT_ID_RESOLVED` on the response); otherwise it refuses `ENTITY_ID_MISSING_MEM` naming every full id that carries the slug. The same rule holds on every id-taking mutation verb
 
 ###### **Options:**
 
@@ -819,7 +819,7 @@ Add or remove a typed relationship between two entities
 
 ###### **Arguments:**
 
-* `<FROM>` — Source entity ID (positional). Flag synonym: `--from`
+* `<FROM>` — Source entity ID (positional). Flag synonym: `--from`. On either end a bare slug without the `mem--` prefix resolves when exactly one mounted mem carries it (announced as `SHORT_ID_RESOLVED`); otherwise refuses `ENTITY_ID_MISSING_MEM` naming the candidates
 * `<REL_TYPE>` — Relationship type (positional). Flag synonym: `--rel-type`. UPPER_SNAKE_CASE, e.g. `USES`, `PART_OF`
 * `<TO>` — Target entity ID (positional). Flag synonym: `--to`. Creates a stub if the target doesn't exist
 
@@ -843,7 +843,7 @@ Delete an entity. Use `--dry-run` to preview impact first. Delete is hashless by
 
 ###### **Arguments:**
 
-* `<ID>` — Entity ID to delete
+* `<ID>` — Entity ID to delete. A bare slug without the `mem--` prefix resolves when exactly one mounted mem carries it (announced as `SHORT_ID_RESOLVED`); otherwise refuses `ENTITY_ID_MISSING_MEM` naming the candidates
 
 ###### **Options:**
 
@@ -887,7 +887,7 @@ Slug derivation:
 
 ###### **Arguments:**
 
-* `<ID>` — Current entity ID
+* `<ID>` — Current entity ID. A bare slug without the `mem--` prefix resolves when exactly one mounted mem carries it (announced as `SHORT_ID_RESOLVED`); otherwise refuses `ENTITY_ID_MISSING_MEM` naming the candidates
 * `<NEW_TITLE>` — New title. The ID is re-derived from the title
 
 ###### **Options:**
@@ -907,7 +907,7 @@ Change an entity's type in place (id, path and incoming edges stay; sections, me
 
 ###### **Arguments:**
 
-* `<ID>` — Entity ID (`mem--slug`)
+* `<ID>` — Entity ID (`mem--slug`). A bare slug resolves when exactly one mounted mem carries it (announced as `SHORT_ID_RESOLVED`); otherwise refuses `ENTITY_ID_MISSING_MEM` naming the candidates
 
 ###### **Options:**
 

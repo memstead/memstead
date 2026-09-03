@@ -116,13 +116,24 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<UpdateEntityOutcome, EngineError> {
+        // A short id resolves (or refuses) before anything reads its
+        // mem; the announcement leads the outcome's warnings.
+        let mut args = args;
+        let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
+        args.id = resolved;
+        let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
+        for r in &mut args.declare_relations {
+            let (target, hint) = self.resolve_entity_id(&r.target)?;
+            r.target = target;
+            drift_warnings.extend(hint);
+        }
         // Reload-before-operation: probe the mem ref and reload if a
         // sibling advanced it, so the `expected_hash` compare inside
         // `prepare_update` runs against current truth. A stale hash for
         // the targeted entity then trips a real `HASH_MISMATCH`; an
         // unrelated concurrent write leaves this entity's hash intact
         // and the update proceeds. The drift notice rides the outcome.
-        let mut drift_warnings = self.reload_if_stale(Some(args.id.mem()));
+        drift_warnings.extend(self.reload_if_stale(Some(args.id.mem())));
         // Declared relations on an ACYCLIC rel-type (or one in an
         // `acyclic_sets` set, whose guard walks the set's UNION
         // subgraph) run the same whole-subgraph cycle guard relate
@@ -1335,6 +1346,34 @@ impl Engine {
         // is the one multi-op-per-process path, so a sibling commit
         // between boot and this call is plausible). Notices stash on
         // the engine for the caller to drain.
+        // Short ids resolve once, before the touched-mem probe reads
+        // each item's mem; an item that does not resolve fails as its
+        // own error below, never the whole batch.
+        let mut short_hints: Vec<WarningHint> = Vec::new();
+        let mut short_errors: Vec<(usize, EngineError)> = Vec::new();
+        let updates: Vec<(UpdateEntityArgs, Option<String>)> = updates
+            .into_iter()
+            .enumerate()
+            .map(|(i, (mut a, n))| {
+                match self.resolve_entity_id(&a.id) {
+                    Ok((rid, hint)) => {
+                        a.id = rid;
+                        short_hints.extend(hint);
+                    }
+                    Err(e) => short_errors.push((i, e)),
+                }
+                for r in &mut a.declare_relations {
+                    match self.resolve_entity_id(&r.target) {
+                        Ok((t, hint)) => {
+                            r.target = t;
+                            short_hints.extend(hint);
+                        }
+                        Err(e) => short_errors.push((i, e)),
+                    }
+                }
+                (a, n)
+            })
+            .collect();
         let mut touched_mems: Vec<String> = updates
             .iter()
             .map(|(a, _)| a.id.mem().to_string())
@@ -1395,6 +1434,12 @@ impl Engine {
         // failing entry at once (the family's upgraded contract).
         for (i, (args, note)) in updates.into_iter().enumerate() {
             let id = args.id.clone();
+            if let Some(pos) = short_errors.iter().position(|(j, _)| *j == i) {
+                let (_, e) = short_errors.remove(pos);
+                items.push((id, Item::Error));
+                errors.push((i, e));
+                continue;
+            }
             // Rehearsal is batch-level (the `dry_run` parameter) —
             // force the per-entry flag off so `Done` below always
             // means a genuine content no-op, never a per-entry
@@ -1615,7 +1660,7 @@ impl Engine {
         // Provenance + store application per item, now that the commits
         // landed. `record_self_write` marks the commit as engine-self
         // so drift detection ignores it.
-        let mut batch_warnings: Vec<WarningHint> = Vec::new();
+        let mut batch_warnings: Vec<WarningHint> = short_hints;
         for (p, note) in prepared.iter().zip(notes.iter()) {
             let write_id = mount_commits
                 .iter()
@@ -1882,6 +1927,105 @@ mod tests {
     /// (`SECTION_HEADING_DIVERGENCE`, naming both headings) and still
     /// commits. Refusal complement: once the file carries the matching
     /// heading, the same update emits no such warning.
+    /// A bare slug resolves when exactly one mounted mem carries it,
+    /// announced as `SHORT_ID_RESOLVED`; refuses
+    /// `ENTITY_ID_MISSING_MEM` naming every carrier when two do, and
+    /// naming none when none does; a full id takes the path it always
+    /// took (B7 grader finding, 2026-09-02: a bare slug reached the
+    /// verbs as an id with an empty mem, and the caller was told a mem
+    /// called "" did not exist).
+    #[test]
+    fn short_id_resolves_when_unique_and_refuses_with_candidates_otherwise() {
+        let tmp_a = TempDir::new().unwrap();
+        let tmp_b = TempDir::new().unwrap();
+        let mut engine = Engine::from_mounts(vec![
+            (
+                folder_mount("a", tmp_a.path().to_path_buf()),
+                Box::new(FilesystemMemWriter::new(tmp_a.path().to_path_buf()))
+                    as Box<dyn MemBackend>,
+            ),
+            (
+                folder_mount("b", tmp_b.path().to_path_buf()),
+                Box::new(FilesystemMemWriter::new(tmp_b.path().to_path_buf()))
+                    as Box<dyn MemBackend>,
+            ),
+        ])
+        .unwrap();
+        for (mem, title) in [("a", "Foo"), ("b", "Foo"), ("a", "Only")] {
+            engine
+                .create_entity(empty_create_args(mem, title), Actor::Cli, None, None)
+                .unwrap();
+        }
+        let update_args = |id: &str, tag: &str| UpdateEntityArgs {
+            anchors: Vec::new(),
+            id: EntityId(id.into()),
+            expected_hash: None,
+            sections: IndexMap::new(),
+            append_sections: IndexMap::new(),
+            patch_sections: IndexMap::new(),
+            sections_unset: Vec::new(),
+            metadata: IndexMap::from_iter([("tags".to_string(), tag.to_string())]),
+            metadata_unset: Vec::new(),
+            declare_relations: Vec::new(),
+            dry_run: false,
+            relations_unset: Vec::new(),
+            anchors_unset: Vec::new(),
+        };
+
+        // Unique: resolved and announced.
+        let out = engine
+            .update_entity(update_args("only", "x"), Actor::Cli, None, None)
+            .expect("unique short id resolves");
+        assert_eq!(out.id.0, "a--only");
+        assert_eq!(
+            out.warnings.first().map(|w| w.code()),
+            Some("SHORT_ID_RESOLVED"),
+            "{:?}",
+            out.warnings
+        );
+
+        // Ambiguous: refused, both carriers named.
+        let err = engine
+            .update_entity(update_args("foo", "x"), Actor::Cli, None, None)
+            .unwrap_err();
+        assert_eq!(err.code(), "ENTITY_ID_MISSING_MEM");
+        assert_eq!(
+            err.details()["candidates"],
+            serde_json::json!(["a--foo", "b--foo"])
+        );
+
+        // No carrier: refused, no candidates.
+        let err = engine
+            .update_entity(update_args("nothing", "x"), Actor::Cli, None, None)
+            .unwrap_err();
+        assert_eq!(err.code(), "ENTITY_ID_MISSING_MEM");
+        assert_eq!(err.details()["candidates"], serde_json::json!([]));
+
+        // The same rule on the other verbs.
+        let err = engine
+            .delete_entity(
+                crate::engine::DeleteEntityArgs {
+                    id: EntityId("foo".into()),
+                    expected_hash: None,
+                },
+                Actor::Cli,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.code(), "ENTITY_ID_MISSING_MEM");
+
+        // A full id: no announcement.
+        let out = engine
+            .update_entity(update_args("a--only", "y"), Actor::Cli, None, None)
+            .unwrap();
+        assert!(
+            out.warnings.iter().all(|w| w.code() != "SHORT_ID_RESOLVED"),
+            "{:?}",
+            out.warnings
+        );
+    }
+
     #[test]
     fn update_warns_on_section_heading_divergence_and_still_commits() {
         let tmp = TempDir::new().unwrap();

@@ -37,7 +37,9 @@ use crate::setup::{CliContext, CliEngine};
 /// refuses `RETYPE_REFERRER_UNPROBEABLE` naming it.
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Entity ID (`mem--slug`).
+    /// Entity ID (`mem--slug`). A bare slug resolves when exactly one mounted
+    /// mem carries it (announced as `SHORT_ID_RESOLVED`); otherwise refuses
+    /// `ENTITY_ID_MISSING_MEM` naming the candidates.
     pub id: String,
 
     /// The target type, as declared by the mem's schema.

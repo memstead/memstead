@@ -1532,6 +1532,58 @@ impl Engine {
     /// quarantine roster, `UNKNOWN_MEM` otherwise. Every lookup site
     /// that fails to find a mem routes here so a quarantined mem is
     /// never misreported as unknown — honest absence, with the reason.
+    /// Resolve an entity id that may lack its mem prefix — the one
+    /// rule every id-taking mutation verb applies before it reads the
+    /// id's mem. A full id (`mem--slug`) returns unchanged with no
+    /// hint, byte for byte the path it always took. A bare slug is
+    /// looked up across every mounted mem (loading deferred mems
+    /// first, so a lazily mounted carrier is not invisible): exactly
+    /// one carrier resolves the id and returns the
+    /// [`crate::ops::WarningHint::ShortIdResolved`] announcement the
+    /// verb rides on its outcome; zero or several carriers refuse
+    /// [`EngineError::EntityIdMissingMem`] naming every candidate.
+    /// Before this rule a bare slug reached the verbs as an id whose
+    /// mem was the empty string, and the caller was told a mem called
+    /// "" did not exist (B7 grader finding, 2026-09-02).
+    pub fn resolve_entity_id(
+        &mut self,
+        id: &EntityId,
+    ) -> Result<(EntityId, Option<crate::ops::WarningHint>), EngineError> {
+        if !id.mem().is_empty() {
+            return Ok((id.clone(), None));
+        }
+        // Grammar before resolution: a malformed bare string is an
+        // invalid id, not a slug nobody carries.
+        let slug = id.0.as_str();
+        if let Err(reason) = crate::entity::id::validate_id_path_grammar(slug) {
+            return Err(EngineError::InvalidEntityId {
+                id: id.0.clone(),
+                reason,
+            });
+        }
+        self.ensure_mems_loaded(None);
+        let mut candidates: Vec<EntityId> = self
+            .store
+            .all_entities()
+            .filter(|e| !e.stub && e.id.path() == slug)
+            .map(|e| e.id.clone())
+            .collect();
+        candidates.sort_by(|a, b| a.0.cmp(&b.0));
+        candidates.dedup();
+        if candidates.len() == 1 {
+            let resolved = candidates.remove(0);
+            let hint = crate::ops::WarningHint::ShortIdResolved {
+                given: id.0.clone(),
+                resolved: resolved.clone(),
+            };
+            return Ok((resolved, Some(hint)));
+        }
+        Err(EngineError::EntityIdMissingMem {
+            id: id.0.clone(),
+            candidates: candidates.into_iter().map(|c| c.0).collect(),
+        })
+    }
+
     pub fn unknown_mem_error(&self, mem: &str) -> EngineError {
         match self.quarantine_reason(mem) {
             Some(q) => EngineError::MemQuarantined {

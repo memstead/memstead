@@ -17,7 +17,10 @@ use crate::setup::CliContext;
 /// scripts that pipe positional args don't break.
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Source entity ID (positional). Flag synonym: `--from`.
+    /// Source entity ID (positional). Flag synonym: `--from`. On either end
+    /// a bare slug without the `mem--` prefix resolves when exactly one
+    /// mounted mem carries it (announced as `SHORT_ID_RESOLVED`); otherwise
+    /// refuses `ENTITY_ID_MISSING_MEM` naming the candidates.
     #[arg(value_name = "FROM")]
     pub from_pos: Option<String>,
 

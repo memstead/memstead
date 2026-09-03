@@ -826,6 +826,11 @@ fn engine_err_unified(
                 ),
             )
         }
+        E::EntityIdMissingMem { .. } => tool_error_with_payload(
+            "ENTITY_ID_MISSING_MEM",
+            &message,
+            envelope("ENTITY_ID_MISSING_MEM", message.clone(), e.details()),
+        ),
         E::AlreadyExists { .. } => tool_error_with_payload(
             "ENTITY_ALREADY_EXISTS",
             &message,
@@ -2871,7 +2876,6 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        let mem_for_anchor = id.mem().to_string();
         let dry_run = p.dry_run.unwrap_or(false);
         let role = match self.resolve_role(p.role.as_deref()) {
             Ok(r) => r,
@@ -2887,6 +2891,14 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
+        // The mem the anchors ride on is the resolved id's mem: a bare
+        // slug the engine resolves to one mem must not stage its
+        // anchors under the empty mem name. The verb itself receives
+        // the id as given and announces the resolution.
+        let mem_for_anchor = match engine.resolve_entity_id(&id) {
+            Ok((resolved, _)) => resolved.mem().to_string(),
+            Err(e) => return engine_err_unified(e, &engine),
+        };
         let patch_sections: indexmap::IndexMap<String, Vec<memstead_base::ops::PatchArg>> = p
             .patch_sections
             .clone()
@@ -3391,7 +3403,10 @@ impl McpServer {
         engine.set_identity(identity);
         // Capture the schema-ref BEFORE the delete — mem may
         // drop with the last entity.
-        let mem_for_anchor = mem_schema_ref_unified(&engine, id.mem());
+        let mem_for_anchor = match engine.resolve_entity_id(&id) {
+            Ok((resolved, _)) => mem_schema_ref_unified(&engine, resolved.mem()),
+            Err(e) => return engine_err_unified(e, &engine),
+        };
         let args = memstead_base::DeleteEntityArgs {
             id: id.clone(),
             expected_hash: expected_hash_opt,
@@ -3602,7 +3617,6 @@ impl McpServer {
             return err;
         }
         let id = EntityId::canonical(&p.id);
-        let mem_for_anchor = id.mem().to_string();
         let role = match self.resolve_role(p.role.as_deref()) {
             Ok(r) => r,
             Err(resp) => return *resp,
@@ -3618,6 +3632,10 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
+        let mem_for_anchor = match engine.resolve_entity_id(&id) {
+            Ok((resolved, _)) => resolved.mem().to_string(),
+            Err(e) => return engine_err_unified(e, &engine),
+        };
         let args = memstead_base::RenameEntityArgs {
             id: id.clone(),
             expected_hash: Some(p.expected_hash.clone()),
@@ -3689,7 +3707,6 @@ impl McpServer {
             );
         }
         let id = EntityId::canonical(&p.id);
-        let mem_for_anchor = id.mem().to_string();
         let role = match self.resolve_role(p.role.as_deref()) {
             Ok(r) => r,
             Err(resp) => return *resp,
@@ -3702,6 +3719,10 @@ impl McpServer {
         let mut engine = crate::lock_engine!(unified);
         engine.set_role(role);
         engine.set_identity(identity);
+        let mem_for_anchor = match engine.resolve_entity_id(&id) {
+            Ok((resolved, _)) => resolved.mem().to_string(),
+            Err(e) => return engine_err_unified(e, &engine),
+        };
         let args = memstead_base::RetypeEntityArgs {
             id: id.clone(),
             expected_hash: p.expected_hash.clone(),

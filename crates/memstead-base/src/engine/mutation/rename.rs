@@ -57,6 +57,10 @@ impl Engine {
         client: Option<&ClientId>,
         note: Option<&str>,
     ) -> Result<RenameEntityOutcome, EngineError> {
+        // A short id resolves (or refuses) before anything reads its mem.
+        let mut args = args;
+        let (resolved, short_hint) = self.resolve_entity_id(&args.id)?;
+        args.id = resolved;
         let id = &args.id;
         let mem = id.mem().to_string();
 
@@ -73,7 +77,8 @@ impl Engine {
         // mem ref so the `expected_hash` compare below runs against
         // current truth. The drift notice rides the outcome's
         // `warnings` (real-rename path).
-        let mut drift_warnings = self.reload_if_stale(Some(&mem));
+        let mut drift_warnings: Vec<WarningHint> = short_hint.into_iter().collect();
+        drift_warnings.extend(self.reload_if_stale(Some(&mem)));
 
         let entity = self
             .store

@@ -32,6 +32,11 @@ use crate::setup::{CliContext, CliEngine};
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Full entity ID (e.g. `specs--my-entity`). Required unless `--from` is given.
+    /// A bare slug without the `mem--` prefix resolves when exactly one mounted
+    /// mem carries an entity of that slug (announced as `SHORT_ID_RESOLVED` on
+    /// the response); otherwise it refuses `ENTITY_ID_MISSING_MEM` naming every
+    /// full id that carries the slug. The same rule holds on every id-taking
+    /// mutation verb.
     pub id: Option<String>,
 
     /// Hash from `memstead entity <id>` (the `_hash` field). Required for any
@@ -460,8 +465,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
+            let lookup_id = crate::setup::preflight_id(&mut engine, &entity_id)?;
             check_template_identity(
-                engine.get_entity(&entity_id),
+                engine.get_entity(&lookup_id),
                 payload.title.as_deref(),
                 payload.entity_type.as_deref(),
             )?;
@@ -520,7 +526,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let mut update_args = update_args;
             update_args.expected_hash = resolve_hash_mem_repo(
                 &engine,
-                &entity_id,
+                &lookup_id,
                 explicit_hash,
                 args.auto_hash,
                 args.force,
@@ -597,8 +603,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
         }
         CliEngine::Filesystem(mut engine) => {
+            let lookup_id = crate::setup::preflight_id(&mut engine, &entity_id)?;
             check_template_identity(
-                engine.get_entity(&entity_id),
+                engine.get_entity(&lookup_id),
                 payload.title.as_deref(),
                 payload.entity_type.as_deref(),
             )?;
@@ -670,7 +677,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             let mut update_args = update_args;
             update_args.expected_hash = resolve_hash_filesystem(
                 &engine,
-                &entity_id,
+                &lookup_id,
                 explicit_hash,
                 args.auto_hash,
                 args.force,

@@ -683,6 +683,13 @@ pub enum WarningHint {
     /// Never fires in a single-writer workspace: the cached copy equals the
     /// file there, so there is nothing to report.
     ConfigWriteIntervened { mem: String, fields: Vec<String> },
+    /// A mutation verb was given an entity id without its mem prefix
+    /// and exactly one mounted mem carried an entity of that slug, so
+    /// the verb acted on that entity. Announced, never silent: the
+    /// caller learns the full id the write landed on, and a second
+    /// mem gaining the slug later turns the same call into an
+    /// `ENTITY_ID_MISSING_MEM` refusal rather than a silent retarget.
+    ShortIdResolved { given: String, resolved: EntityId },
     /// `memstead_relate` add path landed on a not-yet-real target id and
     /// the engine materialised a stub at that id (in-memory upsert; the
     /// file lands when a follow-up `memstead_create` promotes the stub).
@@ -1645,6 +1652,12 @@ impl fmt::Display for WarningHint {
                  detected, and reads keep serving the pre-edit content. Reconcile on demand with \
                  `memstead health --include ledger`.",
             ),
+            WarningHint::ShortIdResolved { given, resolved } => write!(
+                f,
+                "entity id `{given}` carried no mem prefix; exactly one mounted mem holds that \
+                 slug, so this call acted on `{resolved}`. Write the full id to keep the target \
+                 fixed if another mem gains the slug.",
+            ),
             WarningHint::ConfigWriteIntervened { mem, fields } => write!(
                 f,
                 "mem '{mem}' config had changed since this engine last read it: another writer \
@@ -2037,6 +2050,7 @@ impl WarningHint {
             Self::MemReloaded { .. } => "MEM_RELOADED",
             Self::MemRosterChanged { .. } => "MEM_ROSTER_CHANGED",
             Self::ConfigWriteIntervened { .. } => "CONFIG_WRITE_INTERVENED",
+            Self::ShortIdResolved { .. } => "SHORT_ID_RESOLVED",
             Self::OutOfBandEditsUndetected { .. } => "OUT_OF_BAND_EDITS_UNDETECTED",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::MountUnbacked { .. } => "MOUNT_UNBACKED",
@@ -2115,6 +2129,7 @@ impl WarningHint {
             Self::SearchMemIndexUnavailable { mem, .. } => Some(mem.as_str()),
             Self::OutOfBandEditsUndetected { mem } => Some(mem.as_str()),
             Self::ConfigWriteIntervened { mem, .. } => Some(mem.as_str()),
+            Self::ShortIdResolved { resolved, .. } => Some(resolved.mem()),
             Self::CrossSchemaLinkUndeclared { from, .. } => Some(from.mem()),
             // Workspace- or request-scoped — no mem to attribute.
             // OuterRepoNotIgnoringMemRepo concerns the embedding repo,
@@ -2411,6 +2426,10 @@ impl WarningHint {
             Self::ConfigWriteIntervened { mem, fields } => serde_json::json!({
                 "mem": mem,
                 "fields": fields,
+            }),
+            Self::ShortIdResolved { given, resolved } => serde_json::json!({
+                "given": given,
+                "resolved": resolved,
             }),
             Self::MissingRequiredSection {
                 entity_type,

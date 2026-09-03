@@ -16,7 +16,10 @@ use crate::setup::{CliContext, CliEngine};
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Entity ID to delete.
+    /// Entity ID to delete. A bare slug without the `mem--` prefix resolves
+    /// when exactly one mounted mem carries it (announced as
+    /// `SHORT_ID_RESOLVED`); otherwise refuses `ENTITY_ID_MISSING_MEM` naming
+    /// the candidates.
     pub id: String,
 
     /// Show what would be removed without deleting anything.
@@ -46,9 +49,10 @@ fn run_mem_repo(
     id: EntityId,
     args: Args,
 ) -> anyhow::Result<()> {
+    let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
     if args.dry_run {
         let entity = engine
-            .get_entity(&id)
+            .get_entity(&lookup_id)
             .ok_or_else(|| {
                 CliError::new(
                     ExitKind::NotFound,
@@ -77,7 +81,7 @@ fn run_mem_repo(
     // CLI process. MCP keeps the full read-then-lock pattern so a
     // multi-agent workflow can't stomp itself.
     let current_hash = engine
-        .get_entity(&id)
+        .get_entity(&lookup_id)
         .ok_or_else(|| {
             CliError::new(
                 ExitKind::NotFound,
@@ -118,9 +122,10 @@ fn run_filesystem(
     id: EntityId,
     args: Args,
 ) -> anyhow::Result<()> {
+    let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
     if args.dry_run {
         let entity = engine
-            .get_entity(&id)
+            .get_entity(&lookup_id)
             .ok_or_else(|| {
                 CliError::new(
                     ExitKind::NotFound,
@@ -144,7 +149,7 @@ fn run_filesystem(
 
     // Same hash-snapshot posture as the mem-repo path.
     let current_hash = engine
-        .get_entity(&id)
+        .get_entity(&lookup_id)
         .ok_or_else(|| {
             CliError::new(
                 ExitKind::NotFound,

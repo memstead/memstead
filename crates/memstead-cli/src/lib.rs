@@ -140,6 +140,7 @@ impl CliError {
         let code = e.code();
         let (kind, details) = match &e {
             NotFound { id } => (ExitKind::NotFound, Some(serde_json::json!({ "id": id }))),
+            EntityIdMissingMem { .. } => (ExitKind::NotFound, Some(e.details())),
             MergeConflictUnsupportedBackend { mem } => (
                 ExitKind::Validation,
                 Some(serde_json::json!({ "mem": mem })),

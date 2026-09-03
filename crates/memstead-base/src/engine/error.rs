@@ -481,6 +481,19 @@ pub enum EngineError {
         target_id: String,
         target_mem: String,
     },
+    /// An entity id arrived without its mem prefix (`slug` where
+    /// `mem--slug` is the grammar) and could not be resolved to one
+    /// entity: either no mounted mem carries an entity of that slug,
+    /// or more than one does. `candidates` names every full id that
+    /// carries the slug so the caller can pick one; empty when none
+    /// does. A short id that exactly one mounted mem carries never
+    /// reaches this error — the verb resolves it and announces the
+    /// resolution as `SHORT_ID_RESOLVED`.
+    #[error(
+        "entity id `{id}` has no mem prefix (the grammar is `mem--slug`){}",
+        if candidates.is_empty() { " and no mounted mem carries an entity of that slug".to_string() } else { format!(" and more than one mounted mem carries it: {}", candidates.join(", ")) }
+    )]
+    EntityIdMissingMem { id: String, candidates: Vec<String> },
     /// `memstead_relate` across mems pinning schemas with different
     /// *names* refused because the source schema's
     /// `cross_mem_relationships:` section declares no entry for the
@@ -1342,6 +1355,7 @@ impl EngineError {
             EngineError::MemHasIncomingRefs { .. } => "MEM_HAS_INCOMING_REFS",
             EngineError::CrossMemLinkNotAllowed { .. } => "CROSS_MEM_LINK_NOT_ALLOWED",
             EngineError::CrossMemTargetNotFound { .. } => "CROSS_MEM_TARGET_NOT_FOUND",
+            EngineError::EntityIdMissingMem { .. } => "ENTITY_ID_MISSING_MEM",
             EngineError::CrossMemEdgeNotDeclared { .. } => "CROSS_MEM_EDGE_NOT_DECLARED",
             EngineError::RepairNotNeeded { .. } => "REPAIR_NOT_NEEDED",
             EngineError::RenameNoOp { .. } => "RENAME_NO_OP",
@@ -1796,6 +1810,15 @@ impl EngineError {
             } => {
                 serde_json::json!({ "target_id": target_id, "target_mem": target_mem })
             }
+            EngineError::EntityIdMissingMem { id, candidates } => serde_json::json!({
+                "id": id,
+                "candidates": candidates,
+                "hint": if candidates.is_empty() {
+                    "write the id as `<mem>--<slug>`; no mounted mem carries this slug".to_string()
+                } else {
+                    format!("retry with one of the candidates: {}", candidates.join(", "))
+                },
+            }),
             EngineError::UnterminatedFenceInStoredBody {
                 id,
                 section,

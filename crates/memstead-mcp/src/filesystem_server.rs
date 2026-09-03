@@ -345,6 +345,7 @@ fn engine_op_error(err: EngineError) -> CallToolResult {
         EngineError::RetypeRefused { .. }
         | EngineError::RetypeNoOp { .. }
         | EngineError::RetypeReferrerUnprobeable { .. }
+        | EngineError::EntityIdMissingMem { .. }
         | EngineError::InvalidCheckFinding { .. } => {
             tool_error_with_details(err.code(), &display, Some(err.details()))
         }

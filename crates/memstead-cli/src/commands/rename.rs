@@ -15,7 +15,10 @@ use crate::setup::{CliContext, CliEngine};
 #[derive(Parser, Debug)]
 #[command(after_long_help = super::slug_derivation_help())]
 pub struct Args {
-    /// Current entity ID.
+    /// Current entity ID. A bare slug without the `mem--` prefix resolves
+    /// when exactly one mounted mem carries it (announced as
+    /// `SHORT_ID_RESOLVED`); otherwise refuses `ENTITY_ID_MISSING_MEM` naming
+    /// the candidates.
     pub id: String,
 
     /// New title. The ID is re-derived from the title.
@@ -47,7 +50,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match ctx.cli_engine()? {
         #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
-            let expected_hash = resolve_expected_hash_mem_repo(&engine, &id, &args)?;
+            let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
+            let expected_hash = resolve_expected_hash_mem_repo(&engine, &lookup_id, &args)?;
             let result = engine
                 .rename_entity_with_ctx(
                     &id,
@@ -74,7 +78,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             }
         }
         CliEngine::Filesystem(mut engine) => {
-            let expected_hash = resolve_expected_hash_filesystem(&engine, &id, &args)?;
+            let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
+            let expected_hash = resolve_expected_hash_filesystem(&engine, &lookup_id, &args)?;
             let outcome = engine
                 .rename_entity(
                     RenameEntityArgs {

@@ -9,6 +9,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A short entity id names its missing prefix.** Every id-taking
+  mutation verb (`update`, `delete`, `rename`, `retype`, `relate`, the
+  batch forms, and their MCP tools) given a bare slug without the `mem--`
+  prefix now resolves it when exactly one mounted mem carries an entity
+  of that slug, announcing the resolution as `SHORT_ID_RESOLVED` on the
+  response, and otherwise refuses `ENTITY_ID_MISSING_MEM` naming every
+  full id that carries the slug (`details.candidates`, empty when none
+  does). Before, a bare slug reached the verbs as an id whose mem was
+  the empty string, and the caller was told a mem called "" did not
+  exist. One resolver in the engine carries the rule; a full id takes
+  the path it always took, byte for byte.
 - **The lite schema skeleton carries a field's `value_pattern` and a
   type's `last_resort` flag.** The `memstead_schema` lite reply (and the
   CLI `type` markdown that shares the renderer) now renders a metadata
