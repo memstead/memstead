@@ -136,10 +136,25 @@ fn valid_sidecar_carries_no_condition() {
             .all(|f| f["code"] != "ANCHORS_SIDECAR_UNREADABLE"),
         "{v}"
     );
-    // `--include anchors` rendered the axis, so the coverage line examines it.
+    // Rendering the axis does NOT examine it (C10, 2026-09-03). `anchors`
+    // used to be promoted into `examined` for any pass that included it,
+    // while `--strict` never folds anchor drift into its exit and its help
+    // says so. The line now renders the registry declaration: `anchors` is
+    // advisory on every pass, and the verify surfaces carry the drift
+    // statement. This assertion was written against the promoted line and is
+    // inverted with the behaviour it pins.
     let cov = v["verdict_coverage"].as_str().unwrap();
-    let examined = cov.split(';').next().unwrap();
-    assert!(examined.contains("anchors"), "{cov}");
+    let mut parts = cov.split(';');
+    let examined = parts.next().unwrap();
+    let advisory = parts.next().unwrap();
+    assert!(
+        !examined.contains("anchors"),
+        "a rendered anchors axis is not an examined one: {cov}"
+    );
+    assert!(
+        advisory.contains("anchors"),
+        "and it is named advisory rather than dropped: {cov}"
+    );
 
     let out = memstead()
         .current_dir(ws.path())

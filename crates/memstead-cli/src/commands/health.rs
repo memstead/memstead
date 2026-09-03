@@ -314,12 +314,14 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
     let mut lines: Vec<String> = Vec::new();
     lines.push("# Graph health".to_string());
     lines.push(String::new());
-    // The line the composer stamped, not a fresh render of the static
-    // declaration: the composer promotes an opt-in axis it rendered
-    // this pass (`--include anchors`) into the examined set, and a
-    // markdown that re-rendered the registry row filed the same axis
-    // as advisory while the JSON of the same run filed it as examined
-    // (C2 grader finding, 2026-09-02).
+    // The line the composer stamped, never a fresh render of the static
+    // declaration. A markdown that re-derived the line filed an axis
+    // differently from the JSON of the same run (C2 grader finding,
+    // 2026-09-02): one stamped value, read by both, is what keeps them
+    // equal. That still holds now that the promotion is gone (C10,
+    // 2026-09-03) — the composer stamps the registry declaration
+    // unchanged, and re-rendering here would merely be a second chance
+    // to disagree.
     if let Some(cov) = v["verdict_coverage"].as_str() {
         lines.push(format!("**Verdict coverage:** {cov}"));
         lines.push(String::new());

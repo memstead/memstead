@@ -20,6 +20,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **The health coverage line reports the verdict, not the render.** The
+  `anchors` axis was promoted into the `examined` bucket for any pass that
+  included it, while `health --strict` fails on an unreadable anchors
+  sidecar alone and never on drift, and its own help says drifted anchors
+  stay advisory. So a gate reading the coverage line believed the health
+  verdict policed anchor drift when the verify surfaces carry that
+  statement. `anchors` is now filed advisory on every pass and the line
+  renders straight from the registry declaration, which always said so.
+  The strict policy is unchanged, so nothing green today goes red
+  tomorrow: widening strict instead was rejected on the evidence that the
+  one real `--strict` consumer already runs `projection verify` separately
+  against a drifted-anchor ceiling. What is given up is the composer's
+  "rendered this pass, therefore examined" rule, whose only instance this
+  was. One stamped value still feeds CLI markdown, CLI JSON and MCP, so
+  the three cannot disagree.
 - **`projection verify` and `brief` refuse a quarantined destination.** When
   the binding's destination mem is quarantined (schema pin unresolved, mount
   unbacked) both refuse with `MEM_QUARANTINED` and the boot reason, the same

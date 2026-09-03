@@ -2014,13 +2014,12 @@ impl FilesystemMcpServer {
             if wants_labelling {
                 value["labelling"] = engine.health_labelling_axis(mem_scope);
             }
+            // Mirrors the composer exactly (C10): no promotion, so this
+            // server's line is byte-identical to the CLI's on every pass.
+            // `anchors` is advisory because the strict exit never folds
+            // drift in; the verify surfaces carry the drift statement.
             if let Some(cov) = crate::coverage::HEALTH.axis_coverage() {
-                value["verdict_coverage"] =
-                    serde_json::json!(cov.wire_line_promoting(if wants_anchors {
-                        &["anchors"]
-                    } else {
-                        &[]
-                    }));
+                value["verdict_coverage"] = serde_json::json!(cov.wire_line());
             }
             return json_response(&value);
         }

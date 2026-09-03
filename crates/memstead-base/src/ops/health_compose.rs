@@ -348,11 +348,16 @@ pub fn compose_health(
         // this report's defect statement answers for, stamped by the
         // composer itself so every consumer of the composition
         // carries the same declaration.
-        // An opt-in axis the report rendered this pass was examined by it:
-        // `anchors` moves into the examined set when included.
-        "verdict_coverage": crate::ops::coverage::HEALTH_COVERAGE.wire_line_promoting(
-            if include.iter().any(|s| s == "anchors") { &["anchors"] } else { &[] },
-        ),
+        // Rendered is not examined (C10, 2026-09-03). `anchors` used to be
+        // promoted into the examined set for any pass that included it, on a
+        // "rendered this pass, therefore examined" rule whose only instance
+        // this was. But `--strict` fails on an unreadable anchors sidecar
+        // alone and never on drift, and its help says drifted anchors stay
+        // advisory, so the promoted line told a gate that the health verdict
+        // polices anchor drift when the verify surfaces do. The line now
+        // renders straight from the registry, which already declares
+        // `anchors` advisory with that reason.
+        "verdict_coverage": crate::ops::coverage::HEALTH_COVERAGE.wire_line(),
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),
