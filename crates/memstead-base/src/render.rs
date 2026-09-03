@@ -1321,6 +1321,14 @@ pub fn render_type_info_markdown_in(
         "Staleness threshold: {} days. Hierarchy: `{}`.",
         schema.staleness_threshold_days, schema.hierarchy_relationship,
     ));
+    if schema.last_resort {
+        lines.push(String::new());
+        lines.push(
+            "Last resort: this is the schema's fallback type, chosen only when no more \
+             specific type fits; the `vital_signs` health axis counts what sits on it."
+                .to_string(),
+        );
+    }
     lines.push(String::new());
 
     // Metadata fields
@@ -2036,6 +2044,14 @@ pub fn build_schema_payload_scoped(
             if td.leaf {
                 obj["leaf"] = serde_json::json!(true);
             }
+            // Last-resort declaration — the schema's fallback type, the
+            // one a writer picks only when no more specific type fits
+            // (the `vital_signs` health axis counts what sits on it).
+            // A planning agent must see it beside `leaf`; emitted only
+            // when declared so undeclared schemas keep their bytes.
+            if td.last_resort {
+                obj["last_resort"] = serde_json::json!(true);
+            }
             // The type's canonical exemplar (agent-trust plan 09) —
             // engine-validated at install/seal, so what it teaches is
             // exactly what the validator accepts. Rides FULL mode only
@@ -2443,6 +2459,15 @@ fn lite_types_projection(types_full: &[serde_json::Value]) -> Vec<serde_json::Va
                             if let Some(d) = f.get("default") {
                                 o.insert("default".into(), d.clone());
                             }
+                            // The declared `value_pattern` binds every
+                            // written value (`INVALID_FIELD_VALUE` on a
+                            // miss): a legality flag the skeleton must
+                            // carry, or an agent that plans from it is
+                            // refused on a shape it was never shown
+                            // (B6 grader finding, 2026-09-02).
+                            if let Some(p) = f.get("pattern") {
+                                o.insert("pattern".into(), p.clone());
+                            }
                             serde_json::Value::Object(o)
                         })
                         .collect()
@@ -2460,6 +2485,12 @@ fn lite_types_projection(types_full: &[serde_json::Value]) -> Vec<serde_json::Va
             // a legality-relevant per-type fact.
             if t.get("leaf") == Some(&serde_json::json!(true)) {
                 o["leaf"] = serde_json::json!(true);
+            }
+            // The last-resort declaration rides the lite skeleton for
+            // the same reason: a writer choosing a type must see which
+            // one the schema names as its fallback.
+            if t.get("last_resort") == Some(&serde_json::json!(true)) {
+                o["last_resort"] = serde_json::json!(true);
             }
             // Reachability obligations ride whole — a health condition
             // the skeleton must not hide; key present only when the
@@ -2612,6 +2643,140 @@ mod tests {
             heading_spans: std::collections::HashMap::new(),
             raw_section_headings: Vec::new(),
         }
+    }
+
+    /// The lite skeleton carries a field's `value_pattern` (wire key
+    /// `pattern`, as in the full reply) and a type's `last_resort`
+    /// declaration: both are legality-relevant facts the server
+    /// instructions promise the skeleton shows, and an agent that
+    /// planned a write from a skeleton without them was refused on a
+    /// shape it never saw (B6 grader finding, 2026-09-02). A type
+    /// declaring neither renders without either key, so schemas that
+    /// do not use them keep their bytes.
+    #[test]
+    fn lite_skeleton_carries_value_pattern_and_last_resort() {
+        let manifest = r#"name: flagged
+version: 1.0.0
+description: legality-flag render fixture
+when_to_use: render tests
+types:
+  - ticket
+  - misc
+relationships:
+  mode: strict
+  definitions:
+    - name: PART_OF
+      description: hier
+      default_weight: 1.0
+    - name: _default
+      description: fallback
+      default_weight: 1.0
+community:
+  resolution: 1.0
+  seed: 42
+"#;
+        let ticket = r#"name: ticket
+description: t
+when_to_use: tests
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields:
+  - key: ticket_key
+    description: The tracker key.
+    field_type: string
+    value_pattern: "[A-Z]+-[0-9]+"
+  - key: owner
+    description: Who holds it.
+    field_type: string
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+        let misc = r#"name: misc
+description: the fallback
+when_to_use: tests
+last_resort: true
+sections:
+  - key: body
+    heading: Body
+    required: true
+    search_weight: 10.0
+    catch_all: true
+    write_rules: []
+metadata_fields: []
+title_weight: 100.0
+text_fields:
+  - body
+hierarchy_relationship: PART_OF
+no_self_loop_relationships: []
+updatable_fields:
+  - title
+  - body
+health_required_fields:
+  - body
+staleness_threshold_days: 90
+write_rules: []
+"#;
+        let schema = Arc::new(
+            memstead_schema::loader::load_schema_from_memory(
+                manifest,
+                &[
+                    ("ticket".to_string(), ticket.to_string()),
+                    ("misc".to_string(), misc.to_string()),
+                ],
+            )
+            .expect("flag fixture loads"),
+        );
+        for verbosity in [SchemaVerbosity::Full, SchemaVerbosity::Lite] {
+            let payload = build_schema_payload(&schema, vec![], verbosity, OriginClass::FirstParty);
+            let types = match verbosity {
+                SchemaVerbosity::Full => &payload["types"],
+                SchemaVerbosity::Lite => &payload["types_summary"],
+            };
+            let types = types.as_array().unwrap();
+            let ticket = types.iter().find(|t| t["name"] == "ticket").unwrap();
+            let misc = types.iter().find(|t| t["name"] == "misc").unwrap();
+            let fields = ticket["fields"].as_array().unwrap();
+            let keyed = fields.iter().find(|f| f["name"] == "ticket_key").unwrap();
+            assert_eq!(
+                keyed["pattern"], "[A-Z]+-[0-9]+",
+                "{verbosity:?} carries the declared value_pattern"
+            );
+            let owner = fields.iter().find(|f| f["name"] == "owner").unwrap();
+            assert!(
+                owner.get("pattern").is_none(),
+                "{verbosity:?}: a field without a pattern renders no key"
+            );
+            assert_eq!(
+                misc["last_resort"],
+                serde_json::json!(true),
+                "{verbosity:?} carries the last_resort declaration"
+            );
+            assert!(
+                ticket.get("last_resort").is_none(),
+                "{verbosity:?}: a type not declaring last_resort renders no key"
+            );
+        }
+        // The CLI `type` markdown says it too.
+        let md = render_type_info_markdown(&schema.types["misc"]);
+        assert!(md.contains("Last resort:"), "{md}");
+        let md = render_type_info_markdown(&schema.types["ticket"]);
+        assert!(!md.contains("Last resort:"), "{md}");
+        assert!(md.contains("pattern: `[A-Z]+-[0-9]+`"), "{md}");
     }
 
     #[test]

@@ -9,6 +9,16 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The lite schema skeleton carries a field's `value_pattern` and a
+  type's `last_resort` flag.** The `memstead_schema` lite reply (and the
+  CLI `type` markdown that shares the renderer) now renders a metadata
+  field's declared pattern under `pattern`, the key the full reply already
+  used, and a type's `last_resort: true` beside `leaf`, so an agent that
+  plans a write from the skeleton sees every constraint the engine
+  enforces (`INVALID_FIELD_VALUE` on a pattern miss) and which type the
+  schema names as its fallback. Both keys appear only where a schema
+  declares them; a schema declaring neither renders byte-identical to
+  before. software@0.5.0 is the first built-in to carry both.
 - **A completed schema migration re-stamps the mem's mutation stamp.**
   `memstead mem set-schema` / `memstead_mem_set_schema` now re-stamps the
   engine-owned mutation stamp (the marker the `ENGINE_VERSION_SKEW` hint

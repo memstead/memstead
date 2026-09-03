@@ -1197,6 +1197,10 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "UNKNOWN_ENTITY_TYPE",
             "types_summary",
             "relationships_summary",
+            // Field-level and type-level legality flags the lite
+            // skeleton carries (backlog-repairs C4).
+            "pattern",
+            "last_resort",
             "description",
             "when_to_use",
             "relationship_mode",
