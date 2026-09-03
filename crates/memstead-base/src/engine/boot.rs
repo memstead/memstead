@@ -264,7 +264,28 @@ impl Engine {
                 quarantined_idx.insert(m_idx);
                 continue;
             };
-            let schema = match SchemaResolver::new(&builtin_schemas).resolve(effective_pin) {
+            // An archive-backed mount carries its own sealed vocabulary
+            // and resolves against it on every workspace shape: a
+            // folder workspace has no sealed-package storage to stage a
+            // third party's schema into, and a mem published under such
+            // a schema would otherwise quarantine there. The embedded
+            // package is layered per mount, between the workspace tier
+            // and the built-ins, and never into the shared catalogue —
+            // a sealed vocabulary is this mount's, not something a
+            // writable mem may pin.
+            let embedded = embedded_archive_schemas(&m.mount);
+            let resolved = if embedded.is_empty() {
+                SchemaResolver::new(&builtin_schemas).resolve(effective_pin)
+            } else {
+                let mut per_mount: Vec<Arc<Schema>> = Vec::with_capacity(
+                    workspace_schemas.len() + embedded.len() + builtin_schemas_only.len(),
+                );
+                per_mount.extend(workspace_schemas.iter().cloned());
+                per_mount.extend(embedded);
+                per_mount.extend(builtin_schemas_only.iter().cloned());
+                SchemaResolver::new(&per_mount).resolve(effective_pin)
+            };
+            let schema = match resolved {
                 Ok(schema) => schema,
                 Err(sources) => {
                     // Unresolvable pin: the plenum failure class —
@@ -850,6 +871,29 @@ pub struct FailedSchemaPackage {
     pub version: Option<String>,
     /// The loader's typed failure, rendered.
     pub error: String,
+}
+
+/// The sealed schema package an archive-backed mount carries inside its
+/// `.mem` (`.memstead/schema/`), read through the same sealed reader
+/// the install validator uses, so the mount can resolve its pin from
+/// the archive itself. Empty for every other storage kind, for an
+/// archive mount with no on-disk path (the from-bytes boot already
+/// threads its embedded schemas through `extra_schemas`), and for an
+/// archive that cannot be read: the pin then fails to resolve and the
+/// mem quarantines with the ordinary not-found reason, which names the
+/// sources consulted.
+pub(crate) fn embedded_archive_schemas(mount: &Mount) -> Vec<Arc<Schema>> {
+    let crate::workspace::MountStorage::Archive { path } = &mount.storage else {
+        return Vec::new();
+    };
+    if path.as_os_str().is_empty() || !path.is_file() {
+        return Vec::new();
+    }
+    use crate::schema_source::SchemaSource as _;
+    crate::schema_source::ArchiveSchemaSource::from_path(path)
+        .ok()
+        .and_then(|source| source.read_schemas().ok())
+        .unwrap_or_default()
 }
 
 /// Tolerant form of [`load_workspace_schemas`]: broken packages are

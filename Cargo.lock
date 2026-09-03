@@ -2526,6 +2526,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "thiserror 2.0.20",
+ "tinyvec",
  "tokio",
  "toml",
  "tracing",

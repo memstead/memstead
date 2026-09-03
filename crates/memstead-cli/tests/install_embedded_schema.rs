@@ -1034,3 +1034,83 @@ fn seal_carries_source_generation_never_invents_the_marker() {
         "second bare field likewise: {md}"
     );
 }
+
+/// The v0.18.0 newcomer run's first finding: the paved `quickstart` /
+/// `init` shape is a FOLDER workspace, and an archive pinning a schema
+/// the workspace had never seen refused there with a staging error
+/// (`MEM_ERROR`, "staging a schema requires a mem-repo workspace") while
+/// the CLI reference promised install on every shape and the quickstart
+/// receipt promised a different code. A folder workspace has no
+/// sealed-package storage, so the mount now resolves its vocabulary from
+/// the archive itself: across process boundaries (every CLI call below
+/// boots afresh), through uninstall and re-install, and without a byte
+/// landing in the authoring tier (`.memstead/schemas/`), which never
+/// holds a third party's sealed bytes.
+#[test]
+fn archive_under_an_unknown_schema_installs_on_a_folder_workspace() {
+    let _guard = cache_guard();
+    let sender = TempDir::new().unwrap();
+    let receiver = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+
+    let archive = publish_fieldnotes_archive(sender.path(), cache.path());
+    run_ok(
+        receiver.path(),
+        cache.path(),
+        &["init", "--name", "notes", "--schema", "default@1.0.0"],
+    );
+    assert!(
+        !receiver.path().join("mem-repo").exists(),
+        "the receiver must be folder-shaped: no mem-repo anywhere"
+    );
+
+    run_ok(
+        receiver.path(),
+        cache.path(),
+        &["install", archive.to_str().unwrap()],
+    );
+
+    let read_back = |ctx: &str| {
+        let out = run_ok(
+            receiver.path(),
+            cache.path(),
+            &["--json", "entity", "field-log--morning-count"],
+        );
+        let entity: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(entity["entity_type"], "note", "{ctx}: {entity}");
+        assert!(
+            entity.to_string().contains("Eleven herons"),
+            "{ctx}: the installed mem's content must be readable: {entity}"
+        );
+    };
+    read_back("after install, in a fresh process");
+
+    // Nothing was staged: the folder tier is the authoring tier.
+    let authoring = receiver.path().join(".memstead").join("schemas");
+    let landed: Vec<String> = fs::read_dir(&authoring)
+        .map(|dir| {
+            dir.filter_map(Result::ok)
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !landed.iter().any(|n| n.starts_with("fieldnotes")),
+        "a sealed third-party package must never land in the authoring tier: {landed:?}"
+    );
+
+    // The mount is a first-class read-mem: it detaches and re-attaches.
+    run_ok(receiver.path(), cache.path(), &["uninstall", "field-log"]);
+    memstead()
+        .current_dir(receiver.path())
+        .env("MEMSTEAD_MEM_CACHE", cache.path())
+        .args(["--json", "entity", "field-log--morning-count"])
+        .assert()
+        .failure();
+    run_ok(
+        receiver.path(),
+        cache.path(),
+        &["install", archive.to_str().unwrap()],
+    );
+    read_back("after uninstall and re-install");
+}

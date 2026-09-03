@@ -7,6 +7,41 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fresh `cargo add` of the published crates compiles again.** A new
+  consumer's resolver picked tinyvec 1.13.0 through `unicode-normalization`,
+  and that release does not build in the alloc-only configuration the chain
+  requests (`cannot find macro vec`), so "Program against the libraries"
+  ended in a build error inside a crate the reader never named. The
+  workspace's own lock sat on 1.12.0 and CI never saw it; the v0.18.0
+  newcomer run did, on rustc 1.98, and the failure reproduces on 1.95.
+  `memstead-base` now carries tinyvec as a resolver constraint
+  (`>=1.6, <1.13`), unused in code, so every downstream tree resolves a
+  version that compiles. The ceiling is lifted once a tinyvec release
+  builds alloc-only again.
+- **`memstead install` works on the folder workspace shape, as its
+  reference always said.** Install stopped being shape-gated in 0.13.0,
+  but the archive's sealed schema was still staged into the mem-repo's
+  `__MEMSTEAD:schemas/` ref, so on the shape `quickstart` and `init`
+  produce a mem published under a vocabulary the workspace had never seen
+  refused with a generic `MEM_ERROR` ("staging a schema requires a
+  mem-repo workspace"), while the quickstart receipt promised an
+  `UNSUPPORTED_WORKSPACE_SHAPE` refusal that no longer existed. The
+  v0.18.0 newcomer run met all three stories on the headline registry
+  command. An archive-backed mount now resolves its pin from the schema
+  package sealed inside its own archive, layered between the workspace
+  tier and the built-ins for that mount alone, on every shape and every
+  boot path (the CLI, the MCP server's `--read-mem`, a re-attach after
+  quarantine). On a mem-repo workspace staging still happens, so
+  `memstead schema <pin>` renders the installed package and a second mem
+  may pin it; on a folder workspace staging reads and checks the package,
+  writes nothing, and reports `CarriedByArchive`: the folder tier's
+  `.memstead/schemas/` stays the authoring tier and never holds a third
+  party's sealed bytes. The quickstart and init receipts now name what
+  the folder shape really cannot do (the atomic `batch-*` commands and
+  `memstead recover`) and say that install works on either shape.
+
 ## [0.18.0] - 2026-09-03
 
 ### Fixed

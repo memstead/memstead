@@ -41,6 +41,13 @@ pub enum SchemaStaging {
     /// The archive carries no embedded schema tree. Nothing to stage;
     /// the pin must resolve on its own or the mount refuses.
     NoEmbeddedSchema,
+    /// The workspace has no sealed-package storage (a folder-shaped
+    /// workspace: its `.memstead/schemas/` is the authoring tier and
+    /// never holds a third party's sealed bytes). The package was read
+    /// and checked against the pin, nothing was written, and the mount
+    /// resolves its vocabulary from the archive itself — on this shape
+    /// the archive IS the schema storage.
+    CarriedByArchive,
 }
 
 impl Engine {
@@ -243,6 +250,15 @@ impl Engine {
     ///
     /// Idempotent: a pin the engine can already resolve returns
     /// [`SchemaStaging::AlreadyResolvable`] with nothing written.
+    ///
+    /// Shape-agnostic: on a workspace with no sealed-package storage (the
+    /// folder shape) the package is still read and checked against the
+    /// pin, so a broken embedded schema refuses before any mount side
+    /// effect, but nothing is written — the archive-backed mount that
+    /// follows resolves the vocabulary from the archive itself
+    /// ([`SchemaStaging::CarriedByArchive`]). What that shape forgoes is
+    /// the staged copy's extras: `memstead schema <pin>` rendering the
+    /// installed package, and a second, writable mem pinning it.
     pub fn stage_sealed_schema(
         &mut self,
         mem: &str,
@@ -285,9 +301,31 @@ impl Engine {
             )));
         }
 
+        if self.sealed_schema_gitdir().is_none() {
+            return Ok(SchemaStaging::CarriedByArchive);
+        }
         self.write_to_local_schema_source(&name, &version.to_string(), files)?;
         self.workspace_schemas.push(std::sync::Arc::new(schema));
         Ok(SchemaStaging::Staged)
+    }
+
+    /// The gitdir that holds sealed third-party packages (the
+    /// `__MEMSTEAD:schemas/` ref): the first git-branch mount's, else the
+    /// workspace's `mem-repo/.git`. `None` on a folder-shaped workspace,
+    /// whose `.memstead/schemas/` is the authoring tier and never holds
+    /// sealed bytes.
+    fn sealed_schema_gitdir(&self) -> Option<PathBuf> {
+        self.mounts
+            .iter()
+            .find_map(|m| match &m.mount.storage {
+                crate::workspace::MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.workspace_root()
+                    .map(|r| r.join("mem-repo").join(".git"))
+            })
+            .filter(|g| g.is_dir())
     }
 
     /// Write a schema package into the workspace's local schema
@@ -301,26 +339,14 @@ impl Engine {
         version: &str,
         files: &[(String, Vec<u8>)],
     ) -> Result<(), EngineError> {
-        let gitdir = self
-            .mounts
-            .iter()
-            .find_map(|m| match &m.mount.storage {
-                crate::workspace::MountStorage::GitBranch { gitdir, .. } => Some(gitdir.clone()),
-                _ => None,
-            })
-            .or_else(|| {
-                self.workspace_root()
-                    .map(|r| r.join("mem-repo").join(".git"))
-            })
-            .filter(|g| g.is_dir())
-            .ok_or_else(|| {
-                EngineError::Mem(
-                    "staging a schema requires a mem-repo workspace — the folder workspace's \
+        let gitdir = self.sealed_schema_gitdir().ok_or_else(|| {
+            EngineError::Mem(
+                "staging a schema requires a mem-repo workspace — the folder workspace's \
                      `.memstead/schemas/` is the authoring tier and never holds sealed \
                      third-party packages"
-                        .to_string(),
-                )
-            })?;
+                    .to_string(),
+            )
+        })?;
         let ops = self.git_branch_ops.as_ref().ok_or_else(|| {
             EngineError::Mem("git-branch ops are not wired on this engine".to_string())
         })?;
@@ -719,6 +745,11 @@ impl Engine {
         // git-branch `__MEMSTEAD:schemas/` ref) schema resolves.
         let mut builtin_schemas: Vec<std::sync::Arc<memstead_schema::Schema>> =
             self.workspace_schemas().to_vec();
+        // An archive-backed mount's own sealed vocabulary sits between
+        // the workspace tier and the built-ins, for this resolution
+        // only — see `from_mounts_inner` for why it never joins the
+        // shared catalogue.
+        builtin_schemas.extend(super::boot::embedded_archive_schemas(&mount));
         builtin_schemas.extend(
             memstead_schema::builtins::load_builtin_schemas()
                 .map_err(|e| EngineError::SchemaResolverInit(e.to_string()))?,
@@ -2446,11 +2477,15 @@ impl Engine {
             requarantine(self, &err);
             return Err(self.unknown_mem_error(mem));
         };
+        // Same catalogue order as boot: workspace tier, then the mount's
+        // own embedded vocabulary when it is archive-backed, then the
+        // built-ins.
         let catalogue: Vec<std::sync::Arc<memstead_schema::Schema>> = self
             .workspace_schemas
             .iter()
-            .chain(self.builtin_schemas.iter())
             .cloned()
+            .chain(super::boot::embedded_archive_schemas(&mount))
+            .chain(self.builtin_schemas.iter().cloned())
             .collect();
         let schema = match crate::engine::SchemaResolver::new(&catalogue).resolve(&effective_pin) {
             Ok(s) => s,

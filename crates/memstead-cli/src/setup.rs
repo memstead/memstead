@@ -210,18 +210,22 @@ fn mem_repo_init_hint() -> String {
 
 /// What a filesystem-mem workspace cannot do — stated with the same
 /// feature gate as the hint above, and for the same reason. The full
-/// build names `memstead install`, which exists there and refuses by
-/// shape; the lean build has no `install` subcommand at all, so naming
-/// it would send the reader to a verb that does not parse. The lean
-/// wording states the limit without borrowing a command it lacks.
+/// build names the `batch-*` commands and `memstead recover`, which
+/// exist there and refuse by shape, and says in the same breath that
+/// `memstead install` does NOT refuse (it stopped being shape-gated on
+/// 2026-08-27, and since 0.18.1 a folder workspace resolves an installed
+/// mem's sealed schema from the archive itself); the lean build has none
+/// of those subcommands, so naming them would send the reader to verbs
+/// that do not parse. The lean wording states the limit without
+/// borrowing a command it lacks.
 #[cfg(feature = "mem-repo")]
-const FILESYSTEM_CANNOT: &str = "**It cannot install mems from the registry.** `memstead install \
-     <scope>/<name>` (and the other mem-repo-only subcommands) refuse here with \
-     `UNSUPPORTED_WORKSPACE_SHAPE`.";
+const FILESYSTEM_CANNOT: &str = "**It cannot run the atomic `batch-*` commands or `recover`.** \
+     Those are mem-repo-only and refuse here with `UNSUPPORTED_WORKSPACE_SHAPE`. \
+     `memstead install <scope>/<name>` works on either shape.";
 #[cfg(not(feature = "mem-repo"))]
-const FILESYSTEM_CANNOT: &str = "**It cannot install mems from the registry, and holds exactly \
-     one mem.** The subcommands that do either are mem-repo-only, and this lean build does not \
-     carry them at all.";
+const FILESYSTEM_CANNOT: &str = "**It holds exactly one mem, and keeps no history of its own.** \
+     Installing published mems, the atomic batch commands and recovery live in the full build, \
+     which this lean build does not carry at all.";
 
 impl WorkspaceShape {
     /// Resolve the shape of an existing workspace root. Routes through
@@ -304,16 +308,17 @@ pub fn shape_disclosure_in(shape: WorkspaceShape, mem_folder: Option<&str>) -> S
             cannot: FILESYSTEM_CANNOT,
             other_shape: WorkspaceShape::MemRepo,
             other_shape_command: format!(
-                "**The other shape** — mem-repo: many mems, git-backed, registry-capable — \
-                 comes from {hint}. Switching later means starting a second \
-                 workspace, so decide now if you intend to install mems.",
+                "**The other shape** — mem-repo: many mems, git-backed, every mutation a \
+                 commit — comes from {hint}. Switching later means starting a second \
+                 workspace, so decide now if you want per-mutation history or the atomic \
+                 batch commands.",
                 hint = mem_repo_init_hint(),
             ),
         },
         WorkspaceShape::MemRepo => ShapeDisclosure {
             shape,
             summary: "Many mems on git branches, full history — every subcommand works here, \
-                      including `memstead install <scope>/<name>`."
+                      including the atomic `batch-*` commands and `recover`."
                 .to_string(),
             cannot: "**It costs a git repository.** The mems live in `mem-repo/.git/` and \
                      every mutation is a commit — not a folder of files you can hand-edit.",

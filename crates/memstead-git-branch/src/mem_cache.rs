@@ -247,11 +247,15 @@ pub enum MountRegistration {
 ///
 /// Staging comes first and for a reason: a mem published under a
 /// third party's vocabulary carries that vocabulary inside the
-/// archive and nowhere else, so the pin the mount resolves against
-/// only exists once the embedded package has been written into the
-/// workspace's local schema storage. Staging is idempotent and
-/// refuses before any mount side effect, so a broken embedded schema
-/// leaves neither a staged package nor a registered mount behind.
+/// archive and nowhere else. On a mem-repo workspace the embedded
+/// package is written into the `__MEMSTEAD:schemas/` ref, so the pin
+/// resolves for this mount and for any later mem pinning the same
+/// schema; on a folder workspace, which has no sealed-package storage,
+/// staging reads and checks the package but writes nothing, and the
+/// archive-backed mount resolves its vocabulary from the archive
+/// itself. Staging is idempotent and refuses before any mount side
+/// effect, so a broken embedded schema leaves neither a staged package
+/// nor a registered mount behind on either shape.
 pub fn register_cached_archive(
     engine: &mut memstead_base::Engine,
     outcome: &CacheInstallOutcome,

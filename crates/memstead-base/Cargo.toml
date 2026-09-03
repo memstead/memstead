@@ -32,6 +32,10 @@ thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
+# Unused directly: carried so downstream resolvers stay off the broken
+# tinyvec 1.13.0 (see the workspace manifest). memstead-base is in every
+# consumer's tree, which is why the constraint lives here.
+tinyvec.workspace = true
 zip.workspace = true
 
 # Optional — only pulled in when the `tokio` feature is enabled.

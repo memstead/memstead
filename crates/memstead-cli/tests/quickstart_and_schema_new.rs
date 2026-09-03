@@ -975,23 +975,24 @@ fn every_refusal_on_these_paths_names_a_next_command() {
 /// other shape. Applied to `quickstart` and `init` alike.
 ///
 /// The "cannot" half is flavour-specific on purpose. The full build
-/// names `memstead install` and the typed code it refuses with, because
-/// that command exists there. The lean build has no `install`
-/// subcommand at all, so it states the limit without borrowing a verb
+/// names the `batch-*` commands and the typed code they refuse with,
+/// because those commands exist there, and states that `memstead
+/// install` works on either shape — the v0.18.0 newcomer run met a
+/// receipt promising an `UNSUPPORTED_WORKSPACE_SHAPE` refusal from an
+/// install that no longer refuses by shape. The lean build has none of
+/// those subcommands, so it states the limit without borrowing a verb
 /// the reader could not run — see the FILESYSTEM_CANNOT gate in
 /// `setup.rs`. Both must still name `memstead mem-repo init`, which is
 /// a pointer at the other shape, not an invitation to run it here.
 fn assert_filesystem_shape_disclosure(out: &str, ctx: &str) {
-    let mut needles = vec![
-        "filesystem-mem",
-        "cannot install mems from the registry",
-        "memstead mem-repo init",
-    ];
+    let mut needles = vec!["filesystem-mem", "memstead mem-repo init"];
     if cfg!(feature = "mem-repo") {
-        needles.push("memstead install");
+        needles.push("cannot run the atomic `batch-*` commands");
         needles.push("UNSUPPORTED_WORKSPACE_SHAPE");
+        needles.push("`memstead install <scope>/<name>` works on either shape");
     } else {
-        needles.push("this lean build does not carry them");
+        needles.push("holds exactly one mem");
+        needles.push("this lean build does not carry");
     }
     for needle in needles {
         assert!(
