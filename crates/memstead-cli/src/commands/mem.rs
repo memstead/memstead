@@ -1451,7 +1451,12 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
             // the marker `ENGINE_VERSION_SKEW` reads — so a reader can
             // see which generation and which binary last wrote the mem
             // without opening its config.
-            "mutation_stamp": cfg.and_then(|c| c.mutation_stamp.clone()),
+            "mutation_stamp": cfg.and_then(|c| c.mutation_stamp.as_ref()).map(|st| {
+                // The row's own spelling (snake_case, like every sibling
+                // key and the overview roster), not the config's wire
+                // form: a reader of this surface meets one casing.
+                serde_json::json!({ "engine_version": st.engine_version, "schema": st.schema })
+            }),
         }));
     }
 
