@@ -225,6 +225,15 @@ pub enum ProjectionCommand {
     /// recording no producing binding are included by the pre-provenance
     /// fallback.
     ///
+    /// A destination mem that is QUARANTINED (its schema pin unresolved, its
+    /// mount unbacked) refuses the run outright with `MEM_QUARANTINED` and its
+    /// boot reason, on both `verify` and `brief --verify`: a mem serving no
+    /// entities would read as every artifact uncovered and every anchor
+    /// absent, which is a measurement neither can honestly make. The refusal
+    /// is placed above every store the run would otherwise write, so the
+    /// findings store, the `#verified` token and the authored exclusions in
+    /// the advance file all come through byte-identical.
+    ///
     /// A sidecar row whose ENTITY the mem no longer holds is reported as
     /// dangling and named, in no figure and never as resolving: it is a
     /// sidecar integrity condition, not an anchor state, and nothing repairs
@@ -749,6 +758,38 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
             {
                 return Err(absent_sync_error(&binding_id, &record.config).into());
             }
+        }
+        // Same consult verify makes, for the same reason: a quarantined
+        // destination serves no entities, so the rendered brief would describe
+        // a mem that is not there. `render_*_brief_for` also reaches
+        // `reconcile_exclusions`, which prunes authored exclusions whose
+        // sources appear to hold nothing — the 181 lost dispositions in the
+        // filed incident. Refuse above it, not after.
+        if let Ok(configs) = load_pipeline_configs(&root)
+            && let Some(record) = configs
+                .bindings
+                .iter()
+                .find(|r| format!("{}/{}", r.mem, r.name) == binding_id)
+            && let Ok(resolved) = resolve_binding_run(&binding_id, &record.config)
+            && let Some(q) = engine.quarantine_reason(&resolved.destination_mem)
+        {
+            return Err(CliError::new(
+                ExitKind::Validation,
+                "MEM_QUARANTINED",
+                format!(
+                    "brief refused for `{binding_id}`: the destination mem `{}` is \
+quarantined ({}) — it serves no entities, so the brief would describe a mem \
+that is not there. Repair the mem, then re-run",
+                    resolved.destination_mem, q.reason_message
+                ),
+            )
+            .with_details(json!({
+                "binding": binding_id,
+                "mem": resolved.destination_mem,
+                "reason_code": q.reason_code,
+                "reason": q.reason_message,
+            }))
+            .into());
         }
         let (rendered, operation) = if args.verify {
             (
@@ -2332,6 +2373,41 @@ fn verify(ctx: &CliContext, args: VerifyArgs) -> anyhow::Result<()> {
     // completed-run baseline write below.
     let mut cli_engine = ctx.cli_engine_at(&root)?;
     let engine = cli_engine.base_mut();
+
+    // A quarantined destination serves NO entities, so a pass over it reads
+    // every artifact as uncovered and every anchor as absent: the same
+    // fiction the sidecar refusal below exists to prevent, one cause over.
+    // Filed 2026-09-02 after a tick under a binary missing a schema version
+    // loaded `engine` quarantined, then recorded 583 bogus uncovered
+    // findings and a baseline, and pruned 181 authored dispositions.
+    //
+    // Placed HERE deliberately: above the measurement and above all three
+    // stores it would otherwise touch (the findings store, the `#verified`
+    // token, and the advance file whose exclusions `reconcile_exclusions`
+    // prunes when the sources appear to hold nothing). A refusal further
+    // down would leave whichever store sits above it already dirtied.
+    if let Some(q) = engine.quarantine_reason(&resolved.destination_mem) {
+        return Err(CliError::new(
+            ExitKind::Validation,
+            "MEM_QUARANTINED",
+            format!(
+                "verify refused for `{binding_id}`: the destination mem `{}` is \
+quarantined ({}) — it serves no entities, so every artifact would read as \
+uncovered and every anchor as absent, which is a measurement this run cannot \
+honestly make. Repair the mem, then re-run",
+                resolved.destination_mem, q.reason_message
+            ),
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "mem": resolved.destination_mem,
+            // The same vocabulary every other surface reports for this
+            // condition, not a new one: code plus the boot reason.
+            "reason_code": q.reason_code,
+            "reason": q.reason_message,
+        }))
+        .into());
+    }
 
     // A malformed anchors sidecar reads as "no anchors", which a fidelity
     // pass would faithfully report as every artifact uncovered — findings,

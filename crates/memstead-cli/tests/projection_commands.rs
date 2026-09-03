@@ -3316,6 +3316,111 @@ fn verify_backfills_hashless_anchor_then_adjudicates_drift() {
     );
 }
 
+/// C9 AC1: a quarantined DESTINATION mem is refused by both verify and
+/// brief, and the run leaves all three stores byte-identical.
+///
+/// Filed 2026-09-02: a tick under a binary missing a schema version loaded
+/// `engine` quarantined. Verify measured the empty view rather than refusing,
+/// recorded 583 bogus `uncovered` findings and a `#verified` baseline, and
+/// pruned 181 authored dispositions out of the advance file. Three separate
+/// stores dirtied by a run that had nothing true to say, which is why this
+/// test compares all three rather than only the one the report mentions.
+///
+/// Distinct from the pre-existing quarantine test in this file, which covers
+/// a quarantined BINDING RECORD (a version-gate failure on the stored file).
+/// This is the destination mem being unserviceable while the binding itself
+/// loads fine.
+#[test]
+fn a_quarantined_destination_is_refused_and_all_three_stores_are_untouched() {
+    let tmp = verify_workspace();
+    let root = tmp.path();
+
+    // Seed every store a bad run would touch, so "untouched" has something
+    // to prove: findings + backfill from a real run, a `#verified` token,
+    // and an authored exclusion in the advance ledger.
+    memstead()
+        .current_dir(root)
+        .args(["projection", "verify", "engine/graph", "--advance"])
+        .assert()
+        .success();
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "exclude",
+            "engine/graph",
+            "--exclusions",
+            r#"{"src/a.rs": "probe rationale"}"#,
+        ])
+        .assert()
+        .success();
+
+    let findings_path = root.join(".memstead/state/findings/engine/graph.json");
+    let advance_path = root.join(".memstead/state/advance/engine/graph.json");
+    let config_path = root.join("engine-mem/.memstead/config.json");
+    let findings_before = std::fs::read(&findings_path).unwrap();
+    let advance_before = std::fs::read(&advance_path).unwrap();
+    let config_before = std::fs::read(&config_path).unwrap();
+    assert!(
+        String::from_utf8_lossy(&config_before).contains("#verified"),
+        "fixture must carry a baseline token"
+    );
+    assert!(
+        String::from_utf8_lossy(&advance_before).contains("probe rationale"),
+        "fixture must carry an authored exclusion"
+    );
+
+    // Quarantine the DESTINATION: repoint its schema pin at a version no
+    // installed schema resolves to. The binding record itself stays valid.
+    std::fs::write(&config_path, r#"{ "schema": "default@9.9.9" }"#).unwrap();
+    let config_quarantined = std::fs::read(&config_path).unwrap();
+
+    for (label, args) in [
+        ("verify", vec!["projection", "verify", "engine/graph"]),
+        (
+            "brief",
+            vec!["projection", "brief", "engine/graph", "--verify"],
+        ),
+    ] {
+        let out = memstead()
+            .current_dir(root)
+            .args(&args)
+            .assert()
+            .failure()
+            .get_output()
+            .clone();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            text.contains("MEM_QUARANTINED"),
+            "{label} refuses with the shared quarantine code: {text}"
+        );
+        assert!(
+            text.contains("engine"),
+            "{label} names the destination mem: {text}"
+        );
+
+        assert_eq!(
+            std::fs::read(&findings_path).unwrap(),
+            findings_before,
+            "{label}: the findings store must be byte-identical"
+        );
+        assert_eq!(
+            std::fs::read(&advance_path).unwrap(),
+            advance_before,
+            "{label}: the advance file must be byte-identical (no disposition prune)"
+        );
+        assert_eq!(
+            std::fs::read(&config_path).unwrap(),
+            config_quarantined,
+            "{label}: the mem config, and so the #verified token, must be byte-identical"
+        );
+    }
+}
+
 /// C6 AC1: a BARE `projection verify` leaves the destination mem's config
 /// byte-identical, findings and report unaffected; the same call with
 /// `--advance` moves the `#verified` token. The entry this pins was filed on

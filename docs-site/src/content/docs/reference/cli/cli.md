@@ -1885,6 +1885,8 @@ Measure a binding's fidelity and record durable findings (E3b, group A). Read-on
 
 The anchor figures answer for THIS BINDING'S population only: anchors another binding wrote, and anchors pointing outside this binding's declared scope, are excluded from every figure and named in the report rather than dropped. They are never deleted or rewritten: exclusion is a reporting decision. The report states what its denominator counted (anchor rows, with the distinct-artifact count beside them, since one artifact legitimately carries several rows), and says so when anchors recording no producing binding are included by the pre-provenance fallback.
 
+A destination mem that is QUARANTINED (its schema pin unresolved, its mount unbacked) refuses the run outright with `MEM_QUARANTINED` and its boot reason, on both `verify` and `brief --verify`: a mem serving no entities would read as every artifact uncovered and every anchor absent, which is a measurement neither can honestly make. The refusal is placed above every store the run would otherwise write, so the findings store, the `#verified` token and the authored exclusions in the advance file all come through byte-identical.
+
 A sidecar row whose ENTITY the mem no longer holds is reported as dangling and named, in no figure and never as resolving: it is a sidecar integrity condition, not an anchor state, and nothing repairs it, because the row is the trace of a writer that went around the engine. Where the entity end could not be reconciled at all (an unloaded, quarantined or partly unparsed mem), the report says so rather than reporting a clean anchor axis.
 
 **Usage:** `memstead projection verify [OPTIONS] <BINDING>`

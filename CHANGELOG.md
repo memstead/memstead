@@ -20,6 +20,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the empty string, and the caller was told a mem called "" did not
   exist. One resolver in the engine carries the rule; a full id takes
   the path it always took, byte for byte.
+- **`projection verify` and `brief` refuse a quarantined destination.** When
+  the binding's destination mem is quarantined (schema pin unresolved, mount
+  unbacked) both refuse with `MEM_QUARANTINED` and the boot reason, the same
+  typed condition every other read surface reports, instead of measuring the
+  empty view. Before, a run under a binary missing a schema version reported
+  every artifact uncovered and dirtied three separate stores: it recorded
+  bogus `uncovered` findings and a `#verified` baseline, and pruned authored
+  dispositions out of the advance ledger, because the exclusion reconcile
+  sees sources that appear to hold nothing. The refusal sits above all three,
+  so a refused run leaves each byte-identical.
+- **The uncovered headline counts the set it describes.** The rollup's
+  "N in-scope source artifact(s) carry no anchor" line took N from the
+  findings recorded this pass, while the body listed the enumerated coverage
+  set; under a cap or a sample those are different numbers, and one run
+  printed 17 against a body of 583. That sentence now counts
+  `coverage.uncovered`, the very list the body prints. Every other class
+  still counts findings, which is what those sentences claim.
 - **An ambiguous artifact id is refused with both names.** On a binding with
   several primary sources, a source-relative id carried by more than one of
   them (`docs/a.md` under two pointers) now refuses the whole

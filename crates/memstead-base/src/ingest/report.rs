@@ -475,6 +475,29 @@ impl FidelityReport {
     /// derivation is deliberately conservative in one direction only: it will
     /// downgrade a green claim it cannot support, and it will never upgrade a
     /// recorded finding away.
+    /// The number an action sentence should state for `class`.
+    ///
+    /// Every class counts the findings RECORDED this pass, which is what its
+    /// sentence claims — except `uncovered`, whose sentence says "N in-scope
+    /// source artifact(s) carry no anchor". That is a statement about the
+    /// enumerated coverage set, not about how many findings the pass got
+    /// round to recording under its cap, and the two are not the same number
+    /// once sampling or a cap bites. On the run this rule was filed from, the
+    /// headline said 17 while the body listed 583: both were right about
+    /// their own set, and the report contradicted itself in public.
+    ///
+    /// So `uncovered` takes its count from `coverage.uncovered`, the very
+    /// list the body prints. Reconciling the two numbers afterwards was the
+    /// rejected alternative: it would have hidden that they answer different
+    /// questions instead of making the sentence count what it describes.
+    fn action_count(&self, class: &str, findings: usize) -> usize {
+        if class == "uncovered" {
+            self.coverage.uncovered.len()
+        } else {
+            findings
+        }
+    }
+
     pub fn rollup(&self) -> Rollup {
         let findings_total: usize = self.findings_by_class.values().sum();
 
@@ -594,7 +617,11 @@ impl FidelityReport {
             if let Some(&n) = self.findings_by_class.get(class)
                 && n > 0
             {
-                actions.push(class_action(class, n, &self.binding));
+                actions.push(class_action(
+                    class,
+                    self.action_count(class, n),
+                    &self.binding,
+                ));
             }
         }
         // Any class the vocabulary grew past this list still surfaces, after
@@ -2145,6 +2172,58 @@ mod tests {
         assert!(
             md.contains("- uncovered (no anchor): 1; excluded on purpose (not owed): 1"),
             "{md}"
+        );
+    }
+
+    /// C9 — the uncovered action sentence counts the SET IT DESCRIBES, so
+    /// the headline and the body can never disagree.
+    ///
+    /// Filed from a run whose headline said 17 uncovered while its body
+    /// listed 583: the sentence counted findings recorded under the pass cap,
+    /// the list counted the enumerated coverage set. Both were right about
+    /// their own set, which is exactly why the report was misleading. Every
+    /// other class still counts findings, because that is what those
+    /// sentences claim.
+    #[test]
+    fn c9_the_uncovered_action_counts_the_body_list_not_the_recorded_findings() {
+        let mut r = base_report();
+        r.coverage_semantics = CoverageSemantics::Exhaustive;
+        // The body enumerates three; the pass recorded only one finding,
+        // as a cap or a sample would leave it.
+        r.coverage.uncovered = vec![
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+            "src/c.rs".to_string(),
+        ];
+        r.findings_by_class = [("uncovered".to_string(), 1)].into_iter().collect();
+        let rollup = r.rollup();
+        let uncovered_action = rollup
+            .actions
+            .iter()
+            .find(|a| a.contains("carry no anchor"))
+            .expect("the uncovered action is present");
+        assert!(
+            uncovered_action.starts_with("3 in-scope source artifact(s)"),
+            "the sentence counts the enumerated list it describes: {uncovered_action}"
+        );
+        // The findings tally itself is untouched: it answers a different
+        // question and the verdict line still reports it.
+        assert_eq!(rollup.findings_total, 1, "{rollup:?}");
+
+        // A different class keeps counting findings.
+        let mut d = base_report();
+        d.coverage.uncovered = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+        d.findings_by_class = [("drifted".to_string(), 1)].into_iter().collect();
+        let drift_action = d
+            .rollup()
+            .actions
+            .iter()
+            .find(|a| a.contains("moved since the entity was written"))
+            .cloned()
+            .expect("the drift action is present");
+        assert!(
+            drift_action.starts_with("1 anchored artifact(s)"),
+            "{drift_action}"
         );
     }
 
