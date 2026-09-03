@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:05Z
-last_modified: 2026-08-26T17:44:32Z
+last_modified: 2026-09-03T13:26:41Z
 status: accepted
 decided_on: 2026-07-10
 deciders: operator (dasboe)
@@ -24,6 +24,8 @@ Findings are engine-owned state, not a mem (unless the operator decides otherwis
 **Amendment (2026-08-21) — what verify reports when it could not measure.** A measurement surface has a failure mode its own numbers hide: reporting *green* from an input it could not read. The dashboard is therefore three-valued — `clean` / `drifted` / `inconclusive` — and `inconclusive` is forced, not chosen, by any blind spot the pass detects: a non-enumerable denominator, an enumerated zero, no observed anchors, no readable change signal, or a declared change strategy whose signal the pass could not actually resolve (a declared `git` source with no reachable repository). The capability row keeps reporting the *declaration*; the freshness row reports what the pass could *read*. A verdict may only ever be downgraded by a blind spot, never upgraded, so silence about coverage can never present as coverage.
 
 This makes verify gateable by machines without a second surface. `--fail-on-findings` opts a run into a dedicated exit code (6) for "the mem drifted from its source", constructed at exactly one site and never returned for an operational error — so a CI job can distinguish drift from an engine that could not run, which is the whole point of a gate: both otherwise look like a red build. The findings report reaches stdout *before* the gate fails, under a versioned `memstead-verify/v1` envelope, so a red build always carries the document explaining it. `inconclusive` deliberately has no exit code of its own — a caller that must fail on it reads `rollup.verdict` from that envelope, which keeps the exit-code vocabulary small and the blind-spot policy the caller's to set.
+
+- Amendment 2026-09-03 (backlog-repairs C9, supervisor): verify and its brief now REFUSE a quarantined destination mem, naming the quarantine reason and writing nothing, and the uncovered headline counts the body's list so the two can never disagree. These guards currently live in the CLI projection command, not at the engine's shared ingest entry point, so a future MCP or ui-api surface that exposed the verify pass would not inherit them. Today no MCP tool and no ui-api route calls verify, so the gap is latent, not live. Revisit if such a surface is added: push the quarantine refusal and the count derivation down into the shared ingest path before it ships, so every caller is protected, not only the CLI.
 
 ## Relationships
 - **REFERENCES**: [[engine:anchor-primitive]]
