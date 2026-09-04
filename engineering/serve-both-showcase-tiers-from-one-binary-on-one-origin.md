@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:07Z
-last_modified: 2026-07-13T16:44:06Z
+last_modified: 2026-09-04T11:48:01Z
 status: accepted
 decided_on: 2026-06-19
 deciders: registry-team
@@ -42,3 +42,9 @@ Both single-surface binaries remain first-class — this decision adds the unifi
 
 
 Soft-launch gate (fixed 2026-07-02): `memstead-serve-full` now reads `MEMSTEAD_SOFT_LAUNCH` — default ON, `0`/`off`/`false` to go public, the identical parse `memstead-session-serve` already used — and threads it into `AppState::with_soft_launch`, relocating read pages and the sketch `/mcp` mount under `/try/…`. Before the fix the binary always served the public routes while the embedded static face (built with the same variable defaulting ON) emitted `/try`-prefixed links, so the served connect instructions 404ed live. The face and the binary MUST agree: one env var set once governs both the face's build and the binary's runtime routes.
+
+
+2026-09-04 amendment: the soft-launch gate is deleted from `memstead-serve`, `memstead-serve-full` and `memstead-session-serve` (the census decision basket's stage-0 list). `AppState` carries no gate, every read route and the sketch `/mcp` mount sit top-level, and `MEMSTEAD_SOFT_LAUNCH` is no longer read anywhere; the face-and-binary lockstep the 2026-07-02 fix restored is moot because there is one shape.
+
+
+2026-09-04 amendment (dead files, the census decision basket): the two single-surface binaries `memstead-serve` and `memstead-session-serve` and the compile-time-embedded content mem are removed; `memstead-serve-full` is the crate's only binary and requires `MEMSTEAD_SERVE_ARCHIVE`. A Rust-only checkout no longer serves built-in content; the deployment's sealed archive is the only content source, which is what memstead.ai has run since the flagship archive was baked into its image.
