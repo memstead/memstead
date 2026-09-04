@@ -250,8 +250,14 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
          attestation, GitHub Release, Homebrew tap, crates.io and npm all \
          run from it:\n\
          \x20        git tag -a v{v} -m \"v{v}\" && git push origin v{v}\n\
-         \n  4. In the private repo, adopt it (gitlink + the private \
-         crates' locks + the .ai deploy):\n\
+         \n  4. In the private repo, bring the website surfaces to the tag \
+         BEFORE adopting — the release box (a {v} summary in \
+         websites/memstead.com/src/data/release-summaries.json, then the \
+         box builder) and the served flagship (reconcile its binding if \
+         the docs moved, then re-cut with regen-flagship.sh) — then adopt \
+         (gitlink + the private crates' locks + the .ai deploy). Adoption \
+         refuses a stale box, a drifted flagship and a stale archive \
+         before it pushes:\n\
          \x20        scripts/adopt-release.sh v{v}\n\
          \n  5. Verify from the real channel: scripts/release-verify.sh, \
          then install.sh into a scratch CARGO_HOME, `memstead --version` = \
