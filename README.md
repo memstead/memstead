@@ -8,7 +8,7 @@
 
 Under the hood: each **mem** is a typed graph of interconnected entities. A **schema** you pin defines the entity types, their sections, and the relationships allowed between them — knowledge, plans, specs, inquiry, or any mix. Knowledge graphs are one well-known slice; Memstead generalises across all of them.
 
-Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. New here? [CONCEPTS.md](CONCEPTS.md) is the three-minute tour of the fourteen terms everything else assumes — each links into the normative [glossary](GLOSSARY.md).
+Use it for software specs, ADRs, decision logs, ontologies, research notes, or any domain you define. New here? The [glossary](GLOSSARY.md) defines the terms everything else assumes.
 
 Memstead is part of the 2026 agent-memory wave — alongside mem0, Zep/Graphiti, Letta, and basic-memory — but sits at the authored end of it: agent-curated knowledge, written and maintained as schema-validated, typed entities in markdown files in a git repository you own, rather than an extraction pipeline distilling conversations into a retrieval store. Where neighbours share the markdown substrate (basic-memory, Letta's MemFS), Memstead adds the layer they leave to convention: writes validated against a pinned schema, a typed relationship vocabulary, and git provenance on every mutation. The honest tool-by-tool comparison is in [PRIOR_ART.md](PRIOR_ART.md#the-2026-agent-memory-category).
 
