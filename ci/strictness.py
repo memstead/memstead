@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lean-build smoke: schema-strictness probes.
+"""CI smoke: schema-strictness probes on a folder workspace.
 
 Pre-strictness-axis-fix the filesystem-mem write path silently
 accepted unknown sections, missing required sections, and out-of-enum
@@ -12,9 +12,8 @@ Three probes — each one expects `isError=true` with a specific stable
 * `UNKNOWN_SECTION`: sections payload includes a key the type's schema
   does not declare.
 * `MISSING_REQUIRED_SECTION`: sections payload omits a section the
-  schema marks `required: true`. Today the filesystem path surfaces
-  this as a warning rather than a hard error — see the assertion's
-  `note` for the contract this probe pins.
+  schema marks `required: true`. A hard error with the stable code on
+  the envelope, the same shape as the other two probes.
 * `INVALID_ENUM_VALUE`: a metadata field with an `enum` constraint
   receives a value outside the enum.
 """
@@ -97,16 +96,16 @@ def run(memstead: Path, memstead_mcp: Path) -> int:
             code = (missing.structured_content or {}).get("code")
             assert_eq(code, "MISSING_REQUIRED_SECTION", "MISSING_REQUIRED_SECTION code")
 
-        sys.stderr.write("lean_strictness: OK\n")
+        sys.stderr.write("strictness: OK\n")
         return 0
     finally:
         cleanup_workspace(workspace)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Lean MCP strictness probe.")
-    parser.add_argument("--memstead", required=True, type=Path, help="Path to the lean `memstead` binary.")
-    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the lean `memstead-mcp` binary.")
+    parser = argparse.ArgumentParser(description="MCP strictness probe.")
+    parser.add_argument("--memstead", required=True, type=Path, help="Path to the `memstead` binary.")
+    parser.add_argument("--memstead-mcp", required=True, type=Path, help="Path to the `memstead-mcp` binary.")
     args = parser.parse_args()
     sys.exit(run(args.memstead, args.memstead_mcp))
 

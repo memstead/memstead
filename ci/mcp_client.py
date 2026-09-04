@@ -1,4 +1,4 @@
-"""Shared JSON-RPC-over-stdio client for the lean-build smoke tests.
+"""Shared JSON-RPC-over-stdio client for the CI smoke probes.
 
 Spawns `memstead-mcp` as a subprocess with the given working directory,
 performs the MCP `initialize` handshake, then exposes a `call` method
@@ -10,7 +10,7 @@ general-purpose MCP client. Three tradeoffs to keep in mind:
 * **No notifications.** We send `initialized` as a notification (no
   response), but every subsequent message is a request that the script
   blocks on. Tools that emit progress notifications would deadlock
-  here; the lean surface does not.
+  here; the server's tools do not.
 * **Synchronous, single-threaded.** The transport is one writer thread
   pumping JSON-RPC frames into stdin and one reader thread that yields
   responses by id. Each `call` waits for its own response.
@@ -39,8 +39,8 @@ class ToolResponse:
     """Decoded `tools/call` response.
 
     `is_error` mirrors the wire-level `isError`. `text` is the
-    concatenated `text` content blocks (the markdown body the lean
-    server returns on read tools and on success of write tools).
+    concatenated `text` content blocks (the markdown body the server
+    returns on read tools and on success of write tools).
     `structured_content` is the `structuredContent` envelope —
     `{ code, message, details }` on errors, tool-specific shape on
     success.
@@ -64,10 +64,8 @@ class McpServer:
     def __enter__(self) -> "McpServer":
         full_env = os.environ.copy()
         full_env.update(self.env)
-        # No `--config` flag: the lean binary doesn't have one, and
-        # the full binary auto-discovers `.memstead/config.json` when no
-        # `.memstead.toml` resolves. Either way the dispatcher boots
-        # `FilesystemMcpServer` here.
+        # No flags: the binary discovers the workspace by walking up
+        # from cwd to `.memstead/workspace.toml`.
         self.proc = subprocess.Popen(
             [str(self.binary)],
             cwd=str(self.cwd),
@@ -82,7 +80,7 @@ class McpServer:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "lean-smoke", "version": "0"},
+                "clientInfo": {"name": "ci-smoke", "version": "0"},
             },
         )
         assert "result" in init_resp, f"initialize failed: {init_resp}"
@@ -240,9 +238,8 @@ def init_mem_repo_workspace(
 def init_workspace(memstead_binary: Path, root: Path, name: str = "demo", schema: str = "default@1.0.0") -> None:
     """Run `memstead init --name <name> --schema <schema>` in `root`.
 
-    Equivalent to the manual smoke flow: bootstrap `.memstead/config.json`
-    plus the empty `.memstead/cache/` and `.memstead/memstead-io/` subdirs that
-    `FilesystemEngine::init` expects.
+    Bootstraps a folder-only workspace: the `.memstead/workspace.toml`
+    marker plus one folder mem.
     """
     subprocess.run(
         [str(memstead_binary), "init", "--name", name, "--schema", schema],
@@ -269,7 +266,7 @@ def assert_true(cond: bool, label: str) -> None:
 def fresh_workspace() -> Path:
     """Return a freshly-created temp dir. Caller is responsible for
     cleanup; on CI the runner reaps the dir on job teardown."""
-    return Path(tempfile.mkdtemp(prefix="memstead-lean-smoke-"))
+    return Path(tempfile.mkdtemp(prefix="memstead-smoke-"))
 
 
 def cleanup_workspace(path: Path) -> None:

@@ -1,0 +1,121 @@
+# CI smoke. Builds `memstead` and `memstead-mcp` in release mode and
+# exercises three end-to-end probes against the binaries, each its own
+# job so a failure names its probe:
+#
+#   * `smoke`       — mem-repo round-trip (`memstead mem-repo init` +
+#                      `memstead mem init`, then create → update → relate →
+#                      entity → search → changes_since).
+#   * `strictness`  — schema-strictness refusals on a folder workspace
+#                      (UNKNOWN_SECTION, INVALID_ENUM_VALUE,
+#                      MISSING_REQUIRED_SECTION).
+#   * `mutation`    — update / relate / delete with the hash round-trip,
+#                      the HASH_MISMATCH refusal and the folder ledger's
+#                      tombstone row.
+#
+# The probe scripts live under `ci/` so the same probes replay locally
+# against binaries built by hand; `ci/mcp_client.py` is the shared
+# JSON-RPC-over-stdio harness. The Rust suite covers every refusal code
+# in-process; these probes are the end-to-end binary path.
+name: Smoke
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: . -> target
+          shared-key: smoke-build
+
+      - name: Build
+        run: cargo build -p memstead-cli -p memstead-mcp --release
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binaries
+          path: |
+            target/release/memstead
+            target/release/memstead-mcp
+          retention-days: 1
+
+  smoke:
+    name: Smoke (mem-repo round-trip)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: bin
+      - name: Make binaries executable
+        run: chmod +x bin/memstead bin/memstead-mcp
+      - name: Run smoke
+        # `memstead mem init` spawns `memstead-mcp`; pass the path through
+        # `MEMSTEAD_MCP_BIN` so the spawn finds the right binary
+        # without a system-wide install. The probe sets this env var
+        # itself, but a sibling test that bypasses it would surface
+        # the same `MEMSTEAD_MCP_BIN` requirement.
+        run: |
+          python3 ci/full_smoke.py \
+            --memstead "$(pwd)/bin/memstead" \
+            --memstead-mcp "$(pwd)/bin/memstead-mcp"
+
+  strictness:
+    name: Strictness probes
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: bin
+      - name: Make binaries executable
+        run: chmod +x bin/memstead bin/memstead-mcp
+      - name: Run strictness probes
+        run: |
+          python3 ci/strictness.py \
+            --memstead "$(pwd)/bin/memstead" \
+            --memstead-mcp "$(pwd)/bin/memstead-mcp"
+
+  mutation:
+    name: Mutation surface
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: bin
+      - name: Make binaries executable
+        run: chmod +x bin/memstead bin/memstead-mcp
+      - name: Run mutation probes
+        run: |
+          python3 ci/mutation.py \
+            --memstead "$(pwd)/bin/memstead" \
+            --memstead-mcp "$(pwd)/bin/memstead-mcp"

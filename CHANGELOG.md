@@ -30,6 +30,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   cost of the flavour: a build nothing shipped, kept green only by
   dedicated CI, that sat red for two days in 2026-06 with 33 errors
   because no developer machine compiled it.
+- **The lean CI apparatus goes.** `lean-smoke.yml` and `ci/lean_smoke.py`
+  are deleted; the strictness and mutation probes are re-homed as
+  `ci/strictness.py` and `ci/mutation.py` and run against the one binary
+  in the renamed `smoke.yml` lane, so the end-to-end refusal and hash
+  round-trip checks keep running. `run-tests.sh` has no lean legs, the
+  parity matrix no lean column, the MCP reference no lean count, and the
+  README, build guide and setup skill describe one engine.
 - **`memstead-base` retires the `stale-product-name` and `legacy-domain`
   redaction classes.** The leak scan retired their scan lines when the
   vocabulary migration closed; the engine's mirror of the vocabulary now

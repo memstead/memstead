@@ -1,7 +1,7 @@
 # The engine gate — every push and PR runs the complete test surface
-# (both flavours + true-lean CLI + plugin suites via run-tests.sh, the
-# same script developers run locally), the lint gates (clippy
-# -D warnings in both flavours, rustfmt), and a RustSec advisory audit.
+# (engine + plugin suites via run-tests.sh, the same script developers
+# run locally), the lint gates (clippy -D warnings, rustfmt), and a
+# RustSec advisory audit.
 # A failing test, warning, format diff, or advisory turns the build red.
 
 name: CI
@@ -67,9 +67,12 @@ jobs:
         uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2
         with:
           tool: wasm-pack
-      # memstead-wasm pulls memstead-base with default-features off; the
-      # ingest/pipeline modules sit ungated in that closure — this run is
-      # the dependency gate AND, since backlog-sweep plan 04, the executed
+      # This job is the kernel's portability proof: memstead-base must
+      # build for wasm32 without gix, and this is the one leg that proves
+      # it. memstead-wasm pulls
+      # memstead-base with default-features off; the ingest/pipeline
+      # modules sit ungated in that closure — this run is the dependency
+      # gate AND, since backlog-sweep plan 04, the executed
       # test surface: the crate's assertions (hydration, getEntity, the
       # entityIds stability contract, commit application, typed refusals)
       # run in Node on every push and fail the job on assertion failure.

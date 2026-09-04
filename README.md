@@ -195,7 +195,7 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 | [`examples/`](examples/) | Example schemas: `agent-program`, and the paired `reimpl-source`/`reimpl-target` |
 | `engineering/` | This project's standing engineering knowledge as a live mem: decisions, principles, memos (see [`engineering/README.md`](engineering/README.md)) |
 | `tests/` | Shared test fixtures used across the crates' integration tests |
-| `ci/` | The CI probes that drive the built binaries from outside (full and lean smoke, the verify gate) and the prose checker that holds the docs to the binary |
+| `ci/` | The CI probes that drive the built binaries from outside (the smoke, strictness and mutation probes, the verify gate) and the prose checker that holds the docs to the binary |
 | `fuzz/` | Coverage-guided fuzz targets for the trust-boundary parsers (see [`fuzz/README.md`](fuzz/README.md)) |
 | `scripts/` | Repository guards (leak scan, plan refs, mechanism leak, plugin architecture), the release machinery (`release-verify.sh`, `untagged-release.sh`, `ci-status.sh`) and the crates.io / npm publishers |
 
@@ -219,13 +219,13 @@ Build everything and install the binaries in one step:
 ./build-engine.sh
 ```
 
-Run the test suite (engine in both build flavours + the plugin):
+Run the test suite (engine + the plugin):
 
 ```bash
 ./run-tests.sh
 ```
 
-The engine builds in two flavours from one set of crates: the default build is the full multi-mem, git-backed engine; `--no-default-features` is the lean folder-only build (a CI / dependency-hygiene config). For which crate produces which binary, profiles, feature flags, and troubleshooting, see [docs/build.md](docs/build.md).
+The engine builds one way from one set of crates: the multi-mem, git-backed engine, which also serves folder-only workspaces. For which crate produces which binary, profiles, and troubleshooting, see [docs/build.md](docs/build.md).
 
 ```bash
 # Force-restart the MCP server (kills all instances; your agent auto-restarts it)

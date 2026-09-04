@@ -21,7 +21,7 @@ New to Memstead? Start here.
 
 You know what you want; these get you there.
 
-- **[Build & test from source](build.md)** — the build flavours, the test
+- **[Build & test from source](build.md)** — the build, the test
   suite, output paths, troubleshooting.
 - **Connect an AI agent** — `memstead quickstart` writes the MCP wiring;
   for Claude Code the [plugin](../plugins/claude-code/README.md)'s `/setup`

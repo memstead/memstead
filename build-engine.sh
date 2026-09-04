@@ -9,10 +9,8 @@
 #
 # Layout: one crate per surface. `memstead-cli` produces the `memstead`
 # binary and `memstead-mcp` produces the `memstead-mcp` binary; both are
-# the full multi-mem, git-backed build by default (the `mem-repo`
-# feature is on by default). `--no-default-features` yields the lean
-# folder-only build — a CI / dependency-hygiene config, not installed
-# here.
+# the multi-mem, git-backed engine, which also serves folder-only
+# workspaces. There is no second build flavour.
 #
 # Skips the registry (a separate deploy binary). Run it separately when
 # you actually need it — see docs/build.md.

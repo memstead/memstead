@@ -4,7 +4,7 @@ What this skill must achieve. Use this as the reference when tuning SKILL.md.
 
 ## Core purpose
 
-First-time onboarding for a filesystem-mem Memstead workspace. The user just installed `memstead` and `memstead-mcp` (lean flavour); they need a one-shot path from "empty folder" to "MCP server registered, ready to use".
+First-time onboarding for a filesystem-mem Memstead workspace. The user just installed `memstead` and `memstead-mcp`; they need a one-shot path from "empty folder" to "MCP server registered, ready to use".
 
 ## Acceptance shape
 

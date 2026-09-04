@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Full-build smoke: mem-repo round-trip.
 
-Mirrors `lean_smoke.py` for the full flavour. Bootstraps a mem-repo
+Bootstraps a mem-repo
 workspace (`memstead mem-repo init` + `memstead mem init`), boots the full
 `memstead-mcp`, exercises the full mutation surface end-to-end:
 
@@ -13,12 +13,10 @@ workspace (`memstead mem-repo init` + `memstead mem init`), boots the full
 * `memstead_changes_since` returns the entities since the workspace's
   initial empty-tree commit (the canonical fresh-client first sync).
 
-The mem-repo path's surface differs from filesystem in subtle ways
-(the larger full-flavour tool surface — pinned as ``EXPECTED_TOOLS``
-in ``crates/memstead-mcp/tests/tool_surface.rs``, the authority on
-the count — gitdir-backed commits, different changelog mechanism),
-so this probe runs the same shape as lean-mutation without the JSONL
-changelog inspection.
+The mem-repo shape differs from the folder shape in its change
+mechanism (gitdir-backed commits, no JSONL ledger), so this probe runs
+the same shape as `ci/mutation.py` without the ledger inspection; the
+tool roster is pinned in ``crates/memstead-mcp/tests/tool_surface.rs``.
 
 Invocation::
 

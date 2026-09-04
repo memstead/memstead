@@ -44,14 +44,11 @@ The plugin runs without compilation. Everything else needs a build step. `./buil
 
 On macOS, before running the test suite the first time, follow [docs/macos-dev-setup.md](macos-dev-setup.md) — the Developer Tools exemption is required or `cargo nextest run` deadlocks. Not relevant for `build-engine.sh` itself, only for tests.
 
-## Two flavours: lean and full
+## One engine
 
-The engine has two build flavours:
+There is one build: `cargo build` produces the multi-mem, git-backed engine, and the same binaries serve folder-only workspaces (the shape `memstead quickstart` produces). No crate declares a feature that changes what ships; `--no-default-features` builds the same binaries. The kernel (`memstead-base`) still compiles without `gix` for wasm32, which the wasm CI job proves.
 
-- **lean** — folder backend only, no `gix`. `cargo build --no-default-features`.
-- **full** — adds the git-branch storage backend. This is the default build (the `mem-repo` feature is on by default): plain `cargo build`, or explicitly `cargo build --features mem-repo`.
-
-Both must stay green. `./run-tests.sh` runs both flavours (plus a targeted `-p memstead-cli --no-default-features` run that exercises the CLI's true lean flavour), the plugin architecture gate, and the plugin `node --test` suite; CI runs the flavours as separate smoke jobs.
+`./run-tests.sh` runs the engine suite, the plugin architecture gate, and the plugin `node --test` suite; CI runs the same script plus the smoke lane and the wasm job.
 
 ## Specific workflows
 
@@ -61,7 +58,7 @@ Both must stay green. `./run-tests.sh` runs both flavours (plus a targeted `-p m
 
 ```bash
 cargo build --workspace                  # debug build, fast incremental
-cargo nextest run --workspace --features mem-repo   # run all tests (~5 s when warm)
+cargo nextest run --workspace   # run all tests (~5 s when warm)
 ```
 
 Cargo handles incremental builds — only changed crates and their dependents recompile. Workspace-crate edits typically rebuild in <30 s. Use this during active iteration; full `./build-engine.sh` is overkill until you actually need the new CLI/MCP binaries.
@@ -122,10 +119,9 @@ Workspace crates stay unoptimised so incremental rebuilds during development are
 
 | Feature | Purpose | Default? |
 |---|---|---|
-| `git-object-storage` | The git-object write path. Mutations go through `gix::object::tree::Editor` against the mem-repo's `.git/`. No working tree. Retained for forward symmetry — it is the only compiled-in storage adapter. | Yes |
 | `test-support` | Exposes `init_mem_repo_stub` (and future helpers) for downstream test crates. | No |
 
-Default `cargo build --workspace` (and `./build-engine.sh`) builds with `git-object-storage`. The crate-level flavour switch (`mem-repo` on `memstead-cli` / `memstead-mcp`, on by default) is what selects full vs lean — see the flavours section above.
+No feature changes what the binaries do; the git-tree writer is always compiled.
 
 ## Output paths
 
