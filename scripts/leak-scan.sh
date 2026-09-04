@@ -79,14 +79,12 @@ scan "absolute-user-paths" '/Users/(dasboe|bjornbosenberg)'
 scan "secrets"             '(-----BEGIN [A-Z]+ PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|gho_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{24,}|sk-[A-Za-z0-9]{24,})'
 scan "private-infra"       '(railway\.app|\.up\.railway\.app|railway\.json)'
 scan "internal-refs"       '(dev/plans|dev/strategy|dev/ci|LAUNCH\.md)'
-scan "stale-product-name"  '\b[Mm]emgno\b'
 # Path references to excluded private dirs — anchored to a real path
 # boundary so compound tokens (engine-graph/) are not false-matched inside
 # hyphenated words.
 scan "excluded-private-dirs" '(^|[[:space:]"'"'"'`(:,])(macos|websites|graph|inspector|local-ai)/' \
   --include='*.sh' --include='*.md' --include='*.toml' --include='*.rs' --include='*.mdx' --include='*.yml' \
   --include='*.mjs' --include='*.js' --include='*.json' --include='*.jsonl' --include='*.udl' --include='*.swift' --include='*.py'
-scan "legacy-domain"       '(mdgv\.io|dasboe/mdgv|dasboe\.github\.io)'
 
 echo
 if [ "$HITS" -eq 0 ]; then

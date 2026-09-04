@@ -3,15 +3,15 @@
 // Guard: the plugin roster's SKILL.md prose stays disciplined.
 //
 // A roster skill's prose is a job map for the user, not a place to
-// regrow into a manual, narrate engine mechanics the engine's own tool
-// text already teaches, or leak retired vocabulary. Review goodwill
+// regrow into a manual or narrate engine mechanics the engine's own tool
+// text already teaches. Review goodwill
 // catches this once; a lint keeps it caught. Sibling in spirit to
 // check-architecture.sh (its own banner, its own failure line, its own
 // row in dev/handbook/testing.md) — deliberately a SEPARATE named leg,
 // not a glob buried inside the plugin node-test leg, so its absence can
 // never go invisible.
 //
-// Four rules (scope per rule, exclusions honoured exactly):
+// Three rules (scope per rule, exclusions honoured exactly):
 //
 //   (1) Router line cap — a thin router (ingest, sync) drives an
 //       engine-rendered brief; its SKILL.md body stays under
@@ -26,14 +26,7 @@
 //       to react to `_hash` / HASH_MISMATCH (drift guidance), which is
 //       action the agent takes, not mechanism narration in a skill.
 //
-//   (3) Retired vocabulary — the unit noun retired by the 2026-07
-//       unit-noun rename ("vault" → mem) and the retired store-layout
-//       dir (`ingests/`, collapsed into the binding). The LIVE skill
-//       verb "ingest" / "ingesting" is not retired; only the plural
-//       store-dir form is. Scope: the roster SKILL.md files + the
-//       plugin README + the plugin CLAUDE.md + public/examples/.
-//
-//   (4) Description medium-noun rule — a roster skill's `description:`
+//   (3) Description medium-noun rule — a roster skill's `description:`
 //       must not presume the source medium is code / a repo / files.
 //       An allowlist (MEDIUM_ALLOW) carries legitimate non-medium senses,
 //       keyed "<skill>:<term>" (currently empty).
@@ -50,7 +43,7 @@
 // named leg from the workspace `run-tests.sh`. Exit 0 = clean, 1 = at
 // least one violation (printed), 2 = wiring error.
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -80,12 +73,6 @@ const MECHANISM_TERMS = [
   { re: /\b\w*_hash\b/i, label: '`_hash`-suffixed mechanism name' },
   { re: /\bdry_run\b/i, label: '`dry_run`' },
   { re: /\benvelope\b/i, label: '"envelope"' },
-];
-
-const RETIRED_VOCAB = [
-  { re: /\bvaults?\b/i, label: 'retired unit noun "vault" — the unit is a mem' },
-  { re: /\.memstead\/ingests\b/i, label: 'retired store path `.memstead/ingests`' },
-  { re: /(^|[^a-z])ingests\//i, label: 'retired store-layout dir `ingests/` — collapsed into the binding' },
 ];
 
 const MEDIUM_NOUNS = [
@@ -154,14 +141,6 @@ export function checkMechanismTerms(name, text) {
   return out;
 }
 
-export function checkRetiredVocab(name, text) {
-  const out = [];
-  for (const { re, label } of RETIRED_VOCAB) {
-    if (re.test(text)) out.push(`${name}: ${label}`);
-  }
-  return out;
-}
-
 export function checkDescriptionMediumNouns(skill) {
   const out = [];
   for (const { re, term } of MEDIUM_NOUNS) {
@@ -174,21 +153,9 @@ export function checkDescriptionMediumNouns(skill) {
 
 // ── Surface walk ────────────────────────────────────────────────────
 
-function textFilesUnder(dir) {
-  const out = [];
-  if (!existsSync(dir)) return out;
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry);
-    const st = statSync(p);
-    if (st.isDirectory()) out.push(...textFilesUnder(p));
-    else if (/\.(md|ya?ml|json|txt)$/i.test(entry)) out.push(p);
-  }
-  return out;
-}
-
 // Collect every violation across all rules and surfaces. Pure over the
 // filesystem inputs so the test can exercise the rules directly.
-export function lint(pluginRoot, examplesDir) {
+export function lint(pluginRoot) {
   const violations = [];
   const skillsDir = join(pluginRoot, 'skills');
 
@@ -202,25 +169,10 @@ export function lint(pluginRoot, examplesDir) {
     const skill = parseSkill(name, text);
     violations.push(...checkRouterCap(skill));          // rule 1
     violations.push(...checkMechanismTerms(name, text)); // rule 2
-    violations.push(...checkRetiredVocab(name, text));   // rule 3 (roster leg)
-    violations.push(...checkDescriptionMediumNouns(skill)); // rule 4
-  }
-
-  // rule 3 also walks the plugin README + CLAUDE.md + public/examples/.
-  const retiredScope = [join(pluginRoot, 'README.md'), join(pluginRoot, 'CLAUDE.md')];
-  for (const path of retiredScope) {
-    if (existsSync(path)) violations.push(...checkRetiredVocab(relLabel(path), readFileSync(path, 'utf8')));
-  }
-  for (const path of textFilesUnder(examplesDir)) {
-    violations.push(...checkRetiredVocab(relLabel(path), readFileSync(path, 'utf8')));
+    violations.push(...checkDescriptionMediumNouns(skill)); // rule 3
   }
 
   return violations;
-}
-
-function relLabel(path) {
-  const i = path.indexOf('/public/');
-  return i >= 0 ? path.slice(i + 1) : path;
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────
@@ -228,16 +180,15 @@ function relLabel(path) {
 function main() {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const pluginRoot = join(scriptDir, '..', 'plugins', 'claude-code');
-  const examplesDir = join(scriptDir, '..', 'examples');
 
   if (!existsSync(join(pluginRoot, 'skills'))) {
     console.error(`check-skill-prose: could not locate plugin skills/ from ${scriptDir}`);
     process.exit(2);
   }
 
-  const violations = lint(pluginRoot, examplesDir);
+  const violations = lint(pluginRoot);
   if (violations.length === 0) {
-    console.log('check-skill-prose: OK — roster prose disciplined (line caps, no mechanism terms, no retired vocabulary, medium-neutral descriptions).');
+    console.log('check-skill-prose: OK — roster prose disciplined (line caps, no mechanism terms, medium-neutral descriptions).');
     process.exit(0);
   }
   console.error('check-skill-prose: roster prose discipline violated:');

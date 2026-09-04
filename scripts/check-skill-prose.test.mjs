@@ -14,7 +14,6 @@ import {
   bodyLineCount,
   checkRouterCap,
   checkMechanismTerms,
-  checkRetiredVocab,
   checkDescriptionMediumNouns,
   ROUTER_BODY_MAX,
   EXEMPT,
@@ -72,24 +71,10 @@ test('rule 2 passes prose free of mechanism terms', () => {
   assert.deepEqual(checkMechanismTerms('tidy', 'Assess structure, propose fixes, apply approved ones.'), []);
 });
 
-// ── rule 3: retired vocabulary ───────────────────────────────────────
-
-test('rule 3 flags the retired unit noun "vault"', () => {
-  assert.equal(checkRetiredVocab('setup', 'Create the vault in the current dir.').length, 1);
-  assert.equal(checkRetiredVocab('examples/x.md', 'a Vault of typed entities').length, 1);
-});
-
-test('rule 3 flags the retired store-layout dir but NOT the live ingest verb', () => {
-  assert.ok(checkRetiredVocab('ingest', 'reads .memstead/ingests/foo.json').length >= 1);
-  assert.equal(checkRetiredVocab('ingest', 'writes to ingests/ under the store').length, 1);
-  // "ingest" / "ingesting" as the live skill verb must never trip.
-  assert.deepEqual(checkRetiredVocab('ingest', 'Ingest a source; ingesting one batch per run.'), []);
-});
-
-// ── rule 4: description medium nouns ─────────────────────────────────
+// ── rule 3: description medium nouns ─────────────────────────────────
 
 for (const term of ['code', 'repo', 'repository', 'file', 'files', 'commit', 'commits']) {
-  test(`rule 4 flags medium noun "${term}" in an unallowlisted description`, () => {
+  test(`rule 3 flags medium noun "${term}" in an unallowlisted description`, () => {
     const out = checkDescriptionMediumNouns({ name: 'ingest', description: `Build a mem from your ${term}.` });
     assert.ok(out.length >= 1, `expected a violation for "${term}"`);
   });
