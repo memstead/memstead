@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead workspace ...` config commands ship only in the full build.
 
 //! Integration tests for the `memstead workspace` write-side subcommand

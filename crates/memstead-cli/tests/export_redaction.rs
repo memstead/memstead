@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead mem init` (git-branch mems) ships only in the full build.
 
 //! `memstead export --format mem` redacts private-pattern spans in the
@@ -24,9 +23,8 @@ fn memstead() -> Command {
 /// the leak scan's patterns as a literal.
 fn private_note() -> String {
     format!(
-        "see {}/x.md and the old {} page, checked at {}/w/notes",
+        "see {}/x.md, checked at {}/w/notes",
         ["dev", "plans"].join("/"),
-        ["mdgv", "io"].join("."),
         ["/Users", "bjornbosenberg"].join("/"),
     )
 }
@@ -180,7 +178,6 @@ fn assert_redacted(ws: &Path) {
         vec![
             ("absolute-user-paths".to_string(), 1),
             ("internal-refs".to_string(), 1),
-            ("legacy-domain".to_string(), 1),
         ],
         "{report}"
     );
@@ -193,7 +190,7 @@ fn assert_redacted(ws: &Path) {
     let entry = &prov["entities"]["alpha"];
     assert_eq!(
         entry["rationale"],
-        "see [redacted:internal-refs]/x.md and the old [redacted:legacy-domain] page, checked at [redacted:absolute-user-paths]/w/notes"
+        "see [redacted:internal-refs]/x.md, checked at [redacted:absolute-user-paths]/w/notes"
     );
     // Redact, never strip: the row keeps its shape and its other fields.
     assert_eq!(entry["kind"], "create", "{prov}");
@@ -238,9 +235,7 @@ fn branch_export_redacts_reports_and_scans_clean() {
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains(
-            "- Redacted in provenance: absolute-user-paths 1, internal-refs 1, legacy-domain 1"
-        ),
+        text.contains("- Redacted in provenance: absolute-user-paths 1, internal-refs 1"),
         "{text}"
     );
 }

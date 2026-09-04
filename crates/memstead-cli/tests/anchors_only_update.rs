@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! An anchors-only update replaces the row on folder mems (backlog-decisions
 //! plan B10), exactly as git-branch mems do: a `memstead update --anchor`
 //! naming a stored (artifact, grain, class) triple with a differing field

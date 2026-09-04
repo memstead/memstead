@@ -24,7 +24,7 @@
 //! references degrade to load-time stubs, which health surfaces.
 //!
 //! The sweep deliberately does NOT maintain the in-memory store — the
-//! orchestrator (`memstead_engine::rename_mem`) reloads the engine
+//! orchestrator (`crate::mem_management::rename_mem`) reloads the engine
 //! after the storage-identity flip, and everything between the sweep
 //! and that reload happens inside one engine call.
 

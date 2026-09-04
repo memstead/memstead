@@ -2529,6 +2529,7 @@ dependencies = [
  "tinyvec",
  "tokio",
  "toml",
+ "toml_edit",
  "tracing",
  "unicode-normalization",
  "zip",
@@ -2549,7 +2550,6 @@ dependencies = [
  "gix",
  "indexmap",
  "memstead-base",
- "memstead-engine",
  "memstead-git-branch",
  "memstead-schema",
  "predicates",
@@ -2568,21 +2568,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memstead-engine"
-version = "0.18.1"
-dependencies = [
- "memstead-base",
- "memstead-schema",
- "semver",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
- "toml_edit",
- "tracing",
-]
-
-[[package]]
 name = "memstead-git-branch"
 version = "0.18.1"
 dependencies = [
@@ -2591,7 +2576,6 @@ dependencies = [
  "globset",
  "indexmap",
  "memstead-base",
- "memstead-engine",
  "memstead-git-branch",
  "memstead-schema",
  "regex",
@@ -2621,7 +2605,6 @@ dependencies = [
  "gix",
  "indexmap",
  "memstead-base",
- "memstead-engine",
  "memstead-git-branch",
  "memstead-schema",
  "rmcp",

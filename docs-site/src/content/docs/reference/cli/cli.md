@@ -106,7 +106,7 @@ This document contains the help content for the `memstead` command-line program.
 
 ## `memstead`
 
-Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-mem, git-backed); `--no-default-features` builds the lean folder-only surface.
+Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Builds the `memstead` binary (multi-mem, git-backed; folder workspaces served by the same engine).
 
 **Usage:** `memstead [OPTIONS] <COMMAND>`
 
@@ -147,7 +147,7 @@ Exit codes:
 * `search` — Find entities by text or graph proximity
 * `list` — Filter entities by metadata (no text match — use `search` for that)
 * `context` — Read an entity's community cluster
-* `overview` — All clusters with summaries and member lists. The full build renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-engine`
+* `overview` — All clusters with summaries and member lists. Renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-base`
 * `type` — Describe one type, or list all types when no name given
 * `health` — Health summary (orphans, stubs, stale entities, missing fields)
 * `due` — Render the due-brief: open entities whose schema-declared due date falls inside the window (default 90d), overdue first
@@ -358,7 +358,7 @@ Read an entity's community cluster
 
 ## `memstead overview`
 
-All clusters with summaries and member lists. The full build renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-engine`
+All clusters with summaries and member lists. Renders the same rich content the MCP `memstead_overview` tool emits — both surfaces share the engine composer in `memstead-base`
 
 **Usage:** `memstead overview [OPTIONS]`
 

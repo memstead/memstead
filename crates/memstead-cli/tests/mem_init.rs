@@ -1,11 +1,10 @@
-#![cfg(feature = "mem-repo")]
 // `memstead mem init` is part of the mem-repo subcommand surface; the
 // lean build does not ship it.
 
 //! Integration test for `memstead mem init`.
 //!
 //! The CLI calls the engine in-process via
-//! `memstead_engine::mem_management::create_mem`. An earlier design
+//! `memstead_base::mem_management::create_mem`. An earlier design
 //! spawned `memstead-mcp` as a subprocess and the test mocked that
 //! subprocess via a stub shell script — confirming the JSON-RPC plumbing
 //! rather than the actual engine wiring.

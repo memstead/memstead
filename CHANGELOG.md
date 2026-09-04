@@ -7,6 +7,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine ships one flavour.** The `mem-repo` Cargo feature on
+  `memstead-cli` and `memstead-mcp` is gone, together with its 212 `cfg`
+  sites: the git-branch backend, the multi-mem policy and the lifecycle
+  verbs are always compiled, and `--no-default-features` now builds the
+  same binaries as the default. The lean `FilesystemMcpServer` and its
+  separate description set are gone; `memstead-mcp` boots the one
+  `McpServer` on every workspace shape, including the folder-only
+  workspace `memstead quickstart` produces, with the same tool roster on
+  both. The `memstead-engine` crate is folded into `memstead-base`: the
+  lifecycle orchestrators live at `memstead_base::mem_management`, the
+  workspace-policy writer at `memstead_base::workspace_config_edit`, and
+  `FullEngineError` / `RecoveryAction` at the crate root. The crates.io
+  name `memstead-engine` stays reserved and receives no further release;
+  depend on `memstead-base` for what it carried. `memstead-base` still
+  carries no `gix` dependency, so the wasm build is unchanged. The
+  `git-object-storage` feature on `memstead-git-branch`, on by default and
+  the only compiled adapter since the cutover, goes the same way: the
+  git-tree writer is always compiled. Recorded
+  cost of the flavour: a build nothing shipped, kept green only by
+  dedicated CI, that sat red for two days in 2026-06 with 33 errors
+  because no developer machine compiled it.
+- **`memstead-base` retires the `stale-product-name` and `legacy-domain`
+  redaction classes.** The leak scan retired their scan lines when the
+  vocabulary migration closed; the engine's mirror of the vocabulary now
+  matches it.
+
 ## [0.18.1] - 2026-09-03
 
 ### Fixed

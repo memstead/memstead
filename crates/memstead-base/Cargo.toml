@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Engine internals for Memstead — store, parser, validators, filesystem-mem engine. A library surface you can program against — pre-1.0, experimental, no API stability promise."
+description = "Engine internals for Memstead — store, parser, validators, mem lifecycle, workspace policy. A library surface you can program against — pre-1.0, experimental, no API stability promise."
 readme = "README.md"
 keywords = ["agent-memory", "knowledge-graph", "markdown", "graph", "agents"]
 categories = ["database-implementations"]
@@ -30,6 +30,7 @@ sha2.workspace = true
 strsim = "0.11"
 thiserror.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
 # Unused directly: carried so downstream resolvers stay off the broken

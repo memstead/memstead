@@ -1,18 +1,16 @@
 //! Memstead CLI library — the command modules, utility modules, and
 //! the shared `CliError` behind the `memstead` binary (`src/main.rs`).
 //!
-//! One crate, two build configs. The default build (`mem-repo`
-//! feature on) is the full `memstead`: every subcommand, including the
-//! multi-mem / mem-repo lifecycle (mem, workspace, install,
-//! batch-update, recover). `--no-default-features` drops the git-branch
-//! backend and the mem-repo-only subcommands, yielding the lean
-//! engine-agnostic surface (a CI / wasm-adjacent config, not shipped).
+//! One binary, every subcommand, including the multi-mem / mem-repo
+//! lifecycle (mem, workspace, install, batch-update, recover). The
+//! same binary serves folder-only and mem-repo workspaces; the
+//! mem-repo-only subcommands refuse on the folder shape with a typed
+//! `UNSUPPORTED_WORKSPACE_SHAPE` envelope.
 
 pub mod auth;
 pub mod cli;
 pub mod commands;
 pub mod coverage;
-#[cfg(feature = "mem-repo")]
 pub mod outer_gitignore;
 pub mod output;
 pub mod registry;

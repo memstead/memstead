@@ -172,10 +172,9 @@ fn scan_mcp_codes(
     // Whole-file scan for the same reason as `scan_cli_codes`: rustfmt
     // may put the code literal on the line after `tool_error(`.
     let tool_re =
-        // `_with_details` is the lean flavour's own payload-carrying form
-        // (`filesystem_server.rs`); omitting it hid every code only that
-        // server emits, so the reference under-reported where a refusal
-        // comes from (consistency-sweep 03/04 grading).
+        // `_with_details` is the payload-carrying form; omitting it hid
+        // every code only that form emits (consistency-sweep 03/04
+        // grading).
         Regex::new(r#"\btool_error(?:_with_payload|_with_details)?\(\s*"([A-Z][A-Z0-9_]+)"\s*,"#)
             .unwrap();
     for crate_dir in ["crates/memstead-mcp/src"] {
@@ -329,7 +328,7 @@ mod code_vocabulary_tests {
         let dir = root.join("crates/memstead-mcp/descriptions");
         let mut text = String::new();
         let mut files = 0usize;
-        for surface in ["full", "filesystem"] {
+        for surface in ["full"] {
             let d = dir.join(surface);
             for entry in
                 std::fs::read_dir(&d).unwrap_or_else(|e| panic!("reading {}: {e}", d.display()))
@@ -344,7 +343,7 @@ mod code_vocabulary_tests {
             }
         }
         assert!(
-            files >= 30,
+            files >= 20,
             "the description walk found only {files} files — a walk that reaches \
              (almost) nothing is worse than an absent one"
         );

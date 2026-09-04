@@ -224,7 +224,7 @@ impl WorkspaceEditError {
 /// Path of the workspace config file relative to the workspace root.
 pub fn workspace_toml_path(workspace_root: &Path) -> PathBuf {
     workspace_root
-        .join(memstead_base::WORKSPACE_STORE_DIR)
+        .join(crate::WORKSPACE_STORE_DIR)
         .join("workspace.toml")
 }
 

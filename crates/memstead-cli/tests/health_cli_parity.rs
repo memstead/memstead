@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead mem set-schema` ships only in the full build.
 
 //! `memstead health` composes its report through the engine's

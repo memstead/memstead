@@ -1,1 +1,0 @@
-Return a two-ref structural diff at entity granularity. **Filesystem-mem flavour:** folder mounts carry no git refs, so this tool refuses with `INVALID_INPUT` against folder-backed mems. Use the mem-repo flavour for the real diff; the surface stays for cross-flavour clients that hit either server.

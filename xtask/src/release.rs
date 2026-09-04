@@ -211,21 +211,6 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
                 "clippy",
                 "--workspace",
                 "--all-targets",
-                "--features",
-                "mem-repo",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        )?;
-        run_streamed(
-            &root,
-            "cargo",
-            &[
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--no-default-features",
                 "--",
                 "-D",
                 "warnings",

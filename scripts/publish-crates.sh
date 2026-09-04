@@ -9,12 +9,11 @@
 #
 #   memstead-schema       (leaf — no internal deps)
 #   memstead-base         -> schema
-#   memstead-engine       -> base, schema
-#   memstead-git-branch   -> base, engine, schema
-#   memstead-mcp          -> base, engine (opt), git-branch (opt), schema
-#   memstead-cli          -> base, engine (opt), git-branch (opt), schema
+#   memstead-git-branch   -> base, schema
+#   memstead-mcp          -> base, git-branch, schema
+#   memstead-cli          -> base, git-branch, schema
 #
-# Exactly these six crates are the public Rust surface. Deliberately NOT
+# Exactly these five crates are the public Rust surface. Deliberately NOT
 # published (see the `publish = false` comments in their manifests):
 # memstead-wasm
 # (distribution channel is npm — scripts/publish-npm.sh), xtask (internal
@@ -42,7 +41,6 @@ cd "$ROOT"
 CRATES=(
     memstead-schema
     memstead-base
-    memstead-engine
     memstead-git-branch
     memstead-mcp
     memstead-cli

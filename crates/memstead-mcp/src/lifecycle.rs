@@ -1,9 +1,8 @@
 //! Parameter structs for the runtime mem-lifecycle tools —
 //! `memstead_mem_create` and `memstead_mem_delete`.
 //!
-//! These are the on-the-wire shapes agents send; the full MCP handlers
-//! translate them before calling the orchestrators. Full-only — lean
-//! `FilesystemMcpServer` does not expose mem lifecycle.
+//! These are the on-the-wire shapes agents send; the MCP handlers
+//! translate them before calling the orchestrators.
 
 use rmcp::schemars;
 
@@ -43,7 +42,7 @@ impl From<VcsConfigInput> for memstead_schema::VcsConfig {
 /// storage-residue refusal path exposes three explicit
 /// recovery options the caller picks via this enum. The wire
 /// tokens (`reattach` / `force_overwrite` / `hard_cleanup_first`)
-/// match `memstead_engine::RecoveryAction::as_wire_str()` so the
+/// match `memstead_base::RecoveryAction::as_wire_str()` so the
 /// MCP serde shape and the CLI flag bridge converge on a single
 /// engine-side enum.
 #[derive(Debug, Clone, Copy, serde::Deserialize, schemars::JsonSchema)]
@@ -68,13 +67,13 @@ pub enum RecoveryActionInput {
     HardCleanupFirst,
 }
 
-impl From<RecoveryActionInput> for memstead_engine::RecoveryAction {
+impl From<RecoveryActionInput> for memstead_base::RecoveryAction {
     fn from(v: RecoveryActionInput) -> Self {
         match v {
-            RecoveryActionInput::Reattach => memstead_engine::RecoveryAction::Reattach,
-            RecoveryActionInput::ForceOverwrite => memstead_engine::RecoveryAction::ForceOverwrite,
+            RecoveryActionInput::Reattach => memstead_base::RecoveryAction::Reattach,
+            RecoveryActionInput::ForceOverwrite => memstead_base::RecoveryAction::ForceOverwrite,
             RecoveryActionInput::HardCleanupFirst => {
-                memstead_engine::RecoveryAction::HardCleanupFirst
+                memstead_base::RecoveryAction::HardCleanupFirst
             }
         }
     }

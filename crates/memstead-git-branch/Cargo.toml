@@ -13,7 +13,6 @@ categories = ["database-implementations"]
 
 [dependencies]
 memstead-base.workspace = true
-memstead-engine.workspace = true
 memstead-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -47,14 +46,6 @@ memstead-schema.workspace = true
 memstead-git-branch = { path = ".", features = ["test-support"] }
 
 [features]
-# `git-object-storage` is the canonical write path:
-# `storage::git_tree::GitTreeMemWriter` applies mutations via
-# `gix::object::tree::Editor` against a multi-root `mem-repo-git`
-# repository. No working tree is written for mem content. The
-# feature flag is retained for forward symmetry but is on by default
-# and the only compiled-in adapter post-cutover.
-default = ["git-object-storage"]
-git-object-storage = []
 # `test-support` re-exports `crate::test_support::init_mem_repo_stub`
 # (and any future helpers) for downstream test crates. The module is
 # always compiled under the crate's own `cfg(test)`; this feature

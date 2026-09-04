@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! The rehearsal contract (agent-trust plan 07), asserted end to end
 //! over the CLI write surface: a `--dry-run` call runs the IDENTICAL
 //! validation the real call runs (same typed refusals, same details),

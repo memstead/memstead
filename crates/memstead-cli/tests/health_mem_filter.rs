@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! The health mem filter applies to every section and warning
 //! (backlog-decisions plan B9): on two mounted mems that each carry one
 //! anchor row and one warning of their own, `health --mem alpha` lists

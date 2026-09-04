@@ -2,7 +2,7 @@
 //! CLI front-ends.
 //!
 //! Both subcommands call the
-//! engine in-process via `memstead_engine::mem_management::create_mem` /
+//! engine in-process via `memstead_base::mem_management::create_mem` /
 //! `delete_mem`. An earlier design spawned `memstead-mcp --operator-mode`
 //! as a child process and drove the matching MCP tool over JSON-RPC
 //! — wire-format parity with the agent path was the intent,
@@ -30,7 +30,7 @@ use crate::CliError;
 use crate::outer_gitignore::{OuterRepoOutcome, apply_outer_gitignore};
 use crate::output::ExitKind;
 use crate::setup::{CliContext, CliEngine, find_workspace_root};
-use memstead_engine::mem_management::{
+use memstead_base::mem_management::{
     self, MemCreateParams, MemCreateResponse, MemDeleteParams, MemDeleteResponse,
 };
 
@@ -919,9 +919,9 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// Sourcing from the engine error directly means any new engine code
 /// automatically reaches the CLI envelope without a hand-maintained
 /// translation table to update.
-fn full_engine_err_to_cli(err: memstead_engine::FullEngineError) -> anyhow::Error {
+fn full_engine_err_to_cli(err: memstead_base::FullEngineError) -> anyhow::Error {
     match err {
-        memstead_engine::FullEngineError::Lean(inner) => CliError::from_engine_op(inner).into(),
+        memstead_base::FullEngineError::Lean(inner) => CliError::from_engine_op(inner).into(),
         lifecycle => {
             let code = lifecycle.code();
             let details = lifecycle.details();
@@ -1400,13 +1400,13 @@ fn recovery_from_flags(
     reattach: bool,
     force_overwrite: bool,
     hard_cleanup_first: bool,
-) -> Option<memstead_engine::RecoveryAction> {
+) -> Option<memstead_base::RecoveryAction> {
     if reattach {
-        Some(memstead_engine::RecoveryAction::Reattach)
+        Some(memstead_base::RecoveryAction::Reattach)
     } else if force_overwrite {
-        Some(memstead_engine::RecoveryAction::ForceOverwrite)
+        Some(memstead_base::RecoveryAction::ForceOverwrite)
     } else if hard_cleanup_first {
-        Some(memstead_engine::RecoveryAction::HardCleanupFirst)
+        Some(memstead_base::RecoveryAction::HardCleanupFirst)
     } else {
         None
     }
@@ -1536,8 +1536,8 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use memstead_base::EngineError;
+    use memstead_base::FullEngineError;
     use memstead_base::ReferrerInfo;
-    use memstead_engine::FullEngineError;
     use std::path::PathBuf;
 
     fn lifted_cli_error(err: FullEngineError) -> CliError {

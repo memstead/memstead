@@ -2,12 +2,12 @@
 //! binary that every external integration invokes (Claude Code plugin,
 //! install scripts, `MEMSTEAD_MCP_BIN` env var).
 //!
-//! One crate, two build configs. The default build (`mem-repo` feature
-//! on) serves the multi-mem, git-backed engine; `--no-default-features`
-//! serves the folder + archive engine only (no `gix`, no
-//! `memstead-git-branch`) — a CI / wasm-adjacent config, not shipped.
+//! Serves the multi-mem, git-backed engine on every workspace shape:
+//! the folder-only workspace `memstead quickstart` produces and the
+//! mem-repo workspace `memstead mem-repo init` produces boot the same
+//! server with the same tool roster.
 //!
-//! Workspace resolution (both configs): walk upward from cwd for the
+//! Workspace resolution: walk upward from cwd for the
 //! first ancestor that carries `.memstead/workspace.toml`. Operators on
 //! pre-rebuild layouts run `memstead mem-repo init` to bootstrap a
 //! fresh workspace.
@@ -19,7 +19,6 @@ use clap::Parser;
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 
-#[cfg(feature = "mem-repo")]
 use clap::ArgAction;
 
 /// memstead-mcp — serves the Memstead graph engine over MCP on stdio.
@@ -40,7 +39,6 @@ struct Args {
     /// the same model `memstead install` produces; no writable mem's
     /// config is touched. The mount persists in the engine's mount
     /// state, so the next run picks it up without the flag.
-    #[cfg(feature = "mem-repo")]
     #[arg(long = "read-mem", value_name = "PATH", action = ArgAction::Append)]
     read_mems: Vec<PathBuf>,
 
@@ -53,7 +51,6 @@ struct Args {
     /// sets this flag when it spawns `memstead-mcp` for `memstead mem init`
     /// / `memstead mem delete`. Agent-spawned servers (e.g. the Claude
     /// Code plugin) do not.
-    #[cfg(feature = "mem-repo")]
     #[arg(long = "operator-mode", default_value_t = false)]
     operator_mode: bool,
 
@@ -78,7 +75,6 @@ struct Args {
 /// flag or the `MEMSTEAD_IDENTITY` environment variable (flag wins),
 /// normalised and length-checked (agent-trust plan 15). Over-length
 /// refuses at boot — the record is append-only.
-#[cfg(feature = "mem-repo")]
 fn default_identity_from(flag: Option<&str>) -> anyhow::Result<Option<String>> {
     let raw = flag
         .map(str::to_string)
@@ -154,45 +150,10 @@ fn init_tracing() {
         .init();
 }
 
-/// Boot the lean MCP server (folder + archive backends only).
-#[cfg(not(feature = "mem-repo"))]
-async fn run(_args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
-    init_tracing();
-
-    // Name the shape actually opened, not the build config: this line
-    // is what someone debugging an `UNSUPPORTED_WORKSPACE_SHAPE`
-    // refusal reads, and a boot line that disagrees with the refusal
-    // reads as a spurious error.
-    tracing::info!(
-        "boot: {} workspace at {} (lean build: folder + archive backends only)",
-        memstead_base::workspace_shape_label(&workspace_root),
-        workspace_root.display()
-    );
-
-    let server = match memstead_mcp::filesystem_server::FilesystemMcpServer::from_workspace_root(
-        &workspace_root,
-    ) {
-        Ok(server) => server,
-        Err(e) => {
-            let shell = diagnostic_shell_engine(&workspace_root, e);
-            memstead_mcp::filesystem_server::FilesystemMcpServer::from_engine(
-                shell,
-                workspace_root.clone(),
-            )
-        }
-    };
-
-    let service = server.serve(stdio()).await?;
-    service.waiting().await?;
-
-    Ok(())
-}
-
-/// Boot the full MCP server. Constructs the unified engine through
+/// Boot the MCP server. Constructs the unified engine through
 /// `memstead_git_branch::engine_from_workspace_root`, then sources
 /// `token_budget` / `disabled_tools` / `mutations` / `plugin` from
 /// `Engine::settings()`.
-#[cfg(feature = "mem-repo")]
 async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
     use memstead_mcp::config::{DEFAULT_TOKEN_BUDGET, validate_disabled_tools};
     use memstead_mcp::read_mems;
@@ -210,10 +171,10 @@ async fn run(args: Args, workspace_root: PathBuf) -> anyhow::Result<()> {
 
     init_tracing();
 
-    // Name the shape actually opened. The full build serves both
-    // shapes, and the mem-repo-only subcommands refuse on one of them —
-    // a boot line that always said "mem-repo" made that refusal look
-    // spurious to anyone reading the log.
+    // Name the shape actually opened. The server serves both shapes,
+    // and the mem-repo-only subcommands refuse on one of them — a boot
+    // line that always said "mem-repo" made that refusal look spurious
+    // to anyone reading the log.
     tracing::info!(
         "boot: {} workspace at {}",
         memstead_base::workspace_shape_label(&workspace_root),

@@ -17,7 +17,7 @@ embedded built-ins. Every write the engine accepts is validated against
 these types, so a mem never drifts away from its pinned schema.
 
 It is the leaf crate of the Memstead workspace: everything else
-(`memstead-base`, `memstead-engine`, `memstead-git-branch`, the CLI and
+(`memstead-base`, `memstead-git-branch`, the CLI and
 MCP server) depends on it.
 
 ## Use

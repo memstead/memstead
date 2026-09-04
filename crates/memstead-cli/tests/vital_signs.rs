@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead projection init` and the MCP counterpart ship only in the
 // full build.
 

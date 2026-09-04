@@ -292,7 +292,6 @@ fn workspace_installed_readme(ctx: &CliContext, schema_ref: &SchemaRef) -> Optio
     if let Ok(bytes) = std::fs::read(&fs_readme) {
         return Some(bytes);
     }
-    #[cfg(feature = "mem-repo")]
     {
         let gitdir = root.join("mem-repo").join(".git");
         if gitdir.is_dir()
@@ -540,7 +539,6 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
         .map(|(mem, _)| format!("{mem}--welcome-to-memstead"));
     // Full flavour: install into the current workspace, then re-pin the
     // mem in place.
-    #[cfg(feature = "mem-repo")]
     {
         let mut steps = vec![
             Step::bare(format!("memstead schema validate {name}")),
@@ -560,52 +558,6 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
             "memstead mem set-schema {mem} {name}@{SCAFFOLD_VERSION}"
         )));
         steps
-    }
-    // Lean flavour: no `mem set-schema`, so the custom schema gets a
-    // fresh mem. Order matters — `init` pins without resolving, and the
-    // engine only boots once the package is installed *inside the new
-    // workspace*, so the install step comes right after init and points
-    // back at the scaffolded package. When `schema new` ran inside an
-    // existing workspace, the fresh mem must land OUTSIDE it (workspaces
-    // don't nest, and `init`'s refusal there is a dead end on this
-    // binary) — the printed paths anchor at the workspace root's parent,
-    // absolute and quoted so the sequence stays verbatim-runnable.
-    #[cfg(not(feature = "mem-repo"))]
-    {
-        let _ = (mem, quickstart_seed); // full-only context
-        let (fresh_dir, install_source) = match ctx.workspace_shape() {
-            Some((_, root)) => {
-                let parent = root.parent().unwrap_or(&root).to_path_buf();
-                let pkg = std::env::current_dir().unwrap_or_default().join(name);
-                (
-                    format!("\"{}\"", parent.join(format!("{name}-mem")).display()),
-                    format!("\"{}\"", pkg.display()),
-                )
-            }
-            None => (format!("{name}-mem"), format!("../{name}")),
-        };
-        vec![
-            Step::bare(format!("memstead schema validate {name}")),
-            Step {
-                command: format!(
-                    "mkdir {fresh_dir} && cd {fresh_dir} && memstead init --name {name}-mem \
-                     --schema {name}@{SCAFFOLD_VERSION}"
-                ),
-                note: Some(
-                    "this binary cannot re-pin an existing mem, so the schema gets a \
-                     fresh one"
-                        .to_string(),
-                ),
-            },
-            Step {
-                command: format!("memstead schema install {install_source}"),
-                note: Some(
-                    "run inside the new folder — the workspace boots once its pinned \
-                     schema is installed"
-                        .to_string(),
-                ),
-            },
-        ]
     }
 }
 
@@ -1124,7 +1076,6 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
 /// repairs — the plenum outage's failed escape route. Only present in
 /// the `mem-repo`-featured build; the lean binary refuses (it has no
 /// git-branch ref writer).
-#[cfg(feature = "mem-repo")]
 fn install_to_git_branch(
     ctx: &CliContext,
     schema_ref: &SchemaRef,
@@ -1162,22 +1113,6 @@ fn install_to_git_branch(
         ));
     }
     Ok(())
-}
-
-#[cfg(not(feature = "mem-repo"))]
-fn install_to_git_branch(
-    _ctx: &CliContext,
-    _schema_ref: &SchemaRef,
-    _files: &[memstead_schema::SchemaSourceFile],
-) -> anyhow::Result<()> {
-    Err(CliError::new(
-        ExitKind::Generic,
-        "MEM_REPO_NOT_SUPPORTED",
-        "this binary was built without git-branch support — use the `memstead` binary to \
-         install a schema into a mem-repo workspace."
-            .to_string(),
-    )
-    .into())
 }
 
 /// Resolve `<source>` (a path to a package dir, or a built-in name /

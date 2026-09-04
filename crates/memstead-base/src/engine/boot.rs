@@ -776,8 +776,8 @@ pub(crate) fn build_mem_router_from_mounts(mounts: &[MountedBackend]) -> MemRout
     router
 }
 
-/// Public re-export of [`resolve_builtin_schema_pin`] for lifecycle
-/// orchestrators in `memstead-engine`. Mirrors full's
+/// Public re-export of [`resolve_builtin_schema_pin`] for the lifecycle
+/// orchestrators in `crate::mem_management`. Mirrors the orchestrators'
 /// `resolve_mem_schema` against the built-in catalogue;
 /// workspace-schema-registry resolution lifts later.
 pub fn resolve_builtin_schema_pin_pub(

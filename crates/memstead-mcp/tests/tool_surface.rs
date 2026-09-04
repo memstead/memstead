@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Locks the shape of the agent-facing MCP surface.
 //!
 //! The surface is the `EXPECTED_TOOLS` list below — read-only:
@@ -86,17 +85,6 @@ fn current_tool_names() -> Vec<String> {
         .collect()
 }
 
-/// The lean (filesystem) server flavour's tool names — the second surface the
-/// folded-tools ban must hold on (cross-plan rule c).
-fn filesystem_tool_names() -> Vec<String> {
-    use memstead_mcp::filesystem_server::FilesystemMcpServer;
-    FilesystemMcpServer::tool_router()
-        .list_all()
-        .iter()
-        .map(|t| t.name.to_string())
-        .collect()
-}
-
 #[test]
 fn tool_surface_matches_expected_set() {
     let mut names = current_tool_names();
@@ -144,7 +132,7 @@ fn tool_count_matches_expected_set() {
 /// CLI crate (`memstead-cli`). The layering rule: CLI and MCP are
 /// sibling surfaces over the engine — so MCP tools that need
 /// shared logic (e.g. the `workspace_config_edit` writers) reach it
-/// through `memstead-engine`, never back through the CLI. Inspecting the
+/// through `memstead-base`, never back through the CLI. Inspecting the
 /// Cargo.toml is the canonical source of truth.
 #[test]
 fn memstead_mcp_does_not_depend_on_memstead_cli() {
@@ -153,7 +141,7 @@ fn memstead_mcp_does_not_depend_on_memstead_cli() {
     assert!(
         !body.contains("memstead-cli") && !body.contains("memstead_cli"),
         "memstead-mcp must not depend on memstead-cli — the layering forbids it. \
-         If an MCP tool needs CLI-side helpers, lift them into memstead-engine \
+         If an MCP tool needs CLI-side helpers, lift them into memstead-base \
          instead. Cargo.toml contents:\n{body}",
     );
 }
@@ -203,12 +191,10 @@ fn mcp_does_not_expose_batch_update_or_export() {
 /// rename mints **no** new MCP tool — health remains the single agent
 /// dashboard (a second status tool is the response-shape sprawl the
 /// tool-surface policy exists to prevent; the asymmetry is recorded in
-/// `agent-surfaces.md`). The ban holds on **both** server flavours (cross-plan
-/// rule c) — the full `McpServer` and the lean `FilesystemMcpServer`.
+/// `agent-surfaces.md`).
 #[test]
 fn mcp_does_not_expose_folded_stats_tools() {
     let full = current_tool_names();
-    let lean = filesystem_tool_names();
     for removed in [
         "memstead_stats",
         "memstead_status",
@@ -218,11 +204,7 @@ fn mcp_does_not_expose_folded_stats_tools() {
     ] {
         assert!(
             !full.iter().any(|n| n == removed),
-            "{removed} was folded into a sibling tool — do not re-expose (full server)."
-        );
-        assert!(
-            !lean.iter().any(|n| n == removed),
-            "{removed} was folded into a sibling tool — do not re-expose (lean/filesystem server)."
+            "{removed} was folded into a sibling tool — do not re-expose."
         );
     }
 }
@@ -644,38 +626,28 @@ fn every_tool_has_expected_annotation_hints() {
 }
 
 /// Helper — returns (surface, tool_name, description) triples for every
-/// tool on BOTH server flavours: the full `McpServer` ("full") and the
-/// lean `FilesystemMcpServer` ("lean"). Every Memstead tool MUST declare
-/// a description, and both flavours' descriptions go through the same
-/// lints — an agent gets the same contract quality regardless of build.
+/// tool on the server (`McpServer`, surface label "full"). Every
+/// Memstead tool MUST declare a description.
 fn descriptions() -> Vec<(&'static str, String, String)> {
-    use memstead_mcp::filesystem_server::FilesystemMcpServer;
-
-    let mut out = Vec::new();
-    for (surface, tools) in [
-        ("full", McpServer::tool_router().list_all()),
-        ("lean", FilesystemMcpServer::tool_router().list_all()),
-    ] {
-        for t in &tools {
+    let surface = "full";
+    McpServer::tool_router()
+        .list_all()
+        .iter()
+        .map(|t| {
             let desc = t
                 .description
                 .as_deref()
                 .unwrap_or_else(|| panic!("{surface}/{} must set a description", t.name))
                 .to_string();
-            out.push((surface, t.name.to_string(), desc));
-        }
-    }
-    out
+            (surface, t.name.to_string(), desc)
+        })
+        .collect()
 }
 
-/// Like `schema_for`, but resolves against the named surface's router so
-/// lean tools lint against the lean wire shape, not the full one.
+/// Like `schema_for`, but resolves against the named surface's router.
 fn schema_for_surface(surface: &str, tool_name: &str) -> String {
-    use memstead_mcp::filesystem_server::FilesystemMcpServer;
-
     let tools = match surface {
         "full" => McpServer::tool_router().list_all(),
-        "lean" => FilesystemMcpServer::tool_router().list_all(),
         other => panic!("unknown surface {other}"),
     };
     let tool = tools
@@ -961,13 +933,11 @@ fn is_allowed_reference(tool_name: &str, token: &str, schema: &str) -> bool {
         return true;
     }
     // Cross-tool references — a `memstead_`-prefixed token naming a live
-    // tool on either server flavour is a valid sibling pointer, not drift.
+    // tool is a valid sibling pointer, not drift.
     if normalised.starts_with("memstead_") {
-        use memstead_mcp::filesystem_server::FilesystemMcpServer;
         let is_tool = McpServer::tool_router()
             .list_all()
             .iter()
-            .chain(FilesystemMcpServer::tool_router().list_all().iter())
             .any(|t| t.name == normalised);
         if is_tool {
             return true;
@@ -1166,7 +1136,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Frontmatter slot: the serving engine's absolute workspace
             // path (CLI `--workspace` targeting for skills that shell out).
             "_workspace_root",
-            // Lean-flavour overview: mount roster fields + the
+            // Overview mount roster fields + the
             // frontmatter/error tokens its description names.
             "durable",
             "storage",
@@ -1182,7 +1152,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Full and lite ship the heavy arrays under distinct keys;
             // the description names all four so consumers decode by key
             // presence.
-            // Lean-flavour additions: the canonical pin format literal
+            // The canonical pin format literal
             // and the `community` schema block.
             "name@version",
             "community",
@@ -1254,9 +1224,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_create" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
-            // Lean-flavour refusal for params this surface doesn't honour.
-            "UNSUPPORTED_PARAM",
-            "details.params",
             "warnings",
             "write_id",
             "id",
@@ -1321,9 +1288,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_update" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
-            // Lean-flavour refusal for params this surface doesn't honour.
-            "UNSUPPORTED_PARAM",
-            "details.params",
             // Recovery-payload home named in the fix-from-details pointer.
             "details",
             "prospective_hash",
@@ -1480,10 +1444,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
         "memstead_relate" => &[
             // Schema-discovery pointer named in the pre-fetch imperative.
             "memstead_schema",
-            // Lean-flavour refusal for the dry_run param this surface
-            // doesn't honour (same posture as create / update).
-            "UNSUPPORTED_PARAM",
-            "details.params",
             // List-form envelope: refusal wrapper + per-entry fields.
             "BATCH_REFUSED",
             "details.entries",
@@ -1885,9 +1845,9 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // configs).
             "memstead_ref",
             "__MEMSTEAD",
-            // Lean-surface honour-or-refuse posture (backlog-sweep 09b):
-            // the refusal code for an unknown mem, the lean notes[]
-            // element fields, and the up-front rename_similarity refusal.
+            // Honour-or-refuse posture (backlog-sweep 09b): the refusal
+            // code for an unknown mem, the notes[] element fields, and
+            // the up-front rename_similarity refusal.
             "UNKNOWN_MEM",
             "notes[]",
             "timestamp",
@@ -1898,8 +1858,6 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "client",
             "sha",
             "subject",
-            "UNSUPPORTED_PARAM",
-            "details.params",
         ],
         "memstead_reload" => &[
             // Response-shape fields surfaced by the per-mem `ReloadReport`.
@@ -2210,7 +2168,6 @@ fn every_response_shape_ref_exists_in_emitting_source() {
     let mut corpus = String::new();
     for krate in [
         "memstead-mcp",
-        "memstead-engine",
         "memstead-base",
         "memstead-git-branch",
         "memstead-schema",
@@ -2283,25 +2240,13 @@ fn every_response_shape_ref_exists_in_emitting_source() {
 /// is the signal.
 #[test]
 fn relocated_prose_carries_no_stray_newline() {
-    for (surface, text) in [
-        ("full", memstead_mcp::server::SERVER_INSTRUCTIONS),
-        (
-            "filesystem",
-            memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS,
-        ),
-    ] {
-        assert!(
-            !text.contains('\n'),
-            "{surface} server instructions contain a newline — a descriptions/**/server-instructions-*.md file grew a trailing newline, which changes the served bytes"
-        );
-    }
-    for (surface, tools) in [
-        ("full", McpServer::tool_router().list_all()),
-        (
-            "filesystem",
-            memstead_mcp::filesystem_server::FilesystemMcpServer::tool_router().list_all(),
-        ),
-    ] {
+    assert!(
+        !memstead_mcp::server::SERVER_INSTRUCTIONS.contains('\n'),
+        "server instructions contain a newline — a descriptions/**/server-instructions-*.md file grew a trailing newline, which changes the served bytes"
+    );
+    {
+        let surface = "full";
+        let tools = McpServer::tool_router().list_all();
         for tool in &tools {
             let d = tool.description.as_deref().unwrap_or_default();
             assert!(
@@ -2628,65 +2573,10 @@ fn no_mutation_description_glosses_write_id_as_git_or_cursor() {
     );
 }
 
-/// The filesystem flavour has no commits — its substrate is the
-/// change ledger — yet its descriptions inherited sentences from the
-/// mem-repo flavour that assert one happens ("rewritten in one per-mem
-/// commit"). The four write_id guards all key on the token and are
-/// blind to a bare commit claim, which is how that sentence survived
-/// the 2026-08 rename sweep. Structural rule, not a banned phrase: a
-/// lean-flavour description sentence naming a commit must either negate
-/// it (no / not / never / none) or explicitly speak about the mem-repo
-/// flavour as its subject.
-#[test]
-fn no_filesystem_description_asserts_a_commit_happens() {
-    let mut violations = Vec::new();
-    let mut sentences_judged = 0usize;
-    for (surface, name, desc) in descriptions() {
-        if surface != "lean" {
-            continue;
-        }
-        for sentence in desc.split(". ") {
-            let lower = sentence.to_lowercase();
-            if !lower.contains("commit") {
-                continue;
-            }
-            sentences_judged += 1;
-            let negated = [
-                "no commit",
-                "no per-mem commit",
-                "not a commit",
-                "there are no commits",
-                "no commit history",
-                "never commit",
-                "no commits",
-                "not commits",
-            ]
-            .iter()
-            .any(|n| lower.contains(n));
-            let other_flavour = lower.contains("mem-repo");
-            if !negated && !other_flavour {
-                violations.push(format!(
-                    "lean/{name}: asserts a commit on a substrate that has none — {sentence}"
-                ));
-            }
-        }
-    }
-    assert!(
-        sentences_judged > 0,
-        "no filesystem description mentions commits at all — this check has gone vacuous"
-    );
-    assert!(
-        violations.is_empty(),
-        "commit-claim violations on the commit-less flavour:\n  {}",
-        violations.join("\n  ")
-    );
-}
-
 /// Helper — return the FULL-surface description for one tool. Panics if
 /// the tool is absent (indicates the surface itself has drifted, which
 /// other tests already catch). The load-bearing substring tests below
-/// lock the full server's contract; the lean flavour is covered by the
-/// generic lints, not these per-clause pins.
+/// lock the server's contract.
 fn description_of(tool_name: &str) -> String {
     descriptions()
         .into_iter()
@@ -3032,39 +2922,14 @@ fn full_instructions_roster_matches_registry_bidirectionally() {
     );
 }
 
-/// Criterion 1 (lean flavour): same bidirectional contract for the
-/// filesystem server's instructions and its own tool set.
-#[test]
-fn lean_instructions_roster_matches_registry_bidirectionally() {
-    let registered = registered_tools(
-        &memstead_mcp::filesystem_server::FilesystemMcpServer::tool_router().list_all(),
-    );
-    let mentioned = mentioned_tools(memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS);
-    let absent: Vec<_> = registered.difference(&mentioned).collect();
-    assert!(
-        absent.is_empty(),
-        "registered tools missing from the lean instructions roster: {absent:?}"
-    );
-    let phantom: Vec<_> = mentioned.difference(&registered).collect();
-    assert!(
-        phantom.is_empty(),
-        "lean instructions name tools that are not registered: {phantom:?}"
-    );
-}
-
-/// Criterion 2: both flavours' instructions carry the crate version and
-/// the CLI-companion note naming the batch, export, and distribution
+/// Criterion 2: the instructions carry the crate version and the
+/// CLI-companion note naming the batch, export, and distribution
 /// families. (Integration tests compile inside the memstead-mcp
 /// package, so `CARGO_PKG_VERSION` here IS the crate version.)
 #[test]
 fn instructions_carry_crate_version_and_cli_companion_note() {
-    for (label, text) in [
-        ("full", memstead_mcp::server::SERVER_INSTRUCTIONS),
-        (
-            "lean",
-            memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS,
-        ),
-    ] {
+    {
+        let (label, text) = ("full", memstead_mcp::server::SERVER_INSTRUCTIONS);
         assert!(
             text.contains(concat!("Engine version: ", env!("CARGO_PKG_VERSION"))),
             "{label}: instructions must carry the crate version"
@@ -3085,28 +2950,16 @@ fn instructions_carry_crate_version_and_cli_companion_note() {
 }
 
 /// Criterion 2: the MCP serverInfo version equals the engine's FULL
-/// build version (crate semver plus git build sha for dev builds) on
-/// both flavours — the historical hardcoded `"0.1.0"` cannot recur,
-/// and two dev builds between releases stay distinguishable.
-/// Asserted against the LIVE `get_info()` of constructed servers.
-/// The full flavour's served instructions keep the compile-time
-/// const verbatim as their prefix and append a runtime `Build:`
-/// sentence exactly when a build sha exists.
+/// build version (crate semver plus git build sha for dev builds) —
+/// the historical hardcoded `"0.1.0"` cannot recur, and two dev builds
+/// between releases stay distinguishable. Asserted against the LIVE
+/// `get_info()` of a constructed server. The served instructions keep
+/// the compile-time const verbatim as their prefix and append a
+/// runtime `Build:` sentence exactly when a build sha exists.
 #[test]
-fn server_info_version_equals_full_build_version_on_both_flavours() {
+fn server_info_version_equals_full_build_version() {
     use rmcp::ServerHandler as _;
     let full_version = memstead_base::build_info::full_version();
-    let lean_engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
-    let lean = memstead_mcp::filesystem_server::FilesystemMcpServer::from_engine(
-        lean_engine,
-        std::path::PathBuf::from("."),
-    );
-    let info = lean.get_info();
-    assert_eq!(info.server_info.version, full_version);
-    assert_eq!(
-        info.instructions.as_deref(),
-        Some(memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS),
-    );
 
     let full_engine = memstead_base::Engine::from_mounts(Vec::new()).unwrap();
     let full = memstead_mcp::server::McpServer::new_with_config(
@@ -3139,9 +2992,7 @@ fn server_info_version_equals_full_build_version_on_both_flavours() {
 
 /// Criterion 4: instruction length stays within a stated budget — a
 /// tripwire against unbounded growth, not a magic number. Budgets set
-/// at plan-05 landing: full ~10.1kB current + ~24% headroom; lean
-/// ~2.0kB current with a roomier 4kB ceiling (the lean surface is
-/// small enough that a doubling is the signal worth tripping on).
+/// at plan-05 landing: ~10.1kB current + ~24% headroom.
 /// Raised consciously on 2026-09-02 (12.5kB → 12.8kB) for the
 /// `MEM_ROSTER_CHANGED` membership marker, the sibling of
 /// `MEM_RELOADED`: a protocol every consumer must know, not decoration.
@@ -3152,11 +3003,5 @@ fn instruction_length_stays_within_budget() {
         full_len <= 12_800,
         "full instructions grew past the 12.8kB tripwire ({full_len} bytes) — trim \
          (the error-code list is the sanctioned cut) or consciously raise the budget"
-    );
-    let lean_len = memstead_mcp::filesystem_server::FS_SERVER_INSTRUCTIONS.len();
-    assert!(
-        lean_len <= 4_000,
-        "lean instructions grew past the 4kB tripwire ({lean_len} bytes) — trim or \
-         consciously raise the budget"
     );
 }

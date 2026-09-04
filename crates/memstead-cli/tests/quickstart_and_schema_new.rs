@@ -373,13 +373,7 @@ fn schema_new_scaffold_validates_unmodified() {
             .success(),
     );
     assert!(out.contains("memstead schema validate acme"), "got: {out}");
-    #[cfg(feature = "mem-repo")]
     assert!(out.contains("memstead schema install acme"), "got: {out}");
-    #[cfg(not(feature = "mem-repo"))]
-    assert!(
-        out.contains("memstead schema install ../acme"),
-        "got: {out}"
-    );
     assert!(
         out.contains("acme@0.1.0"),
         "pin step names the version; got: {out}",
@@ -399,7 +393,6 @@ fn schema_new_scaffold_validates_unmodified() {
 /// accepting a `memstead create --type note`. (`mem set-schema` lives
 /// in the mem-repo-featured binary; the lean flavour covers the
 /// scaffold/validate/install prefix in the test above and below.)
-#[cfg(feature = "mem-repo")]
 #[test]
 fn schema_new_follow_up_commands_end_in_pinned_mem_accepting_create() {
     let tmp = TempDir::new().unwrap();
@@ -474,7 +467,6 @@ fn schema_new_follow_up_commands_end_in_pinned_mem_accepting_create() {
 /// step for the seed, and the printed commands executed verbatim end
 /// with the mem atomically pinned (`Switched`, not a dual-pin
 /// migration) and accepting the scaffolded type.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn schema_new_follow_up_from_quickstart_workspace_ends_pinned() {
     let tmp = TempDir::new().unwrap();
@@ -546,7 +538,6 @@ fn schema_new_follow_up_from_quickstart_workspace_ends_pinned() {
 /// (`planning-0.3`, …) instead of refusing everything but the
 /// name-exact directory's version. An unregistered version still
 /// refuses.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn schema_install_resolves_retained_builtin_versions() {
     let tmp = TempDir::new().unwrap();
@@ -629,161 +620,6 @@ fn quickstart_malformed_agent_config_refuses_before_any_write() {
         !tmp.path().join(".memstead").exists(),
         "nothing was created"
     );
-}
-
-/// Lean-flavour follow-up end-to-end: without `mem set-schema`, the
-/// printed sequence routes through a fresh mem — init pins the custom
-/// schema, then `schema install ../<name>` from inside the new folder
-/// makes the workspace boot. Executed as printed, it ends with a
-/// working workspace accepting a `create --type note` (regression: an
-/// earlier sequence pinned without installing, leaving a workspace
-/// where every engine-booting command died with INTERNAL).
-#[cfg(not(feature = "mem-repo"))]
-#[test]
-fn schema_new_lean_follow_up_ends_in_working_fresh_mem() {
-    let tmp = TempDir::new().unwrap();
-    let out = stdout_of(
-        memstead()
-            .current_dir(tmp.path())
-            .args(["schema", "new", "acme"])
-            .assert()
-            .success(),
-    );
-    assert!(
-        out.contains("memstead init --name acme-mem --schema acme@0.1.0"),
-        "lean follow-up routes through a fresh init; got: {out}",
-    );
-    assert!(
-        out.contains("memstead schema install ../acme"),
-        "install step targets the new workspace; got: {out}",
-    );
-    assert!(
-        !out.contains("mem set-schema"),
-        "lean never prints the full-only subcommand; got: {out}",
-    );
-
-    // The printed sequence, step by step (`mkdir && cd` become the
-    // test's directory handling).
-    memstead()
-        .current_dir(tmp.path())
-        .args(["schema", "validate", "acme"])
-        .assert()
-        .success();
-    let fresh = tmp.path().join("acme-mem");
-    std::fs::create_dir(&fresh).unwrap();
-    memstead()
-        .current_dir(&fresh)
-        .args(["init", "--name", "acme-mem", "--schema", "acme@0.1.0"])
-        .assert()
-        .success();
-    memstead()
-        .current_dir(&fresh)
-        .args(["schema", "install", "../acme"])
-        .assert()
-        .success();
-
-    // The workspace boots and the scaffolded type is writable.
-    memstead()
-        .current_dir(&fresh)
-        .arg("overview")
-        .assert()
-        .success();
-    memstead()
-        .current_dir(&fresh)
-        .args([
-            "create",
-            "--type",
-            "note",
-            "--title",
-            "First note",
-            "--section",
-            "summary=It works.",
-        ])
-        .assert()
-        .success();
-}
-
-/// Lean follow-up scaffolded from INSIDE an existing workspace: the
-/// printed fresh-mem path must land outside it (workspaces don't nest,
-/// and the lean binary has no `memstead mem init` to fall back on).
-/// The test executes the paths exactly as printed and ends in a
-/// working mem.
-#[cfg(not(feature = "mem-repo"))]
-#[test]
-fn schema_new_lean_follow_up_from_inside_workspace_lands_outside() {
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path().join("my-graph");
-    memstead().arg("quickstart").arg(&ws).assert().success();
-
-    let out = stdout_of(
-        memstead()
-            .current_dir(&ws)
-            .args(["schema", "new", "acme"])
-            .assert()
-            .success(),
-    );
-
-    // Pull the two printed paths: the fresh-mem dir from the init step,
-    // the package path from the install step. Both are quoted absolute
-    // paths in the in-workspace variant.
-    let quoted = |line_marker: &str| -> std::path::PathBuf {
-        let line = out
-            .lines()
-            .find(|l| l.contains(line_marker))
-            .unwrap_or_else(|| panic!("no step containing `{line_marker}`; got: {out}"));
-        let start = line
-            .find('"')
-            .unwrap_or_else(|| panic!("no quoted path in: {line}"));
-        let rest = &line[start + 1..];
-        let end = rest
-            .find('"')
-            .unwrap_or_else(|| panic!("unterminated quote in: {line}"));
-        std::path::PathBuf::from(&rest[..end])
-    };
-    let fresh = quoted("memstead init --name acme-mem");
-    let pkg = quoted("memstead schema install");
-
-    // The fresh mem lands outside the workspace.
-    let ws_canon = std::fs::canonicalize(&ws).unwrap();
-    assert!(
-        !fresh.starts_with(&ws_canon) && !fresh.starts_with(&ws),
-        "fresh-mem dir {} must not nest inside the workspace {}",
-        fresh.display(),
-        ws.display(),
-    );
-
-    // Execute as printed: mkdir + init in the fresh dir, install the
-    // package by its printed path, and the workspace works.
-    std::fs::create_dir_all(&fresh).unwrap();
-    memstead()
-        .current_dir(&fresh)
-        .args(["init", "--name", "acme-mem", "--schema", "acme@0.1.0"])
-        .assert()
-        .success();
-    memstead()
-        .current_dir(&fresh)
-        .args(["schema", "install"])
-        .arg(&pkg)
-        .assert()
-        .success();
-    memstead()
-        .current_dir(&fresh)
-        .arg("overview")
-        .assert()
-        .success();
-    memstead()
-        .current_dir(&fresh)
-        .args([
-            "create",
-            "--type",
-            "note",
-            "--title",
-            "First note",
-            "--section",
-            "summary=It works.",
-        ])
-        .assert()
-        .success();
 }
 
 /// `schema install` accepts the scaffolded package on the folder
@@ -974,26 +810,20 @@ fn every_refusal_on_these_paths_names_a_next_command() {
 /// which shape, one concrete thing it cannot do, and the way to the
 /// other shape. Applied to `quickstart` and `init` alike.
 ///
-/// The "cannot" half is flavour-specific on purpose. The full build
-/// names the `batch-*` commands and the typed code they refuse with,
-/// because those commands exist there, and states that `memstead
-/// install` works on either shape — the v0.18.0 newcomer run met a
-/// receipt promising an `UNSUPPORTED_WORKSPACE_SHAPE` refusal from an
-/// install that no longer refuses by shape. The lean build has none of
-/// those subcommands, so it states the limit without borrowing a verb
-/// the reader could not run — see the FILESYSTEM_CANNOT gate in
-/// `setup.rs`. Both must still name `memstead mem-repo init`, which is
-/// a pointer at the other shape, not an invitation to run it here.
+/// The "cannot" half names the `batch-*` commands and the typed code
+/// they refuse with, and states that `memstead install` works on
+/// either shape — the v0.18.0 newcomer run met a receipt promising an
+/// `UNSUPPORTED_WORKSPACE_SHAPE` refusal from an install that no longer
+/// refuses by shape. It must still name `memstead mem-repo init`, which
+/// is a pointer at the other shape, not an invitation to run it here.
 fn assert_filesystem_shape_disclosure(out: &str, ctx: &str) {
-    let mut needles = vec!["filesystem-mem", "memstead mem-repo init"];
-    if cfg!(feature = "mem-repo") {
-        needles.push("cannot run the atomic `batch-*` commands");
-        needles.push("UNSUPPORTED_WORKSPACE_SHAPE");
-        needles.push("`memstead install <scope>/<name>` works on either shape");
-    } else {
-        needles.push("holds exactly one mem");
-        needles.push("this lean build does not carry");
-    }
+    let needles = [
+        "filesystem-mem",
+        "memstead mem-repo init",
+        "cannot run the atomic `batch-*` commands",
+        "UNSUPPORTED_WORKSPACE_SHAPE",
+        "`memstead install <scope>/<name>` works on either shape",
+    ];
     for needle in needles {
         assert!(
             out.contains(needle),
@@ -1043,7 +873,6 @@ fn init_receipt_discloses_the_shape_it_picked() {
 /// disclosure reads as a fork rather than as a warning bolted onto one
 /// branch. It names what mem-repo costs and the command for the other
 /// shape.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn mem_repo_init_discloses_its_shape_symmetrically() {
     let tmp = TempDir::new().unwrap();
@@ -1112,7 +941,6 @@ fn json_receipts_carry_the_whole_disclosure_not_just_the_label() {
 
 /// Symmetric machine surface: `mem-repo init --json` carries the same
 /// disclosure shape, pointing the other way.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn mem_repo_init_json_carries_the_whole_disclosure() {
     let tmp = TempDir::new().unwrap();
@@ -1140,7 +968,6 @@ fn mem_repo_init_json_carries_the_whole_disclosure() {
 /// and names `.memstead/` as intentionally trackable next to the
 /// `.gitignore` append (backlog-sweep plan 06, decisions 14/15).
 /// Complement: under no git repo at all, neither line appears.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn mem_repo_init_inside_git_repo_hints_layout_and_trackability() {
     let tmp = TempDir::new().unwrap();
@@ -1230,7 +1057,6 @@ fn every_verb_the_receipt_names_is_runnable_or_flagged_as_absent() {
 /// Disclosure is not permission: a mem-repo-only subcommand on the
 /// shape `quickstart` produces still refuses with the same typed code,
 /// and the message still names the recovering command.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn mem_repo_only_subcommand_still_refuses_after_disclosure() {
     let tmp = TempDir::new().unwrap();

@@ -12,8 +12,8 @@ stored as plain markdown in git.
 This crate is the engine core: the entity store and markdown parser, the
 schema validators, wiki-link/relationship graph integrity, full-text search
 (tantivy, native targets only), the change-event surface, and the
-filesystem-mem engine that runs a single folder-backed mem. Higher layers
-build on it: `memstead-engine` adds multi-mem lifecycle and policy,
+engine that runs folder-backed mems, plus the multi-mem lifecycle
+orchestrators and the workspace-policy writer. One layer builds on it:
 `memstead-git-branch` adds the git-backed mem-repo backend.
 
 ## Features

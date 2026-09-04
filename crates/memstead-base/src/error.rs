@@ -1,27 +1,26 @@
-//! Full-flavor engine error envelope.
+//! Lifecycle error envelope.
 //!
-//! Mirrors the wrap-not-embed pattern: full errors **wrap** lean
-//! errors via `From<memstead_base::EngineError>`, so full code paths can
-//! transparently propagate a lean failure without re-wrapping at each
-//! call site. The full MCP render layer reads the wrapped chain to
-//! produce the typed `code`; the lean render layer only ever sees
-//! lean errors.
+//! Wrap-not-embed: [`FullEngineError`] **wraps** [`crate::EngineError`]
+//! via `From`, so lifecycle code paths propagate an engine failure
+//! without re-wrapping at each call site, and the MCP render layer
+//! reads the wrapped chain to produce the typed `code`.
 //!
 //! The four lifecycle-only variants live here rather than on
-//! `memstead_base::EngineError`: they are produced by this crate's
-//! mem-management orchestrator (`create_mem` / `delete_mem`),
-//! which returns `Result<_, FullEngineError>`, so the lean crate
-//! carries no full-specific lifecycle types.
+//! `crate::EngineError`: they are produced by the mem-management
+//! orchestrator (`create_mem` / `delete_mem`), which returns
+//! `Result<_, FullEngineError>`. The name dates from the crate split
+//! this envelope outlived (`memstead-engine` folded into this crate);
+//! the type keeps it so consumers need no rename.
 
 use std::path::PathBuf;
 
-use memstead_base::EngineError;
+use crate::EngineError;
 
 /// Errors surfaced by the full engine extension.
 ///
 /// `Lean(EngineError)` wraps any failure that originates in the
 /// underlying lean engine — full orchestrators that delegate to
-/// `memstead_base::Engine` propagate lean errors verbatim through this
+/// `crate::Engine` propagate lean errors verbatim through this
 /// variant (`#[from]`), so the wire-rendering layer at the full MCP
 /// surface can recover the lean `code()` for any wrapped variant.
 ///
@@ -32,7 +31,7 @@ use memstead_base::EngineError;
 #[derive(Debug, thiserror::Error)]
 pub enum FullEngineError {
     /// Wrapped lean-engine error. Use this variant whenever a full
-    /// code path delegates to `memstead_base::Engine` and a lean-side
+    /// code path delegates to `crate::Engine` and a lean-side
     /// failure should surface unchanged.
     #[error(transparent)]
     Lean(#[from] EngineError),
@@ -365,7 +364,7 @@ impl FullEngineError {
 
     /// Stable, surface-independent error code token.
     ///
-    /// Matches `memstead_base::EngineError::code()` for every variant —
+    /// Matches `crate::EngineError::code()` for every variant —
     /// wrapped lean errors delegate to the lean mapping, lifecycle
     /// variants return the exact strings the lean enum returned for
     /// them today. This is load-bearing: the wire-shape pins in
@@ -393,7 +392,7 @@ mod tests {
     /// actual fire condition (a workspace `[cross_mem_links]` grant,
     /// not a materialised graph edge); the other three lifecycle
     /// codes are unchanged from when these variants lived on
-    /// `memstead_base::EngineError`.
+    /// `crate::EngineError`.
     #[test]
     fn lifecycle_codes_pin_wire_vocabulary() {
         let e = FullEngineError::MemPathNotAllowed {

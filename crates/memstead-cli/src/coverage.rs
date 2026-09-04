@@ -16,7 +16,6 @@ const READS_DATA: &str = "returns data, not a verdict; an empty result is an emp
      result, never an all-clear";
 const MUTATION: &str = "mutation surface: reports what it did, never an all-clear \
      over unexamined state";
-#[cfg(feature = "mem-repo")]
 const TRANSPORT: &str = "transport operation: reports the transfer's own outcome";
 const ACCOUNT_OP: &str = "registry or account operation: reports the operation's own \
      outcome";
@@ -28,7 +27,6 @@ const ANCHORS_ONLY: &str = "the standalone anchor statement answers for anchors 
      alone; it examines no other axis and says so";
 const VERIFY_SCOPE: &str = "the binding-scoped fidelity report answers for one \
      binding's projection and its anchors; other axes belong to health";
-#[cfg(feature = "mem-repo")]
 const DUMP_SCOPE: &str = "the dump is a configuration and roster snapshot; graph \
      axes belong to health";
 
@@ -147,7 +145,6 @@ pub const PROJECTION_VERIFY: SurfaceCoverage = SurfaceCoverage {
     }),
 };
 
-#[cfg(feature = "mem-repo")]
 pub const WORKSPACE_DUMP: SurfaceCoverage = SurfaceCoverage {
     surface: "workspace dump",
     disposition: CoverageDisposition::Verdict(AxisCoverage {
@@ -194,7 +191,6 @@ fn no_verdict(surface: &'static str, reason: &'static str) -> SurfaceCoverage {
 /// Feature-gated commands carry the same gate as their clap variant,
 /// so the lean build's registry matches the lean build's walk.
 pub fn surface_registry() -> Vec<SurfaceCoverage> {
-    #[cfg_attr(not(feature = "mem-repo"), allow(unused_mut))]
     let mut rows = vec![
         STATUS,
         HEALTH,
@@ -270,7 +266,6 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("admin takedown", ACCOUNT_OP),
         no_verdict("admin denylist", ACCOUNT_OP),
     ];
-    #[cfg(feature = "mem-repo")]
     rows.extend([
         WORKSPACE_DUMP,
         no_verdict("install", MUTATION),

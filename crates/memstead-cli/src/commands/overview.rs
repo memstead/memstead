@@ -7,31 +7,19 @@ use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::CliContext;
 
-// Lean build: renders the simple in-process cluster overview and defers
-// rich heavy-content to the MCP tool.
-#[cfg(not(feature = "mem-repo"))]
-use memstead_base::{chunking::floor_chunk_budget, render};
-#[cfg(not(feature = "mem-repo"))]
-const DEFAULT_TOKEN_BUDGET: usize = 25_000;
-
-// Full build: routes through the shared engine composer so the CLI
-// renders the same rich content the MCP `memstead_overview` tool emits.
-#[cfg(feature = "mem-repo")]
-use memstead_engine::overview::{
+// Routes through the shared engine composer so the CLI renders the
+// same rich content the MCP `memstead_overview` tool emits.
+use memstead_base::overview::{
     ComposeOverviewError, DEFAULT_OVERVIEW_BUDGET, OverviewArgs, Surface, compose_overview,
 };
-#[cfg(feature = "mem-repo")]
 const DEFAULT_CHUNK_BUDGET: usize = 25_000;
 
 /// All clusters with summaries and member lists.
 ///
-/// The full build calls the shared composer in `memstead-engine`
-/// (`Surface::Cli`) and renders the same rich content the MCP tool
-/// emits, differing only in inline command-name hints
-/// (`memstead type <ref>` vs `memstead_schema(name=<ref>)`). The lean
-/// build renders the simpler cluster summary in-process and surfaces a
-/// warning when rich `--include` / `--mem` / `--token-budget` flags
-/// are supplied (that content needs the git-backed engine composer).
+/// Calls the shared composer in `memstead-base` (`Surface::Cli`) and
+/// renders the same rich content the MCP tool emits, differing only in
+/// inline command-name hints (`memstead type <ref>` vs
+/// `memstead_schema(name=<ref>)`).
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Re-run Louvain community detection before rendering.
@@ -71,7 +59,6 @@ pub struct Args {
     pub token_budget: Option<usize>,
 }
 
-#[cfg(feature = "mem-repo")]
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let mut engine = ctx.cli_engine()?.into_base();
 
@@ -186,107 +173,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// into the chunk's frontmatter. Defaults to 1 — `apply_chunking`
 /// guarantees the marker, but a malformed head degrades to the
 /// single-chunk reading rather than failing the command.
-#[cfg(feature = "mem-repo")]
 fn parse_total_chunks(chunked: &str) -> usize {
     chunked
         .lines()
         .find_map(|l| l.strip_prefix("_total_chunks: "))
         .and_then(|v| v.trim().parse::<usize>().ok())
         .unwrap_or(1)
-}
-
-#[cfg(not(feature = "mem-repo"))]
-pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    // `--include` parses uniformly with `memstead health --include` — both repeatable and
-    // comma-string shapes accept. Validate keys against the engine's
-    // shared `OVERVIEW_INCLUDE_KEYS` allowlist and emit
-    // `UNKNOWN_INCLUDE_KEY` warnings (same pattern the MCP tool ships).
-    // Rich-content rendering on the lean build is deferred — it always
-    // lists per-cluster members (the `community_members` content) but
-    // `community_bridges`, `mem_distribution`, `dangling_links` need
-    // the shared engine composer, which is absent without the
-    // git-branch backend.
-    let mut include_warnings: Vec<(String, &'static [&'static str])> = Vec::new();
-    for key in &args.include {
-        if !memstead_base::ops::OVERVIEW_INCLUDE_KEYS.contains(&key.as_str()) {
-            include_warnings.push((key.clone(), memstead_base::ops::OVERVIEW_INCLUDE_KEYS));
-        }
-    }
-
-    let mut engine = ctx.cli_engine()?.into_base();
-    if args.rebuild && args.chunk.unwrap_or(1) <= 1 {
-        engine.invalidate_communities();
-    }
-    let output = engine.communities();
-    let cluster_count = output.count;
-    let modularity = output.modularity;
-    let md = render::render_overview_markdown(output, engine.store());
-    let cluster_count_str = cluster_count.to_string();
-    let chunked = apply_chunking(
-        &md,
-        // Floor the chunk size — `--token-budget` is a content budget,
-        // not a transport chunk size; a tiny value must not fragment the
-        // always-shipped body. Small overviews stay one chunk.
-        floor_chunk_budget(args.token_budget.unwrap_or(DEFAULT_TOKEN_BUDGET)),
-        args.chunk,
-        &[("_cluster_count", cluster_count_str.as_str())],
-    )
-    .map_err(|e| CliError::new(ExitKind::Generic, "CHUNK_OUT_OF_RANGE", e))?;
-
-    // Surface a typed warning when the richer flags were supplied —
-    // keeps the parsing-uniformity acceptance without silently
-    // dropping the caller's intent. The lean build's overview renders
-    // the simple cluster summary only; the rich heavy-content
-    // composer lives in `memstead-engine` (reached by the full
-    // `memstead overview` and the MCP `memstead_overview` tool).
-    let full_only_warning = (!args.include.is_empty()
-        || args.token_budget.is_some()
-        || args.mem.is_some())
-        .then(|| {
-            (
-                "OVERVIEW_RICH_CONTENT_FULL_ONLY",
-                "the lean build renders the simple cluster overview only — rich content (`--mem` scoping, `--include community_bridges` / `mem_distribution` / `dangling_links`, non-default `--token-budget`) requires the full `memstead` build or the `memstead_overview` MCP tool".to_string(),
-            )
-        });
-
-    if ctx.json {
-        let mut warnings_json: Vec<_> = include_warnings
-            .into_iter()
-            .map(|(key, allowed)| {
-                json!({
-                    "code": "UNKNOWN_INCLUDE_KEY",
-                    "key": key,
-                    "allowed": allowed,
-                })
-            })
-            .collect();
-        if let Some((code, message)) = full_only_warning.as_ref() {
-            warnings_json.push(json!({
-                "code": code,
-                "message": message,
-            }));
-        }
-        let body = json!({
-            "markdown": chunked,
-            "cluster_count": cluster_count,
-            "modularity": modularity,
-            "warnings": warnings_json,
-        });
-        print_json(&body)?;
-    } else {
-        let mut out = chunked;
-        for (key, allowed) in &include_warnings {
-            out.push_str(&format!(
-                "\n\n_WARNING [UNKNOWN_INCLUDE_KEY]: `{key}` — allowed: {:?}_",
-                allowed,
-            ));
-        }
-        if let Some((code, message)) = full_only_warning.as_ref() {
-            out.push_str(&format!("\n\n_WARNING [{code}]: {message}._"));
-        }
-        print_markdown(&out);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -327,10 +219,7 @@ mod tests {
     /// allowlist; the lean build against `memstead-base`'s constant.
     #[test]
     fn help_lists_every_overview_include_key() {
-        #[cfg(feature = "mem-repo")]
-        let keys: &[&str] = memstead_engine::overview::ALLOWED_OVERVIEW_INCLUDE_KEYS;
-        #[cfg(not(feature = "mem-repo"))]
-        let keys: &[&str] = memstead_base::ops::OVERVIEW_INCLUDE_KEYS;
+        let keys: &[&str] = memstead_base::overview::ALLOWED_OVERVIEW_INCLUDE_KEYS;
 
         let cmd = Args::command();
         let arg = cmd

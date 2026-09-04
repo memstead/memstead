@@ -2,10 +2,9 @@
 //! the xtask doc generator can call `Cli::command()` against the same
 //! tree the binary exposes — no duplicated declarations, no drift.
 //!
-//! One crate, two build configs: the default (`mem-repo`) build
-//! exposes the full command set including the multi-mem / mem-repo
-//! lifecycle subcommands; `--no-default-features` drops those, leaving
-//! the engine-agnostic surface.
+//! One command set, including the multi-mem / mem-repo lifecycle
+//! subcommands; the shape-dependent ones refuse at runtime on a
+//! folder-only workspace rather than being compiled out.
 
 use clap::{Parser, Subcommand};
 
@@ -136,9 +135,9 @@ pub enum Command {
     /// Read an entity's community cluster.
     Context(commands::context::Args),
 
-    /// All clusters with summaries and member lists. The full build
-    /// renders the same rich content the MCP `memstead_overview` tool
-    /// emits — both surfaces share the engine composer in `memstead-engine`.
+    /// All clusters with summaries and member lists. Renders the same
+    /// rich content the MCP `memstead_overview` tool emits — both
+    /// surfaces share the engine composer in `memstead-base`.
     Overview(commands::overview::Args),
 
     /// Describe one type, or list all types when no name given.
@@ -184,14 +183,12 @@ pub enum Command {
     /// read-only mount; `memstead uninstall` is the symmetric removal.
     /// Works on every workspace shape: a read-mem attaches to the workspace,
     /// not to one of your mems.
-    #[cfg(feature = "mem-repo")]
     Install(commands::install::Args),
 
     /// Remove an installed read-mem's workspace-level mount. The global
     /// cache copy survives by default; re-`install` re-registers it.
     /// Works on every workspace shape, symmetric with `install`: a
     /// workspace that can attach a read-mem can detach one.
-    #[cfg(feature = "mem-repo")]
     Uninstall(commands::uninstall::Args),
 
     /// Verify every anchor in a mem against its declared source — the
@@ -269,7 +266,6 @@ pub enum Command {
     /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
     /// `memstead quickstart` produces; fall back to one `memstead
     /// update` per entity there.
-    #[cfg(feature = "mem-repo")]
     #[command(name = "batch-update")]
     BatchUpdate(commands::batch_update::Args),
 
@@ -286,7 +282,6 @@ pub enum Command {
     /// `memstead quickstart` produces; fall back to one `memstead
     /// create` per entity there (losing atomicity and intra-batch
     /// reference resolution).
-    #[cfg(feature = "mem-repo")]
     #[command(name = "batch-create")]
     BatchCreate(commands::batch_create::Args),
 
@@ -301,7 +296,6 @@ pub enum Command {
     /// `UNSUPPORTED_WORKSPACE_SHAPE` on the filesystem-mem workspace
     /// `memstead quickstart` produces; fall back to one `memstead
     /// relate` per edge there.
-    #[cfg(feature = "mem-repo")]
     #[command(name = "batch-relate")]
     BatchRelate(commands::batch_relate::Args),
 
@@ -309,7 +303,6 @@ pub enum Command {
     /// `PARSED_RELATION_INVALID` warnings, re-renders affected
     /// source entities to drop the stale rows, and reports per-entry
     /// outcomes. Read-only-origin drops surface as skipped.
-    #[cfg(feature = "mem-repo")]
     Recover(commands::recover::Args),
 
     /// Read provenance anchors (E3a): `memstead anchors <id>` lists an
@@ -360,14 +353,12 @@ pub enum Command {
     /// (no local branch moves — inspect first, then `pull`). Requires a
     /// git-branch-backed mem (`INVALID_INPUT` on folder mounts);
     /// refuses `UNKNOWN_REMOTE` when the remote is not configured.
-    #[cfg(feature = "mem-repo")]
     Fetch(commands::transport::FetchArgs),
 
     /// Fast-forward a mem's branch to its fetched remote counterpart
     /// and reload the in-memory store. Refuses `LOCAL_DIVERGENCE` when
     /// the local branch is not an ancestor of the remote — reconcile
     /// via `branch-reset`, or resolve on another clone and push.
-    #[cfg(feature = "mem-repo")]
     Pull(commands::transport::PullArgs),
 
     /// Push a mem's branch to a git remote. `--force` uses
@@ -378,25 +369,21 @@ pub enum Command {
     /// ref, fast-forward only: silent for refs already in sync, one line
     /// per ref moved, a refused ref named while the others still go,
     /// non-zero exit at the end.
-    #[cfg(feature = "mem-repo")]
     Push(commands::transport::PushArgs),
 
     /// Reset a mem's branch pointer to a target ref/SHA. Refuses to
     /// discard commits reachable from any remote ref
     /// (`PUSHED_COMMITS_PROTECTED`).
-    #[cfg(feature = "mem-repo")]
     #[command(name = "branch-reset")]
     BranchReset(commands::branch_reset::BranchResetArgs),
 
     /// Mem lifecycle commands.
-    #[cfg(feature = "mem-repo")]
     Mem {
         #[command(subcommand)]
         action: commands::mem::MemAction,
     },
 
     /// Mem-repo-git lifecycle commands.
-    #[cfg(feature = "mem-repo")]
     #[command(name = "mem-repo")]
     MemRepo {
         #[command(subcommand)]
@@ -408,7 +395,6 @@ pub enum Command {
     /// `revoke-delete`/`grant-cross-link`/`revoke-cross-link`/`set-mutations`
     /// write the mem-lifecycle allowlist, cross-mem link grants, and
     /// mutation policy.
-    #[cfg(feature = "mem-repo")]
     Workspace {
         #[command(subcommand)]
         action: commands::workspace::WorkspaceAction,
@@ -457,9 +443,7 @@ impl Command {
             Command::Export(_) => "export",
             Command::Init(_) => "init",
             Command::Quickstart(_) => "quickstart",
-            #[cfg(feature = "mem-repo")]
             Command::Install(_) => "install",
-            #[cfg(feature = "mem-repo")]
             Command::Uninstall(_) => "uninstall",
             Command::VerifyAnchors(_) => "verify-anchors",
             Command::Publish(_) => "publish",
@@ -474,13 +458,9 @@ impl Command {
             Command::Delete(_) => "delete",
             Command::Rename(_) => "rename",
             Command::Retype(_) => "retype",
-            #[cfg(feature = "mem-repo")]
             Command::BatchUpdate(_) => "batch-update",
-            #[cfg(feature = "mem-repo")]
             Command::BatchCreate(_) => "batch-create",
-            #[cfg(feature = "mem-repo")]
             Command::BatchRelate(_) => "batch-relate",
-            #[cfg(feature = "mem-repo")]
             Command::Recover(_) => "recover",
             Command::Anchors(_) => "anchors",
             Command::Conflicts(_) => "conflicts",
@@ -488,19 +468,12 @@ impl Command {
             Command::Check(_) => "check",
             Command::ReviewMark(_) => "review-mark",
             Command::Reload(_) => "reload",
-            #[cfg(feature = "mem-repo")]
             Command::Fetch(_) => "fetch",
-            #[cfg(feature = "mem-repo")]
             Command::Pull(_) => "pull",
-            #[cfg(feature = "mem-repo")]
             Command::Push(_) => "push",
-            #[cfg(feature = "mem-repo")]
             Command::BranchReset(_) => "branch-reset",
-            #[cfg(feature = "mem-repo")]
             Command::Mem { .. } => "mem",
-            #[cfg(feature = "mem-repo")]
             Command::MemRepo { .. } => "mem-repo",
-            #[cfg(feature = "mem-repo")]
             Command::Workspace { .. } => "workspace",
             Command::Schema(_) => "schema",
             Command::Projection(_) => "projection",

@@ -1,11 +1,8 @@
-#![cfg(feature = "mem-repo")]
 //! Wire-shape characterization for the MCP tool surface.
 //!
 //! This suite pins the bytes the server emits in `result.content[]` and
-//! `result.structured_content` for representative tool calls. Both server
-//! implementations live in this crate, gated by `mem-repo`: each
-//! flavour's pin runs against its own (`FilesystemMcpServer` for the
-//! lean build, `McpServer` for the full build).
+//! `result.structured_content` for representative tool calls against
+//! `McpServer`, the one server this crate ships.
 //!
 //! Harness drives the real `memstead-mcp` binary over stdio — same path agents
 //! exercise — so the bytes captured here are the agent-visible contract.
@@ -255,20 +252,8 @@ impl Drop for WireHarness {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Lean-flavor pins (FilesystemMcpServer)
-// ---------------------------------------------------------------------------
-//
-// Run with `cargo nextest run --no-default-features -p memstead-mcp wire_shape`.
-
 /// Shared assertion shape: every error envelope must carry `isError=true`,
-/// the expected typed `code`, and a `message` matching the per-flavor
-/// pinned text. Pre-extraction the two server files own independent
-/// mappers (`FilesystemMcpServer::engine_op_error` vs
-/// `McpServer::engine_err_unified`) — message text DRIFTS between them
-/// today (see `lean_memstead_entity_*` vs `full_memstead_entity_*`). The
-/// wire-byte-identity contract is *per-flavor*, not inter-flavor, so
-/// each pin records its own server's current bytes.
+/// the expected typed `code`, and a `message` matching the pinned text.
 fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: &str) {
     let is_error = result
         .get("isError")
@@ -298,7 +283,7 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
 }
 
 // ---------------------------------------------------------------------------
-// Full-flavor pins (McpServer)
+// Pins (McpServer)
 // ---------------------------------------------------------------------------
 
 /// Full pin: same input as the lean test, intentionally separate

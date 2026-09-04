@@ -392,14 +392,14 @@ fn validate_entity_id(id: &str) -> Option<CallToolResult> {
 
 /// Validate the optional agent-authored `note` field on a mutation call.
 /// Returns an `INVALID_INPUT` envelope when the note exceeds
-/// `memstead_engine::mem_management::NOTE_MAX_LEN` Unicode scalar values, matching the
+/// `memstead_base::mem_management::NOTE_MAX_LEN` Unicode scalar values, matching the
 /// mem-lifecycle orchestrators. Empty / absent values succeed.
 /// Whitespace-only notes are allowed at the edge (the engine side
 /// collapses them to "no body line" during commit-message assembly).
 fn validate_note(note: Option<&str>) -> Option<CallToolResult> {
     let n = note?;
-    if n.chars().count() > memstead_engine::mem_management::NOTE_MAX_LEN {
-        let max = memstead_engine::mem_management::NOTE_MAX_LEN;
+    if n.chars().count() > memstead_base::mem_management::NOTE_MAX_LEN {
+        let max = memstead_base::mem_management::NOTE_MAX_LEN;
         let msg = format!(
             "note exceeds {max} characters — shorten the agent-authored \
              provenance line to one sentence."
@@ -456,7 +456,7 @@ fn finalize_health_text(
     if chunk.is_none() && estimate_tokens(&json_text) <= budget {
         return res;
     }
-    let md = memstead_engine::health::render_health_markdown(sc);
+    let md = memstead_base::ops::health_compose::render_health_markdown(sc);
     match apply_chunking(&md, budget, chunk, &[]) {
         Ok(text) => {
             res.content = vec![rmcp::model::ContentBlock::text(text)];
@@ -694,8 +694,8 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
 }
 
 // Per-mem schema pin / workspace policy / cross-catalogue schema
-// lookup helpers live in `memstead_engine::overview` so the shared
-// composer (this MCP tool + the full CLI) and the rest of this server
+// lookup helpers live in `memstead_base::overview` so the shared
+// composer (this MCP tool + the CLI) and the rest of this server
 // reach the same canonical implementation. The wrappers below stay so
 // the existing ~14 call sites in this file continue to compile
 // unchanged; their bodies just forward.
@@ -705,14 +705,14 @@ fn prepend_drift_warnings_md(md: String, drift_warnings: &[WarningHint]) -> Stri
 /// engine's `MemState.schema_ref`, which always reflects the schema
 /// actually loaded — never a stale on-disk pin.
 fn mem_schema_ref_unified(engine: &memstead_base::Engine, mem_name: &str) -> Option<String> {
-    memstead_engine::overview::mem_schema_ref(engine, mem_name)
+    memstead_base::overview::mem_schema_ref(engine, mem_name)
 }
 
 fn find_schema_unified<'a>(
     engine: &'a memstead_base::Engine,
     sref: &memstead_schema::SchemaRef,
 ) -> Option<&'a std::sync::Arc<memstead_schema::Schema>> {
-    memstead_engine::overview::find_schema(engine, sref)
+    memstead_base::overview::find_schema(engine, sref)
 }
 
 /// Resolve a schema by bare name across mem-pinned, workspace, and
@@ -1852,10 +1852,10 @@ fn engine_err_unified(
 /// variants before the lifecycle variants moved off
 /// `memstead_base::EngineError`; the move is pure plumbing.
 fn full_engine_err_unified(
-    e: memstead_engine::FullEngineError,
+    e: memstead_base::FullEngineError,
     engine: &memstead_base::Engine,
 ) -> CallToolResult {
-    use memstead_engine::FullEngineError as PE;
+    use memstead_base::FullEngineError as PE;
     // The text-channel message uses the rich-prose renderer so lifecycle
     // refusals (MEM_PATH_NOT_ALLOWED, MEM_SCHEMA_NOT_ALLOWED,
     // MEM_REFERENCED_BY_POLICY) inline their full recovery payload
@@ -2427,7 +2427,7 @@ impl McpServer {
     }
 
     /// Unified-engine path for [`Self::memstead_overview`]. Body lifted to
-    /// [`memstead_engine::overview::compose_overview`] so the full CLI
+    /// [`memstead_base::overview::compose_overview`] so the full CLI
     /// surfaces the same rich-content output via the same composer.
     /// This wrapper handles drift-warning collection, error-envelope
     /// mapping, and response-cap chunking; the composer produces the
@@ -2448,25 +2448,25 @@ impl McpServer {
         let _ = engine.take_mem_changed_notices(); // leak-proof drain; see memstead_entity
 
         let include = p.include.clone().unwrap_or_default();
-        let args = memstead_engine::overview::OverviewArgs {
+        let args = memstead_base::overview::OverviewArgs {
             include: &include,
             mem: p.mem.as_deref(),
             rebuild: p.rebuild.unwrap_or(false) && p.chunk.unwrap_or(1) <= 1,
             token_budget: p
                 .token_budget
-                .unwrap_or(memstead_engine::overview::DEFAULT_OVERVIEW_BUDGET),
+                .unwrap_or(memstead_base::overview::DEFAULT_OVERVIEW_BUDGET),
             operator_mode: self.operator_mode,
             // The full mem-repo MCP surface carries the mem-lifecycle tools.
             suppress_lifecycle: false,
         };
 
-        let out = match memstead_engine::overview::compose_overview(
+        let out = match memstead_base::overview::compose_overview(
             &mut engine,
             args,
-            memstead_engine::overview::Surface::Mcp,
+            memstead_base::overview::Surface::Mcp,
         ) {
             Ok(o) => o,
-            Err(memstead_engine::overview::ComposeOverviewError::InvalidIncludeKeySchemaTypes) => {
+            Err(memstead_base::overview::ComposeOverviewError::InvalidIncludeKeySchemaTypes) => {
                 let msg = "include key 'schema_types' was removed; \
                            call memstead_schema(name=...) for full schema bodies."
                     .to_string();
@@ -2480,11 +2480,11 @@ impl McpServer {
                     ),
                 );
             }
-            Err(memstead_engine::overview::ComposeOverviewError::MemQuarantined(name)) => {
+            Err(memstead_base::overview::ComposeOverviewError::MemQuarantined(name)) => {
                 let err = engine.unknown_mem_error(&name);
                 return engine_err_unified(err, &engine);
             }
-            Err(memstead_engine::overview::ComposeOverviewError::UnknownMem {
+            Err(memstead_base::overview::ComposeOverviewError::UnknownMem {
                 name,
                 writable_mems,
             }) => {
@@ -3817,7 +3817,7 @@ impl McpServer {
         let mem_changed_notices = engine.take_mem_changed_notices();
 
         let include = p.include.unwrap_or_default();
-        let args = memstead_engine::health::HealthArgs {
+        let args = memstead_base::ops::health_compose::HealthArgs {
             mem: p.mem.as_deref(),
             include: &include,
             limit: p.limit,
@@ -3835,23 +3835,23 @@ impl McpServer {
                 (k.clone(), json)
             })
             .collect();
-        let config = memstead_engine::health::HealthConfig {
+        let config = memstead_base::ops::health_compose::HealthConfig {
             mutations: serde_json::json!({ "require_notes": self.mutations.require_notes }),
             plugin: serde_json::Value::Object(plugin_json),
         };
 
-        let result = match memstead_engine::health::compose_health(
+        let result = match memstead_base::ops::health_compose::compose_health(
             &mut engine,
             &args,
             drift_warnings,
             &config,
         ) {
             Ok(v) => v,
-            Err(memstead_engine::health::ComposeHealthError::MemQuarantined(name)) => {
+            Err(memstead_base::ops::health_compose::ComposeHealthError::MemQuarantined(name)) => {
                 let err = engine.unknown_mem_error(&name);
                 return engine_err_unified(err, &engine);
             }
-            Err(memstead_engine::health::ComposeHealthError::UnknownMem {
+            Err(memstead_base::ops::health_compose::ComposeHealthError::UnknownMem {
                 name,
                 writable_mems,
             }) => {
@@ -3872,7 +3872,7 @@ impl McpServer {
                     ),
                 );
             }
-            Err(memstead_engine::health::ComposeHealthError::InvalidTargetSchema {
+            Err(memstead_base::ops::health_compose::ComposeHealthError::InvalidTargetSchema {
                 raw,
                 reason,
             }) => {
@@ -3887,7 +3887,7 @@ impl McpServer {
                     ),
                 );
             }
-            Err(memstead_engine::health::ComposeHealthError::Engine(e)) => {
+            Err(memstead_base::ops::health_compose::ComposeHealthError::Engine(e)) => {
                 return engine_err_unified(e, &engine);
             }
         };
@@ -4366,7 +4366,7 @@ impl McpServer {
         // Hierarchical paths are first-class. The separate `path`
         // wire-shape field retired; `name` carries the full
         // identifier (`team/sub-mem`) verbatim.
-        let params = memstead_engine::mem_management::MemCreateParams {
+        let params = memstead_base::mem_management::MemCreateParams {
             name: p.name,
             location: std::path::PathBuf::from(p.location),
             schema_ref,
@@ -4390,7 +4390,7 @@ impl McpServer {
             storage: None,
         };
 
-        match memstead_engine::mem_management::create_mem(&mut engine, params) {
+        match memstead_base::mem_management::create_mem(&mut engine, params) {
             Ok(response) => {
                 // Apply curation at creation — same setters, same
                 // validation, same storage as the CLI verbs. Each is
@@ -4493,7 +4493,7 @@ impl McpServer {
         // `delete_files`; the wrapper hardcodes `true` so the engine
         // runs both refusal gates (`MEM_REFERENCED_BY_POLICY`,
         // `MEM_HAS_INCOMING_REFS`) and the policy scrub on success.
-        let params = memstead_engine::mem_management::MemDeleteParams {
+        let params = memstead_base::mem_management::MemDeleteParams {
             name: p.name,
             delete_files: true,
             note: p.note,
@@ -4505,7 +4505,7 @@ impl McpServer {
         // can still anchor to the now-departed mem's schema.
         let mem_for_anchor = mem_schema_ref_unified(&engine, &params.name);
 
-        match memstead_engine::mem_management::delete_mem(&mut engine, params) {
+        match memstead_base::mem_management::delete_mem(&mut engine, params) {
             Ok(response) => {
                 let body = serde_json::json!({
                     "name": response.name,
@@ -6027,20 +6027,24 @@ mod tests {
         .unwrap();
 
         let include = vec!["missing_fields".to_string()];
-        let args = memstead_engine::health::HealthArgs {
+        let args = memstead_base::ops::health_compose::HealthArgs {
             mem: None,
             include: &include,
             limit: None,
             target_schema: None,
             include_config: false,
         };
-        let config = memstead_engine::health::HealthConfig {
+        let config = memstead_base::ops::health_compose::HealthConfig {
             mutations: serde_json::Value::Null,
             plugin: serde_json::Value::Object(Default::default()),
         };
-        let payload =
-            memstead_engine::health::compose_health(&mut engine, &args, Vec::new(), &config)
-                .expect("compose_health succeeds");
+        let payload = memstead_base::ops::health_compose::compose_health(
+            &mut engine,
+            &args,
+            Vec::new(),
+            &config,
+        )
+        .expect("compose_health succeeds");
 
         let entries = payload["missing_fields"]
             .as_array()
@@ -6123,18 +6127,18 @@ mod tests {
             let mut engine = unified.lock().unwrap();
             let drift = engine.reload_if_stale(None);
             let _ = engine.take_mem_changed_notices();
-            let args = memstead_engine::health::HealthArgs {
+            let args = memstead_base::ops::health_compose::HealthArgs {
                 mem: None,
                 include: &include,
                 limit: None,
                 target_schema: None,
                 include_config: false,
             };
-            let config = memstead_engine::health::HealthConfig {
+            let config = memstead_base::ops::health_compose::HealthConfig {
                 mutations: serde_json::Value::Null,
                 plugin: serde_json::Value::Object(Default::default()),
             };
-            memstead_engine::health::compose_health(&mut engine, &args, drift, &config)
+            memstead_base::ops::health_compose::compose_health(&mut engine, &args, drift, &config)
                 .expect("compose_health succeeds")
         };
 
@@ -13955,7 +13959,7 @@ write_rules: []
     #[test]
     fn memstead_mem_create_path_not_allowed_emits_structured_envelope() {
         // Empty allowlist surfaces MEM_PATH_NOT_ALLOWED through
-        // `memstead_engine::mem_management::create_mem`'s pre-check.
+        // `memstead_base::mem_management::create_mem`'s pre-check.
         let tmp = TempDir::new().unwrap();
         // Empty allowlist.
         let settings = memstead_git_branch::test_support::auto_seed_with_settings(
@@ -15292,7 +15296,7 @@ write_rules: []
             let mut sections = IndexMap::new();
             sections.insert("identity".into(), "c".into());
             sections.insert("purpose".into(), "d".into());
-            let oversized: String = "x".repeat(memstead_engine::mem_management::NOTE_MAX_LEN + 1);
+            let oversized: String = "x".repeat(memstead_base::mem_management::NOTE_MAX_LEN + 1);
             let result = server.memstead_create(Parameters(CreateParams {
                 anchors: None,
                 title: "Oversized Note".into(),

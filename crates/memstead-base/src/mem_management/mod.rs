@@ -16,14 +16,15 @@
 //! the registry tree without separate path-glob plumbing. Flat-layout
 //! mems pass their leaf name as the candidate.
 //!
-//! **Boundary note.** The lifecycle orchestrators (`create_mem`,
-//! `delete_mem`, their params/responses, the shared `NOTE_MAX_LEN`
-//! cap, the `validate_mem_path` helper) live in
-//! [`memstead_engine::mem_management`]. The matcher primitives stay
-//! here because the lean engine's
+//! The lifecycle orchestrators (`create_mem`, `delete_mem`, their
+//! params/responses, the shared `NOTE_MAX_LEN` cap, the
+//! `validate_mem_path` helper) live in the [`lifecycle`] submodule and
+//! are re-exported here; the matcher primitives below are what
 //! [`crate::Engine::cross_mem_link_allowed`] synthesises a
-//! [`CreateRuleSet`] on multi-folder workspaces — they are a lean
-//! policy primitive shared by both flavors.
+//! [`CreateRuleSet`] from on multi-folder workspaces.
+
+pub mod lifecycle;
+pub use lifecycle::*;
 
 use std::path::Path;
 

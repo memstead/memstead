@@ -15,8 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 memstead-base = { workspace = true }
-memstead-cli = { workspace = true, features = ["mem-repo"] }
-memstead-mcp = { workspace = true, features = ["mem-repo"] }
+memstead-cli.workspace = true
+memstead-mcp.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap-markdown = "0.1.5"

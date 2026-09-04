@@ -236,31 +236,18 @@ pub mod type_cmd;
 pub mod unpublish;
 pub mod update;
 
-// Multi-mem / mem-repo subcommands — compiled into the full
-// `memstead` binary (default features); absent from the lean
-// `--no-default-features` build, which has no git-branch backend.
-#[cfg(feature = "mem-repo")]
+// Multi-mem / mem-repo subcommands. On a folder-only workspace the
+// shape-dependent ones refuse with `UNSUPPORTED_WORKSPACE_SHAPE`.
 pub mod batch;
-#[cfg(feature = "mem-repo")]
 pub mod batch_create;
-#[cfg(feature = "mem-repo")]
 pub mod batch_relate;
-#[cfg(feature = "mem-repo")]
 pub mod batch_update;
-#[cfg(feature = "mem-repo")]
 pub mod branch_reset;
-#[cfg(feature = "mem-repo")]
 pub mod install;
-#[cfg(feature = "mem-repo")]
 pub mod mem;
-#[cfg(feature = "mem-repo")]
 pub mod mem_repo;
-#[cfg(feature = "mem-repo")]
 pub mod recover;
-#[cfg(feature = "mem-repo")]
 pub mod transport;
-#[cfg(feature = "mem-repo")]
 pub mod uninstall;
 pub mod verify_anchors;
-#[cfg(feature = "mem-repo")]
 pub mod workspace;

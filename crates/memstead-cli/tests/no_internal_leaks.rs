@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Regression test: recoverable CLI errors never leak `code: "INTERNAL"`.
 //!
 //! The structural fix (non-optional `CliError.code` and explicit `code`

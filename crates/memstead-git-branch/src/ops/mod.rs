@@ -5,11 +5,8 @@
 pub use memstead_base::ops::*;
 
 pub mod agent_notes;
-#[cfg(feature = "git-object-storage")]
 pub mod branch_reset;
 pub mod changes;
-#[cfg(feature = "git-object-storage")]
 pub mod diff;
 pub mod export;
-#[cfg(feature = "git-object-storage")]
 pub mod transport;

@@ -30,7 +30,7 @@ use memstead_git_branch::mem_repo_config::branch_ref_for_mem_at_gitdir;
 use crate::CliError;
 use crate::output::{ExitKind, print_json};
 use crate::setup::{CliContext, find_workspace_root, workspace_not_initialised_error};
-use memstead_engine::workspace_config_edit::{
+use memstead_base::workspace_config_edit::{
     self, CrossLinkTarget, WorkspaceEditError, WorkspaceEditWarning,
 };
 

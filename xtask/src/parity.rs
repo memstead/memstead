@@ -39,48 +39,15 @@ struct Operation {
 }
 
 pub struct Inputs {
-    pub mcp_lean: Vec<String>,
-    pub mcp_pro: Vec<String>,
-    pub cli_lean: Vec<String>,
-    pub cli_pro: Vec<String>,
+    pub mcp_tools: Vec<String>,
+    pub cli_commands: Vec<String>,
     pub wasm_methods: Vec<String>,
 }
 
-/// Subcommands compiled only into the full `memstead` build (the
-/// `mem-repo` feature). `xtask` links `memstead-cli` with that
-/// feature on, so `Cli::command()` yields the full set; the lean
-/// surface is that set minus these. Kept in sync with the
-/// `#[cfg(feature = "mem-repo")]` variants in
-/// `memstead-cli/src/cli.rs`.
-const CLI_MEM_REPO_ONLY: &[&str] = &[
-    "install",
-    "batch-update",
-    "recover",
-    "mem",
-    "mem-repo",
-    "workspace",
-    "fetch",
-    "pull",
-    "push",
-    "branch-reset",
-];
-
 pub fn collect_inputs(wasm_methods: Vec<String>) -> Inputs {
-    let (mcp_lean, mcp_pro) = mcp::tool_names();
-    // One CLI crate now. `xtask` links it with `mem-repo` on, so
-    // `Cli::command()` is the full surface; the lean surface drops the
-    // mem-repo-only subcommands.
-    let cli_pro = subcommand_names(&memstead_cli::cli::Cli::command());
-    let cli_lean: Vec<String> = cli_pro
-        .iter()
-        .filter(|n| !CLI_MEM_REPO_ONLY.contains(&n.as_str()))
-        .cloned()
-        .collect();
     Inputs {
-        mcp_lean,
-        mcp_pro,
-        cli_lean,
-        cli_pro,
+        mcp_tools: mcp::tool_names(),
+        cli_commands: subcommand_names(&memstead_cli::cli::Cli::command()),
         wasm_methods,
     }
 }
@@ -103,10 +70,8 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
          own publication layer and not in this matrix.\n\n",
     );
 
-    let mcp_lean_set: BTreeSet<&str> = inputs.mcp_lean.iter().map(String::as_str).collect();
-    let mcp_pro_set: BTreeSet<&str> = inputs.mcp_pro.iter().map(String::as_str).collect();
-    let cli_lean_set: BTreeSet<&str> = inputs.cli_lean.iter().map(String::as_str).collect();
-    let cli_pro_set: BTreeSet<&str> = inputs.cli_pro.iter().map(String::as_str).collect();
+    let mcp_set: BTreeSet<&str> = inputs.mcp_tools.iter().map(String::as_str).collect();
+    let cli_set: BTreeSet<&str> = inputs.cli_commands.iter().map(String::as_str).collect();
     let wasm_set: BTreeSet<&str> = inputs.wasm_methods.iter().map(String::as_str).collect();
 
     out.push_str("## Matrix\n\n");
@@ -117,10 +82,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
             Some(name) => format!(
                 "`{}`{}",
                 name,
-                flavour_suffix(
-                    mcp_lean_set.contains(name.as_str()),
-                    mcp_pro_set.contains(name.as_str()),
-                ),
+                presence_suffix(mcp_set.contains(name.as_str())),
             ),
             None => "—".to_string(),
         };
@@ -128,10 +90,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
             Some(name) => format!(
                 "`{}`{}",
                 name,
-                flavour_suffix(
-                    cli_lean_set.contains(name.as_str()),
-                    cli_pro_set.contains(name.as_str()),
-                ),
+                presence_suffix(cli_set.contains(name.as_str())),
             ),
             None => "—".to_string(),
         };
@@ -183,21 +142,15 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         .filter_map(|o| o.wasm.as_deref())
         .collect();
 
-    let unaligned_mcp: Vec<&str> = mcp_pro_set
+    let unaligned_mcp: Vec<&str> = mcp_set
         .iter()
-        .chain(mcp_lean_set.iter())
         .copied()
         .filter(|name| !claimed_mcp.contains(name))
-        .collect::<BTreeSet<&str>>()
-        .into_iter()
         .collect();
-    let unaligned_cli: Vec<&str> = cli_pro_set
+    let unaligned_cli: Vec<&str> = cli_set
         .iter()
-        .chain(cli_lean_set.iter())
         .copied()
         .filter(|name| !claimed_cli.contains(name))
-        .collect::<BTreeSet<&str>>()
-        .into_iter()
         .collect();
     let unaligned_wasm: Vec<&str> = wasm_set
         .iter()
@@ -225,12 +178,13 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     out
 }
 
-fn flavour_suffix(in_lean: bool, in_pro: bool) -> &'static str {
-    match (in_lean, in_pro) {
-        (true, true) => " *(lean + full)*",
-        (true, false) => " *(lean only)*",
-        (false, true) => " *(full only)*",
-        (false, false) => " *(declared but not exposed)*",
+/// A registry row naming a surface entry the live extractor did not
+/// produce is a registry defect, and the matrix says so in the cell.
+fn presence_suffix(present: bool) -> &'static str {
+    if present {
+        ""
+    } else {
+        " *(declared but not exposed)*"
     }
 }
 

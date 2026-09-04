@@ -10,41 +10,41 @@ Every public engine operation across the three programmatic surfaces (MCP, CLI, 
 
 | Operation | MCP | CLI | WASM |
 |-----------|-----|-----|------|
-| `entity-read` | `memstead_entity` *(lean + full)* | `entity` *(lean + full)* | `getEntity` |
-| `search` | `memstead_search` *(lean + full)* | `search` *(lean + full)* | `search` |
-| `list` | — | `list` *(lean + full)* | — |
-| `relations-read` | — | `relations` *(lean + full)* | — |
-| `context` | — | `context` *(lean + full)* | — |
-| `overview` | `memstead_overview` *(lean + full)* | `overview` *(lean + full)* | — |
-| `status` | — | `status` *(lean + full)* | — |
-| `schema-describe` | `memstead_schema` *(lean + full)* | `type` *(lean + full)* | — |
-| `health` | `memstead_health` *(lean + full)* | `health` *(lean + full)* | `health` |
-| `changes-since` | `memstead_changes_since` *(lean + full)* | `changes` *(lean + full)* | — |
-| `reload` | `memstead_reload` *(full only)* | `reload` *(lean + full)* | — |
-| `fetch` | — | `fetch` *(full only)* | — |
-| `pull` | — | `pull` *(full only)* | — |
-| `push` | — | `push` *(full only)* | — |
-| `branch-reset` | — | `branch-reset` *(full only)* | — |
-| `create` | `memstead_create` *(lean + full)* | `create` *(lean + full)* | — |
-| `update` | `memstead_update` *(lean + full)* | `update` *(lean + full)* | — |
-| `relate` | `memstead_relate` *(lean + full)* | `relate` *(lean + full)* | — |
-| `delete` | `memstead_delete` *(lean + full)* | `delete` *(lean + full)* | — |
-| `rename` | `memstead_rename` *(lean + full)* | `rename` *(lean + full)* | — |
-| `mem-create` | `memstead_mem_create` *(full only)* | `mem` *(full only)* | — |
-| `mem-delete` | `memstead_mem_delete` *(full only)* | `mem` *(full only)* | — |
-| `mem-set-version` | `memstead_mem_set_version` *(full only)* | `mem` *(full only)* | — |
-| `workspace-allow-create` † | — | `workspace` *(full only)* | — |
-| `workspace-revoke-create` † | — | `workspace` *(full only)* | — |
-| `workspace-allow-delete` † | — | `workspace` *(full only)* | — |
-| `workspace-revoke-delete` † | — | `workspace` *(full only)* | — |
-| `workspace-grant-cross-link` † | — | `workspace` *(full only)* | — |
-| `workspace-revoke-cross-link` † | — | `workspace` *(full only)* | — |
-| `projection-brief` | — | `projection` *(lean + full)* | — |
-| `projection-init` | — | `projection` *(lean + full)* | — |
-| `projection-migrate` | — | `projection` *(lean + full)* | — |
-| `projection-advance` | — | `projection` *(lean + full)* | — |
-| `projection-enable` | — | `projection` *(lean + full)* | — |
-| `parse-recovery` | — | `recover` *(full only)* | — |
+| `entity-read` | `memstead_entity` | `entity` | `getEntity` |
+| `search` | `memstead_search` | `search` | `search` |
+| `list` | — | `list` | — |
+| `relations-read` | — | `relations` | — |
+| `context` | — | `context` | — |
+| `overview` | `memstead_overview` | `overview` | — |
+| `status` | — | `status` | — |
+| `schema-describe` | `memstead_schema` | `type` | — |
+| `health` | `memstead_health` | `health` | `health` |
+| `changes-since` | `memstead_changes_since` | `changes` | — |
+| `reload` | `memstead_reload` | `reload` | — |
+| `fetch` | — | `fetch` | — |
+| `pull` | — | `pull` | — |
+| `push` | — | `push` | — |
+| `branch-reset` | — | `branch-reset` | — |
+| `create` | `memstead_create` | `create` | — |
+| `update` | `memstead_update` | `update` | — |
+| `relate` | `memstead_relate` | `relate` | — |
+| `delete` | `memstead_delete` | `delete` | — |
+| `rename` | `memstead_rename` | `rename` | — |
+| `mem-create` | `memstead_mem_create` | `mem` | — |
+| `mem-delete` | `memstead_mem_delete` | `mem` | — |
+| `mem-set-version` | `memstead_mem_set_version` | `mem` | — |
+| `workspace-allow-create` † | — | `workspace` | — |
+| `workspace-revoke-create` † | — | `workspace` | — |
+| `workspace-allow-delete` † | — | `workspace` | — |
+| `workspace-revoke-delete` † | — | `workspace` | — |
+| `workspace-grant-cross-link` † | — | `workspace` | — |
+| `workspace-revoke-cross-link` † | — | `workspace` | — |
+| `projection-brief` | — | `projection` | — |
+| `projection-init` | — | `projection` | — |
+| `projection-migrate` | — | `projection` | — |
+| `projection-advance` | — | `projection` | — |
+| `projection-enable` | — | `projection` | — |
+| `parse-recovery` | — | `recover` | — |
 | `agent-notes` | — | — | — |
 | `mem-head-sha` | — | — | — |
 | `from-snapshot` | — | — | `fromSnapshot` |

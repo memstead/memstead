@@ -62,7 +62,6 @@ pub enum Command {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => dispatch(ctx, engine, args),
         CliEngine::Filesystem(engine) => dispatch(ctx, engine, args),
     }

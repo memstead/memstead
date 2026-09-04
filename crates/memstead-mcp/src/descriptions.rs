@@ -105,65 +105,6 @@ pub const FULL: &[(&str, &str)] = &[
     ),
 ];
 
-pub const FILESYSTEM: &[(&str, &str)] = &[
-    (
-        "memstead_changes_since",
-        include_str!("../descriptions/filesystem/memstead_changes_since.md"),
-    ),
-    (
-        "memstead_check",
-        include_str!("../descriptions/filesystem/memstead_check.md"),
-    ),
-    (
-        "memstead_create",
-        include_str!("../descriptions/filesystem/memstead_create.md"),
-    ),
-    (
-        "memstead_delete",
-        include_str!("../descriptions/filesystem/memstead_delete.md"),
-    ),
-    (
-        "memstead_diff",
-        include_str!("../descriptions/filesystem/memstead_diff.md"),
-    ),
-    (
-        "memstead_entity",
-        include_str!("../descriptions/filesystem/memstead_entity.md"),
-    ),
-    (
-        "memstead_health",
-        include_str!("../descriptions/filesystem/memstead_health.md"),
-    ),
-    (
-        "memstead_overview",
-        include_str!("../descriptions/filesystem/memstead_overview.md"),
-    ),
-    (
-        "memstead_relate",
-        include_str!("../descriptions/filesystem/memstead_relate.md"),
-    ),
-    (
-        "memstead_rename",
-        include_str!("../descriptions/filesystem/memstead_rename.md"),
-    ),
-    (
-        "memstead_retype",
-        include_str!("../descriptions/filesystem/memstead_retype.md"),
-    ),
-    (
-        "memstead_schema",
-        include_str!("../descriptions/filesystem/memstead_schema.md"),
-    ),
-    (
-        "memstead_search",
-        include_str!("../descriptions/filesystem/memstead_search.md"),
-    ),
-    (
-        "memstead_update",
-        include_str!("../descriptions/filesystem/memstead_update.md"),
-    ),
-];
-
 /// The served text for one tool: the file's bytes without its final newline.
 pub fn text(table: &[(&'static str, &'static str)], name: &str) -> Option<&'static str> {
     table

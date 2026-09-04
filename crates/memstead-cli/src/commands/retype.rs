@@ -113,7 +113,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let section_map = parse_section_map(&args.section_map)?;
 
     let outcome = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
             // The hash preflight reads the entity the verb will act on,
             // so a bare slug has to be resolved through the engine's one

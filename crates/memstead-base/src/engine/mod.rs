@@ -2,12 +2,9 @@
 //!
 //! **One [`Engine`] type, three storage backends**: the engine sits
 //! above [`MemBackend`] and routes reads / writes to the backend
-//! named by each mount's mem. The MCP filesystem-mem server
-//! (`memstead_mcp::filesystem_server::FilesystemMcpServer`) and every CLI
-//! lean subcommand reach the
-//! engine through [`Engine::from_workspace_root`] (lean: folder +
-//! archive backends) or `memstead_git_branch::engine_from_workspace_root`
-//! (full: adds git-branch).
+//! named by each mount's mem. Consumers reach the engine through
+//! [`Engine::from_workspace_root`] (folder + archive backends) or
+//! `memstead_git_branch::engine_from_workspace_root` (adds git-branch).
 //!
 //! ## Routing
 //!
@@ -622,8 +619,8 @@ pub type GitBranchBranchResetFn = fn(
 /// `__MEMSTEAD:mems/<branch_full_path>/config.json` blob in one
 /// ref-edit transaction (the same call the
 /// `MemBackend::delete_artifacts` impl wraps for delete-files
-/// flows). Surfaces as a function pointer so `memstead-engine` can
-/// drive a prune against an unmounted gitdir without depending on
+/// flows). Surfaces as a function pointer so `crate::mem_management`
+/// can drive a prune against an unmounted gitdir without depending on
 /// `memstead-git-branch`.
 pub type GitBranchPruneResidueFn =
     fn(gitdir: &Path, branch_full_path: &str) -> Result<(), BackendError>;

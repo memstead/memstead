@@ -13,7 +13,6 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 
-#[cfg(feature = "git-object-storage")]
 use memstead_base::ops::MemExportBytes;
 use memstead_schema::{
     ARCHIVE_ANCHORS_PATH, ARCHIVE_CONFIG_PATH, ARCHIVE_SCHEMA_PREFIX, MemConfig, TypeDefinition,
@@ -24,7 +23,6 @@ use zip::{CompressionMethod, DateTime, write::SimpleFileOptions};
 use super::{ExportResult, MemExportResult};
 use crate::entity::generator::generate_markdown;
 use crate::entity::writer::write_entity;
-#[cfg(feature = "git-object-storage")]
 use crate::storage::git_tree::{BranchReadError, read_branch_blobs};
 use crate::store::Store;
 use crate::validator::canonical::canonical_json;
@@ -146,7 +144,6 @@ pub fn export_entity(
 // gix-bound `export_mem_from_branch` (below) stays here.
 pub use memstead_base::ops::export::{MemExportError, export_mem};
 
-#[cfg(feature = "git-object-storage")]
 fn branch_read_into_mem_export(e: BranchReadError) -> MemExportError {
     MemExportError::BranchRead(e.to_string())
 }
@@ -169,7 +166,6 @@ fn branch_read_into_mem_export(e: BranchReadError) -> MemExportError {
 /// falling back to the disk/builtin chain ([`collect_schema_source`]
 /// over `workspace_root` + `workspace_schemas_dir`) for builtins and
 /// pre-ref layouts.
-#[cfg(feature = "git-object-storage")]
 #[allow(clippy::too_many_arguments)]
 pub fn export_mem_from_branch(
     mem_repo_gitdir: &Path,
@@ -216,7 +212,6 @@ pub fn export_mem_from_branch(
 /// `memstead schema install` writes on the git-branch backend. Returns
 /// `None` when the branch, the package subtree, or its `schema.yaml`
 /// is absent, so the caller falls through to the disk/builtin chain.
-#[cfg(feature = "git-object-storage")]
 pub(crate) fn schema_files_from_memstead_ref(
     mem_repo_gitdir: &Path,
     schema_ref: &memstead_schema::SchemaRef,
@@ -272,7 +267,6 @@ fn archive_identity(mem_name: &str) -> &str {
     mem_name.rsplit('/').next().unwrap_or(mem_name)
 }
 
-#[cfg(feature = "git-object-storage")]
 #[allow(clippy::too_many_arguments)]
 pub fn export_mem_from_branch_to_bytes(
     mem_repo_gitdir: &Path,
@@ -746,7 +740,6 @@ mod tests {
 
     // ---- mem archive export from git-object branch ----------------------
 
-    #[cfg(feature = "git-object-storage")]
     mod git_object_export {
         use super::*;
         use crate::storage::MemWriter;

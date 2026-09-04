@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! `memstead health --strict` on the configuration axes widened on
 //! 2026-08-23: a strict run exited 0 on a dogfood workspace with three
 //! schema-pin mismatches, two rotted schema packages, two mounts whose

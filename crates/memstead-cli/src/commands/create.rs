@@ -156,7 +156,6 @@ struct CreatePayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct RelationPayload {
     /// Far end of the edge; the near end is the entity being created.
     target: String,
@@ -283,7 +282,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let note = args.note.clone().or_else(|| payload.note.clone());
 
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
             let mem = match payload.mem {
                 Some(v) => v,
@@ -540,7 +538,6 @@ fn parse_relation_list(items: &[String]) -> anyhow::Result<Vec<RelationPayload>>
     Ok(out)
 }
 
-#[cfg(feature = "mem-repo")]
 fn first_writable_mem(engine: &memstead_base::Engine) -> anyhow::Result<String> {
     // Resolve through the shared stable-default contract so the CLI and
     // MCP omitted-`mem` paths always agree: the first writable mount in

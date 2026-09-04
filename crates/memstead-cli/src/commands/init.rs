@@ -42,13 +42,9 @@ use crate::setup::CliContext;
 /// prints it: `memstead mem init` is the full (mem-repo) verb; the
 /// lean binary has no `mem` subcommand group, so it points outside
 /// the existing workspace instead.
-#[cfg(feature = "mem-repo")]
 const NESTED_WORKSPACE_HINT: &str = "If you meant to add a mem inside the existing \
      workspace, run `memstead mem init` instead; for a separate graph, initialise in a \
      folder outside the existing workspace.";
-#[cfg(not(feature = "mem-repo"))]
-const NESTED_WORKSPACE_HINT: &str = "Initialise in a folder outside the existing \
-     workspace instead.";
 
 /// `memstead init` arguments.
 #[derive(Args, Debug)]

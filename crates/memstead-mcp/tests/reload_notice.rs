@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Engine-level reload-before-operation test on a real git-branch
 //! mem. Two `Engine` instances share one mem-repo gitdir (the
 //! coherence plan's framing scenario: two sessions on one mem). A

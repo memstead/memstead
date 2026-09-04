@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead workspace dump` ships only in the full build.
 
 //! Integration tests for `memstead workspace dump`.

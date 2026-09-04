@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Default build produces the full `memstead` binary (multi-mem, git-backed); `--no-default-features` builds the lean folder-only surface."
+description = "Command-line interface for Memstead — query and mutate typed entity graphs from the shell. Builds the `memstead` binary (multi-mem, git-backed; folder workspaces served by the same engine)."
 readme = "README.md"
 keywords = ["agent-memory", "cli", "knowledge-graph", "markdown", "agents"]
 categories = ["command-line-utilities"]
@@ -17,11 +17,10 @@ path = "src/main.rs"
 
 [dependencies]
 memstead-base.workspace = true
-memstead-engine = { workspace = true, optional = true }
-memstead-git-branch = { workspace = true, optional = true }
+memstead-git-branch.workspace = true
 memstead-schema.workspace = true
 clap.workspace = true
-gix = { workspace = true, optional = true }
+gix.workspace = true
 indexmap.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -48,19 +47,6 @@ predicates.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 zip.workspace = true
-
-[features]
-# `mem-repo` is the default: it pulls in the git-branch backend
-# (`memstead-git-branch` + `gix`) and the full engine extension
-# (`memstead-engine`), compiling the cfg-gated `CliEngine::MemRepo`
-# variant plus the multi-mem / mem-repo lifecycle subcommands —
-# yielding the full `memstead` binary. `--no-default-features` drops all
-# of that, producing the lean folder-only surface whose `cli_engine()`
-# rejects mem-repo workspaces with an actionable error. The lean build
-# is a CI / wasm-adjacent config and dependency-hygiene guard, not a
-# shipped product.
-default = ["mem-repo"]
-mem-repo = ["dep:memstead-git-branch", "dep:gix", "dep:memstead-engine"]
 
 [lints]
 workspace = true

@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! The `open_questions` health axis (agent-trust plan 11): a composed
 //! per-mem worklist of what the holding does not know — stubs,
 //! recheck/unresolvable anchors, unsatisfied constraints, dangling

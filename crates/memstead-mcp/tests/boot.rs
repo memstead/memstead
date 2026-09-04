@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Boot smoke test for the full MCP binary (`memstead-mcp`).
 //!
 //! Spawns the binary as a subprocess against a tempdir workspace
@@ -7,8 +6,9 @@
 //! Sends one `initialize` JSON-RPC request over stdin, reads the
 //! reply over stdout, asserts the envelope is well-formed.
 //!
-//! The lean equivalent (testing the --no-default-features build) lives in
-//! `memstead-mcp/tests/boot.rs`.
+//! The folder-only shape (`memstead quickstart` output: the same marker,
+//! no `mem-repo/.git/`) boots through the same binary and is covered
+//! below alongside the mem-repo shape.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -229,6 +229,100 @@ fn full_binary_boot_line_names_the_shape_it_opened() {
     assert!(
         !stderr.contains("mem-repo workspace at"),
         "the mem-repo spelling must never name a filesystem-mem workspace\n--- stderr ---\n{stderr}"
+    );
+}
+
+/// The folder-only workspace shape (`memstead quickstart` output: the
+/// marker files, no `mem-repo/.git/`) boots the one server, and that
+/// server answers `initialize`, lists the full tool roster, and answers
+/// `memstead_overview`. There is no second, smaller server for this
+/// shape: the roster a folder-only session sees is the router's roster.
+#[test]
+fn full_binary_serves_folder_only_workspace_with_the_full_roster() {
+    let tmp = TempDir::new().unwrap();
+    seed_workspace(tmp.path());
+
+    let mut child = Command::new(memstead_mcp_bin())
+        .current_dir(tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn memstead-mcp — confirm the binary built before running tests");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    writeln!(stdin, "{}", initialize_request()).unwrap();
+    writeln!(
+        stdin,
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0", "method": "notifications/initialized"
+        }))
+        .unwrap()
+    )
+    .unwrap();
+    writeln!(
+        stdin,
+        "{}",
+        serde_json::to_string(&serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}
+        }))
+        .unwrap()
+    )
+    .unwrap();
+    writeln!(stdin, "{}", tools_call_request(3, "memstead_overview")).unwrap();
+    stdin.flush().unwrap();
+    drop(stdin);
+
+    let stdout = child.stdout.take().expect("child stdout");
+    let mut reader = BufReader::new(stdout);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut by_id: std::collections::BTreeMap<i64, serde_json::Value> = Default::default();
+    let mut line = String::new();
+    while by_id.len() < 3 && Instant::now() < deadline {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim())
+                    && let Some(id) = v.get("id").and_then(|v| v.as_i64())
+                {
+                    by_id.insert(id, v);
+                }
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let init = by_id
+        .get(&1)
+        .expect("initialize must be answered on a folder-only workspace");
+    assert_initialize_envelope(init);
+
+    let listed = by_id.get(&2).expect("tools/list must be answered");
+    let mut served: Vec<String> = listed["result"]["tools"]
+        .as_array()
+        .expect("tools/list result carries a `tools` array")
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    served.sort();
+    let mut expected: Vec<String> = memstead_mcp::server::McpServer::tool_router()
+        .list_all()
+        .iter()
+        .map(|t| t.name.to_string())
+        .collect();
+    expected.sort();
+    assert_eq!(
+        served, expected,
+        "a folder-only workspace must see the same tool roster as a mem-repo workspace"
+    );
+
+    let overview = by_id.get(&3).expect("memstead_overview must be answered");
+    let is_error = overview["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(
+        !is_error,
+        "memstead_overview must answer, not refuse, on a folder-only workspace: {overview}"
     );
 }
 

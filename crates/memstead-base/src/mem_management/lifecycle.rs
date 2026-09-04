@@ -1,14 +1,14 @@
-//! Mem-lifecycle orchestrator — full home for the multi-mem create
-//! and delete pipelines. The matcher primitives
-//! ([`memstead_base::CreateRuleSet`], [`memstead_base::DeleteRuleSet`],
-//! [`memstead_base::MatcherSet`]) stay in lean because the lean engine's
-//! `cross_mem_link_allowed` synthesises a [`memstead_base::CreateRuleSet`]
+//! Mem-lifecycle orchestrator: the multi-mem create and delete
+//! pipelines. The matcher primitives
+//! ([`crate::CreateRuleSet`], [`crate::DeleteRuleSet`],
+//! [`crate::MatcherSet`]) stay in lean because the lean engine's
+//! `cross_mem_link_allowed` synthesises a [`crate::CreateRuleSet`]
 //! on multi-folder workspaces. Only the lifecycle orchestrators —
 //! `create_mem`, `delete_mem`, their param/response types, the
 //! shared `NOTE_MAX_LEN` cap, and the `validate_mem_path` helper —
 //! live here.
 //!
-//! Functions take `&mut memstead_base::Engine` directly rather than going
+//! Functions take `&mut crate::Engine` directly rather than going
 //! through a `FullEngine` wrapper struct: the lean engine is a single
 //! polymorphic `Engine` parameterised by `Box<dyn MemBackend>` and
 //! already carries every state field the orchestrators need
@@ -20,14 +20,14 @@
 //! failures (`InvalidInput`, `UnknownMem`, `SchemaResolverInit`,
 //! `SchemaNotFound`, `MemNameCollision`, `Mem(_)`, `Backend(_)`)
 //! propagate verbatim through `FullEngineError::Lean(_)` via the
-//! `#[from] memstead_base::EngineError` conversion — the `?` operator on
+//! `#[from] crate::EngineError` conversion — the `?` operator on
 //! `engine.persist_state()?` and similar lean calls does the wrap
 //! automatically. The four lifecycle-only variants
 //! (`MemPathNotAllowed`, `MemReferencedByPolicy`, `MemSchemaNotAllowed`,
 //! `ConfigAlreadyExists`) are constructed as `FullEngineError::*`
-//! directly; they no longer live in `memstead_base::EngineError`.
+//! directly; they no longer live in `crate::EngineError`.
 
-use memstead_base::mem_management::{CreateRuleSet, DeleteRuleSet};
+use super::{CreateRuleSet, DeleteRuleSet};
 
 use crate::FullEngineError;
 
@@ -39,7 +39,7 @@ pub const NOTE_MAX_LEN: usize = 280;
 /// current wall clock. Used to stamp the `unregistered_at` tombstone
 /// on `memstead mem unregister`. Hand-rolled to avoid a
 /// chrono / time dependency — the codebase already calculates the
-/// date portion in `memstead_base::entity::generator` via the same
+/// date portion in `crate::entity::generator` via the same
 /// epoch-day algorithm; this adds the time-of-day suffix.
 fn now_iso_utc() -> String {
     let dur = std::time::SystemTime::now()
@@ -78,7 +78,7 @@ enum ResidueProbe {
 ///
 /// Implementation routes through the engine's installed backend
 /// factory rather than calling `memstead-git-branch` directly — that
-/// keeps `memstead-engine` decoupled from the git-branch crate (the
+/// keeps this crate decoupled from the git-branch crate (the
 /// layer-above-backend posture matches the rest of `mem_management`,
 /// which delegates backend instantiation through the same factory).
 /// `backend.read_mem_config()` for a git-branch mount lifts
@@ -90,7 +90,7 @@ enum ResidueProbe {
 /// falls through to its prior behaviour (the seed-commit step's
 /// existing `HashMismatch` is the fallback safety net).
 fn residue_probe_for_workspace(
-    engine: &memstead_base::Engine,
+    engine: &crate::Engine,
     workspace_root: Option<&std::path::Path>,
     branch_full_path: &str,
     mem_name: &str,
@@ -104,16 +104,16 @@ fn residue_probe_for_workspace(
         return ResidueProbe::None;
     }
     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
-    let probe_mount = memstead_base::workspace::Mount {
+    let probe_mount = crate::workspace::Mount {
         migration_target: None,
         mem: mem_name.to_string(),
         schema: Some(canonical_schema_ref.clone()),
-        storage: memstead_base::workspace::MountStorage::GitBranch {
+        storage: crate::workspace::MountStorage::GitBranch {
             gitdir: canonical_gitdir,
             branch: format!("refs/heads/{branch_full_path}"),
         },
-        capability: memstead_base::workspace::MountCapability::Write,
-        lifecycle: memstead_base::workspace::MountLifecycle::Eager,
+        capability: crate::workspace::MountCapability::Write,
+        lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
     };
     let factory = engine.backend_factory();
@@ -137,7 +137,7 @@ fn residue_probe_for_workspace(
 
 /// Days-since-epoch → (Y, M, D). Algorithm from
 /// http://howardhinnant.github.io/date_algorithms.html — same one
-/// `memstead_base::entity::generator::days_to_ymd` uses; replicated here
+/// `crate::entity::generator::days_to_ymd` uses; replicated here
 /// to keep the function private to the orchestrator without
 /// re-exporting from lean.
 fn days_to_ymd(days: u64) -> (u64, u64, u64) {
@@ -217,7 +217,7 @@ pub struct MemDeleteResponse {
     /// cleanup attempts. Empty when nothing surprised the operation
     /// (e.g. `delete_files: false`, or `delete_files: true` and rmdir
     /// succeeded).
-    pub warnings: Vec<memstead_base::ops::WarningHint>,
+    pub warnings: Vec<crate::ops::WarningHint>,
     /// Dangling `[cross_mem_links]` grants scrubbed from
     /// `.memstead/workspace.toml` on a destructive delete. Surfacing
     /// the scrub here gives the agent a one-round-trip view of every
@@ -235,7 +235,7 @@ pub struct MemDeleteResponse {
     /// until a same-name re-creation re-adopts them. Always empty
     /// when `detach_incoming` was `false` (the refusal fires
     /// instead).
-    pub detached_referrers: Vec<memstead_base::ReferrerInfo>,
+    pub detached_referrers: Vec<crate::ReferrerInfo>,
 }
 
 /// One scrubbed `.memstead/workspace.toml` entry surfaced on
@@ -275,7 +275,7 @@ pub struct AllowlistEntryRemoved {
 ///    allowlist match). Any failure here leaves the engine untouched
 ///    and performs zero filesystem writes.
 /// 2. Router unregister (snapshot swap via
-///    [`memstead_base::Engine::unregister_writable_mem`]). After this the
+///    [`crate::Engine::unregister_writable_mem`]). After this the
 ///    mem is no longer visible to readers. The unregister hands
 ///    back the backend handle so step 3 can drive backend-side
 ///    cleanup without re-resolving the mount.
@@ -320,25 +320,25 @@ pub struct AllowlistEntryRemoved {
 /// Hierarchical candidate composition is symmetric with
 /// `create_mem`: the router records the create-time `path` on
 /// each writable entry, and Step 2 below reads it back via
-/// [`memstead_base::MemRouterSnapshot::mem_path_for_mem`] to assemble
+/// [`crate::MemRouterSnapshot::mem_path_for_mem`] to assemble
 /// the same `<mem_path>/<name>` (or bare `<name>`) string the
 /// create-side composer matched against.
 pub fn delete_mem(
-    engine: &mut memstead_base::Engine,
+    engine: &mut crate::Engine,
     params: MemDeleteParams,
 ) -> Result<MemDeleteResponse, FullEngineError> {
     // ---- Step 0: input validation ----
     if let Some(note) = params.note.as_deref()
         && note.chars().count() > NOTE_MAX_LEN
     {
-        return Err(memstead_base::EngineError::InvalidInput(format!(
+        return Err(crate::EngineError::InvalidInput(format!(
             "note exceeds {NOTE_MAX_LEN} characters"
         ))
         .into());
     }
 
     // Populated only under `detach_incoming: true` — see Step 3a.
-    let mut detached_referrers: Vec<memstead_base::ReferrerInfo> = Vec::new();
+    let mut detached_referrers: Vec<crate::ReferrerInfo> = Vec::new();
 
     // The `MEM_HAS_INCOMING_REFS` guard (Step 3a) walks incoming edges
     // that can originate in ANY mem — a deferred (lazy, unloaded)
@@ -350,7 +350,7 @@ pub fn delete_mem(
 
     // ---- Step 1: resolve name ----
     if !engine.mem_router().is_writable(&params.name) {
-        return Err(memstead_base::EngineError::UnknownMem(params.name.clone()).into());
+        return Err(crate::EngineError::UnknownMem(params.name.clone()).into());
     }
 
     // ---- Step 2: allowlist match ----
@@ -381,9 +381,7 @@ pub fn delete_mem(
         let candidate: String = params.name.clone();
 
         let delete_rule_set = DeleteRuleSet::new(engine.settings().mem_delete_rules.clone())
-            .map_err(|e| {
-                memstead_base::EngineError::InvalidInput(format!("mem_delete_rules: {e}"))
-            })?;
+            .map_err(|e| crate::EngineError::InvalidInput(format!("mem_delete_rules: {e}")))?;
         let patterns_for_errors: Vec<String> = delete_rule_set.patterns();
 
         if delete_rule_set.is_empty() {
@@ -475,9 +473,9 @@ pub fn delete_mem(
     // The scan walks every entity in the doomed mem, collects each
     // entity's incoming edges, partitions out same-mem and ReadOnly-
     // mount referrers, and groups the remaining Write-Mem referrers
-    // by source-entity id (one [`memstead_base::ReferrerInfo`] per source,
+    // by source-entity id (one [`crate::ReferrerInfo`] per source,
     // `rel_types` aggregating every offending edge type). Same shape
-    // as entity-level `HasIncomingRefs` — see [`memstead_base::EngineError::MemHasIncomingRefs`]
+    // as entity-level `HasIncomingRefs` — see [`crate::EngineError::MemHasIncomingRefs`]
     // for the refusal-with-recovery contract. Fires regardless of
     // `delete_files` because a router-only unregister with stale edges
     // is just as broken as a storage-destruction with stale edges —
@@ -492,10 +490,8 @@ pub fn delete_mem(
         // form sorts deterministically and is what the wire envelope
         // serialises anyway.
         let store = engine.store();
-        let mut by_source: std::collections::BTreeMap<
-            String,
-            (memstead_base::EntityId, BTreeSet<String>),
-        > = std::collections::BTreeMap::new();
+        let mut by_source: std::collections::BTreeMap<String, (crate::EntityId, BTreeSet<String>)> =
+            std::collections::BTreeMap::new();
         let doomed_mem = params.name.as_str();
         for entity in store.all_entities() {
             if entity.mem != doomed_mem {
@@ -525,9 +521,9 @@ pub fn delete_mem(
         }
 
         if !by_source.is_empty() {
-            let referrers: Vec<memstead_base::ReferrerInfo> = by_source
+            let referrers: Vec<crate::ReferrerInfo> = by_source
                 .into_values()
-                .map(|(from, rel_types)| memstead_base::ReferrerInfo {
+                .map(|(from, rel_types)| crate::ReferrerInfo {
                     from_id: from.to_string(),
                     rel_types: rel_types.into_iter().collect(),
                     mem: from.mem().to_string(),
@@ -541,7 +537,7 @@ pub fn delete_mem(
                 // set so the caller can verify re-adoption.
                 detached_referrers = referrers;
             } else {
-                return Err(memstead_base::EngineError::MemHasIncomingRefs {
+                return Err(crate::EngineError::MemHasIncomingRefs {
                     mem: params.name,
                     referrers,
                 }
@@ -636,7 +632,7 @@ pub fn delete_mem(
     // ends `false`, and per-failure `MEM_FILES_NOT_DELETED` warnings
     // name the surviving artifact(s). `delete_files: false` returns
     // `files_deleted: false` silently (the archive-workflow contract).
-    let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+    let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
     let files_deleted = if params.delete_files {
         let backend_ok = match backend.delete_artifacts() {
             Ok(()) => true,
@@ -648,7 +644,7 @@ pub fn delete_mem(
                      cleanup failed — leaving leftover refs / tree entries \
                      for explicit cleanup"
                 );
-                warnings.push(memstead_base::ops::WarningHint::MemFilesNotDeleted {
+                warnings.push(crate::ops::WarningHint::MemFilesNotDeleted {
                     mem: params.name.clone(),
                     reason: "backend_prune_failed".into(),
                     path: None,
@@ -668,7 +664,7 @@ pub fn delete_mem(
                         "delete_mem: unregister succeeded but rmdir failed — \
                          leaving leftover files for explicit cleanup"
                     );
-                    warnings.push(memstead_base::ops::WarningHint::MemFilesNotDeleted {
+                    warnings.push(crate::ops::WarningHint::MemFilesNotDeleted {
                         mem: params.name.clone(),
                         reason: "rmdir_failed".into(),
                         path: Some(dir.display().to_string()),
@@ -750,8 +746,8 @@ pub fn delete_mem(
                 // unparseable file leaves the existing in-memory
                 // settings untouched (the scrub already succeeded; the
                 // pre-scrub settings were strictly more permissive).
-                let store = memstead_base::workspace_store::FileWorkspaceStore::new();
-                if let Ok(ws) = <memstead_base::workspace_store::FileWorkspaceStore as memstead_base::workspace_store::WorkspaceStoreAdapter>::load(
+                let store = crate::workspace_store::FileWorkspaceStore::new();
+                if let Ok(ws) = <crate::workspace_store::FileWorkspaceStore as crate::workspace_store::WorkspaceStoreAdapter>::load(
                         &store,
                         &root,
                     ) {
@@ -804,7 +800,7 @@ pub enum StorageKind {
 /// Hierarchical paths are first-class mem identifiers — there is no
 /// separate `path` field; `name` carries the full path
 /// (e.g. `"team/sub-mem"`) directly, validated via
-/// [`memstead_base::entity::id::validate_mem_name_grammar`]. The
+/// [`crate::entity::id::validate_mem_name_grammar`]. The
 /// branch ref composes as `refs/heads/<name>` and the `__MEMSTEAD`
 /// config blob as `__MEMSTEAD:mems/<name>/config.json` with no extra
 /// composition step.
@@ -879,11 +875,11 @@ pub struct MemCreateParams {
     /// Pre-parameter behaviour hardcoded `Agent` for every transport —
     /// app-embedder mem creations were misattributed as agent
     /// writes.
-    pub actor: memstead_base::vcs::Actor,
+    pub actor: crate::vcs::Actor,
     /// Client identity paired with `actor` — renders `name@version`
     /// in the seed commit's `Client:` trailer and derives its author,
     /// exactly as entity mutations do.
-    pub client: Option<memstead_base::vcs::ClientId>,
+    pub client: Option<crate::vcs::ClientId>,
 }
 
 /// Response shape from [`create_mem`].
@@ -892,14 +888,15 @@ pub struct MemCreateResponse {
     pub name: String,
     pub location: std::path::PathBuf,
     pub schema_ref: memstead_schema::SchemaRef,
-    /// Seed-commit cursor. Folder backends produce a synthetic id
-    /// (UNIX-nanos + counter, hex per the trait's contract);
-    /// git-branch backends produce a real 40-char hex sha. Either
-    /// way, the cursor is non-empty — agents poll
-    /// `memstead_changes_since` against it without branching on
-    /// backend type. Empty string (`""`) signals the reattach branch
-    /// was taken — pair with the `MEM_REATTACHED_AFTER_UNREGISTER`
-    /// warning surfaced via [`Self::warnings`] for full context.
+    /// Write identifier of the seed write. git-branch backends
+    /// produce the seed commit's 40-char hex sha; folder backends
+    /// produce a synthetic id (UNIX-nanos + counter, hex per the
+    /// trait's contract). Not a change cursor: poll
+    /// `memstead_changes_since` from the `head` it reports, never
+    /// from this value. Non-empty on every fresh create; the empty
+    /// string (`""`) signals the reattach branch was taken — pair
+    /// with the `MEM_REATTACHED_AFTER_UNREGISTER` warning surfaced
+    /// via [`Self::warnings`] for full context.
     pub seed_write_id: String,
     /// Non-fatal findings emitted during the create / reattach
     /// pipeline. Today populated only by the reattach branch with a
@@ -907,7 +904,7 @@ pub struct MemCreateResponse {
     /// `{mem, unregistered_at}`. Fresh-create
     /// (residue absent or force-overwrite branch taken) leaves this
     /// empty.
-    pub warnings: Vec<memstead_base::ops::WarningHint>,
+    pub warnings: Vec<crate::ops::WarningHint>,
 }
 
 /// Classify a structurally-invalid mem name into the typed
@@ -940,7 +937,7 @@ fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
 
 /// Create a new writable mem at runtime. Unified counterpart to
 /// full's `memstead_git_branch::mem_management::create_mem`. Routes
-/// through the engine's installed [`memstead_base::BackendFactory`] so the
+/// through the engine's installed [`crate::BackendFactory`] so the
 /// same call site materialises folder, archive, or git-branch
 /// backends transparently — production full consumers install
 /// `memstead_git_branch::storage::instantiate_full_backend` at boot via
@@ -976,12 +973,12 @@ fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
 ///    per-mem config travels in the workspace's `__MEMSTEAD` registry
 ///    ref.
 /// 5. Materialise the backend via the engine's
-///    [`memstead_base::BackendFactory`], commit the seed (real sha for
+///    [`crate::BackendFactory`], commit the seed (real sha for
 ///    git-branch, synthetic id for folder), and register via
-///    [`memstead_base::Engine::register_writable_mem`] with
-///    [`memstead_base::MemOrigin::RuntimeCreated`].
+///    [`crate::Engine::register_writable_mem`] with
+///    [`crate::MemOrigin::RuntimeCreated`].
 pub fn create_mem(
-    engine: &mut memstead_base::Engine,
+    engine: &mut crate::Engine,
     mut params: MemCreateParams,
 ) -> Result<MemCreateResponse, FullEngineError> {
     use std::path::Path;
@@ -990,7 +987,7 @@ pub fn create_mem(
     if let Some(note) = params.note.as_deref()
         && note.chars().count() > NOTE_MAX_LEN
     {
-        return Err(memstead_base::EngineError::InvalidInput(format!(
+        return Err(crate::EngineError::InvalidInput(format!(
             "note exceeds {NOTE_MAX_LEN} characters"
         ))
         .into());
@@ -1018,7 +1015,7 @@ pub fn create_mem(
     // every concrete malformation. But keep the call as a defense in
     // depth in case the grammar tightens later; route through the
     // typed `invalid_char` reason so the wire shape stays consistent.
-    if memstead_base::entity::id::validate_mem_name_grammar(&params.name).is_err() {
+    if crate::entity::id::validate_mem_name_grammar(&params.name).is_err() {
         return Err(FullEngineError::InvalidMemName {
             name: params.name.clone(),
             reason: "invalid_char",
@@ -1035,10 +1032,10 @@ pub fn create_mem(
     let mut builtin_schemas: Vec<std::sync::Arc<memstead_schema::Schema>> =
         engine.workspace_schemas().to_vec();
     builtin_schemas.extend_from_slice(engine.builtin_schemas());
-    let resolved_schema = memstead_base::engine::SchemaResolver::new(&builtin_schemas)
+    let resolved_schema = crate::engine::SchemaResolver::new(&builtin_schemas)
         .resolve(&params.schema_ref)
         .map_err(|sources| {
-            memstead_base::EngineError::SchemaNotFound {
+            crate::EngineError::SchemaNotFound {
                 mem: params.name.clone(),
                 pin: params.schema_ref.to_string(),
                 sources,
@@ -1104,9 +1101,7 @@ pub fn create_mem(
 
     if !params.operator_mode {
         let create_rule_set = CreateRuleSet::new(engine.settings().mem_create_rules.clone())
-            .map_err(|e| {
-                memstead_base::EngineError::InvalidInput(format!("mem_create_rules: {e}"))
-            })?;
+            .map_err(|e| crate::EngineError::InvalidInput(format!("mem_create_rules: {e}")))?;
         let patterns_for_errors: Vec<String> = create_rule_set.patterns();
 
         if create_rule_set.is_empty() {
@@ -1149,7 +1144,7 @@ pub fn create_mem(
         let schema_wildcard = matched_rule
             .schemas
             .iter()
-            .any(|s| s == memstead_base::SCHEMA_WILDCARD);
+            .any(|s| s == crate::SCHEMA_WILDCARD);
         if !schema_wildcard {
             let requested_canonical = canonical_schema_ref.to_string();
             let mut allowed_canonical: Vec<String> = Vec::with_capacity(matched_rule.schemas.len());
@@ -1158,17 +1153,17 @@ pub fn create_mem(
                 let parsed: memstead_schema::SchemaRef = match raw.parse() {
                     Ok(r) => r,
                     Err(_) => {
-                        return Err(memstead_base::EngineError::InvalidInput(format!(
+                        return Err(crate::EngineError::InvalidInput(format!(
                             "[mem_management] rule {:?}: schema entry {:?} is not a valid `name@version` pin",
                             matched_rule.pattern, raw,
                         ))
                         .into());
                     }
                 };
-                let resolved = memstead_base::engine::SchemaResolver::new(&builtin_schemas)
+                let resolved = crate::engine::SchemaResolver::new(&builtin_schemas)
                     .resolve(&parsed)
                     .map_err(|sources| {
-                        memstead_base::EngineError::SchemaNotFound {
+                        crate::EngineError::SchemaNotFound {
                             mem: params.name.clone(),
                             pin: parsed.to_string(),
                             sources,
@@ -1228,7 +1223,7 @@ pub fn create_mem(
         }
     };
     if storage_kind == StorageKind::GitBranch && !workspace_has_mem_repo {
-        return Err(memstead_base::EngineError::InvalidInput(
+        return Err(crate::EngineError::InvalidInput(
             "storage: git-branch requires a mem-repo workspace \
              (<workspace_root>/mem-repo/.git/ not found) — omit the \
              override or pass storage: folder"
@@ -1248,7 +1243,7 @@ pub fn create_mem(
             .next()
             .unwrap_or(params.name.as_str());
         if target_basename != name_leaf {
-            return Err(memstead_base::EngineError::InvalidInput(format!(
+            return Err(crate::EngineError::InvalidInput(format!(
                 "mem name '{}' (leaf '{}') does not match the basename '{}' of the canonical location '{}' \
                  — rename either side so the registered identity's leaf matches the on-disk basename",
                 params.name,
@@ -1262,7 +1257,7 @@ pub fn create_mem(
 
     // ---- Step 2: name collision probe (snapshot only) ----
     if let Some(existing) = engine.mem_router().origin_for_mem(&params.name) {
-        return Err(memstead_base::EngineError::MemNameCollision {
+        return Err(crate::EngineError::MemNameCollision {
             name: params.name,
             source_origin: existing.render_source(),
         }
@@ -1273,7 +1268,7 @@ pub fn create_mem(
         .archive_path_for_mem(&params.name)
         .is_some()
     {
-        return Err(memstead_base::EngineError::MemNameCollision {
+        return Err(crate::EngineError::MemNameCollision {
             name: params.name,
             source_origin: "attached read mem".to_string(),
         }
@@ -1324,7 +1319,7 @@ pub fn create_mem(
     // `warnings` field. The match value itself is unused once those
     // branches have taken effect — the warning emission lives on the
     // response, not the discarded binding.
-    let _: Option<memstead_base::ops::WarningHint> = match residue_probe {
+    let _: Option<crate::ops::WarningHint> = match residue_probe {
         ResidueProbe::None => None,
         ResidueProbe::Present {
             branch_ref,
@@ -1360,7 +1355,7 @@ pub fn create_mem(
                     // `None` so no warning rides on the response;
                     // the prior entities are gone by design.
                     let workspace_root_ref = workspace_root.as_ref().ok_or_else(|| {
-                        memstead_base::EngineError::InvalidInput(
+                        crate::EngineError::InvalidInput(
                             "force_overwrite requires a workspace_root \
                                  to locate mem-repo/.git/"
                                 .to_string(),
@@ -1369,7 +1364,7 @@ pub fn create_mem(
                     let gitdir = workspace_root_ref.join("mem-repo").join(".git");
                     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
                     let ops = engine.git_branch_ops().ok_or_else(|| {
-                        memstead_base::EngineError::InvalidInput(
+                        crate::EngineError::InvalidInput(
                             "force_overwrite requires the git-branch ops \
                              bundle (full boot only) — folder workspaces \
                              have no branch residue to prune"
@@ -1377,7 +1372,7 @@ pub fn create_mem(
                         )
                     })?;
                     (ops.prune_residue)(&canonical_gitdir, &composed_branch_leaf).map_err(|e| {
-                        memstead_base::EngineError::Mem(format!("force_overwrite prune: {e}"))
+                        crate::EngineError::Mem(format!("force_overwrite prune: {e}"))
                     })?;
                     // Fall through to Step 3 — the residue is gone,
                     // create proceeds normally and the fresh seed
@@ -1393,7 +1388,7 @@ pub fn create_mem(
                     // return so steps 3-5 stay aligned with the
                     // fresh-create path.
                     let workspace_root_ref = workspace_root.as_ref().ok_or_else(|| {
-                        memstead_base::EngineError::InvalidInput(
+                        crate::EngineError::InvalidInput(
                             "reattach requires a workspace_root \
                                  to locate mem-repo/.git/"
                                 .to_string(),
@@ -1401,23 +1396,21 @@ pub fn create_mem(
                     })?;
                     let gitdir = workspace_root_ref.join("mem-repo").join(".git");
                     let canonical_gitdir = gitdir.canonicalize().unwrap_or(gitdir);
-                    let mount = memstead_base::workspace::Mount {
+                    let mount = crate::workspace::Mount {
                         migration_target: None,
                         mem: params.name.clone(),
                         schema: Some(canonical_schema_ref.clone()),
-                        storage: memstead_base::workspace::MountStorage::GitBranch {
+                        storage: crate::workspace::MountStorage::GitBranch {
                             gitdir: canonical_gitdir,
                             branch: format!("refs/heads/{composed_branch_leaf}"),
                         },
-                        capability: memstead_base::workspace::MountCapability::Write,
-                        lifecycle: memstead_base::workspace::MountLifecycle::Eager,
+                        capability: crate::workspace::MountCapability::Write,
+                        lifecycle: crate::workspace::MountLifecycle::Eager,
                         cross_linkable: true,
                     };
                     let factory = engine.backend_factory();
                     let backend = factory(&mount).map_err(|e| {
-                        memstead_base::EngineError::Mem(format!(
-                            "reattach backend instantiate: {e}"
-                        ))
+                        crate::EngineError::Mem(format!("reattach backend instantiate: {e}"))
                     })?;
                     // Clear the tombstone if one was present, so a
                     // future drift probe doesn't re-trigger the
@@ -1440,7 +1433,7 @@ pub fn create_mem(
                             }
                         }
                     }
-                    let origin = memstead_base::MemOrigin::RuntimeCreated {
+                    let origin = crate::MemOrigin::RuntimeCreated {
                         at: std::time::SystemTime::now(),
                         by_tool: "memstead_mem_create (reattach)",
                     };
@@ -1459,14 +1452,12 @@ pub fn create_mem(
                     // re-read. Reports are dropped; the side effect is
                     // the edge index re-derivation.
                     let _ = engine.reload_each_writable_mem_reports()?;
-                    let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+                    let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
                     if let Some(ts) = tombstone {
-                        warnings.push(
-                            memstead_base::ops::WarningHint::MemReattachedAfterUnregister {
-                                mem: params.name.clone(),
-                                unregistered_at: ts,
-                            },
-                        );
+                        warnings.push(crate::ops::WarningHint::MemReattachedAfterUnregister {
+                            mem: params.name.clone(),
+                            unregistered_at: ts,
+                        });
                     }
                     // Early return — the reattach path has no seed
                     // commit, no .memstead/config.json write. The branch
@@ -1512,7 +1503,7 @@ pub fn create_mem(
         extra: Default::default(),
     };
     let config_bytes = serde_json::to_vec_pretty(&mem_config).map_err(|e| {
-        memstead_base::EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
+        crate::EngineError::InvalidInput(format!("could not serialize mem config: {e}"))
     })?;
 
     // ---- Step 3b: pick storage variant ----
@@ -1526,7 +1517,7 @@ pub fn create_mem(
     // backend factory installed (`engine_from_workspace_root` does
     // this at boot). When the factory is the default lean one, the
     // factory call below returns
-    // [`memstead_base::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature`]
+    // [`crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature`]
     // — wrapped as `EngineError::Mem` in the seed-commit step.
     // The branch leaf IS `params.name` — no separate composition step.
     // Hierarchical identity lives directly in the mem name.
@@ -1537,7 +1528,7 @@ pub fn create_mem(
             // mem-repo probe requires a workspace_root — this arm
             // always has one. The `ok_or_else` is defence in depth.
             let root = workspace_root.as_ref().ok_or_else(|| {
-                memstead_base::EngineError::InvalidInput(
+                crate::EngineError::InvalidInput(
                     "storage: git-branch requires a workspace_root \
                      to locate mem-repo/.git/"
                         .to_string(),
@@ -1545,19 +1536,16 @@ pub fn create_mem(
             })?;
             let probe = root.join("mem-repo").join(".git");
             let gitdir = probe.canonicalize().unwrap_or(probe);
-            memstead_base::workspace::MountStorage::GitBranch {
+            crate::workspace::MountStorage::GitBranch {
                 gitdir,
                 branch: format!("refs/heads/{branch_leaf}"),
             }
         }
-        StorageKind::Folder => memstead_base::workspace::MountStorage::Folder {
+        StorageKind::Folder => crate::workspace::MountStorage::Folder {
             path: mount_path.clone(),
         },
     };
-    let is_git_branch = matches!(
-        storage,
-        memstead_base::workspace::MountStorage::GitBranch { .. }
-    );
+    let is_git_branch = matches!(storage, crate::workspace::MountStorage::GitBranch { .. });
 
     // ---- Step 4: write .memstead/config.json ----
     // Folder path: write the config blob to disk before instantiating
@@ -1570,14 +1558,11 @@ pub fn create_mem(
     // wire shape.
     if !is_git_branch {
         std::fs::create_dir_all(&canonical).map_err(|e| {
-            memstead_base::EngineError::Mem(format!("create_dir_all {}: {e}", canonical.display()))
+            crate::EngineError::Mem(format!("create_dir_all {}: {e}", canonical.display()))
         })?;
-        let memstead_dir = canonical.join(memstead_base::MEM_META_DIR);
+        let memstead_dir = canonical.join(crate::MEM_META_DIR);
         std::fs::create_dir_all(&memstead_dir).map_err(|e| {
-            memstead_base::EngineError::Mem(format!(
-                "create_dir_all {}: {e}",
-                memstead_dir.display()
-            ))
+            crate::EngineError::Mem(format!("create_dir_all {}: {e}", memstead_dir.display()))
         })?;
         let config_path = memstead_dir.join("config.json");
         if config_path.exists() {
@@ -1604,20 +1589,18 @@ pub fn create_mem(
                     // (version, description, syncState) and entity
                     // files stay untouched; only the mount is
                     // registered. No seed commit, no config write.
-                    let mount = memstead_base::workspace::Mount {
+                    let mount = crate::workspace::Mount {
                         migration_target: None,
                         mem: params.name.clone(),
                         schema: Some(canonical_schema_ref.clone()),
                         storage,
-                        capability: memstead_base::workspace::MountCapability::Write,
-                        lifecycle: memstead_base::workspace::MountLifecycle::Eager,
+                        capability: crate::workspace::MountCapability::Write,
+                        lifecycle: crate::workspace::MountLifecycle::Eager,
                         cross_linkable: true,
                     };
                     let factory = engine.backend_factory();
                     let backend = factory(&mount).map_err(|e| {
-                        memstead_base::EngineError::Mem(format!(
-                            "reattach backend instantiate: {e}"
-                        ))
+                        crate::EngineError::Mem(format!("reattach backend instantiate: {e}"))
                     })?;
                     // Clear the tombstone if one was present, so a
                     // future probe doesn't re-trigger this branch.
@@ -1639,7 +1622,7 @@ pub fn create_mem(
                             }
                         }
                     }
-                    let origin = memstead_base::MemOrigin::RuntimeCreated {
+                    let origin = crate::MemOrigin::RuntimeCreated {
                         at: std::time::SystemTime::now(),
                         by_tool: "memstead_mem_create (reattach)",
                     };
@@ -1650,14 +1633,12 @@ pub fn create_mem(
                     // cross-mem edges pointing at the reattached mem land
                     // in the in-memory edge index.
                     let _ = engine.reload_each_writable_mem_reports()?;
-                    let mut warnings: Vec<memstead_base::ops::WarningHint> = Vec::new();
+                    let mut warnings: Vec<crate::ops::WarningHint> = Vec::new();
                     if let Some(ts) = tombstone {
-                        warnings.push(
-                            memstead_base::ops::WarningHint::MemReattachedAfterUnregister {
-                                mem: params.name.clone(),
-                                unregistered_at: ts,
-                            },
-                        );
+                        warnings.push(crate::ops::WarningHint::MemReattachedAfterUnregister {
+                            mem: params.name.clone(),
+                            unregistered_at: ts,
+                        });
                     }
                     return Ok(MemCreateResponse {
                         name: params.name,
@@ -1672,7 +1653,7 @@ pub fn create_mem(
                     // tree — often a directory the operator also owns
                     // for other purposes. Create never destroys such
                     // content; deletion stays a separate, named act.
-                    return Err(memstead_base::EngineError::InvalidInput(
+                    return Err(crate::EngineError::InvalidInput(
                         "force_overwrite is not supported for folder residue — \
                          a folder mem's files live in the outer tree and are \
                          never destroyed by create. Remove the folder contents \
@@ -1687,7 +1668,7 @@ pub fn create_mem(
             }
         }
         std::fs::write(&config_path, &config_bytes).map_err(|e| {
-            memstead_base::EngineError::Mem(format!("write {}: {e}", config_path.display()))
+            crate::EngineError::Mem(format!("write {}: {e}", config_path.display()))
         })?;
     }
 
@@ -1704,19 +1685,19 @@ pub fn create_mem(
     // (UNIX-nanos + counter, hex per the trait's contract);
     // git-branch backends produce real 40-char shas. Either way the
     // response carries a non-empty cursor.
-    let mount = memstead_base::workspace::Mount {
+    let mount = crate::workspace::Mount {
         mem: params.name.clone(),
         schema: Some(canonical_schema_ref.clone()),
         storage,
-        capability: memstead_base::workspace::MountCapability::Write,
-        lifecycle: memstead_base::workspace::MountLifecycle::Eager,
+        capability: crate::workspace::MountCapability::Write,
+        lifecycle: crate::workspace::MountLifecycle::Eager,
         cross_linkable: true,
         migration_target: None,
     };
     let factory = engine.backend_factory();
     let backend = factory(&mount)
-        .map_err(|e| memstead_base::EngineError::Mem(format!("instantiate backend: {e}")))?;
-    let seed_ctx = memstead_base::vcs::CommitContext {
+        .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
+    let seed_ctx = crate::vcs::CommitContext {
         actor: params.actor,
         client: params.client.clone(),
         tool: Some("memstead_mem_create"),
@@ -1734,12 +1715,12 @@ pub fn create_mem(
     if is_git_branch {
         backend
             .write_mem_config(&config_bytes)
-            .map_err(|e| memstead_base::EngineError::Mem(format!("write mem config: {e}")))?;
+            .map_err(|e| crate::EngineError::Mem(format!("write mem config: {e}")))?;
     }
     let seed_write_id = backend
         .commit(&format!("memstead: create mem {}", params.name), &seed_ctx)
-        .map_err(|e| memstead_base::EngineError::Mem(format!("seed commit: {e}")))?;
-    let origin = memstead_base::MemOrigin::RuntimeCreated {
+        .map_err(|e| crate::EngineError::Mem(format!("seed commit: {e}")))?;
+    let origin = crate::MemOrigin::RuntimeCreated {
         at: std::time::SystemTime::now(),
         by_tool: "memstead_mem_create",
     };
@@ -1763,14 +1744,14 @@ pub fn create_mem(
     // transport). The seed commit landed above; a noteless create
     // surfaces the warning without blocking.
     let note_warning = engine.note_missing_warning("create_mem", params.note.as_deref());
-    let mut warnings: Vec<memstead_base::ops::WarningHint> = note_warning.into_iter().collect();
+    let mut warnings: Vec<crate::ops::WarningHint> = note_warning.into_iter().collect();
     // Folder storage has no version control: say at creation what
     // provenance means there (changelog ledger, placeholder SHAs,
     // durability tied to the surrounding repo). A warning, never a
     // refusal — folder mems are a supported storage class. Git-branch
     // mounts carry real commits and get no notice.
     if storage_kind == StorageKind::Folder {
-        warnings.push(memstead_base::ops::WarningHint::FolderMemProvenance {
+        warnings.push(crate::ops::WarningHint::FolderMemProvenance {
             mem: params.name.clone(),
         });
     }
@@ -1852,7 +1833,7 @@ pub struct MemRenameResponse {
     /// the idempotent halves ran (reference sweep, grants, binding /
     /// findings relocation).
     pub resumed: bool,
-    pub warnings: Vec<memstead_base::ops::WarningHint>,
+    pub warnings: Vec<crate::ops::WarningHint>,
 }
 
 /// Rename a mem: `old` → `new`, complete across every surface that
@@ -1863,7 +1844,7 @@ pub struct MemRenameResponse {
 /// orchestrator's job is everything textual and structural around
 /// that:
 ///
-/// 1. **Reference sweep** ([`memstead_base::Engine::rewrite_mem_references`]):
+/// 1. **Reference sweep** ([`crate::Engine::rewrite_mem_references`]):
 ///    every `<old>--<slug>` / `<old>:<slug>` wiki-link and
 ///    Relationships entry in every writable mem (peers and the renamed
 ///    mem's own full-id self-references), plus the anchors-sidecar
@@ -1902,20 +1883,20 @@ pub struct MemRenameResponse {
 /// one-shot process model makes this invisible; a long-lived embedder
 /// must re-boot after a rename.
 pub fn rename_mem(
-    engine: &mut memstead_base::Engine,
+    engine: &mut crate::Engine,
     params: MemRenameParams,
 ) -> Result<MemRenameResponse, FullEngineError> {
     // ---- Step 0: input validation (no writes past this block) ----
     if let Some(note) = params.note.as_deref()
         && note.chars().count() > NOTE_MAX_LEN
     {
-        return Err(memstead_base::EngineError::InvalidInput(format!(
+        return Err(crate::EngineError::InvalidInput(format!(
             "note exceeds {NOTE_MAX_LEN} characters"
         ))
         .into());
     }
     if params.old == params.new {
-        return Err(memstead_base::EngineError::InvalidInput(
+        return Err(crate::EngineError::InvalidInput(
             "rename source and target are the same name".to_string(),
         )
         .into());
@@ -1926,7 +1907,7 @@ pub fn rename_mem(
             reason,
         });
     }
-    if memstead_base::entity::id::validate_mem_name_grammar(&params.new).is_err() {
+    if crate::entity::id::validate_mem_name_grammar(&params.new).is_err() {
         return Err(FullEngineError::InvalidMemName {
             name: params.new.clone(),
             reason: "invalid_char",
@@ -1938,15 +1919,15 @@ pub fn rename_mem(
     let new_mount_present = engine.mount(&params.new).is_some();
     let resumed = match (&old_mount, new_mount_present) {
         (Some(_), true) => {
-            return Err(memstead_base::EngineError::MemNameCollision {
+            return Err(crate::EngineError::MemNameCollision {
                 name: params.new.clone(),
                 source_origin: "registered mount".to_string(),
             }
             .into());
         }
         (Some(m), false) => {
-            if m.capability != memstead_base::MountCapability::Write {
-                return Err(memstead_base::EngineError::ReadOnlyMount(params.old.clone()).into());
+            if m.capability != crate::MountCapability::Write {
+                return Err(crate::EngineError::ReadOnlyMount(params.old.clone()).into());
             }
             false
         }
@@ -1956,12 +1937,12 @@ pub fn rename_mem(
             // a read-only mount, so anything else is a name clash
             // with an installed read mem, not a resumable rename).
             if !engine.mem_router().is_writable(&params.new) {
-                return Err(memstead_base::EngineError::UnknownMem(params.old.clone()).into());
+                return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
             }
             true
         }
         (None, false) => {
-            return Err(memstead_base::EngineError::UnknownMem(params.old.clone()).into());
+            return Err(crate::EngineError::UnknownMem(params.old.clone()).into());
         }
     };
 
@@ -1973,9 +1954,7 @@ pub fn rename_mem(
         let attempted = std::path::PathBuf::from(format!("(mem: {})", params.old));
 
         let delete_rule_set = DeleteRuleSet::new(engine.settings().mem_delete_rules.clone())
-            .map_err(|e| {
-                memstead_base::EngineError::InvalidInput(format!("mem_delete_rules: {e}"))
-            })?;
+            .map_err(|e| crate::EngineError::InvalidInput(format!("mem_delete_rules: {e}")))?;
         let delete_patterns: Vec<String> = delete_rule_set.patterns();
         if delete_rule_set.is_empty()
             || delete_rule_set
@@ -1997,9 +1976,7 @@ pub fn rename_mem(
         }
 
         let create_rule_set = CreateRuleSet::new(engine.settings().mem_create_rules.clone())
-            .map_err(|e| {
-                memstead_base::EngineError::InvalidInput(format!("mem_create_rules: {e}"))
-            })?;
+            .map_err(|e| crate::EngineError::InvalidInput(format!("mem_create_rules: {e}")))?;
         let create_patterns: Vec<String> = create_rule_set.patterns();
         let matched_rule = if create_rule_set.is_empty() {
             None
@@ -2032,7 +2009,7 @@ pub fn rename_mem(
         let schema_wildcard = matched_rule
             .schemas
             .iter()
-            .any(|s| s == memstead_base::SCHEMA_WILDCARD);
+            .any(|s| s == crate::SCHEMA_WILDCARD);
         if !schema_wildcard {
             let existing_pin: Option<String> = engine
                 .mem_configs_named()
@@ -2075,12 +2052,11 @@ pub fn rename_mem(
             // same storage the mounted one does (git-branch handles
             // are cheap ref wrappers, folder handles are paths).
             let factory = engine.backend_factory();
-            let backend_ref = factory(&mount).map_err(|e| {
-                memstead_base::EngineError::Mem(format!("instantiate backend: {e}"))
-            })?;
+            let backend_ref = factory(&mount)
+                .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
             let config_bytes = backend_ref
                 .read_mem_config()
-                .map_err(|e| memstead_base::EngineError::Mem(format!("read mem config: {e}")))?;
+                .map_err(|e| crate::EngineError::Mem(format!("read mem config: {e}")))?;
             if let Some(bytes) = config_bytes
                 && let Ok(mut cfg) =
                     serde_json::from_slice::<memstead_schema::config::MemConfig>(&bytes)
@@ -2102,21 +2078,21 @@ pub fn rename_mem(
                 cfg.sync_state = rewritten;
                 if changed {
                     let mut out = serde_json::to_vec_pretty(&cfg).map_err(|e| {
-                        memstead_base::EngineError::Mem(format!("serialise mem config: {e}"))
+                        crate::EngineError::Mem(format!("serialise mem config: {e}"))
                     })?;
                     out.push(b'\n');
-                    backend_ref.write_mem_config(&out).map_err(|e| {
-                        memstead_base::EngineError::Mem(format!("write mem config: {e}"))
-                    })?;
+                    backend_ref
+                        .write_mem_config(&out)
+                        .map_err(|e| crate::EngineError::Mem(format!("write mem config: {e}")))?;
                 }
             }
         }
 
         // Step 5: storage identity flip.
         let new_storage = match &mount.storage {
-            memstead_base::MountStorage::GitBranch { gitdir, branch } => {
+            crate::MountStorage::GitBranch { gitdir, branch } => {
                 let ops = engine.git_branch_ops().ok_or_else(|| {
-                    memstead_base::EngineError::InvalidInput(
+                    crate::EngineError::InvalidInput(
                         "mem rename on a git-branch mount requires the git-branch ops \
                          bundle (full boot only)"
                             .to_string(),
@@ -2131,13 +2107,13 @@ pub fn rename_mem(
                 let had_prefix = branch.starts_with("refs/heads/");
                 let old_leaf = branch.strip_prefix("refs/heads/").unwrap_or(branch);
                 (ops.rename_mem_storage)(&canonical_gitdir, old_leaf, &params.new)
-                    .map_err(|e| memstead_base::EngineError::Mem(format!("storage rename: {e}")))?;
+                    .map_err(|e| crate::EngineError::Mem(format!("storage rename: {e}")))?;
                 let new_branch = if had_prefix {
                     format!("refs/heads/{}", params.new)
                 } else {
                     params.new.clone()
                 };
-                memstead_base::MountStorage::GitBranch {
+                crate::MountStorage::GitBranch {
                     gitdir: gitdir.clone(),
                     branch: new_branch,
                 }
@@ -2149,7 +2125,7 @@ pub fn rename_mem(
         engine
             .unregister_writable_mem(&params.old)
             .map_err(FullEngineError::from)?;
-        let new_mount = memstead_base::Mount {
+        let new_mount = crate::Mount {
             mem: params.new.clone(),
             schema: mount.schema.clone(),
             storage: new_storage,
@@ -2160,8 +2136,8 @@ pub fn rename_mem(
         };
         let factory = engine.backend_factory();
         let backend = factory(&new_mount)
-            .map_err(|e| memstead_base::EngineError::Mem(format!("instantiate backend: {e}")))?;
-        let origin = memstead_base::MemOrigin::RuntimeCreated {
+            .map_err(|e| crate::EngineError::Mem(format!("instantiate backend: {e}")))?;
+        let origin = crate::MemOrigin::RuntimeCreated {
             at: std::time::SystemTime::now(),
             by_tool: "memstead mem rename",
         };
@@ -2174,23 +2150,22 @@ pub fn rename_mem(
     // ---- Step 7: workspace grants (idempotent; both modes) ----
     if let Some(root) = engine.workspace_root().map(|p| p.to_path_buf()) {
         crate::workspace_config_edit::rename_mem_in_cross_links(&root, &params.old, &params.new)
-            .map_err(|e| memstead_base::EngineError::Mem(format!("grants rewrite: {e}")))?;
+            .map_err(|e| crate::EngineError::Mem(format!("grants rewrite: {e}")))?;
 
         // ---- Step 8: binding + findings stores (idempotent) ----
-        let store_dir = root.join(memstead_base::WORKSPACE_STORE_DIR);
+        let store_dir = root.join(crate::WORKSPACE_STORE_DIR);
         let projections_old = store_dir.join("projections").join(&params.old);
         let projections_new = store_dir.join("projections").join(&params.new);
         if projections_old.is_dir() && !projections_new.exists() {
-            std::fs::rename(&projections_old, &projections_new).map_err(|e| {
-                memstead_base::EngineError::Mem(format!("move projections dir: {e}"))
-            })?;
+            std::fs::rename(&projections_old, &projections_new)
+                .map_err(|e| crate::EngineError::Mem(format!("move projections dir: {e}")))?;
         }
         if projections_new.is_dir() {
             for entry in std::fs::read_dir(&projections_new)
-                .map_err(|e| memstead_base::EngineError::Mem(format!("read projections: {e}")))?
+                .map_err(|e| crate::EngineError::Mem(format!("read projections: {e}")))?
             {
                 let path = entry
-                    .map_err(|e| memstead_base::EngineError::Mem(format!("read projections: {e}")))?
+                    .map_err(|e| crate::EngineError::Mem(format!("read projections: {e}")))?
                     .path();
                 if path.extension().and_then(|e| e.to_str()) != Some("json") {
                     continue;
@@ -2206,9 +2181,8 @@ pub fn rename_mem(
                     doc["destination_mem"] = serde_json::Value::String(params.new.clone());
                     let mut out = serde_json::to_string_pretty(&doc).unwrap_or(text);
                     out.push('\n');
-                    std::fs::write(&path, out).map_err(|e| {
-                        memstead_base::EngineError::Mem(format!("rewrite binding: {e}"))
-                    })?;
+                    std::fs::write(&path, out)
+                        .map_err(|e| crate::EngineError::Mem(format!("rewrite binding: {e}")))?;
                 }
             }
         }
@@ -2216,7 +2190,7 @@ pub fn rename_mem(
         let findings_new = store_dir.join("state").join("findings").join(&params.new);
         if findings_old.is_dir() && !findings_new.exists() {
             std::fs::rename(&findings_old, &findings_new)
-                .map_err(|e| memstead_base::EngineError::Mem(format!("move findings dir: {e}")))?;
+                .map_err(|e| crate::EngineError::Mem(format!("move findings dir: {e}")))?;
         }
     }
 

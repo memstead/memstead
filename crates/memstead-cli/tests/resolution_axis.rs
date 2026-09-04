@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead mem set-schema` ships only in the full build.
 
 //! A type's `resolution` declaration (backlog-decisions plan B5): the

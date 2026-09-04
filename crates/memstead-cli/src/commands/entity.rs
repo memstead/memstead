@@ -104,7 +104,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     } else {
         let scoped = ctx.cli_engine_scoped(id.mem())?;
         let escalate = match &scoped {
-            #[cfg(feature = "mem-repo")]
             CliEngine::MemRepo(engine) => declares_cross_mem_serving(engine.schema_for(id.mem())),
             CliEngine::Filesystem(engine) => {
                 declares_cross_mem_serving(engine.schema_for(id.mem()))
@@ -123,7 +122,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         labelling,
         sidecar_error,
     ) = match engine_handle {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             let entity = engine
                 .get_entity(&id)

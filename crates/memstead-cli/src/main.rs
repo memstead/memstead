@@ -4,12 +4,10 @@
 //! (same text MCP returns); `--json` emits structured content matching
 //! the MCP `structured_content` payload.
 //!
-//! One crate, two build configs. The default (`mem-repo`) build is
-//! the full `memstead`: every subcommand, including the multi-mem /
-//! mem-repo lifecycle (`mem`, `mem-repo`, `workspace`, `install`,
-//! `batch-update`, `recover`). `--no-default-features` drops the
-//! git-branch backend and those subcommands — a CI / wasm-adjacent
-//! config, not shipped.
+//! One binary, every subcommand, including the multi-mem / mem-repo
+//! lifecycle (`mem`, `mem-repo`, `workspace`, `install`,
+//! `batch-update`, `recover`); folder-only and mem-repo workspaces are
+//! served by the same engine.
 
 use std::process::ExitCode;
 
@@ -160,9 +158,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Export(args) => commands::export::run(&ctx, args),
         Command::Init(args) => commands::init::run(&ctx, args),
         Command::Quickstart(args) => commands::quickstart::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Install(args) => commands::install::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Uninstall(args) => commands::uninstall::run(&ctx, args),
         Command::VerifyAnchors(args) => commands::verify_anchors::run(&ctx, args),
         Command::Publish(args) => commands::publish::run(&ctx, args),
@@ -184,13 +180,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Delete(args) => commands::delete::run(&ctx, args),
         Command::Rename(args) => commands::rename::run(&ctx, args),
         Command::Retype(args) => commands::retype::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::BatchUpdate(args) => commands::batch_update::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::BatchCreate(args) => commands::batch_create::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::BatchRelate(args) => commands::batch_relate::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Recover(args) => commands::recover::run(&ctx, args),
         Command::Anchors(args) => commands::anchors::run(&ctx, args),
         Command::Conflicts(args) => commands::conflicts::run(&ctx, args),
@@ -198,15 +190,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Check(args) => commands::check::run(&ctx, args),
         Command::ReviewMark(args) => commands::review_mark::run(&ctx, args),
         Command::Reload(args) => commands::reload::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Fetch(args) => commands::transport::run_fetch(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Pull(args) => commands::transport::run_pull(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Push(args) => commands::transport::run_push(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::BranchReset(args) => commands::branch_reset::run(&ctx, args),
-        #[cfg(feature = "mem-repo")]
         Command::Mem { action } => match action {
             commands::mem::MemAction::Init(args) => commands::mem::run(&ctx, args),
             commands::mem::MemAction::Unregister(args) => commands::mem::run_unregister(&ctx, args),
@@ -231,9 +218,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             }
             commands::mem::MemAction::List(args) => commands::mem::run_list(&ctx, args),
         },
-        #[cfg(feature = "mem-repo")]
         Command::MemRepo { action } => commands::mem_repo::run(&ctx, action),
-        #[cfg(feature = "mem-repo")]
         Command::Workspace { action } => commands::workspace::run(&ctx, action),
         Command::Schema(args) => commands::schema::run(&ctx, args),
         Command::Projection(args) => commands::projection::run(&ctx, args),

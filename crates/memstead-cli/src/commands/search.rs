@@ -230,7 +230,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     let result = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             if let Some(name) = scope.mem.as_deref()
                 && engine.mount(name).is_none()

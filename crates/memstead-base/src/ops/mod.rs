@@ -4619,7 +4619,6 @@ mod write_id_doc_gloss_tests {
             for sibling in [
                 "crates/memstead-mcp/src",
                 "crates/memstead-cli/src",
-                "crates/memstead-engine/src",
                 "crates/memstead-schema/src",
             ] {
                 let p = ws.join(sibling);
@@ -4646,11 +4645,11 @@ mod write_id_doc_gloss_tests {
         // and `serve/src` could both silently drop out and this still
         // passed, so the round that widened the reach did not actually
         // fix it in place. Require every root that exists on disk.
-        let expected = 5 + usize::from(private_ui_api_present) + usize::from(private_serve_present);
+        let expected = 4 + usize::from(private_ui_api_present) + usize::from(private_serve_present);
         assert_eq!(
             roots.len(),
             expected,
-            "expected {expected} roots (four sibling crates plus the private consumers \
+            "expected {expected} roots (three sibling crates plus the private consumers \
              present on disk), saw {} — the check has narrowed",
             roots.len()
         );

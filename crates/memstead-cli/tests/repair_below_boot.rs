@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Repair-below-boot: the verbs a boot-failure message names must run
 //! on exactly the workspace whose boot they repair (agent-trust plan
 //! 03). Fixtures follow the plenum outage shape — a mem-repo workspace

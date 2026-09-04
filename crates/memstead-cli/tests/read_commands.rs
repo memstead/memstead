@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Integration tests for `memstead` read subcommands.
 //!
 //! Each test sets up a fresh temp mem with one or two entities and runs the
@@ -487,10 +486,10 @@ fn overview_runs() {
         .success();
 }
 
-/// Full CLI's overview command renders the rich content (community
-/// bridges, mem distribution, dangling links) via the shared
-/// `memstead-engine::overview::compose_overview` composer. The full CLI
-/// renders the content directly: when `--include` is passed the
+/// The overview command renders the rich content (community bridges,
+/// mem distribution, dangling links) via the shared
+/// `memstead_base::overview::compose_overview` composer directly: when
+/// `--include` is passed the
 /// `OVERVIEW_RICH_CONTENT_FULL_ONLY` (formerly `mcp_only_notice`)
 /// warning string must not appear in the response.
 #[test]

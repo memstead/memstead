@@ -1,5 +1,5 @@
 //! Shared overview composer used by both the `memstead_overview` MCP tool
-//! and the full CLI overview command.
+//! and the CLI overview command.
 //!
 //! Lifted from `memstead-mcp/src/server.rs::memstead_overview_unified`.
 //! The function produces structurally identical markdown for both
@@ -8,8 +8,8 @@
 //! and equivalent pairs for `memstead_mem_create` / `memstead_mem_delete`).
 //!
 //! The MCP wrapper handles drift-warning collection, response-cap
-//! chunking, and envelope wrapping — none of that lives here. The full
-//! CLI command applies its own chunking + markdown/JSON output mode.
+//! chunking, and envelope wrapping — none of that lives here. The CLI
+//! command applies its own chunking + markdown/JSON output mode.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;

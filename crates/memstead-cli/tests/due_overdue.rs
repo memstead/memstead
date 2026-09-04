@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead mem set-schema` ships only in the full build.
 
 //! The due brief reads `overdue` (backlog-decisions plan B4): with the

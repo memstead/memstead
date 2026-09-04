@@ -28,15 +28,13 @@ FAILED=()
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Lint: rustfmt + clippy (both flavours)"
+echo "  Lint: rustfmt + clippy"
 echo "══════════════════════════════════"
 # Byte-identical to the commands CI runs. If you change one, change it HERE —
 # CI has no copy of its own; see the header note.
 if (cd "$ROOT" \
   && cargo fmt --check \
-  && cargo clippy --workspace --all-targets --features mem-repo -- -D warnings \
-  && cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
-  && cargo clippy -p memstead-cli --all-targets --no-default-features -- -D warnings); then
+  && cargo clippy --workspace --all-targets -- -D warnings); then
   echo "  ✓ rustfmt + clippy passed"
 else
   FAILED+=("lint")
@@ -77,13 +75,13 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Testing: engine (Rust, full flavour)"
+echo "  Testing: engine (Rust)"
 echo "══════════════════════════════════"
-if (cd "$ROOT" && cargo nextest run --workspace --features mem-repo); then
-  echo "  ✓ engine (full) passed"
+if (cd "$ROOT" && cargo nextest run --workspace); then
+  echo "  ✓ engine passed"
 else
-  FAILED+=("engine-full")
-  echo "  ✗ engine (full) FAILED"
+  FAILED+=("engine")
+  echo "  ✗ engine FAILED"
 fi
 
 echo ""
@@ -157,67 +155,12 @@ for d in "$ROOT"/crates/*/; do
 done
 DOCTEST_ARGS=()
 for c in "${DOCTEST_CRATES[@]}"; do DOCTEST_ARGS+=("-p" "$c"); done
-# No --features mem-repo here: that feature lives on memstead-cli and
-# memstead-mcp, and cargo hard-errors when a feature is requested for a
-# selection that does not carry it (the roster is memstead-base only).
-# If a crate that owns mem-repo rejoins the roster, reintroduce the flag
-# then; the two-way roster check above makes that moment loud.
 if [ "$DOCTEST_ROSTER_OK" = "1" ] \
   && (cd "$ROOT" && cargo test --doc "${DOCTEST_ARGS[@]}"); then
   echo "  ✓ doctests passed"
 else
   FAILED+=("doctests")
   echo "  ✗ doctests FAILED"
-fi
-
-echo ""
-echo "══════════════════════════════════"
-echo "  Testing: engine (Rust, lean flavour)"
-echo "══════════════════════════════════"
-# lean is the --no-default-features, folder-backend-only build (no gix). Both
-# flavours must stay green — public CI runs lean-smoke and full-smoke.
-# Lean legs build into their own target dir (target/lean): sharing the
-# default dir left a degraded --no-default-features binary at
-# target/debug/memstead after every full run — a binary that is not what
-# its path says it is (cost two sessions a false-negative probe round
-# each). Isolation also keeps lean artifacts cached across runs.
-if (cd "$ROOT" && cargo nextest run --workspace --no-default-features --target-dir target/lean); then
-  echo "  ✓ engine (lean) passed"
-else
-  FAILED+=("engine-lean")
-  echo "  ✗ engine (lean) FAILED"
-fi
-
-echo ""
-echo "══════════════════════════════════"
-echo "  Testing: memstead-cli (true lean build)"
-echo "══════════════════════════════════"
-# The workspace-wide lean run above still compiles memstead-cli WITH
-# mem-repo: xtask depends on it with that feature on, and cargo unifies
-# features across one build graph. Only a targeted -p build exercises
-# the cli's real lean flavour (its cfg(not(mem-repo)) branches — e.g.
-# the schema-new follow-up that routes through a fresh init).
-if (cd "$ROOT" && cargo nextest run -p memstead-cli --no-default-features --target-dir target/lean); then
-  echo "  ✓ memstead-cli (true lean) passed"
-else
-  FAILED+=("memstead-cli-lean")
-  echo "  ✗ memstead-cli (true lean) FAILED"
-fi
-
-echo ""
-echo "══════════════════════════════════"
-echo "  Testing: memstead-mcp (true lean build)"
-echo "══════════════════════════════════"
-# Same feature-unification trap as the CLI leg above, and it had the same
-# consequence: memstead-mcp's `cfg(not(mem-repo))` tests (boot_lean.rs,
-# wire_shape_lean.rs) were compiled out of every leg, so they existed
-# without ever running. A targeted -p build is the only way to reach the
-# lean MCP binary's own behaviour.
-if (cd "$ROOT" && cargo nextest run -p memstead-mcp --no-default-features --target-dir target/lean); then
-  echo "  ✓ memstead-mcp (true lean) passed"
-else
-  FAILED+=("memstead-mcp-lean")
-  echo "  ✗ memstead-mcp (true lean) FAILED"
 fi
 
 # Decision 9: the Rust gate must not hard-depend on node. Every node leg
@@ -378,17 +321,16 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Gate: target/debug/memstead is the full-feature binary"
+echo "  Gate: target/debug/memstead answers"
 echo "══════════════════════════════════"
-# The behavioural invariant behind the lean target-dir isolation above: a
-# green run leaves behind a binary that is what its path says it is. Only
-# checked when the binary exists (a docs-only tree may never build it).
+# A green run leaves behind a binary that is what its path says it is.
+# Only checked when the binary exists (a docs-only tree may never build it).
 if [ -x "$ROOT/target/debug/memstead" ]; then
   if "$ROOT/target/debug/memstead" mem --help >/dev/null 2>&1; then
-    echo "  ✓ full-feature binary intact (mem subcommand answers)"
+    echo "  ✓ binary intact (mem subcommand answers)"
   else
     FAILED+=("binary-integrity")
-    echo "  ✗ target/debug/memstead lost its full-feature surface (lean leg leaked?)"
+    echo "  ✗ target/debug/memstead does not answer `mem --help`"
   fi
 else
   echo "  (no target/debug/memstead built — nothing to check)"

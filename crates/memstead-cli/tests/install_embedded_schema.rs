@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead install` is mem-repo-only; the lean build has no install to
 // exercise, so the whole binary is skipped under
 // `--no-default-features`.

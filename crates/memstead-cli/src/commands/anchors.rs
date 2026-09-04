@@ -47,7 +47,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // resolution (present only for a by-entity lookup on a path-medium mem;
     // `None` for the reverse `--artifact` lookup, which spans mems).
     let (rows, unreadable): (Vec<AnchorRow>, Vec<SidecarCondition>) = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }

@@ -359,7 +359,6 @@ fn domain_scope(scope: Option<&str>) -> Option<String> {
 /// Build the per-publish domain signature: canonicalize the archive (the
 /// signature covers the canonical content hash the registry will also compute),
 /// then sign `(hash, scope, name, version, now)` with the domain's stored key.
-#[cfg(feature = "mem-repo")]
 fn build_domain_signature(
     archive_path: &Path,
     scope: &str,
@@ -408,24 +407,6 @@ fn build_domain_signature(
         signature: domain_key::sign(&signing, &payload),
         timestamp,
     })
-}
-
-/// Lean build: canonicalizing an archive needs the git-branch validator, which
-/// is only compiled into the full `memstead` binary. Domain publishing is
-/// therefore unavailable here.
-#[cfg(not(feature = "mem-repo"))]
-fn build_domain_signature(
-    _archive_path: &Path,
-    _scope: &str,
-    _domain: &str,
-) -> anyhow::Result<registry::DomainSignature> {
-    Err(CliError::new(
-        ExitKind::Generic,
-        "DOMAIN_PUBLISH_UNAVAILABLE",
-        "domain publishing requires the full `memstead` build (the lean build cannot \
-         canonicalize archives for signing)",
-    )
-    .into())
 }
 
 /// Render the `--dry-run` preview: what the real publish would send,

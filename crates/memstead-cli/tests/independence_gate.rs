@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead mem set-schema` ships only in the full build.
 
 //! The checks-axis independence reading compares a check's identity with

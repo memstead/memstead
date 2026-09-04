@@ -220,7 +220,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         return run_llms_txt(ctx, args);
     }
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => match args.format {
             Format::Markdown => run_markdown(ctx, &engine, args.mem_name.as_deref()),
             Format::Mem => run_mem(ctx, &engine, args),
@@ -456,7 +455,6 @@ fn run_json(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }))
 }
 
-#[cfg(feature = "mem-repo")]
 fn run_markdown(
     ctx: &CliContext,
     engine: &memstead_base::Engine,
@@ -513,7 +511,6 @@ fn run_markdown(
     Ok(())
 }
 
-#[cfg(feature = "mem-repo")]
 fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyhow::Result<()> {
     let mem_name = resolve_mem_name(engine, args.mem_name)?;
     // Deliberately the config-keyed query: a mem-archive export cannot be
@@ -693,7 +690,6 @@ fn make_self_contained_on_disk(
     Ok(out)
 }
 
-#[cfg(feature = "mem-repo")]
 fn resolve_mem_name(
     engine: &memstead_base::Engine,
     explicit: Option<String>,
@@ -867,7 +863,6 @@ fn run_mem_filesystem(
     Ok(())
 }
 
-#[cfg(feature = "mem-repo")]
 fn default_output_path(
     mem_name: &str,
     config: &memstead_schema::MemConfig,

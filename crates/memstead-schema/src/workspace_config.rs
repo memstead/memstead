@@ -3,8 +3,8 @@
 //! [`CrossLinkValue`] is the shared shape behind `[cross_mem_links]`
 //! and `[[mem_management.create]].default_cross_links` — an operator
 //! writes either `"*"` (wildcard) or a list of mem names. Each engine
-//! crate that loads workspace policy (`memstead-base`,
-//! `memstead-engine`, `memstead-mcp`, `memstead-cli`) calls
+//! crate that loads workspace policy (`memstead-base`, `memstead-mcp`,
+//! `memstead-cli`) calls
 //! [`CrossLinkValue::parse_toml`] when lifting those tables; the value
 //! parser lives here so every crate validates the shape identically.
 

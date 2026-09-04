@@ -1,13 +1,10 @@
-//! The MCP servers' axis-coverage registries: every tool an agent can
+//! The MCP server's axis-coverage registry: every tool an agent can
 //! call declares either which axes its clean-reading output examined
 //! or why it emits no verdict at all. The rule, its vocabulary, and
 //! the validator live in `memstead_base::ops::coverage`; the gate
-//! test (`tests/axis_coverage.rs`) walks each server's live tool
+//! test (`tests/axis_coverage.rs`) walks the server's live tool
 //! router, so a new tool fails until it declares, and a new axis
-//! fails every verdict row that has not met it. Both flavours are
-//! covered: the full server and the lean filesystem server carry
-//! separate registries because their rosters differ, and each is
-//! held against its own router's walk.
+//! fails every verdict row that has not met it.
 
 use memstead_base::ops::coverage::{CoverageDisposition, SurfaceCoverage};
 
@@ -44,7 +41,7 @@ fn no_verdict(surface: &'static str, reason: &'static str) -> SurfaceCoverage {
     }
 }
 
-/// The thirteen tools both server flavours expose.
+/// The entity-level tools.
 fn shared_rows() -> Vec<SurfaceCoverage> {
     vec![
         HEALTH,
@@ -71,14 +68,8 @@ fn shared_rows() -> Vec<SurfaceCoverage> {
     ]
 }
 
-/// The lean filesystem server's registry.
-pub fn lean_registry() -> Vec<SurfaceCoverage> {
-    shared_rows()
-}
-
-/// The full server's registry: the shared roster plus reload and the
+/// The server's registry: the entity-level roster plus reload and the
 /// mem-lifecycle family.
-#[cfg(feature = "mem-repo")]
 pub fn full_registry() -> Vec<SurfaceCoverage> {
     let mut rows = shared_rows();
     rows.extend([

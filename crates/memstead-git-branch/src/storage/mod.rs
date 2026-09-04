@@ -17,7 +17,6 @@ pub use memstead_base::storage::{CommitId, MemWriter, MemWriterError};
 /// is the per-mem branch (fully-qualified, e.g.
 /// `refs/heads/<mem>`). The first commit creates the ref if it does
 /// not yet exist.
-#[cfg(feature = "git-object-storage")]
 pub fn git_tree_mem_writer(gitdir: PathBuf, ref_name: String) -> Box<dyn MemWriter> {
     Box::new(git_tree::GitTreeMemWriter::new(gitdir, ref_name))
 }
@@ -181,7 +180,7 @@ fn prune_residue_dispatch(
     )
 }
 
-/// Dispatcher for `memstead_engine::rename_mem` on git-branch
+/// Dispatcher for `memstead_base::mem_management::rename_mem` on git-branch
 /// workspaces: branch move + `__MEMSTEAD:mems/` config relocation in
 /// one ref-edit transaction, history preserved.
 fn rename_mem_storage_dispatch(
@@ -282,17 +281,7 @@ fn read_tree_dispatch(
     gitdir: &std::path::Path,
     ref_name: &str,
 ) -> Result<Vec<(String, String)>, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::read_md_blobs_at_ref(gitdir, ref_name)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, ref_name);
-        Err(memstead_base::backend::BackendError::Other(
-            "read_tree: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::read_md_blobs_at_ref(gitdir, ref_name)
 }
 
 fn fetch_dispatch(
@@ -300,17 +289,7 @@ fn fetch_dispatch(
     remote: &str,
     refspecs: &[String],
 ) -> Result<memstead_base::ops::FetchOutcome, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::fetch_in_gitdir(gitdir, remote, refspecs)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, remote, refspecs);
-        Err(memstead_base::backend::BackendError::Other(
-            "fetch: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::fetch_in_gitdir(gitdir, remote, refspecs)
 }
 
 fn pull_dispatch(
@@ -319,17 +298,7 @@ fn pull_dispatch(
     branch: &str,
     mem: &str,
 ) -> Result<memstead_base::ops::PullOutcome, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::pull_in_gitdir(gitdir, remote, branch, mem)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, remote, branch, mem);
-        Err(memstead_base::backend::BackendError::Other(
-            "pull: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::pull_in_gitdir(gitdir, remote, branch, mem)
 }
 
 fn push_dispatch(
@@ -339,51 +308,21 @@ fn push_dispatch(
     mem: &str,
     force: bool,
 ) -> Result<memstead_base::ops::PushOutcome, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::push_in_gitdir(gitdir, remote, branch, mem, force)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, remote, branch, mem, force);
-        Err(memstead_base::backend::BackendError::Other(
-            "push: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::push_in_gitdir(gitdir, remote, branch, mem, force)
 }
 
 fn ls_remote_dispatch(
     gitdir: &std::path::Path,
     remote: &str,
 ) -> Result<Vec<(String, String)>, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::ls_remote_in_gitdir(gitdir, remote)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, remote);
-        Err(memstead_base::backend::BackendError::Other(
-            "ls-remote: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::ls_remote_in_gitdir(gitdir, remote)
 }
 
 fn resolve_ref_dispatch(
     gitdir: &std::path::Path,
     ref_name: &str,
 ) -> Result<Option<String>, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::resolve_ref_in_gitdir(gitdir, ref_name)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, ref_name);
-        Err(memstead_base::backend::BackendError::Other(
-            "resolve-ref: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::resolve_ref_in_gitdir(gitdir, ref_name)
 }
 
 fn remote_add_dispatch(
@@ -391,17 +330,7 @@ fn remote_add_dispatch(
     name: &str,
     url: &str,
 ) -> Result<memstead_base::ops::RemoteAddOutcome, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::transport::remote_add_in_gitdir(gitdir, name, url)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, name, url);
-        Err(memstead_base::backend::BackendError::Other(
-            "remote_add: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::transport::remote_add_in_gitdir(gitdir, name, url)
 }
 
 fn branch_reset_dispatch(
@@ -410,17 +339,7 @@ fn branch_reset_dispatch(
     target_sha: &str,
     expected_head: Option<&str>,
 ) -> Result<memstead_base::ops::BranchResetOutcome, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::branch_reset::branch_reset_in_gitdir(gitdir, branch, target_sha, expected_head)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, branch, target_sha);
-        Err(memstead_base::backend::BackendError::Other(
-            "branch_reset: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::branch_reset::branch_reset_in_gitdir(gitdir, branch, target_sha, expected_head)
 }
 
 fn diff_dispatch(
@@ -431,17 +350,7 @@ fn diff_dispatch(
     ref_b: &str,
     config: &memstead_base::ops::DiffConfig,
 ) -> Result<memstead_base::ops::Diff, memstead_base::backend::BackendError> {
-    #[cfg(feature = "git-object-storage")]
-    {
-        crate::ops::diff::diff_two_refs(gitdir, branch, mem, ref_a, ref_b, config)
-    }
-    #[cfg(not(feature = "git-object-storage"))]
-    {
-        let _ = (gitdir, branch, mem, ref_a, ref_b, config);
-        Err(memstead_base::backend::BackendError::Other(
-            "diff_two_refs: git-object-storage feature not enabled".to_string(),
-        ))
-    }
+    crate::ops::diff::diff_two_refs(gitdir, branch, mem, ref_a, ref_b, config)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -72,7 +72,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     };
 
     let result = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => {
             // Validate `--mem` upfront so unknown names error
             // typed instead of silently returning `_total: 0` — matches

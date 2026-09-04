@@ -57,19 +57,9 @@ pub const REDACTION_CLASSES: &[RedactionClass] = &[
         keeps_leading_group: false,
     },
     RedactionClass {
-        name: "stale-product-name",
-        pattern: r"\b[Mm]emgno\b",
-        keeps_leading_group: false,
-    },
-    RedactionClass {
         name: "excluded-private-dirs",
         pattern: r#"(^|[[:space:]"'`(:,])(macos|websites|graph|inspector|local-ai)/"#,
         keeps_leading_group: true,
-    },
-    RedactionClass {
-        name: "legacy-domain",
-        pattern: r"(mdgv\.io|dasboe/mdgv|dasboe\.github\.io)",
-        keeps_leading_group: false,
     },
 ];
 
@@ -160,16 +150,15 @@ mod tests {
         // its patterns, but the scan's file-type-scoped class still reads
         // it, so no literal below may match a class.
         let input = format!(
-            "see {}/x.md and {} from {}/w; reads a {}/ path prefix",
+            "see {}/x.md from {}/w; reads a {}/ path prefix",
             ["dev", "plans"].join("/"),
-            ["mdgv", "io"].join("."),
             ["/Users", "bjornbosenberg"].join("/"),
             "graph"
         );
         let (out, counts) = redact(&input);
         assert_eq!(
             out,
-            "see [redacted:internal-refs]/x.md and [redacted:legacy-domain] from [redacted:absolute-user-paths]/w; reads a [redacted:excluded-private-dirs] path prefix"
+            "see [redacted:internal-refs]/x.md from [redacted:absolute-user-paths]/w; reads a [redacted:excluded-private-dirs] path prefix"
         );
         let list = counts_to_list(&counts);
         assert_eq!(
@@ -180,7 +169,6 @@ mod tests {
                 ("absolute-user-paths", 1),
                 ("internal-refs", 1),
                 ("excluded-private-dirs", 1),
-                ("legacy-domain", 1)
             ]
         );
         let (clean, none) = redact("an ordinary note about engine-graph/ and memstead.io");

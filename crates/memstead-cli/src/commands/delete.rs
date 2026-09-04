@@ -36,13 +36,11 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id);
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => run_mem_repo(ctx, engine, id, args),
         CliEngine::Filesystem(engine) => run_filesystem(ctx, engine, id, args),
     }
 }
 
-#[cfg(feature = "mem-repo")]
 fn run_mem_repo(
     ctx: &CliContext,
     mut engine: memstead_base::Engine,

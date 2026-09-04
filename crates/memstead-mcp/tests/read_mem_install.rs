@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Integration tests for the `--read-mem` install batch.
 //!
 //! Drives [`memstead_mcp::read_mems::install_read_mems`] directly — the

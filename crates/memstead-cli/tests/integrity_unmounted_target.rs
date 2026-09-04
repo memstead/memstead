@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! The integrity axis blames no grant after an unmount (backlog-decisions
 //! plan B8): a cross-mem edge whose target mem is no longer mounted is
 //! reported exactly once, as the dangling finding, and never as

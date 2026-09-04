@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Integration tests for the workspace-init / no-workspace edges.
 //!
 //! Covers two behaviours of the workspace-config CLI:

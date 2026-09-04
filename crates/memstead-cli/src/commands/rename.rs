@@ -48,7 +48,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let new_title = args.new_title.clone();
 
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
             let lookup_id = crate::setup::preflight_id(&mut engine, &id)?;
             let expected_hash = resolve_expected_hash_mem_repo(&engine, &lookup_id, &args)?;
@@ -142,7 +141,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// `--force`. Mirrors the original inline logic — extracted only so
 /// the filesystem path can run the same flag plumbing without
 /// duplicating it.
-#[cfg(feature = "mem-repo")]
 fn resolve_expected_hash_mem_repo(
     engine: &memstead_base::Engine,
     id: &EntityId,

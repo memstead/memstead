@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 // `memstead push --all` ships only in the full build.
 
 //! Integration tests for `memstead push --all`: every mounted

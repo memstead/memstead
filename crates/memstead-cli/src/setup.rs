@@ -9,24 +9,19 @@
 //! [`memstead_base::Engine::from_workspace_root`] (folder + archive
 //! only).
 //!
-//! [`CliEngine`] wraps either flavour; subcommands match-dispatch on
-//! it. The `WorkspaceShape` variant is retained so the lean build
-//! can still surface an actionable "this is the lean binary, your
-//! workspace has git-branch mounts" error when the operator points a
-//! lean binary at a full workspace — the shape tag is derived from
-//! `mem-repo/.git` co-existing with the marker rather than the
-//! marker itself.
+//! [`CliEngine`] wraps either shape; subcommands match-dispatch on
+//! it. The `WorkspaceShape` tag is derived from `mem-repo/.git`
+//! co-existing with the marker rather than the marker itself, and the
+//! mem-repo-only subcommands read it to refuse on the folder shape
+//! with a typed envelope.
 
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "mem-repo")]
 use anyhow::Context;
 
 use memstead_base::Engine as BaseEngine;
 use memstead_base::vcs::ClientId;
-#[cfg(feature = "mem-repo")]
 use memstead_base::vcs::{Actor, CommitContext};
-#[cfg(feature = "mem-repo")]
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 
 use crate::CliError;
@@ -41,14 +36,10 @@ use crate::output::ExitKind;
 pub const WORKSPACE_NOT_INITIALISED_CODE: &str = "WORKSPACE_NOT_INITIALISED";
 
 /// Recovery command suggested when no `.memstead/workspace.toml` is
-/// reachable from cwd. `memstead mem-repo init` in the full build (this
-/// binary speaks mem-repo); `memstead init` in the lean build. The
-/// structured `hint.recovery_command` field carries this token
+/// reachable from cwd. The structured `hint.recovery_command` field
+/// carries this token
 /// verbatim so an agent can re-exec it.
-#[cfg(feature = "mem-repo")]
 pub const WORKSPACE_RECOVERY_COMMAND: &str = "memstead mem-repo init";
-#[cfg(not(feature = "mem-repo"))]
-pub const WORKSPACE_RECOVERY_COMMAND: &str = "memstead init";
 
 /// Build the typed `WORKSPACE_NOT_INITIALISED` exit envelope. Goes
 /// through `CliError` so the top-level `main` downcast lifts the
@@ -152,9 +143,6 @@ fn memstead_word() -> String {
 /// this binary — the refusal is read by someone who is about to type
 /// what it says.
 ///
-/// Both gates that mint it are mem-repo-only, so the lean build never
-/// reaches this refusal (it has no mem-repo-only subcommand to refuse).
-#[cfg(feature = "mem-repo")]
 fn unsupported_workspace_shape_message() -> String {
     let m = memstead_word();
     format!(
@@ -191,41 +179,21 @@ pub fn memstead_program() -> String {
 }
 
 /// The command that produces the *other* shape than the one a
-/// disclosure is describing. Feature-gated because every command a
-/// message names must exist in the binary that prints it: the lean
-/// build has no `mem-repo` subcommand group, so it points at the full
-/// build rather than at a verb it would reject. The program name is
-/// resolved rather than hardcoded, for the same reason the verify
-/// commands resolve it — this is an instruction, not a mention.
-#[cfg(feature = "mem-repo")]
+/// disclosure is describing. The program name is resolved rather than
+/// hardcoded, for the same reason the verify commands resolve it —
+/// this is an instruction, not a mention.
 fn mem_repo_init_hint() -> String {
     format!("`{} mem-repo init` in a fresh folder", memstead_word())
 }
-#[cfg(not(feature = "mem-repo"))]
-fn mem_repo_init_hint() -> String {
-    "the full build of memstead (this lean build has no `mem-repo` subcommand), then \
-     `memstead mem-repo init` in a fresh folder"
-        .to_string()
-}
 
-/// What a filesystem-mem workspace cannot do — stated with the same
-/// feature gate as the hint above, and for the same reason. The full
-/// build names the `batch-*` commands and `memstead recover`, which
-/// exist there and refuse by shape, and says in the same breath that
-/// `memstead install` does NOT refuse (it stopped being shape-gated on
-/// 2026-08-27, and since 0.18.1 a folder workspace resolves an installed
-/// mem's sealed schema from the archive itself); the lean build has none
-/// of those subcommands, so naming them would send the reader to verbs
-/// that do not parse. The lean wording states the limit without
-/// borrowing a command it lacks.
-#[cfg(feature = "mem-repo")]
+/// What a filesystem-mem workspace cannot do. Names the `batch-*`
+/// commands and `memstead recover`, which refuse by shape, and says in
+/// the same breath that `memstead install` does NOT refuse (it stopped
+/// being shape-gated on 2026-08-27, and since 0.18.1 a folder workspace
+/// resolves an installed mem's sealed schema from the archive itself).
 const FILESYSTEM_CANNOT: &str = "**It cannot run the atomic `batch-*` commands or `recover`.** \
      Those are mem-repo-only and refuse here with `UNSUPPORTED_WORKSPACE_SHAPE`. \
      `memstead install <scope>/<name>` works on either shape.";
-#[cfg(not(feature = "mem-repo"))]
-const FILESYSTEM_CANNOT: &str = "**It holds exactly one mem, and keeps no history of its own.** \
-     Installing published mems, the atomic batch commands and recovery live in the full build, \
-     which this lean build does not carry at all.";
 
 impl WorkspaceShape {
     /// Resolve the shape of an existing workspace root. Routes through
@@ -373,68 +341,42 @@ pub fn shape_disclosure_lines_in(shape: WorkspaceShape, mem_folder: Option<&str>
 /// store accessor (`engine.store()`) lives on both flavours so simple
 /// read commands can share most of their bodies.
 ///
-/// The `MemRepo` variant is only present under the `mem-repo`
-/// feature. In the lean build (`--no-default-features`) the enum
-/// collapses to a single `Filesystem` arm — every subcommand's
-/// dispatch elides the missing arm via `cfg`.
+/// The variant names the workspace shape that booted, not a build
+/// config: one binary serves both, and the mem-repo-only subcommands
+/// refuse on the `Filesystem` arm.
 pub enum CliEngine {
-    #[cfg(feature = "mem-repo")]
+    /// Mem-repo shape (`mem-repo/.git/` present), served by the
+    /// git-branch-backed [`memstead_base::Engine`].
     MemRepo(BaseEngine),
-    /// Filesystem-mem flavour, served by the unified [`memstead_base::Engine`].
+    /// Filesystem-mem shape, served by the unified [`memstead_base::Engine`].
     Filesystem(BaseEngine),
 }
 
 impl CliEngine {
-    /// The unified base engine behind whichever flavour booted. Both
-    /// variants wrap [`BaseEngine`]; commands that treat the flavours
+    /// The unified base engine behind whichever shape booted. Both
+    /// variants wrap [`BaseEngine`]; commands that treat the shapes
     /// identically destructure here instead of carrying a per-site
-    /// match (which, in the lean build's single-variant enum, is the
-    /// `infallible_destructuring_match` shape the isolated lean clippy
-    /// leg flags).
+    /// match.
     pub fn base(&self) -> &BaseEngine {
-        #[cfg(feature = "mem-repo")]
-        {
-            match self {
-                CliEngine::MemRepo(e) => e,
-                CliEngine::Filesystem(e) => e,
-            }
-        }
-        #[cfg(not(feature = "mem-repo"))]
-        {
-            let CliEngine::Filesystem(e) = self;
-            e
+        match self {
+            CliEngine::MemRepo(e) => e,
+            CliEngine::Filesystem(e) => e,
         }
     }
 
     /// Mutable twin of [`Self::base`].
     pub fn base_mut(&mut self) -> &mut BaseEngine {
-        #[cfg(feature = "mem-repo")]
-        {
-            match self {
-                CliEngine::MemRepo(e) => e,
-                CliEngine::Filesystem(e) => e,
-            }
-        }
-        #[cfg(not(feature = "mem-repo"))]
-        {
-            let CliEngine::Filesystem(e) = self;
-            e
+        match self {
+            CliEngine::MemRepo(e) => e,
+            CliEngine::Filesystem(e) => e,
         }
     }
 
     /// Owning twin of [`Self::base`].
     pub fn into_base(self) -> BaseEngine {
-        #[cfg(feature = "mem-repo")]
-        {
-            match self {
-                CliEngine::MemRepo(e) => e,
-                CliEngine::Filesystem(e) => e,
-            }
-        }
-        #[cfg(not(feature = "mem-repo"))]
-        {
-            let CliEngine::Filesystem(e) = self;
-            e
+        match self {
+            CliEngine::MemRepo(e) => e,
+            CliEngine::Filesystem(e) => e,
         }
     }
 }
@@ -445,11 +387,9 @@ impl CliContext {
     ///
     /// Post-rebuild the marker is shape-neutral — the same
     /// `.memstead/workspace.toml` carries both folder-only workspaces and
-    /// mem-repo workspaces. The flavour tag comes from whether the
-    /// workspace root also carries `mem-repo/.git/` (mem-repo
-    /// flavour) or not (folder-only flavour). The lean CLI uses this
-    /// distinction to surface "this is the lean binary" when the
-    /// operator points it at a workspace with git-branch mounts.
+    /// mem-repo workspaces. The shape tag comes from whether the
+    /// workspace root also carries `mem-repo/.git/` (mem-repo shape)
+    /// or not (folder-only shape).
     pub fn workspace_shape(&self) -> Option<(WorkspaceShape, PathBuf)> {
         let cwd = std::env::current_dir().ok()?;
         let root = find_workspace_root(&cwd)?;
@@ -457,14 +397,8 @@ impl CliContext {
     }
 
     /// Build a [`CliEngine`] from the current cwd. The workspace
-    /// marker `.memstead/workspace.toml` resolves either flavour; the
+    /// marker `.memstead/workspace.toml` resolves either shape; the
     /// presence of `mem-repo/.git/` switches the engine factory.
-    ///
-    /// On the lean build (`--no-default-features`) the mem-repo
-    /// branch surfaces a clear "not built into this binary" error so
-    /// a user pointing the lean build at a mem-repo workspace
-    /// gets an actionable signal rather than a confusing "no
-    /// workspace" bail.
     pub fn cli_engine(&self) -> anyhow::Result<CliEngine> {
         match self.workspace_shape() {
             Some((_, root)) => self.cli_engine_at(&root),
@@ -494,7 +428,6 @@ impl CliContext {
             Some((_, root)) => {
                 let mut engine = self.cli_engine_at_unloaded(&root)?;
                 match &mut engine {
-                    #[cfg(feature = "mem-repo")]
                     CliEngine::MemRepo(e) => e.ensure_mems_loaded(Some(mem)),
                     CliEngine::Filesystem(e) => e.ensure_mems_loaded(Some(mem)),
                 }
@@ -521,7 +454,6 @@ impl CliContext {
         // over a partial store. Commands whose whole answer lives in one
         // mem opt into [`Self::cli_engine_scoped`] instead.
         match &mut engine {
-            #[cfg(feature = "mem-repo")]
             CliEngine::MemRepo(e) => e.ensure_mems_loaded(None),
             CliEngine::Filesystem(e) => e.ensure_mems_loaded(None),
         }
@@ -534,25 +466,12 @@ impl CliContext {
     /// default path, one mem for the scoped path).
     fn cli_engine_at_unloaded(&self, root: &Path) -> anyhow::Result<CliEngine> {
         if memstead_base::is_mem_repo_shaped(root) {
-            #[cfg(feature = "mem-repo")]
             {
                 let mut engine =
                     engine_from_workspace_root(root).map_err(|e| boot_error_to_cli(root, e))?;
                 engine.set_role(self.role);
                 engine.set_identity(self.identity.clone());
                 return Ok(CliEngine::MemRepo(engine));
-            }
-            #[cfg(not(feature = "mem-repo"))]
-            {
-                return Err(CliError {
-                    kind: ExitKind::Generic,
-                    code: "UNSUPPORTED_WORKSPACE_SHAPE",
-                    message:
-                        "this is the lean build of memstead (folder-mount only); the workspace is mem-repo-shaped (`mem-repo/.git/` present). Install the full build (`cargo build --features mem-repo`) or run from a workspace whose mounts are all folder-backed."
-                            .to_string(),
-                    details: None,
-                }
-                .into());
             }
         }
         let mut engine =
@@ -570,7 +489,6 @@ impl CliContext {
     /// Only compiled into the full build — the lean build never sees a
     /// mem-repo workspace because `cli_engine()` rejects it before
     /// reaching here.
-    #[cfg(feature = "mem-repo")]
     pub fn engine(&self) -> anyhow::Result<BaseEngine> {
         let cwd = std::env::current_dir().context("Could not determine current directory")?;
 
@@ -662,7 +580,6 @@ pub fn find_filesystem_workspace_root(start: &Path) -> Option<PathBuf> {
 /// Only used by mem-repo write paths today; filesystem-mem write
 /// paths assemble their own provenance directly. The function therefore
 /// only compiles when `mem-repo` is enabled.
-#[cfg(feature = "mem-repo")]
 pub fn cli_ctx() -> CommitContext<'static> {
     cli_ctx_with_note(None)
 }
@@ -685,7 +602,6 @@ pub fn cli_client_id() -> ClientId {
 /// The note rides into the same payload slot the MCP `note` parameter
 /// uses; the engine's `require_notes` policy gate fires `NOTE_MISSING`
 /// symmetrically across both surfaces.
-#[cfg(feature = "mem-repo")]
 pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
     CommitContext {
         actor: Actor::Cli,
@@ -708,7 +624,6 @@ pub fn cli_ctx_with_note(note: Option<String>) -> CommitContext<'static> {
 /// they read / write commit-shaped artefacts (`workspace dump`
 /// snapshots, `batch-update` commit envelopes) that have no analogue
 /// on a folder-mount-only workspace.
-#[cfg(feature = "mem-repo")]
 pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     // Typed, not INTERNAL: an unreadable or deleted working directory
     // is an environment condition the caller can act on (`cd` somewhere

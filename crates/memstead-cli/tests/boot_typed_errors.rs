@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Boot-path complement of `no_internal_leaks`: every boot failure
 //! class surfaces a typed code — never `INTERNAL` — and a message whose
 //! final clause names the repair command (or states plainly that no

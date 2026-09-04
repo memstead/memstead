@@ -17,7 +17,7 @@ use memstead_base::workspace::{
     WorkspaceSettings,
 };
 use memstead_base::{Engine, EngineError};
-use memstead_engine::{FullEngineError, mem_management};
+use memstead_base::{FullEngineError, mem_management};
 use memstead_schema::SchemaRef;
 use tempfile::TempDir;
 
@@ -2496,7 +2496,7 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
 
     // Policy projection surfaces the rule-derived grant distinctly from
     // any explicit grant.
-    let entries = memstead_engine::overview::build_workspace_policy_entries(&engine);
+    let entries = memstead_base::overview::build_workspace_policy_entries(&engine);
     assert!(
         entries
             .iter()
@@ -2510,9 +2510,9 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
 
     // Rendered overview names the grant under its pattern and carries the
     // posture in the `_policy` flow.
-    let out = memstead_engine::overview::compose_overview(
+    let out = memstead_base::overview::compose_overview(
         &mut engine,
-        memstead_engine::overview::OverviewArgs {
+        memstead_base::overview::OverviewArgs {
             include: &[],
             mem: None,
             rebuild: false,
@@ -2520,7 +2520,7 @@ fn rule_derived_cross_link_grant_is_enforced_and_surfaced_in_overview() {
             operator_mode: false,
             suppress_lifecycle: false,
         },
-        memstead_engine::overview::Surface::Mcp,
+        memstead_base::overview::Surface::Mcp,
     )
     .unwrap();
     assert!(
@@ -2566,7 +2566,7 @@ fn explicit_and_rule_derived_cross_links_project_as_distinct_entries() {
         ..Default::default()
     });
 
-    let entries = memstead_engine::overview::build_workspace_policy_entries(&engine);
+    let entries = memstead_base::overview::build_workspace_policy_entries(&engine);
     assert!(
         entries
             .iter()

@@ -20,7 +20,6 @@ use clap::Parser;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-#[cfg(feature = "mem-repo")]
 use memstead_base::ops::PatchArg;
 use memstead_base::vcs::Actor;
 use memstead_base::{EntityId, UpdateEntityArgs};
@@ -273,7 +272,6 @@ struct UpdatePayload {
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct DeclareRelationPayload {
     /// Target entity id (`mem--slug` or cross-mem form).
     to: String,
@@ -307,7 +305,6 @@ impl RelationUnsetPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 struct PatchPayload {
     old: String,
     new: String,
@@ -320,14 +317,12 @@ struct PatchPayload {
 /// in order against the section's evolving body.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-#[cfg_attr(not(feature = "mem-repo"), allow(dead_code))]
 enum PatchesPayload {
     One(PatchPayload),
     Many(Vec<PatchPayload>),
 }
 
 impl PatchesPayload {
-    #[cfg(feature = "mem-repo")]
     fn into_vec(self) -> Vec<PatchPayload> {
         match self {
             PatchesPayload::One(p) => vec![p],
@@ -463,7 +458,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     }
 
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(mut engine) => {
             let lookup_id = crate::setup::preflight_id(&mut engine, &entity_id)?;
             check_template_identity(
@@ -799,7 +793,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
 /// Render `modified_sections` as `identity (replaced), constraints (appended)`.
 /// Returns `None` when nothing was modified, letting the caller omit the line.
-#[cfg(feature = "mem-repo")]
 fn render_section_mutations(m: &memstead_git_branch::ModifiedSections) -> Option<String> {
     let mut parts = Vec::new();
     for k in &m.replaced {
@@ -819,7 +812,6 @@ fn render_section_mutations(m: &memstead_git_branch::ModifiedSections) -> Option
 }
 
 /// Render `modified_metadata` as `level (set), tags (unset)`. `None` when empty.
-#[cfg(feature = "mem-repo")]
 fn render_metadata_mutations(m: &memstead_git_branch::ModifiedMetadata) -> Option<String> {
     let mut parts = Vec::new();
     for k in &m.set {
@@ -845,7 +837,6 @@ fn render_metadata_mutations(m: &memstead_git_branch::ModifiedMetadata) -> Optio
 ///   bother reading the entity first," `--force` for "I intend to overwrite
 ///   regardless of what's there."
 /// * Strict (default) → use the explicit `--expected-hash` / JSON field, else error.
-#[cfg(feature = "mem-repo")]
 fn resolve_hash_mem_repo(
     engine: &memstead_base::Engine,
     id: &EntityId,

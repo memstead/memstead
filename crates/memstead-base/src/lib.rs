@@ -24,6 +24,7 @@ pub mod derivation;
 pub mod domain_authority_wire;
 pub mod engine;
 pub mod entity;
+pub mod error;
 pub mod filesystem;
 pub mod friction;
 pub mod graph;
@@ -50,6 +51,7 @@ pub mod store;
 pub mod validator;
 pub mod vcs;
 pub mod workspace;
+pub mod workspace_config_edit;
 pub mod workspace_root;
 pub mod workspace_store;
 
@@ -82,6 +84,7 @@ pub use engine::{
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
+pub use error::{FullEngineError, RecoveryAction};
 pub use graph::{ClusterInfo, LouvainOutput};
 pub use mem::{MEM_META_DIR, MemOrigin, MemRouterSnapshot};
 

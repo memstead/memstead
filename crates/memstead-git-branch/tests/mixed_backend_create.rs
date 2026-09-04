@@ -8,9 +8,9 @@
 //! proves both backends coexist in one workspace.
 
 use memstead_base::CreateEntityArgs;
+use memstead_base::mem_management::{self, StorageKind};
 use memstead_base::vcs::Actor;
 use memstead_base::workspace::MountStorage;
-use memstead_engine::mem_management::{self, StorageKind};
 use memstead_git_branch::test_support::init_real_mem_repo;
 use memstead_git_branch::workspace_store::engine_from_workspace_root;
 use tempfile::TempDir;
@@ -444,10 +444,10 @@ fn detach_incoming_delete_supports_same_name_rehoming() {
     // Revoke the grant on disk (policy gate would otherwise fire
     // first and mask the incoming-refs axis), reboot, and assert the
     // edge-graph refusal without the flag.
-    memstead_engine::workspace_config_edit::revoke_cross_link(
+    memstead_base::workspace_config_edit::revoke_cross_link(
         tmp.path(),
         "referrer",
-        &memstead_engine::workspace_config_edit::CrossLinkTarget::Named("target-mem".to_string()),
+        &memstead_base::workspace_config_edit::CrossLinkTarget::Named("target-mem".to_string()),
     )
     .expect("revoke grant");
     let mut engine = engine_from_workspace_root(tmp.path()).expect("reboot after revoke");
@@ -563,7 +563,7 @@ fn agent_mode_out_of_root_location_refuses_outside_workspace() {
     )
     .expect_err("agent-mode out-of-root create must refuse");
     match err {
-        memstead_engine::error::FullEngineError::MemPathNotAllowed { reason, .. } => {
+        memstead_base::FullEngineError::MemPathNotAllowed { reason, .. } => {
             assert_eq!(reason, "outside_workspace");
         }
         other => panic!("expected MemPathNotAllowed/outside_workspace, got {other:?}"),

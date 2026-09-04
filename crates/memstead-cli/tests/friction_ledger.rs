@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! The friction ledger's CLI leg (agent-trust plan 08): a refused CLI
 //! call appends one content-free entry, a successful one appends
 //! nothing, `health --include friction` serves the summary and its

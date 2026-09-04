@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Agent-surface polish:
 //! `--quiet` parity with `--json`, the exit-code-table documenting the
 //! clap usage-error code, and the `mem unregister` / `workspace` help

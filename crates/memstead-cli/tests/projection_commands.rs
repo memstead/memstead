@@ -1310,7 +1310,6 @@ fn advance_outside_workspace_is_typed() {
 /// `projection brief <mem>/<stem>` renders a binding's discovery run-brief,
 /// headed by the canonical binding id (D3/D9). Scaffold a binding with
 /// `projection init`, then render it.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_renders_for_scaffolded_binding() {
     let tmp = TempDir::new().unwrap();
@@ -1361,7 +1360,6 @@ fn brief_renders_for_scaffolded_binding() {
 /// `--all`, so named briefs are peeks by construction) leaves every cache
 /// byte-identical and never points enforcement at the peeked binding; a
 /// consuming `--all --consume` render publishes the picked binding's id.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn active_binding_pointer_derives_only_from_consuming_renders() {
     fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
@@ -1466,7 +1464,6 @@ fn active_binding_pointer_derives_only_from_consuming_renders() {
 /// verdicts against a named binding, naming the matched deny entry on a
 /// block; the directory-prefix rule and `..`-escaping candidates produce the
 /// verdicts the retired hook dialect produced.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn check_path_answers_single_and_batch() {
     let tmp = TempDir::new().unwrap();
@@ -1576,7 +1573,6 @@ fn check_path_answers_single_and_batch() {
 /// `projection check-path` refusals are typed, never "allowed" by omission:
 /// an unknown binding, a quarantined binding, a missing active pointer, and
 /// a malformed batch each refuse with their own code.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn check_path_refuses_typed() {
     let tmp = TempDir::new().unwrap();
@@ -1671,7 +1667,6 @@ fn check_path_refuses_typed() {
 /// the loop with no list ever cached: after the pointer moves, the previous
 /// binding's denies are no longer enforced (the stale-enforcement regression,
 /// re-expressed at the new seam).
-#[cfg(feature = "mem-repo")]
 #[test]
 fn check_path_follows_the_active_binding() {
     let tmp = TempDir::new().unwrap();
@@ -1743,7 +1738,6 @@ fn check_path_follows_the_active_binding() {
 /// `skipped` outcome, which would otherwise collapse into the same `None`. A
 /// caller (the plugin's setup ramp, a status display) branches on this to
 /// prompt first-time setup rather than retry a no-op pass.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_all_empty_store_reports_no_bindings() {
     let tmp = TempDir::new().unwrap();
@@ -1792,7 +1786,6 @@ fn brief_all_empty_store_reports_no_bindings() {
 /// `projection brief <binding> --verify` renders the verify brief (group C):
 /// measurement + capped-adjudication instructions only, with the explicit
 /// no-mutation refusal and NO repair block. Read-only on the mem.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_verify_renders_measurement_only() {
     let tmp = TempDir::new().unwrap();
@@ -1849,7 +1842,6 @@ fn brief_verify_renders_measurement_only() {
 /// `projection brief <binding> --sync` renders the sync brief (group C): the
 /// sole-maintenance-writer prompt with the absorbed reconcile conservatism. A
 /// fresh mem (no anchors, never synced) triggers the adopt / first-sync framing.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_sync_renders_sole_writer_with_conservatism() {
     let tmp = TempDir::new().unwrap();
@@ -1903,7 +1895,6 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
 /// must not spend a work slot rendering a brief the engine will refuse to
 /// apply (backlog-sweep plan 03, decision 13). Complement: `projection
 /// enable sync` makes the identical call succeed.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_sync_refuses_sync_disabled_binding_with_remedy() {
     let tmp = TempDir::new().unwrap();
@@ -1972,7 +1963,6 @@ fn brief_sync_refuses_sync_disabled_binding_with_remedy() {
 /// `projection brief --verify` / `--sync` without a binding id refuses with a
 /// typed `PROJECTION_BRIEF_BINDING_REQUIRED` — they render one binding, never an
 /// `--all` rotation.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_verify_sync_require_a_binding() {
     let tmp = TempDir::new().unwrap();
@@ -1999,7 +1989,6 @@ fn brief_verify_sync_require_a_binding() {
 
 /// `projection brief` on an unknown binding id refuses `PROJECTION_NOT_FOUND`
 /// (NotFound exit) — never a generic/internal leak.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_missing_binding_refuses() {
     let tmp = TempDir::new().unwrap();
@@ -2474,7 +2463,6 @@ fn an_undeclared_anchor_source_refuses_on_the_path_but_is_tolerated_when_it_reso
 /// surface that sent it said something untrue.
 ///
 /// Fixture needs `mem-repo init`, which the lean build does not carry.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_names_a_destination_mem_that_does_not_exist_yet() {
     let tmp = TempDir::new().unwrap();
@@ -2918,7 +2906,6 @@ fn migrate_without_cursor_leaves_never_synced() {
 /// A mem-repo workspace with one scaffolded binding `ws/code` over a real
 /// sibling `src/` dir (init defaults: build `trigger: loop`, sync + verify
 /// `trigger: manual`). Returns the TempDir and the workspace path.
-#[cfg(feature = "mem-repo")]
 fn operation_workspace() -> (TempDir, std::path::PathBuf) {
     let tmp = TempDir::new().unwrap();
     let src = tmp.path().join("src");
@@ -2949,7 +2936,6 @@ fn operation_workspace() -> (TempDir, std::path::PathBuf) {
 }
 
 /// Rewrite one operation block's `trigger` on the scaffolded `ws/code` binding.
-#[cfg(feature = "mem-repo")]
 fn set_trigger(ws: &Path, op: &str, trigger: &str) {
     let path = ws.join(".memstead/projections/ws/code.json");
     let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -2961,7 +2947,6 @@ fn set_trigger(ws: &Path, op: &str, trigger: &str) {
 /// (back-compat for the ingest router) and the JSON output gains the additive
 /// `operation` field next to `brief` — explicit `--operation build` behaves
 /// identically.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_all_defaults_to_build_and_names_the_operation() {
     let (_tmp, ws) = operation_workspace();
@@ -3007,7 +2992,6 @@ fn brief_all_defaults_to_build_and_names_the_operation() {
 /// loop` in the declaration): with build flipped to manual and verify to loop,
 /// the rotation selects the verify pair and dispatches to the verify renderer,
 /// naming the operation in the JSON output.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_all_any_dispatches_to_the_loop_declared_operation() {
     let (_tmp, ws) = operation_workspace();
@@ -3045,7 +3029,6 @@ fn brief_all_any_dispatches_to_the_loop_declared_operation() {
 
 /// A loop-declared sync pair with an unmoved source and no open findings is
 /// not due — the rotation yields the quiet `skipped` outcome, not a brief.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_all_sync_yields_quietly_when_nothing_due() {
     let (_tmp, ws) = operation_workspace();
@@ -3076,7 +3059,6 @@ fn brief_all_sync_yields_quietly_when_nothing_due() {
 
 /// `--operation` binds to the `--all` rotation: without `--all` it is a usage
 /// error, and it conflicts with the single-binding `--sync` / `--verify` modes.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_operation_flag_requires_all_and_conflicts_with_group_c() {
     let (_tmp, ws) = operation_workspace();
@@ -3102,7 +3084,6 @@ fn brief_operation_flag_requires_all_and_conflicts_with_group_c() {
 /// repeats byte-identically; `--consume` is the act that takes the rotation
 /// slot. The JSON envelope also discloses the (binding, op) pairs the filter
 /// admits but the bindings never loop-declare (`not_rotated`).
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_all_is_pure_without_consume_and_advances_with_it() {
     let (tmp, ws) = operation_workspace();
@@ -3188,7 +3169,6 @@ fn brief_all_is_pure_without_consume_and_advances_with_it() {
 
 /// `--consume` binds to the `--all` rotation: on a named-binding render it is
 /// a usage error (a single-binding brief has no rotation slot to take).
-#[cfg(feature = "mem-repo")]
 #[test]
 fn brief_consume_requires_all() {
     let (_tmp, ws) = operation_workspace();
@@ -4759,7 +4739,6 @@ fn a_web_facet_cannot_carry_scope_either() {
 /// true-lean flavour (which omits the feature) cannot host this fixture. The
 /// folder-mem graph tests above run in every flavour and carry the coverage
 /// and drift criteria; this one adds the git-backed change-detection half.
-#[cfg(feature = "mem-repo")]
 #[test]
 fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
     let tmp = TempDir::new().unwrap();

@@ -1,4 +1,3 @@
-#![cfg(feature = "mem-repo")]
 //! Integration tests for `memstead` write subcommands.
 //!
 //! Covers the core round-trip (create → read → update strict → update

@@ -26,7 +26,6 @@ pub struct Args {
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let id = EntityId::canonical(&args.id_or_query);
     let outcome: ContextOutcome = match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => resolve_context_mem_repo(&engine, &id, ctx, &args)?,
         CliEngine::Filesystem(engine) => resolve_context_filesystem(&engine, &id, ctx, &args)?,
     };
@@ -95,7 +94,6 @@ enum ContextOutcome {
 /// not-found / ambiguous results, prints the user-facing notice and
 /// returns `Ok(None)` so the caller exits cleanly without invoking
 /// the markdown render path.
-#[cfg(feature = "mem-repo")]
 fn resolve_context_mem_repo(
     engine: &memstead_base::Engine,
     id: &EntityId,

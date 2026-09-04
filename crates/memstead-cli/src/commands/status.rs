@@ -133,7 +133,6 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
 
     let (status, total, real, schema_counts, projections, rollup, mems, quarantined) =
         match ctx.cli_engine()? {
-            #[cfg(feature = "mem-repo")]
             CliEngine::MemRepo(engine) => {
                 let status = engine.status();
                 let store: &Store = engine.store();

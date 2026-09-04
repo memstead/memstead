@@ -48,13 +48,11 @@ pub struct Args {
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match ctx.cli_engine()? {
-        #[cfg(feature = "mem-repo")]
         CliEngine::MemRepo(engine) => run_mem_repo(ctx, engine, args),
         CliEngine::Filesystem(engine) => run_filesystem(ctx, engine, args),
     }
 }
 
-#[cfg(feature = "mem-repo")]
 fn run_mem_repo(ctx: &CliContext, engine: memstead_base::Engine, args: Args) -> anyhow::Result<()> {
     let mem = match args.mem {
         Some(v) => v,

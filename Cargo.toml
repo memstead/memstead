@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "crates/memstead-schema",
     "crates/memstead-base",
-    "crates/memstead-engine",
     "crates/memstead-git-branch",
     "crates/memstead-mcp",
     "crates/memstead-cli",
@@ -21,7 +20,7 @@ exclude = ["fuzz"]
 version = "0.18.1"
 edition = "2024"
 # Verified floor: 1.90 fails on `str::floor_char_boundary` (stabilised in
-# 1.91); 1.91 checks the full workspace cleanly in both flavours. Dependency
+# 1.91); 1.91 checks the full workspace cleanly. Dependency
 # MSRVs (zip 8, time 0.3.47, darling 0.23) already require >= 1.88.
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
@@ -45,7 +44,6 @@ result_large_err = "allow"
 # `workspace.package.version`.
 memstead-schema = { path = "crates/memstead-schema", version = "0.18.1" }
 memstead-base = { path = "crates/memstead-base", version = "0.18.1" }
-memstead-engine = { path = "crates/memstead-engine", version = "0.18.1" }
 memstead-mcp = { path = "crates/memstead-mcp", version = "0.18.1" }
 memstead-cli = { path = "crates/memstead-cli", version = "0.18.1" }
 memstead-git-branch = { path = "crates/memstead-git-branch", version = "0.18.1" }
