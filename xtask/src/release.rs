@@ -251,9 +251,8 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
          run from it:\n\
          \x20        git tag -a v{v} -m \"v{v}\" && git push origin v{v}\n\
          \n  4. In the private repo, bring the website surfaces to the tag \
-         BEFORE adopting — the release box (a {v} summary in \
-         websites/memstead.com/src/data/release-summaries.json, then the \
-         box builder) and the served flagship (reconcile its binding if \
+         BEFORE adopting — the release box (a {v} summary in the private site's \
+         release-summaries data, then the box builder) and the served flagship (reconcile its binding if \
          the docs moved, then re-cut with regen-flagship.sh) — then adopt \
          (gitlink + the private crates' locks + the .ai deploy). Adoption \
          refuses a stale box, a drifted flagship and a stale archive \

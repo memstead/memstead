@@ -234,7 +234,7 @@ pkill -f memstead-mcp
 
 ## Built in the open, on itself
 
-Memstead is built by one person — Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open — on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust — the compiler and borrow-checker stand in for the human code review a solo builder gives up — and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform — roughly 138K lines of Rust, none written by hand, about 3,100 agent commits against 4 human ones — was built across roughly 4.5 **calendar** months of **part-time** work as an AI-orchestration project, and it keeps its own project knowledge as live Memstead mems, in the open, gaps included.
+Memstead is built by one person — Björn Bösenberg, a Berlin-based full-stack developer of ~25 years, building Memstead in the open — on a single thesis: *correctness enforced at boundaries replaces trust in the author.* That is why the engine is Rust — the compiler and borrow-checker stand in for the human code review a solo builder gives up — and why every write to a mem is validated at the boundary rather than trusted after the fact. The same thesis, applied to knowledge instead of code, *is* the product. The platform was built as an AI-orchestration project, none of the Rust written by hand, across roughly 4.5 **calendar** months of **part-time** work, and it keeps its own project knowledge as live Memstead mems, in the open, gaps included.
 
 ## License
 
