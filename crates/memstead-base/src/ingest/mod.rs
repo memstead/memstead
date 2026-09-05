@@ -43,7 +43,7 @@ pub use crate::pipeline::Source;
 pub use advance::{
     AdvanceError, AdvanceOutcome, AdvanceState, DispositionInput, EXCLUDED_VERDICT, ExcludeError,
     ExcludeOutcome, advance_baseline, advance_store_path, delete_advance_store, read_advance_store,
-    record_exclusions, write_advance_store,
+    record_entity_exclusions, record_exclusions, write_advance_store,
 };
 pub use brief::{
     NoSignalNote, PROCESS_MEM_SCHEMA, ProcessMemInfo, SourceCursor, SyncCommand,

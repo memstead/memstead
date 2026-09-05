@@ -189,6 +189,13 @@ pub enum ProjectionCommand {
     /// path for the option-(a)
     /// process-mem judgment migration, and the general "this in-scope artifact is
     /// mined and warrants no destination entity, because …" capability.
+    /// The entity side is `--entity-exclusions`: destination entities that
+    /// deliberately carry no anchor (a withdrawn claim kept as record, an
+    /// "about this graph" entity), each with its rationale; the fidelity
+    /// report names them as excluded with the reason instead of listing them
+    /// among the entities without anchors. An id that is not an entity of the
+    /// destination mem refuses the whole call
+    /// (`PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY`).
     Exclude(ExcludeArgs),
     /// Measure a binding's fidelity and record durable findings (E3b, group A).
     /// Read-only on the destination mem's ENTITIES: verify adjudicates its anchors
@@ -466,9 +473,18 @@ pub struct ExcludeArgs {
     /// Every id must resolve to a member of the binding's enumerable source
     /// `S(D)`, in the workspace-relative form or the source-relative one; the
     /// ledger holds the canonical workspace-relative id. An id resolving to no
-    /// artifact refuses the whole call, naming the nearest known ids.
-    #[arg(long)]
-    pub exclusions: String,
+    /// artifact refuses the whole call, naming the nearest known ids. At
+    /// least one of `--exclusions` / `--entity-exclusions` is required.
+    #[arg(long, required_unless_present = "entity_exclusions")]
+    pub exclusions: Option<String>,
+    /// A JSON object mapping each destination entity id to the rationale for
+    /// it deliberately carrying no anchor, e.g. `'{"claims--old-claim":
+    /// "withdrawn 2026-08-18 with its subject; kept as record"}'`. Every id
+    /// must be a non-stub entity of the binding's destination mem; one that
+    /// is not refuses the whole call. Re-declaring merges and updates the
+    /// rationale.
+    #[arg(long = "entity-exclusions", required_unless_present = "exclusions")]
+    pub entity_exclusions: Option<String>,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -2243,6 +2259,16 @@ fn map_exclude_err(binding_id: &str, err: ExcludeError) -> CliError {
             CliError::new(ExitKind::Validation, "PROJECTION_INVALID_NAME", message)
                 .with_details(json!({ "binding": binding_id }))
         }
+        ExcludeError::NotDestinationEntity { entities, mem } => CliError::new(
+            ExitKind::Validation,
+            "PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY",
+            message,
+        )
+        .with_details(json!({
+            "binding": binding_id,
+            "destination_mem": mem,
+            "not_destination_entities": entities,
+        })),
         // The recovery IS the candidate list, so it rides `details` under a
         // key a caller can branch on, not only the prose.
         ExcludeError::AmbiguousArtifact { ambiguous } => CliError::new(
@@ -2300,20 +2326,31 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
 
     let binding_id = args.binding;
 
-    // Parse the exclusions payload up front — a malformed `--exclusions` refuses
-    // cheaply (before loading configs) with a typed code.
-    let exclusions: std::collections::BTreeMap<String, String> =
-        serde_json::from_str(&args.exclusions).map_err(|e| {
+    // Parse both payloads up front — a malformed flag refuses cheaply (before
+    // loading configs) with a typed code.
+    let parse = |flag: &str,
+                 raw: &str,
+                 what: &str|
+     -> Result<std::collections::BTreeMap<String, String>, CliError> {
+        serde_json::from_str(raw).map_err(|e| {
             CliError::new(
                 ExitKind::Validation,
                 "PROJECTION_INVALID_EXCLUSIONS",
-                format!(
-                    "--exclusions must be a JSON object mapping in-scope artifact id → \
-                     rationale string: {e}"
-                ),
+                format!("{flag} must be a JSON object mapping {what} → rationale string: {e}"),
             )
-            .with_details(json!({ "error": e.to_string() }))
-        })?;
+            .with_details(json!({ "error": e.to_string(), "flag": flag }))
+        })
+    };
+    let exclusions: Option<std::collections::BTreeMap<String, String>> = args
+        .exclusions
+        .as_deref()
+        .map(|raw| parse("--exclusions", raw, "in-scope artifact id"))
+        .transpose()?;
+    let entity_exclusions: Option<std::collections::BTreeMap<String, String>> = args
+        .entity_exclusions
+        .as_deref()
+        .map(|raw| parse("--entity-exclusions", raw, "destination entity id"))
+        .transpose()?;
 
     // Find the binding by canonical id in the v1 store.
     let configs = load_pipeline_configs(&root).map_err(|e| {
@@ -2339,39 +2376,101 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
     let mut cli_engine = ctx.cli_engine_at(&root)?;
     let engine = cli_engine.base_mut();
 
-    let outcome = record_exclusions(engine, &root, &resolved, &exclusions)
+    // Both gates run before either write: the entity gate is a pure store
+    // read, so it goes first and a refusal there leaves the artifact ledger
+    // untouched too.
+    if let Some(entity_exclusions) = &entity_exclusions {
+        let dest = resolved.destination_mem.clone();
+        let mut not_member: Vec<String> = entity_exclusions
+            .keys()
+            .filter(|id| {
+                let eid = memstead_base::EntityId::canonical(id);
+                eid.mem() != dest || engine.entity_is_absent(&eid)
+            })
+            .cloned()
+            .collect();
+        if !not_member.is_empty() {
+            not_member.sort();
+            return Err(map_exclude_err(
+                &binding_id,
+                memstead_base::ingest::ExcludeError::NotDestinationEntity {
+                    entities: not_member,
+                    mem: dest,
+                },
+            )
+            .into());
+        }
+    }
+    let artifacts = exclusions
+        .as_ref()
+        .map(|ex| record_exclusions(engine, &root, &resolved, ex))
+        .transpose()
+        .map_err(|e| map_exclude_err(&binding_id, e))?;
+    let entities = entity_exclusions
+        .as_ref()
+        .map(|ex| memstead_base::ingest::record_entity_exclusions(engine, &root, &resolved, ex))
+        .transpose()
         .map_err(|e| map_exclude_err(&binding_id, e))?;
 
-    if ctx.json {
-        print_json(&json!({
-            "binding": outcome.binding,
-            "excluded": outcome.excluded,
-            "added": outcome.added,
-            // Each requested id and the canonical (workspace-relative) id
-            // it resolved to: the spelling the ledger holds.
-            "recorded": outcome
-                .recorded
-                .iter()
-                .map(|(requested, canonical)| json!({
+    let recorded_json = |outcome: &memstead_base::ingest::ExcludeOutcome| {
+        outcome
+            .recorded
+            .iter()
+            .map(|(requested, canonical)| {
+                json!({
                     "requested": requested,
                     "canonical": canonical,
-                }))
-                .collect::<Vec<_>>(),
-        }))?;
-    } else {
-        let mut body = format!(
-            "# Projection exclude\n\nBinding `{}`: {} artifact(s) newly excluded, \
-             {} in the ledger.\n",
-            outcome.binding, outcome.added, outcome.excluded
-        );
-        for (requested, canonical) in &outcome.recorded {
-            if requested == canonical {
-                body.push_str(&format!("\n- `{canonical}`"));
-            } else {
-                body.push_str(&format!("\n- `{canonical}` (from `{requested}`)"));
-            }
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    if ctx.json {
+        let mut body = json!({ "binding": binding_id });
+        if let Some(a) = &artifacts {
+            body["excluded"] = json!(a.excluded);
+            body["added"] = json!(a.added);
+            // Each requested id and the canonical (workspace-relative) id
+            // it resolved to: the spelling the ledger holds.
+            body["recorded"] = json!(recorded_json(a));
         }
-        body.push('\n');
+        if let Some(e) = &entities {
+            body["entities"] = json!({
+                "excluded": e.excluded,
+                "added": e.added,
+                "recorded": recorded_json(e),
+            });
+        }
+        print_json(&body)?;
+    } else {
+        let mut body = format!("# Projection exclude\n\nBinding `{binding_id}`");
+        if let Some(a) = &artifacts {
+            body.push_str(&format!(
+                ": {} artifact(s) newly excluded, {} in the ledger.\n",
+                a.added, a.excluded
+            ));
+            for (requested, canonical) in &a.recorded {
+                if requested == canonical {
+                    body.push_str(&format!("\n- `{canonical}`"));
+                } else {
+                    body.push_str(&format!("\n- `{canonical}` (from `{requested}`)"));
+                }
+            }
+            body.push('\n');
+        } else {
+            body.push_str(".\n");
+        }
+        if let Some(e) = &entities {
+            body.push_str(&format!(
+                "\n{} entit{} newly declared to carry no anchor, {} in the ledger.\n",
+                e.added,
+                if e.added == 1 { "y" } else { "ies" },
+                e.excluded
+            ));
+            for (_, canonical) in &e.recorded {
+                body.push_str(&format!("\n- `{canonical}`"));
+            }
+            body.push('\n');
+        }
         print_markdown(&body);
     }
     Ok(())

@@ -323,6 +323,29 @@ impl Engine {
     /// refuse. `None` means the sidecar is absent (legitimately no anchors
     /// yet) or parses cleanly; the binding store draws the same distinction
     /// with its quarantine path.
+    /// The entities of `mem` that hold at least one anchor row — the
+    /// sidecar's key set, no observation performed. What a coverage reading
+    /// subtracts from the mem's entity roster to name the entities no
+    /// artifact stands behind. Empty for a mem with no sidecar, an unmounted
+    /// mem, or an unreadable sidecar (the latter is reported by
+    /// [`Self::anchors_sidecar_error`], never inferred from an empty set).
+    pub fn mem_anchor_holders(&self, mem: &str) -> std::collections::BTreeSet<String> {
+        let Some(mount) = self.mounts.iter().find(|m| m.mount.mem == mem) else {
+            return Default::default();
+        };
+        let Ok(Some(bytes)) = mount.backend.read_anchors_sidecar() else {
+            return Default::default();
+        };
+        let Ok(sc) = crate::anchor::AnchorSidecar::from_bytes(&bytes) else {
+            return Default::default();
+        };
+        sc.entities
+            .iter()
+            .filter(|(_, rows)| !rows.is_empty())
+            .map(|(eid, _)| eid.clone())
+            .collect()
+    }
+
     pub fn anchors_sidecar_error(&self, mem: &str) -> Option<String> {
         let mount = self.mounts.iter().find(|m| m.mount.mem == mem)?;
         // Three distinct ways to be unreadable, and only one of them is a
@@ -483,16 +506,61 @@ impl Engine {
                         hash: None,
                         at: Some(obs.at.clone()),
                     },
-                    crate::anchor::SuppliedOutcome::Present { hash } => Observed {
-                        state: crate::anchor::resolve_anchor(
-                            anchor,
-                            &crate::anchor::ArtifactObservation::Present {
-                                current_hash: Some(hash.clone()),
+                    crate::anchor::SuppliedOutcome::Present { hash, content } => {
+                        // Touchpoint A for a url row: supplied CONTENT is
+                        // re-prepared under the anchor's source preparation,
+                        // the rule the write path applied to the anchor's
+                        // own `content`, so a `quoted-phrase` row is
+                        // adjudicated on its phrase. A phrase the retrieved
+                        // page no longer carries is the medium saying the
+                        // unit is gone — `orphaned` — unlike a failed
+                        // retrieval, which stays `recheck`. A supplied hash,
+                        // or a source with no preparation, compares as is.
+                        let preparation = anchor
+                            .source
+                            .as_deref()
+                            .and_then(|name| source_roots.get(name))
+                            .and_then(|j| j.preparation.as_deref());
+                        let current = match (preparation, content) {
+                            (Some(_), Some(text)) => crate::preparation::path_prepared_hash(
+                                preparation,
+                                &anchor.artifact,
+                                anchor.grain,
+                                text.as_bytes(),
+                            ),
+                            _ => crate::preparation::PathPrepared::NoHash,
+                        };
+                        match current {
+                            crate::preparation::PathPrepared::UnitAbsent => Observed {
+                                state: crate::anchor::resolve_anchor(
+                                    anchor,
+                                    &crate::anchor::ArtifactObservation::Absent,
+                                ),
+                                hash: None,
+                                at: Some(obs.at.clone()),
                             },
-                        ),
-                        hash: Some(hash.clone()),
-                        at: Some(obs.at.clone()),
-                    },
+                            crate::preparation::PathPrepared::Hash(h) => Observed {
+                                state: crate::anchor::resolve_anchor(
+                                    anchor,
+                                    &crate::anchor::ArtifactObservation::Present {
+                                        current_hash: Some(h.clone()),
+                                    },
+                                ),
+                                hash: Some(h),
+                                at: Some(obs.at.clone()),
+                            },
+                            crate::preparation::PathPrepared::NoHash => Observed {
+                                state: crate::anchor::resolve_anchor(
+                                    anchor,
+                                    &crate::anchor::ArtifactObservation::Present {
+                                        current_hash: Some(hash.clone()),
+                                    },
+                                ),
+                                hash: Some(hash.clone()),
+                                at: Some(obs.at.clone()),
+                            },
+                        }
+                    }
                 });
             }
             return anchor.last_observed.as_ref().map(|rec| Observed {
@@ -546,7 +614,11 @@ impl Engine {
         anchor: &crate::anchor::Anchor,
         preparation: Option<&str>,
     ) -> Option<(crate::anchor::AnchorState, Option<String>)> {
-        let id = EntityId::canonical(&anchor.artifact);
+        // A `#<locator>` on an entity artifact is the preparation's business
+        // (`quoted-phrase`: the phrase the entity must still carry); the id
+        // is what stands before it.
+        let (id_part, locator) = crate::preparation::split_unit_id(&anchor.artifact);
+        let id = EntityId::canonical(id_part);
 
         // The mem the anchor points into must be MOUNTED before a store miss
         // can mean anything. If it is not, every entity in it is missing from
@@ -576,11 +648,27 @@ impl Engine {
             let type_def = self
                 .schema_for(id.mem())
                 .and_then(|schema| schema.get_type(&entity.entity_type));
-            Some(crate::preparation::entity_prepared_hash(
+            match crate::preparation::entity_prepared(
                 entity,
                 type_def.as_deref(),
                 preparation,
-            )?)
+                locator,
+            ) {
+                crate::preparation::PathPrepared::Hash(h) => Some(h),
+                // The entity stands but no longer carries the addressed
+                // unit (a `quoted-phrase` the markdown lost): an absent
+                // artifact, adjudicated like a file's vanished unit.
+                crate::preparation::PathPrepared::UnitAbsent => {
+                    return Some((
+                        crate::anchor::resolve_anchor(
+                            anchor,
+                            &crate::anchor::ArtifactObservation::Absent,
+                        ),
+                        None,
+                    ));
+                }
+                crate::preparation::PathPrepared::NoHash => return None,
+            }
         } else {
             None
         };

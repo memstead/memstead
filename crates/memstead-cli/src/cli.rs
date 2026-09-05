@@ -312,7 +312,10 @@ pub enum Command {
     /// Read provenance anchors (E3a): `memstead anchors <id>` lists an
     /// entity's anchors + composition; `memstead anchors --artifact <path>`
     /// reverse-looks-up every entity whose anchor references that path
-    /// (the query the check-realization hook consumes).
+    /// (the query the check-realization hook consumes); `memstead anchors
+    /// --mem <name>` is one mem's whole roster with live states, and
+    /// `--grain url` narrows any mode to the pages an observer must fetch
+    /// for `verify-anchors --observations`.
     Anchors(commands::anchors::Args),
 
     /// List and resolve git merge conflicts in folder-backed mems —

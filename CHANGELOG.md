@@ -9,6 +9,35 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A `quoted-phrase` preparation: the anchor that says "this text still
+  carries these words".** Under a source declaring `preparation:
+  quoted-phrase`, the artifact `<path>#<phrase>`, `<url>#<phrase>` or
+  `<entity-id>#<phrase>` addresses the occurrence of a literal phrase and
+  its prepared form is the phrase itself: the anchor resolves while the
+  file, the observed page or the entity's canonical markdown still carries
+  the words, whatever else changed around them, and reads `orphaned` once
+  they are gone. A url row's supplied observation (`verify-anchors
+  --observations`, `content`) is re-prepared under its source's
+  preparation, so the phrase is adjudicated and not the whole page; a
+  write-time `content` that lacks the phrase refuses as before
+  (`INVALID_ANCHOR`, unit absent). The claims register of a project is the
+  first consumer: each public claim anchors the surface that asserts it.
+- **The entity side of coverage, and entity exclusions.** The fidelity
+  report's coverage block names every destination entity no anchor stands
+  behind (`unanchored_entities`: nothing in any source backs them, so no
+  verify can speak to them; a reading, never a verdict), and `memstead
+  projection exclude <binding> --entity-exclusions '{"<id>": "<why>"}'`
+  declares the ones that carry no anchor on purpose (a withdrawn claim kept
+  as record, an "about this graph" entity): they leave that list and are
+  named as excluded with their reason (`excluded_entity_rationales`). An
+  id that is not a non-stub entity of the destination mem refuses the whole
+  call (`PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY`); `--exclusions` and
+  `--entity-exclusions` may be given together, at least one is required.
+- **`memstead anchors --mem <name>` is one mem's anchor roster** with live
+  states, and `--grain <span|file|tree|url|entity>` narrows any mode: an
+  observer reads `--grain url --json` to learn which pages to fetch for
+  `verify-anchors --observations`.
+
 - **A due axis can count from an engine-stamped timestamp and wait for a
   roster.** `due.date_field` may name `created_date` or `last_modified`
   (no declaration needed), `due.offset_days` moves the due date past the
@@ -97,6 +126,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   same code. File names (`CLAUDE.md`) and protocol or format acronyms
   (`HTTP`, `JSON`) read as prose. The rule replaces a workspace script that
   once caught the dogfood binding naming `PROVIDED_BY`.
+
+### Fixed
+
+- **A located span and a url row were silently out of a binding's
+  population.** The fidelity report's scope test matched the artifact
+  string with its locator attached, so `docs.md#L3-L5`, a dated unit and a
+  quoted phrase all read "outside this binding's declared scope", and a
+  url row could never be in scope at all; a binding of citation anchors
+  adjudicated nothing and reported INCONCLUSIVE. The test now reads the
+  path before the locator, and a url row belongs to the binding when it
+  names one of the binding's sources (kept under the pre-provenance
+  fallback when it names none).
 
 ### Changed
 

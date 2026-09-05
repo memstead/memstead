@@ -124,6 +124,20 @@ pub const WHOLE_FILE_UNIT: &str = "whole";
 /// restructured between one line and many reads as a shape change.
 pub const CODE_MAP: &str = "code-map";
 
+/// Quoted-phrase preparation on the text-bearing grains (touchpoint A): the
+/// artifact `<path-or-url-or-entity-id>#<phrase>` addresses **the occurrence
+/// of a literal phrase** in a text, and its prepared form is the phrase
+/// itself. While the text still carries the phrase (an exact substring
+/// match after the minimal canonicalization of line endings), the anchor
+/// resolves; when the words are gone the unit is absent and the anchor reads
+/// `orphaned`, whatever else changed around it. A citation anchor, then: "this
+/// document still says X", quiet under every rewrite that keeps the words
+/// and loud the moment they leave. Applies to `span` (a file, read live),
+/// `url` (observation-supplied content: the engine never fetches) and
+/// `entity` (the live entity's canonical markdown). An artifact under this
+/// preparation that names no `#<phrase>` keeps the grain's whole-text form.
+pub const QUOTED_PHRASE: &str = "quoted-phrase";
+
 /// The registry — every preparation this engine implements. The refusal in
 /// [`crate::binding::validate_binding`] is exactly "not in this list".
 pub const REGISTRY: &[Preparation] = &[
@@ -153,6 +167,15 @@ pub const REGISTRY: &[Preparation] = &[
                       bodies invisible), and a tree's is the digest of every scoped file under \
                       it — an anchor drifts when an interface changes and stays quiet when \
                       only an implementation does",
+    },
+    Preparation {
+        id: QUOTED_PHRASE,
+        touchpoint: Touchpoint::PreparedForm,
+        grains: &[AnchorGrain::Span, AnchorGrain::Url, AnchorGrain::Entity],
+        description: "an artifact `<path-or-url-or-entity>#<phrase>` addresses the occurrence of \
+                      a literal phrase in a text and its prepared form is the phrase itself — the \
+                      anchor resolves while the file, the observed page or the entity still says \
+                      those words and reads orphaned once they are gone, whatever else changed",
     },
 ];
 
@@ -275,6 +298,9 @@ pub fn path_prepared_hash(
 ) -> PathPrepared {
     let (path, locator) = split_unit_id(artifact);
     match (preparation, grain) {
+        (Some(QUOTED_PHRASE), AnchorGrain::Span | AnchorGrain::Url) if locator.is_some() => {
+            quoted_phrase_prepared(locator.unwrap_or_default(), &String::from_utf8_lossy(bytes))
+        }
         (_, AnchorGrain::Url | AnchorGrain::Entity | AnchorGrain::Tree) => PathPrepared::NoHash,
         (Some(DATED_ENTRIES), AnchorGrain::Span) if locator.is_some() => {
             let text = String::from_utf8_lossy(bytes);
@@ -295,6 +321,41 @@ pub fn path_prepared_hash(
             PathPrepared::Hash(prepared_content_hash(bytes))
         }
     }
+}
+
+/// Touchpoint A under [`QUOTED_PHRASE`]: the prepared form of `text` for the
+/// artifact `…#<phrase>`. The phrase is matched as an exact substring after
+/// the minimal canonicalization the path grains share (a BOM and `\r\n`
+/// line endings never decide a citation); present, the prepared form is the
+/// phrase and the hash is stable for as long as the words stand; absent, the
+/// unit is gone ([`PathPrepared::UnitAbsent`]) and the anchor reads
+/// `orphaned`. An empty phrase addresses nothing and is absent by
+/// definition, so a `#` with nothing after it can never resolve clean.
+pub fn quoted_phrase_prepared(phrase: &str, text: &str) -> PathPrepared {
+    let phrase = phrase.trim();
+    if phrase.is_empty() {
+        return PathPrepared::UnitAbsent;
+    }
+    let canonical_text = canonical_text(text);
+    let canonical_phrase = canonical_text_owned(phrase);
+    if canonical_text.contains(canonical_phrase.as_str()) {
+        PathPrepared::Hash(prepared_content_hash(canonical_phrase.as_bytes()))
+    } else {
+        PathPrepared::UnitAbsent
+    }
+}
+
+/// The text a phrase is matched against: BOM stripped, `\r\n` folded to
+/// `\n` — the same two normalizations `prepared_content_hash` applies, so a
+/// phrase that resolves on one platform resolves on every other.
+fn canonical_text(text: &str) -> String {
+    canonical_text_owned(text)
+}
+
+fn canonical_text_owned(text: &str) -> String {
+    text.strip_prefix('\u{feff}')
+        .unwrap_or(text)
+        .replace("\r\n", "\n")
 }
 
 /// The code map of a tree: one line per scoped file under it, `<file digest
@@ -1203,12 +1264,38 @@ pub fn entity_prepared_hash(
     type_def: Option<&memstead_schema::types::TypeDefinition>,
     preparation: Option<&str>,
 ) -> Option<String> {
+    match entity_prepared(entity, type_def, preparation, None) {
+        PathPrepared::Hash(h) => Some(h),
+        PathPrepared::NoHash | PathPrepared::UnitAbsent => None,
+    }
+}
+
+/// [`entity_prepared_hash`] with the artifact's `#<locator>` in hand: under
+/// [`QUOTED_PHRASE`] the locator is the phrase and the prepared form is the
+/// phrase where the entity's canonical markdown still carries it
+/// ([`PathPrepared::UnitAbsent`] where it does not); every other
+/// preparation ignores the locator and answers as [`entity_prepared_hash`]
+/// does, [`PathPrepared::NoHash`] for an identifier the registry does not
+/// prepare entities under.
+pub fn entity_prepared(
+    entity: &Entity,
+    type_def: Option<&memstead_schema::types::TypeDefinition>,
+    preparation: Option<&str>,
+    locator: Option<&str>,
+) -> PathPrepared {
     let form = match preparation {
         None => crate::render::render_entity_markdown(entity, None),
         Some(ENTITY_LOAD_BEARING) => entity_load_bearing_form(entity, type_def),
-        Some(_) => return None,
+        Some(QUOTED_PHRASE) => {
+            let rendered = crate::render::render_entity_markdown(entity, None);
+            return match locator {
+                Some(phrase) => quoted_phrase_prepared(phrase, &rendered),
+                None => PathPrepared::Hash(prepared_content_hash(rendered.as_bytes())),
+            };
+        }
+        Some(_) => return PathPrepared::NoHash,
     };
-    Some(prepared_content_hash(form.as_bytes()))
+    PathPrepared::Hash(prepared_content_hash(form.as_bytes()))
 }
 
 // ---------------------------------------------------------------------------
@@ -1438,16 +1525,24 @@ mod tests {
     }
 
     #[test]
-    fn registry_knows_its_three_flavours_and_nothing_else() {
+    fn registry_knows_its_four_flavours_and_nothing_else() {
         assert!(is_registered(ENTITY_LOAD_BEARING));
         assert!(is_registered(DATED_ENTRIES));
         assert!(is_registered(CODE_MAP));
+        assert!(is_registered(QUOTED_PHRASE));
         assert!(!is_registered("pdf-to-markdown"));
         assert!(!is_registered(""));
         assert_eq!(
             registered_identifiers(),
-            vec![ENTITY_LOAD_BEARING, DATED_ENTRIES, CODE_MAP]
+            vec![ENTITY_LOAD_BEARING, DATED_ENTRIES, CODE_MAP, QUOTED_PHRASE]
         );
+        let q = lookup(QUOTED_PHRASE).unwrap();
+        assert_eq!(q.touchpoint, Touchpoint::PreparedForm);
+        assert!(applies_to_namespace(q, "path"));
+        assert!(applies_to_namespace(q, "path+commit"));
+        assert!(applies_to_namespace(q, "entity"));
+        assert!(applies_to_namespace(q, "url"));
+        assert!(delivery_preparation(Some(QUOTED_PHRASE)).is_none());
         let c = lookup(CODE_MAP).unwrap();
         assert_eq!(c.touchpoint, Touchpoint::PreparedForm);
         assert!(applies_to_namespace(c, "path"));
@@ -2504,5 +2599,117 @@ mod tests {
             entity_load_bearing_form(&entity(&[("z", "1"), ("a", "2")]), None),
             "## z\n\n1\n\n## a\n\n2\n\n"
         );
+    }
+
+    #[test]
+    fn quoted_phrase_resolves_while_the_words_stand_and_is_absent_once_they_leave() {
+        let text = "# Sizing\n\nA mem holds 1,000\u{2013}5,000 entities by design.\n";
+        let present = path_prepared_hash(
+            Some(QUOTED_PHRASE),
+            "GLOSSARY.md#1,000\u{2013}5,000 entities by design",
+            AnchorGrain::Span,
+            text.as_bytes(),
+        );
+        let PathPrepared::Hash(h) = present else {
+            panic!("a phrase the text carries prepares to a hash, got {present:?}");
+        };
+        // The hash is the phrase's own, so it holds under every rewrite that
+        // keeps the words: a new paragraph around them changes nothing.
+        let rewritten = "Preface.\n\nA mem holds 1,000\u{2013}5,000 entities by design, we say.\n";
+        assert_eq!(
+            path_prepared_hash(
+                Some(QUOTED_PHRASE),
+                "GLOSSARY.md#1,000\u{2013}5,000 entities by design",
+                AnchorGrain::Span,
+                rewritten.as_bytes(),
+            ),
+            PathPrepared::Hash(h.clone())
+        );
+        // CRLF and a BOM never decide a citation.
+        let crlf = "\u{feff}A mem holds 1,000\u{2013}5,000\r\nentities by design.\r\n";
+        assert_eq!(
+            path_prepared_hash(
+                Some(QUOTED_PHRASE),
+                "GLOSSARY.md#1,000\u{2013}5,000\nentities by design",
+                AnchorGrain::Span,
+                crlf.as_bytes(),
+            ),
+            PathPrepared::Hash(prepared_content_hash(
+                "1,000\u{2013}5,000\nentities by design".as_bytes()
+            ))
+        );
+        // The words gone: the unit is absent, not a differing hash.
+        assert_eq!(
+            path_prepared_hash(
+                Some(QUOTED_PHRASE),
+                "GLOSSARY.md#1,000\u{2013}5,000 entities by design",
+                AnchorGrain::Span,
+                b"A mem holds typically 1,000 entities.\n",
+            ),
+            PathPrepared::UnitAbsent
+        );
+        // An empty phrase addresses nothing.
+        assert_eq!(quoted_phrase_prepared("  ", text), PathPrepared::UnitAbsent);
+        // The url grain prepares observation-supplied content the same way.
+        assert_eq!(
+            path_prepared_hash(
+                Some(QUOTED_PHRASE),
+                "https://example.test/llms.txt#by design",
+                AnchorGrain::Url,
+                text.as_bytes(),
+            ),
+            PathPrepared::Hash(prepared_content_hash(b"by design"))
+        );
+        // Without a locator the grain keeps its whole-text form.
+        assert_eq!(
+            path_prepared_hash(
+                Some(QUOTED_PHRASE),
+                "GLOSSARY.md",
+                AnchorGrain::Span,
+                text.as_bytes()
+            ),
+            PathPrepared::Hash(prepared_content_hash(text.as_bytes()))
+        );
+        assert_eq!(
+            path_prepared_hash(
+                Some(QUOTED_PHRASE),
+                "https://example.test/",
+                AnchorGrain::Url,
+                text.as_bytes()
+            ),
+            PathPrepared::NoHash
+        );
+        // Other preparations are untouched by a phrase-shaped locator.
+        assert_eq!(
+            path_prepared_hash(
+                None,
+                "GLOSSARY.md#by design",
+                AnchorGrain::Span,
+                text.as_bytes()
+            ),
+            PathPrepared::Hash(prepared_content_hash(text.as_bytes()))
+        );
+    }
+
+    #[test]
+    fn quoted_phrase_on_an_entity_reads_the_canonical_markdown() {
+        let e = entity(&[("claim", "The store is the exact layer."), ("notes", "n")]);
+        assert_eq!(
+            entity_prepared(&e, None, Some(QUOTED_PHRASE), Some("the exact layer")),
+            PathPrepared::Hash(prepared_content_hash(b"the exact layer"))
+        );
+        assert_eq!(
+            entity_prepared(&e, None, Some(QUOTED_PHRASE), Some("the semantic layer")),
+            PathPrepared::UnitAbsent
+        );
+        // No locator: the whole rendered form, as with no preparation.
+        assert_eq!(
+            entity_prepared(&e, None, Some(QUOTED_PHRASE), None),
+            entity_prepared(&e, None, None, None)
+        );
+        // The thin wrapper still answers for the older flavours and
+        // reports an unknown identifier as unprepared.
+        assert!(entity_prepared_hash(&e, None, None).is_some());
+        assert!(entity_prepared_hash(&e, None, Some("pdf-to-markdown")).is_none());
     }
 }

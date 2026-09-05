@@ -98,6 +98,16 @@ pub struct AdvanceState {
     /// existed are attributed on the next reconcile.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub exclusion_sources: BTreeMap<String, String>,
+    /// The **entity-side exclusion ledger**: destination entity id → the
+    /// rationale for it deliberately carrying no anchor (a withdrawn claim
+    /// kept as record, an "about this graph" entity, a synthesis no single
+    /// artifact backs). The fidelity report's coverage reading names every
+    /// destination entity without an anchor; one declared here is named as
+    /// excluded with its reason instead of as owed. Keyed by entity, so a
+    /// binding edit never moves it; an entity later deleted simply stops
+    /// being read.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub entity_exclusions: BTreeMap<String, String>,
     /// Exclusions the reconcile dropped because their source left the
     /// declaration — kept so the next sync brief reports them with the
     /// source named, then cleared once reported.
@@ -724,6 +734,7 @@ pub fn advance_baseline(
                 exclusions: state.exclusions.clone(),
                 exclusion_sources: state.exclusion_sources.clone(),
                 dropped_exclusions: state.dropped_exclusions.clone(),
+                entity_exclusions: state.entity_exclusions.clone(),
             };
             write_advance_store(workspace_root, &mem, &name, &durable)
                 .map_err(AdvanceError::Store)?;
@@ -759,12 +770,29 @@ pub struct ExcludeOutcome {
     pub added: usize,
 }
 
-/// Why [`record_exclusions`] could not complete.
+/// Why [`record_exclusions`] or [`record_entity_exclusions`] could not
+/// complete.
 #[derive(Debug, thiserror::Error)]
 pub enum ExcludeError {
     /// The binding id is not the canonical `<mem>/<stem>` shape.
     #[error("malformed binding id '{0}': expected `<mem>/<stem>`")]
     MalformedId(String),
+    /// One or more ids name no entity of the binding's destination mem (an
+    /// entity of another mem, a stub, or nothing at all) — the gate refuses
+    /// the whole call, nothing written. An exclusion is a statement about an
+    /// entity that exists and deliberately anchors nothing; there is nothing
+    /// to state about one that does not.
+    #[error(
+        "entity exclusion names {} id(s) that are not entities of the destination mem `{mem}`: {}",
+        entities.len(),
+        fmt_list(entities)
+    )]
+    NotDestinationEntity {
+        /// The offending ids (sorted).
+        entities: Vec<String>,
+        /// The binding's destination mem.
+        mem: String,
+    },
     /// One or more artifacts are not members of the binding's enumerable source
     /// `S(D)` — the gate refuses the whole call (no partial write). Names each.
     #[error(
@@ -971,6 +999,73 @@ pub fn record_exclusions(
         recorded,
         binding: binding_id,
         excluded: state.exclusions.len(),
+        added,
+    })
+}
+
+/// Declare authored **entity exclusions**: destination entities that
+/// deliberately carry no anchor, each with its rationale. The gate is
+/// existence in the destination mem (a non-stub entity the store holds), and
+/// it is atomic: one id that is not such an entity refuses the whole call and
+/// writes nothing. Re-declaring merges into the ledger and updates the
+/// rationale. The fidelity report's coverage reading consults the ledger:
+/// a declared entity is named as excluded with its reason rather than as an
+/// entity without anchors.
+pub fn record_entity_exclusions(
+    engine: &Engine,
+    workspace_root: &Path,
+    resolved: &ResolvedIngest,
+    exclusions: &BTreeMap<String, String>,
+) -> Result<ExcludeOutcome, ExcludeError> {
+    let binding_id = resolved.name.clone();
+    let (mem, name) =
+        split_binding_id(&binding_id).map_err(|_| ExcludeError::MalformedId(binding_id.clone()))?;
+    let dest = resolved.destination_mem.as_str();
+
+    let mut canonical: BTreeMap<String, String> = BTreeMap::new();
+    let mut not_member: Vec<String> = Vec::new();
+    for requested in exclusions.keys() {
+        let id = crate::EntityId::canonical(requested);
+        if id.mem() == dest && !engine.entity_is_absent(&id) {
+            canonical.insert(requested.clone(), id.to_string());
+        } else {
+            not_member.push(requested.clone());
+        }
+    }
+    if !not_member.is_empty() {
+        not_member.sort();
+        not_member.dedup();
+        return Err(ExcludeError::NotDestinationEntity {
+            entities: not_member,
+            mem: dest.to_string(),
+        });
+    }
+
+    let mut state = read_advance_store(workspace_root, &mem, &name)
+        .map_err(ExcludeError::Store)?
+        .unwrap_or_else(|| AdvanceState {
+            binding: binding_id.clone(),
+            ..Default::default()
+        });
+    let mut added = 0usize;
+    let mut recorded: Vec<(String, String)> = Vec::new();
+    for (requested, rationale) in exclusions {
+        let entity = &canonical[requested];
+        if state
+            .entity_exclusions
+            .insert(entity.clone(), rationale.clone())
+            .is_none()
+        {
+            added += 1;
+        }
+        recorded.push((requested.clone(), entity.clone()));
+    }
+    write_advance_store(workspace_root, &mem, &name, &state).map_err(ExcludeError::Store)?;
+
+    Ok(ExcludeOutcome {
+        recorded,
+        binding: binding_id,
+        excluded: state.entity_exclusions.len(),
         added,
     })
 }

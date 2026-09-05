@@ -109,6 +109,19 @@ rendered report and in `disposed_excluded_rationales` in the JSON. The rule, in
 one line: a population exclusion is **named in place**, a coverage exclusion is
 **moved out and counted**.
 
+Coverage has an entity side too. A destination entity that holds no anchor at
+all is backed by nothing in any source, so no verify can speak to it; the report
+names those under `coverage.unanchored_entities`, a reading and never a verdict,
+since under curated semantics an entity can legitimately be authored from no
+single artifact. The ones that carry no anchor on purpose (a withdrawn claim
+kept as the record of what was claimed, an "about this graph" entity) are
+declared with `memstead projection exclude <binding> --entity-exclusions
+'{"<id>": "<why>"}'`: they leave that list, are counted as
+`coverage.excluded_entities`, and keep their reason under "Entities excluded on
+purpose" in the rendered report and `excluded_entity_rationales` in the JSON.
+The same rule as the artifact side: moved out, counted, and named with the
+reasoning.
+
 The report also states **what its denominator counted**. One artifact legitimately
 carries several anchors at different grains or classes, so the row count and the
 distinct-artifact count are printed side by side rather than the rows being merged

@@ -150,6 +150,17 @@ pub struct GrainCoverage {
     pub excluded: usize,
     /// Per tree anchor, its fan-out over `S(D)` (the heavy detail list).
     pub tree_anchors: Vec<TreeFanout>,
+    /// Destination entities (non-stub) that hold no anchor at all — the
+    /// entity side of coverage: nothing in any source stands behind them, so
+    /// no verify can speak to them. A reading, never a verdict: under curated
+    /// semantics an entity can legitimately be authored from no single
+    /// artifact. Net of the declared entity exclusions, sorted.
+    pub unanchored_entities: Vec<String>,
+    /// Unanchored destination entities a `projection exclude
+    /// --entity-exclusions` declared out of intent, dropped from
+    /// `unanchored_entities` and named with their reasons on the report
+    /// (`excluded_entity_rationales`).
+    pub excluded_entities: usize,
 }
 
 /// Anchor composition + resolution tally over the destination mem's anchors
@@ -369,6 +380,11 @@ pub struct FidelityReport {
     /// backfill denominator and rendered with its reasoning so the editorial
     /// decision stays visible.
     pub disposed_excluded_rationales: Vec<(String, String)>,
+    /// The entity-side exclusion ledger as it applies this pass: `(entity,
+    /// rationale)` for each destination entity without an anchor that a
+    /// declaration marks deliberately so. Named, so the reader sees why the
+    /// entity is not owed, never merely subtracted.
+    pub excluded_entity_rationales: Vec<(String, String)>,
     /// Degradation flags (B1) — typed, human/agent-readable strings.
     pub degradations: Vec<String>,
     /// The binding's intent checked against the destination schema's
@@ -930,6 +946,45 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.coverage.covered_artifacts
     ));
 
+    // The entity side of coverage: destination entities no artifact stands
+    // behind. A reading; the declared ones are named below with their reasons.
+    if !report.coverage.unanchored_entities.is_empty() || report.coverage.excluded_entities > 0 {
+        let listed: Vec<String> = report
+            .coverage
+            .unanchored_entities
+            .iter()
+            .take(20)
+            .map(|e| format!("`{e}`"))
+            .collect();
+        let more = report
+            .coverage
+            .unanchored_entities
+            .len()
+            .saturating_sub(listed.len());
+        md.push_str(&format!(
+            "- entities without anchors (no verify can speak to them): {}{}{}{}\n\n",
+            report.coverage.unanchored_entities.len(),
+            if report.coverage.excluded_entities > 0 {
+                format!(
+                    "; excluded on purpose (not owed): {}",
+                    report.coverage.excluded_entities
+                )
+            } else {
+                String::new()
+            },
+            if listed.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", listed.join(", "))
+            },
+            if more > 0 {
+                format!(" … and {more} more")
+            } else {
+                String::new()
+            },
+        ));
+    }
+
     // Coverage-semantics framing (B4). REFUSAL (E1): under adopt, the exhaustive
     // branch must NOT frame the uncovered artifacts as defect findings — they are
     // the expected backfill worklist of a mem that predates its binding, never a
@@ -977,6 +1032,20 @@ fn render_hard_required(report: &FidelityReport) -> String {
                 md.push_str(&format!("- `{artifact}`\n"));
             } else {
                 md.push_str(&format!("- `{artifact}` — {rationale}\n"));
+            }
+        }
+        md.push('\n');
+    }
+
+    // The entity-side ledger: each entity declared to carry no anchor, with
+    // the reason, so a withdrawn claim reads as a decision and not as a gap.
+    if !report.excluded_entity_rationales.is_empty() {
+        md.push_str("**Entities excluded on purpose (declared to carry no anchor):**\n");
+        for (entity, rationale) in &report.excluded_entity_rationales {
+            if rationale.is_empty() {
+                md.push_str(&format!("- `{entity}`\n"));
+            } else {
+                md.push_str(&format!("- `{entity}` — {rationale}\n"));
             }
         }
         md.push('\n');
@@ -1607,6 +1676,34 @@ pub fn compute_fidelity_report(
         .collect();
     uncovered.retain(|f| !excluded_set.contains(f.as_str()));
 
+    // The entity side (the claims-register move, 2026-09-05): every
+    // destination entity no anchor row stands behind, net of the entity
+    // exclusions the ledger declares, which are named with their reasons.
+    let holders = engine.mem_anchor_holders(dest.as_str());
+    let mut unanchored_entities: Vec<String> = engine
+        .store()
+        .all_entities()
+        .filter(|e| e.mem == dest.as_str() && !e.stub && !holders.contains(e.id.as_ref()))
+        .map(|e| e.id.to_string())
+        .collect();
+    unanchored_entities.sort();
+    let mut excluded_entity_rationales: Vec<(String, String)> = Vec::new();
+    if let Some((mem, name)) = binding_id.split_once('/')
+        && let Ok(Some(state)) = read_advance_store(workspace_root, mem, name)
+    {
+        for (entity, rationale) in &state.entity_exclusions {
+            if unanchored_entities.iter().any(|e| e == entity) {
+                excluded_entity_rationales.push((entity.clone(), rationale.clone()));
+            }
+        }
+    }
+    let excluded_entity_set: std::collections::BTreeSet<&str> = excluded_entity_rationales
+        .iter()
+        .map(|(e, _)| e.as_str())
+        .collect();
+    unanchored_entities.retain(|e| !excluded_entity_set.contains(e.as_str()));
+    let excluded_entities = excluded_entity_rationales.len();
+
     let coverage = GrainCoverage {
         denominator,
         covered_artifacts: direct_covered + tree_only_covered,
@@ -1617,6 +1714,8 @@ pub fn compute_fidelity_report(
         uncovered: uncovered.clone(),
         excluded: disposed_excluded,
         tree_anchors,
+        unanchored_entities,
+        excluded_entities,
     };
 
     // --- Anchor composition + resolution over THIS BINDING'S anchors ---
@@ -1828,6 +1927,7 @@ pub fn compute_fidelity_report(
         superseded,
         disposed_excluded,
         disposed_excluded_rationales,
+        excluded_entity_rationales,
         degradations,
         intent_findings,
     }
@@ -1911,6 +2011,8 @@ mod tests {
                     artifact: "src/".to_string(),
                     fanout: 3,
                 }],
+                unanchored_entities: Vec::new(),
+                excluded_entities: 0,
             },
             anchors: AnchorComposition {
                 by_class: BTreeMap::from([
@@ -1940,6 +2042,7 @@ mod tests {
             superseded: Vec::new(),
             disposed_excluded: 0,
             disposed_excluded_rationales: Vec::new(),
+            excluded_entity_rationales: Vec::new(),
             degradations: vec!["hash-adjudication-deferred — 1 anchor(s) recheck".to_string()],
             intent_findings: Vec::new(),
         }
@@ -2850,6 +2953,8 @@ mod rollup_tests {
                 uncovered: Vec::new(),
                 excluded: 0,
                 tree_anchors: Vec::new(),
+                unanchored_entities: Vec::new(),
+                excluded_entities: 0,
             },
             anchors: AnchorComposition {
                 by_class: BTreeMap::from([("anchored".to_string(), 4)]),
@@ -2873,6 +2978,7 @@ mod rollup_tests {
             superseded: Vec::new(),
             disposed_excluded: 0,
             disposed_excluded_rationales: Vec::new(),
+            excluded_entity_rationales: Vec::new(),
             degradations: Vec::new(),
             intent_findings: Vec::new(),
         }

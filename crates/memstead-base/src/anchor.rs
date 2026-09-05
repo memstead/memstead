@@ -1208,8 +1208,17 @@ pub struct SuppliedObservationInput {
 /// What an observer saw for one artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SuppliedOutcome {
-    /// The artifact was retrieved; `hash` is its prepared-content hash.
-    Present { hash: String },
+    /// The artifact was retrieved; `hash` is its prepared-content hash
+    /// under the default canonicalization, and `content` the retrieved text
+    /// when the observer supplied it rather than a hash — kept so the
+    /// resolution site can re-prepare it under the anchor's source
+    /// preparation (a `quoted-phrase` url anchor is adjudicated on the
+    /// phrase, not on the whole page), exactly as the write path does for
+    /// an anchor's `content`.
+    Present {
+        hash: String,
+        content: Option<String>,
+    },
     /// The observer could not retrieve the artifact.
     Absent,
 }
@@ -1370,10 +1379,13 @@ pub fn validate_supplied_observations(
         } else if let Some(hash) = &row.hash {
             SuppliedOutcome::Present {
                 hash: hash.trim().to_string(),
+                content: None,
             }
         } else {
+            let content = row.content.clone().unwrap_or_default();
             SuppliedOutcome::Present {
-                hash: prepared_content_hash(row.content.as_deref().unwrap_or_default().as_bytes()),
+                hash: prepared_content_hash(content.as_bytes()),
+                content: Some(content),
             }
         };
         first_row.insert(artifact.clone(), n);
@@ -3171,9 +3183,10 @@ three
         assert_eq!(
             ok["https://a.test/2"].outcome,
             SuppliedOutcome::Present {
-                hash: prepared_content_hash(b"body\r\n")
+                hash: prepared_content_hash(b"body\r\n"),
+                content: Some("body\r\n".into()),
             },
-            "content hashes under the write path's canonicalization"
+            "content hashes under the write path's canonicalization and is kept for re-preparation"
         );
         assert_eq!(ok["https://a.test/2"].at, "2026-08-01");
         assert_eq!(ok["https://a.test/3"].outcome, SuppliedOutcome::Absent);

@@ -56,7 +56,7 @@ pub const BINDING_VERSION: u32 = 2;
 /// `impl_version_bump_invalidates_findings_by_construction`). Bump it once
 /// per landed or changed implementation, never per registry entry that
 /// merely exists.
-pub const PREPARATION_IMPL_VERSION: u32 = 3;
+pub const PREPARATION_IMPL_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------------------
 // The v2 record

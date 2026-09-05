@@ -310,9 +310,18 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
     // resolver that enforces them, so a path hidden from the ingest agent is
     // also outside the population.
     let ws_deny = super::check_path::DenyOracle::new(&resolved.deny_paths);
+    let source_names = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(p.name.clone()),
+            ResolvedSource::Reference { .. } => None,
+        })
+        .collect();
     Some(ScopeMatcher {
         per_source,
         ws_deny,
+        source_names,
     })
 }
 
@@ -321,6 +330,9 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
 struct ScopeMatcher {
     per_source: Vec<SourceScope>,
     ws_deny: super::check_path::DenyOracle,
+    /// Every primary source's declared name, web sources included: the
+    /// membership test a `url` row gets, since no glob speaks its namespace.
+    source_names: Vec<String>,
 }
 
 /// One primary source's declared scope, every pattern already joined onto
@@ -398,7 +410,25 @@ fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> 
     if anchor.grain == AnchorGrain::Entity {
         return true;
     }
-    let path = anchor.artifact.trim_end_matches('/');
+    // A `url` row lives in no path namespace, so no glob can admit or refuse
+    // it. It is this binding's when it names one of the binding's sources
+    // (the observer supplies its content under that source's preparation),
+    // and — the same pre-provenance fallback the `binding` field gets — when
+    // it names none: inclusion is the visible direction.
+    if anchor.grain == AnchorGrain::Url {
+        return match anchor.source.as_deref() {
+            Some(name) => matcher.source_names.iter().any(|n| n == name),
+            None => true,
+        };
+    }
+    // The path a span or file row names is what stands before its locator:
+    // `docs.md#L3-L5`, `log.md#2026-08-24T10:05:00`, `GLOSSARY.md#<phrase>`
+    // and `src/a.rs@abc123` all denote the file the glob is asked about. A
+    // matcher that saw the locator excluded every located span as out of
+    // scope, silently — the report then read "nothing adjudicated" over a mem
+    // whose anchors were all in scope.
+    let base = crate::engine::query::anchor_base_path(&anchor.artifact);
+    let path = base.trim_end_matches('/');
     // A binding-level deny is workspace-namespaced and hides the path from the
     // ingest agent, so it is outside the population whatever any source says.
     if matcher.ws_deny.is_denied(path) {
@@ -410,7 +440,7 @@ fn in_declared_scope(matcher: &ScopeMatcher, anchor: &crate::anchor::Anchor) -> 
     matcher
         .per_source
         .iter()
-        .any(|s| s.admits(&anchor.artifact, anchor.grain))
+        .any(|s| s.admits(base, anchor.grain))
 }
 
 #[cfg(test)]
@@ -1015,5 +1045,72 @@ mod tests {
         let pop = population_for(&engine, &r, Some("h"));
         assert_eq!(pop.included.len(), 1);
         assert!(pop.excluded.is_empty());
+    }
+
+    /// A located span names the file before its `#`: a line range, a dated
+    /// unit and a quoted phrase are all in scope when the file is. The
+    /// matcher once tested the whole string against the glob and excluded
+    /// every located span, so a binding of citation anchors adjudicated
+    /// nothing and read INCONCLUSIVE.
+    #[test]
+    fn a_located_span_is_in_scope_when_its_file_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![
+                anchor("src/a.rs#L3-L5", Some("h"), AnchorGrain::Span),
+                anchor("src/a.rs#2026-08-24T10:05:00", Some("h"), AnchorGrain::Span),
+                anchor(
+                    "src/a.rs#a phrase the file says",
+                    Some("h"),
+                    AnchorGrain::Span,
+                ),
+                anchor("src/a.rs@abc123", Some("h"), AnchorGrain::File),
+                anchor("docs/b.md#a phrase", Some("h"), AnchorGrain::Span),
+            ],
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        assert_eq!(pop.included.len(), 4, "{:?}", pop.excluded);
+        assert_eq!(pop.excluded.len(), 1);
+        assert_eq!(pop.excluded[0].artifact, "docs/b.md#a phrase");
+        assert_eq!(pop.excluded[0].reason, ExclusionReason::OutOfScope);
+    }
+
+    /// A url row is in no path namespace: it belongs to the binding when it
+    /// names one of the binding's sources, is kept under the pre-provenance
+    /// fallback when it names none, and is out of scope when it names a
+    /// source this binding never declared.
+    #[test]
+    fn a_url_row_is_judged_by_its_source_name_not_by_a_glob() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut ours = anchor("https://a.test/page#by design", Some("h"), AnchorGrain::Url);
+        ours.source = Some("src".to_string());
+        let mut unnamed = anchor("https://a.test/other", Some("h"), AnchorGrain::Url);
+        unnamed.source = None;
+        let mut foreign = anchor("https://a.test/third", Some("h"), AnchorGrain::Url);
+        foreign.source = Some("some-other-source".to_string());
+        let (engine, r) = fixture(
+            tmp.path(),
+            "src/**/*.rs",
+            &["src/a.rs"],
+            vec![ours, unnamed, foreign],
+        );
+        let pop = population_for(&engine, &r, Some("h"));
+        let included: Vec<&str> = pop
+            .included
+            .iter()
+            .map(|(_, a)| a.anchor.artifact.as_str())
+            .collect();
+        assert_eq!(
+            included,
+            vec!["https://a.test/page#by design", "https://a.test/other"],
+            "{:?}",
+            pop.excluded
+        );
+        assert_eq!(pop.excluded.len(), 1);
+        assert_eq!(pop.excluded[0].artifact, "https://a.test/third");
+        assert_eq!(pop.excluded[0].reason, ExclusionReason::OutOfScope);
     }
 }

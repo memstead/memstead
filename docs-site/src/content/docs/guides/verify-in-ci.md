@@ -281,6 +281,20 @@ reported against anchors only, so an *uncovered* artifact cannot be
 detected: there is no denominator to be uncovered against. Freshness is
 similarly limited to what the medium exposes.
 
+**The engine never fetches, so a `url` anchor is only as current as the
+observation you hand it.** A url row resolves from a supplied observation or
+from the last one recorded on its sidecar row, and the report prints how many
+days each has gone unobserved; a row never observed is unobserved, which makes
+the verdict inconclusive rather than clean. The job that wants live pages
+adjudicated adds one step before the verify: list the rows with
+`memstead anchors --mem <mem> --grain url --json`, fetch each artifact's URL
+(the part before `#`) with curl, write `[{"artifact": "<row>", "content":
+"<text>"}]` (or `"absent": true` for a page that could not be fetched), and
+run `memstead verify-anchors --mem <mem> --observations <file>`. Under a
+source declaring the `quoted-phrase` preparation the row is adjudicated on
+whether the page still carries its phrase, not on the page's bytes, so a
+redesign that keeps the sentence keeps the anchor resolving.
+
 **The exit code cannot express `inconclusive`.** The contract has three
 codes and the verdict has three values, but they are not the same three: a
 run that completed and recorded nothing exits `0` whether it saw everything

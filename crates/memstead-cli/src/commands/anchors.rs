@@ -10,6 +10,12 @@
 //!   check-realization plugin hook consumes: given the file an agent just
 //!   edited, which entities anchored to it. `tree`-grain anchors match the
 //!   path and anything beneath the tree.
+//! * **By mem (the roster).** `memstead anchors --mem <name>` lists every
+//!   anchor row of one mem with its live resolution — the list an observer
+//!   works from when it has to supply what the engine cannot observe itself
+//!   (`--grain url`: the pages to fetch for `verify-anchors --observations`).
+//!
+//! `--grain` narrows any of the three modes to one anchor grain.
 
 use clap::Parser;
 
@@ -30,17 +36,50 @@ pub struct Args {
     /// artifact path. Mutually exclusive with a positional entity id.
     #[arg(long = "artifact", value_name = "PATH", conflicts_with = "id")]
     pub artifact: Option<String>,
+
+    /// The roster: list every anchor row of one mem with its live
+    /// resolution state — what an observer reads to learn which artifacts
+    /// it must supply observations for (`--grain url` names the pages the
+    /// engine never fetches). Mutually exclusive with an entity id and
+    /// `--artifact`.
+    #[arg(long = "mem", value_name = "NAME", conflicts_with_all = ["id", "artifact"])]
+    pub mem: Option<String>,
+
+    /// Keep only anchors of this grain: `span` / `file` / `tree` / `url` /
+    /// `entity`. Applies to every mode.
+    #[arg(long = "grain", value_name = "GRAIN")]
+    pub grain: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
-    if args.id.is_none() && args.artifact.is_none() {
+    if args.id.is_none() && args.artifact.is_none() && args.mem.is_none() {
         return Err(CliError::new(
             ExitKind::Validation,
             "INVALID_INPUT",
-            "pass an entity id or `--artifact <path>`",
+            "pass an entity id, `--artifact <path>` or `--mem <name>`",
         )
         .into());
     }
+    let grain = match args.grain.as_deref() {
+        None => None,
+        Some(g) => match memstead_base::anchor::AnchorGrain::from_wire(g) {
+            Some(grain) => Some(grain),
+            None => {
+                return Err(CliError::new(
+                    ExitKind::Validation,
+                    "INVALID_INPUT",
+                    format!(
+                        "`--grain {g}` is not an anchor grain; one of {}",
+                        memstead_base::anchor::AnchorGrain::WIRE_VALUES.join(", ")
+                    ),
+                )
+                .with_details(serde_json::json!({
+                    "allowed": memstead_base::anchor::AnchorGrain::WIRE_VALUES
+                }))
+                .into());
+            }
+        },
+    };
 
     // Collect the anchor rows off whichever engine backs the workspace.
     // Both variants expose the same read surface. `state` carries the live
@@ -48,17 +87,34 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // `None` for the reverse `--artifact` lookup, which spans mems).
     let (rows, unreadable): (Vec<AnchorRow>, Vec<SidecarCondition>) = match ctx.cli_engine()? {
         CliEngine::MemRepo(engine) => {
+            if let Some(mem) = args.mem.as_deref()
+                && !engine.mem_names().contains(&mem)
+            {
+                return Err(unknown_mem(mem, engine.mem_names()).into());
+            }
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }
         CliEngine::Filesystem(engine) => {
+            if let Some(mem) = args.mem.as_deref()
+                && !engine.mem_names().contains(&mem)
+            {
+                return Err(unknown_mem(mem, engine.mem_names()).into());
+            }
             (collect(&engine, &args), unreadable_sidecars(&engine, &args))
         }
     };
-    // By entity: the one mem's sidecar is the whole answer, and an
-    // unreadable one is a refusal, not "no anchors". By artifact: the
+    let rows: Vec<AnchorRow> = match grain {
+        Some(g) => rows
+            .into_iter()
+            .filter(|(_, a, _, _)| a.grain == g)
+            .collect(),
+        None => rows,
+    };
+    // By entity or by mem: the one mem's sidecar is the whole answer, and
+    // an unreadable one is a refusal, not "no anchors". By artifact: the
     // lookup spans mems, so the readable ones still answer and the
     // unreadable ones ride along as conditions.
-    if args.id.is_some()
+    if (args.id.is_some() || args.mem.is_some())
         && let Some(c) = unreadable.first()
     {
         return Err(CliError::new(
@@ -104,6 +160,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             "composition": composition,
             // Mems whose sidecar could not be read: their rows are unknown,
             // not absent, and `count` does not cover them.
+            "grain": grain.map(|g| g.as_wire()),
+            "mem": args.mem,
             "sidecar_unreadable": unreadable
                 .iter()
                 .map(|c| serde_json::json!({
@@ -119,8 +177,14 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             .as_deref()
             .map(|p| format!("artifact `{p}`"))
             .or_else(|| args.id.as_deref().map(|i| format!("entity `{i}`")))
+            .or_else(|| args.mem.as_deref().map(|m| format!("mem `{m}`")))
             .unwrap_or_default();
-        print_markdown(&format!("# Anchors\n\nNo anchors for {subject}."));
+        let grain_str = grain
+            .map(|g| format!(" of grain `{}`", g.as_wire()))
+            .unwrap_or_default();
+        print_markdown(&format!(
+            "# Anchors\n\nNo anchors{grain_str} for {subject}."
+        ));
     } else {
         let mut body = format!("# Anchors ({})\n", rows.len());
         for c in &unreadable {
@@ -156,6 +220,17 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `--mem` naming a mem the workspace does not mount: a refusal with the
+/// roster, never an empty roster that reads as "no anchors".
+fn unknown_mem(mem: &str, known: Vec<&str>) -> CliError {
+    CliError::new(
+        ExitKind::NotFound,
+        "MEM_NOT_FOUND",
+        format!("mem `{mem}` is not mounted in this workspace"),
+    )
+    .with_details(serde_json::json!({ "mem": mem, "known_mems": known }))
+}
+
 /// A mem whose anchors sidecar could not be read this pass.
 struct SidecarCondition {
     mem: String,
@@ -167,6 +242,8 @@ struct SidecarCondition {
 fn unreadable_sidecars(engine: &memstead_base::Engine, args: &Args) -> Vec<SidecarCondition> {
     let mems: Vec<String> = if let Some(id) = args.id.as_deref() {
         vec![EntityId::canonical(id).mem().to_string()]
+    } else if let Some(mem) = args.mem.as_deref() {
+        vec![mem.to_string()]
     } else {
         engine.mem_names().iter().map(|m| m.to_string()).collect()
     };
@@ -190,10 +267,16 @@ type AnchorRow = (
 );
 
 /// Gather anchor rows from an engine per the requested mode. The by-entity
-/// lookup carries the live resolution state; the reverse `--artifact` lookup
-/// spans mems and carries none.
+/// and by-mem lookups carry the live resolution state; the reverse
+/// `--artifact` lookup spans mems and carries none.
 fn collect(engine: &memstead_base::Engine, args: &Args) -> Vec<AnchorRow> {
-    if let Some(path) = args.artifact.as_deref() {
+    if let Some(mem) = args.mem.as_deref() {
+        engine
+            .mem_anchors_resolved(mem)
+            .into_iter()
+            .map(|(eid, r)| (eid.to_string(), r.anchor, r.state, r.observed_at))
+            .collect()
+    } else if let Some(path) = args.artifact.as_deref() {
         engine
             .anchors_referencing_artifact(path)
             .into_iter()
