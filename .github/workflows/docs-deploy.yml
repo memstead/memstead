@@ -8,8 +8,11 @@
 # any rendered HTML page is missing the `data-generation-sha`
 # attribute.
 #
-# Drift between the live source and the committed Markdown is caught
-# by `docs-drift.yml`, so this workflow trusts the committed tree.
+# The reference pages are not in the tree: the docs-site `prebuild`
+# renders them from this checkout's engine sources with
+# `cargo run -p xtask -- generate-docs`, so the build needs the Rust
+# toolchain beside Node, and the pages it ships describe exactly the
+# commit being deployed.
 
 name: Docs deploy
 
@@ -43,6 +46,15 @@ jobs:
         run: |
           echo "sha=$(git show -s --format='%h' HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(git show -s --format='%cI' HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: . -> target
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

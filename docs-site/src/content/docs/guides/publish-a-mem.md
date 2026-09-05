@@ -157,5 +157,5 @@ shape — the bytes are already baked. Re-export, or use an assembling shape.
 
 ## Where next
 
-- The [Registry HTTP reference](../../reference/registry/) documents the wire API behind these commands.
+- The [publishing guide](https://memstead.io/publish) on memstead.io documents the registry side of these commands.
 - The [Glossary](../../glossary/#mem) defines mem, archive, and mount precisely.

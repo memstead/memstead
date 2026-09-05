@@ -6,14 +6,16 @@ dist/
 .env.development
 .DS_Store
 
-# Generated from src/content/docs/reference/openapi.json by
-# scripts/copy-openapi.mjs (runs as `prebuild`).
-public/openapi.json
+# The reference pages (CLI, MCP, errors, parity, binding, WASM) are
+# rendered from the engine sources of this checkout by
+# `cargo run -p xtask -- generate-docs`, which scripts/prebuild.mjs runs
+# as `prebuild`. A build output, never a committed copy.
+src/content/docs/reference/
 
 # Built from ../GLOSSARY.md (the normative source) by
-# scripts/copy-openapi.mjs (runs as `prebuild`).
+# scripts/prebuild.mjs (runs as `prebuild`).
 src/content/docs/glossary.md
 
 # Generated from the plugin SKILL.md frontmatter by
-# scripts/copy-openapi.mjs (runs as `prebuild`).
+# scripts/prebuild.mjs (runs as `prebuild`).
 src/content/docs/skills.md

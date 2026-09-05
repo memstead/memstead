@@ -9,7 +9,8 @@
 //!   are legal per medium.
 //!
 //! Deterministic: the same schema + capability matrix render byte-identically,
-//! so the page is drift-gated like the other generated references.
+//! so the page is rendered at every docs-site build like the other generated
+//! references, never committed.
 
 use std::path::Path;
 

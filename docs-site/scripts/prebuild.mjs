@@ -1,14 +1,17 @@
-// Prebuild sync of generated/normative artefacts into the site
-// (runs as `prebuild`; both outputs are gitignored).
+// Prebuild of the site's generated content (runs as `prebuild`; every
+// output is gitignored — nothing here is a committed copy).
 //
-// 1. OpenAPI: copy the generated OpenAPI document from the reference
-//    content collection into the Astro `public/` directory so it's
-//    served from the site root at `/openapi.json`. The source lives
-//    next to the rendered Markdown so the registry reference page can
-//    link to it as a sibling artefact; the deploy-time copy exposes it
-//    at the canonical publication path. xtask writes the source on
-//    every regenerate; this script keeps the served copy in sync
-//    without re-running xtask just to refresh `public/`.
+// 1. Reference: render the CLI, MCP, error-index, parity, binding and
+//    WASM reference pages from the engine sources of THIS checkout by
+//    running `cargo run -p xtask -- generate-docs` into the content
+//    tree. The pages describe the commit being built, by construction:
+//    there is no committed copy to regenerate, so nothing can drift and
+//    no gate has to compare. A deploy image that builds the docs stage
+//    without a Rust toolchain renders the reference in its own Rust
+//    stage and hands the directory over via MEMSTEAD_DOCS_REFERENCE_DIR;
+//    the handover is verified, never trusted, and an empty or missing
+//    directory fails the build here rather than serving a site without
+//    its reference.
 //
 // 2. Glossary: render the repo-root GLOSSARY.md as a docs page at
 //    `/glossary/`. GLOSSARY.md is normative and stays the single
@@ -27,8 +30,17 @@
 //    removed skill fails the build), and derives each skill's invocation
 //    posture from its frontmatter keys.
 
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // The prose lint's frontmatter reader — the source of truth for how a skill's
 // `description:` is resolved (handles `>` block scalars and colons inside plain
@@ -38,12 +50,54 @@ import { extractDescription } from "../../scripts/check-skill-prose.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// --- 1. OpenAPI ---
-const openapiSrc = `${here}/../src/content/docs/reference/openapi.json`;
-const openapiDest = `${here}/../public/openapi.json`;
-mkdirSync(dirname(openapiDest), { recursive: true });
-copyFileSync(openapiSrc, openapiDest);
-console.log(`copy-openapi: ${openapiSrc} -> ${openapiDest}`);
+// --- 1. Reference ---
+const workspaceRoot = resolve(here, "../..");
+const referenceDest = resolve(here, "../src/content/docs/reference");
+// Start from nothing: a page the generator no longer renders must not
+// survive from an earlier build of this working tree.
+rmSync(referenceDest, { recursive: true, force: true });
+const prebuilt = process.env.MEMSTEAD_DOCS_REFERENCE_DIR;
+if (prebuilt) {
+  if (!existsSync(prebuilt)) {
+    throw new Error(
+      `prebuild: MEMSTEAD_DOCS_REFERENCE_DIR names ${prebuilt}, which does not exist. The stage ` +
+        `that renders the reference did not run or did not hand it over; refusing to build a site ` +
+        `without its reference.`,
+    );
+  }
+  cpSync(prebuilt, referenceDest, { recursive: true });
+  console.log(`prebuild: reference taken from ${prebuilt} (MEMSTEAD_DOCS_REFERENCE_DIR)`);
+} else {
+  const cargo = spawnSync(
+    "cargo",
+    ["run", "-q", "-p", "xtask", "--", "generate-docs", "--output", referenceDest],
+    { cwd: workspaceRoot, stdio: "inherit" },
+  );
+  if (cargo.error) {
+    throw new Error(
+      `prebuild: cannot run cargo (${cargo.error.message}). The reference pages are ` +
+        `rendered from the engine sources at build time, so the docs-site build needs a ` +
+        `Rust toolchain — or a pre-rendered tree named by MEMSTEAD_DOCS_REFERENCE_DIR.`,
+    );
+  }
+  if (cargo.status !== 0) {
+    throw new Error(`prebuild: generate-docs failed (exit ${cargo.status}); the reference cannot be rendered from this tree`);
+  }
+  console.log(`prebuild: reference rendered from ${workspaceRoot} -> ${referenceDest}`);
+}
+// Whichever path filled it: the tree must carry pages. A generator that
+// exited green but wrote nothing, or a handover directory that was never
+// filled, would otherwise build a site whose sidebar points at 404s.
+let referencePages;
+try {
+  referencePages = readdirSync(referenceDest, { recursive: true }).filter((f) => /\.md$/.test(String(f)));
+} catch (e) {
+  throw new Error(`prebuild: the reference tree ${referenceDest} is unreadable after generation: ${e.message}`);
+}
+if (referencePages.length === 0) {
+  throw new Error(`prebuild: the reference tree ${referenceDest} holds no pages after generation; refusing to build a site without its reference`);
+}
+console.log(`prebuild: ${referencePages.length} reference page(s) in place`);
 
 // --- 2. Glossary ---
 const glossarySrc = `${here}/../../GLOSSARY.md`;
@@ -60,7 +114,7 @@ description: "Normative definitions of Memstead's technical vocabulary — mem, 
 
 `;
 writeFileSync(glossaryDest, frontmatter + body);
-console.log(`copy-openapi: ${glossarySrc} -> ${glossaryDest}`);
+console.log(`prebuild: ${glossarySrc} -> ${glossaryDest}`);
 
 // --- 3. Skills roster ---
 const skillsDir = `${here}/../../plugins/claude-code/skills`;
@@ -106,7 +160,7 @@ const actual = readdirSync(skillsDir, { withFileTypes: true })
   .sort();
 if (JSON.stringify(expected) !== JSON.stringify(actual)) {
   throw new Error(
-    `skills roster drift: live skills [${actual.join(", ")}] != page roster [${expected.join(", ")}] — update the families map in scripts/copy-openapi.mjs`,
+    `skills roster drift: live skills [${actual.join(", ")}] != page roster [${expected.join(", ")}] — update the families map in scripts/prebuild.mjs`,
   );
 }
 
@@ -172,7 +226,7 @@ for (const family of families) {
   }
 }
 writeFileSync(skillsDest, skillsBody);
-console.log(`copy-openapi: ${skillsDir}/*/SKILL.md -> ${skillsDest}`);
+console.log(`prebuild: ${skillsDir}/*/SKILL.md -> ${skillsDest}`);
 
 const countOffenders = scanForSkillCounts(HANDWRITTEN_DOCS);
 if (countOffenders.length > 0) {
@@ -186,4 +240,4 @@ if (countOffenders.length > 0) {
       `generated "six". Remove the number and link to /skills/ instead.\n${listed}`,
   );
 }
-console.log(`copy-openapi: no hand-written skill counts (roster has ${skillCount})`);
+console.log(`prebuild: no hand-written skill counts (roster has ${skillCount})`);

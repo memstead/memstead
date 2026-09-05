@@ -9,6 +9,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The docs reference is rendered at build, never committed.** The
+  reference pages under `docs-site/src/content/docs/reference/` (CLI,
+  MCP tools, error index, parity matrix, binding format, WASM surface)
+  leave the tree: the docs-site `prebuild` renders them with
+  `cargo run -p xtask -- generate-docs` from the engine sources of the
+  checkout being built, into a path git ignores, so the published
+  reference describes the commit it was built from by construction.
+  The three gates that guarded the committed copy are gone with it:
+  the `.githooks/pre-push` docs-drift arm, the `docs-drift.yml`
+  workflow and the `generated-docs` leg of `run-tests.sh`;
+  `generate-docs --check` no longer exists. The docs-site build now
+  needs a Rust toolchain beside Node (or a pre-rendered tree named by
+  `MEMSTEAD_DOCS_REFERENCE_DIR` for images that render it in their own
+  stage). The Registry HTTP reference and its `openapi.json`, a copy of
+  what the private registry's generator wrote once and never refreshed,
+  leave the docs site; the pages that linked it point at the publishing
+  guide on memstead.io.
 - **The engine ships one flavour.** The `mem-repo` Cargo feature on
   `memstead-cli` and `memstead-mcp` is gone, together with its 212 `cfg`
   sites: the git-branch backend, the multi-mem policy and the lifecycle

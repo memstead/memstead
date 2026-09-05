@@ -70,7 +70,7 @@ export default defineConfig({
     starlight({
       title: "Memstead Docs",
       description:
-        "Guides plus auto-generated reference for the Memstead engine's binding format, MCP, CLI, WASM, and Registry HTTP surfaces.",
+        "Guides plus auto-generated reference for the Memstead engine's binding format, MCP, CLI and WASM surfaces.",
       components: {
         Footer: "./src/components/Footer.astro",
       },
@@ -101,12 +101,16 @@ export default defineConfig({
         {
           label: "Concepts",
           items: [
-            // Built from ../GLOSSARY.md at prebuild (scripts/copy-openapi.mjs).
+            // Built from ../GLOSSARY.md at prebuild (scripts/prebuild.mjs).
             { label: "Glossary", link: "/glossary/" },
             { label: "The fidelity contract", link: "/concepts/fidelity-contract/" },
           ],
         },
         {
+          // The reference pages are rendered from this checkout's engine
+          // sources at prebuild (scripts/prebuild.mjs); the Skills roster
+          // and the Glossary come from the plugin tree and GLOSSARY.md the
+          // same way. None of them is committed.
           label: "Reference",
           items: [
             { label: "Skills", link: "/skills/" },
@@ -114,7 +118,6 @@ export default defineConfig({
             { label: "MCP tools", link: "/reference/mcp/" },
             { label: "CLI", link: "/reference/cli/cli/" },
             { label: "WASM surface", link: "/reference/wasm/" },
-            { label: "Registry HTTP", link: "/reference/registry/" },
             { label: "Surface Parity Matrix", link: "/reference/parity/" },
             { label: "Error Code Index", link: "/reference/errors/" },
           ],

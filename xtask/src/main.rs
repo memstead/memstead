@@ -1,9 +1,9 @@
 //! `xtask` — internal command runner for build-tooling tasks against the
-//! engine workspace: `generate-docs` regenerates the deterministic
+//! engine workspace: `generate-docs` renders the deterministic
 //! API-docs Markdown tree from the live MCP / CLI / WASM source
-//! and the v1 binding schema + medium-capability matrix (the Registry
-//! HTTP reference is generated separately by the private
-//! `memstead-registry` crate); `release` runs the mechanical leg of
+//! and the v1 binding schema + medium-capability matrix, into the
+//! output directory the caller names (the docs-site prebuild calls it
+//! at every build; nothing it writes is tracked); `release` runs the mechanical leg of
 //! cutting a release (see `release.rs`); `eval` is the compounding-proof
 //! harness.
 //!
@@ -36,9 +36,10 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Regenerate the deterministic API-docs Markdown tree from the live
-    /// source. Output is byte-stable on identical source — re-running the
-    /// command on the same commit must produce zero diff.
+    /// Render the deterministic API-docs Markdown tree from the live
+    /// source into `--output`. Byte-stable on identical source — re-running
+    /// the command on the same commit produces the same bytes. Called by
+    /// the docs-site prebuild at every build; nothing it writes is tracked.
     GenerateDocs(GenerateDocsArgs),
     /// Compounding-proof eval harness. `--self-test` runs the full loop with
     /// deterministic stubs (no `claude`, no real mem) and writes a chart-ready
@@ -46,7 +47,7 @@ enum Command {
     Eval(EvalArgs),
     /// The mechanical leg of cutting a release: version bump across the
     /// workspace + inter-crate pins, changelog cut, docs-vs-binary guard,
-    /// API-docs regeneration, and the test/lint matrix. Prints the outward
+    /// and the test/lint matrix. Prints the outward
     /// steps (commit → push → CI green → tag → gitlink bump) — it never
     /// runs `git` mutations itself.
     Release(release::ReleaseArgs),
@@ -222,20 +223,13 @@ struct EvalArgs {
 
 #[derive(clap::Args, Debug)]
 struct GenerateDocsArgs {
-    /// Target directory for the regenerated Markdown tree. Pre-existing
-    /// files are overwritten; missing files are created.
+    /// Target directory for the rendered Markdown tree. Pre-existing
+    /// files are overwritten; missing files are created. The docs-site
+    /// prebuild points this at its content tree, which git ignores: the
+    /// reference is a build output of the checkout, never a committed
+    /// copy that could drift from the binaries.
     #[arg(long)]
     output: PathBuf,
-
-    /// Write nothing; instead fail when the committed tree differs from
-    /// what a regeneration would produce. This is the CI gate: the
-    /// reference pages are derived from the binaries (clap help, the
-    /// MCP tool table), so an edit to a help string that never
-    /// gets regenerated leaves the published reference asserting
-    /// something the shipped binary no longer does — exactly the class
-    /// of contradiction these pages exist to prevent.
-    #[arg(long)]
-    check: bool,
 }
 
 fn main() -> Result<()> {
@@ -885,45 +879,15 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
     Ok(())
 }
 
-// Set for the duration of a `--check` run: every `write_if_changed`
-// records the path it would have rewritten instead of rewriting it.
-// A thread-local rather than a parameter threaded through nine
-// writers — the writers are the leaves of a fixed tree, and the check
-// is a whole-run mode, not a per-writer choice.
-thread_local! {
-    static CHECK_ONLY: std::cell::RefCell<Option<Vec<PathBuf>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
-    if args.check {
-        CHECK_ONLY.with(|c| *c.borrow_mut() = Some(Vec::new()));
-    } else {
-        fs::create_dir_all(&args.output)
-            .with_context(|| format!("creating output dir {}", args.output.display()))?;
-    }
+    fs::create_dir_all(&args.output)
+        .with_context(|| format!("creating output dir {}", args.output.display()))?;
     write_cli_reference(&args.output)?;
     write_wasm_reference(&args.output)?;
     write_mcp_reference(&args.output)?;
     write_parity_matrix(&args.output)?;
     write_error_index(&args.output)?;
     write_binding_reference(&args.output)?;
-
-    if args.check {
-        let stale = CHECK_ONLY.with(|c| c.borrow_mut().take().unwrap_or_default());
-        if !stale.is_empty() {
-            let listed: Vec<String> = stale.iter().map(|p| p.display().to_string()).collect();
-            anyhow::bail!(
-                "generated docs are stale — {} file(s) differ from what the current binaries \
-                 produce:\n  {}\nRegenerate and commit: cargo run -p xtask -- generate-docs \
-                 --output {}",
-                stale.len(),
-                listed.join("\n  "),
-                args.output.display(),
-            );
-        }
-        println!("generate-docs --check: generated reference is current");
-    }
     Ok(())
 }
 
@@ -1032,7 +996,7 @@ fn fence_epilog(md: &str) -> String {
         }
         // The epilog is not in this render (a future clap or
         // clap_markdown change). Leave the document alone rather than
-        // guess — the drift gate will show the diff.
+        // guess — the built page will show the difference.
         None => md.to_string(),
     }
 }
@@ -1132,27 +1096,10 @@ fn yaml_double_quote(s: &str) -> String {
 }
 
 /// Write `contents` to `path` only when the file's existing bytes differ.
-/// Idempotent writes keep mtimes stable for incremental builds and let
-/// the drift-check workflow rely on `git diff --exit-code` to flag real
-/// surface changes.
+/// Idempotent writes keep mtimes stable, so a watching dev server does
+/// not reload on a regeneration that produced the same bytes.
 fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
-    let unchanged = matches!(fs::read_to_string(path), Ok(existing) if existing == contents);
-    // `--check` mode: record what would have been rewritten and write
-    // nothing, so the gate can run against a clean tree without
-    // dirtying it.
-    let checking = CHECK_ONLY.with(|c| {
-        let mut slot = c.borrow_mut();
-        match slot.as_mut() {
-            Some(stale) => {
-                if !unchanged {
-                    stale.push(path.to_path_buf());
-                }
-                true
-            }
-            None => false,
-        }
-    });
-    if checking || unchanged {
+    if matches!(fs::read_to_string(path), Ok(existing) if existing == contents) {
         return Ok(());
     }
     fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;

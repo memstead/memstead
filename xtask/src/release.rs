@@ -8,7 +8,7 @@
 //! v0.1.0 release shipped 71 minutes before `quickstart` landed, and
 //! v0.2.0's plugin front door called a `projection` subcommand the
 //! released binary lacked; this guard exists so that class of mismatch
-//! blocks the tag), API-docs regeneration, and the test/lint matrix.
+//! blocks the tag), and the test/lint matrix.
 //!
 //! The outward actions — commit, push, CI wait, tag, gitlink bump — stay
 //! with the operator/agent: this command edits, checks, and then prints
@@ -191,15 +191,9 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
         );
     }
 
-    // 8. Generated docs stay in lockstep (the pre-push hook enforces this;
-    //    doing it here keeps the release commit self-contained).
-    crate::generate_docs(crate::GenerateDocsArgs {
-        output: root.join("docs-site/src/content/docs/reference"),
-        // The release leg regenerates for real; `--check` is the CI gate.
-        check: false,
-    })?;
-
-    // 9. The runbook's green gate, locally (CI re-runs the same legs).
+    // 8. The runbook's green gate, locally (CI re-runs the same legs).
+    //    The docs reference is not part of the release commit: the
+    //    docs-site renders it from the tree at every build.
     if args.skip_tests {
         println!("release: --skip-tests — the tag still waits for CI green");
     } else {
@@ -219,7 +213,7 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
         run_streamed(&root, "cargo", &["fmt", "--check"])?;
     }
 
-    // 10. The outward steps stay human/agent-gated — print them exactly.
+    // 9. The outward steps stay human/agent-gated — print them exactly.
     let v = &args.version;
     println!(
         "\nrelease: mechanical leg done. Outward steps (in order, each gated \

@@ -58,7 +58,7 @@ plugin_required() {
   case "$1" in
     .claude-plugin/marketplace.json) return 0 ;;
     plugins/claude-code/.claude-plugin/plugin.json) return 0 ;;
-    docs-site/scripts/copy-openapi.mjs) return 0 ;;
+    docs-site/scripts/prebuild.mjs) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -66,7 +66,7 @@ mcp_required() {
   case "$1" in
     plugins/claude-code/skills/setup/README.md) return 0 ;;
     crates/memstead-cli/src/cli.rs) return 0 ;;
-    docs-site/scripts/copy-openapi.mjs) return 0 ;;
+    docs-site/scripts/prebuild.mjs) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -91,7 +91,7 @@ exempt() {
     # names the concrete agents it just wired. Plan flywheel
     # 10-first-session-residue/02 requires it to stay as it is.
     crates/memstead-cli/src/commands/quickstart.rs) return 0 ;;
-    # Build output, regenerated at prebuild from copy-openapi.mjs, which
+    # Build output, regenerated at prebuild from prebuild.mjs, which
     # this guard holds by name. Untracked, so the sweep never reaches it;
     # the entry stands as the record of why that is safe.
     docs-site/src/content/docs/skills.md) return 0 ;;

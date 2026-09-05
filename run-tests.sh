@@ -57,24 +57,6 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
-echo "  Gate: the generated reference matches the binaries"
-echo "══════════════════════════════════"
-# docs-site/reference is DERIVED — clap help, the MCP tool table,
-# the error index. Editing a help string without regenerating leaves the
-# published reference asserting something the shipped binary no longer
-# does, and that page is more discoverable than `--help`. This gate is
-# read-only (`--check` writes nothing); the failure message names the
-# regeneration command.
-if (cd "$ROOT" && cargo run -q -p xtask -- generate-docs \
-      --output docs-site/src/content/docs/reference --check); then
-  echo "  ✓ generated reference is current"
-else
-  FAILED+=("generated-docs")
-  echo "  ✗ generated reference is STALE"
-fi
-
-echo ""
-echo "══════════════════════════════════"
 echo "  Testing: engine (Rust)"
 echo "══════════════════════════════════"
 if (cd "$ROOT" && cargo nextest run --workspace); then
@@ -173,14 +155,18 @@ echo ""
 echo "══════════════════════════════════"
 echo "  Gate: docs-site guard prebuild"
 echo "══════════════════════════════════"
-# The prebuild (docs-site/scripts/copy-openapi.mjs) carries the skills
-# roster guard: it reads the live SKILL.md directories, asserts the
-# roster is exactly the expected set, and throws on drift. Before this
-# leg it ran only in the post-merge deploy workflow — a guard that can
-# only fail AFTER the tree merged. Node-free environments skip loudly
-# (decision 9): a skip is a degraded mode, not a silent pass.
+# The prebuild (docs-site/scripts/prebuild.mjs) renders the reference
+# pages from this tree (`cargo run -p xtask -- generate-docs`: a help
+# string or tool description the extractor cannot render fails here,
+# which is the whole docs gate now that no reference is committed) and
+# carries the skills roster guard: it reads the live SKILL.md
+# directories, asserts the roster is exactly the expected set, and
+# throws on drift. Before this leg the guard ran only in the post-merge
+# deploy workflow — a guard that can only fail AFTER the tree merged.
+# Node-free environments skip loudly (decision 9): a skip is a degraded
+# mode, not a silent pass.
 if [ "$HAS_NODE" = 1 ]; then
-  if (cd "$ROOT" && node docs-site/scripts/copy-openapi.mjs); then
+  if (cd "$ROOT" && node docs-site/scripts/prebuild.mjs); then
     echo "  ✓ docs-site guard prebuild passed"
   else
     FAILED+=("docs-site-guards")
@@ -189,7 +175,7 @@ if [ "$HAS_NODE" = 1 ]; then
 else
   echo "  ⚠⚠⚠ SKIPPED — node is not installed. The docs-site guards did NOT run:"
   echo "  ⚠⚠⚠   - skills roster guard (roster set, frontmatter, invocation posture)"
-  echo "  ⚠⚠⚠   - glossary/openapi prebuild sync"
+  echo "  ⚠⚠⚠   - the reference render (generate-docs) and the glossary prebuild"
   echo "  ⚠⚠⚠ A green run WITHOUT node is a degraded green. Install node to close it."
 fi
 
