@@ -288,7 +288,7 @@ test("a rate-limited channel reads as UNMEASURED naming the reset, exit 2, never
   assert.equal(r.status, 2, r.out);
   assert.match(r.out, /crates\.io\s+.*UNMEASURED: rate limited \(anonymous quota; resets .*\)/);
   assert.doesNotMatch(r.out, /crates\.io\s+.*unreadable/);
-  assert.match(r.out, /1 channel\(s\) UNMEASURED/);
+  assert.match(r.out, /2 channel\(s\) UNMEASURED/);
   assert.doesNotMatch(r.out, /channel\(s\) or publish job\(s\) disagree/);
 });
 
@@ -313,7 +313,7 @@ test("a run in which every channel is unmeasured does not claim every channel se
     FAKE_FAIL_BODY: "boom",
   });
   assert.equal(r.status, 2, r.out);
-  assert.match(r.out, /7 channel\(s\) UNMEASURED/);
+  assert.match(r.out, /8 channel\(s\) UNMEASURED/);
   assert.doesNotMatch(r.out, /^✓ every channel serves/m);
 });
 
