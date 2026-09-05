@@ -337,19 +337,29 @@ done
 # being remembered, which is how crates.io sat two minor versions back (and
 # the npm package, a channel until 2026-09-05, six). The tag publishes
 # crates.io now, so it is held to the release like every other channel.
-if fetch "https://crates.io/api/v1/crates/memstead-cli" \
-    -H "User-Agent: memstead-release-verify (ci@memstead.com)"; then
-  crates=$(sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
-  if [ "$crates" = "$WANT" ]; then
-    ok   "crates.io" "$crates"
-  elif [ -z "$crates" ]; then
-    fail "crates.io" "no max_version in the response (expected $WANT)"
+#
+# Two crates are products on crates.io, memstead-cli and memstead-mcp: each
+# is read as its own channel. memstead-schema, memstead-base and
+# memstead-git-branch are on crates.io only because cargo refuses to
+# publish a crate whose path dependencies are not on the registry at the
+# same version; they are dependencies of the two products, not channels,
+# so they get a line here and no verdict.
+for product in memstead-cli memstead-mcp; do
+  if fetch "https://crates.io/api/v1/crates/$product" \
+      -H "User-Agent: memstead-release-verify (ci@memstead.com)"; then
+    crates=$(sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
+    if [ "$crates" = "$WANT" ]; then
+      ok   "crates.io $product" "$crates"
+    elif [ -z "$crates" ]; then
+      fail "crates.io $product" "no max_version in the response (expected $WANT)"
+    else
+      fail "crates.io $product" "$crates (want $WANT)"
+    fi
   else
-    fail "crates.io" "$crates (want $WANT)"
+    unmeasured "crates.io $product" "$FETCH_REASON"
   fi
-else
-  unmeasured "crates.io" "$FETCH_REASON"
-fi
+done
+say "crates.io dependency crates" "memstead-schema, memstead-base, memstead-git-branch: published as dependencies of the two products, not channels"
 # ── 6. the publish jobs of the release run ───────────────────────────────────
 # dist's `announce` runs when every publish job is `success` OR `skipped`;
 # skipping is how prereleases opt out. On a non-prerelease a skipped publish

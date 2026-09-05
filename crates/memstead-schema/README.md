@@ -1,13 +1,19 @@
 # memstead-schema
 
+`memstead-schema` is a dependency of the two Memstead products, the
+[`memstead-cli`](../memstead-cli/) binary and the
+[`memstead-mcp`](../memstead-mcp/) server, and not a supported library.
+It is on crates.io because cargo publishes a crate only when every path
+dependency is on the registry at the same version; nothing else about it
+is a product.
+
 Schema types for [Memstead](https://github.com/memstead/memstead) — the
 schema-agnostic graph engine that gives AI agents a durable, typed memory
 stored as plain markdown in git.
 
-> **Stability:** this crate is an internal library of the Memstead engine,
-> consumed by the `memstead` / `memstead-mcp` binaries. Its Rust API is
-> pre-1.0 and experimental — it changes without deprecation cycles. For a
-> stable contract, consume the binaries or the MCP surface instead.
+> **Stability:** none promised. The Rust API is pre-1.0 and changes
+> without deprecation cycles whenever the products need it. For a stable
+> contract, consume the binaries or the MCP surface instead.
 
 This crate defines what a schema *is*: entity type definitions (sections,
 metadata fields, required/optional shape), the controlled relationship
@@ -22,12 +28,9 @@ MCP server) depends on it.
 
 ## Use
 
-Most users never depend on this crate directly — install the
-[`memstead-cli`](../memstead-cli/) binary or the
-[`memstead-mcp`](../memstead-mcp/) server instead.
-Depend on `memstead-schema` when you are building your own engine
-integration and need to parse, validate, or author schema files
-programmatically.
+Install the [`memstead-cli`](../memstead-cli/) binary or the
+[`memstead-mcp`](../memstead-mcp/) server. A direct dependency on this
+crate is unsupported: it may build today and break at the next release.
 
 ## License
 

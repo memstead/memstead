@@ -11,6 +11,13 @@
 # a separate act somebody had to remember. The tag already triggered
 # binaries and Homebrew; this closes crates.io into the same trigger.
 #
+# What gets published: every workspace crate in path-dependency order,
+# because cargo refuses to publish a crate whose path dependencies are not
+# on crates.io at the same version. Only two of them are products,
+# memstead-cli and memstead-mcp; memstead-schema, memstead-base and
+# memstead-git-branch ride along as their dependencies, not as supported
+# libraries.
+#
 # Requires the `CARGO_REGISTRY_TOKEN` repository secret (scope
 # `publish-update`, crate pattern `memstead-*`). Without it the job fails
 # loudly rather than skipping — a silent skip is exactly the failure mode
@@ -49,5 +56,5 @@ jobs:
       # until each crate is index-visible, and SKIPS any version already
       # live — so a re-run after a partial failure resumes rather than
       # erroring.
-      - name: Publish the six public crates
+      - name: Publish the five crates, two products and their three dependencies
         run: bash scripts/publish-crates.sh

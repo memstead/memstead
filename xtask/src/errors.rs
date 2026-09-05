@@ -17,9 +17,9 @@
 //! * `CliError::new(_, "...", _)`, `.with_code("...")`, and
 //!   `pub const ..._CODE: &str = "..."` constants in `memstead-cli`.
 //!
-//! The Registry HTTP error envelope is documented separately by the
-//! private `memstead-registry` crate (per-route `ApiError` variants live
-//! in its own `registry.md`), so it is not scanned here.
+//! The Registry HTTP error envelope belongs to the private
+//! `memstead-registry` crate, which documents its own routes; the public
+//! docs site carries no copy of that reference, so it is not scanned here.
 //!
 //! Output is a sorted index keyed on the code string with one row per
 //! distinct source location, so a code emitted from multiple sites

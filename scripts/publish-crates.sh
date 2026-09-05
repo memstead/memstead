@@ -13,8 +13,13 @@
 #   memstead-mcp          -> base, git-branch, schema
 #   memstead-cli          -> base, git-branch, schema
 #
-# Exactly these five crates are the public Rust surface. Deliberately NOT
-# published (see the `publish = false` comments in their manifests):
+# Two of the five are products: memstead-cli and memstead-mcp, the crates a
+# user installs and release-verify.sh reads on crates.io. The other three
+# are published because cargo refuses to publish a crate whose path
+# dependencies are not on the registry at the same version; they are
+# dependencies of the two products, not supported libraries, and their
+# READMEs say so. Deliberately NOT published (see the `publish = false`
+# comments in their manifests):
 # memstead-wasm (the browser bundle is built from the tree by the site
 # that uses it; it has no distribution channel since 2026-09-05), xtask
 # (internal tooling).

@@ -20,6 +20,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `login` and `logout` stay, and a `publish --scope <domain>:<handle>` still
   signs with a stored domain key. The gated trees keep their behaviour and
   tests; `run-tests.sh` runs the feature build as its own leg.
+- **Two products on crates.io, three dependencies.** `memstead-cli` and
+  `memstead-mcp` are the crates a user installs; `memstead-schema`,
+  `memstead-base` and `memstead-git-branch` are published only because
+  cargo requires every path dependency on the registry at the same
+  version. Their READMEs and crate descriptions now say they are
+  dependencies of the two products and not supported libraries,
+  `release-verify.sh` reads both products on crates.io and names the
+  dependency crates as published-as-dependencies, and the publish workflow
+  states cargo's rule. The docs index says the registry HTTP API is
+  documented by the registry itself (its page and the `openapi.json` copy
+  left the site with the committed reference tree).
 - **The npm channel is closed.** `@memstead/wasm` is no longer published:
   the site that runs the engine in the browser builds the bundle from the
   tree it is built from, so a published copy of the crate had no consumer
