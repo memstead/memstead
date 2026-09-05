@@ -37,7 +37,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
         with:
           tool: cargo-nextest
       # ci/verify_gate.py parses the docs guide's printed workflow with a
@@ -64,7 +64,7 @@ jobs:
         with:
           workspaces: . -> target
       - name: Install wasm-pack
-        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
         with:
           tool: wasm-pack
       # This job is the kernel's portability proof: memstead-base must
