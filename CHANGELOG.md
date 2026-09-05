@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The npm channel is closed.** `@memstead/wasm` is no longer published:
+  the site that runs the engine in the browser builds the bundle from the
+  tree it is built from, so a published copy of the crate had no consumer
+  left. `publish-npm.yml`, `scripts/publish-npm.sh` and
+  `crates/memstead-wasm/package.json` are gone, `xtask release` bumps no
+  package manifest, `release-verify.sh` checks no npm channel, and the
+  parity matrix carries the MCP and CLI columns only (the WASM surface
+  reference page leaves with the column; the crate's README documents the
+  bundle's JS surface). The `memstead-wasm` crate and the wasm32 CI job
+  stay; `wasm-pack build --target web --release` in the crate produces
+  the bundle locally. The name stays reserved on npm; the last published
+  version stays as it is.
 - **The docs reference is rendered at build, never committed.** The
   reference pages under `docs-site/src/content/docs/reference/` (CLI,
   MCP tools, error index, parity matrix, binding format, WASM surface)

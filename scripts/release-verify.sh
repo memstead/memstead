@@ -332,11 +332,11 @@ for pair in "plugins/claude-code/.claude-plugin/plugin.json:plugin" \
 done
 
 # ── 5. registries, compared, since the tag publishes them ────────────────────
-# Until 2026-08-15 these were stated skips: binaries were the primary channel
-# and the registries followed by hand when someone remembered. They stopped
-# being remembered, which is how crates.io sat two minor versions back and npm
-# six. The tag publishes both now, so both are held to the release like every
-# other channel.
+# Until 2026-08-15 this was a stated skip: binaries were the primary channel
+# and the registry followed by hand when someone remembered. It stopped
+# being remembered, which is how crates.io sat two minor versions back (and
+# the npm package, a channel until 2026-09-05, six). The tag publishes
+# crates.io now, so it is held to the release like every other channel.
 if fetch "https://crates.io/api/v1/crates/memstead-cli" \
     -H "User-Agent: memstead-release-verify (ci@memstead.com)"; then
   crates=$(sed -n 's/.*"max_version": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
@@ -350,22 +350,6 @@ if fetch "https://crates.io/api/v1/crates/memstead-cli" \
 else
   unmeasured "crates.io" "$FETCH_REASON"
 fi
-# npm rides the engine's version line (engineering decision, 2026-08-15), so
-# it is compared like any other channel. Its own line is exactly how it came
-# to sit at 0.1.2 against a 0.7.0 CLI with nothing anywhere saying so.
-if fetch "https://registry.npmjs.org/@memstead/wasm"; then
-  npmv=$(sed -n 's/.*"latest": *"\([^"]*\)".*/\1/p' "$FETCH_BODY" | head -1)
-  if [ "$npmv" = "$WANT" ]; then
-    ok   "npm @memstead/wasm" "$npmv"
-  elif [ -z "$npmv" ]; then
-    fail "npm @memstead/wasm" "no latest dist-tag in the response (expected $WANT)"
-  else
-    fail "npm @memstead/wasm" "$npmv (want $WANT)"
-  fi
-else
-  unmeasured "npm @memstead/wasm" "$FETCH_REASON"
-fi
-
 # ── 6. the publish jobs of the release run ───────────────────────────────────
 # dist's `announce` runs when every publish job is `success` OR `skipped`;
 # skipping is how prereleases opt out. On a non-prerelease a skipped publish

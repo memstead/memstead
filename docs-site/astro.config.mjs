@@ -70,7 +70,7 @@ export default defineConfig({
     starlight({
       title: "Memstead Docs",
       description:
-        "Guides plus auto-generated reference for the Memstead engine's binding format, MCP, CLI and WASM surfaces.",
+        "Guides plus auto-generated reference for the Memstead engine's binding format, MCP and CLI surfaces.",
       components: {
         Footer: "./src/components/Footer.astro",
       },
@@ -117,7 +117,6 @@ export default defineConfig({
             { label: "Binding format", link: "/reference/binding/" },
             { label: "MCP tools", link: "/reference/mcp/" },
             { label: "CLI", link: "/reference/cli/cli/" },
-            { label: "WASM surface", link: "/reference/wasm/" },
             { label: "Surface Parity Matrix", link: "/reference/parity/" },
             { label: "Error Code Index", link: "/reference/errors/" },
           ],

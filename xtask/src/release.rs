@@ -141,15 +141,12 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
     //     These are not Cargo manifests, so step 4 never saw them, and
     //     every release so far has relied on somebody remembering to edit
     //     them: 0.6.0 shipped with the plugin a version behind and needed
-    //     a second commit on top of the tagged one, and `@memstead/wasm`
-    //     drifted six minor versions because nothing prompted the bump.
-    //     The npm publish job now refuses a package version that does not
-    //     match the tag, so forgetting this would fail the release rather
-    //     than ship a stale package — bump it here instead.
+    //     a second commit on top of the tagged one (and, while the npm
+    //     package existed, it drifted six minor versions the same way).
+    //     Bump them here instead.
     for rel in [
         "plugins/claude-code/.claude-plugin/plugin.json",
         ".claude-plugin/marketplace.json",
-        "crates/memstead-wasm/package.json",
     ] {
         let path = root.join(rel);
         let text = fs::read_to_string(&path).with_context(|| format!("reading {rel}"))?;
@@ -219,14 +216,14 @@ pub fn run(args: ReleaseArgs) -> Result<()> {
         "\nrelease: mechanical leg done. Outward steps (in order, each gated \
          on the one before):\n\
          \n  1. Review the diff, then commit with a narrative message \
-         (the JSON manifests were bumped for you — plugin, marketplace, \
-         and the wasm package):\n\
+         (the JSON manifests were bumped for you — plugin and \
+         marketplace):\n\
          \x20        git add -u && git commit   # release: {v} — <why this release exists>\n\
          \n  2. Push and wait for ALL public CI green (the bundle rule — \
          never tag on red or pending):\n\
          \x20        git push origin main\n\
          \n  3. Tag — the tag push is the ENTIRE outward release: binaries, \
-         attestation, GitHub Release, Homebrew tap, crates.io and npm all \
+         attestation, GitHub Release, Homebrew tap and crates.io all \
          run from it:\n\
          \x20        git tag -a v{v} -m \"v{v}\" && git push origin v{v}\n\
          \n  4. In the private repo, bring the website surfaces to the tag \

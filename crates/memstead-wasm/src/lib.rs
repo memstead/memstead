@@ -11,7 +11,7 @@
 //! ## JS API
 //!
 //! ```js
-//! import init, { Engine, setPanicHook } from "@memstead/wasm";
+//! import init, { Engine, setPanicHook } from "./pkg/memstead_wasm.js"; // wasm-pack build --target web
 //!
 //! await init();
 //! setPanicHook(); // optional — readable JS stack traces on panic

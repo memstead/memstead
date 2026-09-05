@@ -46,7 +46,7 @@ You know what you want; these get you there.
 Complete, generated, and kept honest by CI (regenerated from source; a drift
 check fails the build if the committed copy lags).
 
-- **[CLI / MCP / WASM reference + parity matrix](../docs-site/src/content/docs/reference/)**
+- **[CLI / MCP reference + parity matrix](../docs-site/src/content/docs/reference/)** (rendered at docs-site build, not in the tree)
   — every command, tool, and binding, plus the cross-surface parity matrix and
   the error-code index.
 - **[Sizing curve](sizing-curve.md)** — measured operating limits by

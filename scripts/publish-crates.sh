@@ -15,9 +15,9 @@
 #
 # Exactly these five crates are the public Rust surface. Deliberately NOT
 # published (see the `publish = false` comments in their manifests):
-# memstead-wasm
-# (distribution channel is npm — scripts/publish-npm.sh), xtask (internal
-# tooling).
+# memstead-wasm (the browser bundle is built from the tree by the site
+# that uses it; it has no distribution channel since 2026-09-05), xtask
+# (internal tooling).
 #
 # Dry-run note: a *per-crate* `cargo publish --dry-run -p <crate>` cannot
 # succeed before that crate's internal deps are live on crates.io — the

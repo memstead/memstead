@@ -5,7 +5,7 @@
 # on dispatch against any tag. It calls the same `scripts/release-verify.sh`
 # the release chapter tells a maintainer to run: the channels are asked
 # from outside (GitHub Release, installers, the Homebrew tap, the plugin
-# manifests, crates.io, npm), and the run's own publish jobs are read for
+# manifests, crates.io), and the run's own publish jobs are read for
 # one that SKIPPED on a non-prerelease (dist's announce accepts that by
 # design; 0.6.0 announced while the tap kept serving 0.4.0).
 #

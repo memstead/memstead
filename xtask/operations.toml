@@ -1,8 +1,8 @@
 # Hand-maintained operation registry powering the Surface Parity Matrix.
 #
 # Each entry is a logical engine operation; the per-surface name slots
-# resolve to the matching MCP tool, top-level CLI subcommand, and WASM
-# JS-visible entry. A blank slot means the
+# resolve to the matching MCP tool and top-level CLI subcommand. A blank
+# slot means the
 # operation is not exposed on that surface. Surface entries the registry
 # doesn't reference land in the matrix's "unaligned" sub-table — the
 # matrix never silently drops a row when an extractor emits a name this
@@ -12,13 +12,11 @@
 name = "entity-read"
 mcp = "memstead_entity"
 cli = "entity"
-wasm = "getEntity"
 
 [[operation]]
 name = "search"
 mcp = "memstead_search"
 cli = "search"
-wasm = "search"
 
 [[operation]]
 name = "list"
@@ -52,7 +50,6 @@ cli = "type"
 name = "health"
 mcp = "memstead_health"
 cli = "health"
-wasm = "health"
 
 [[operation]]
 name = "changes-since"
@@ -194,25 +191,3 @@ name = "agent-notes"
 
 [[operation]]
 name = "mem-head-sha"
-
-# WASM-specific operations. Browser thin-clients hydrate from a `.mem`
-# snapshot, then receive incremental updates as `applyCommit` envelopes
-# produced by the bridge's `/commits` endpoint. `mem-names` is a cheap
-# diagnostic accessor on the WASM side; the other surfaces expose
-# equivalent information via overview/health, so no parity entry there.
-
-[[operation]]
-name = "from-snapshot"
-wasm = "fromSnapshot"
-
-[[operation]]
-name = "apply-commit"
-wasm = "applyCommit"
-
-[[operation]]
-name = "mem-names"
-wasm = "memNames"
-
-[[operation]]
-name = "set-panic-hook"
-wasm = "setPanicHook"

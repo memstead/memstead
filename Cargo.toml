@@ -56,9 +56,12 @@ unicode-normalization = "0.1"
 # A resolver constraint, not a use: unicode-normalization pulls tinyvec with
 # its `alloc` feature only, and tinyvec 1.13.0 does not compile in that
 # configuration (`cannot find macro vec`, tinyvec.rs:710). Our own lock sat on
-# 1.12.0 and never saw it; every FRESH consumer of the published crates did
+# 1.12.0 and never saw it; every FRESH consumer of the crates on crates.io did
 # (`cargo add memstead-base memstead-git-branch` on 2026-09-03, rustc 1.95
-# and 1.98 alike). Lift the ceiling once a tinyvec release compiles alloc-only.
+# and 1.98 alike), and the kernel's wasm32 build (the site's bundle, the CI
+# wasm job) compiles alloc-only the same way. Lift the ceiling, and drop the
+# direct dependency from memstead-base, once a tinyvec release compiles
+# alloc-only again; nothing watches for that but this comment.
 tinyvec = ">=1.6, <1.13"
 sha2 = "0.11"
 indexmap = { version = "2", features = ["serde"] }

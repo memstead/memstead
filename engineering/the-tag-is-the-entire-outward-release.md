@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T08:41:56Z
-last_modified: 2026-08-15T08:41:56Z
+last_modified: 2026-09-05T09:45:17Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -12,13 +12,13 @@ tags: release, ci, distribution, automation, drift
 # The tag is the entire outward release
 
 ## Decision
-Pushing a version tag performs every outward act of a release: binaries, attestation, the GitHub Release, the Homebrew tap, the six crates on crates.io, and `@memstead/wasm` on npm. The two registry legs are cargo-dist custom publish jobs wrapping the same scripts that were previously run by hand — the scripts remain the contract, the workflows supply only a runner, a toolchain and a token. `release.yml` is regenerated through dist config rather than hand-edited, because a hand-edit is erased by the next `dist generate`.
+Pushing a version tag performs every outward act of a release: binaries, attestation, the GitHub Release, the Homebrew tap, the crates on crates.io (and, until the npm channel closed on 2026-09-05, `@memstead/wasm` on npm). The registry legs are cargo-dist custom publish jobs wrapping the same scripts that were previously run by hand — the scripts remain the contract, the workflows supply only a runner, a toolchain and a token. `release.yml` is regenerated through dist config rather than hand-edited, because a hand-edit is erased by the next `dist generate`.
 
 Both registry jobs FAIL the release when their secret is absent. They do not skip. A silent skip is the exact mechanism by which the registries fell behind, so the polarity is deliberate.
 
 The private half — gitlink, the private crates' locks, a build of each private consumer, the `.ai` deploy, and a rebuild of the maintainer's own binaries — is one command, `scripts/adopt-release.sh <tag>`, which refuses rather than guesses on a dirty tree, an absent tag, a consumer that does not build, or a red gating check.
 
-Two supporting guards make the automation safe to trust: `xtask release` now bumps every hand-set version manifest (plugin, marketplace, wasm package) alongside Cargo, and the npm job refuses to publish when the package version disagrees with the tag.
+Two supporting guards make the automation safe to trust: `xtask release` bumps every hand-set version manifest (plugin, marketplace; the wasm package too while it existed) alongside Cargo, and a publish job refuses to publish when a manifest version disagrees with the tag (the npm job did so until the channel closed on 2026-09-05).
 
 ## Context
 Every channel that ever drifted drifted for one reason: updating it was a separate act somebody had to remember. Not negligence — the acts were documented, and each was skipped by a person who had just done twelve other things correctly.
@@ -34,7 +34,7 @@ The failure mode moves from silent to loud. An absent token, a mismatched packag
 
 Two obligations follow for anyone adding a distribution channel. It publishes from the tag, or it is a documented skew that `release-verify.sh` reports by name — 'somebody will remember' is no longer an accepted design. And a channel that cannot be published from CI still gets a line in the verifier, as the maintainer's own machine now does, because the point is visibility rather than automation for its own sake.
 
-The secrets are the one part a machine cannot own: `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` live on the public repo, and the npm token expires. Rotation is now a release-blocking event rather than a silent skip, which is the right direction and still a calendar item.
+The secrets are the one part a machine cannot own: `CARGO_REGISTRY_TOKEN` lives on the public repo (`NPM_TOKEN` too until 2026-09-05), and tokens expire. Rotation is now a release-blocking event rather than a silent skip, which is the right direction and still a calendar item.
 
 ## Relationships
 - **ENABLES**: [[published-libraries-ride-the-engines-version-line]]

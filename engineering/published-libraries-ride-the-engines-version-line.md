@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T06:14:17Z
-last_modified: 2026-08-15T06:14:17Z
+last_modified: 2026-09-05T09:45:33Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -26,7 +26,7 @@ The entry page warned honestly that libraries may lag and told readers to check 
 The deeper cause was structural: its own version line meant nothing connected the package's number to the engine's, so the skew accumulated silently across three releases. Plan 02 had already tried and failed to close the gap by *describing* it — a generated compatibility table proved underivable and was withdrawn (see [[engineering--a-surfaces-claim-about-itself-is-derived-or-absent]]). Matching the numbers removes the question instead of answering it.
 
 ## Consequences
-`release-verify.sh` now fails when npm disagrees with the release, so the skew cannot accumulate unnoticed again — it is a compared channel, not a stated skip. crates.io remains a deliberate skip on its own terms.
+`release-verify.sh` failed when npm disagreed with the release, so the skew could not accumulate unnoticed again — a compared channel, not a stated skip — until the npm channel closed on 2026-09-05 (memstead.io builds the bundle from the tree since then; the project mem records that decision). The principle keeps binding the crates on crates.io, which `release-verify.sh` compares the same way since 2026-08-15.
 
 The version jump `0.1.2` → `0.7.0` is deliberate and does not auto-upgrade anyone pinned to `^0.1.x`, which is correct: those consumers are on a package that genuinely cannot read current archives.
 

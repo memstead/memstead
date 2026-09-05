@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Internal build-tooling commands for the engine workspace. Invoked as `cargo run -p xtask -- <subcommand>`. The `generate-docs` subcommand renders the deterministic API-docs Markdown tree from the live MCP / CLI / WASM source into the directory the docs-site build names."
+description = "Internal build-tooling commands for the engine workspace. Invoked as `cargo run -p xtask -- <subcommand>`. The `generate-docs` subcommand renders the deterministic API-docs Markdown tree from the live MCP / CLI source into the directory the docs-site build names."
 publish = false
 
 [[bin]]

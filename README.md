@@ -159,13 +159,13 @@ memstead install scope/name    # pull a published mem into your workspace
 
 ## Reference
 
-Auto-generated API reference for every callable surface — MCP tools, CLI, WASM (browser) surface, Registry HTTP, plus a cross-surface parity matrix and error-code index:
+Auto-generated API reference for every callable surface — MCP tools and CLI, plus a cross-surface parity matrix, the binding format and the error-code index:
 
 **[memstead.com/dev](https://memstead.com/dev)**
 
 Generated from source on every push; the [parity matrix](https://memstead.com/dev/reference/parity/) shows at a glance which operations exist on which surface.
 
-The browser surface ships as [`@memstead/wasm`](https://www.npmjs.com/package/@memstead/wasm) on npm, published from the `memstead-wasm` crate on the engine's version line.
+The browser build of the engine is the `memstead-wasm` crate; the site that runs it in the browser builds it from the tree (`wasm-pack build --target web --release` in `crates/memstead-wasm/` produces the same bundle locally).
 
 **Two hosted surfaces, with nothing installed.** [memstead.ai](https://memstead.ai) serves Memstead's own graph read-only over plain HTTP: every page is readable with no tools at all, and `GET https://memstead.ai/llms.txt` is the agent runbook for it. That HTML surface has no search, which is what the second surface is for. Attaching the MCP endpoint at `https://memstead.ai/mcp` to Claude Code, Codex, Cursor or any MCP client mounts the same graph read-only beside a private, ephemeral sketch mem minted per connection: your agent's reads span both, its writes reach only the sketch. Restart the agent session afterwards (one already running does not attach a server added while it runs).
 
@@ -191,13 +191,13 @@ The schema drives all engine behaviour — there are no hardcoded field names. A
 | `xtask/` | Internal build tooling (`cargo run -p xtask -- <subcommand>`): the generated reference, the release cut, the sizing curve |
 | `plugins/claude-code/` | The Claude Code plugin (skills + guard hooks). Self-contained, no npm dependencies |
 | [`docs/`](docs/) | The documentation index plus the pages that live beside the code (build, sizing curve, the measured proofs) |
-| `docs-site/` | The published documentation site (Astro): guides, concepts and the generated CLI / MCP / WASM reference |
+| `docs-site/` | The published documentation site (Astro): guides, concepts and the generated CLI / MCP reference |
 | [`examples/`](examples/) | Example schemas: `agent-program`, and the paired `reimpl-source`/`reimpl-target` |
 | `engineering/` | This project's standing engineering knowledge as a live mem: decisions, principles, memos (see [`engineering/README.md`](engineering/README.md)) |
 | `tests/` | Shared test fixtures used across the crates' integration tests |
 | `ci/` | The CI probes that drive the built binaries from outside (the smoke, strictness and mutation probes, the verify gate) and the prose checker that holds the docs to the binary |
 | `fuzz/` | Coverage-guided fuzz targets for the trust-boundary parsers (see [`fuzz/README.md`](fuzz/README.md)) |
-| `scripts/` | Repository guards (leak scan, plan refs, mechanism leak, plugin architecture), the release machinery (`release-verify.sh`, `untagged-release.sh`, `ci-status.sh`) and the crates.io / npm publishers |
+| `scripts/` | Repository guards (leak scan, plan refs, mechanism leak, plugin architecture), the release machinery (`release-verify.sh`, `untagged-release.sh`, `ci-status.sh`) and the crates.io publisher |
 
 Memstead also has a hosted registry; that is a separate, closed-source part of the project and not part of this open repository.
 

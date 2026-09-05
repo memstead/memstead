@@ -1,6 +1,6 @@
-//! Smoke tests for the `@memstead/wasm` JS bindings, run in Node
+//! Smoke tests for the crate's JS bindings, run in Node
 //! (decision 10, backlog-sweep plan 04): the assertions cover the
-//! published API surface (hydration, `getEntity`, `entityIds`, commit
+//! bundle's API surface (hydration, `getEntity`, `entityIds`, commit
 //! application, typed refusals) and none of them needs a browser API —
 //! a nodejs-target run executes them on every CI push with no
 //! chromedriver. Run with:

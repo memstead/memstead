@@ -27,7 +27,6 @@ function fixtures({ v, brewMcp = v, jobs }) {
     "plugin.json": `{"name": "memstead", "version": "${v}"}`,
     "marketplace.json": `{"version": "${v}"}`,
     "crates.json": `{"crate": {"max_version": "${v}"}}`,
-    "npm.json": `{"dist-tags": {"latest": "${v}"}}`,
     "jobs.txt": jobs.join("\n") + "\n",
   };
 }
@@ -89,7 +88,6 @@ case "$url" in
   */plugin.json) emit "$FX/plugin.json" 200 "" ;;
   */marketplace.json) emit "$FX/marketplace.json" 200 "" ;;
   *crates.io*) emit "$FX/crates.json" 200 "" ;;
-  *registry.npmjs.org*) emit "$FX/npm.json" 200 "" ;;
   *) echo "fake curl: unmapped $url" >&2; exit 22 ;;
 esac
 `);
@@ -120,7 +118,6 @@ const ALL_SUCCESS = [
   "plan\tsuccess",
   "publish-homebrew-formula\tsuccess",
   "custom-publish-crates / publish-crates\tsuccess",
-  "custom-publish-npm / publish-npm\tsuccess",
   "announce\tsuccess",
   "custom-release-verify / verify\tin_progress",
 ];
@@ -130,7 +127,7 @@ test("exit 0: every channel and every publish job agree with the tag", () => {
   const r = run(dir, ["v0.10.0"]);
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, /every channel serves 0\.10\.0$/m);
-  assert.match(r.out, /publish job custom-publish-npm \/ publish-npm\s+.*success/);
+  assert.match(r.out, /publish job custom-publish-crates \/ publish-crates\s+.*success/);
   assert.doesNotMatch(r.out, /REPORT:/);
 });
 
@@ -143,11 +140,11 @@ test("exit 1: a channel disagrees with the tag", () => {
 });
 
 test("exit 1: a publish job skipped on a non-prerelease", () => {
-  const jobs = ALL_SUCCESS.map((j) => (j.startsWith("custom-publish-npm") ? "custom-publish-npm / publish-npm\tskipped" : j));
+  const jobs = ALL_SUCCESS.map((j) => (j.startsWith("custom-publish-crates") ? "custom-publish-crates / publish-crates\tskipped" : j));
   const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs }) });
   const r = run(dir, ["v0.10.0", "--run-id", "4242"]);
   assert.equal(r.status, 1, r.out);
-  assert.match(r.out, /publish job custom-publish-npm \/ publish-npm\s+.*SKIPPED on a non-prerelease/);
+  assert.match(r.out, /publish job custom-publish-crates \/ publish-crates\s+.*SKIPPED on a non-prerelease/);
 });
 
 test("exit 0: a prerelease may skip its publish jobs", () => {
@@ -298,12 +295,12 @@ test("a rate-limited channel reads as UNMEASURED naming the reset, exit 2, never
 test("a plain HTTP error is UNMEASURED with the status named; the other channels still read (partial failure)", () => {
   const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
   const r = run(dir, ["0.10.0"], {
-    FAKE_FAIL_URLS: "registry.npmjs.org",
+    FAKE_FAIL_URLS: "crates.io",
     FAKE_FAIL_CODE: "503",
     FAKE_FAIL_BODY: "upstream unavailable",
   });
   assert.equal(r.status, 2, r.out);
-  assert.match(r.out, /npm @memstead\/wasm\s+.*UNMEASURED: HTTP 503/);
+  assert.match(r.out, /crates\.io\s+.*UNMEASURED: HTTP 503/);
   assert.match(r.out, /Homebrew memstead-cli\s+.*0\.10\.0/);
   assert.match(r.out, /GitHub Release \(Latest\)\s+.*0\.10\.0/);
 });
@@ -311,12 +308,12 @@ test("a plain HTTP error is UNMEASURED with the status named; the other channels
 test("a run in which every channel is unmeasured does not claim every channel serves", () => {
   const dir = scratch({ treeVersion: "0.10.0", fx: fixtures({ v: "0.10.0", jobs: ALL_SUCCESS }) });
   const r = run(dir, ["0.10.0"], {
-    FAKE_FAIL_URLS: "releases/latest releases/tags Formula plugin.json marketplace.json crates.io registry.npmjs.org",
+    FAKE_FAIL_URLS: "releases/latest releases/tags Formula plugin.json marketplace.json crates.io",
     FAKE_FAIL_CODE: "500",
     FAKE_FAIL_BODY: "boom",
   });
   assert.equal(r.status, 2, r.out);
-  assert.match(r.out, /8 channel\(s\) UNMEASURED/);
+  assert.match(r.out, /7 channel\(s\) UNMEASURED/);
   assert.doesNotMatch(r.out, /^✓ every channel serves/m);
 });
 

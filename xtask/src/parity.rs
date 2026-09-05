@@ -1,7 +1,7 @@
 //! Render the Surface Parity Matrix. Each row of the matrix is a logical
 //! engine operation declared in `xtask/operations.toml`; columns line up
-//! the matching MCP tool name, top-level CLI subcommand, and WASM
-//! JS-visible entry point. Names emitted by the live extractors that the
+//! the matching MCP tool name and top-level CLI subcommand. Names
+//! emitted by the live extractors that the
 //! registry doesn't pin land in a dedicated "unaligned" sub-table so the
 //! matrix never silently drops a row when a new tool / command / method
 //! appears.
@@ -27,8 +27,6 @@ struct Operation {
     mcp: Option<String>,
     #[serde(default)]
     cli: Option<String>,
-    #[serde(default)]
-    wasm: Option<String>,
     /// Why this operation is deliberately absent from a surface.
     /// Optional and free-form; when present it renders as a footnote
     /// under the matrix and the row is marked. An empty cell alone
@@ -41,14 +39,12 @@ struct Operation {
 pub struct Inputs {
     pub mcp_tools: Vec<String>,
     pub cli_commands: Vec<String>,
-    pub wasm_methods: Vec<String>,
 }
 
-pub fn collect_inputs(wasm_methods: Vec<String>) -> Inputs {
+pub fn collect_inputs() -> Inputs {
     Inputs {
         mcp_tools: mcp::tool_names(),
         cli_commands: subcommand_names(&memstead_cli::cli::Cli::command()),
-        wasm_methods,
     }
 }
 
@@ -62,8 +58,8 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     let mut out = String::new();
     out.push_str("# Surface Parity Matrix\n\n");
     out.push_str(
-        "Every public engine operation across the three programmatic \
-         surfaces (MCP, CLI, WASM). Rows are aligned by the \
+        "Every public engine operation across the two programmatic \
+         surfaces (MCP, CLI). Rows are aligned by the \
          hand-maintained `xtask/operations.toml` registry; cells render \
          the surface-specific name when present and `—` when the surface \
          doesn't expose the operation. The Registry HTTP surface is its \
@@ -72,11 +68,10 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
 
     let mcp_set: BTreeSet<&str> = inputs.mcp_tools.iter().map(String::as_str).collect();
     let cli_set: BTreeSet<&str> = inputs.cli_commands.iter().map(String::as_str).collect();
-    let wasm_set: BTreeSet<&str> = inputs.wasm_methods.iter().map(String::as_str).collect();
 
     out.push_str("## Matrix\n\n");
-    out.push_str("| Operation | MCP | CLI | WASM |\n");
-    out.push_str("|-----------|-----|-----|------|\n");
+    out.push_str("| Operation | MCP | CLI |\n");
+    out.push_str("|-----------|-----|-----|\n");
     for op in &ops.operation {
         let mcp_cell = match &op.mcp {
             Some(name) => format!(
@@ -94,14 +89,10 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
             ),
             None => "—".to_string(),
         };
-        let wasm_cell = match &op.wasm {
-            Some(name) => format!("`{}`", name),
-            None => "—".to_string(),
-        };
         let marker = if op.rationale.is_some() { " †" } else { "" };
         out.push_str(&format!(
-            "| `{}`{} | {} | {} | {} |\n",
-            op.name, marker, mcp_cell, cli_cell, wasm_cell,
+            "| `{}`{} | {} | {} |\n",
+            op.name, marker, mcp_cell, cli_cell,
         ));
     }
     out.push('\n');
@@ -136,11 +127,6 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         .iter()
         .filter_map(|o| o.cli.as_deref())
         .collect();
-    let claimed_wasm: BTreeSet<&str> = ops
-        .operation
-        .iter()
-        .filter_map(|o| o.wasm.as_deref())
-        .collect();
 
     let unaligned_mcp: Vec<&str> = mcp_set
         .iter()
@@ -152,13 +138,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         .copied()
         .filter(|name| !claimed_cli.contains(name))
         .collect();
-    let unaligned_wasm: Vec<&str> = wasm_set
-        .iter()
-        .copied()
-        .filter(|name| !claimed_wasm.contains(name))
-        .collect();
-
-    if unaligned_mcp.is_empty() && unaligned_cli.is_empty() && unaligned_wasm.is_empty() {
+    if unaligned_mcp.is_empty() && unaligned_cli.is_empty() {
         out.push_str("## Unaligned\n\n");
         out.push_str("_(all surface entries reference an operation in the matrix above)_\n");
     } else {
@@ -172,7 +152,6 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         );
         emit_unaligned_table(&mut out, "MCP", &unaligned_mcp);
         emit_unaligned_table(&mut out, "CLI", &unaligned_cli);
-        emit_unaligned_table(&mut out, "WASM", &unaligned_wasm);
     }
 
     out

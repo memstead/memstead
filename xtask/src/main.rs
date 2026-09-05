@@ -1,6 +1,6 @@
 //! `xtask` — internal command runner for build-tooling tasks against the
 //! engine workspace: `generate-docs` renders the deterministic
-//! API-docs Markdown tree from the live MCP / CLI / WASM source
+//! API-docs Markdown tree from the live MCP / CLI source
 //! and the v1 binding schema + medium-capability matrix, into the
 //! output directory the caller names (the docs-site prebuild calls it
 //! at every build; nothing it writes is tracked); `release` runs the mechanical leg of
@@ -16,7 +16,6 @@ mod mcp;
 mod parity;
 mod release;
 mod sizing;
-mod wasm;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -883,7 +882,6 @@ fn generate_docs(args: GenerateDocsArgs) -> Result<()> {
     fs::create_dir_all(&args.output)
         .with_context(|| format!("creating output dir {}", args.output.display()))?;
     write_cli_reference(&args.output)?;
-    write_wasm_reference(&args.output)?;
     write_mcp_reference(&args.output)?;
     write_parity_matrix(&args.output)?;
     write_error_index(&args.output)?;
@@ -916,25 +914,12 @@ fn write_mcp_reference(output: &Path) -> Result<()> {
 }
 
 fn write_parity_matrix(output: &Path) -> Result<()> {
-    let workspace_root = workspace_root();
-    let wasm_path = workspace_root.join("crates/memstead-wasm/src/lib.rs");
-    let wasm_methods = wasm::method_names_from_file(&wasm_path)?;
     let operations_toml = include_str!("../operations.toml");
-    let inputs = parity::collect_inputs(wasm_methods);
+    let inputs = parity::collect_inputs();
     let rendered = parity::render(operations_toml, &inputs)?;
     write_if_changed(
         &output.join("parity.md"),
         &with_frontmatter("Surface Parity Matrix", &rendered),
-    )
-}
-
-fn write_wasm_reference(output: &Path) -> Result<()> {
-    let workspace_root = workspace_root();
-    let wasm_path = workspace_root.join("crates/memstead-wasm/src/lib.rs");
-    let rendered = wasm::render_from_file(&wasm_path)?;
-    write_if_changed(
-        &output.join("wasm.md"),
-        &with_frontmatter("WASM surface", &rendered),
     )
 }
 
