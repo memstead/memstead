@@ -9,6 +9,27 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead health --strict` is the graph's referee, with acknowledged
+  findings.** Strict now evaluates one fixed set whatever `--include`
+  says (`integrity`, `anchors`, `stale`, `missing_required_outgoing`,
+  `constraints`, `signals`; the report names it under
+  `strict.evaluated`) and exits 1 on any unacknowledged entity finding,
+  any configuration defect, and any stale acknowledgement. An
+  acknowledgement is a check record on the finding's entity whose
+  `finding.code` names the health condition, with verdict `failed` and a
+  method naming the owner and the plan that closes it; the finding is
+  then reported as acknowledged and does not fail the run, and a later
+  `ok` on the same condition withdraws it. An acknowledgement that still
+  stands while its finding no longer occurs is `STALE_ACKNOWLEDGEMENT`,
+  a new condition naming the check record, so the acknowledged set
+  shrinks with the repairs. The report carries the whole axis under
+  `strict` (findings with their acknowledgements, configuration defects,
+  stale acknowledgements, violations by code) and the markdown a
+  `## Strict` section. Finding codes spelled `UPPER_SNAKE` are the
+  engine's namespace and must name a health condition, refused
+  `INVALID_CHECK_FINDING` otherwise; any other spelling stays the
+  checker's own vocabulary. The `HEALTH_STRICT_VIOLATIONS` envelope now
+  names the violating codes with their counts instead of section labels.
 - **A binding's intent is validated against the destination vocabulary.**
   An agent reads an all-caps token in a binding's intent (`DEPENDS_ON`,
   `USES`) as a relationship it may write, so the engine now reads the

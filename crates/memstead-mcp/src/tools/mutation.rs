@@ -484,7 +484,7 @@ pub struct CheckParams {
     )]
     pub kind: Option<String>,
     #[schemars(
-        description = "Optional structured finding: `{code, message, section?, evidence?}` — `code` is your own vocabulary (`hidden-premise`, `stale-source`), `message` one or two sentences a reader can act on, `section` the section key it concerns, `evidence` what it rests on. Persisted on the ledger line, echoed in this response, rendered by `memstead_health` `include: [\"checks\"]` under the entity's latest verdict. The wrapper shape is fixed: a missing `code` or `message`, an empty value, or an unknown key refuses `INVALID_CHECK_FINDING` naming the shape, and nothing is recorded."
+        description = "Optional structured finding: `{code, message, section?, evidence?}` — `code` in `UPPER_SNAKE` is the engine's namespace and must name a health condition (a `failed` verdict with a `method` naming the owner and the closing plan acknowledges that finding for `memstead health --strict`; a later `ok` withdraws it), any other spelling (`hidden-premise`, `stale-source`) is your own vocabulary; `message` one or two sentences a reader can act on, `section` the section key it concerns, `evidence` what it rests on. Persisted on the ledger line, echoed in this response, rendered by `memstead_health` `include: [\"checks\"]` under the entity's latest verdict. The wrapper shape is fixed: a missing `code` or `message`, an empty value, or an unknown key refuses `INVALID_CHECK_FINDING` naming the shape, and nothing is recorded."
     )]
     pub finding: Option<CheckFindingParam>,
 }
@@ -495,7 +495,7 @@ pub struct CheckParams {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct CheckFindingParam {
     #[schemars(
-        description = "The checker's finding code, its own vocabulary (`hidden-premise`, `stale-source`). Required, non-empty."
+        description = "The finding code. `UPPER_SNAKE` is the engine's namespace and must name a health condition (`DANGLING_LINK_TARGET_MISSING`, `MISSING_REQUIRED_OUTGOING`, …); any other spelling (`hidden-premise`, `stale-source`) is the checker's own vocabulary. Required, non-empty."
     )]
     pub code: String,
     #[schemars(description = "One or two sentences a reader can act on. Required, non-empty.")]

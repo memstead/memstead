@@ -28,6 +28,7 @@ pub mod redaction;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod search;
 pub mod signals;
+pub mod strict;
 pub mod transport;
 
 pub use agent_notes::{AgentNotesReport, CommitNote};

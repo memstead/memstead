@@ -1491,7 +1491,7 @@ fn mem_rename_interrupted_half_state_detectable_and_completable() {
     // *reporting*, which is the stub line.)
     memstead()
         .current_dir(root)
-        .args(["health", "--strict"])
+        .args(["health"])
         .assert()
         .stdout(contains("Stubs: 1"));
 
@@ -1509,7 +1509,7 @@ fn mem_rename_interrupted_half_state_detectable_and_completable() {
         .success();
     memstead()
         .current_dir(root)
-        .args(["health", "--strict"])
+        .args(["health"])
         .assert()
         .success()
         .stdout(contains("Stubs: 0"));

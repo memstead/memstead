@@ -26,6 +26,11 @@ pub struct HealthArgs<'a> {
     pub limit: Option<usize>,
     pub target_schema: Option<&'a str>,
     pub include_config: bool,
+    /// The referee: evaluate [`crate::ops::strict::STRICT_INCLUDES`]
+    /// whatever `include` says, and serve the `strict` axis (entity
+    /// findings with their acknowledgements, configuration defects,
+    /// stale acknowledgements, the violation count the exit turns on).
+    pub strict: bool,
 }
 
 /// Surface-owned config the engine does not carry — supplied prebuilt so the
@@ -84,7 +89,20 @@ pub fn compose_health(
 ) -> Result<serde_json::Value, ComposeHealthError> {
     let health = engine.health();
     let stats = engine.status();
-    let include = args.include;
+    // Strict evaluates the referee's set whatever the caller included:
+    // the union keeps every explicit include and adds the strict ones.
+    let effective_include: Vec<String> = if args.strict {
+        let mut v: Vec<String> = args.include.to_vec();
+        for key in crate::ops::strict::STRICT_INCLUDES {
+            if !v.iter().any(|s| s == key) {
+                v.push((*key).to_string());
+            }
+        }
+        v
+    } else {
+        args.include.to_vec()
+    };
+    let include: &[String] = &effective_include;
     const HEALTH_LIMIT_MAX: usize = 100;
     let requested_limit = args.limit.unwrap_or(10);
     let limit = requested_limit.min(HEALTH_LIMIT_MAX);
@@ -771,6 +789,19 @@ pub fn compose_health(
         for (k, v) in entries {
             obj.insert(k, v);
         }
+    }
+
+    // The strict axis, read off the sections rendered above and the
+    // workspace check ledger. Last, so every section it reads is there.
+    if args.strict {
+        let ledger = engine
+            .workspace_root()
+            .map(crate::check::CheckLedger::for_workspace);
+        let axis = crate::ops::strict::compose_strict_axis(obj, ledger.as_ref(), vf);
+        obj.insert(
+            "strict".into(),
+            serde_json::to_value(&axis).unwrap_or_default(),
+        );
     }
 
     Ok(result)

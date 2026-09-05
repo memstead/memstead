@@ -749,7 +749,7 @@ fn health_strict_signals_warn_fails_notice_passes() {
         .assert()
         .failure()
         .code(1)
-        .stderr(contains("signals: 1"));
+        .stderr(contains("SIGNAL_WARN: 1"));
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(
         stdout.contains("attack_load") && stdout.contains("warn"),
@@ -991,7 +991,7 @@ fn health_strict_exits_one_when_violations_present() {
         .failure()
         .code(1)
         .stderr(contains("strict mode"))
-        .stderr(contains("missing_required_outgoing: 1"));
+        .stderr(contains("MISSING_REQUIRED_OUTGOING: 1"));
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(
         stdout.contains("Missing required outgoing"),

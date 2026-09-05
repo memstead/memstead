@@ -57,9 +57,15 @@ pub struct Args {
     /// A structured finding as JSON: `{"code": "...", "message": "...",
     /// "section"?: "<key>", "evidence"?: "..."}`. Persisted on the
     /// ledger line, echoed on the output, rendered by `health --include
-    /// checks` under the entity's latest verdict. `code` is your own
-    /// vocabulary; the wrapper shape is fixed and refuses unknown keys
-    /// (`INVALID_CHECK_FINDING`).
+    /// checks` under the entity's latest verdict. The wrapper shape is
+    /// fixed and refuses unknown keys (`INVALID_CHECK_FINDING`). `code`
+    /// in `UPPER_SNAKE` is the engine's namespace and must name a health
+    /// condition (`memstead health --help`, under `--strict`): with
+    /// `--verdict failed` and a `--method` naming the owner and the
+    /// closing plan, such a record ACKNOWLEDGES that finding on the
+    /// entity for `health --strict`, and a later `ok` on the same
+    /// condition withdraws it; any other spelling (`hidden-premise`) is
+    /// your own vocabulary and acknowledges nothing.
     #[arg(long, value_name = "JSON", conflicts_with = "from")]
     pub finding: Option<String>,
 

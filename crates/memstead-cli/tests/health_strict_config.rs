@@ -210,7 +210,7 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
     assert_eq!(unbacked.len(), 2);
     assert_eq!(code, 1, "strict refuses with no include needed\n{envelope}");
     assert!(
-        envelope.contains("mount_unbacked: 2"),
+        envelope.contains("MOUNT_UNBACKED: 2"),
         "the envelope names the class and count: {envelope}"
     );
 
@@ -273,7 +273,7 @@ fn strict_refuses_a_schema_pin_mismatch() {
         "{json}"
     );
     assert_eq!(code, 1, "{envelope}");
-    assert!(envelope.contains("schema_pin_mismatch: 1"), "{envelope}");
+    assert!(envelope.contains("SCHEMA_PIN_MISMATCH: 1"), "{envelope}");
 }
 
 /// A pinned schema sealed under an older engine whose package no
@@ -346,7 +346,7 @@ propagating_relationships: []
     );
     assert_eq!(code, 1, "{envelope}");
     assert!(
-        envelope.contains("schema_unstamped_source_rot: 1"),
+        envelope.contains("SCHEMA_UNSTAMPED_SOURCE_ROT: 1"),
         "{envelope}"
     );
 }
@@ -441,7 +441,7 @@ fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
     let (code, json, envelope) = strict_health(tmp.path(), &["integrity"]);
     assert_eq!(code, 1, "{envelope}");
     assert!(
-        envelope.contains("ungranted_cross_mem_edges: 1"),
+        envelope.contains("CROSS_MEM_EDGE_UNGRANTED: 1"),
         "{envelope}"
     );
     let codes: Vec<&str> = json["findings"]
@@ -609,12 +609,46 @@ fn strict_with_integrity_refuses_dangling_links_and_unresolved_stubs() {
     );
     assert!(codes.contains(&"UNRESOLVED_STUB"), "{codes:?}");
     assert_eq!(code, 1, "{envelope}");
-    assert!(envelope.contains("dangling_links:"), "{envelope}");
-    assert!(envelope.contains("unresolved_stubs: 1"), "{envelope}");
+    assert!(
+        envelope.contains("DANGLING_LINK_TARGET_MISSING: 2"),
+        "{envelope}"
+    );
+    assert!(envelope.contains("UNRESOLVED_STUB: 1"), "{envelope}");
 
-    // Without `integrity` the same workspace is not refused.
-    let (code, _, envelope) = strict_health(tmp.path(), &["stubs"]);
-    assert_eq!(code, 0, "the consistency axis is include-gated\n{envelope}");
+    // Strict evaluates the referee's set whatever `--include` says: the
+    // same workspace refuses with an unrelated include, and the report
+    // names the evaluated set. Without `--strict` the run exits 0 and the
+    // same findings ride the report as advisory.
+    let (code, json, envelope) = strict_health(tmp.path(), &["stubs"]);
+    assert_eq!(code, 1, "strict is not include-gated\n{envelope}");
+    assert!(
+        json["strict"]["evaluated"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "integrity"),
+        "{}",
+        json["strict"]
+    );
+    let out = memstead()
+        .current_dir(tmp.path())
+        .args(["--json", "health", "--include", "integrity"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "advisory without --strict");
+    let advisory: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        advisory["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["code"] == "UNRESOLVED_STUB"),
+        "the finding is reported, not refused: {advisory}"
+    );
+    assert!(
+        advisory.get("strict").is_none(),
+        "no strict axis without --strict"
+    );
 }
 
 /// The complement: a workspace whose only findings are a stale entity

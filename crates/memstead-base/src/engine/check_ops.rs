@@ -77,6 +77,36 @@ impl Engine {
         if let Some(f) = &finding {
             f.validate()
                 .map_err(|reason| EngineError::InvalidCheckFinding { reason })?;
+            // The code namespace: `UPPER_SNAKE` claims an engine health
+            // condition (the acknowledgement `health --strict` honours),
+            // so it must name one; a checker's own vocabulary keeps any
+            // other spelling. An acknowledgement (a `failed` verdict on a
+            // condition) names its owner and the closing plan in `method`.
+            if crate::ops::strict::is_engine_code_shape(&f.code)
+                && !crate::ops::strict::is_health_condition(&f.code)
+            {
+                return Err(EngineError::InvalidCheckFinding {
+                    reason: format!(
+                        "finding.code `{}` is spelled in the engine's UPPER_SNAKE namespace but \
+                         names no health condition — an acknowledgement names one of: {}; a \
+                         checker's own code takes another spelling (`hidden-premise`)",
+                        f.code,
+                        crate::ops::strict::HEALTH_CONDITIONS.join(", ")
+                    ),
+                });
+            }
+            if crate::ops::strict::is_health_condition(&f.code)
+                && verdict == Verdict::Failed
+                && method.is_none_or(|m| m.trim().is_empty())
+            {
+                return Err(EngineError::InvalidCheckFinding {
+                    reason: format!(
+                        "an acknowledgement of `{}` names its owner and the plan that closes it \
+                         in `method`, and none was given",
+                        f.code
+                    ),
+                });
+            }
         }
         let mount_idx = self
             .mounts

@@ -126,8 +126,10 @@ impl RecordKind {
 /// A structured finding riding a check record: WHAT failed (or what was
 /// observed) in a locatable form, so a `failed` verdict never forces
 /// the author to re-derive the failure from a free-text method note.
-/// `code` is the checker's own vocabulary (free for callers); the
-/// wrapper shape is fixed and refuses unknown keys.
+/// `code` in `UPPER_SNAKE` is the engine's namespace and must name a
+/// health condition ([`crate::ops::strict::HEALTH_CONDITIONS`]); any
+/// other spelling is the checker's own vocabulary. The wrapper shape is
+/// fixed and refuses unknown keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CheckFinding {

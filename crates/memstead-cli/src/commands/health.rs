@@ -92,27 +92,29 @@ pub struct Args {
     #[arg(long, default_value_t = 10)]
     pub limit: usize,
 
-    /// Exit non-zero (1) when any included Tier-2 warning kind has
-    /// present violations, or when an always-on configuration axis
-    /// reports findings. Always-on (no `--include` opt-in): the
-    /// authoring-drift axis (`SCHEMA_AUTHORING_SOURCE_MISSING` /
-    /// `SCHEMA_AUTHORING_SOURCE_DIVERGED`) and the configuration
-    /// defects `SCHEMA_PIN_MISMATCH`, `SCHEMA_UNSTAMPED_SOURCE_ROT`
-    /// and `MOUNT_UNBACKED` (a mount whose branch or folder does not
-    /// exist, or holds no entity). Include-gated participation:
-    /// `missing_required_outgoing`, `constraints`, `signals` (warn
-    /// level), and with `integrity` the consistency findings
-    /// `UNRESOLVED_STUB`, `DANGLING_LINK_TARGET_MISSING`,
-    /// `DANGLING_LINK_NOT_RELATED` and
-    /// `DANGLING_RELATION_TARGET_MISSING` and
-    /// `CROSS_MEM_EDGE_UNGRANTED` (no grant declared for the pair
-    /// while the target is mounted; an edge into a mem that is not
-    /// mounted is the dangling finding, once, never a grant finding,
-    /// whatever the grant table still names). Stale entities, drifted
-    /// anchors and `SCHEMA_GENERATIONS_BEHIND` stay advisory. The
-    /// output is rendered first, then the non-zero exit fires; new
-    /// Tier-2 codes opt in additively without breaking the flag's
-    /// semantics.
+    /// The graph's referee. Evaluates the strict set whatever
+    /// `--include` says: `integrity`, `anchors`, `stale`,
+    /// `missing_required_outgoing`, `constraints`, `signals` (the
+    /// report names it under `strict.evaluated`). Exit 0 when every
+    /// entity finding is acknowledged and nothing else is wrong; exit
+    /// 1 (`HEALTH_STRICT_VIOLATIONS`, after the report) on any
+    /// unacknowledged entity finding — `DANGLING_LINK_TARGET_MISSING`,
+    /// `DANGLING_LINK_NOT_RELATED`, `DANGLING_RELATION_TARGET_MISSING`,
+    /// `UNRESOLVED_STUB`, `CROSS_MEM_EDGE_UNGRANTED`,
+    /// `MISSING_REQUIRED_OUTGOING`, `CONSTRAINT_UNSATISFIED`,
+    /// `SECTION_FORMAT_VIOLATION`, `SIGNAL_WARN` — on any configuration
+    /// defect, never acknowledgeable (`SCHEMA_PIN_MISMATCH`,
+    /// `SCHEMA_UNSTAMPED_SOURCE_ROT`, `SCHEMA_AUTHORING_SOURCE_MISSING`
+    /// / `_DIVERGED`, `MOUNT_UNBACKED`, `ANCHORS_SIDECAR_UNREADABLE`,
+    /// `SCHEMA_FORMAT_DEFECT`), and on any `STALE_ACKNOWLEDGEMENT`: an
+    /// acknowledgement that still stands while its finding no longer
+    /// occurs. An acknowledgement is a check record on the finding's
+    /// entity (`memstead check <id> --verdict failed --finding
+    /// '{"code": "<condition>", "message": "..."}' --method "<owner,
+    /// closing plan>"`); a later `ok` on the same condition withdraws
+    /// it. Stale entities, drifted anchors and `SCHEMA_GENERATIONS_BEHIND`
+    /// stay advisory. Any other exit code is a refusal of the run
+    /// itself (unknown mem, quarantine, boot failure), never a verdict.
     #[arg(long)]
     pub strict: bool,
 }
@@ -135,6 +137,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         limit: Some(args.limit),
         target_schema: args.target_schema.as_deref(),
         include_config: false,
+        strict: args.strict,
     };
 
     let result = match compose_health(engine, &health_args, drift_warnings, &config) {
@@ -173,115 +176,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         }
     };
 
-    let strict_violations = strict_violations(&result, &args.include);
-
     if ctx.json {
         print_json(&result)?;
-        return strict_exit(args.strict, &strict_violations);
+        return strict_exit(args.strict, &result);
     }
 
     print_markdown(&render_markdown(&result, args.mem.as_deref()));
-    strict_exit(args.strict, &strict_violations)
-}
-
-/// The Tier-2 violations `--strict` refuses on, read off the composed
-/// report. Every entry is a section the caller opted into with
-/// `--include` (or a configuration defect the engine always reports), so
-/// `--strict` without any Tier-2 include stays a no-op.
-fn strict_violations(v: &Value, include: &[String]) -> Vec<(&'static str, usize)> {
-    let has = |key: &str| include.iter().any(|s| s == key);
-    let arr_len = |key: &str| v.get(key).and_then(Value::as_array).map_or(0, Vec::len);
-    let mut out: Vec<(&'static str, usize)> = Vec::new();
-    fn push(out: &mut Vec<(&'static str, usize)>, label: &'static str, n: usize) {
-        if n > 0 {
-            out.push((label, n));
-        }
-    }
-
-    if has("missing_required_outgoing") {
-        push(
-            &mut out,
-            "missing_required_outgoing",
-            arr_len("missing_required_outgoing"),
-        );
-    }
-    if has("constraints") {
-        push(&mut out, "constraints", arr_len("constraints"));
-        push(
-            &mut out,
-            "schema_format_defects",
-            arr_len("schema_format_defects"),
-        );
-    }
-    if has("integrity") {
-        let findings = v.get("findings").and_then(Value::as_array);
-        let count_code = |pred: &dyn Fn(&str) -> bool| {
-            findings.map_or(0, |f| {
-                f.iter()
-                    .filter(|x| x["code"].as_str().is_some_and(pred))
-                    .count()
-            })
-        };
-        push(
-            &mut out,
-            "dangling_links",
-            count_code(&|c| memstead_base::ops::DanglingLinkKind::ALL_CODES.contains(&c)),
-        );
-        push(
-            &mut out,
-            "unresolved_stubs",
-            count_code(&|c| c == "UNRESOLVED_STUB"),
-        );
-        push(
-            &mut out,
-            "ungranted_cross_mem_edges",
-            count_code(&|c| c == "CROSS_MEM_EDGE_UNGRANTED"),
-        );
-        push(
-            &mut out,
-            "anchors_sidecar_unreadable",
-            count_code(&|c| c == "ANCHORS_SIDECAR_UNREADABLE"),
-        );
-    }
-    if let Some(warn) = v["signals"]["counts"]["warn"].as_u64() {
-        push(&mut out, "signals", warn as usize);
-    }
-    if let Some(mems) = v.get("anchors").and_then(Value::as_object)
-        && !out.iter().any(|(k, _)| *k == "anchors_sidecar_unreadable")
-    {
-        let unreadable = mems
-            .values()
-            .filter(|m| m.get("condition").is_some_and(|c| !c.is_null()))
-            .count();
-        push(&mut out, "anchors_sidecar_unreadable", unreadable);
-    }
-
-    let warnings = v.get("warnings").and_then(Value::as_array);
-    let count_warning = |pred: &dyn Fn(&str) -> bool| {
-        warnings.map_or(0, |w| {
-            w.iter()
-                .filter(|x| x["code"].as_str().is_some_and(pred))
-                .count()
-        })
-    };
-    push(
-        &mut out,
-        "schema_authoring_drift",
-        count_warning(&|c| {
-            matches!(
-                c,
-                "SCHEMA_AUTHORING_SOURCE_MISSING" | "SCHEMA_AUTHORING_SOURCE_DIVERGED"
-            )
-        }),
-    );
-    for (label, code) in [
-        ("schema_pin_mismatch", "SCHEMA_PIN_MISMATCH"),
-        ("schema_unstamped_source_rot", "SCHEMA_UNSTAMPED_SOURCE_ROT"),
-        ("mount_unbacked", "MOUNT_UNBACKED"),
-    ] {
-        push(&mut out, label, count_warning(&|c| c == code));
-    }
-    out
+    strict_exit(args.strict, &result)
 }
 
 fn s<'a>(v: &'a Value, key: &str) -> &'a str {
@@ -367,6 +268,68 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
         n(summary, "total_communities")
     ));
     lines.push(String::new());
+
+    if let Some(axis) = v.get("strict").and_then(Value::as_object) {
+        lines.push("## Strict".to_string());
+        lines.push(String::new());
+        lines.push(format!(
+            "Evaluated: {}. Violations: {} (acknowledged findings: {}).",
+            strs(&axis["evaluated"]).join(", "),
+            n(&Value::Object(axis.clone()), "violations"),
+            n(&Value::Object(axis.clone()), "acknowledged"),
+        ));
+        lines.push(String::new());
+        for f in axis
+            .get("findings")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let ack = f["acknowledged"].as_bool().unwrap_or(false);
+            let who = f["acknowledgement"]["identity"].as_str().unwrap_or("");
+            let method = f["acknowledgement"]["method"].as_str().unwrap_or("");
+            lines.push(format!(
+                "- [{}] `{}`{}",
+                s(f, "code"),
+                s(f, "entity"),
+                if ack {
+                    format!(" — acknowledged by {who}: {method}")
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        for c in axis
+            .get("configuration")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            lines.push(format!(
+                "- [{}] configuration{}",
+                s(c, "code"),
+                c["mem"]
+                    .as_str()
+                    .map(|m| format!(" — mem `{m}`"))
+                    .unwrap_or_default()
+            ));
+        }
+        for st in axis
+            .get("stale_acknowledgements")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            lines.push(format!(
+                "- [STALE_ACKNOWLEDGEMENT] `{}` acknowledged `{}` by {} ({}) and the finding no longer occurs — withdraw it with an `ok` check on the same condition",
+                s(st, "entity"),
+                s(st, "condition"),
+                st["acknowledgement"]["identity"].as_str().unwrap_or("an identity-less caller"),
+                st["acknowledgement"]["method"].as_str().unwrap_or("")
+            ));
+        }
+        lines.push(String::new());
+    }
 
     if let Some(items) = v.get("orphans").and_then(Value::as_array) {
         lines.push("## Orphans".to_string());
@@ -931,24 +894,43 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
     lines.join("\n")
 }
 
-/// `--strict` set and any Tier-2 violations recorded, return a
-/// `CliError(Generic)` so `main` exits 1 after the report has been
-/// written to stdout. When `--strict` is unset, or when no Tier-2
-/// `--include` token was supplied, this is a no-op.
-fn strict_exit(strict: bool, violations: &[(&'static str, usize)]) -> anyhow::Result<()> {
-    if !strict || violations.is_empty() {
+/// `--strict` set and the report's `strict` axis carrying violations,
+/// return a `CliError(Generic)` so `main` exits 1 after the report has
+/// been written to stdout. The axis is the engine's: unacknowledged
+/// entity findings, configuration defects and stale acknowledgements,
+/// counted by code. When `--strict` is unset this is a no-op.
+fn strict_exit(strict: bool, report: &Value) -> anyhow::Result<()> {
+    if !strict {
         return Ok(());
     }
-    let summary = violations
+    let axis = &report["strict"];
+    let violations = axis["violations"].as_u64().unwrap_or(0);
+    if violations == 0 {
+        return Ok(());
+    }
+    let by_code = axis["violations_by_code"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    let summary = by_code
         .iter()
-        .map(|(code, n)| format!("{code}: {n}"))
+        .map(|(code, n)| format!("{code}: {}", n.as_u64().unwrap_or(0)))
         .collect::<Vec<_>>()
         .join(", ");
     Err(crate::CliError::new(
         ExitKind::Generic,
         "HEALTH_STRICT_VIOLATIONS",
-        format!("strict mode: tier-2 violations present ({summary})"),
+        format!("strict mode: {violations} violation(s) ({summary})"),
     )
+    .with_details(serde_json::json!({
+        "violations": violations,
+        "violations_by_code": by_code,
+        "acknowledged": axis["acknowledged"],
+        "stale_acknowledgements": axis["stale_acknowledgements"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0),
+    }))
     .into())
 }
 
@@ -992,33 +974,43 @@ mod tests {
         }
     }
 
+    /// The exit turns on the engine's strict axis alone: zero violations
+    /// exits clean, a positive count names every code; without `--strict`
+    /// the axis is never consulted.
     #[test]
-    fn strict_reads_the_tier_two_sections_off_the_report() {
-        let v = serde_json::json!({
-            "findings": [
-                {"code": "UNRESOLVED_STUB"},
-                {"code": "DANGLING_LINK_TARGET_MISSING"},
-                {"code": "CROSS_MEM_EDGE_UNGRANTED"},
-            ],
-            "constraints": [{"id": "a"}],
-            "signals": {"counts": {"warn": 2}},
-            "warnings": [{"code": "MOUNT_UNBACKED"}],
-        });
-        let include = vec!["integrity".to_string(), "constraints".to_string()];
-        let got = strict_violations(&v, &include);
-        assert_eq!(
-            got,
-            vec![
-                ("constraints", 1),
-                ("dangling_links", 1),
-                ("unresolved_stubs", 1),
-                ("ungranted_cross_mem_edges", 1),
-                ("signals", 2),
-                ("mount_unbacked", 1),
-            ]
-        );
-        // Sections not opted into do not count.
-        let got = strict_violations(&v, &[]);
-        assert_eq!(got, vec![("signals", 2), ("mount_unbacked", 1)]);
+    fn strict_exit_reads_the_axis() {
+        let clean = serde_json::json!({"strict": {"violations": 0, "violations_by_code": {}}});
+        assert!(strict_exit(true, &clean).is_ok());
+        let red = serde_json::json!({"strict": {
+            "violations": 3,
+            "violations_by_code": {"MISSING_REQUIRED_OUTGOING": 1, "STALE_ACKNOWLEDGEMENT": 2},
+            "acknowledged": 1,
+            "stale_acknowledgements": [{}, {}],
+        }});
+        let err = strict_exit(true, &red).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("MISSING_REQUIRED_OUTGOING: 1"), "{msg}");
+        assert!(msg.contains("STALE_ACKNOWLEDGEMENT: 2"), "{msg}");
+        assert!(strict_exit(false, &red).is_ok());
+    }
+
+    /// `--strict --help` names the strict set and both exit codes.
+    #[test]
+    fn strict_help_names_the_set_and_the_exit_codes() {
+        let cmd = Args::command();
+        let help = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "strict")
+            .and_then(|a| a.get_help())
+            .expect("--strict has help text")
+            .to_string();
+        for key in memstead_base::ops::strict::STRICT_INCLUDES {
+            assert!(help.contains(key), "help names `{key}`: {help}");
+        }
+        for code in memstead_base::ops::strict::HEALTH_CONDITIONS {
+            assert!(help.contains(code), "help names `{code}`: {help}");
+        }
+        assert!(help.contains("STALE_ACKNOWLEDGEMENT"));
+        assert!(help.contains("Exit 0") && help.contains("exit 1"), "{help}");
     }
 }
