@@ -43,7 +43,7 @@ pub use diff::{Diff, DiffConfig, EntityDiff, IncomingRipple};
 pub use export::{MemExportBytes, MemExportError};
 pub use transport::{
     FetchOutcome, PullOutcome, PushAllOutcome, PushOutcome, PushedRef, RefusedRef,
-    RemoteAddOutcome, UpdatedRef,
+    RemoteAddOutcome, RemoteRefState, RemoteRefStatus, RemoteStatusOutcome, UpdatedRef,
 };
 
 use crate::entity::EntityId;

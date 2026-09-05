@@ -137,3 +137,96 @@ pub struct RemoteAddOutcome {
     /// re-pointed; `false` when it was newly added.
     pub updated: bool,
 }
+
+/// The standing of one remote ref (or one mounted branch the remote lacks)
+/// on `memstead status --remote`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteRefState {
+    /// Local and remote heads agree.
+    InSync,
+    /// The remote head is an ancestor of the local head: unpushed local
+    /// work, never staleness.
+    LocalAhead,
+    /// The local head is an ancestor of the remote head: the remote
+    /// carries commits this clone has not seen. Staleness.
+    Behind,
+    /// Neither head is an ancestor of the other. Staleness.
+    Forked,
+    /// The remote head is not in the local object store: the remote
+    /// carries commits this clone has never fetched, so it is behind or
+    /// forked and only a `memstead fetch` can say which. Staleness.
+    Unfetched,
+    /// The remote carries a branch this workspace mounts (or the schemas
+    /// ref) and the local gitdir has no such ref. Staleness.
+    MissingLocal,
+    /// A remote branch nothing mounts (whether or not a local ref of that
+    /// name exists): a probable leftover of a retired or re-homed mem, or
+    /// a branch that is not graph state at all. A notice, never staleness;
+    /// deleting a remote branch is a human decision.
+    UnmountedRemote,
+    /// A mounted branch the remote does not carry yet: never pushed. A
+    /// notice, never staleness.
+    NotOnRemote,
+}
+
+impl RemoteRefState {
+    /// The stable wire label.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::InSync => "in_sync",
+            Self::LocalAhead => "local_ahead",
+            Self::Behind => "behind",
+            Self::Forked => "forked",
+            Self::Unfetched => "unfetched",
+            Self::MissingLocal => "missing_local",
+            Self::UnmountedRemote => "unmounted_remote",
+            Self::NotOnRemote => "not_on_remote",
+        }
+    }
+
+    /// Whether this state means the local graph lags the remote.
+    pub fn is_stale(self) -> bool {
+        matches!(
+            self,
+            Self::Behind | Self::Forked | Self::Unfetched | Self::MissingLocal
+        )
+    }
+}
+
+/// One ref on the remote-status report.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteRefStatus {
+    /// The full ref name (`refs/heads/<branch>`).
+    pub ref_name: String,
+    /// The mem the branch is mounted as, or `None` for the schemas ref
+    /// and for an unmounted remote branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem: Option<String>,
+    /// `true` for the `__MEMSTEAD` schemas ref.
+    pub schemas_ref: bool,
+    pub state: RemoteRefState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_sha: Option<String>,
+}
+
+/// What `memstead status --remote` reports: every mounted git-branch mem
+/// and the schemas ref compared against the named remote by a read-only
+/// `ls-remote`, plus the notices of what could not be compared. Never a
+/// refusal: a workspace without a remote, or one it cannot reach, reports
+/// the fact as a notice and stands as not stale (fail open).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RemoteStatusOutcome {
+    /// Remote name the comparison targeted.
+    pub remote: String,
+    /// Every ref compared, sorted by name.
+    pub refs: Vec<RemoteRefStatus>,
+    /// Why some or all of the comparison could not run, one line each.
+    pub notices: Vec<String>,
+    /// Counts by state, in wire-label order.
+    pub counts: std::collections::BTreeMap<String, usize>,
+    /// `true` when any ref is behind, forked or missing locally.
+    pub stale: bool,
+}

@@ -118,7 +118,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Node / edge counts, schema distribution, and per-binding projection state.
-    Status,
+    Status(commands::status::Args),
 
     /// Read one entity as markdown.
     Entity(commands::entity::Args),
@@ -433,7 +433,7 @@ impl Command {
     /// and nothing payload-shaped can leak through a static name.
     pub fn verb(&self) -> &'static str {
         match self {
-            Command::Status => "status",
+            Command::Status(_) => "status",
             Command::Entity(_) => "entity",
             Command::Relations(_) => "relations",
             Command::Search(_) => "search",

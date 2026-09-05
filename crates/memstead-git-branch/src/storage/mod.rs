@@ -60,6 +60,7 @@ pub const FULL_GIT_BRANCH_OPS: memstead_base::GitBranchOps = memstead_base::GitB
     push: push_dispatch,
     ls_remote: ls_remote_dispatch,
     resolve_ref: resolve_ref_dispatch,
+    is_ancestor: is_ancestor_dispatch,
     remote_add: remote_add_dispatch,
     read_tree: read_tree_dispatch,
     export: export_dispatch,
@@ -323,6 +324,14 @@ fn resolve_ref_dispatch(
     ref_name: &str,
 ) -> Result<Option<String>, memstead_base::backend::BackendError> {
     crate::ops::transport::resolve_ref_in_gitdir(gitdir, ref_name)
+}
+
+fn is_ancestor_dispatch(
+    gitdir: &std::path::Path,
+    ancestor: &str,
+    descendant: &str,
+) -> Result<bool, memstead_base::backend::BackendError> {
+    crate::ops::transport::is_ancestor_in_gitdir(gitdir, ancestor, descendant)
 }
 
 fn remote_add_dispatch(

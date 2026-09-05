@@ -105,6 +105,6 @@ baseline, no entity writes). Source read-only; refusals verbatim.
 
 ## Rules
 
-- The **sole maintenance writer** for bound mems. Changes flow source → mem,
-  never the reverse; not a version-control operation. Conservative — when
-  unsure, skip and leave the finding open: cheaper than a wrong edit.
+- The **sole maintenance writer** for bound mems. Changes flow source → mem, never the reverse; not a
+  version-control operation. Conservative — when unsure, skip and leave the finding open: cheaper than a wrong
+  edit. With a remote, session start is `memstead status --remote`; exit 6 (`REMOTE_STALE`) means `memstead fetch` then `memstead pull` per named mem before the first write.

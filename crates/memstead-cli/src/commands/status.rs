@@ -5,8 +5,32 @@ use memstead_base::ingest::status::{ProjectionStatus, Rollup, projection_overvie
 use serde::Serialize;
 use serde_json::json;
 
-use crate::output::{print_json, print_markdown};
+use crate::output::{ExitKind, print_json, print_markdown};
 use crate::setup::{CliContext, CliEngine};
+
+#[derive(clap::Args, Debug, Default)]
+pub struct Args {
+    /// Compare every mounted git-branch mem and the schemas ref against
+    /// the named remote (default `origin`) by one read-only remote query
+    /// per mem-repo: no fetch, no ref moved. Each ref is
+    /// classified `in_sync`, `local_ahead` (unpushed local work, never
+    /// staleness), `behind`, `forked`, `unfetched` (the remote head is
+    /// not in the local object store, so behind or forked, which
+    /// `memstead fetch` tells), `missing_local` (the remote carries a
+    /// mounted branch or the schemas ref this clone lacks),
+    /// `unmounted_remote` (a remote branch nothing mounts, whether or not
+    /// a local ref of that name exists: a probable leftover of a retired
+    /// or re-homed mem, a notice) or `not_on_remote` (a mounted branch
+    /// never pushed, a notice). Exit 6 (`REMOTE_STALE`, after the report)
+    /// when any ref is behind, forked, unfetched or missing locally — the
+    /// local graph lags what another machine
+    /// pushed; reconcile with `memstead fetch` then `memstead pull` per
+    /// named mem. Exit 0 otherwise, and exit 0 with a named notice when no
+    /// git-branch mem is mounted, no remote is configured, or the remote
+    /// cannot be reached (fail open: a network blip never blocks a session).
+    #[arg(long, value_name = "REMOTE", num_args = 0..=1, default_missing_value = "origin")]
+    pub remote: Option<String>,
+}
 
 #[derive(Serialize)]
 struct EdgeTypeCount<'a> {
@@ -44,6 +68,9 @@ struct StatusPayload<'a> {
     edge_types: Vec<EdgeTypeCount<'a>>,
     type_distribution: Vec<TypeCount<'a>>,
     projections: Vec<ProjectionStatus>,
+    /// The remote comparison, present under `--remote` only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote: Option<memstead_base::ops::RemoteStatusOutcome>,
     /// Boot-honesty roster, present whenever non-empty and never behind
     /// an opt-in — the same rule `health` follows. On a filesystem
     /// workspace `status` is the roster surface the `mem list` refusal
@@ -124,16 +151,20 @@ fn mem_durability(engine: &memstead_base::Engine) -> Vec<MemDurability> {
         .collect()
 }
 
-pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
+pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // The workspace root (for the projection store / advance store reads). The
     // engine build below fails before this matters when we are outside a
     // workspace, so a `None` here only ever means "in a workspace that declares
     // no projections" once we get past `cli_engine()?`.
     let root = ctx.workspace_shape().map(|(_, r)| r);
 
+    let mut remote: Option<memstead_base::ops::RemoteStatusOutcome> = None;
     let (status, total, real, schema_counts, projections, rollup, mems, quarantined) =
         match ctx.cli_engine()? {
             CliEngine::MemRepo(engine) => {
+                if let Some(name) = args.remote.as_deref() {
+                    remote = Some(engine.remote_status(name));
+                }
                 let status = engine.status();
                 let store: &Store = engine.store();
                 // One per-binding pass for both projections (A3 AC2).
@@ -158,6 +189,9 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 )
             }
             CliEngine::Filesystem(engine) => {
+                if let Some(name) = args.remote.as_deref() {
+                    remote = Some(engine.remote_status(name));
+                }
                 let status = engine.status();
                 let store: &Store = engine.store();
                 // One per-binding pass for both projections (A3 AC2).
@@ -216,9 +250,11 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
                 })
                 .collect(),
             projections,
+            remote: remote.clone(),
             quarantined,
         };
-        return print_json(&json!(payload));
+        print_json(&json!(payload))?;
+        return remote_exit(remote.as_ref());
     }
 
     let mut lines = Vec::new();
@@ -326,8 +362,85 @@ pub fn run(ctx: &CliContext) -> anyhow::Result<()> {
             }
         }
     }
+    if let Some(r) = &remote {
+        lines.push(String::new());
+        lines.push(format!("## Remote `{}`", r.remote));
+        lines.push(String::new());
+        if r.refs.is_empty() && r.notices.is_empty() {
+            lines.push("- nothing to compare".to_string());
+        }
+        for x in &r.refs {
+            let who = if x.schemas_ref {
+                "schemas ref".to_string()
+            } else {
+                x.mem
+                    .as_deref()
+                    .map(|m| format!("mem `{m}`"))
+                    .unwrap_or_else(|| "no mount".to_string())
+            };
+            lines.push(format!(
+                "- `{}` ({who}): {} ({} → {})",
+                x.ref_name,
+                x.state.as_wire(),
+                x.remote_sha
+                    .as_deref()
+                    .map(|s| &s[..8.min(s.len())])
+                    .unwrap_or("—"),
+                x.local_sha
+                    .as_deref()
+                    .map(|s| &s[..8.min(s.len())])
+                    .unwrap_or("—"),
+            ));
+        }
+        for n in &r.notices {
+            lines.push(format!("- notice: {n}"));
+        }
+        if r.stale {
+            lines.push(String::new());
+            lines.push(
+                "The local graph lags the remote. Reconcile before mutating: `memstead fetch` \
+                 then `memstead pull` per named mem."
+                    .to_string(),
+            );
+        }
+    }
     print_markdown(&lines.join("\n"));
-    Ok(())
+    remote_exit(remote.as_ref())
+}
+
+/// `--remote` and any ref behind, forked or missing locally: a completed
+/// comparison whose result the caller asked to be gated on, exit 6
+/// (`REMOTE_STALE`) after the report. Everything else, the fail-open
+/// notices included, exits 0.
+fn remote_exit(remote: Option<&memstead_base::ops::RemoteStatusOutcome>) -> anyhow::Result<()> {
+    let Some(r) = remote else {
+        return Ok(());
+    };
+    if !r.stale {
+        return Ok(());
+    }
+    let stale: Vec<String> = r
+        .refs
+        .iter()
+        .filter(|x| x.state.is_stale())
+        .map(|x| format!("{} ({})", x.ref_name, x.state.as_wire()))
+        .collect();
+    Err(crate::CliError::new(
+        ExitKind::Findings,
+        "REMOTE_STALE",
+        format!(
+            "the local graph lags remote `{}`: {} — reconcile with `memstead fetch` then \
+             `memstead pull` per named mem before mutating",
+            r.remote,
+            stale.join(", ")
+        ),
+    )
+    .with_details(json!({
+        "remote": r.remote,
+        "stale": stale,
+        "counts": r.counts,
+    }))
+    .into())
 }
 
 /// Count real (non-stub) entities by `entity_type`. Both engine

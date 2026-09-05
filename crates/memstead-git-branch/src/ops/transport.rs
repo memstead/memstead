@@ -267,6 +267,74 @@ pub fn resolve_ref_in_gitdir(
     Ok(resolve_ref(gitdir, ref_name))
 }
 
+/// `Engine::remote_status` half: is `ancestor` reachable from
+/// `descendant`? `git merge-base --is-ancestor` answers with its exit
+/// status (0 yes, 1 no); anything else is an error. Read-only.
+pub fn is_ancestor_in_gitdir(
+    gitdir: &Path,
+    ancestor: &str,
+    descendant: &str,
+) -> Result<bool, BackendError> {
+    if !gitdir.is_dir() {
+        return Err(BackendError::Other(format!(
+            "gitdir not found: {}",
+            gitdir.display()
+        )));
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(gitdir)
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| BackendError::Other(format!("git merge-base failed to start: {e}")))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(BackendError::Other(format!(
+            "git merge-base --is-ancestor {ancestor} {descendant} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod remote_status_verbs {
+    /// The two helpers `Engine::remote_status` reaches run read-only git
+    /// verbs only (`ls-remote`, `rev-parse`, `merge-base`): a mutating
+    /// verb in either fails here before it ships.
+    #[test]
+    fn remote_status_helpers_run_only_read_verbs() {
+        let src = include_str!("transport.rs");
+        for name in [
+            "pub fn ls_remote_in_gitdir(",
+            "pub fn is_ancestor_in_gitdir(",
+        ] {
+            let start = src
+                .find(name)
+                .unwrap_or_else(|| panic!("{name} is defined"));
+            let end = src[start..].find("\n}\n").map(|i| start + i).unwrap();
+            let body = &src[start..end];
+            for verb in [
+                "\"fetch\"",
+                "\"pull\"",
+                "\"push\"",
+                "\"update-ref\"",
+                "\"reset\"",
+                "\"checkout\"",
+                "\"branch\"",
+                "\"commit\"",
+                "\"merge\"",
+                "\"rebase\"",
+                "\"remote\"",
+            ] {
+                assert!(!body.contains(verb), "{name} must not run git {verb}");
+            }
+        }
+    }
+}
+
 /// `memstead mem-repo remote-add` implementation: configures (or
 /// re-points) the named remote on the mem-repo gitdir. Upsert
 /// semantics — an existing remote gets `git remote set-url`, a new one

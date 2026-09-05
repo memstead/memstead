@@ -595,6 +595,13 @@ pub type GitBranchLsRemoteFn =
 pub type GitBranchResolveRefFn =
     fn(gitdir: &Path, ref_name: &str) -> Result<Option<String>, BackendError>;
 
+/// `Engine::remote_status` dispatch: whether `ancestor` is reachable
+/// from `descendant` in the gitdir's history (`git merge-base
+/// --is-ancestor`). Read-only; tells local-ahead from behind from forked
+/// without moving a ref.
+pub type GitBranchIsAncestorFn =
+    fn(gitdir: &Path, ancestor: &str, descendant: &str) -> Result<bool, BackendError>;
+
 /// `Engine::remote_add` dispatch — configures a named remote on the
 /// mem-repo gitdir (upsert: add, or set-url when it already exists).
 pub type GitBranchRemoteAddFn =
@@ -695,6 +702,7 @@ pub struct GitBranchOps {
     pub push: GitBranchPushFn,
     pub ls_remote: GitBranchLsRemoteFn,
     pub resolve_ref: GitBranchResolveRefFn,
+    pub is_ancestor: GitBranchIsAncestorFn,
     pub remote_add: GitBranchRemoteAddFn,
     pub read_tree: GitBranchReadTreeFn,
     pub export: GitBranchExportFn,

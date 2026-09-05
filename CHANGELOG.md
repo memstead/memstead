@@ -9,6 +9,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **`memstead status --remote` reports remote staleness.** One read-only
+  `git ls-remote` per mem-repo (no fetch, no ref moved) compares every
+  mounted git-branch mem and the `__MEMSTEAD` schemas ref against the
+  named remote (default `origin`) and classifies each ref `in_sync`,
+  `local_ahead`, `behind`, `forked`, `unfetched` (the remote head is not in
+  the local object store, so behind or forked, which a fetch tells),
+  `missing_local`, `unmounted_remote` (a remote branch nothing mounts,
+  whether or not a local ref of that name exists, a notice) or
+  `not_on_remote` (a mounted branch never pushed, a notice). Exit 6
+  (`REMOTE_STALE`, after the report) when any ref is behind, forked,
+  unfetched or missing locally; exit 0
+  otherwise, and exit 0 with a named notice when no git-branch mem is
+  mounted, no remote is configured, or the remote cannot be reached. The
+  comparison rides the `--json` payload as `remote`. The git-branch hooks
+  gain an `is_ancestor` read (`git merge-base --is-ancestor`).
 - **One frontmatter parser.** The core split in `memstead-base` is now the
   public surface every reader uses: `frontmatter_parts`,
   `body_after_frontmatter`, `split_frontmatter_core` and the `Frontmatter`

@@ -710,6 +710,162 @@ impl Engine {
         })
     }
 
+    /// `memstead status --remote`: every mounted git-branch mem and the
+    /// schemas ref compared against `remote` by one read-only
+    /// `ls-remote` per gitdir, classified in sync / local-ahead / behind
+    /// / forked / unfetched (the remote head is not in the local object
+    /// store, so behind or forked, which a fetch tells) / missing locally,
+    /// plus the remote's branches nothing mounts (a notice, whether or
+    /// not a local ref of that name exists) and the mounted branches the
+    /// remote lacks (a notice). Moves no ref and never refuses: no git-branch mount, no
+    /// hook (lean flavour), no remote configured or one that cannot be
+    /// reached each become a notice and the outcome stands as not stale,
+    /// so a network blip never blocks a session. The mount table the
+    /// classification reads is this engine's own, so a remote branch with
+    /// no mount is a leftover of a retired or re-homed mem, never
+    /// staleness; the reconcile itself stays `fetch` and `pull`.
+    pub fn remote_status(&self, remote: &str) -> crate::ops::RemoteStatusOutcome {
+        use crate::ops::{RemoteRefState, RemoteRefStatus, RemoteStatusOutcome};
+
+        let mut outcome = RemoteStatusOutcome {
+            remote: remote.to_string(),
+            ..Default::default()
+        };
+        let mut gitdirs: Vec<std::path::PathBuf> = Vec::new();
+        for m in &self.mounts {
+            if let MountStorage::GitBranch { gitdir, .. } = &m.mount.storage
+                && !gitdirs.contains(gitdir)
+            {
+                gitdirs.push(gitdir.clone());
+            }
+        }
+        if gitdirs.is_empty() {
+            outcome.notices.push(
+                "no git-branch mem is mounted, so there is no remote to compare against"
+                    .to_string(),
+            );
+            return outcome;
+        }
+        let Some(hook) = self.git_branch_ops.as_ref() else {
+            outcome.notices.push(
+                "git-branch hooks not installed (lean flavour): the remote was not compared"
+                    .to_string(),
+            );
+            return outcome;
+        };
+
+        let memstead_ref = crate::workspace::branch_full_ref(crate::MEMSTEAD_REF_BRANCH);
+        for gitdir in &gitdirs {
+            let remote_refs: std::collections::BTreeMap<String, String> =
+                match (hook.ls_remote)(gitdir, remote) {
+                    Ok(v) => v.into_iter().collect(),
+                    Err(BackendError::Other(msg)) if msg.starts_with("UNKNOWN_REMOTE:") => {
+                        outcome.notices.push(format!(
+                            "remote `{}` is not configured or not reachable from {}: the \
+                             comparison did not run (fail open)",
+                            msg.trim_start_matches("UNKNOWN_REMOTE:").trim(),
+                            gitdir.display()
+                        ));
+                        continue;
+                    }
+                    Err(e) => {
+                        outcome.notices.push(format!(
+                            "remote `{remote}` could not be read from {}: {e} (fail open)",
+                            gitdir.display()
+                        ));
+                        continue;
+                    }
+                };
+            // The branches this workspace mounts from this gitdir, by ref.
+            let mut mounted: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            for m in &self.mounts {
+                if let MountStorage::GitBranch { gitdir: g, branch } = &m.mount.storage
+                    && g == gitdir
+                {
+                    mounted.insert(
+                        crate::workspace::branch_full_ref(branch),
+                        m.mount.mem.clone(),
+                    );
+                }
+            }
+            let local = |ref_name: &str| -> Option<String> {
+                (hook.resolve_ref)(gitdir, ref_name).ok().flatten()
+            };
+            // The ancestry verdict for a tracked ref whose heads differ.
+            // A remote head this clone has never fetched is not in the
+            // local object store, so neither direction can be tested:
+            // that is `Unfetched`, never a guessed `Forked`.
+            let compare = |local_sha: &str, remote_sha: &str| -> RemoteRefState {
+                match (hook.is_ancestor)(gitdir, remote_sha, local_sha) {
+                    Ok(true) => RemoteRefState::LocalAhead,
+                    Ok(false) => match (hook.is_ancestor)(gitdir, local_sha, remote_sha) {
+                        Ok(true) => RemoteRefState::Behind,
+                        Ok(false) => RemoteRefState::Forked,
+                        Err(_) => RemoteRefState::Unfetched,
+                    },
+                    Err(_) => RemoteRefState::Unfetched,
+                }
+            };
+
+            for (ref_name, remote_sha) in &remote_refs {
+                let schemas_ref = *ref_name == memstead_ref;
+                let mem = mounted.get(ref_name).cloned();
+                let tracked = schemas_ref || mem.is_some();
+                let local_sha = local(ref_name);
+                // Mount first: a branch nothing mounts is not graph state,
+                // whatever a local ref of that name says, so it can never
+                // be staleness.
+                let state = match (&local_sha, tracked) {
+                    (_, false) => RemoteRefState::UnmountedRemote,
+                    (None, true) => RemoteRefState::MissingLocal,
+                    (Some(l), true) if l == remote_sha => RemoteRefState::InSync,
+                    (Some(l), true) => compare(l, remote_sha),
+                };
+                outcome.refs.push(RemoteRefStatus {
+                    ref_name: ref_name.clone(),
+                    mem,
+                    schemas_ref,
+                    state,
+                    remote_sha: Some(remote_sha.clone()),
+                    local_sha,
+                });
+            }
+            // Tracked refs the remote lacks: every mounted branch, and the
+            // schemas ref when this clone carries one. Never pushed, a
+            // notice.
+            let mut tracked_only: Vec<(String, Option<String>, bool)> = mounted
+                .iter()
+                .map(|(r, m)| (r.clone(), Some(m.clone()), false))
+                .collect();
+            if local(&memstead_ref).is_some() {
+                tracked_only.push((memstead_ref.clone(), None, true));
+            }
+            for (ref_name, mem, schemas_ref) in tracked_only {
+                if remote_refs.contains_key(&ref_name) {
+                    continue;
+                }
+                outcome.refs.push(RemoteRefStatus {
+                    local_sha: local(&ref_name),
+                    ref_name,
+                    mem,
+                    schemas_ref,
+                    state: RemoteRefState::NotOnRemote,
+                    remote_sha: None,
+                });
+            }
+        }
+        outcome.refs.sort_by(|a, b| a.ref_name.cmp(&b.ref_name));
+        for r in &outcome.refs {
+            *outcome
+                .counts
+                .entry(r.state.as_wire().to_string())
+                .or_default() += 1;
+        }
+        outcome.stale = outcome.refs.iter().any(|r| r.state.is_stale());
+        outcome
+    }
+
     /// Push every mounted git-branch mem's declared branch, plus the
     /// `__MEMSTEAD` ref of every mem-repo those mounts share, to
     /// `remote` — fast-forward only, there is no force variant. One
@@ -1936,5 +2092,47 @@ mod tests {
             1,
             "no throttle window — the moved ref reloads on the next probe"
         );
+    }
+}
+
+#[cfg(test)]
+mod remote_status_source_scan {
+    /// The remote comparison is read-only by construction: the function's
+    /// own source reaches the git-branch hooks through `ls_remote`,
+    /// `resolve_ref` and `is_ancestor` only, and names no hook that moves a
+    /// ref. A future edit that adds `fetch`, `pull`, `push`, `branch_reset`
+    /// or `remote_add` to it fails here before it ships.
+    #[test]
+    fn remote_status_carries_no_mutating_git_hook() {
+        let src = include_str!("drift.rs");
+        let start = src
+            .find("pub fn remote_status(")
+            .expect("remote_status is defined in this file");
+        let end = src[start..]
+            .find("\n    }\n")
+            .map(|i| start + i)
+            .expect("remote_status ends");
+        let body = &src[start..end];
+        for allowed in ["hook.ls_remote", "hook.resolve_ref", "hook.is_ancestor"] {
+            assert!(
+                body.contains(allowed),
+                "remote_status reads through {allowed}"
+            );
+        }
+        for forbidden in [
+            "hook.fetch",
+            "hook.pull",
+            "hook.push",
+            "hook.branch_reset",
+            "hook.remote_add",
+            "hook.rename_mem_storage",
+            "hook.prune_residue",
+            "hook.write_schema",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "remote_status must never reach {forbidden}: a status read moves no ref"
+            );
+        }
     }
 }
