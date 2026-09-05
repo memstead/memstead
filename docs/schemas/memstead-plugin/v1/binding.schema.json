@@ -16,7 +16,7 @@
       "const": 2
     },
     "intent": {
-      "description": "What the binding is trying to accomplish — prose for the agent. Optional.",
+      "description": "What the binding is trying to accomplish — prose for the agent. Optional. An all-caps token of three or more characters is read as a relationship of the destination mem's schema: one the schema does not declare is a `BINDING_INTENT_UNKNOWN_RELATIONSHIP` finding on every brief and on the verify report, and `projection init` / `projection edit` refuse to write such an intent. File names (`CLAUDE.md`) and protocol or format acronyms (`HTTP`, `JSON`) read as prose.",
       "type": "string",
       "minLength": 1
     },

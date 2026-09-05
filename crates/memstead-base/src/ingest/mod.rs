@@ -29,6 +29,7 @@ pub mod check_path;
 pub mod cursor;
 pub mod findings;
 pub mod guidance;
+pub mod intent;
 pub mod prune;
 pub mod refinement;
 pub mod render;
@@ -67,6 +68,10 @@ pub use findings::{
 };
 pub use guidance::{
     GuidanceDefaults, MemGuidance, ResolvedGuidance, merge_guidance_block, resolve_writing_guidance,
+};
+pub use intent::{
+    BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE, IntentFinding, binding_intent_findings,
+    intent_findings, relationship_vocabulary, render_intent_findings,
 };
 pub use prune::{
     PruneDisposition, PruneMerge, PruneMode, PruneProposal, classify_prune_candidate,

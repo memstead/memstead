@@ -92,9 +92,47 @@ pub enum PipelineEditError {
         key: String,
         refusals: Vec<CapabilityError>,
     },
+    /// The write would put an intent into the record that names a
+    /// relationship the destination schema does not declare
+    /// ([`crate::ingest::intent`]). Refused on `init` and on an `edit` that
+    /// sets the intent; a stored record already carrying one keeps loading
+    /// and is reported on every brief instead. Nothing was written.
+    #[error(
+        "binding '{key}' intent refused: {}",
+        findings.iter().map(|f| f.to_string()).collect::<Vec<_>>().join("; ")
+    )]
+    IntentUnknownRelationship {
+        key: String,
+        findings: Vec<crate::ingest::intent::IntentFinding>,
+    },
     /// Underlying store IO / parse failure.
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// The destination schema a binding write is checked against: the pin as
+/// displayed (`software@0.5.0`) and the loaded schema. `None` when the
+/// destination mem is not mounted or carries no schema — there is no
+/// vocabulary to read, so the intent rule cannot apply and the write goes
+/// through (the brief's absent-destination note carries that case).
+pub type DestinationSchema<'a> = Option<(&'a str, &'a memstead_schema::Schema)>;
+
+/// The intent rule at a write front door: the intent about to be written,
+/// checked against the destination schema when one is at hand.
+fn refuse_unknown_intent(
+    key: String,
+    intent: Option<&str>,
+    schema: DestinationSchema<'_>,
+) -> Result<(), PipelineEditError> {
+    let Some((pin, schema)) = schema else {
+        return Ok(());
+    };
+    let findings = crate::ingest::intent::intent_findings(intent, pin, schema);
+    if findings.is_empty() {
+        Ok(())
+    } else {
+        Err(PipelineEditError::IntentUnknownRelationship { key, findings })
+    }
 }
 
 fn key(mem: &str, name: &str) -> String {
@@ -256,6 +294,20 @@ pub fn add_binding_json(
     name: &str,
     patch_json: &str,
 ) -> Result<Binding, PipelineEditError> {
+    add_binding_json_against(root, mem, name, patch_json, None)
+}
+
+/// [`add_binding_json`] with the destination schema at hand: the created
+/// record's intent must name only relationships that schema declares
+/// ([`PipelineEditError::IntentUnknownRelationship`] otherwise, nothing
+/// written). `None` skips the rule — the destination has no vocabulary.
+pub fn add_binding_json_against(
+    root: &Path,
+    mem: &str,
+    name: &str,
+    patch_json: &str,
+    schema: DestinationSchema<'_>,
+) -> Result<Binding, PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs_strict(root)?;
     if binding_exists(&configs, mem, name) {
         return Err(PipelineEditError::AlreadyExists {
@@ -278,6 +330,7 @@ pub fn add_binding_json(
             refusals,
         });
     }
+    refuse_unknown_intent(key(mem, name), binding.intent.as_deref(), schema)?;
     pipeline_store::write_binding(root, mem, name, &binding)?;
     Ok(binding)
 }
@@ -302,6 +355,22 @@ pub fn update_binding_json(
     name: &str,
     patch_json: &str,
 ) -> Result<Binding, PipelineEditError> {
+    update_binding_json_against(root, mem, name, patch_json, None)
+}
+
+/// [`update_binding_json`] with the destination schema at hand: a patch
+/// that SETS the intent must name only relationships that schema declares
+/// ([`PipelineEditError::IntentUnknownRelationship`] otherwise, nothing
+/// written). A patch that leaves the intent untouched, or clears it, is
+/// not a new intent and is never refused on its account — a stored record
+/// carrying an unknown token keeps loading, and the brief reports it.
+pub fn update_binding_json_against(
+    root: &Path,
+    mem: &str,
+    name: &str,
+    patch_json: &str,
+    schema: DestinationSchema<'_>,
+) -> Result<Binding, PipelineEditError> {
     let configs = pipeline_store::load_pipeline_configs_strict(root)?;
     if !binding_exists(&configs, mem, name) {
         return Err(PipelineEditError::NotFound {
@@ -312,6 +381,9 @@ pub fn update_binding_json(
     let patch: BindingPatch = parse_json(patch_json, "projection")?;
     let existing = pipeline_store::read_binding(root, mem, name)?;
     let mut patched = existing.clone();
+    // Whether this patch SETS an intent (as opposed to preserving or
+    // clearing it) — the one case the intent rule applies to on update.
+    let sets_intent = matches!(patch.intent, Some(Some(_)));
     patch.apply(&mut patched);
     if let Err(refusals) = validate_binding(&patched) {
         let before = validate_binding(&existing).err().unwrap_or_default();
@@ -325,6 +397,9 @@ pub fn update_binding_json(
                 refusals: introduced,
             });
         }
+    }
+    if sets_intent {
+        refuse_unknown_intent(key(mem, name), patched.intent.as_deref(), schema)?;
     }
     pipeline_store::write_binding(root, mem, name, &patched)?;
     Ok(patched)
@@ -411,6 +486,18 @@ impl Engine {
             .map_err(|e| PipelineEditError::Provenance(e.to_string()))
     }
 
+    /// The destination schema a binding write into `mem` is checked
+    /// against — the pin as displayed plus the loaded schema — or `None`
+    /// when this engine mounts no such mem or it carries no schema.
+    pub fn destination_schema_for(
+        &self,
+        mem: &str,
+    ) -> Option<(String, std::sync::Arc<memstead_schema::Schema>)> {
+        let pin = self.schema_pin(mem)?.as_display();
+        let schema = self.schema_for(mem)?;
+        Some((pin, schema))
+    }
+
     /// Create a binding from a JSON [`BindingPatch`] applied to the default
     /// scaffold: the caller may supply any author-editable field, including
     /// the inline `sources` and a full `operations` block; an absent block
@@ -425,7 +512,15 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        let binding = add_binding_json(&root, mem, name, projection_json)?;
+        let binding = add_binding_json_against(
+            &root,
+            mem,
+            name,
+            projection_json,
+            self.destination_schema_for(mem)
+                .as_ref()
+                .map(|(p, s)| (p.as_str(), &**s)),
+        )?;
         self.record_binding_edit(mem, name, &binding, &root, note, "add")
     }
 
@@ -443,7 +538,15 @@ impl Engine {
         note: Option<&str>,
     ) -> Result<(), PipelineEditError> {
         let root = self.pipeline_edit_root()?;
-        let binding = update_binding_json(&root, mem, name, projection_json)?;
+        let binding = update_binding_json_against(
+            &root,
+            mem,
+            name,
+            projection_json,
+            self.destination_schema_for(mem)
+                .as_ref()
+                .map(|(p, s)| (p.as_str(), &**s)),
+        )?;
         self.record_binding_edit(mem, name, &binding, &root, note, "update")
     }
 

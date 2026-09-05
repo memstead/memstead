@@ -40,10 +40,19 @@ fn write_store(root: &Path, rel: &str, contents: &str) {
     std::fs::write(path, contents).unwrap();
 }
 
-/// A bare workspace: just the `.memstead/workspace.toml` marker.
+/// The smallest workspace store the engine boots: a `workspace.toml` naming
+/// its format and adapter, no mounts. `projection init` and `projection edit`
+/// boot a scoped engine to read the destination schema for the intent rule,
+/// so a fixture with an empty marker file (which the engine has never
+/// accepted) would refuse `WORKSPACE_STORE_PARSE` before the command under
+/// test runs.
+const BARE_WORKSPACE_TOML: &str =
+    "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n";
+
+/// A bare workspace: just the `.memstead/workspace.toml` store, no mounts.
 fn bare_workspace() -> TempDir {
     let tmp = TempDir::new().unwrap();
-    write_store(tmp.path(), "workspace.toml", "");
+    write_store(tmp.path(), "workspace.toml", BARE_WORKSPACE_TOML);
     tmp
 }
 
@@ -53,7 +62,7 @@ fn bare_workspace() -> TempDir {
 fn fixture(mode: &str, deny: &str) -> TempDir {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
-    write_store(root, "workspace.toml", "");
+    write_store(root, "workspace.toml", BARE_WORKSPACE_TOML);
     write_store(
         root,
         "mediums/engine/src.json",
@@ -5190,5 +5199,307 @@ fn verify_does_not_record_a_ledger_excluded_artifact_as_uncovered() {
     assert_eq!(
         env["report"]["disposed_excluded"], 1,
         "rationale kept: {env}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Binding intent against the destination vocabulary
+// ---------------------------------------------------------------------------
+
+/// A folder-mount workspace whose `engine` mem pins the built-in `software`
+/// schema, with one git codebase binding `engine/graph` carrying `intent`.
+/// The shape every intent test runs against: a real schema, so the vocabulary
+/// the rule reads is the one the engine loads, never a fixture list.
+fn intent_workspace(intent: &str) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_store(
+        root,
+        "workspace.toml",
+        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+    );
+    write_store(
+        root,
+        "state/mounts.json",
+        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"software@0.5.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
+    );
+    write_store(
+        root,
+        "projections/engine/graph.json",
+        &format!(
+            r#"{{"version":2,"intent":{},"sources":[{{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git","scope":[{{"path":"**/*.rs","mode":"allow"}}]}}],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{{"build":{{"mode":"discovery","trigger":"loop","batch_size":20}},"sync":{{"trigger":"manual","batch_size":20}},"verify":{{"trigger":"manual","batch_size":20,"adjudication_cap":50,"full_resync_every":20}}}}}}"#,
+            serde_json::to_string(intent).unwrap()
+        ),
+    );
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-q"]);
+    std::fs::write(src.join("a.rs"), "one").unwrap();
+    git(&src, &["add", "a.rs"]);
+    git(&src, &["commit", "-qm", "base"]);
+    let mem_meta = root.join("engine-mem").join(".memstead");
+    std::fs::create_dir_all(&mem_meta).unwrap();
+    std::fs::write(
+        mem_meta.join("config.json"),
+        r#"{"format":1,"schema":"software@0.5.0"}"#,
+    )
+    .unwrap();
+    tmp
+}
+
+const INTENT_CODE: &str = "BINDING_INTENT_UNKNOWN_RELATIONSHIP";
+
+/// A stored binding whose intent names `PROVIDED_BY` — absent from the
+/// software vocabulary — keeps loading: the build brief, the verify brief and
+/// the verify report each carry the typed finding naming the token and the
+/// schema, and an edit that leaves the intent alone still lands. Only a
+/// write of an intent that names the token refuses: `projection edit` with a
+/// patch that sets one, and `projection init --intent`, both with the same
+/// code and nothing written.
+#[test]
+fn intent_unknown_relationship_is_reported_on_load_and_refused_on_write() {
+    let tmp = intent_workspace("Every crate is PROVIDED_BY its workspace; it DEPENDS_ON others.");
+    let root = tmp.path();
+
+    // (1) The build brief carries the finding next to the intent.
+    let out = memstead()
+        .current_dir(root)
+        .args(["projection", "brief", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    assert!(
+        md.contains(INTENT_CODE),
+        "build brief carries the code:\n{md}"
+    );
+    assert!(md.contains("`PROVIDED_BY`"), "names the token:\n{md}");
+    assert!(md.contains("software@0.5.0"), "names the schema:\n{md}");
+    assert!(md.contains("`DEPENDS_ON`"), "names the vocabulary:\n{md}");
+
+    // (2) The verify brief carries it too.
+    let out = memstead()
+        .current_dir(root)
+        .args(["projection", "brief", "engine/graph", "--verify"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    assert!(
+        md.contains(INTENT_CODE),
+        "verify brief carries the code:\n{md}"
+    );
+
+    // (3) The verify report: a completed run (never a refusal) with the
+    //     typed finding in the report, JSON and markdown alike.
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    let findings = env["report"]["intent_findings"]
+        .as_array()
+        .expect("intent_findings array");
+    assert_eq!(findings.len(), 1, "one unknown token: {env}");
+    assert_eq!(findings[0]["code"], INTENT_CODE);
+    assert_eq!(findings[0]["token"], "PROVIDED_BY");
+    assert_eq!(findings[0]["schema"], "software@0.5.0");
+    assert!(
+        findings[0]["vocabulary"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "DEPENDS_ON"),
+        "the vocabulary rides the finding: {env}"
+    );
+    let report_md = env["report_markdown"].as_str().unwrap();
+    assert!(
+        report_md.contains("## Binding intent"),
+        "rendered section:\n{report_md}"
+    );
+    assert!(
+        report_md.contains(INTENT_CODE),
+        "rendered code:\n{report_md}"
+    );
+
+    // (4) An edit that leaves the intent alone lands on the old record.
+    let before = scaffold_bytes(root, "engine", "graph");
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "edit",
+            "engine/graph",
+            "--patch",
+            r#"{"deny_paths":["vendor/**"]}"#,
+        ])
+        .assert()
+        .success();
+    assert_ne!(before, scaffold_bytes(root, "engine", "graph"));
+
+    // (5) An edit that SETS an intent naming the token refuses, byte-stable.
+    let before = scaffold_bytes(root, "engine", "graph");
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "edit",
+            "engine/graph",
+            "--patch",
+            r#"{"intent":"Still PROVIDED_BY the workspace."}"#,
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], INTENT_CODE, "{env}");
+    assert_eq!(env["details"]["tokens"], serde_json::json!(["PROVIDED_BY"]));
+    assert_eq!(env["details"]["schema"], "software@0.5.0");
+    assert_eq!(
+        before,
+        scaffold_bytes(root, "engine", "graph"),
+        "refused edit writes nothing"
+    );
+
+    // (6) `init --intent` naming the token refuses with the same code and
+    //     scaffolds nothing.
+    let out = memstead()
+        .current_dir(root)
+        .args([
+            "--json",
+            "projection",
+            "init",
+            "--mem",
+            "engine",
+            "--source",
+            "src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "other",
+            "--intent",
+            "Modules are PROVIDED_BY crates.",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(env["code"], INTENT_CODE, "{env}");
+    assert!(
+        !root
+            .join(".memstead/projections/engine/other.json")
+            .exists(),
+        "refused init scaffolds nothing"
+    );
+
+    // (7) A clean intent edits through, and the brief goes quiet.
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "edit",
+            "engine/graph",
+            "--patch",
+            r#"{"intent":"Every crate DEPENDS_ON others; read CLAUDE.md first."}"#,
+        ])
+        .assert()
+        .success();
+    let out = memstead()
+        .current_dir(root)
+        .args(["projection", "brief", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    assert!(
+        !md.contains(INTENT_CODE),
+        "a clean intent renders no finding:\n{md}"
+    );
+}
+
+/// The silence half: an intent naming only vocabulary relationships (plus a
+/// file name and a prose acronym) renders no finding on the brief and an
+/// empty `intent_findings` on the verify report, and `init --intent` with
+/// such text scaffolds.
+#[test]
+fn intent_naming_only_the_vocabulary_is_silent() {
+    let tmp = intent_workspace(
+        "Rust source. A crate DEPENDS_ON its neighbours and USES the CLI over JSON; \
+         CLAUDE.md carries dev notes.",
+    );
+    let root = tmp.path();
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["projection", "brief", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let md = String::from_utf8(out).unwrap();
+    assert!(
+        !md.contains(INTENT_CODE),
+        "no finding on a clean brief:\n{md}"
+    );
+
+    let out = memstead()
+        .current_dir(root)
+        .args(["--json", "projection", "verify", "engine/graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let env: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        env["report"]["intent_findings"],
+        serde_json::json!([]),
+        "{env}"
+    );
+    assert!(
+        !env["report_markdown"]
+            .as_str()
+            .unwrap()
+            .contains("## Binding intent"),
+        "a clean report carries no intent section"
+    );
+
+    memstead()
+        .current_dir(root)
+        .args([
+            "projection",
+            "init",
+            "--mem",
+            "engine",
+            "--source",
+            "src",
+            "--medium-type",
+            "codebase",
+            "--name",
+            "other",
+            "--intent",
+            "Modules DEPENDS_ON crates; see DATABASE.md.",
+        ])
+        .assert()
+        .success();
+    assert!(
+        root.join(".memstead/projections/engine/other.json")
+            .exists()
     );
 }

@@ -46,6 +46,7 @@ use memstead_base::ingest::findings::{
     FindingsError, FullResyncDecision, record_anchor_hash_backfill, record_verified_baseline,
     verify_binding, verify_binding_full,
 };
+use memstead_base::ingest::intent::{IntentFinding, intent_findings};
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
 };
@@ -961,6 +962,50 @@ fn derive_stem(source: &str) -> String {
 }
 
 /// Map a store write failure during scaffolding to a typed CLI error.
+/// The typed refusal for an intent that names a relationship the
+/// destination schema does not declare — one code, shared by `init` and
+/// `edit`, and the same code the brief and the verify report carry for a
+/// stored record. `details` names every token and the vocabulary it was
+/// checked against, so the caller can fix the intent without opening the
+/// schema.
+fn intent_refusal(binding_id: &str, findings: &[IntentFinding]) -> CliError {
+    let tokens: Vec<&str> = findings.iter().map(|f| f.token.as_str()).collect();
+    let schema = findings
+        .first()
+        .map(|f| f.schema.clone())
+        .unwrap_or_default();
+    let vocabulary = findings
+        .first()
+        .map(|f| f.vocabulary.clone())
+        .unwrap_or_default();
+    CliError::new(
+        ExitKind::Validation,
+        "BINDING_INTENT_UNKNOWN_RELATIONSHIP",
+        format!(
+            "intent refused for `{binding_id}` (nothing was written): it names {} — not a \
+             relationship of the destination schema `{schema}`. An agent reads an all-caps \
+             token in the intent as an edge it may write, so the intent may name only what \
+             the vocabulary carries: {}",
+            tokens
+                .iter()
+                .map(|t| format!("`{t}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            vocabulary
+                .iter()
+                .map(|v| format!("`{v}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    )
+    .with_details(json!({
+        "binding": binding_id,
+        "tokens": tokens,
+        "schema": schema,
+        "vocabulary": vocabulary,
+    }))
+}
+
 fn init_write_error(binding_id: &str, err: StoreError) -> CliError {
     CliError::new(
         ExitKind::Generic,
@@ -1070,6 +1115,22 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
                 args.source,
                 base.display(),
             ));
+        }
+    }
+
+    // The intent rule at this front door: an intent naming a relationship
+    // the destination schema does not declare is refused before the write.
+    // The schema comes from a scoped engine boot (the destination mem only);
+    // a destination that is not mounted has no vocabulary, so the rule
+    // does not apply and the absent-destination warning above stands.
+    {
+        let cli_engine = ctx.cli_engine_scoped(&mem)?;
+        let engine = cli_engine.base();
+        if let Some((pin, schema)) = engine.destination_schema_for(&mem) {
+            let found = intent_findings(binding.intent.as_deref(), &pin, &schema);
+            if !found.is_empty() {
+                return Err(intent_refusal(&binding_id, &found).into());
+            }
         }
     }
 
@@ -1784,9 +1845,20 @@ fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
         return Err(binding_miss_error(&configs, &binding_id).into());
     }
 
-    let binding =
-        memstead_base::pipeline_edit::update_binding_json(&root, &mem, &stem, &args.patch)
-            .map_err(|e| edit_refused(&binding_id, e))?;
+    // The destination schema for the intent rule — a scoped boot of the
+    // destination mem only; `None` (unmounted, no schema) skips the rule.
+    let cli_engine = ctx.cli_engine_scoped(&mem)?;
+    let destination_schema = cli_engine.base().destination_schema_for(&mem);
+    let binding = memstead_base::pipeline_edit::update_binding_json_against(
+        &root,
+        &mem,
+        &stem,
+        &args.patch,
+        destination_schema
+            .as_ref()
+            .map(|(pin, schema)| (pin.as_str(), &**schema)),
+    )
+    .map_err(|e| edit_refused(&binding_id, e))?;
 
     let source_names: Vec<&str> = binding.sources.iter().map(|s| s.name.as_str()).collect();
     let mut operations: Vec<&str> = Vec::new();
@@ -1859,6 +1931,7 @@ fn edit_refused(
             "binding": binding_id,
             "refusals": refusals.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
         })),
+        E::IntentUnknownRelationship { findings, .. } => intent_refusal(binding_id, findings),
         _ => CliError::new(
             ExitKind::Generic,
             "PROJECTION_EDIT_FAILED",

@@ -23,6 +23,7 @@ use super::check_path::write_active_binding_file;
 use super::cursor::compute_source_cursor;
 use super::findings::{FindingClass, current_findings};
 use super::guidance::{GuidanceDefaults, MemGuidance, ResolvedGuidance, resolve_writing_guidance};
+use super::intent::{binding_intent_findings, render_intent_findings};
 use super::prune::prune_proposals;
 use super::resolve::{ResolveError, ResolvedIngest, ResolvedSource, resolve_binding_run};
 
@@ -219,7 +220,21 @@ pub fn render_verify_brief_for(
         .iter()
         .filter(|f| f.class == FindingClass::QueuedForAdjudication)
         .count();
-    Ok(render_verify_brief(&resolved, backlog))
+    // The binding's intent against the destination vocabulary, reported on
+    // load (never refused here): an old record surfaces the defect without
+    // breaking the pass.
+    let intent = render_intent_findings(
+        &binding_intent_findings(
+            engine,
+            &resolved.destination_mem,
+            resolved.intent.as_deref(),
+        ),
+        &binding_id,
+    );
+    Ok(format!(
+        "{intent}{}",
+        render_verify_brief(&resolved, backlog)
+    ))
 }
 
 /// Render the **sync brief** (C2/C3) for a binding — the *single* channel
@@ -261,13 +276,17 @@ pub fn render_sync_brief_for(
                 detail: format!("exclusion ledger: {e}"),
             },
         )?;
-    Ok(render_sync_brief(
-        &resolved,
-        &cursor,
-        &findings,
-        &prune,
-        adopt,
-        &exclusions,
+    let intent = render_intent_findings(
+        &binding_intent_findings(
+            engine,
+            &resolved.destination_mem,
+            resolved.intent.as_deref(),
+        ),
+        &binding_id,
+    );
+    Ok(format!(
+        "{intent}{}",
+        render_sync_brief(&resolved, &cursor, &findings, &prune, adopt, &exclusions,)
     ))
 }
 
@@ -513,8 +532,10 @@ fn render_discovery(engine: &Engine, resolved: &ResolvedIngest, workspace_root: 
 
     let dest_note = absent_destination_note(engine, resolved, &resolved.name, workspace_root);
     let absent = absent_source_names(resolved, workspace_root);
+    let intent_findings = binding_intent_findings(engine, dest, resolved.intent.as_deref());
     assemble_discovery_brief(
         resolved,
+        &intent_findings,
         &guidance,
         &process_mem,
         dest_schema.as_deref(),
@@ -534,9 +555,11 @@ fn render_one_shot(engine: &Engine, resolved: &ResolvedIngest) -> String {
         .mem_config_for(dest)
         .and_then(|c| c.description.clone());
     let process_mem = build_process_mem(engine, resolved); // skipped = true for one-shot
+    let intent_findings = binding_intent_findings(engine, dest, resolved.intent.as_deref());
 
     assemble_one_shot_brief(
         resolved,
+        &intent_findings,
         &guidance,
         &process_mem,
         dest_schema.as_deref(),

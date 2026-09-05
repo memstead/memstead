@@ -367,6 +367,13 @@ pub struct FidelityReport {
     pub disposed_excluded_rationales: Vec<(String, String)>,
     /// Degradation flags (B1) — typed, human/agent-readable strings.
     pub degradations: Vec<String>,
+    /// The binding's intent checked against the destination schema's
+    /// relationship vocabulary ([`super::intent`]): one entry per all-caps
+    /// token the schema does not declare, code
+    /// `BINDING_INTENT_UNKNOWN_RELATIONSHIP`. Reported, never refused, on a
+    /// record that already carries one; empty proves a clean intent. Not a
+    /// fidelity figure, so it never moves the rollup verdict.
+    pub intent_findings: Vec<super::intent::IntentFinding>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1145,6 +1152,20 @@ fn render_hard_required(report: &FidelityReport) -> String {
         md.push('\n');
     }
 
+    // --- Binding intent (hard-required only when there is something to say:
+    // a clean intent renders nothing, so a clean report is unchanged) ---
+    if !report.intent_findings.is_empty() {
+        md.push_str("## Binding intent\n\n");
+        for f in &report.intent_findings {
+            md.push_str(&format!("- {f}\n"));
+        }
+        md.push_str(&format!(
+            "\nRead each token as prose, never as an edge to write; fix the intent with \
+             `memstead projection edit {} --patch '{{\"intent\": \"...\"}}'`.\n\n",
+            report.binding
+        ));
+    }
+
     md
 }
 
@@ -1774,6 +1795,8 @@ pub fn compute_fidelity_report(
     // `#synced` baseline predates its binding, so 0% anchored is expected.
     let adopt = super::render::mem_predates_binding(engine, resolved);
     let effective_coverage = crate::binding::effective_coverage_semantics(binding);
+    let intent_findings =
+        super::intent::binding_intent_findings(engine, &dest, binding.intent.as_deref());
 
     FidelityReport {
         legacy_dialect_patterns: legacy_patterns,
@@ -1793,6 +1816,7 @@ pub fn compute_fidelity_report(
         disposed_excluded,
         disposed_excluded_rationales,
         degradations,
+        intent_findings,
     }
 }
 
@@ -1899,6 +1923,7 @@ mod tests {
             disposed_excluded: 0,
             disposed_excluded_rationales: Vec::new(),
             degradations: vec!["hash-adjudication-deferred — 1 anchor(s) recheck".to_string()],
+            intent_findings: Vec::new(),
         }
     }
 
@@ -2826,6 +2851,7 @@ mod rollup_tests {
             disposed_excluded: 0,
             disposed_excluded_rationales: Vec::new(),
             degradations: Vec::new(),
+            intent_findings: Vec::new(),
         }
     }
 

@@ -858,6 +858,7 @@ pub fn render_anchor_instruction(resolved: &ResolvedIngest) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_discovery_brief(
     resolved: &ResolvedIngest,
+    intent_findings: &[super::intent::IntentFinding],
     guidance: &ResolvedGuidance,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
@@ -868,6 +869,7 @@ pub fn assemble_discovery_brief(
     let parts = [
         render_situation(resolved, process_mem),
         render_intent(resolved),
+        super::intent::render_intent_findings(intent_findings, &resolved.name),
         render_goal_and_avoid(guidance),
         render_operative_data(
             resolved,
@@ -992,6 +994,7 @@ pub fn render_one_shot_lens(
 #[allow(clippy::too_many_arguments)]
 pub fn assemble_one_shot_brief(
     resolved: &ResolvedIngest,
+    intent_findings: &[super::intent::IntentFinding],
     guidance: &ResolvedGuidance,
     process_mem: &ProcessMemInfo,
     destination_schema: Option<&str>,
@@ -1002,6 +1005,7 @@ pub fn assemble_one_shot_brief(
     let parts = [
         render_situation(resolved, process_mem),
         render_intent(resolved),
+        super::intent::render_intent_findings(intent_findings, &resolved.name),
         render_goal_and_avoid(guidance),
         render_operative_data(
             resolved,
@@ -1909,7 +1913,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         );
         let g = guidance(Some("build coverage"), None);
         let pm = process_present("macos");
-        let brief = assemble_discovery_brief(&r, &g, &pm, Some("s@1"), None, &[], "");
+        let brief = assemble_discovery_brief(&r, &[], &g, &pm, Some("s@1"), None, &[], "");
 
         // Blocks appear in order and the empty preface is dropped.
         let sit = brief.find("## Situation").unwrap();
@@ -1929,6 +1933,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         // A non-empty preface is appended verbatim at the end.
         let with_slice = assemble_discovery_brief(
             &r,
+            &[],
             &g,
             &pm,
             Some("s@1"),
@@ -2314,8 +2319,16 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             leaf_name: "os".to_string(),
             mem_label: "ingest/os".to_string(),
         };
-        let brief =
-            assemble_one_shot_brief(&r, &g, &skipped, Some("s@1"), None, &[], Some("purpose"));
+        let brief = assemble_one_shot_brief(
+            &r,
+            &[],
+            &g,
+            &skipped,
+            Some("s@1"),
+            None,
+            &[],
+            Some("purpose"),
+        );
         assert!(brief.contains("(one-shot mode)"));
         assert!(brief.contains("No process mem is paired with this ingest (mode=one-shot;"));
         assert!(brief.contains("## Mode: one-shot — lens routing"));
@@ -2877,15 +2890,15 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         let preface = render_changed_slice(&changed_cursor);
         assert_clean(
             "discovery build brief (plain roam)",
-            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), None, &[], ""),
+            &assemble_discovery_brief(&r, &[], &g, &pm, Some("s@1"), None, &[], ""),
         );
         assert_clean(
             "discovery build brief (changed slice)",
-            &assemble_discovery_brief(&r, &g, &pm, Some("s@1"), None, &[], &preface),
+            &assemble_discovery_brief(&r, &[], &g, &pm, Some("s@1"), None, &[], &preface),
         );
         assert_clean(
             "one-shot build brief",
-            &assemble_one_shot_brief(&r, &g, &pm, Some("s@1"), None, &[], Some("purpose")),
+            &assemble_one_shot_brief(&r, &[], &g, &pm, Some("s@1"), None, &[], Some("purpose")),
         );
 
         // Verify brief — with and without an adjudication backlog.

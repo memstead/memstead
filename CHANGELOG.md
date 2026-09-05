@@ -7,6 +7,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **A binding's intent is validated against the destination vocabulary.**
+  An agent reads an all-caps token in a binding's intent (`DEPENDS_ON`,
+  `USES`) as a relationship it may write, so the engine now reads the
+  intent against the schema the destination mem pins: every such token of
+  three or more characters that is not a relationship of that schema is a
+  typed finding, `BINDING_INTENT_UNKNOWN_RELATIONSHIP`, naming the token
+  and the vocabulary. A stored binding that carries one keeps loading and
+  the finding rides the build, verify and sync briefs and the verify
+  report (`report.intent_findings`); `projection init --intent` and a
+  `projection edit` patch that sets an intent refuse to write one, with the
+  same code. File names (`CLAUDE.md`) and protocol or format acronyms
+  (`HTTP`, `JSON`) read as prose. The rule replaces a workspace script that
+  once caught the dogfood binding naming `PROVIDED_BY`.
+
 ### Changed
 
 - **`memstead admin` and `memstead domain` move behind a Cargo feature.**
