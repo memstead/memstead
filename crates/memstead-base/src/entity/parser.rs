@@ -212,7 +212,7 @@ pub fn parse_file(
 /// a different typed error for each. That difference belongs to the wrappers;
 /// the arithmetic below belongs here, once.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Frontmatter<'a> {
+pub enum Frontmatter<'a> {
     /// A closed block. Both slices borrow the input.
     Present { meta: &'a str, body: &'a str },
     /// The document does not open with `---` on its first line.
@@ -233,7 +233,7 @@ pub(crate) enum Frontmatter<'a> {
 /// is itself a suffix of `content`. Two callers recover the frontmatter prefix
 /// by subtracting the body's length, so a core that copied or normalised
 /// anything would break them silently.
-pub(crate) fn split_frontmatter_core(content: &str) -> (&str, Frontmatter<'_>) {
+pub fn split_frontmatter_core(content: &str) -> (&str, Frontmatter<'_>) {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
 
     let after_open = if content.starts_with("---\r\n") {
@@ -257,6 +257,20 @@ pub(crate) fn split_frontmatter_core(content: &str) -> (&str, Frontmatter<'_>) {
         .unwrap_or(body_rest);
 
     (content, Frontmatter::Present { meta, body })
+}
+
+/// The frontmatter block and the body of a document, both borrowed, or
+/// `None` when the document carries no closed frontmatter (no opening
+/// fence on its first line, or an opening fence never closed). The one
+/// entry point every reader outside this module uses; the contract is
+/// [`split_frontmatter_core`]'s: a byte-order mark is skipped, CRLF and LF
+/// documents both split, the fence counts only at the start of the
+/// document, and the body starts after the closing fence's line break.
+pub fn frontmatter_parts(content: &str) -> Option<(&str, &str)> {
+    match split_frontmatter_core(content) {
+        (_, Frontmatter::Present { meta, body }) => Some((meta, body)),
+        _ => None,
+    }
 }
 
 /// Extract the `type:` value from frontmatter without running the full parser.
@@ -1177,6 +1191,54 @@ mod tests {
     fn peek_type_returns_none_without_frontmatter() {
         let content = "# Just a heading\n\nBody with type: concept inside text.\n";
         assert_eq!(peek_type_from_frontmatter(content), None);
+    }
+
+    /// The contract on a carriage-return document: the opening fence is
+    /// five bytes, the meta slice carries no fence, and the body starts
+    /// after the closing fence's `\r\n` — the shape the CR-blind site of
+    /// the 2026-09-04 census got wrong with a four-byte offset constant.
+    #[test]
+    fn split_core_crlf_document_borrows_meta_and_body() {
+        let content = "---\r\ntype: spec\r\nlevel: M0\r\n---\r\n# Title\r\n\r\nBody.\r\n";
+        let (stripped, split) = split_frontmatter_core(content);
+        assert_eq!(stripped, content);
+        assert_eq!(
+            split,
+            Frontmatter::Present {
+                meta: "type: spec\r\nlevel: M0\r",
+                body: "# Title\r\n\r\nBody.\r\n"
+            }
+        );
+        let (meta, body) = frontmatter_parts(content).unwrap();
+        assert_eq!(meta, "type: spec\r\nlevel: M0\r");
+        assert_eq!(body, "# Title\r\n\r\nBody.\r\n");
+        assert_eq!(body_after_frontmatter(content), body);
+        // The same document with a byte-order mark splits identically.
+        let marked = format!("\u{feff}{content}");
+        assert_eq!(frontmatter_parts(&marked), Some((meta, body)));
+    }
+
+    /// A fence anywhere but the first line is not frontmatter: the whole
+    /// document is body, and nothing is injected or stripped at the first
+    /// fence found — the shape the fence-searching site of the census got
+    /// wrong.
+    #[test]
+    fn first_fence_not_at_document_start_is_no_frontmatter() {
+        let content = "# Intro\n\n---\ntype: spec\n---\n\nBody.\n";
+        assert_eq!(
+            split_frontmatter_core(content),
+            (content, Frontmatter::NoOpeningDelimiter)
+        );
+        assert_eq!(frontmatter_parts(content), None);
+        assert_eq!(body_after_frontmatter(content), content);
+        assert_eq!(peek_type_from_frontmatter(content), None);
+        // An opening fence that never closes is not frontmatter either.
+        let unclosed = "---\ntype: spec\nno close\n";
+        assert_eq!(
+            split_frontmatter_core(unclosed),
+            (unclosed, Frontmatter::Unclosed)
+        );
+        assert_eq!(frontmatter_parts(unclosed), None);
     }
 
     #[test]

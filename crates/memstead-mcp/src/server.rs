@@ -747,13 +747,18 @@ fn find_schema_by_name<'a>(
 /// `_mem_schema:` is already present at the top of the frontmatter the
 /// second call is a silent no-op so chunked responses do not double-stamp.
 fn inject_md_mem_schema(md: &mut String, schema_ref: &str) {
-    if !md.starts_with("---\n") {
+    // The core's split decides whether there is frontmatter at all and
+    // where it starts (a CRLF fence is five bytes, a byte-order mark is
+    // skipped); the meta slice borrows `md`, so its offset is the insert
+    // point.
+    let Some((meta, _)) = memstead_base::frontmatter_parts(md) else {
+        return;
+    };
+    let at = meta.as_ptr() as usize - md.as_ptr() as usize;
+    if md[at..].starts_with("_mem_schema:") {
         return;
     }
-    if md[4..].starts_with("_mem_schema:") {
-        return;
-    }
-    md.insert_str(4, &format!("_mem_schema: {schema_ref}\n"));
+    md.insert_str(at, &format!("_mem_schema: {schema_ref}\n"));
 }
 
 /// Insert `_mem_schema: <ref>` at the top level of a JSON-shaped tool
@@ -4940,20 +4945,12 @@ mod tests {
         fn from(result: &CallToolResult) -> Self {
             let text = extract_text(result);
             let mut frontmatter = std::collections::HashMap::new();
-            let mut in_fm = false;
-            let mut seen_first = false;
-            for line in text.lines() {
-                if line == "---" {
-                    if !seen_first {
-                        seen_first = true;
-                        in_fm = true;
-                        continue;
-                    } else if in_fm {
-                        break;
+            // The core's split, never a second reader of the fence.
+            if let Some((meta, _)) = memstead_base::frontmatter_parts(&text) {
+                for line in meta.lines() {
+                    if let Some((k, v)) = line.split_once(':') {
+                        frontmatter.insert(k.trim().to_string(), v.trim().to_string());
                     }
-                }
-                if in_fm && let Some((k, v)) = line.split_once(':') {
-                    frontmatter.insert(k.trim().to_string(), v.trim().to_string());
                 }
             }
             Self { text, frontmatter }

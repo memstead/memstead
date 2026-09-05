@@ -504,26 +504,19 @@ fn apply_agent_notes_renames(
 /// follow-up — the surface admits future expansion without changing
 /// the wire shape.
 fn classify_parse_failure(content: &str) -> Option<String> {
-    let trimmed_bom = content.trim_start_matches('\u{FEFF}');
-    if !trimmed_bom.starts_with("---") {
-        return Some("missing frontmatter (body does not open with `---`)".to_string());
-    }
-    let after_open = match trimmed_bom.strip_prefix("---") {
-        Some(rest) => rest.trim_start_matches('\r').trim_start_matches('\n'),
-        None => return Some("missing frontmatter".to_string()),
-    };
-    // Look for a line that is just "---" closing the frontmatter.
-    let mut closed = false;
-    for line in after_open.lines() {
-        if line.trim_end() == "---" {
-            closed = true;
-            break;
+    // The core's verdict, never a second reader of the fence: a document
+    // whose first line is not an opening fence (`---` followed by a line
+    // break) has no frontmatter; one that opens and never closes is
+    // malformed. The same contract the loader applies.
+    match memstead_base::split_frontmatter_core(content).1 {
+        memstead_base::Frontmatter::Present { .. } => None,
+        memstead_base::Frontmatter::NoOpeningDelimiter => {
+            Some("missing frontmatter (body does not open with a `---` line)".to_string())
+        }
+        memstead_base::Frontmatter::Unclosed => {
+            Some("malformed frontmatter (no closing `---` line)".to_string())
         }
     }
-    if !closed {
-        return Some("malformed frontmatter (no closing `---` line)".to_string());
-    }
-    None
 }
 
 /// Rewrite `entries` so any entry whose surviving content fails the

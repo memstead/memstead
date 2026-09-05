@@ -44,6 +44,7 @@
 // least one violation (printed), 2 = wiring error.
 
 import { readFileSync, existsSync } from 'node:fs';
+import { parseFrontmatter } from './frontmatter.mjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -90,9 +91,9 @@ const MEDIUM_ALLOW = new Set([]);
 
 // Split a SKILL.md into frontmatter, body, and the parsed description.
 export function parseSkill(name, text) {
-  const m = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  const frontmatter = m ? m[1] : '';
-  const body = m ? m[2] : text;
+  const parsed = parseFrontmatter(text);
+  const frontmatter = parsed ? parsed.meta : '';
+  const body = parsed ? parsed.body : text;
   return { name, frontmatter, body, description: extractDescription(frontmatter) };
 }
 

@@ -83,6 +83,10 @@ pub use engine::{
     UpdateEntityArgs, UpdateEntityOutcome, format_inline_list_overflow,
 };
 pub use entity::id::{ENTITY_ID_MAX_LEN, SlugError, TITLE_GRAMMAR_RULE};
+pub use entity::parser::{
+    Frontmatter, body_after_frontmatter, frontmatter_parts, peek_type_from_frontmatter,
+    split_frontmatter_core,
+};
 pub use entity::{Entity, EntityId, MetadataValue, ParseResult, Relationship};
 pub use error::{FullEngineError, RecoveryAction};
 pub use graph::{ClusterInfo, LouvainOutput};

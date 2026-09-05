@@ -47,6 +47,7 @@ import { fileURLToPath } from "node:url";
 // scalars that strict YAML rejects), so the rendered roster stays byte-identical
 // to what the plugin ships.
 import { extractDescription } from "../../scripts/check-skill-prose.mjs";
+import { parseFrontmatter, renderFrontmatter } from "../../scripts/frontmatter.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -105,14 +106,14 @@ const glossaryDest = `${here}/../src/content/docs/glossary.md`;
 const body = readFileSync(glossarySrc, "utf8")
   .replace(/^# Glossary\n/, "")
   .replaceAll("](VISION.md", "](https://github.com/memstead/memstead/blob/main/VISION.md");
-const frontmatter = `---
-title: Glossary
-description: "Normative definitions of Memstead's technical vocabulary — mem, schema, workspace, mount, entity, storage backend, and the rest."
----
-
+const frontmatter = renderFrontmatter(
+  `title: Glossary
+description: "Normative definitions of Memstead's technical vocabulary — mem, schema, workspace, mount, entity, storage backend, and the rest."`,
+  `
 > This page is built from [GLOSSARY.md](https://github.com/memstead/memstead/blob/main/GLOSSARY.md) at the repository root — the normative source. Definitions here override any older wording elsewhere.
 
-`;
+`,
+);
 writeFileSync(glossaryDest, frontmatter + body);
 console.log(`prebuild: ${glossarySrc} -> ${glossaryDest}`);
 
@@ -136,9 +137,9 @@ const families = [
 
 function readSkill(name) {
   const raw = readFileSync(`${skillsDir}/${name}/SKILL.md`, "utf8");
-  const m = raw.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!m) throw new Error(`skills roster: ${name}/SKILL.md has no frontmatter`);
-  const frontmatter = m[1];
+  const parsed = parseFrontmatter(raw);
+  if (!parsed) throw new Error(`skills roster: ${name}/SKILL.md has no frontmatter`);
+  const frontmatter = parsed.meta;
   const description = extractDescription(frontmatter).trim();
   if (!description) throw new Error(`skills roster: ${name}/SKILL.md has no description`);
   // Invocation posture from the two inverse frontmatter keys (plugin CLAUDE.md).
@@ -208,16 +209,16 @@ function scanForSkillCounts(dir) {
   return offenders;
 }
 
-let skillsBody = `---
-title: Skills
-description: "The ${skillCountWord}-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."
----
-
+let skillsBody = renderFrontmatter(
+  `title: Skills
+description: "The ${skillCountWord}-skill Memstead plugin roster in two families — onboarding & context and the mem lifecycle — with each skill's invocation posture and its shipped description."`,
+  `
 > This page is generated from the plugin \`SKILL.md\` frontmatter at build time — the shipped skill descriptions are the source of truth, so the roster here cannot drift from the installed plugin.
 
 The Claude Code plugin ships **${skillCountWord} skills in two families**. \`/setup\` and \`/interview\` are the human-driven front doors; the rest are both-invocable — usable from the \`/\` menu and auto-invocable by the model. Fidelity measurement is \`/sync --verify\`; the on-demand full stock-take is \`/sync --inventory\`. There is no command for everyday graph work: once a workspace exists and the session has started with the MCP server wired, you just talk to Claude and the \`memstead_*\` MCP tools stay live. A session that is already running picks the new skills up only after \`/reload-plugins\` or a restart. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs.
 
-`;
+`,
+);
 for (const family of families) {
   skillsBody += `## ${family.title}\n\n${family.blurb}\n\n`;
   for (const name of family.skills) {

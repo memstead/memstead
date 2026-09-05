@@ -242,12 +242,7 @@ fn inject_chunk_frontmatter(markdown: &str, idx: usize, total: usize, truncated:
 /// wrong for that shape besides (the divergence-from-the-core disease
 /// `scripts/frontmatter-sites.json` documents); the core owns both
 /// delimiter flavours in one place.
-fn frontmatter_parts(text: &str) -> Option<(&str, &str)> {
-    match crate::entity::parser::split_frontmatter_core(text) {
-        (_, crate::entity::parser::Frontmatter::Present { meta, body }) => Some((meta, body)),
-        _ => None,
-    }
-}
+use crate::entity::parser::frontmatter_parts;
 
 #[cfg(test)]
 mod tests {

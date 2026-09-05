@@ -3107,11 +3107,11 @@ fn declared_roles_are_recorded_in_append_only_history_on_both_backends() {
     let log = Command::new("git")
         .arg("--git-dir")
         .arg(tmp.path().join("mem-repo").join(".git"))
-        .args(["log", "--format=%H%n%B%n---", "refs/heads/specs"])
+        .args(["log", "--format=%H%n%B%n@@@", "refs/heads/specs"])
         .output()
         .expect("git log");
     let log = String::from_utf8_lossy(&log.stdout).to_string();
-    let commits: Vec<&str> = log.split("\n---").collect();
+    let commits: Vec<&str> = log.split("\n@@@").collect();
     let author_commit = commits
         .iter()
         .find(|c| c.contains("create specs--derived-conclusion"))
@@ -3391,11 +3391,11 @@ fn declared_identity_records_serves_and_gates_on_both_backends() {
     let log = Command::new("git")
         .arg("--git-dir")
         .arg(tmp.path().join("mem-repo").join(".git"))
-        .args(["log", "--format=%H%n%B%n---", "refs/heads/specs"])
+        .args(["log", "--format=%H%n%B%n@@@", "refs/heads/specs"])
         .output()
         .expect("git log");
     let log = String::from_utf8_lossy(&log.stdout).to_string();
-    let commits: Vec<&str> = log.split("\n---").collect();
+    let commits: Vec<&str> = log.split("\n@@@").collect();
     let probe_commit = commits
         .iter()
         .find(|c| c.contains("create specs--identity-probe"))

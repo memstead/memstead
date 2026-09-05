@@ -63,25 +63,21 @@ pub fn entity_md_link(href_prefix: &str, id: &str, title: &str) -> String {
 /// document surfaces the type as a visible line instead; the rest of the
 /// frontmatter is agent-budget metadata that would be noise repeated once per
 /// entity.
+///
+/// The split is the core's ([`crate::frontmatter_parts`]); this only
+/// normalises the body's line endings and drops the blank run after the
+/// closing fence, as the flat document always did. A document with no
+/// closed frontmatter is returned untouched.
 pub fn strip_frontmatter(md: &str) -> String {
-    let mut lines = md.lines();
-    if lines.next() == Some("---") {
-        let mut closed = false;
-        let mut body: Vec<&str> = Vec::new();
-        for line in lines {
-            if !closed && line == "---" {
-                closed = true;
-                continue;
-            }
-            if closed {
-                body.push(line);
-            }
-        }
-        if closed {
-            return body.join("\n").trim_start_matches('\n').to_string();
-        }
+    match crate::frontmatter_parts(md) {
+        Some((_, body)) => body
+            .lines()
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_start_matches('\n')
+            .to_string(),
+        None => md.to_string(),
     }
-    md.to_string()
 }
 
 /// Rewrite `[[…]]` wiki-links to markdown links, resolving each occurrence

@@ -9,6 +9,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **One frontmatter parser.** The core split in `memstead-base` is now the
+  public surface every reader uses: `frontmatter_parts`,
+  `body_after_frontmatter`, `split_frontmatter_core` and the `Frontmatter`
+  verdict are exported at the crate root, and the llms.txt export, the MCP
+  server's `_mem_schema` stamp (which now honours a CRLF fence and a
+  byte-order mark) and its wire tests, and the git-branch diff's
+  parse-failure classifier read through it instead of their own delimiter
+  arithmetic. The core's tests carry the two defect shapes found in
+  hand-rolled copies: a carriage-return document, and a fence that is not
+  on the first line (no frontmatter). Non-entity documents (a skill's
+  SKILL.md) have one helper, `scripts/frontmatter.mjs`, with a command line
+  for shell callers and its own tests; the prose checker and the docs-site
+  prebuild read through it.
 - **`memstead health --strict` is the graph's referee, with acknowledged
   findings.** Strict now evaluates one fixed set whatever `--include`
   says (`integrity`, `anchors`, `stale`, `missing_required_outgoing`,
