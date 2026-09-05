@@ -9,6 +9,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **A due axis can count from an engine-stamped timestamp and wait for a
+  roster.** `due.date_field` may name `created_date` or `last_modified`
+  (no declaration needed), `due.offset_days` moves the due date past the
+  field's date (an archive window, a review interval), and
+  `due.unless_open_via` holds an entity back while any related entity is
+  still open (`relationships`, `direction`, the neighbour's `status_field`
+  and `open_values`). `memstead health --include due` serves the due brief
+  as data (the rows `memstead due` renders, over the default 90-day
+  window), with a `## Due` section in the markdown.
 - **The anchor resolution figure is a type that carries its population.**
   `AnchorResolutionFigure` in `memstead-base` cannot be constructed,
   deserialized or therefore printed without the population statement it

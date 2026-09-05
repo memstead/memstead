@@ -31,6 +31,10 @@ pub struct HealthArgs<'a> {
     /// findings with their acknowledgements, configuration defects,
     /// stale acknowledgements, the violation count the exit turns on).
     pub strict: bool,
+    /// The date the `due` axis reads "today" as (`YYYY-MM-DD`); `None`
+    /// reads the engine clock. A testing hook, the same one `memstead due
+    /// --today` exposes, so a recorded rendering can pin the day.
+    pub today: Option<&'a str>,
 }
 
 /// Surface-owned config the engine does not carry — supplied prebuilt so the
@@ -642,6 +646,30 @@ pub fn compose_health(
             crate::ops::health::health_vital_signs_axis(engine, args.mem),
         );
     }
+    if include.iter().any(|s| s == "due") {
+        // The due brief as data (`Engine::due_brief`), over the default
+        // 90-day window from today: overdue entities with the days past,
+        // due-soon ones with the days until. A reading, never a verdict;
+        // a workspace where no schema declares a due axis serves the
+        // empty brief with `mems: []`.
+        let today = match args.today {
+            Some(t) => t.to_string(),
+            None => {
+                let now = engine.now_iso();
+                now.get(..10).unwrap_or(&now).to_string()
+            }
+        };
+        let brief = engine
+            .due_brief(&today, &crate::engine::due::DueWindow::Days(90), vf)
+            .map_err(|e| ComposeHealthError::InvalidTargetSchema {
+                raw: today.clone(),
+                reason: e,
+            })?;
+        obj.insert(
+            "due".into(),
+            serde_json::to_value(&brief).unwrap_or_default(),
+        );
+    }
     if include.iter().any(|s| s == "friction") {
         // The friction ledger's read surface (agent-trust plan 08):
         // counts per code / per verb over the workspace-local refusal
@@ -893,6 +921,50 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
                     .get("note")
                     .and_then(|x| x.as_str())
                     .unwrap_or("no note"),
+            );
+        }
+    }
+
+    // Due axis — the due brief's rows, overdue first.
+    if let Some(due) = v.get("due").and_then(|x| x.as_object()) {
+        let rows = |key: &str| -> Vec<&serde_json::Value> {
+            due.get(key)
+                .and_then(|x| x.as_array())
+                .map(|a| a.iter().collect())
+                .unwrap_or_default()
+        };
+        let overdue = rows("overdue");
+        let soon = rows("due_soon");
+        let _ = writeln!(
+            s,
+            "\n## Due ({} overdue, {} due soon; today {}, through {})",
+            overdue.len(),
+            soon.len(),
+            due.get("today").and_then(|x| x.as_str()).unwrap_or("?"),
+            due.get("through").and_then(|x| x.as_str()).unwrap_or("?"),
+        );
+        for r in overdue {
+            let _ = writeln!(
+                s,
+                "- `{}` — {} — **{}** OVERDUE ({} days past) (status: {}, mem: {})",
+                r["id"].as_str().unwrap_or(""),
+                r["title"].as_str().unwrap_or(""),
+                r["date"].as_str().unwrap_or(""),
+                r["days_past"].as_u64().unwrap_or(0),
+                r["status"].as_str().unwrap_or(""),
+                r["mem"].as_str().unwrap_or(""),
+            );
+        }
+        for r in soon {
+            let _ = writeln!(
+                s,
+                "- `{}` — {} — **{}** (in {} days) (status: {}, mem: {})",
+                r["id"].as_str().unwrap_or(""),
+                r["title"].as_str().unwrap_or(""),
+                r["date"].as_str().unwrap_or(""),
+                r["days_until"].as_u64().unwrap_or(0),
+                r["status"].as_str().unwrap_or(""),
+                r["mem"].as_str().unwrap_or(""),
             );
         }
     }

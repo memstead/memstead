@@ -51,6 +51,7 @@ pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
     "checks",
     "ledger",
     "vital_signs",
+    "due",
 ];
 
 /// Item cap per vital-signs list.

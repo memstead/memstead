@@ -310,21 +310,56 @@ impl Engine {
                 if !due.open_values.contains(&status) {
                     continue;
                 }
+                // The roster gate: not due while any related entity the
+                // declaration names is still open.
+                if let Some(gate) = &due.unless_open_via {
+                    let neighbours: Vec<&crate::EntityId> = match gate.direction {
+                        memstead_schema::ReachDirection::In => self
+                            .store
+                            .incoming(&entity.id)
+                            .iter()
+                            .filter(|e| gate.relationships.contains(&e.rel_type))
+                            .map(|e| &e.from)
+                            .collect(),
+                        memstead_schema::ReachDirection::Out => self
+                            .store
+                            .outgoing(&entity.id)
+                            .iter()
+                            .filter(|e| gate.relationships.contains(&e.rel_type))
+                            .map(|e| &e.target)
+                            .collect(),
+                    };
+                    let blocked = neighbours.iter().any(|n| {
+                        self.store.get(n).is_some_and(|other| {
+                            matches!(
+                                other.metadata.get(&gate.status_field),
+                                Some(MetadataValue::String(v)) if gate.open_values.contains(v)
+                            )
+                        })
+                    });
+                    if blocked {
+                        continue;
+                    }
+                }
                 let date = match entity.metadata.get(&due.date_field) {
                     Some(MetadataValue::String(s)) => s.clone(),
                     _ => continue,
                 };
                 // Dates are ISO strings — take the date part, refuse
                 // malformed values silently (they never entered via
-                // the validated write path).
-                let date_part = date.get(..10).unwrap_or(&date).to_string();
-                let Some((dy, dm, dd)) = parse_ymd(&date_part) else {
+                // the validated write path). The declared offset moves
+                // the due date past the field's date.
+                let base_part = date.get(..10).unwrap_or(&date).to_string();
+                let Some((by, bm, bd)) = parse_ymd(&base_part) else {
                     continue;
                 };
+                let due_days = days_from_civil(by, bm, bd) + due.offset_days as i64;
+                let (dy, dm, dd) = civil_from_days(due_days);
+                let date_part = format!("{dy:04}-{dm:02}-{dd:02}");
                 if date_part.as_str() > end.as_str() {
                     continue;
                 }
-                let days_until = days_from_civil(dy, dm, dd) - today_days;
+                let days_until = due_days - today_days;
                 let lead = due.lead_section.as_ref().and_then(|key| {
                     entity
                         .sections

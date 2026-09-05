@@ -837,8 +837,17 @@ pub struct ResolutionAxis {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DueAxis {
-    /// Date-typed metadata field holding the deadline.
+    /// The metadata field the due date is read from: a `date`-typed
+    /// field of the type, or one of the engine-stamped timestamps every
+    /// entity carries (`created_date`, `last_modified`; the date part is read)
+    /// — so a deadline can be "N days after the last change" without an
+    /// author writing a date.
     pub date_field: String,
+    /// Days added to `date_field` to reach the due date (default 0). An
+    /// archive window, a review interval, a grace period: the date the
+    /// field holds plus this offset is when the entity is due.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub offset_days: u32,
     /// Enum-typed metadata field holding the lifecycle status.
     pub status_field: String,
     /// The `status_field` values under which the entity counts as
@@ -849,6 +858,35 @@ pub struct DueAxis {
     /// "what must happen first".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lead_section: Option<String>,
+    /// Optional gate: the entity is not due while any related entity is
+    /// still open (see [`DueGate`]) — a container whose members are not
+    /// yet closed, a milestone whose review waits for its tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unless_open_via: Option<DueGate>,
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
+}
+
+/// The roster gate of a [`DueAxis`]: which related entities must all be
+/// closed before the entity counts as due. Validated at schema load:
+/// `relationships` non-empty and declared in the schema's vocabulary,
+/// `open_values` non-empty. The neighbour's `status_field` is read on the
+/// neighbour as authored; a neighbour without that field never blocks.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DueGate {
+    /// The relationships walked from the entity to its members.
+    pub relationships: Vec<String>,
+    /// `in` walks edges pointing at the entity (its members point at
+    /// it, as plans PART_OF a bundle), `out` edges pointing away.
+    pub direction: ReachDirection,
+    /// The neighbour's status field.
+    pub status_field: String,
+    /// The neighbour's status values under which it is still open, and
+    /// therefore blocks the entity from being due.
+    pub open_values: Vec<String>,
 }
 
 /// A metadata (frontmatter) field.

@@ -322,11 +322,12 @@ fn cli_markdown_matches_the_recorded_fixtures() {
     cases.push(("all".to_string(), all));
     for (name, include) in cases {
         let joined = include.join(",");
-        let args: Vec<&str> = if include.is_empty() {
-            vec![]
-        } else {
-            vec!["--include", &joined]
-        };
+        // The `due` axis reads "today"; pin it so the recording stays
+        // byte-stable across days (the same hook `memstead due --today` has).
+        let mut args: Vec<&str> = vec!["--today", "2026-09-05"];
+        if !include.is_empty() {
+            args.extend(["--include", &joined]);
+        }
         let got = cli_markdown(root, &args);
         let path = dir.join(format!("{name}.md"));
         if record {

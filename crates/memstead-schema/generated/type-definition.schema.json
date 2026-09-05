@@ -384,7 +384,7 @@
       "type": "object",
       "properties": {
         "date_field": {
-          "description": "Date-typed metadata field holding the deadline.",
+          "description": "The metadata field the due date is read from: a `date`-typed\nfield of the type, or one of the engine-stamped timestamps every\nentity carries (`created_date`, `last_modified`; the date part is read)\n— so a deadline can be \"N days after the last change\" without an\nauthor writing a date.",
           "type": "string"
         },
         "lead_section": {
@@ -393,6 +393,12 @@
             "string",
             "null"
           ]
+        },
+        "offset_days": {
+          "description": "Days added to `date_field` to reach the due date (default 0). An\narchive window, a review interval, a grace period: the date the\nfield holds plus this offset is when the entity is due.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         },
         "open_values": {
           "description": "The `status_field` values under which the entity counts as\nstill open (due-relevant). Every entry must be declared in the\nfield's `enum_values`.",
@@ -404,11 +410,57 @@
         "status_field": {
           "description": "Enum-typed metadata field holding the lifecycle status.",
           "type": "string"
+        },
+        "unless_open_via": {
+          "description": "Optional gate: the entity is not due while any related entity is\nstill open (see [`DueGate`]) — a container whose members are not\nyet closed, a milestone whose review waits for its tasks.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DueGate"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
       "required": [
         "date_field",
+        "status_field",
+        "open_values"
+      ]
+    },
+    "DueGate": {
+      "description": "The roster gate of a [`DueAxis`]: which related entities must all be\nclosed before the entity counts as due. Validated at schema load:\n`relationships` non-empty and declared in the schema's vocabulary,\n`open_values` non-empty. The neighbour's `status_field` is read on the\nneighbour as authored; a neighbour without that field never blocks.",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "description": "`in` walks edges pointing at the entity (its members point at\nit, as plans PART_OF a bundle), `out` edges pointing away.",
+          "$ref": "#/$defs/ReachDirection"
+        },
+        "open_values": {
+          "description": "The neighbour's status values under which it is still open, and\ntherefore blocks the entity from being due.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "relationships": {
+          "description": "The relationships walked from the entity to its members.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status_field": {
+          "description": "The neighbour's status field.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relationships",
+        "direction",
         "status_field",
         "open_values"
       ]

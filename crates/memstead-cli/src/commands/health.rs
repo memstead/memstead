@@ -79,7 +79,11 @@ pub struct Args {
     /// never does), labelling (grounded labels per declaring mem:
     /// accepted/defeated/undecided counts, the defeated and undecided
     /// lists with their attacker evidence, and the excluded cross-mem
-    /// attack-edge count; an observation, never a strict violation).
+    /// attack-edge count; an observation, never a strict violation),
+    /// due (the due brief as data over the default 90-day window:
+    /// entities whose schema-declared due date is past, with the days
+    /// past, or due soon, with the days until; a reading, never a
+    /// verdict, the same rows `memstead due` renders).
     #[arg(long, value_delimiter = ',')]
     pub include: Vec<String>,
 
@@ -117,6 +121,11 @@ pub struct Args {
     /// itself (unknown mem, quarantine, boot failure), never a verdict.
     #[arg(long)]
     pub strict: bool,
+
+    /// Override the current date for the `due` include (YYYY-MM-DD).
+    /// Testing hook, the same one `memstead due --today` exposes.
+    #[arg(long, hide = true)]
+    pub today: Option<String>,
 }
 
 pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
@@ -138,6 +147,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         target_schema: args.target_schema.as_deref(),
         include_config: false,
         strict: args.strict,
+        today: args.today.as_deref(),
     };
 
     let result = match compose_health(engine, &health_args, drift_warnings, &config) {
@@ -629,6 +639,49 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
                 n(counts, "unresolvable"),
                 n(counts, "unobserved"),
                 n(counts, "dangling"),
+            ));
+        }
+        lines.push(String::new());
+    }
+
+    if let Some(due) = v.get("due").and_then(Value::as_object) {
+        let overdue = due
+            .get("overdue")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let soon = due
+            .get("due_soon")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        lines.push(format!(
+            "## Due ({} overdue, {} due soon; today {}, through {})",
+            overdue.len(),
+            soon.len(),
+            s(&Value::Object(due.clone()), "today"),
+            s(&Value::Object(due.clone()), "through"),
+        ));
+        for r in &overdue {
+            lines.push(format!(
+                "- `{}` — {} — **{}** OVERDUE ({} days past) (status: {}, mem: {})",
+                s(r, "id"),
+                s(r, "title"),
+                s(r, "date"),
+                n(r, "days_past"),
+                s(r, "status"),
+                s(r, "mem"),
+            ));
+        }
+        for r in &soon {
+            lines.push(format!(
+                "- `{}` — {} — **{}** (in {} days) (status: {}, mem: {})",
+                s(r, "id"),
+                s(r, "title"),
+                s(r, "date"),
+                n(r, "days_until"),
+                s(r, "status"),
+                s(r, "mem"),
             ));
         }
         lines.push(String::new());

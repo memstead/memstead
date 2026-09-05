@@ -2053,20 +2053,67 @@ fn validate_type(
     // Due axis (first-author-path plan 08): the declaration's
     // references must exist on this type in the declared shapes.
     if let Some(due) = &td.due {
+        // The engine stamps `created_date` and `last_modified` on every
+        // entity whether or not the type declares them, so a due axis may
+        // read them without a declaration.
+        let engine_stamped = matches!(due.date_field.as_str(), "created_date" | "last_modified");
         match td.metadata_fields.iter().find(|f| f.key == due.date_field) {
+            None if engine_stamped => {}
             None => errors.push(SchemaLoadError::InvalidDueAxis {
                 type_name: td.name.clone(),
                 offender: due.date_field.clone(),
-                reason: "`date_field` names no metadata field of this type".to_string(),
+                reason: "`date_field` names no metadata field of this type (and is not an \
+                         engine-stamped timestamp: created_date, last_modified)"
+                    .to_string(),
             }),
             Some(f) if f.field_type != crate::types::FieldType::Date => {
                 errors.push(SchemaLoadError::InvalidDueAxis {
                     type_name: td.name.clone(),
                     offender: due.date_field.clone(),
-                    reason: "`date_field` must name a date-typed metadata field".to_string(),
+                    reason: "`date_field` must name a date-typed metadata field or an \
+                             engine-stamped timestamp (created_date, last_modified)"
+                        .to_string(),
                 })
             }
             Some(_) => {}
+        }
+        if let Some(gate) = &due.unless_open_via {
+            if gate.relationships.is_empty() {
+                errors.push(SchemaLoadError::InvalidDueAxis {
+                    type_name: td.name.clone(),
+                    offender: "(empty)".to_string(),
+                    reason: "`unless_open_via.relationships` must name at least one relationship"
+                        .to_string(),
+                });
+            }
+            for r in &gate.relationships {
+                if let Err(e) = check_rel(
+                    &td.name,
+                    "due.unless_open_via",
+                    r,
+                    rel_names,
+                    available_rels,
+                ) {
+                    errors.push(e);
+                }
+            }
+            if gate.open_values.is_empty() {
+                errors.push(SchemaLoadError::InvalidDueAxis {
+                    type_name: td.name.clone(),
+                    offender: "(empty)".to_string(),
+                    reason: "`unless_open_via.open_values` must name at least one open status \
+                             value"
+                        .to_string(),
+                });
+            }
+            if gate.status_field.trim().is_empty() {
+                errors.push(SchemaLoadError::InvalidDueAxis {
+                    type_name: td.name.clone(),
+                    offender: "(empty)".to_string(),
+                    reason: "`unless_open_via.status_field` must name the neighbour's status field"
+                        .to_string(),
+                });
+            }
         }
         match td
             .metadata_fields

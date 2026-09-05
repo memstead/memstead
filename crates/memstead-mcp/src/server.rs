@@ -3833,6 +3833,7 @@ impl McpServer {
             target_schema: p.target_schema.as_deref(),
             include_config: p.include_config,
             strict: false,
+            today: None,
         };
         // Server-owned config the engine does not carry — prebuilt here so the
         // composer inserts the bytes verbatim (and stays free of the MCP
@@ -6036,6 +6037,7 @@ mod tests {
             target_schema: None,
             include_config: false,
             strict: false,
+            today: None,
         };
         let config = memstead_base::ops::health_compose::HealthConfig {
             mutations: serde_json::Value::Null,
@@ -6137,6 +6139,7 @@ mod tests {
                 target_schema: None,
                 include_config: false,
                 strict: false,
+                today: None,
             };
             let config = memstead_base::ops::health_compose::HealthConfig {
                 mutations: serde_json::Value::Null,

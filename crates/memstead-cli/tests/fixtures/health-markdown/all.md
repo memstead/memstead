@@ -1,6 +1,6 @@
 # Graph health
 
-**Verdict coverage:** examined=dangling_links,missing_required_outgoing,constraints,signals,integrity,config,mounts; advisory=orphans,stubs,most_connected,missing_fields,stale,tags,labelling,conformance,anchors,friction,open_questions,vital_signs,stale_derivations,checks,ledger; not_examined=projection
+**Verdict coverage:** examined=dangling_links,missing_required_outgoing,constraints,signals,integrity,config,mounts; advisory=orphans,stubs,most_connected,missing_fields,stale,tags,labelling,conformance,anchors,friction,open_questions,vital_signs,stale_derivations,checks,ledger,due; not_examined=projection
 
 - Entities: 6
 - Orphans: 2
@@ -61,6 +61,8 @@
 ## Anchors (2 mems)
 - `notes`: resolves 0 over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0); drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0
 - `side`: resolves 0 over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0); drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0
+
+## Due (0 overdue, 0 due soon; today 2026-09-05, through 2026-12-04)
 
 ## Vital signs (2 mems)
 - `notes`: last-resort type `concept` over 2 community(ies); no bound source; 0 contested unowned file(s); 2 zero-outgoing entity(ies) in 2 community(ies); 0 empty declared section(s)

@@ -1597,6 +1597,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "friction",
             // Vital-signs axis (include=vital_signs, A6).
             "vital_signs",
+            // Due axis (include=due): the due brief as data.
+            "due",
             // Standalone anchor-verification axis (include=anchors).
             "anchors",
             "resolves",

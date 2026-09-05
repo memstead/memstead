@@ -256,6 +256,10 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
             "check states are derived views; the verdicts in them belong to their recording callers",
         ),
         ("ledger", "descriptive view of the check ledger"),
+        (
+            "due",
+            "descriptive due brief: what is overdue or due soon by a schema-declared due axis, a reading never a verdict",
+        ),
     ],
     not_examined: &[(
         "projection",
@@ -291,6 +295,7 @@ pub const OVERVIEW_COVERAGE: AxisCoverage = AxisCoverage {
         ("friction", OVERVIEW_SCOPE),
         ("open_questions", OVERVIEW_SCOPE),
         ("vital_signs", OVERVIEW_SCOPE),
+        ("due", OVERVIEW_SCOPE),
         ("stale_derivations", OVERVIEW_SCOPE),
         ("checks", OVERVIEW_SCOPE),
         ("ledger", OVERVIEW_SCOPE),
