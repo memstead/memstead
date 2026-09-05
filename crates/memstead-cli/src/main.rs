@@ -163,7 +163,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::VerifyAnchors(args) => commands::verify_anchors::run(&ctx, args),
         Command::Publish(args) => commands::publish::run(&ctx, args),
         Command::Unpublish(args) => commands::unpublish::run(&ctx, args),
+        #[cfg(feature = "registry-ops")]
         Command::Domain { action } => commands::domain::run(&ctx, action),
+        #[cfg(feature = "registry-ops")]
         Command::Admin { action } => match action {
             commands::admin::AdminAction::Takedown(args) => {
                 commands::admin::run_takedown(&ctx, args)

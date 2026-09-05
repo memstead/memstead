@@ -225,6 +225,7 @@ pub fn unpublish(
 /// statement-of-reasons notice reference. The server selects the
 /// takedown path (deny-list the bytes, tombstone, burn the name)
 /// instead of an ordinary hard-delete, and refuses non-admins with 403.
+#[cfg(feature = "registry-ops")]
 pub fn admin_takedown(
     client: &reqwest::blocking::Client,
     base: &str,
@@ -261,6 +262,7 @@ pub fn admin_takedown(
 }
 
 /// Outcome of a successful `POST /api/admin/denylist`.
+#[cfg(feature = "registry-ops")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct DenylistResponse {
     #[allow(dead_code)]
@@ -270,6 +272,7 @@ pub struct DenylistResponse {
 
 /// Admin-only: add a canonical-bytes SHA-256 to the content deny-list so
 /// those exact bytes can never be published. Refuses non-admins with 403.
+#[cfg(feature = "registry-ops")]
 pub fn admin_denylist(
     client: &reqwest::blocking::Client,
     base: &str,

@@ -207,8 +207,10 @@ pub fn render_mem_changed_block(notices: &[memstead_base::ops::MemChangedNotice]
     out
 }
 
+#[cfg(feature = "registry-ops")]
 pub mod admin;
 pub mod delete;
+#[cfg(feature = "registry-ops")]
 pub mod domain;
 pub mod due;
 pub mod entity;

@@ -261,11 +261,17 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("unpublish", ACCOUNT_OP),
         no_verdict("login", ACCOUNT_OP),
         no_verdict("logout", ACCOUNT_OP),
+    ];
+    // The operator-build command trees exist only under `registry-ops`;
+    // their rows follow the same condition so the default build's gate
+    // never carries a stale entry for a subcommand it cannot discover.
+    #[cfg(feature = "registry-ops")]
+    rows.extend([
         no_verdict("domain keygen", ACCOUNT_OP),
         no_verdict("domain manifest", ACCOUNT_OP),
         no_verdict("admin takedown", ACCOUNT_OP),
         no_verdict("admin denylist", ACCOUNT_OP),
-    ];
+    ]);
     rows.extend([
         WORKSPACE_DUMP,
         no_verdict("install", MUTATION),

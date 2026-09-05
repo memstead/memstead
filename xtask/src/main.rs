@@ -933,6 +933,15 @@ pub(crate) fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// The one paragraph the CLI reference carries about the command trees
+/// the default build leaves out. Rendered above the clap tree.
+const REGISTRY_OPS_NOTE: &str = "\
+This reference is rendered from the default build of `memstead-cli`, the \
+binary the installer ships. Two command trees are not part of it: \
+`memstead admin` (registry moderation) and `memstead domain` \
+(domain-authority signing keys) exist only in the registry operator's own \
+build, compiled with the crate's `registry-ops` Cargo feature.";
+
 fn write_cli_reference(output: &Path) -> Result<()> {
     let cli_dir = output.join("cli");
     fs::create_dir_all(&cli_dir).with_context(|| format!("creating {}", cli_dir.display()))?;
@@ -946,6 +955,11 @@ fn write_cli_reference(output: &Path) -> Result<()> {
     let cli = escape_raw_html_in_markdown(&fence_epilog(&clap_markdown::help_markdown_command(
         &memstead_cli::cli::Cli::command(),
     )));
+    // The reference renders the default build: the registry-operator
+    // command trees are compiled only under the CLI crate's
+    // `registry-ops` feature and are named here once, as what the
+    // installed binary does not carry, so the roster reads as complete.
+    let cli = format!("{REGISTRY_OPS_NOTE}\n\n{cli}");
     write_if_changed(
         &cli_dir.join("cli.md"),
         &with_frontmatter("CLI (`memstead`)", &cli),

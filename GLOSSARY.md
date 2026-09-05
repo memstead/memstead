@@ -508,7 +508,7 @@ Why one record: fidelity accounting needs one object to key on. `hash(D)` invali
 
 Memstead publishes two different `.well-known/` files whose names invite confusion — cite the right one for the job:
 
-- **`.well-known/memstead-publishing.json`** — the **registry publisher proof** for domain-authority publishing. You generate a signing key for a domain you control (`memstead domain`), host this manifest on that domain, and `memstead publish --scope <domain>:<handle>` signs each publish against it; the registry fetches the manifest fresh and verifies the signature. It lives on *your* domain.
+- **`.well-known/memstead-publishing.json`** — the **registry publisher proof** for domain-authority publishing. You generate a signing key for a domain you control (`memstead domain keygen`, a command of the operator's build: it is compiled only with the CLI crate's `registry-ops` Cargo feature, not in the installed binary), host this manifest on that domain, and `memstead publish --scope <domain>:<handle>` signs each publish against it; the registry fetches the manifest fresh and verifies the signature. It lives on *your* domain.
 - **`.well-known/memstead-authority.json`** — the **agent-discovery manifest** served by a Memstead deployment itself (memstead.ai serves one): it tells an arriving agent where the deployment's MCP and read surfaces are. It lives on the *serving* site.
 
 ### Rationale

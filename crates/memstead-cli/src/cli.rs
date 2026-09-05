@@ -209,6 +209,8 @@ pub enum Command {
     /// Domain-authority publishing: generate the signing key for a domain you
     /// control and print the `.well-known` manifest to host. `publish --scope
     /// <domain>:<handle>` then signs with that key — no GitHub account needed.
+    /// Compiled only with the `registry-ops` feature (the operator's build).
+    #[cfg(feature = "registry-ops")]
     Domain {
         #[command(subcommand)]
         action: commands::domain::DomainAction,
@@ -217,6 +219,8 @@ pub enum Command {
     /// Admin-only registry moderation: take a mem down or deny-list
     /// bytes. Gated server-side by the `MEMSTEAD_ADMINS` allowlist; every
     /// action is recorded in the registry's append-only audit log.
+    /// Compiled only with the `registry-ops` feature (the operator's build).
+    #[cfg(feature = "registry-ops")]
     Admin {
         #[command(subcommand)]
         action: commands::admin::AdminAction,
@@ -448,7 +452,9 @@ impl Command {
             Command::VerifyAnchors(_) => "verify-anchors",
             Command::Publish(_) => "publish",
             Command::Unpublish(_) => "unpublish",
+            #[cfg(feature = "registry-ops")]
             Command::Domain { .. } => "domain",
+            #[cfg(feature = "registry-ops")]
             Command::Admin { .. } => "admin",
             Command::Login(_) => "login",
             Command::Logout(_) => "logout",

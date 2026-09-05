@@ -48,5 +48,12 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 zip.workspace = true
 
+[features]
+# Registry-operator commands (`memstead admin`, `memstead domain`): off by
+# default, so the binary a stranger installs carries no moderation or
+# domain-authority signing surface. The operator's own build sets it:
+# `cargo install --path crates/memstead-cli --features registry-ops`.
+registry-ops = []
+
 [lints]
 workspace = true

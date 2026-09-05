@@ -68,6 +68,30 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Testing: CLI operator build (--features registry-ops)"
+echo "══════════════════════════════════"
+# `memstead admin` and `memstead domain` are compiled only under the CLI
+# crate's `registry-ops` feature (the registry operator's own build); the
+# default build above never sees them. This leg lints and tests the crate
+# with the feature on, so the gated trees stay green without a second
+# workspace run. It shares the target dir with the engine leg on purpose:
+# two CLI tests spawn `target/debug/memstead-mcp`, which the engine leg
+# built. The feature build uplifts `target/debug/memstead` as the operator
+# binary, so the leg ends by rebuilding the default one — every later leg
+# (prose-vs-binary, verify-gate, binary integrity) reads that path and
+# must see the binary the installer ships.
+if (cd "$ROOT" \
+  && cargo clippy -p memstead-cli --all-targets --features registry-ops -- -D warnings \
+  && cargo nextest run -p memstead-cli --features registry-ops \
+  && cargo build -p memstead-cli); then
+  echo "  ✓ CLI operator build passed"
+else
+  FAILED+=("cli-registry-ops")
+  echo "  ✗ CLI operator build FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Testing: doctests (cargo test --doc)"
 echo "══════════════════════════════════"
 # nextest skips doctests by design, so without this leg every doc example

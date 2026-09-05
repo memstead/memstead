@@ -9,6 +9,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **`memstead admin` and `memstead domain` move behind a Cargo feature.**
+  The two registry-operator command trees (takedown and deny-list
+  moderation; domain-authority signing keys) are compiled only when
+  `memstead-cli` is built with `--features registry-ops`. The default
+  build, the one cargo-dist ships and `install.sh` installs, has neither
+  command: `memstead --help` lists the remaining roster, `memstead admin`
+  refuses as an unknown subcommand, and the generated CLI reference and
+  parity matrix show no admin or domain entries. `publish`, `unpublish`,
+  `login` and `logout` stay, and a `publish --scope <domain>:<handle>` still
+  signs with a stored domain key. The gated trees keep their behaviour and
+  tests; `run-tests.sh` runs the feature build as its own leg.
 - **The npm channel is closed.** `@memstead/wasm` is no longer published:
   the site that runs the engine in the browser builds the bundle from the
   tree it is built from, so a published copy of the crate had no consumer
