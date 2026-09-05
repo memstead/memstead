@@ -2456,8 +2456,12 @@ impl McpServer {
                 .token_budget
                 .unwrap_or(memstead_base::overview::DEFAULT_OVERVIEW_BUDGET),
             operator_mode: self.operator_mode,
-            // The full mem-repo MCP surface carries the mem-lifecycle tools.
-            suppress_lifecycle: false,
+            // The section is a truthful function of which tools this
+            // server exposes: an embedder (or a workspace's
+            // `[mcp].disabled_tools`) that withholds both lifecycle tools
+            // gets no section naming them.
+            suppress_lifecycle: self.disabled_tools.contains("memstead_mem_create")
+                && self.disabled_tools.contains("memstead_mem_delete"),
         };
 
         let out = match memstead_base::overview::compose_overview(

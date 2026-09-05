@@ -30,6 +30,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   cost of the flavour: a build nothing shipped, kept green only by
   dedicated CI, that sat red for two days in 2026-06 with 33 errors
   because no developer machine compiled it.
+- **The overview's lifecycle section follows the served roster.** When
+  both `memstead_mem_create` and `memstead_mem_delete` are disabled on a
+  server (`[mcp].disabled_tools`, or an embedder's filter), `memstead_overview`
+  renders no `## Lifecycle Namespaces` section naming them; the section is a
+  function of which tools the server exposes, as the composer already
+  declared it to be.
 - **The lean CI apparatus goes.** `lean-smoke.yml` and `ci/lean_smoke.py`
   are deleted; the strictness and mutation probes are re-homed as
   `ci/strictness.py` and `ci/mutation.py` and run against the one binary

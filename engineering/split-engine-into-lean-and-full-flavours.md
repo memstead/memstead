@@ -1,8 +1,8 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:07Z
-last_modified: 2026-07-13T16:44:06Z
-status: accepted
+last_modified: 2026-09-05T08:17:32Z
+status: superseded
 decided_on: 2026-06-08
 deciders: engine team
 scope: system
