@@ -616,18 +616,19 @@ fn render_markdown(v: &Value, mem: Option<&str>) -> String {
                 ));
                 continue;
             }
+            // The figure prints through its type, from the row's own three
+            // fields: the count never appears apart from its population.
+            let figure = memstead_base::anchor::AnchorResolutionFigure::from_json(counts)
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| "resolution figure not stated with its population".to_string());
             lines.push(format!(
-                "- `{mem}`: resolves {}, drifted {}, recheck {}, unresolvable (artifact gone) \
-                 {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
-                n(counts, "resolves"),
+                "- `{mem}`: resolves {figure}; drifted {}, recheck {}, unresolvable (artifact \
+                 gone) {}, unobserved (not measured) {}, dangling (entity gone) {}",
                 n(counts, "drifted"),
                 n(counts, "recheck"),
                 n(counts, "unresolvable"),
                 n(counts, "unobserved"),
                 n(counts, "dangling"),
-                counts["population"]
-                    .as_str()
-                    .unwrap_or("population not stated"),
             ));
         }
         lines.push(String::new());

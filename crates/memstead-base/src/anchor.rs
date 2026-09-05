@@ -1443,6 +1443,17 @@ pub enum AnchorState {
 }
 
 impl AnchorState {
+    /// Every state, in the order the vocabulary is documented. The one
+    /// list; a new variant must join it (the match in [`Self::describe`]
+    /// refuses to compile without it, and [`Self::vocabulary_help`] and the
+    /// round-trip test read it).
+    pub const ALL: [AnchorState; 4] = [
+        AnchorState::Resolves,
+        AnchorState::Drifted,
+        AnchorState::Recheck,
+        AnchorState::Orphaned,
+    ];
+
     /// Stable wire form.
     pub fn as_wire(&self) -> &'static str {
         match self {
@@ -1451,6 +1462,166 @@ impl AnchorState {
             AnchorState::Recheck => "recheck",
             AnchorState::Orphaned => "orphaned",
         }
+    }
+
+    /// The one-line meaning of each state — the documentation every
+    /// surface that names the vocabulary reads from (the CLI help and the
+    /// reference rendered from it, [`Self::vocabulary_help`]).
+    pub fn describe(&self) -> &'static str {
+        match self {
+            AnchorState::Resolves => "the artifact is present and matches",
+            AnchorState::Drifted => {
+                "present, hash differs, the medium is stable, so a real content drift"
+            }
+            AnchorState::Recheck => {
+                "present, but drift cannot be asserted (unstable medium, or a hash missing on one side)"
+            }
+            AnchorState::Orphaned => "the artifact the anchor references is gone from the medium",
+        }
+    }
+
+    /// The vocabulary as a help paragraph, one line per state, rendered
+    /// from [`Self::ALL`] and [`Self::describe`] so a surface never carries
+    /// its own list of states.
+    pub fn vocabulary_help() -> String {
+        let mut s = String::from("Anchor states (the artifact end of an anchor):\n");
+        for state in Self::ALL {
+            s.push_str(&format!("  {:<9} {}\n", state.as_wire(), state.describe()));
+        }
+        s.push_str(
+            "Not states: `dangling` (a sidecar row whose entity the mem no longer holds) and \
+             `unobserved` (the pass did not reach the artifact) are conditions of the \
+             measurement, counted apart.",
+        );
+        s
+    }
+}
+
+/// The positive anchor resolution figure, carried with the population it
+/// was computed over. A resolution count read on its own is read as
+/// health, and every W3 finding of the 2026-08 consistency sweep was a bare
+/// figure that meant less than it looked; this type makes the defect a
+/// construction error instead of a lint finding. It cannot be built
+/// without a population statement, it prints only through [`Display`]
+/// (the count and the statement in one sentence) or [`Self::ratio`], and
+/// its serde form carries the three fields together, so no renderer, JSON
+/// or markdown, reaches the raw count.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawFigure")]
+pub struct AnchorResolutionFigure {
+    /// Anchors that resolved clean.
+    resolves: usize,
+    /// What the figure was computed over and how much of it the pass could
+    /// not adjudicate. Never empty.
+    population: String,
+    /// Whether the pass adjudicated everything it counted.
+    fully_adjudicated: bool,
+}
+
+/// The wire shape [`AnchorResolutionFigure`] deserializes through, so a
+/// figure read back from JSON without a population is refused too.
+#[derive(Deserialize)]
+struct RawFigure {
+    resolves: usize,
+    population: String,
+    fully_adjudicated: bool,
+}
+
+/// The one construction refusal: a figure with no population statement.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("an anchor resolution figure cannot exist without the population it was computed over")]
+pub struct FigureWithoutPopulation;
+
+impl TryFrom<RawFigure> for AnchorResolutionFigure {
+    type Error = FigureWithoutPopulation;
+    fn try_from(raw: RawFigure) -> Result<Self, Self::Error> {
+        Self::new(raw.resolves, raw.population, raw.fully_adjudicated)
+    }
+}
+
+impl AnchorResolutionFigure {
+    /// The only constructor: refuses an empty population statement.
+    pub fn new(
+        resolves: usize,
+        population: impl Into<String>,
+        fully_adjudicated: bool,
+    ) -> Result<Self, FigureWithoutPopulation> {
+        let population = population.into();
+        if population.trim().is_empty() {
+            return Err(FigureWithoutPopulation);
+        }
+        Ok(Self {
+            resolves,
+            population,
+            fully_adjudicated,
+        })
+    }
+
+    /// The figure of a pass that counted nothing because it could not
+    /// read its rows: zero, with the reason as its population. The reason
+    /// is the statement, so it is checked like any other.
+    pub(crate) fn uncounted(why: impl Into<String>) -> Self {
+        Self::new(0, why, false).expect("an uncounted figure names why it counted nothing")
+    }
+
+    /// What the count was computed over.
+    pub fn population(&self) -> &str {
+        &self.population
+    }
+
+    /// Whether the pass adjudicated everything it counted.
+    pub fn fully_adjudicated(&self) -> bool {
+        self.fully_adjudicated
+    }
+
+    /// The count as a ratio over `denominator`, followed by the population:
+    /// `388/422 (91.9%) over 424 counted row(s) …`. The percentage never
+    /// travels without the statement.
+    pub fn ratio(&self, denominator: usize) -> String {
+        if denominator == 0 {
+            format!("{}/{denominator} (n/a) {}", self.resolves, self.population)
+        } else {
+            let pct = (self.resolves as f64) * 100.0 / (denominator as f64);
+            format!(
+                "{}/{denominator} ({pct:.1}%) {}",
+                self.resolves, self.population
+            )
+        }
+    }
+
+    /// Read a figure back from a JSON object that carries the three fields
+    /// (`resolves`, `population`, `fully_adjudicated`) — the shape every
+    /// surface serializes — so a renderer of JSON prints through the type
+    /// too. `None` when a field is missing or the population is empty.
+    pub fn from_json(v: &serde_json::Value) -> Option<Self> {
+        Self::new(
+            v.get("resolves")?.as_u64()? as usize,
+            v.get("population")?.as_str()?,
+            v.get("fully_adjudicated")?.as_bool()?,
+        )
+        .ok()
+    }
+
+    /// The bare count, for a test assertion and nothing else: a renderer
+    /// prints through [`Display`] or [`Self::ratio`]. Compiled for tests
+    /// only, so no shipping code can reach it.
+    #[cfg(test)]
+    pub(crate) fn count_for_assertions(&self) -> usize {
+        self.resolves
+    }
+}
+
+impl Default for AnchorResolutionFigure {
+    fn default() -> Self {
+        Self::uncounted("population unknown: no row was counted")
+    }
+}
+
+impl std::fmt::Display for AnchorResolutionFigure {
+    /// The count and its population in one sentence: `388 over 424 counted
+    /// row(s): 422 adjudicated, 2 not (…)`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.resolves, self.population)
     }
 }
 
@@ -3066,5 +3237,89 @@ three
         assert_eq!(days_between("garbage", "2026-09-02"), None);
         assert_eq!(iso_days_since_epoch("1970-01-01"), Some(0));
         assert_eq!(iso_days_since_epoch("2000-03-01"), Some(11017));
+    }
+}
+
+#[cfg(test)]
+mod figure_and_vocabulary {
+    use super::*;
+
+    /// Every variant round-trips through serde under its wire name, the
+    /// wire name is the `as_wire` form, and every variant carries a doc
+    /// line; `ALL` is the whole vocabulary (a new variant must join it, or
+    /// `describe` refuses to compile and this test refuses to pass).
+    #[test]
+    fn anchor_state_round_trips_and_is_documented() {
+        let mut seen = std::collections::BTreeSet::new();
+        for state in AnchorState::ALL {
+            let json = serde_json::to_string(&state).unwrap();
+            assert_eq!(json, format!("\"{}\"", state.as_wire()));
+            let back: AnchorState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, state);
+            assert!(!state.describe().is_empty(), "{state:?} has a doc line");
+            assert!(seen.insert(state.as_wire()), "wire names are distinct");
+        }
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            vec!["drifted", "orphaned", "recheck", "resolves"]
+        );
+        let help = AnchorState::vocabulary_help();
+        for state in AnchorState::ALL {
+            assert!(help.contains(state.as_wire()) && help.contains(state.describe()));
+        }
+        // An unknown wire name is refused, never mapped to a neighbour.
+        assert!(serde_json::from_str::<AnchorState>("\"resolved\"").is_err());
+    }
+
+    /// A figure without a population cannot be constructed, deserialized or
+    /// therefore formatted; with one, it prints the count and the statement
+    /// in one sentence and its JSON carries all three fields.
+    #[test]
+    fn figure_refuses_to_exist_without_its_population() {
+        assert_eq!(
+            AnchorResolutionFigure::new(3, "", true),
+            Err(FigureWithoutPopulation)
+        );
+        assert_eq!(
+            AnchorResolutionFigure::new(3, "   ", true),
+            Err(FigureWithoutPopulation)
+        );
+        assert!(
+            serde_json::from_str::<AnchorResolutionFigure>(
+                r#"{"resolves":3,"population":"","fully_adjudicated":true}"#
+            )
+            .is_err()
+        );
+        assert!(serde_json::from_str::<AnchorResolutionFigure>(r#"{"resolves":3}"#).is_err());
+
+        let fig =
+            AnchorResolutionFigure::new(3, "over 4 counted row(s): 4 adjudicated, 0 not", true)
+                .unwrap();
+        assert_eq!(
+            fig.to_string(),
+            "3 over 4 counted row(s): 4 adjudicated, 0 not"
+        );
+        assert_eq!(
+            fig.ratio(4),
+            "3/4 (75.0%) over 4 counted row(s): 4 adjudicated, 0 not"
+        );
+        assert_eq!(
+            fig.ratio(0),
+            "3/0 (n/a) over 4 counted row(s): 4 adjudicated, 0 not"
+        );
+        let json = serde_json::to_value(&fig).unwrap();
+        assert_eq!(json["resolves"], 3);
+        assert_eq!(
+            json["population"],
+            "over 4 counted row(s): 4 adjudicated, 0 not"
+        );
+        assert_eq!(json["fully_adjudicated"], true);
+        assert_eq!(AnchorResolutionFigure::from_json(&json), Some(fig.clone()));
+        assert_eq!(
+            AnchorResolutionFigure::from_json(&serde_json::json!({"resolves": 3})),
+            None
+        );
+        assert_eq!(fig.count_for_assertions(), 3);
+        assert!(!AnchorResolutionFigure::default().fully_adjudicated());
     }
 }

@@ -722,7 +722,9 @@ pub fn health_open_questions_axis(
                 });
                 match a.state.as_str() {
                     "recheck" => recheck.push(item),
-                    "unresolvable" => unresolvable.push(item),
+                    // The enum's wire name for a gone artifact; the bucket
+                    // keeps the axis's count name (`anchors_unresolvable`).
+                    "orphaned" => unresolvable.push(item),
                     "unobserved" => unobserved.push(item),
                     "dangling" => dangling_rows.push(item),
                     _ => {}
@@ -980,13 +982,12 @@ pub fn health_anchors_axis(
                 "reason": why,
             })
         });
-        out.insert(
-            mem,
-            serde_json::json!({
+        // The figure travels as its type's own three fields (`resolves`,
+        // `population`, `fully_adjudicated`), merged into the row.
+        let mut row = serde_json::json!({
                 // The one condition that replaces the counts: an unreadable
                 // sidecar. Absent when the sidecar read cleanly.
                 "condition": condition,
-                "resolves": report.resolves,
                 "drifted": report.drifted,
                 "recheck": report.recheck,
                 // Split from `unresolvable` (03/05, criterion 2): the artifact
@@ -1001,10 +1002,6 @@ pub fn health_anchors_axis(
                 // entity end was never reconciled.
                 "dangling": report.dangling,
                 "entity_end_unreconciled": report.unreconciled,
-                // The figures never travel without what they were computed
-                // over (03/05, criteria 1 and 3).
-                "population": report.population_statement(),
-                "fully_adjudicated": report.fully_adjudicated(),
                 // Rows whose state rests on a recorded observation (url
                 // rows), each with how long it has gone unobserved. A state
                 // observed months ago is not today's state, and the axis
@@ -1025,8 +1022,13 @@ pub fn health_anchors_axis(
                         })
                     })
                     .collect::<Vec<_>>(),
-            }),
-        );
+        });
+        if let (Some(o), Ok(serde_json::Value::Object(f))) =
+            (row.as_object_mut(), serde_json::to_value(&report.figure))
+        {
+            o.extend(f);
+        }
+        out.insert(mem, row);
     }
     serde_json::Value::Object(out)
 }

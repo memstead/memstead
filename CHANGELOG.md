@@ -9,6 +9,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The anchor resolution figure is a type that carries its population.**
+  `AnchorResolutionFigure` in `memstead-base` cannot be constructed,
+  deserialized or therefore printed without the population statement it
+  was computed over; it prints as one sentence (`388 over 424 counted
+  row(s): …`, or as a ratio) and serializes as the three fields every
+  surface already emitted (`resolves`, `population`, `fully_adjudicated`).
+  The standalone anchor verification and the fidelity report carry the
+  figure instead of a bare count, the health anchors axis, `verify-anchors`
+  and the health markdown (CLI and MCP text channel) print through it, and
+  the fidelity report's resolution line now leads with the ratio and its
+  population. A gone artifact's row now spells its state `orphaned`, the
+  enum's wire name, in `verify-anchors --json` rows and the flagged-anchors
+  markdown, where the CLI spelled `unresolvable`; the per-mem summary count
+  keeps the key `unresolvable`. The anchor-state vocabulary is the engine's
+  enum alone:
+  `AnchorState::ALL`, a doc line per state and a serde round-trip test,
+  and `verify-anchors --help` lists the states from it.
 - **`memstead status --remote` reports remote staleness.** One read-only
   `git ls-remote` per mem-repo (no fetch, no ref moved) compares every
   mounted git-branch mem and the `__MEMSTEAD` schemas ref against the

@@ -391,7 +391,9 @@ pub fn record_standalone_findings(
             // verdict.
             let class = match a.state.as_str() {
                 "drifted" => FindingClass::Drifted,
-                "unresolvable" => FindingClass::UnresolvableAnchor,
+                // The row spells the enum's wire name; the finding class
+                // keeps the name the findings store is keyed by.
+                "orphaned" => FindingClass::UnresolvableAnchor,
                 _ => return None,
             };
             Some(Finding {

@@ -59,8 +59,8 @@
 - no folder mems: the check does not apply to git-branch storage, whose change set is a real two-tree diff
 
 ## Anchors (2 mems)
-- `notes`: resolves 0, drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0 — over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0)
-- `side`: resolves 0, drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0 — over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0)
+- `notes`: resolves 0 over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0); drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0
+- `side`: resolves 0 over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0); drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0
 
 ## Vital signs (2 mems)
 - `notes`: last-resort type `concept` over 2 community(ies); no bound source; 0 contested unowned file(s); 2 zero-outgoing entity(ies) in 2 community(ies); 0 empty declared section(s)

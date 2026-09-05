@@ -168,8 +168,12 @@ pub struct AnchorComposition {
     pub authored: usize,
     /// Non-`authored` anchors that carry a resolution state this pass.
     pub observed: usize,
-    /// Non-`authored` anchors that resolved clean.
-    pub resolves: usize,
+    /// Non-`authored` anchors that resolved clean, as the figure type that
+    /// carries its population (`resolves`, `population`,
+    /// `fully_adjudicated` at this level in JSON): the count is never
+    /// reachable apart from what it was computed over.
+    #[serde(flatten)]
+    pub figure: crate::anchor::AnchorResolutionFigure,
     /// Non-`authored` anchors that drifted (stable-medium hash break).
     pub drifted: usize,
     /// Non-`authored` anchors deferred for re-examination (unstable / no hash).
@@ -999,18 +1003,12 @@ fn render_hard_required(report: &FidelityReport) -> String {
     // health. `scripts/check-anchor-figure-sites.py` fails on a rendering that
     // shows a resolution count without saying what it covered.
     md.push_str(&format!(
-        "- resolution (non-`authored`, observed): resolves {}, drifted {}, recheck {}, \
-         orphaned {}; **anchor-resolution %:** {} over {} counted row(s) on {} distinct \
-         artifact(s), with {} unobserved this pass (state unavailable, never scored as \
-         resolved)\n",
-        report.anchors.resolves,
+        "- resolution (non-`authored`, observed): **anchor-resolution %:** {}; drifted {}, \
+         recheck {}, orphaned {}\n",
+        report.anchors.figure.ratio(report.anchors.observed),
         report.anchors.drifted,
         report.anchors.recheck,
         report.anchors.orphaned,
-        ratio(report.anchors.resolves, report.anchors.observed),
-        report.anchors.counted_rows,
-        report.anchors.distinct_artifacts,
-        report.anchors.unobserved
     ));
     // What the denominator counted, stated rather than left to be assumed
     // (consistency-sweep 03/01, criterion 5). Rows and artifacts differ
@@ -1629,6 +1627,7 @@ pub fn compute_fidelity_report(
         resolved,
         Some(key.binding_hash.as_str()),
     );
+    let mut resolves = 0usize;
     let mut anchors = AnchorComposition {
         counted_rows: population.included.len(),
         distinct_artifacts: population.distinct_artifacts(),
@@ -1697,7 +1696,7 @@ pub fn compute_fidelity_report(
         }
         match resolved_anchor.state {
             Some(AnchorState::Resolves) => {
-                anchors.resolves += 1;
+                resolves += 1;
                 anchors.observed += 1;
             }
             Some(AnchorState::Drifted) => {
@@ -1776,6 +1775,20 @@ pub fn compute_fidelity_report(
             ));
         }
     }
+    // The figure closes here, with the population it was computed over
+    // (consistency-sweep 03/05, criteria 1 and 3; 03/01, criterion 5): rows
+    // and artifacts differ whenever one artifact carries several legitimate
+    // rows, and a reader reads the figure as being about artifacts.
+    anchors.figure = crate::anchor::AnchorResolutionFigure::new(
+        resolves,
+        format!(
+            "over {} counted row(s) on {} distinct artifact(s), with {} unobserved this pass \
+             (state unavailable, never scored as resolved)",
+            anchors.counted_rows, anchors.distinct_artifacts, anchors.unobserved
+        ),
+        anchors.recheck == 0 && anchors.unobserved == 0,
+    )
+    .expect("the population statement is never empty");
     if anchors.recheck > 0 {
         degradations.push(format!(
             "hash-adjudication-deferred — {} anchor(s) recheck (unstable medium / hash \
@@ -1907,7 +1920,12 @@ mod tests {
                 by_grain: BTreeMap::from([("file".to_string(), 4), ("tree".to_string(), 1)]),
                 authored: 2,
                 observed: 5,
-                resolves: 4,
+                figure: crate::anchor::AnchorResolutionFigure::new(
+                    4,
+                    "over 6 counted row(s) on 6 distinct artifact(s), with 0 unobserved this pass (state unavailable, never scored as resolved)",
+                    true,
+                )
+                .unwrap(),
                 drifted: 0,
                 recheck: 1,
                 orphaned: 0,
@@ -2838,7 +2856,12 @@ mod rollup_tests {
                 by_grain: BTreeMap::from([("file".to_string(), 4)]),
                 authored: 0,
                 observed: 4,
-                resolves: 4,
+                figure: crate::anchor::AnchorResolutionFigure::new(
+                    4,
+                    "over 6 counted row(s) on 6 distinct artifact(s), with 0 unobserved this pass (state unavailable, never scored as resolved)",
+                    true,
+                )
+                .unwrap(),
                 drifted: 0,
                 recheck: 0,
                 orphaned: 0,
@@ -3077,7 +3100,12 @@ mod rollup_tests {
     fn zero_observed_anchors_blocks_green() {
         let mut r = clean_report();
         r.anchors.observed = 0;
-        r.anchors.resolves = 0;
+        r.anchors.figure = crate::anchor::AnchorResolutionFigure::new(
+            0,
+            "over 0 counted row(s) on 0 distinct artifact(s), with 0 unobserved this pass (state unavailable, never scored as resolved)",
+            true,
+        )
+        .unwrap();
         assert_eq!(r.rollup().verdict, RollupVerdict::Inconclusive);
     }
 

@@ -51,6 +51,7 @@ use crate::setup::CliContext;
 /// `fully_adjudicated: false` in its details), never zero rows: nothing
 /// is recorded for a pass that measured nothing.
 #[derive(Parser, Debug)]
+#[command(after_long_help = memstead_base::anchor::AnchorState::vocabulary_help())]
 pub struct Args {
     /// Which mem to verify (by name).
     #[arg(long = "mem", value_name = "NAME")]
@@ -162,8 +163,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .with_details(json!({
             "mem": report.mem,
             "reason": why,
-            "fully_adjudicated": report.fully_adjudicated(),
-            "population": report.population_statement(),
+            "fully_adjudicated": report.figure.fully_adjudicated(),
+            "population": report.figure.population(),
             "verdict_coverage": crate::coverage::VERIFY_ANCHORS
                 .axis_coverage()
                 .expect("verify-anchors is a verdict surface")
@@ -241,7 +242,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 "items": fs,
             })
         });
-        print_json(&json!({
+        // The figure travels as its type's own three fields (`resolves`,
+        // `population`, `fully_adjudicated`), merged into the payload.
+        let mut payload = json!({
             // The coverage rule (memstead_base::ops::coverage): this
             // surface answers for anchors alone and says so.
             "verdict_coverage": crate::coverage::VERIFY_ANCHORS
@@ -249,14 +252,11 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 .expect("verify-anchors is a verdict surface")
                 .wire_line(),
             "mem": report.mem,
-            "resolves": report.resolves,
             "drifted": report.drifted,
             "recheck": report.recheck,
             "unresolvable": report.unresolvable,
             "unobserved": report.unobserved,
             "dangling": report.dangling,
-            "population": report.population_statement(),
-            "fully_adjudicated": report.fully_adjudicated(),
             "entity_end_unreconciled": report.unreconciled,
             "anchors": report.anchors,
             "hash_backfilled": backfilled,
@@ -267,23 +267,30 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                 "recorded": observations_recorded,
             },
             "findings": findings,
-        }))?;
+        });
+        if let (Some(o), Ok(serde_json::Value::Object(f))) = (
+            payload.as_object_mut(),
+            serde_json::to_value(&report.figure),
+        ) {
+            o.extend(f);
+        }
+        print_json(&payload)?;
     } else {
-        // The figures and the population they were computed over render as ONE
-        // unit (consistency-sweep 03/05, criteria 1 and 3): a count shown
-        // without what it could not adjudicate is read as health.
+        // The figure and the population it was computed over render as ONE
+        // sentence (consistency-sweep 03/05, criteria 1 and 3): the figure
+        // type prints the count only with its statement, so a count shown
+        // without what it could not adjudicate cannot be written here.
         let mut out = format!(
             "# Anchor verification — `{}`\n\n- Resolves: {}\n- Drifted: {}\n- Recheck: {}\n\
              - Unresolvable (artifact gone): {}\n- Unobserved (not measured this pass): {}\n\
-             - Dangling (entity gone): {}\n- Population: {}\n",
+             - Dangling (entity gone): {}\n",
             report.mem,
-            report.resolves,
+            report.figure,
             report.drifted,
             report.recheck,
             report.unresolvable,
             report.unobserved,
             report.dangling,
-            report.population_statement(),
         );
         // The coverage rule: the one axis this verdict answers for,
         // in the output itself (memstead_base::ops::coverage).

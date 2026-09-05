@@ -2284,7 +2284,11 @@ community:
         );
         assert_eq!(report.recordable_observations.len(), 3);
         assert_eq!(
-            (report.resolves, report.recheck, report.unobserved),
+            (
+                report.figure.count_for_assertions(),
+                report.recheck,
+                report.unobserved
+            ),
             (1, 2, 1)
         );
 

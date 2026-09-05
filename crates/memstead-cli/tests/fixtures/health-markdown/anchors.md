@@ -10,6 +10,6 @@
 - Communities: 3
 
 ## Anchors (2 mems)
-- `notes`: resolves 0, drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0 — over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0)
-- `side`: resolves 0, drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0 — over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0)
+- `notes`: resolves 0 over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0); drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0
+- `side`: resolves 0 over 0 counted row(s): 0 adjudicated, 0 not (recheck 0, unobserved 0); drifted 0, recheck 0, unresolvable (artifact gone) 0, unobserved (not measured) 0, dangling (entity gone) 0
 

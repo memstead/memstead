@@ -2555,7 +2555,7 @@ fn verify_anchors_reports_four_states_without_binding() {
     assert_eq!(state_of("src-a.txt"), "resolves");
     assert_eq!(state_of("src-b.txt"), "drifted");
     assert_eq!(state_of("src-c.txt"), "recheck");
-    assert_eq!(state_of("src-d.txt"), "unresolvable");
+    assert_eq!(state_of("src-d.txt"), "orphaned");
 
     // Read-only: no ref moved.
     let refs_after = std::process::Command::new("git")

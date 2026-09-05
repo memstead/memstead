@@ -879,11 +879,13 @@ impl Engine {
         // below would degrade it to "no anchors" and the report would then
         // describe a clean mem it never measured.
         if let Some(why) = self.anchors_sidecar_error(mem) {
-            return Ok(MemAnchorVerification {
+            let mut report = MemAnchorVerification {
                 mem: mem.to_string(),
                 sidecar_error: Some(why),
                 ..Default::default()
-            });
+            };
+            report.figure = report.figure_over(0);
+            return Ok(report);
         }
         let mut report = MemAnchorVerification {
             mem: mem.to_string(),
@@ -894,6 +896,7 @@ impl Engine {
             ..Default::default()
         };
         let reconciled = report.unreconciled.is_none();
+        let mut resolves = 0usize;
         let mut matched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for (eid, resolved) in self.mem_anchors_resolved_with(mem, supplied) {
             let is_url = resolved.anchor.grain == crate::anchor::AnchorGrain::Url;
@@ -936,20 +939,23 @@ impl Engine {
             }
             let state = match resolved.state {
                 Some(crate::anchor::AnchorState::Resolves) => {
-                    report.resolves += 1;
+                    resolves += 1;
                     crate::anchor::AnchorState::Resolves.as_wire()
                 }
                 Some(crate::anchor::AnchorState::Drifted) => {
                     report.drifted += 1;
-                    "drifted"
+                    crate::anchor::AnchorState::Drifted.as_wire()
                 }
                 Some(crate::anchor::AnchorState::Recheck) => {
                     report.recheck += 1;
-                    "recheck"
+                    crate::anchor::AnchorState::Recheck.as_wire()
                 }
+                // The row spells the enum's wire name (`orphaned`); the
+                // summary count beside it keeps its surface name,
+                // `unresolvable` (the artifact is gone: a measured failure).
                 Some(crate::anchor::AnchorState::Orphaned) => {
                     report.unresolvable += 1;
-                    "unresolvable"
+                    crate::anchor::AnchorState::Orphaned.as_wire()
                 }
                 // Split from `unresolvable` (03/05, criterion 2): the artifact
                 // being GONE is a measurement; the pass not reaching the
@@ -977,6 +983,7 @@ impl Engine {
             .filter(|artifact| !matched.contains(*artifact))
             .cloned()
             .collect();
+        report.figure = report.figure_over(resolves);
         Ok(report)
     }
 
@@ -2993,10 +3000,14 @@ pub struct MemAnchorVerification {
     /// this field; no surface parses the sidecar on its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sidecar_error: Option<String>,
-    /// Source present, hash matches (or a non-hash class whose source
-    /// exists). The wire name is the `AnchorState` wire form, `resolves`;
-    /// `resolved` was retired on 2026-09-02 (one name per state).
-    pub resolves: usize,
+    /// The positive figure with the population it was computed over
+    /// ([`crate::anchor::AnchorResolutionFigure`]): `resolves` (the wire
+    /// name is the `AnchorState` wire form; `resolved` was retired on
+    /// 2026-09-02, one name per state), `population` and
+    /// `fully_adjudicated`, serialized at this level. The count is never
+    /// reachable apart from its statement.
+    #[serde(flatten)]
+    pub figure: crate::anchor::AnchorResolutionFigure,
     /// Source present, hash differs, stability `stable` — real drift.
     pub drifted: usize,
     /// Hash differs under `unstable` stability, or a hash is missing on
@@ -3068,29 +3079,29 @@ impl Observed {
 }
 
 impl MemAnchorVerification {
-    /// The population statement that must accompany this report's figures
-    /// (consistency-sweep 03/05, criteria 1 and 3): what the figures were
-    /// computed over, and how much of it the pass could not adjudicate.
+    /// The figure this report's counts yield for `resolves` resolving rows:
+    /// the count with the population statement it was computed over
+    /// (consistency-sweep 03/05, criteria 1 and 3): what the figures cover,
+    /// and how much of it the pass could not adjudicate.
     ///
     /// A resolution figure alone is read as health. Every W3 finding made that
     /// figure mean less than a reader assumes, and none of them made it wrong
-    /// in a way anyone could see. Rendering the figure and its population as
-    /// ONE unit is what stops the next such finding being invisible: a surface
-    /// cannot show the number and omit the caveat, because it gets both from
-    /// here or neither.
-    pub fn population_statement(&self) -> String {
+    /// in a way anyone could see. The figure type renders the number and its
+    /// population as ONE unit, so a surface cannot show the number and omit
+    /// the caveat: it gets both or neither.
+    fn figure_over(&self, resolves: usize) -> crate::anchor::AnchorResolutionFigure {
         // `recheck` belongs on ONE side of this sentence. A first version put
         // it in both: counted as adjudicated and then reported as not, so the
         // same rows appeared twice and the two numbers could not be reconciled
         // by a reader. A recheck row is a row whose drift could NOT be
         // asserted, which is the definition of unadjudicated.
         if let Some(why) = &self.sidecar_error {
-            return format!(
+            return crate::anchor::AnchorResolutionFigure::uncounted(format!(
                 "population unknown: the anchors sidecar could not be read ({why}); no row was \
                  counted, and zero counts here are not a clean mem"
-            );
+            ));
         }
-        let adjudicated = self.resolves + self.drifted + self.unresolvable;
+        let adjudicated = resolves + self.drifted + self.unresolvable;
         let unadjudicated = self.recheck + self.unobserved;
         let mut s = format!(
             "over {} counted row(s): {adjudicated} adjudicated, {unadjudicated} not (recheck {}, unobserved {})",
@@ -3109,17 +3120,12 @@ impl MemAnchorVerification {
                 "; the entity end was NOT reconciled ({why}), so dangling rows would not have been detected"
             ));
         }
-        s
-    }
-
-    /// Whether this axis adjudicated everything it counted. False means the
-    /// figures above rest on an incomplete measurement, which is not the same
-    /// as a failed one.
-    pub fn fully_adjudicated(&self) -> bool {
-        self.sidecar_error.is_none()
-            && self.recheck == 0
-            && self.unobserved == 0
-            && self.unreconciled.is_none()
+        // False means the figures rest on an incomplete measurement, which
+        // is not the same as a failed one.
+        let fully_adjudicated =
+            self.recheck == 0 && self.unobserved == 0 && self.unreconciled.is_none();
+        crate::anchor::AnchorResolutionFigure::new(resolves, s, fully_adjudicated)
+            .expect("the population statement is never empty")
     }
 }
 

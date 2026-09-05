@@ -916,19 +916,20 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
                 );
                 continue;
             }
+            // The figure prints through its type, from the row's own three
+            // fields: the count never appears apart from its population.
+            let figure = crate::anchor::AnchorResolutionFigure::from_json(counts)
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| "resolution figure not stated with its population".to_string());
             let _ = writeln!(
                 s,
-                "- `{mem}`: resolves {}, drifted {}, recheck {}, unresolvable (artifact gone) \
-                 {}, unobserved (not measured) {}, dangling (entity gone) {} — {}",
-                counts["resolves"].as_u64().unwrap_or(0),
+                "- `{mem}`: resolves {figure}; drifted {}, recheck {}, unresolvable (artifact \
+                 gone) {}, unobserved (not measured) {}, dangling (entity gone) {}",
                 counts["drifted"].as_u64().unwrap_or(0),
                 counts["recheck"].as_u64().unwrap_or(0),
                 counts["unresolvable"].as_u64().unwrap_or(0),
                 counts["unobserved"].as_u64().unwrap_or(0),
                 counts["dangling"].as_u64().unwrap_or(0),
-                counts["population"]
-                    .as_str()
-                    .unwrap_or("population not stated"),
             );
         }
     }
