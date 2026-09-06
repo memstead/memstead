@@ -251,10 +251,20 @@ pub fn find_schema<'a>(
 // Surface-specific inline hints
 // ---------------------------------------------------------------------------
 
-fn schema_lookup_hint_md(surface: Surface) -> &'static str {
+/// The CLI steer names `--mem` whenever the bare form would not
+/// resolve the type the reader is looking at: more than one writable
+/// mem, or any read-only mount (an installed archive), whose types
+/// the bare `memstead type <name>` never reaches because it resolves
+/// against the writable mem's pin. A lone writable mem keeps the
+/// short form. `needs_mem` is ignored on MCP, where the schema call
+/// takes the schema name.
+fn schema_lookup_hint_md(surface: Surface, needs_mem: bool) -> &'static str {
     match surface {
         Surface::Mcp => {
             "_(call `memstead_schema(name=<ref>)` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n"
+        }
+        Surface::Cli if needs_mem => {
+            "_(run `memstead type <name> --mem <mem>` for the full per-type catalogue, sections, fields, and relationship vocabulary; `--mem` names the mem whose schema to read, a read-only mount included)_\n\n"
         }
         Surface::Cli => {
             "_(run `memstead type <name>` for the full per-type catalogue, sections, fields, and relationship vocabulary)_\n\n"
@@ -1014,7 +1024,10 @@ pub fn compose_overview(
     if schemas_out.is_empty() {
         md.push_str("_(no schemas in use)_\n\n");
     } else {
-        md.push_str(schema_lookup_hint_md(surface));
+        md.push_str(schema_lookup_hint_md(
+            surface,
+            writable_names.len() != 1 || !read_names.is_empty(),
+        ));
         for s in &schemas_out {
             let schema_ref = s["ref"].as_str().unwrap_or("?");
             md.push_str(&format!("### {schema_ref}\n\n"));

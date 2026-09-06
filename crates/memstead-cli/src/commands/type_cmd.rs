@@ -22,9 +22,12 @@ use crate::setup::CliContext;
 pub struct Args {
     pub name: Option<String>,
 
-    /// Resolve the schema from this writable mem's pin. Required
-    /// when the workspace has more than one writable mem; defaults
-    /// to the lone writable mem otherwise.
+    /// Resolve the schema from this mem's pin. Any mounted mem
+    /// qualifies, read-only mounts (an installed archive) included:
+    /// describing a type is a read. Required when the workspace has
+    /// more than one writable mem, and whenever the type you want is
+    /// a read-only mount's; defaults to the lone writable mem
+    /// otherwise.
     #[arg(long)]
     pub mem: Option<String>,
 }

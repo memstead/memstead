@@ -247,8 +247,13 @@ pub enum Command {
     Relate(commands::relate::Args),
 
     /// Delete an entity. Use `--dry-run` to preview impact first.
-    /// Delete is hashless by design (no post-state to race on); race
-    /// protection comes from `HAS_INCOMING_REFS` — and
+    /// Delete is optimistically locked at the engine, which takes the
+    /// entity's current `_hash` on every delete: over MCP the caller
+    /// supplies `expected_hash` from a prior read, on the CLI the
+    /// command reads the current hash itself immediately before the
+    /// delete (the `--auto-hash` posture of `update` / `rename`), so it
+    /// carries no hash flag. Protection against dangling referrers is
+    /// `HAS_INCOMING_REFS` on both surfaces — and
     /// `RESIDUAL_STUB_FOR_READONLY_REFERRERS` for read-only-referrer cases.
     Delete(commands::delete::Args),
 

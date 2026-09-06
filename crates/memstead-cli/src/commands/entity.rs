@@ -249,14 +249,26 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             ));
         }
         if let Some(prov) = &provenance {
+            // A record's client and actor are recorded only when the
+            // caller declared them; an absent one reads `unrecorded`,
+            // never a guess. The timestamp is epoch seconds on the
+            // wire and renders as RFC 3339 here, the form every other
+            // date on the read surfaces uses.
             let render_rec = |label: &str, key: &str| -> Option<String> {
                 let r = prov.get(key)?;
+                let at = r["timestamp"]
+                    .as_i64()
+                    .and_then(|secs| time::OffsetDateTime::from_unix_timestamp(secs).ok())
+                    .and_then(|dt| {
+                        dt.format(&time::format_description::well_known::Rfc3339)
+                            .ok()
+                    })
+                    .unwrap_or_else(|| "unrecorded".to_string());
                 Some(format!(
-                    "- {label}: {} ({}), role {}, at {}",
-                    r["client"].as_str().unwrap_or("unknown client"),
-                    r["actor"].as_str().unwrap_or("unknown actor"),
+                    "- {label}: {} ({}), role {}, at {at}",
+                    r["client"].as_str().unwrap_or("unrecorded"),
+                    r["actor"].as_str().unwrap_or("unrecorded"),
                     r["role"].as_str().unwrap_or("unspecified"),
-                    r["timestamp"],
                 ))
             };
             text.push_str(

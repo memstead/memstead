@@ -3328,16 +3328,21 @@ pub struct SearchHit {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub sections: HashMap<String, String>,
     /// Score component breakdown — populated when the call supplied a
-    /// text predicate; `None` on the metadata-only path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// text predicate; `None` on the metadata-only path. Always on the
+    /// wire (as `null` when absent): the envelope the `memstead_search`
+    /// description promises is one stable shape, so a consumer reads
+    /// the key and branches on its value, never on its presence.
+    #[serde(default)]
     pub score_breakdown: Option<ScoreBreakdown>,
     /// Per-term match details keyed by query term — populated when the
     /// call supplied a text predicate; `None` on the metadata-only path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Always on the wire, as `score_breakdown` is.
+    #[serde(default)]
     pub matched_terms: Option<HashMap<String, Vec<TermMatch>>>,
     /// Expansion metadata — populated on hits reached via graph
-    /// expansion; `None` on primary hits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// expansion; `None` on primary hits. Always on the wire, as
+    /// `score_breakdown` is.
+    #[serde(default)]
     pub expansion: Option<ExpansionInfo>,
     /// Lead-section summary resolved against the hit's *own* mem schema
     /// at search time (see [`SummaryPair`]). The renderer cannot resolve

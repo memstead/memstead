@@ -3,7 +3,9 @@
 //! `--dry-run` does a non-destructive preview by reading the entity and
 //! counting its relations; no engine-side dry-run exists — the MCP tool
 //! carries no `dry_run` param, and optimistic locking via `expected_hash`
-//! is the shipping safety mechanism.
+//! is the shipping safety mechanism. One locking design on both surfaces:
+//! the engine op takes the hash unconditionally; MCP makes the caller
+//! supply it, the CLI reads it itself right before the delete (below).
 
 use clap::Parser;
 
@@ -73,11 +75,14 @@ fn run_mem_repo(
     }
 
     // `expected_hash` is mandatory on `Engine::delete_entity`. The CLI
-    // reads the current hash itself rather than exposing a flag — agents
-    // and humans invoking `memstead delete <id>` want one-shot semantics, and
-    // there's no meaningful external concurrency against a user-driven
-    // CLI process. MCP keeps the full read-then-lock pattern so a
-    // multi-agent workflow can't stomp itself.
+    // reads the current hash itself rather than exposing a flag — the
+    // `--auto-hash` posture `update` / `rename` offer as an option is
+    // the delete's only mode: agents and humans invoking `memstead
+    // delete <id>` want one-shot semantics, and there's no meaningful
+    // external concurrency against a user-driven CLI process. MCP keeps
+    // the full read-then-lock pattern so a multi-agent workflow can't
+    // stomp itself. The `Delete` doc on `cli.rs` and the
+    // `memstead_delete` description state this same design.
     let current_hash = engine
         .get_entity(&lookup_id)
         .ok_or_else(|| {

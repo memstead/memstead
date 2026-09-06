@@ -770,7 +770,9 @@ pub struct SearchResultEnvelope<'a> {
     /// shape stability).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub facets: Option<&'a Facets>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Always on the wire, `[]` when nothing warned: the envelope is one
+    /// stable shape, so a consumer reads `warnings` without testing for
+    /// the key first.
     pub warnings: &'a Vec<crate::ops::WarningHint>,
 }
 
@@ -790,7 +792,8 @@ pub struct ListResultEnvelope<'a> {
     #[serde(rename = "_total_tokens")]
     pub total_tokens: usize,
     pub hits: Vec<SearchHitEnvelope<'a>>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// Always on the wire, `[]` when nothing warned (as on the search
+    /// envelope).
     pub warnings: &'a Vec<crate::ops::WarningHint>,
 }
 
@@ -3330,10 +3333,12 @@ write_rules: []
         assert_eq!(value["_total"], 1);
         assert_eq!(value["_returned"], 1);
         assert_eq!(value["_offset"], 0);
-        // Warnings field is omitted when empty (skip_serializing_if).
-        assert!(
-            value.get("warnings").is_none(),
-            "empty warnings must be elided, got: {value}"
+        // The envelope is one stable shape: `warnings` is on the wire
+        // as `[]` when nothing warned, never elided.
+        assert_eq!(
+            value["warnings"],
+            serde_json::json!([]),
+            "empty warnings must serialise as [], got: {value}"
         );
 
         let hit0 = &value["hits"][0];

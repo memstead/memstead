@@ -205,7 +205,7 @@ Memstead also has a hosted registry; that is a separate, closed-source part of t
 
 Stated here so you don't have to discover it:
 
-- **No semantic / embedding search.** `memstead_search` is ranked lexical search plus structural filters (BM25-scored content matches, type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
+- **No semantic / embedding search.** `memstead_search` is ranked lexical search plus structural filters (a BM25 content score with title and per-field weight boosts, itemised on every hit as `bm25 + title + <field>`; type/metadata filters) — there is no vector index. Agents navigate by structure: communities, types, relationships.
 - **No one-shot import command.** Nothing turns a folder of notes into a mem in a single command — every entity enters through a schema-validated write. Bulk ingestion is a declared path instead: bind a source (a codebase, a docs tree, a URL) to a mem as a [projection](GLOSSARY.md), and the Claude Code plugin's `/ingest` and `/sync` skills build the graph from the binding's brief and keep it current, batch by batch.
 - **The engine does not calculate.** It can know a statement is due (`memstead due`), hold every input as typed entities (rates, allocation keys, receipts), and name exactly what is missing — and it will still never produce the statement, the sum, or the filled form. That output is the periodically-invoked agent's work; the engine's query path stays deterministic, with no model call and no computation in it.
 - **No built-in visualization.** The graph is queryable (status, overview, relations) but ships no renderer; projections and exports are the extension point.

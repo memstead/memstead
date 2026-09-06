@@ -156,29 +156,47 @@ rationale = "workspace policy decides what an agent may do, so it is an operator
 
 # Binding (projection-promotion) surface — the `memstead projection` tree.
 # The projection is the unit: one versioned binding per source→mem
-# obligation. The scaffold / migrate / advance / enable leaves are CLI-only
-# (like the mem / workspace lifecycle rows, several operations share one
-# top-level `projection` subcommand).
+# obligation. Every verb of the tree is CLI-only. Each row names its
+# verb as a path (`projection edit`), so the parity generator refuses a
+# row whose verb the binary does not have and lists a verb no row names
+# as unaligned: the roster here and `memstead projection --help` are
+# bound to each other.
 
 [[operation]]
 name = "projection-brief"
-cli = "projection"
+cli = "projection brief"
 
 [[operation]]
 name = "projection-init"
-cli = "projection"
+cli = "projection init"
 
 [[operation]]
 name = "projection-migrate"
-cli = "projection"
+cli = "projection migrate"
 
 [[operation]]
 name = "projection-advance"
-cli = "projection"
+cli = "projection advance"
 
 [[operation]]
 name = "projection-enable"
-cli = "projection"
+cli = "projection enable"
+
+[[operation]]
+name = "projection-edit"
+cli = "projection edit"
+
+[[operation]]
+name = "projection-exclude"
+cli = "projection exclude"
+
+[[operation]]
+name = "projection-verify"
+cli = "projection verify"
+
+[[operation]]
+name = "projection-check-path"
+cli = "projection check-path"
 
 # Parse-time-drift recovery. Reaches the CLI (`memstead recover`);
 # no MCP tool (operator-initiated maintenance sweep).

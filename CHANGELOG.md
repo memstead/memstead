@@ -129,6 +129,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Six texts now say what the wire serves.** `memstead entity
+  --provenance` renders each touch's timestamp as RFC 3339 and an absent
+  client or actor as `unrecorded`, where it printed raw epoch seconds and
+  "unknown client". `memstead type --help` describes `--mem` as taking
+  any mounted mem, a read-only mount included (the flag always did; the
+  help said "this writable mem's pin"), and the CLI overview's steer
+  reads `memstead type <name> --mem <mem>` whenever the bare form would
+  not resolve the type shown: more than one writable mem, or an installed
+  archive. The delete operation states one locking design on the CLI
+  help, the `memstead_delete` description and the engine mem: the engine
+  op takes the entity's current hash on every delete, MCP has the caller
+  supply it, the CLI reads it itself right before deleting and so has no
+  hash flag (the CLI help had called delete "hashless by design" while
+  MCP required the hash). The parity matrix lists all nine `memstead
+  projection` verbs (`edit`, `exclude`, `verify` and `check-path` join
+  the five it had). The README's search sentence names what a hit's score
+  line prints: a BM25 content score with title and per-field boosts.
 - **A located span and a url row were silently out of a binding's
   population.** The fidelity report's scope test matched the artifact
   string with its locator attached, so `docs.md#L3-L5`, a dated unit and a
@@ -141,6 +158,24 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **The search envelope is one stable shape.** `memstead_search` and
+  `memstead search --json` now serialise every key the tool description
+  names on every response: `warnings` is `[]` when nothing warned, and a
+  hit's `score_breakdown`, `matched_terms` and `expansion` are `null`
+  where nothing applies (a metadata-only call, a primary hit) instead of
+  being omitted. `memstead list --json` carries the same keys. The
+  description says which values are `null` when, in the sentence that
+  names them; a consumer reads a key and branches on its value, never on
+  its presence.
+- **The parity generator refuses a registry row the binaries do not
+  expose, down to the verb.** `xtask generate-docs` fails, naming the
+  row, when `xtask/operations.toml` claims an MCP tool or CLI subcommand
+  the live binaries do not have, where the matrix used to print a
+  "declared but not exposed" marker into the page: a defective registry
+  fails the docs build instead of being published by it. A row may now
+  name one verb of a command tree as a path (`cli = "projection edit"`);
+  the projection rows do, so a verb the CLI lost fails the build and a
+  verb no row names is listed as unaligned.
 - **`memstead admin` and `memstead domain` move behind a Cargo feature.**
   The two registry-operator command trees (takedown and deny-list
   moderation; domain-authority signing keys) are compiled only when

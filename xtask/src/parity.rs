@@ -1,6 +1,7 @@
 //! Render the Surface Parity Matrix. Each row of the matrix is a logical
 //! engine operation declared in `xtask/operations.toml`; columns line up
-//! the matching MCP tool name and top-level CLI subcommand. Names
+//! the matching MCP tool name and CLI subcommand (a top-level command,
+//! or one verb of a command tree as `projection edit`). Names
 //! emitted by the live extractors that the
 //! registry doesn't pin land in a dedicated "unaligned" sub-table so the
 //! matrix never silently drops a row when a new tool / command / method
@@ -51,10 +52,10 @@ pub fn collect_inputs() -> Inputs {
 pub fn render(operations_toml: &str, inputs: &Inputs) -> Result<String> {
     let parsed: Operations =
         toml::from_str(operations_toml).context("parsing xtask/operations.toml")?;
-    Ok(render_parsed(&parsed, inputs))
+    render_parsed(&parsed, inputs)
 }
 
-fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
+fn render_parsed(ops: &Operations, inputs: &Inputs) -> Result<String> {
     let mut out = String::new();
     out.push_str("# Surface Parity Matrix\n\n");
     out.push_str(
@@ -69,24 +70,44 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     let mcp_set: BTreeSet<&str> = inputs.mcp_tools.iter().map(String::as_str).collect();
     let cli_set: BTreeSet<&str> = inputs.cli_commands.iter().map(String::as_str).collect();
 
+    // A registry row naming a surface entry the live extractor did not
+    // produce is a registry defect. The render refuses rather than
+    // printing a marker into the page: the matrix is a build output of
+    // the checkout, and a defective registry must fail the build that
+    // would publish it, not decorate the page it publishes.
+    let mut undeclared: Vec<String> = Vec::new();
+    for op in &ops.operation {
+        if let Some(name) = &op.mcp
+            && !mcp_set.contains(name.as_str())
+        {
+            undeclared.push(format!("`{}`: MCP tool `{name}` is not exposed", op.name));
+        }
+        if let Some(name) = &op.cli
+            && !cli_set.contains(name.as_str())
+        {
+            undeclared.push(format!(
+                "`{}`: CLI subcommand `{name}` is not exposed",
+                op.name
+            ));
+        }
+    }
+    if !undeclared.is_empty() {
+        anyhow::bail!(
+            "xtask/operations.toml names surface entries the binaries do not expose:\n  {}",
+            undeclared.join("\n  ")
+        );
+    }
+
     out.push_str("## Matrix\n\n");
     out.push_str("| Operation | MCP | CLI |\n");
     out.push_str("|-----------|-----|-----|\n");
     for op in &ops.operation {
         let mcp_cell = match &op.mcp {
-            Some(name) => format!(
-                "`{}`{}",
-                name,
-                presence_suffix(mcp_set.contains(name.as_str())),
-            ),
+            Some(name) => format!("`{name}`"),
             None => "—".to_string(),
         };
         let cli_cell = match &op.cli {
-            Some(name) => format!(
-                "`{}`{}",
-                name,
-                presence_suffix(cli_set.contains(name.as_str())),
-            ),
+            Some(name) => format!("`{name}`"),
             None => "—".to_string(),
         };
         let marker = if op.rationale.is_some() { " †" } else { "" };
@@ -136,7 +157,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
     let unaligned_cli: Vec<&str> = cli_set
         .iter()
         .copied()
-        .filter(|name| !claimed_cli.contains(name))
+        .filter(|name| !cli_entry_claimed(name, &claimed_cli))
         .collect();
     if unaligned_mcp.is_empty() && unaligned_cli.is_empty() {
         out.push_str("## Unaligned\n\n");
@@ -154,17 +175,7 @@ fn render_parsed(ops: &Operations, inputs: &Inputs) -> String {
         emit_unaligned_table(&mut out, "CLI", &unaligned_cli);
     }
 
-    out
-}
-
-/// A registry row naming a surface entry the live extractor did not
-/// produce is a registry defect, and the matrix says so in the cell.
-fn presence_suffix(present: bool) -> &'static str {
-    if present {
-        ""
-    } else {
-        " *(declared but not exposed)*"
-    }
+    Ok(out)
 }
 
 fn emit_unaligned_table(out: &mut String, label: &str, items: &[&str]) {
@@ -178,11 +189,48 @@ fn emit_unaligned_table(out: &mut String, label: &str, items: &[&str]) {
     out.push('\n');
 }
 
+/// Every CLI entry the matrix can name: each top-level subcommand, and
+/// each nested verb as a space-joined path (`projection edit`), so a
+/// registry row can bind one verb of a command tree and the guard
+/// refuses a verb the binary does not have. clap's implicit `help`
+/// leaf is not an entry.
 fn subcommand_names(cmd: &clap::Command) -> Vec<String> {
-    let mut names: Vec<String> = cmd
-        .get_subcommands()
-        .map(|s| s.get_name().to_string())
-        .collect();
+    fn walk(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
+        for sub in cmd.get_subcommands() {
+            if sub.get_name() == "help" {
+                continue;
+            }
+            let path = if prefix.is_empty() {
+                sub.get_name().to_string()
+            } else {
+                format!("{prefix} {}", sub.get_name())
+            };
+            walk(sub, &path, out);
+            out.push(path);
+        }
+    }
+    let mut names = Vec::new();
+    walk(cmd, "", &mut names);
     names.sort();
     names
+}
+
+/// Whether a CLI entry is pinned by the registry. A top-level command
+/// is pinned when a row claims it bare (the lifecycle rows pin `mem`
+/// and `workspace` as one command each) or claims any of its verbs by
+/// path. A nested verb is pinned when a row claims it by path or claims
+/// its command bare; and a verb of a command the registry does not
+/// touch at all is not listed on its own, its command's line says it.
+fn cli_entry_claimed(name: &str, claimed_cli: &BTreeSet<&str>) -> bool {
+    if claimed_cli.contains(name) {
+        return true;
+    }
+    let verb_prefix = format!("{name} ");
+    match name.split_once(' ') {
+        None => claimed_cli.iter().any(|c| c.starts_with(&verb_prefix)),
+        Some((top, _)) => {
+            let top_prefix = format!("{top} ");
+            claimed_cli.contains(top) || !claimed_cli.iter().any(|c| c.starts_with(&top_prefix))
+        }
+    }
 }
