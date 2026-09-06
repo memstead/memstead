@@ -36,9 +36,9 @@ pub use config::{
 };
 pub use loader::{
     HeadingKeyViolation, MetadataPolarityFormat, SchemaLoadError, check_reserved_metadata_keys,
-    check_section_formats, check_section_heading_roundtrip, load_authoring_package_from_memory,
-    load_schema_from_dir, load_schema_from_memory, load_schema_from_memory_with_format,
-    load_sealed_package,
+    check_section_formats, check_section_heading_roundtrip, check_system_message_markers,
+    literal_markers_in, load_authoring_package_from_memory, load_schema_from_dir,
+    load_schema_from_memory, load_schema_from_memory_with_format, load_sealed_package,
 };
 pub use manifest::{
     Cardinality, CommunityConfig, CrossMemRelationshipEntry, DefaultWritingGuidance, LabellingDef,

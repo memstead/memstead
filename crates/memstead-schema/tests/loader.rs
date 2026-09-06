@@ -3570,3 +3570,91 @@ fn value_pattern_loads_onto_the_field() {
     let f = td.metadata_field("status").expect("field");
     assert_eq!(f.value_pattern.as_deref(), Some("[a-z]+"));
 }
+
+// ---------------------------------------------------------------------------
+// System-message markers name what a section rule recognises
+// ---------------------------------------------------------------------------
+
+/// Every built-in package's system message names only literal markers
+/// (`Word: <placeholder>`) that some section write rule recognises
+/// verbatim: the prose an agent reads first never tells it to write a
+/// form the skeleton does not accept.
+#[test]
+fn builtin_system_messages_name_only_recognised_markers() {
+    let all = memstead_schema::builtins::load_builtin_schemas().expect("builtins load");
+    for s in &all {
+        memstead_schema::check_system_message_markers(s).unwrap_or_else(|e| {
+            panic!("{}@{}: {e}", s.manifest.name, s.version);
+        });
+    }
+}
+
+fn manifest_with_system_message(marker_sentence: &str) -> String {
+    minimal_manifest().replace(
+        "when_to_use: In loader tests only\n",
+        &format!("when_to_use: In loader tests only\nsystem_message: |\n  {marker_sentence}\n"),
+    )
+}
+
+/// A system message naming a marker its section rule lacks refuses,
+/// naming the marker and the markers the rules do recognise.
+#[test]
+fn system_message_marker_without_a_section_rule_refuses() {
+    let manifest =
+        manifest_with_system_message("If nothing applies, write `Not applicable: <reason>`.");
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("loads");
+    let err = memstead_schema::check_system_message_markers(&schema)
+        .expect_err("a marker no rule recognises must refuse");
+    let text = err.to_string();
+    assert!(
+        text.contains("`Not applicable: <reason>`"),
+        "the refusal names the marker: {text}"
+    );
+    assert!(
+        matches!(err, SchemaLoadError::SystemMessageMarkerUnrecognised { .. }),
+        "typed variant: {err:?}"
+    );
+}
+
+/// The same marker, written into a section rule, passes; and ordinary
+/// code spans in the system message (`kind=idea`, a relation name) are
+/// not markers at all.
+#[test]
+fn system_message_marker_recognised_by_a_section_rule_passes() {
+    let manifest = manifest_with_system_message(
+        "Use `status=closed` and `PART_OF`; if nothing applies, write `Not applicable: <reason>`.",
+    );
+    let type_yaml = minimal_type().replace(
+        "      - One sentence describing the body.\n",
+        "      - One sentence describing the body.\n      - \"If nothing applies, write exactly `Not applicable: <reason>`.\"\n",
+    );
+    let schema = load(&manifest, &[("sample", &type_yaml)]).expect("loads");
+    memstead_schema::check_system_message_markers(&schema).expect("recognised marker passes");
+    assert_eq!(
+        memstead_schema::literal_markers_in(
+            "`status=closed`, `PART_OF`, `Not applicable: <reason>`, `note.kind`"
+        ),
+        vec!["Not applicable: <reason>".to_string()]
+    );
+}
+
+/// A system message naming a bare identifier the skeleton lacks (a
+/// retired field, a misspelt section) refuses; one naming a field the
+/// skeleton has, or a `field=value` pair of an existing enum, passes.
+#[test]
+fn system_message_naming_an_unknown_identifier_refuses() {
+    let manifest = manifest_with_system_message("Declare `complement_na` deliberately instead.");
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("loads");
+    let err = memstead_schema::check_system_message_markers(&schema)
+        .expect_err("a field the skeleton lacks must refuse");
+    assert!(
+        err.to_string().contains("`complement_na`"),
+        "names the identifier: {err}"
+    );
+    let manifest = manifest_with_system_message(
+        "Set `status=closed` on the `body` of a `sample`; `tags` ride along.",
+    );
+    let schema = load(&manifest, &[("sample", &minimal_type())]).expect("loads");
+    memstead_schema::check_system_message_markers(&schema)
+        .expect("names the skeleton carries pass");
+}

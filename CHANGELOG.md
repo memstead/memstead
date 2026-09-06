@@ -129,6 +129,20 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Schema prose matches the skeleton it describes.** `project@0.6.0` is
+  `project@0.5.0` with its prose corrected and its skeleton byte-for-byte
+  the same: the when-to-use pairs the mem with `software@0.5.0` (it named
+  `software@0.2.0`), and the cross-mem REFERENCES prose no longer lists a
+  `macos` mem. A shipped generation's bytes are sealed by the retention
+  ledger, so the correction is a new generation and the dogfood project
+  mem re-pins to it. The schema loader gains
+  `check_system_message_markers`, run by `schema install`, `schema new`
+  and `schema validate`: a package `system_message` that names a bare
+  identifier no type, section, metadata field, enum value or relationship
+  of the package carries (a retired field, a misspelt key), or a literal
+  marker (`Word: <placeholder>`) no section write rule recognises, refuses
+  with `SCHEMA_VALIDATION_FAILED` naming the offender. Every built-in
+  passes; the test that proves the red case is beside the loader tests.
 - **Health tells the truth about mounts, coverage and rehearsals.** A
   mem-branch mount whose branch was missing when a long-running engine
   loaded it (a mount pulled in before its branch, an unborn mem) stayed

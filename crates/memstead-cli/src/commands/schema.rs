@@ -455,6 +455,7 @@ fn scaffold_new(ctx: &CliContext, args: NewArgs) -> anyhow::Result<()> {
     if let Err(e) = memstead_schema::loader::load_schema_from_dir(&pkg_dir)
         .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
         .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
+        .and_then(|s| memstead_schema::check_system_message_markers(&s).map(|()| s))
     {
         return Err(CliError::new(
             ExitKind::Generic,
@@ -826,6 +827,7 @@ fn validate(ctx: &CliContext, args: ValidateArgs) -> anyhow::Result<()> {
         .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
         .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
         .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
+        .and_then(|s| memstead_schema::check_system_message_markers(&s).map(|()| s))
     {
         Ok(schema) => {
             // Exemplar gate — same validator the install/seal path
@@ -1138,6 +1140,7 @@ fn resolve_source(
             .and_then(|s| memstead_schema::check_section_heading_roundtrip(&s).map(|()| s))
             .and_then(|s| memstead_schema::check_reserved_metadata_keys(&s).map(|()| s))
             .and_then(|s| memstead_schema::check_section_formats(&s).map(|()| s))
+            .and_then(|s| memstead_schema::check_system_message_markers(&s).map(|()| s))
             .map_err(|e| {
                 CliError::new(
                     ExitKind::Validation,

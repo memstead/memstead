@@ -205,6 +205,25 @@ pub enum SchemaLoadError {
     InvalidLabelling { offender: String, reason: String },
 
     #[error(
+        "the package system message names the literal marker `{marker}` and no section write \
+         rule recognises it: a marker the prose tells an author to write must be the one a \
+         section rule accepts (write it into that section's `write_rules`, or drop it from \
+         `system_message`); markers the rules do recognise: [{recognised}]"
+    )]
+    SystemMessageMarkerUnrecognised { marker: String, recognised: String },
+
+    #[error(
+        "the package system message names `{identifier}` (a {kind}) and no type, section, \
+         metadata field, enum value or relationship of this package carries that name: the \
+         prose an agent reads first must name what the skeleton has (rename it, or drop it \
+         from `system_message`)"
+    )]
+    SystemMessageNamesUnknownIdentifier {
+        identifier: String,
+        kind: &'static str,
+    },
+
+    #[error(
         "type '{type_name}' section '{section}' format declaration is invalid: {}",
         problems.join("; ")
     )]
@@ -1495,6 +1514,213 @@ fn compile_section_formats(td: &mut TypeDefinition) {
             section.format_problems = problems;
         }
     }
+}
+
+/// The literal markers a prose string names: every backtick span of
+/// the shape `` `Word words: <placeholder>` `` — a template an author is
+/// told to write verbatim into a section (`Not applicable: <reason>`).
+/// Ordinary code spans (`kind=session_log`, `PART_OF`, a field name)
+/// do not match the shape and are not markers.
+pub fn literal_markers_in(prose: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = prose;
+    while let Some(start) = rest.find('`') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('`') else { break };
+        let span = &after[..end];
+        if is_literal_marker(span) && !out.iter().any(|m| m == span) {
+            out.push(span.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+    out
+}
+
+/// Every backtick span of a prose string, verbatim.
+fn code_spans_in(prose: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = prose;
+    while let Some(start) = rest.find('`') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('`') else { break };
+        out.push(after[..end].to_string());
+        rest = &after[end + 1..];
+    }
+    out
+}
+
+/// A bare snake_case identifier: the shape of a field key, section
+/// key, type name or enum value. Anything with spaces, dots, slashes,
+/// uppercase or punctuation is prose or a path, not a skeleton name.
+fn is_bare_identifier(span: &str) -> bool {
+    !span.is_empty()
+        && span.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && span
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Every lowercase name the skeleton carries: type names, section keys,
+/// metadata field keys (the engine-injected base keys included), enum
+/// values, the relationship names lowered, and the schema language's
+/// own keys (`when_to_use`, `write_rules`, ...), which a system message
+/// may name when it explains the format to an author.
+fn skeleton_vocabulary(schema: &crate::Schema) -> Vec<String> {
+    let mut v: Vec<String> = crate::base_metadata::BASE_KEYS
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    v.extend(schema_language_keys());
+    v.extend(
+        crate::base_metadata::prefix_fields()
+            .into_iter()
+            .chain(crate::base_metadata::suffix_fields())
+            .map(|f| f.key),
+    );
+    for td in schema.types.values() {
+        v.push(td.name.clone());
+        v.extend(td.sections.iter().map(|s| s.key.clone()));
+        for f in &td.metadata_fields {
+            v.push(f.key.clone());
+            if let Some(vals) = &f.enum_values {
+                v.extend(vals.iter().cloned());
+            }
+        }
+    }
+    v.extend(
+        schema
+            .manifest
+            .relationships
+            .definitions
+            .iter()
+            .map(|r| r.name.to_ascii_lowercase()),
+    );
+    v
+}
+
+/// Every property name the two meta-schemas declare, at any depth:
+/// the words the schema language itself is written in.
+fn schema_language_keys() -> Vec<String> {
+    fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::Object(props)) = map.get("properties") {
+                    out.extend(props.keys().cloned());
+                }
+                for child in map.values() {
+                    walk(child, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for text in [
+        crate::meta_schema::META_SCHEMA_MANIFEST,
+        crate::meta_schema::META_SCHEMA_TYPE_DEFINITION,
+    ] {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
+            walk(&v, &mut out);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn is_literal_marker(span: &str) -> bool {
+    let Some((head, tail)) = span.split_once(": <") else {
+        return false;
+    };
+    let head_ok = head.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && head.chars().all(|c| c.is_ascii_alphabetic() || c == ' ');
+    let tail_ok = tail.ends_with('>')
+        && tail.len() > 1
+        && tail[..tail.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_' || c == '-' || c == ' ');
+    head_ok && tail_ok
+}
+
+/// Refuse a schema whose package `system_message` names a literal
+/// marker no section write rule recognises. The system message is the
+/// prose an agent reads first; a marker it names (`Not applicable:
+/// <reason>`) is a promise that some section rule accepts exactly that
+/// text, and the rule is the reference. The planning package once kept
+/// a pre-0.6 field name in its system message after the section marker
+/// replaced it; every author who followed the prose wrote a field the
+/// skeleton did not have. Same posture as [`check_section_formats`]:
+/// install and strict validation call this and refuse; boot and
+/// sealed-schema loads do not.
+pub fn check_system_message_markers(schema: &crate::Schema) -> Result<(), SchemaLoadError> {
+    let Some(message) = schema.manifest.system_message.as_deref() else {
+        return Ok(());
+    };
+    // Bare identifiers first: a code span naming a field, section,
+    // type, enum value or `field=value` pair the skeleton does not
+    // carry is the same defect in a smaller shape (the planning
+    // package once named a `complement_na` field its types lacked).
+    let vocabulary = skeleton_vocabulary(schema);
+    for span in code_spans_in(message) {
+        if let Some((field, value)) = span.split_once('=') {
+            if is_bare_identifier(field)
+                && is_bare_identifier(value)
+                && !vocabulary.iter().any(|v| v == field)
+            {
+                return Err(SchemaLoadError::SystemMessageNamesUnknownIdentifier {
+                    identifier: span.clone(),
+                    kind: "field",
+                });
+            }
+            if is_bare_identifier(field)
+                && is_bare_identifier(value)
+                && !vocabulary.iter().any(|v| v == value)
+            {
+                return Err(SchemaLoadError::SystemMessageNamesUnknownIdentifier {
+                    identifier: span.clone(),
+                    kind: "value",
+                });
+            }
+            continue;
+        }
+        if is_bare_identifier(&span) && !vocabulary.contains(&span) {
+            return Err(SchemaLoadError::SystemMessageNamesUnknownIdentifier {
+                identifier: span,
+                kind: "identifier",
+            });
+        }
+    }
+    let named = literal_markers_in(message);
+    if named.is_empty() {
+        return Ok(());
+    }
+    let mut recognised: Vec<String> = Vec::new();
+    for td in schema.types.values() {
+        for section in &td.sections {
+            for rule in &section.write_rules {
+                for m in literal_markers_in(rule) {
+                    if !recognised.contains(&m) {
+                        recognised.push(m);
+                    }
+                }
+            }
+        }
+    }
+    recognised.sort();
+    for marker in named {
+        if !recognised.contains(&marker) {
+            return Err(SchemaLoadError::SystemMessageMarkerUnrecognised {
+                marker,
+                recognised: recognised.join(", "),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Refuse a schema whose section-format declarations are defective —

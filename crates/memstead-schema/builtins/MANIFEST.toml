@@ -144,3 +144,8 @@ sha256 = "c48aeae9ca039d421663d6fe2b05df89dd95e0f9fd7829012f19fcfad943f3dc"
 name = "software"
 version = "0.5.0"
 sha256 = "3e73b61eb6244919a652e4b66ed40d2072a2624cc26b0c5388dc31a94eef8eb3"
+
+[[shipped]]
+name = "project"
+version = "0.6.0"
+sha256 = "3567176dbf0855b3fa0d493172c13b364d840f49b7a49221493fbb0c8791ed2d"
