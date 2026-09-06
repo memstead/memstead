@@ -222,9 +222,19 @@ impl BackendChanges {
 /// - First event = Create                 → `Added`
 /// - Anything else                        → `Updated`
 ///
-/// `Rename` events surface as `Updated` (folder rename doesn't carry
-/// from→to metadata). `Batch` events have no entity id and don't
-/// contribute envelopes. The cursor is an RFC-3339 timestamp; the
+/// A `rename` row records only the id the entity now carries (the
+/// ledger's on-disk shape); with `store` present the replay pairs it
+/// with the id that vanished: an id the ledger knows, absent from the
+/// store, never deleted, whose creation instant matches the renamed
+/// entity's `created_date` (a rename keeps it), falling back to the
+/// nearest vanished id before the rename row. A pair inside one window
+/// surfaces as one event: `renamed` with `from_id` and `to_id`, or
+/// `added` under the final id when the entity was also created in the
+/// window. A vanished id that pairs with nothing surfaces as `removed`:
+/// an `added` row for an id no reader can fetch is the one shape the
+/// feed never serves. Without `store` (a bare replay) a rename row
+/// surfaces as `updated` under the new id. `Batch` events have no
+/// entity id and don't contribute envelopes. The cursor is an RFC-3339 timestamp; the
 /// [`EMPTY_TREE_SHA`] sentinel and the empty string mean "from the
 /// beginning". Any other non-parseable cursor **refuses** with the
 /// typed `INVALID_TS_CURSOR:` marker (lifted by the engine to the
@@ -237,10 +247,16 @@ impl BackendChanges {
 ///
 /// Envelopes are id-only (`title` / `entity_type` are `None`); the
 /// engine wrapper enriches from its in-memory store.
+/// The store's view the folder replay pairs renames with: for an id
+/// the store serves, its `created_date` as written in the frontmatter;
+/// `None` for an id it does not serve.
+pub type StoreLookup<'a> = &'a dyn Fn(&EntityId) -> Option<String>;
+
 pub fn folder_changes_since(
     mem_root: &Path,
     mem: &str,
     since: &str,
+    store: Option<StoreLookup<'_>>,
 ) -> Result<BackendChanges, BackendError> {
     if !since.is_empty()
         && since != EMPTY_TREE_SHA
@@ -264,8 +280,23 @@ pub fn folder_changes_since(
         first_kind: ProvenanceKind,
         last_kind: ProvenanceKind,
     }
+    /// What the whole ledger says about one id, window or not: the
+    /// instant it was created (when the ledger saw it), the instant of
+    /// its last row, and whether a delete row ever closed it.
+    #[derive(Default)]
+    struct Lifetime {
+        created_at: Option<String>,
+        last_at: String,
+        deleted: bool,
+        /// The id's last row is the rename row that named it: it is a
+        /// link in a rename chain, and the next rename continues from it.
+        named_by_rename: bool,
+    }
     let mut by_entity: std::collections::BTreeMap<String, Aggregate> =
         std::collections::BTreeMap::new();
+    let mut lifetimes: std::collections::BTreeMap<String, Lifetime> =
+        std::collections::BTreeMap::new();
+    let mut rename_rows: Vec<(String, String)> = Vec::new();
     let mut max_ts: Option<String> = None;
 
     let cursor_opt: Option<&str> = if since.is_empty() || since == EMPTY_TREE_SHA {
@@ -284,11 +315,6 @@ pub fn folder_changes_since(
             Err(_) => continue,
         };
         let ts_str = value.get("ts").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(c) = cursor_opt
-            && ts_str <= c
-        {
-            continue;
-        }
         let kind = match value
             .get("kind")
             .and_then(|v| v.as_str())
@@ -301,6 +327,27 @@ pub fn folder_changes_since(
             Some(s) if !s.is_empty() => s.to_string(),
             _ => continue,
         };
+        {
+            let life = lifetimes.entry(entity_id.clone()).or_default();
+            if matches!(kind, ProvenanceKind::Create) && life.created_at.is_none() {
+                life.created_at = Some(ts_str.to_string());
+            }
+            if ts_str >= life.last_at.as_str() {
+                life.last_at = ts_str.to_string();
+                life.named_by_rename = matches!(kind, ProvenanceKind::Rename);
+            }
+            if matches!(kind, ProvenanceKind::Delete) {
+                life.deleted = true;
+            }
+        }
+        if let Some(c) = cursor_opt
+            && ts_str <= c
+        {
+            continue;
+        }
+        if matches!(kind, ProvenanceKind::Rename) {
+            rename_rows.push((ts_str.to_string(), entity_id.clone()));
+        }
 
         if max_ts.as_deref().is_none_or(|m| ts_str > m) {
             max_ts = Some(ts_str.to_string());
@@ -317,12 +364,134 @@ pub fn folder_changes_since(
             });
     }
 
+    // Pair every rename row in the window with the id that vanished
+    // for it, when the store can say which ids still exist, then
+    // compose the pairs into chains: a -> b -> c inside one window is
+    // one rename from a to c, and b, a name no reader ever held for
+    // long, surfaces nowhere.
+    let mut links: Vec<(String, String)> = Vec::new(); // (from, to), in row order
+    if let Some(lookup) = store {
+        let parse = |s: &str| match s.split_once("--") {
+            Some((v, slug)) if v == mem => Some(EntityId::new(v, slug)),
+            _ => None,
+        };
+        let exists = |name: &str| parse(name).and_then(|id| lookup(&id));
+        let mut taken: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        rename_rows.sort();
+        for (rename_ts, new_name) in &rename_rows {
+            let vanished: Vec<(&String, &Lifetime)> = lifetimes
+                .iter()
+                .filter(|(name, life)| {
+                    *name != new_name
+                        && !life.deleted
+                        && !taken.contains(*name)
+                        && life.last_at.as_str() < rename_ts.as_str()
+                        && parse(name).is_some()
+                        && exists(name).is_none()
+                })
+                .collect();
+            // The renamed entity keeps its creation instant: when the
+            // store serves the new id, the vanished id created at that
+            // instant is the origin, unless the instant is ambiguous.
+            let same_instant: Vec<&String> = match exists(new_name) {
+                Some(created_date) => vanished
+                    .iter()
+                    .filter(|(_, life)| {
+                        life.created_at
+                            .as_deref()
+                            .is_some_and(|c| same_instant(c, &created_date))
+                    })
+                    .map(|(name, _)| *name)
+                    .collect(),
+                None => Vec::new(),
+            };
+            let nearest: Option<String> = vanished
+                .iter()
+                .max_by(|a, b| a.1.last_at.cmp(&b.1.last_at))
+                .map(|(name, _)| (*name).clone());
+            // A vanished id that a rename row named (inside this window
+            // or before it) is a chain link: the row after it continues
+            // the chain, whatever the origin's creation instant says.
+            let continues_chain = nearest
+                .as_deref()
+                .is_some_and(|n| lifetimes.get(n).is_some_and(|l| l.named_by_rename));
+            let from = if continues_chain {
+                nearest
+            } else {
+                match same_instant.as_slice() {
+                    [one] => Some((*one).clone()),
+                    _ => nearest,
+                }
+            };
+            if let Some(from) = from {
+                taken.insert(from.clone());
+                links.push((from, new_name.clone()));
+            }
+        }
+    }
+    // Chains: an origin is a `from` no link renames into; follow it
+    // to the name the entity carries now.
+    let mut paired: Vec<(String, String, Vec<String>)> = Vec::new(); // (origin, final, members)
+    for (from, _) in &links {
+        if links.iter().any(|(_, to)| to == from) {
+            continue;
+        }
+        let mut members = vec![from.clone()];
+        let mut current = from.clone();
+        while let Some((_, to)) = links.iter().find(|(f, _)| *f == current) {
+            members.push(to.clone());
+            current = to.clone();
+        }
+        paired.push((from.clone(), current, members));
+    }
+
     let mut changes: Vec<ChangeEnvelope> = Vec::with_capacity(by_entity.len());
+    for (from, to, members) in &paired {
+        let from_agg = by_entity.remove(from);
+        for member in members {
+            by_entity.remove(member);
+        }
+        let (Some(from_id), Some(to_id)) = (
+            from.split_once("--").map(|(v, s)| EntityId::new(v, s)),
+            to.split_once("--").map(|(v, s)| EntityId::new(v, s)),
+        ) else {
+            continue;
+        };
+        let born_in_window =
+            from_agg.is_some_and(|a| matches!(a.first_kind, ProvenanceKind::Create));
+        changes.push(if born_in_window {
+            ChangeEnvelope::Added {
+                id: to_id,
+                title: None,
+                entity_type: None,
+            }
+        } else {
+            ChangeEnvelope::Renamed {
+                from_id,
+                to_id,
+                title: None,
+                entity_type: None,
+            }
+        });
+    }
     for (entity_str, agg) in by_entity {
         let id = match entity_str.split_once("--") {
             Some((v, slug)) if v == mem => EntityId::new(v, slug),
             _ => continue,
         };
+        // An id the store no longer serves and no delete row closed
+        // vanished without a pair: it is gone for every reader.
+        if let Some(lookup) = store
+            && !matches!(agg.last_kind, ProvenanceKind::Delete)
+            && lookup(&id).is_none()
+        {
+            changes.push(ChangeEnvelope::Removed {
+                id,
+                title: None,
+                entity_type: None,
+            });
+            continue;
+        }
         let envelope = match (agg.first_kind, agg.last_kind) {
             (_, ProvenanceKind::Delete) => ChangeEnvelope::Removed {
                 id,
@@ -343,6 +512,8 @@ pub fn folder_changes_since(
         changes.push(envelope);
     }
 
+    changes.sort_by(|a, b| a.primary_id().cmp(b.primary_id()));
+
     Ok(BackendChanges {
         since: since.to_string(),
         head: max_ts.unwrap_or_else(|| since.to_string()),
@@ -350,6 +521,17 @@ pub fn folder_changes_since(
         notes: Vec::new(),
         memstead_ref: None,
     })
+}
+
+/// Whether a ledger timestamp and an entity's `created_date` name the
+/// same instant at the coarser of the two precisions (the ledger
+/// carries milliseconds, a frontmatter date seconds or a bare day).
+fn same_instant(ledger_ts: &str, created_date: &str) -> bool {
+    let norm = |s: &str| s.trim_end_matches('Z').replace('T', " ");
+    let a = norm(ledger_ts);
+    let b = norm(created_date);
+    let n = a.len().min(b.len());
+    n >= 10 && a[..n] == b[..n]
 }
 
 /// Engine-wrapper-level "what changed" shape returned by

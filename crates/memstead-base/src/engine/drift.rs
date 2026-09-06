@@ -409,9 +409,29 @@ impl Engine {
         }
         let clamped = rename_similarity.unwrap_or(crate::ops::RENAME_SIMILARITY_DEFAULT);
 
+        // The folder replay pairs a rename row with the id that vanished
+        // for it only over a loaded store: a deferred mount would read
+        // every id as vanished.
+        let store_lookup = |id: &crate::EntityId| -> Option<String> {
+            let e = self.store.get(id)?;
+            if e.stub {
+                return None;
+            }
+            Some(
+                e.metadata
+                    .get("created_date")
+                    .map(|v| v.to_frontmatter_string())
+                    .unwrap_or_default(),
+            )
+        };
+        let store_ref: Option<crate::ops::StoreLookup<'_>> = if m.deferred {
+            None
+        } else {
+            Some(&store_lookup)
+        };
         let backend_changes = match &m.mount.storage {
             MountStorage::Folder { path } => {
-                match crate::ops::folder_changes_since(path, mem, since) {
+                match crate::ops::folder_changes_since(path, mem, since, store_ref) {
                     Ok(c) => c,
                     // Lift the backend's typed bad-`since` marker, parallel
                     // to the git arm's COMMIT_NOT_FOUND lift below: the
@@ -1874,6 +1894,118 @@ mod tests {
     /// into place by another process) the next probe reloads it, the
     /// entities the branch holds are served, the warning is gone, and
     /// the reload names the head the branch appeared at.
+    /// The folder feed through the engine, on a real ledger: an entity
+    /// created and then renamed arrives once; from a cursor between the
+    /// two writes it arrives as `renamed` with both ids; either way the
+    /// event carries the title and type of the entity a reader can
+    /// fetch, and no event names an id the store cannot serve.
+    #[test]
+    fn folder_feed_serves_a_renamed_entity_once_with_its_final_id() {
+        use crate::engine::test_helpers::*;
+        use crate::engine::{CreateEntityArgs, RenameEntityArgs};
+        use crate::storage::FilesystemMemWriter;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mem_dir = tmp.path().to_path_buf();
+        let writer = FilesystemMemWriter::new(mem_dir.clone());
+        let mut engine = Engine::from_mounts(vec![(
+            folder_mount("specs", mem_dir.clone()),
+            Box::new(writer) as Box<dyn MemBackend>,
+        )])
+        .unwrap();
+        engine.set_workspace_root(mem_dir.clone());
+        let (actor, client) = cli_actor();
+
+        let args: CreateEntityArgs = empty_create_args("specs", "Alpha One");
+        let created = engine
+            .create_entity(args, actor, Some(&client), Some("seed"))
+            .unwrap();
+        let old_id = created.id.clone();
+        let keeper = engine
+            .create_entity(
+                empty_create_args("specs", "Keeper"),
+                actor,
+                Some(&client),
+                Some("seed"),
+            )
+            .unwrap();
+        let between = engine
+            .changes_since("specs", "", None)
+            .unwrap()
+            .head
+            .clone();
+        // The ledger's millisecond clock must move past `between`.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let renamed = engine
+            .rename_entity(
+                RenameEntityArgs {
+                    id: old_id.clone(),
+                    expected_hash: Some(created.content_hash.clone()),
+                    new_title: "Alpha Two".to_string(),
+                },
+                actor,
+                Some(&client),
+                Some("rename"),
+            )
+            .unwrap();
+        let new_id = renamed.new_id.clone();
+
+        // Whole window: one added under the final id, one for keeper.
+        let whole = engine.changes_since("specs", "", None).unwrap();
+        let mut ids: Vec<(String, String)> = whole
+            .changes
+            .iter()
+            .map(|c| (c.action().to_string(), c.primary_id().to_string()))
+            .collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec![
+                ("added".to_string(), new_id.0.clone()),
+                ("added".to_string(), keeper.id.0.clone()),
+            ],
+            "{:?}",
+            whole.changes
+        );
+        for c in &whole.changes {
+            assert!(
+                engine
+                    .store()
+                    .get(&EntityId(c.primary_id().to_string()))
+                    .is_some(),
+                "every event names an id the store serves: {c:?}"
+            );
+            let titled = matches!(
+                c,
+                crate::ops::ChangeEnvelope::Added { title: Some(_), .. }
+                    | crate::ops::ChangeEnvelope::Updated { title: Some(_), .. }
+                    | crate::ops::ChangeEnvelope::Renamed { title: Some(_), .. }
+            );
+            assert!(titled && c.entity_type().is_some(), "{c:?}");
+        }
+
+        // From between the add and the rename: the renamed event alone.
+        let later = engine.changes_since("specs", &between, None).unwrap();
+        match later.changes.as_slice() {
+            [
+                crate::ops::ChangeEnvelope::Renamed {
+                    from_id,
+                    to_id,
+                    title,
+                    entity_type,
+                },
+            ] => {
+                assert_eq!(from_id, &old_id);
+                assert_eq!(to_id, &new_id);
+                assert_eq!(title.as_deref(), Some("Alpha Two"));
+                assert!(entity_type.is_some());
+            }
+            other => panic!("expected the renamed event alone, got {other:?}"),
+        }
+        // The head round-trips to silence.
+        let quiet = engine.changes_since("specs", &later.head, None).unwrap();
+        assert!(quiet.changes.is_empty(), "{:?}", quiet.changes);
+    }
+
     #[test]
     fn reload_if_stale_reloads_a_mem_whose_branch_appeared() {
         let shared = std::sync::Arc::new(ManualHeadBackend::new(None));

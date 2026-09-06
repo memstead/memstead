@@ -129,6 +129,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The change feed keeps its contract on folder mems.** A folder mem's
+  ledger records a rename under the id the entity now carries, and the
+  replay served the old id as a bare `added` row no reader could fetch,
+  beside an `updated` row for the new one. The replay now pairs a rename
+  row with the id that vanished for it (an id the ledger knows, absent
+  from the store, never deleted, whose creation instant matches the
+  renamed entity's `created_date`; nearest vanished id before the rename
+  as the fallback): one `renamed` event with `from_id` and `to_id`, or one
+  `added` under the final id when the entity was also created inside the
+  window; a rename chain inside one window composes into one event, and
+  its intermediate names surface nowhere. An id that vanished with no pair
+  and no delete row surfaces as `removed`. `memstead changes` on a
+  filesystem-shape workspace serves this same report (`head` included)
+  where it printed the raw ledger rows. The `memstead_changes_since`
+  description states the folder cursor: `head` is the timestamp of the
+  last ledger entry, `since` takes it back, and the same `head` returns
+  zero events until the mem moves.
 - **Schema prose matches the skeleton it describes.** `project@0.6.0` is
   `project@0.5.0` with its prose corrected and its skeleton byte-for-byte
   the same: the when-to-use pairs the mem with `software@0.5.0` (it named

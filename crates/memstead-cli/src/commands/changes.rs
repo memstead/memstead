@@ -54,7 +54,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 }
 
 fn run_mem_repo(ctx: &CliContext, engine: memstead_base::Engine, args: Args) -> anyhow::Result<()> {
-    let mem = match args.mem {
+    let mem = match args.mem.clone() {
         Some(v) => v,
         None => engine
             // Every mount, not only those with a readable config: a mem
@@ -73,6 +73,19 @@ fn run_mem_repo(ctx: &CliContext, engine: memstead_base::Engine, args: Args) -> 
             })?,
     };
 
+    run_report(ctx, &engine, mem, args)
+}
+
+/// One report for both workspace shapes: the engine's `changes_since`
+/// (the fold the MCP tool serves, `head` included) rendered the same
+/// way. The filesystem shape once printed the raw ledger rows here,
+/// which was a second shape for one feed.
+fn run_report(
+    ctx: &CliContext,
+    engine: &memstead_base::Engine,
+    mem: String,
+    args: Args,
+) -> anyhow::Result<()> {
     let mut report = engine
         .changes_since(&mem, &args.since, args.rename_similarity)
         .map_err(CliError::from_engine_op)?;
@@ -235,96 +248,5 @@ fn run_filesystem(
             .into());
     }
 
-    // Unified engine doesn't expose workspace_root (mounts can be
-    // heterogeneous); discover from cwd.
-    let workspace_root =
-        crate::setup::find_filesystem_workspace_root(&std::env::current_dir().map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                crate::INTERNAL_CODE,
-                format!("current_dir: {e}"),
-            )
-        })?)
-        .ok_or_else(|| {
-            CliError::new(
-                ExitKind::NotFound,
-                "WORKSPACE_NOT_INITIALISED",
-                "no filesystem-mem workspace found from cwd",
-            )
-        })?;
-    let log_path = workspace_root
-        .join(memstead_base::MEM_META_DIR)
-        .join("changes.jsonl");
-    let raw = match std::fs::read_to_string(&log_path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => {
-            return Err(CliError::new(
-                ExitKind::Generic,
-                crate::INTERNAL_CODE,
-                format!("read {}: {e}", log_path.display()),
-            )
-            .into());
-        }
-    };
-
-    let since = args.since.trim();
-    let mut entries: Vec<serde_json::Value> = Vec::new();
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue, // skip malformed lines silently
-        };
-        let ts_match = value
-            .get("ts")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if !since.is_empty() && ts_match.as_str() <= since {
-            continue;
-        }
-        entries.push(value);
-    }
-
-    if ctx.json {
-        print_json(&serde_json::json!({
-            "mem": workspace_mem,
-            "since": since,
-            "entries": entries,
-        }))?;
-        return Ok(());
-    }
-
-    let mut lines: Vec<String> = Vec::new();
-    lines.push(format!(
-        "# Changes in `{}` since `{}`",
-        workspace_mem, since
-    ));
-    lines.push(String::new());
-    lines.push(format!("- Entries: {}", entries.len()));
-    lines.push(String::new());
-    if entries.is_empty() {
-        lines.push("_no changes_".to_string());
-    } else {
-        for entry in &entries {
-            let kind = entry.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
-            let id = entry
-                .get("entity")
-                .and_then(|v| v.as_str())
-                .unwrap_or("(no entity)");
-            let ts = entry.get("ts").and_then(|v| v.as_str()).unwrap_or("?");
-            let note = entry
-                .get("note")
-                .and_then(|v| v.as_str())
-                .map(|s| format!(" — {s}"))
-                .unwrap_or_default();
-            lines.push(format!("- `{ts}` **{kind}** `{id}`{note}"));
-        }
-    }
-    print_markdown(&lines.join("\n"));
-    Ok(())
+    run_report(ctx, &engine, workspace_mem, args)
 }

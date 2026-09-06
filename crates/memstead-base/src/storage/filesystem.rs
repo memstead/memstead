@@ -1185,11 +1185,151 @@ mod tests {
         // with `head` echoing the cursor.
         let tmp = TempDir::new().unwrap();
         let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA, None)
                 .unwrap();
         assert_eq!(result.since, crate::ops::EMPTY_TREE_SHA);
         assert_eq!(result.head, crate::ops::EMPTY_TREE_SHA);
         assert!(result.changes.is_empty());
+    }
+
+    /// A rename row names only the id the entity now carries; with the
+    /// store's view the replay pairs it with the id that vanished. Added
+    /// and renamed inside one window: one `added` under the final id.
+    /// Rename alone in the window: one `renamed` with both ids. An
+    /// entity created in the window that still exists keeps its `added`.
+    #[test]
+    fn folder_changes_since_pairs_a_rename_row_with_the_vanished_id() {
+        let tmp = TempDir::new().unwrap();
+        let writer = FilesystemMemWriter::new(tmp.path().to_path_buf());
+        append_at(
+            &writer,
+            1_700_000_000,
+            ProvenanceKind::Create,
+            "specs--alpha",
+        );
+        append_at(
+            &writer,
+            1_700_000_100,
+            ProvenanceKind::Create,
+            "specs--keeper",
+        );
+        append_at(
+            &writer,
+            1_700_000_200,
+            ProvenanceKind::Rename,
+            "specs--alpha-two",
+        );
+        // The store after the rename: alpha is gone, alpha-two carries
+        // alpha's creation instant, keeper is untouched.
+        let store = |id: &crate::EntityId| -> Option<String> {
+            match id.0.as_str() {
+                "specs--alpha-two" => Some("2023-11-14T22:13:20Z".to_string()),
+                "specs--keeper" => Some("2023-11-14T22:15:00Z".to_string()),
+                _ => None,
+            }
+        };
+
+        let whole = crate::ops::folder_changes_since(
+            tmp.path(),
+            "specs",
+            crate::ops::EMPTY_TREE_SHA,
+            Some(&store),
+        )
+        .unwrap();
+        let kinds: Vec<(&str, &str)> = whole
+            .changes
+            .iter()
+            .map(|c| (c.action(), c.primary_id()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![("added", "specs--alpha-two"), ("added", "specs--keeper")],
+            "add-then-rename folds to one added under the final id: {:?}",
+            whole.changes
+        );
+
+        // Window opens after the add and before the rename.
+        let mid = crate::filesystem::changelog::format_rfc3339_utc(
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_150),
+        );
+        let later =
+            crate::ops::folder_changes_since(tmp.path(), "specs", &mid, Some(&store)).unwrap();
+        match later.changes.as_slice() {
+            [crate::ops::ChangeEnvelope::Renamed { from_id, to_id, .. }] => {
+                assert_eq!(from_id.0, "specs--alpha");
+                assert_eq!(to_id.0, "specs--alpha-two");
+            }
+            other => panic!("expected the renamed event alone, got {other:?}"),
+        }
+
+        // Without the store's view the rename row reads as updated.
+        let bare = crate::ops::folder_changes_since(tmp.path(), "specs", &mid, None).unwrap();
+        assert_eq!(bare.changes.len(), 1);
+        assert_eq!(bare.changes[0].action(), "updated");
+
+        // A chain: alpha-two -> alpha-three -> alpha-four. Only the
+        // final name exists now. The whole window folds to one added
+        // under it; a reader holding alpha-two gets one renamed from
+        // alpha-two to alpha-four; a reader holding alpha-three gets
+        // one renamed from alpha-three; the intermediates surface
+        // nowhere.
+        append_at(
+            &writer,
+            1_700_000_300,
+            ProvenanceKind::Rename,
+            "specs--alpha-three",
+        );
+        append_at(
+            &writer,
+            1_700_000_400,
+            ProvenanceKind::Rename,
+            "specs--alpha-four",
+        );
+        let store = |id: &crate::EntityId| -> Option<String> {
+            match id.0.as_str() {
+                "specs--alpha-four" => Some("2023-11-14T22:13:20Z".to_string()),
+                "specs--keeper" => Some("2023-11-14T22:15:00Z".to_string()),
+                _ => None,
+            }
+        };
+        let at = |secs: u64| {
+            crate::filesystem::changelog::format_rfc3339_utc(
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+            )
+        };
+        let whole = crate::ops::folder_changes_since(
+            tmp.path(),
+            "specs",
+            crate::ops::EMPTY_TREE_SHA,
+            Some(&store),
+        )
+        .unwrap();
+        let kinds: Vec<(&str, &str)> = whole
+            .changes
+            .iter()
+            .map(|c| (c.action(), c.primary_id()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![("added", "specs--alpha-four"), ("added", "specs--keeper")],
+            "{:?}",
+            whole.changes
+        );
+        for (cursor, from) in [
+            (1_700_000_250, "specs--alpha-two"),
+            (1_700_000_350, "specs--alpha-three"),
+        ] {
+            let part =
+                crate::ops::folder_changes_since(tmp.path(), "specs", &at(cursor), Some(&store))
+                    .unwrap();
+            match part.changes.as_slice() {
+                [crate::ops::ChangeEnvelope::Renamed { from_id, to_id, .. }] => {
+                    assert_eq!(from_id.0, from);
+                    assert_eq!(to_id.0, "specs--alpha-four");
+                }
+                other => panic!("expected one renamed from {from}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -1204,7 +1344,7 @@ mod tests {
         );
 
         let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA, None)
                 .unwrap();
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
@@ -1243,7 +1383,7 @@ mod tests {
         );
 
         let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA, None)
                 .unwrap();
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
@@ -1266,7 +1406,7 @@ mod tests {
         );
 
         let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA, None)
                 .unwrap();
         assert_eq!(result.changes.len(), 1);
         assert!(matches!(
@@ -1293,7 +1433,7 @@ mod tests {
 
         let write_token = make_commit_id();
         for bad in [write_token.as_str(), "not-a-timestamp"] {
-            let err = crate::ops::folder_changes_since(tmp.path(), "specs", bad).unwrap_err();
+            let err = crate::ops::folder_changes_since(tmp.path(), "specs", bad, None).unwrap_err();
             match err {
                 BackendError::Other(msg) => {
                     assert_eq!(msg, format!("INVALID_TS_CURSOR:{bad}"));
@@ -1302,7 +1442,8 @@ mod tests {
             }
         }
         for from_start in ["", crate::ops::EMPTY_TREE_SHA] {
-            let ok = crate::ops::folder_changes_since(tmp.path(), "specs", from_start).unwrap();
+            let ok =
+                crate::ops::folder_changes_since(tmp.path(), "specs", from_start, None).unwrap();
             assert_eq!(ok.changes.len(), 1, "sentinel '{from_start}' reads all");
         }
     }
@@ -1335,7 +1476,7 @@ mod tests {
         let cursor = changelog::format_rfc3339_utc(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_725_000_000),
         );
-        let result = crate::ops::folder_changes_since(tmp.path(), "specs", &cursor).unwrap();
+        let result = crate::ops::folder_changes_since(tmp.path(), "specs", &cursor, None).unwrap();
         assert_eq!(result.changes.len(), 2);
         let ids: Vec<_> = result
             .changes
@@ -1373,7 +1514,7 @@ mod tests {
         );
 
         let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA, None)
                 .unwrap();
         assert_eq!(result.changes.len(), 1);
         match &result.changes[0] {
@@ -1411,7 +1552,7 @@ mod tests {
         );
 
         let result =
-            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA)
+            crate::ops::folder_changes_since(tmp.path(), "specs", crate::ops::EMPTY_TREE_SHA, None)
                 .unwrap();
         // Only the Create-Real event surfaces; the batch is dropped.
         assert_eq!(result.changes.len(), 1);
@@ -1433,7 +1574,7 @@ mod tests {
         let cursor = changelog::format_rfc3339_utc(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_900_000_000),
         );
-        let result = crate::ops::folder_changes_since(tmp.path(), "specs", &cursor).unwrap();
+        let result = crate::ops::folder_changes_since(tmp.path(), "specs", &cursor, None).unwrap();
         assert!(result.changes.is_empty());
         assert_eq!(result.head, cursor);
     }
