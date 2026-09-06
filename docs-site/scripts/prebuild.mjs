@@ -1,8 +1,8 @@
 // Prebuild of the site's generated content (runs as `prebuild`; every
 // output is gitignored — nothing here is a committed copy).
 //
-// 1. Reference: render the CLI, MCP, error-index, parity, binding and
-//    WASM reference pages from the engine sources of THIS checkout by
+// 1. Reference: render the CLI, MCP, error-index, parity and binding
+//    reference pages from the engine sources of THIS checkout by
 //    running `cargo run -p xtask -- generate-docs` into the content
 //    tree. The pages describe the commit being built, by construction:
 //    there is no committed copy to regenerate, so nothing can drift and
