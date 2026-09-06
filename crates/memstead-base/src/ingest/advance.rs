@@ -115,6 +115,17 @@ pub struct AdvanceState {
     pub dropped_exclusions: Vec<DroppedExclusion>,
 }
 
+impl AdvanceState {
+    /// Whether the store carries authored exclusions that must outlive a
+    /// completed pass: the artifact ledger or the entity ledger. Both guards
+    /// that may delete the store ask this, so a ledger added later cannot
+    /// be dropped by a guard that still tests only the older one (the
+    /// entity ledger was, from 2026-09-05 to 2026-09-06).
+    pub fn has_durable_exclusions(&self) -> bool {
+        !self.exclusions.is_empty() || !self.entity_exclusions.is_empty()
+    }
+}
+
 /// One authored exclusion dropped by [`reconcile_exclusions`]: the source it
 /// was recorded under is no longer declared on the binding.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -244,7 +255,7 @@ pub fn reconcile_exclusions(
     }
     dropped.extend(dropped_now);
     if changed {
-        if state.exclusions.is_empty()
+        if !state.has_durable_exclusions()
             && state.frozen_slice == Slice::default()
             && state.dispositions.is_empty()
         {
@@ -732,11 +743,12 @@ pub fn advance_baseline(
             tokens_written.push(c.key.clone());
         }
         // Transient progress (frozen slice + per-run dispositions) is consumed.
-        // If any durable authored exclusions accumulated, retain a slimmed store
-        // holding only them (empty slice, no transient dispositions) so the
-        // fidelity report keeps consulting them; otherwise drop the store
-        // entirely (completion idempotent — the no-exclusion path is unchanged).
-        if state.exclusions.is_empty() {
+        // If any durable authored exclusions accumulated, on either ledger
+        // (artifacts or entities), retain a slimmed store holding only them
+        // (empty slice, no transient dispositions) so the fidelity report
+        // keeps consulting them; otherwise drop the store entirely
+        // (completion idempotent — the no-exclusion path is unchanged).
+        if !state.has_durable_exclusions() {
             delete_advance_store(workspace_root, &mem, &name).map_err(AdvanceError::Store)?;
         } else {
             let durable = AdvanceState {
@@ -1181,6 +1193,26 @@ mod tests {
         );
         // Idempotent: deleting an absent store is a no-op, not an error.
         delete_advance_store(root, "engine", "graph").unwrap();
+    }
+
+    /// An entity-only exclusion ledger counts as durable content: the two
+    /// guards that may delete the store consult it through this predicate.
+    #[test]
+    fn entity_exclusions_alone_keep_the_store_durable() {
+        let mut state = AdvanceState {
+            binding: "engine/graph".to_string(),
+            ..Default::default()
+        };
+        assert!(!state.has_durable_exclusions());
+        state
+            .entity_exclusions
+            .insert("engine--about".to_string(), "no source".to_string());
+        assert!(state.has_durable_exclusions());
+        state.entity_exclusions.clear();
+        state
+            .exclusions
+            .insert("gen.rs".to_string(), "generated".to_string());
+        assert!(state.has_durable_exclusions());
     }
 
     /// `subtract_disposed` removes disposed ids from every class.

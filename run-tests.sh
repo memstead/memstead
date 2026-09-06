@@ -331,6 +331,22 @@ fi
 
 echo ""
 echo "══════════════════════════════════"
+echo "  Gate: the blind battery's instrument still works"
+echo "══════════════════════════════════"
+# ci/blind_battery.py is the committed form of the mem-versus-source
+# battery (docs/proof/blind-battery/). Its readers and graders are agents
+# and never run here; the mechanical parts (citation stripping, the A/B
+# order, the tally that maps verdicts back to a side) are what a later
+# run compares through, so they are exercised on fixtures every run.
+if python3 "$ROOT/ci/blind_battery.py" --self-test >/dev/null; then
+  echo "  ✓ blind battery self-test"
+else
+  FAILED+=("blind-battery-selftest")
+  echo "  ✗ ci/blind_battery.py --self-test FAILED"
+fi
+
+echo ""
+echo "══════════════════════════════════"
 echo "  Gate: target/debug/memstead answers"
 echo "══════════════════════════════════"
 # A green run leaves behind a binary that is what its path says it is.

@@ -9,6 +9,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The blind battery is a committed script.** `ci/blind_battery.py`
+  carries the eleven fixed questions of the 2026-09-04 mem-versus-source
+  battery and its protocol: `prepare` installs the mem under test into a
+  scratch workspace and writes the reader prompts with a seeded A/B order,
+  `run` drives the readers and the graders through `claude -p` (a session
+  that spawns its own agents drops the answer and verdict files in
+  instead), `pair` strips citations and side-revealing phrases, and `tally`
+  maps each verdict back to mem or source and writes wins, margins, score
+  totals and the graders' error lists per side. `--self-test` exercises the
+  stripping, the order and the tally on fixtures and runs in
+  `run-tests.sh`. Runs and their records live under `docs/proof/blind-battery/`.
+
 - **The sync brief presents every entity that names a changed artifact.**
   Under the changed slice, the brief lists for each changed artifact the
   entities that anchor it and, headed as steered by mention, the entities
@@ -160,6 +172,14 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   once caught the dogfood binding naming `PROVIDED_BY`.
 
 ### Fixed
+
+- **Entity exclusions survive a completed sync pass.** The advance store
+  is dropped when a pass completes with nothing durable in it; the two
+  guards that decide this tested the artifact exclusion ledger alone, so a
+  store whose only content was entity exclusions (`projection exclude
+  --entity-exclusions`) vanished on the next completion and the fidelity
+  report named those entities as owed again. Both guards now ask one
+  predicate over both ledgers.
 
 - **The sealed rationale is readable through the engine.** On an installed
   archive, `memstead entity <id> --provenance` and `memstead_entity` with
