@@ -280,7 +280,9 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
     not_examined: &[
         (
             "projection",
-            "projection fidelity is answered by status and projection verify",
+            "projection fidelity is answered by status and projection verify; the one class \
+             health carries from the findings stores, an entity's claim about an artifact it \
+             does not anchor (`UNANCHORED_MENTION`), rides as a warning and never as a verdict",
         ),
         ("missing_required_outgoing", INCLUDE_GATED),
         ("constraints", INCLUDE_GATED),

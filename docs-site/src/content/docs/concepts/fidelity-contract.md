@@ -122,6 +122,23 @@ purpose" in the rendered report and `excluded_entity_rationales` in the JSON.
 The same rule as the artifact side: moved out, counted, and named with the
 reasoning.
 
+Between the two sides sits the claim no verify watches: an entity whose prose
+names an in-scope artifact by path and carries no anchor on it. Every anchor
+the entity holds may resolve while a sentence about a file it never anchored
+stands falsified, and until 2026-09-05 nothing measured that. The verify pass
+now records one `unanchored-mention` finding per entity and artifact (prose
+only; a path inside a fenced code block is not a claim), naming the section,
+and the coverage block carries the count beside `uncovered`. Path matching
+follows the binding's source join, so the source-relative and the
+workspace-relative spelling of one file are one artifact. It is a finding,
+never a refusal: the write that names the file still lands. The remedy is the
+anchor (`memstead_update` with `anchors`, so the next verify watches the claim)
+or, where the artifact is mined and deliberately warrants no entity, `memstead
+projection exclude` with a rationale, after which mentions of it raise nothing.
+The sync brief lists the open ones beside the drifted and uncovered findings,
+and `memstead health` carries each as an `UNANCHORED_MENTION` warning, so the
+exposure is work with an owner rather than an invisible number.
+
 The report also states **what its denominator counted**. One artifact legitimately
 carries several anchors at different grains or classes, so the row count and the
 distinct-artifact count are printed side by side rather than the rows being merged

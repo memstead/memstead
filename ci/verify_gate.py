@@ -114,7 +114,8 @@ DOCUMENTED_CONTRACT = [
     '"format": "memstead-verify/v1"',
     # The closed finding-class vocabulary, every member.
     "`drifted`, `wrong`,",
-    "`uncovered`, `unresolvable-anchor`, `queued-for-adjudication`",
+    "`uncovered`, `unresolvable-anchor`, `unanchored-mention`,",
+    "`queued-for-adjudication`",
     # The recipe that works on the two-document gate path. A plain
     # `jq -r .code` does not, and the guide used to print it.
     "jq -s -r '.[-1].code'",

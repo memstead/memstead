@@ -2439,6 +2439,12 @@ impl Engine {
         // next install attempt. A parsing unstamped package stays
         // silent; stamped pins are the drift axis's business.
         summary.warnings.extend(self.unstamped_rot_findings());
+        // Claims no verify watches: every `unanchored-mention` finding the
+        // bindings' verify passes recorded, read off the durable findings
+        // stores (no source is observed here — health reports the standing,
+        // verify establishes it). Warn-level, one line per (entity,
+        // artifact), the same unit the store holds.
+        summary.warnings.extend(self.unanchored_mention_findings());
         // Under a mem scope, mem-attributable warnings narrow to the
         // scoped mem; workspace- and request-scoped warnings return
         // `None` from `source_mem()` and stay visible regardless.
@@ -2449,6 +2455,50 @@ impl Engine {
                 .retain(|w| w.source_mem().is_none_or(|wv| wv == v));
         }
         summary
+    }
+
+    /// The `unanchored-mention` findings of every binding's current batch,
+    /// as health warnings. Empty without a workspace root (no binding store
+    /// to read) and for a binding whose store or resolution is unreadable —
+    /// health never fabricates a projection reading it did not find.
+    fn unanchored_mention_findings(&self) -> Vec<WarningHint> {
+        let Some(root) = self.workspace_root.as_deref() else {
+            return Vec::new();
+        };
+        let Ok(configs) = crate::pipeline_store::load_pipeline_configs(root) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for record in &configs.bindings {
+            let binding_id = format!("{}/{}", record.mem, record.name);
+            let Ok(resolved) =
+                crate::ingest::resolve::resolve_binding_run(&binding_id, &record.config)
+            else {
+                continue;
+            };
+            let Ok((_, findings)) =
+                crate::ingest::findings::current_findings(self, root, &record.config, &resolved)
+            else {
+                continue;
+            };
+            for f in findings {
+                if let crate::ingest::findings::FindingTarget::Mention {
+                    entity,
+                    artifact,
+                    section,
+                } = f.target
+                {
+                    out.push(WarningHint::UnanchoredMention {
+                        mem: record.config.destination_mem.clone(),
+                        binding: binding_id.clone(),
+                        entity: EntityId(entity),
+                        artifact,
+                        section,
+                    });
+                }
+            }
+        }
+        out
     }
 
     /// Compute the authoring-drift findings for every stamped pinned

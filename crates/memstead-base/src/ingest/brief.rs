@@ -1117,6 +1117,11 @@ fn finding_target_label(target: &FindingTarget) -> String {
     match target {
         FindingTarget::Anchor { entity, artifact } => format!("`{entity}` → `{artifact}`"),
         FindingTarget::Artifact { artifact } => format!("`{artifact}`"),
+        FindingTarget::Mention {
+            entity,
+            artifact,
+            section,
+        } => format!("`{entity}` names `{artifact}` in `{section}`"),
     }
 }
 
@@ -1225,6 +1230,26 @@ fn render_open_findings(findings: &[Finding], binding_id: &str) -> String {
         "Uncovered — a source artifact with no entity",
         &uncovered_guidance,
         &group(FindingClass::Uncovered),
+    );
+    // Unanchored mention — a claim about a file the entity does not watch.
+    // Verify cannot speak to it until an anchor exists, so the pass reads the
+    // claim against the artifact now and then decides its provenance.
+    let mention_guidance = format!(
+        "The entity's prose names an in-scope source artifact it carries no anchor on, so \
+         no verify watches that claim on the entity's behalf. Read the named section against \
+         the artifact. If the claim holds, add the anchor in one `memstead_update` call \
+         (`anchors`: the artifact, grain `file`, class `anchored` or `informed-by`) so the \
+         next verify watches it; if the claim is stale, correct the section and anchor it in \
+         the same call. If the artifact is mined and deliberately warrants no entity, record \
+         that instead — the mention stops presenting from the next brief on:\n\n```bash\n\
+         memstead projection exclude {binding_id} --exclusions '{{\"<artifact>\": \
+         \"<rationale>\"}}'\n```"
+    );
+    render_findings_group(
+        &mut lines,
+        "Unanchored mention — a claim about an artifact the entity does not anchor",
+        &mention_guidance,
+        &group(FindingClass::UnanchoredMention),
     );
     // Queued — not yet adjudicated: verify owns these, not sync.
     render_findings_group(

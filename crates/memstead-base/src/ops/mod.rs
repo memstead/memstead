@@ -671,6 +671,20 @@ pub enum WarningHint {
     /// Never fires for a git-branch mem: its change set is a real two-tree
     /// diff, so the condition cannot arise.
     OutOfBandEditsUndetected { mem: String },
+    /// A destination entity of a projection binding names an in-scope source
+    /// artifact in its prose and carries no anchor on it — a claim no verify
+    /// watches on the entity's behalf. Read off the binding's findings store
+    /// (the `unanchored-mention` class the verify pass records); warn-level,
+    /// never a refusal. Remedy: anchor the artifact on the entity
+    /// (`memstead_update` with `anchors`), or exclude the artifact with a
+    /// rationale (`memstead projection exclude`).
+    UnanchoredMention {
+        mem: String,
+        binding: String,
+        entity: EntityId,
+        artifact: String,
+        section: String,
+    },
     /// A config write found the stored config had moved on from what this
     /// engine last observed: another writer changed it in between
     /// (consistency-sweep 04/03, criterion 3).
@@ -1646,6 +1660,19 @@ impl fmt::Display for WarningHint {
                  and dropped the rest. The next read-modify-write will \
                  collapse the markdown to one heading."
             ),
+            WarningHint::UnanchoredMention {
+                binding,
+                entity,
+                artifact,
+                section,
+                ..
+            } => write!(
+                f,
+                "`{entity}` names `{artifact}` in section `{section}` and carries no anchor on \
+                 it, so no verify under `{binding}` watches that claim. Add the anchor \
+                 (`memstead_update` with `anchors`), or exclude the artifact with a rationale \
+                 (`memstead projection exclude {binding}`).",
+            ),
             WarningHint::OutOfBandEditsUndetected { mem } => write!(
                 f,
                 "mem '{mem}' is folder-backed, so its drift cursor is its own change ledger and \
@@ -2067,6 +2094,7 @@ impl WarningHint {
             Self::ConfigWriteIntervened { .. } => "CONFIG_WRITE_INTERVENED",
             Self::ShortIdResolved { .. } => "SHORT_ID_RESOLVED",
             Self::OutOfBandEditsUndetected { .. } => "OUT_OF_BAND_EDITS_UNDETECTED",
+            Self::UnanchoredMention { .. } => "UNANCHORED_MENTION",
             Self::SchemaPinMismatch { .. } => "SCHEMA_PIN_MISMATCH",
             Self::MountUnbacked { .. } => "MOUNT_UNBACKED",
             Self::EngineVersionSkew { .. } => "ENGINE_VERSION_SKEW",
@@ -2143,6 +2171,7 @@ impl WarningHint {
             // to `None` below to stay visible to the caller.
             Self::SearchMemIndexUnavailable { mem, .. } => Some(mem.as_str()),
             Self::OutOfBandEditsUndetected { mem } => Some(mem.as_str()),
+            Self::UnanchoredMention { mem, .. } => Some(mem.as_str()),
             Self::ConfigWriteIntervened { mem, .. } => Some(mem.as_str()),
             Self::ShortIdResolved { resolved, .. } => Some(resolved.mem()),
             Self::CrossSchemaLinkUndeclared { from, .. } => Some(from.mem()),
@@ -2355,6 +2384,13 @@ impl WarningHint {
             WarningHint::OutOfBandEditsUndetected {
                 mem: "test-mem-plugin".into(),
             },
+            WarningHint::UnanchoredMention {
+                mem: "engine".into(),
+                binding: "engine/graph".into(),
+                entity: EntityId("engine--reload".into()),
+                artifact: "../public/crates/memstead-base/src/storage/filesystem.rs".into(),
+                section: "constraints".into(),
+            },
             WarningHint::MemReloaded {
                 mem: "test-mem-plugin".into(),
                 old_head: "abc123".into(),
@@ -2438,6 +2474,19 @@ impl WarningHint {
     fn details_payload(&self) -> serde_json::Value {
         match self {
             Self::OutOfBandEditsUndetected { mem } => serde_json::json!({ "mem": mem }),
+            Self::UnanchoredMention {
+                mem,
+                binding,
+                entity,
+                artifact,
+                section,
+            } => serde_json::json!({
+                "mem": mem,
+                "binding": binding,
+                "entity": entity,
+                "artifact": artifact,
+                "section": section,
+            }),
             Self::ConfigWriteIntervened { mem, fields } => serde_json::json!({
                 "mem": mem,
                 "fields": fields,

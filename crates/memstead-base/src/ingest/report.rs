@@ -57,8 +57,12 @@ pub const DEFAULT_REPORT_BUDGET: usize = 8_000;
 /// budget (mirroring the overview envelope); an unlisted key greedy-fills until
 /// the budget is exhausted, then surfaces as a hint. An unknown key is ignored
 /// with a warning line.
-pub const ALLOWED_REPORT_INCLUDE_KEYS: &[&str] =
-    &["uncovered_artifacts", "tree_fanout", "superseded_findings"];
+pub const ALLOWED_REPORT_INCLUDE_KEYS: &[&str] = &[
+    "uncovered_artifacts",
+    "unanchored_mentions",
+    "tree_fanout",
+    "superseded_findings",
+];
 
 // ---------------------------------------------------------------------------
 // Structured report — the deterministic, pre-computed data the pure renderer
@@ -148,6 +152,11 @@ pub struct GrainCoverage {
     /// reads it, so an entry left in it stays owed however it is annotated.
     /// The rationales ride `disposed_excluded_rationales` on the report.
     pub excluded: usize,
+    /// Destination entities naming an `S(D)` artifact they carry no anchor on
+    /// (the `unanchored-mention` findings of the current batch): claims no
+    /// verify watches. Each entry names the entity, the artifact and the
+    /// section (the heavy list); the count rides beside `uncovered`.
+    pub unanchored_mentions: Vec<UnanchoredMention>,
     /// Per tree anchor, its fan-out over `S(D)` (the heavy detail list).
     pub tree_anchors: Vec<TreeFanout>,
     /// Destination entities (non-stub) that hold no anchor at all — the
@@ -161,6 +170,18 @@ pub struct GrainCoverage {
     /// `unanchored_entities` and named with their reasons on the report
     /// (`excluded_entity_rationales`).
     pub excluded_entities: usize,
+}
+
+/// One claim no verify watches: a destination entity names an in-scope
+/// artifact in its prose and carries no anchor on it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct UnanchoredMention {
+    /// The entity whose body names the artifact.
+    pub entity: String,
+    /// The `S(D)` artifact named.
+    pub artifact: String,
+    /// The section the mention sits in.
+    pub section: String,
 }
 
 /// Anchor composition + resolution tally over the destination mem's anchors
@@ -459,11 +480,12 @@ pub struct Rollup {
 /// projection misleads, drift is stale, an unresolvable anchor is broken
 /// bookkeeping, uncovered is unwritten work, and a queued item is not yet
 /// adjudicated at all.
-const CLASS_SEVERITY: [&str; 5] = [
+const CLASS_SEVERITY: [&str; 6] = [
     "wrong",
     "drifted",
     "unresolvable-anchor",
     "uncovered",
+    "unanchored-mention",
     "queued-for-adjudication",
 ];
 
@@ -486,6 +508,11 @@ fn class_action(class: &str, n: usize, binding: &str) -> String {
             "{n} in-scope source artifact(s) carry no anchor — cover them via \
              `memstead projection brief {binding} --sync`, or record a disposition for the \
              ones deliberately excluded"
+        ),
+        "unanchored-mention" => format!(
+            "{n} claim(s) name an in-scope artifact the entity does not anchor, so no verify \
+             watches them — add the anchor (`memstead_update` with `anchors`), or exclude the \
+             artifact with a rationale (`memstead projection exclude {binding}`)"
         ),
         "queued-for-adjudication" => format!(
             "{n} finding(s) are queued and not yet adjudicated — run \
@@ -932,6 +959,19 @@ fn render_hard_required(report: &FidelityReport) -> String {
             String::new()
         }
     ));
+    // Claims no verify watches, beside the artifacts no entity covers: the
+    // count is the finding class's, and the remedy names both dispositions.
+    md.push_str(&format!(
+        "- unanchored mentions (an entity names an in-scope artifact it does not anchor): {}{}\n",
+        report.coverage.unanchored_mentions.len(),
+        if report.coverage.unanchored_mentions.is_empty() {
+            String::new()
+        } else {
+            " — remedy: add the anchor (`memstead_update` with `anchors`), or \
+             `memstead projection exclude <binding>` the artifact with a rationale"
+                .to_string()
+        }
+    ));
     // The unit, stated beside the figures (A3 AC4): the count is over
     // artifacts described, never over anchor rows.
     md.push_str(&format!(
@@ -1264,6 +1304,20 @@ fn heavy_sections(report: &FidelityReport) -> Vec<(&'static str, String)> {
         s.push('\n');
     }
     out.push(("uncovered_artifacts", s));
+
+    // unanchored_mentions
+    let mut s = String::new();
+    if !report.coverage.unanchored_mentions.is_empty() {
+        s.push_str("## Unanchored mentions\n\n");
+        for m in &report.coverage.unanchored_mentions {
+            s.push_str(&format!(
+                "- `{}` names `{}` in `{}`\n",
+                m.entity, m.artifact, m.section
+            ));
+        }
+        s.push('\n');
+    }
+    out.push(("unanchored_mentions", s));
 
     // tree_fanout
     let mut s = String::new();
@@ -1704,6 +1758,30 @@ pub fn compute_fidelity_report(
     unanchored_entities.retain(|e| !excluded_entity_set.contains(e.as_str()));
     let excluded_entities = excluded_entity_rationales.len();
 
+    // The claims no verify watches, read off the durable store's current
+    // batch: the verify pass records one `unanchored-mention` finding per
+    // (entity, artifact), already net of the exclusion ledger.
+    let mut unanchored_mentions: Vec<UnanchoredMention> = Vec::new();
+    if let Some((mem, name)) = binding_id.split_once('/')
+        && let Ok(Some(store)) = read_findings_store(workspace_root, mem, name)
+    {
+        for f in store.current(key) {
+            if let super::findings::FindingTarget::Mention {
+                entity,
+                artifact,
+                section,
+            } = &f.target
+            {
+                unanchored_mentions.push(UnanchoredMention {
+                    entity: entity.clone(),
+                    artifact: artifact.clone(),
+                    section: section.clone(),
+                });
+            }
+        }
+    }
+    unanchored_mentions.sort();
+
     let coverage = GrainCoverage {
         denominator,
         covered_artifacts: direct_covered + tree_only_covered,
@@ -1713,6 +1791,7 @@ pub fn compute_fidelity_report(
         tree_only_covered,
         uncovered: uncovered.clone(),
         excluded: disposed_excluded,
+        unanchored_mentions,
         tree_anchors,
         unanchored_entities,
         excluded_entities,
@@ -1963,6 +2042,11 @@ fn finding_target_label(target: &super::findings::FindingTarget) -> String {
             format!("{entity} → {artifact}")
         }
         super::findings::FindingTarget::Artifact { artifact } => artifact.clone(),
+        super::findings::FindingTarget::Mention {
+            entity,
+            artifact,
+            section,
+        } => format!("{entity} names {artifact} in {section}"),
     }
 }
 
@@ -2006,6 +2090,7 @@ mod tests {
                 tree_only_covered: 3,
                 uncovered: vec!["src/a.rs".to_string()],
                 excluded: 0,
+                unanchored_mentions: Vec::new(),
                 tree_anchors: vec![TreeFanout {
                     entity: "engine--big".to_string(),
                     artifact: "src/".to_string(),
@@ -2952,6 +3037,7 @@ mod rollup_tests {
                 tree_only_covered: 0,
                 uncovered: Vec::new(),
                 excluded: 0,
+                unanchored_mentions: Vec::new(),
                 tree_anchors: Vec::new(),
                 unanchored_entities: Vec::new(),
                 excluded_entities: 0,

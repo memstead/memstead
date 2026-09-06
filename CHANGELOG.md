@@ -9,6 +9,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Claims about artifacts an entity does not anchor are a finding.** The
+  verify pass walks every destination entity's prose (fenced code masked)
+  against the binding's enumerated scope and records one
+  `unanchored-mention` finding per entity and artifact, naming the section,
+  for every in-scope file the entity names by path and carries no anchor on.
+  Path matching follows the binding's source join, so a source-relative and
+  a workspace-relative spelling of one file are one artifact; an artifact
+  excluded with a rationale raises nothing. A finding, never a refusal. The
+  fidelity report's coverage block carries the count beside `uncovered` with
+  the remedy (`memstead_update` with `anchors`, or `memstead projection
+  exclude` with a rationale) and lists each under `unanchored_mentions`, the
+  sync brief presents the open ones in their own group, `memstead status`
+  counts them, and `memstead health` reports each as an `UNANCHORED_MENTION`
+  warning. Motivation: on the engine mem, three entities' claims about the
+  folder backend stood falsified for weeks while every anchor they held
+  resolved.
+
 - **A `quoted-phrase` preparation: the anchor that says "this text still
   carries these words".** Under a source declaring `preparation:
   quoted-phrase`, the artifact `<path>#<phrase>`, `<url>#<phrase>` or

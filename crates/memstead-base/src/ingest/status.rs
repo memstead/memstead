@@ -69,6 +69,10 @@ pub struct FindingCounts {
     pub uncovered: usize,
     /// Findings queued for adjudication.
     pub queued: usize,
+    /// Entities naming an in-scope artifact they carry no anchor on: claims
+    /// no verify watches. Warn-level — counted, listed by the sync brief, and
+    /// never part of the action verdict.
+    pub unanchored_mentions: usize,
 }
 
 /// One binding's status entry (D11) — the per-binding drill-down, carrying
@@ -161,6 +165,7 @@ fn resolve_binding_status(
                 FindingClass::Drifted | FindingClass::Wrong => findings.drifted += 1,
                 FindingClass::Uncovered => findings.uncovered += 1,
                 FindingClass::QueuedForAdjudication => findings.queued += 1,
+                FindingClass::UnanchoredMention => findings.unanchored_mentions += 1,
             }
         }
     }
@@ -476,6 +481,7 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
             drifted,
             uncovered,
             queued,
+            unanchored_mentions,
         } = resolution.findings;
         if unresolvable > 0 {
             candidates.push(Candidate {
@@ -515,6 +521,18 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
                 text: format!(
                     "{queued} finding(s) in `{binding_id}` queued for adjudication — run \
                      `memstead projection verify {binding_id}`"
+                ),
+            });
+        }
+        // Warn-level: a claim no verify watches is exposure, not a defect —
+        // it never flips the verdict, but it is named so it becomes work.
+        if unanchored_mentions > 0 {
+            candidates.push(Candidate {
+                severity: 1,
+                text: format!(
+                    "{unanchored_mentions} claim(s) in `{binding_id}` name an in-scope artifact \
+                     the entity does not anchor — the sync brief lists them; add the anchor \
+                     or exclude the artifact with a rationale"
                 ),
             });
         }

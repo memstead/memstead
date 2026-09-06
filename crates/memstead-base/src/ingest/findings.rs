@@ -122,8 +122,10 @@ pub struct FindingKey {
 /// `queued-for-adjudication` come only from **hash-drift adjudication** (over
 /// hash-bearing anchors — never `authored` / `informed-by`, see
 /// [`adjudicate_anchor`]); `unresolvable-anchor` is an existence failure;
-/// `uncovered` marks a source artifact with no anchor; `wrong` is reserved for
-/// an adjudicated content mismatch the group-B report renders.
+/// `uncovered` marks a source artifact with no anchor; `unanchored-mention`
+/// marks a destination entity naming an in-scope artifact it carries no
+/// anchor on; `wrong` is reserved for an adjudicated content mismatch the
+/// group-B report renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FindingClass {
@@ -139,6 +141,12 @@ pub enum FindingClass {
     /// Hash adjudication is deferred (capped, or `recheck`) and queued in the
     /// store; the remainder is the tier-3 backlog.
     QueuedForAdjudication,
+    /// A destination entity names an in-scope source artifact in its body
+    /// (by path, outside fenced code) and carries no anchor on it: a claim
+    /// about a file no verify watches on the entity's behalf. A finding, never
+    /// a refusal; the remedy is an anchor (`memstead_update` with `anchors`)
+    /// or an authored exclusion of the artifact with a rationale.
+    UnanchoredMention,
 }
 
 impl FindingClass {
@@ -149,6 +157,7 @@ impl FindingClass {
         "uncovered",
         "unresolvable-anchor",
         "queued-for-adjudication",
+        "unanchored-mention",
     ];
 
     /// Stable wire form.
@@ -159,6 +168,7 @@ impl FindingClass {
             FindingClass::Uncovered => "uncovered",
             FindingClass::UnresolvableAnchor => "unresolvable-anchor",
             FindingClass::QueuedForAdjudication => "queued-for-adjudication",
+            FindingClass::UnanchoredMention => "unanchored-mention",
         }
     }
 
@@ -170,6 +180,7 @@ impl FindingClass {
             "uncovered" => Some(FindingClass::Uncovered),
             "unresolvable-anchor" => Some(FindingClass::UnresolvableAnchor),
             "queued-for-adjudication" => Some(FindingClass::QueuedForAdjudication),
+            "unanchored-mention" => Some(FindingClass::UnanchoredMention),
             _ => None,
         }
     }
@@ -193,6 +204,17 @@ pub enum FindingTarget {
     Artifact {
         /// The source-side artifact id.
         artifact: String,
+    },
+    /// A body mention: the entity whose prose names the artifact, the
+    /// artifact it names, and the section the mention sits in (the first
+    /// naming section when several do; the detail lists them all).
+    Mention {
+        /// The entity id (`mem--slug`) whose body names the artifact.
+        entity: String,
+        /// The source-side artifact id, in the spelling `S(D)` enumerates.
+        artifact: String,
+        /// The section key the mention was found in.
+        section: String,
     },
 }
 
@@ -1074,6 +1096,11 @@ fn target_key(target: &FindingTarget) -> String {
     match target {
         FindingTarget::Anchor { entity, artifact } => format!("a\u{1f}{entity}\u{1f}{artifact}"),
         FindingTarget::Artifact { artifact } => format!("f\u{1f}{artifact}"),
+        // Keyed on entity and artifact: a mention that moves between sections
+        // is the same claim, and the section rides as description.
+        FindingTarget::Mention {
+            entity, artifact, ..
+        } => format!("m\u{1f}{entity}\u{1f}{artifact}"),
     }
 }
 
@@ -1137,6 +1164,10 @@ fn merge_with_prior(
         let observed = match &f.target {
             FindingTarget::Anchor { .. } => obs.anchors_observed.contains(&tkey),
             FindingTarget::Artifact { artifact } => obs.files_observed.contains(artifact),
+            // The mention walk reads every destination body against the whole
+            // of `S(D)` on every pass, so a mention is always re-observed: it
+            // is either recorded afresh or gone.
+            FindingTarget::Mention { .. } => true,
         };
         if observed {
             // Deferral must not supersede a substantive prior verdict.
@@ -1156,6 +1187,7 @@ fn merge_with_prior(
             FindingTarget::Artifact { artifact } => {
                 obs.s_d.contains(artifact) && !accounted_now(artifact)
             }
+            FindingTarget::Mention { .. } => false,
         };
         if still_open {
             carried.push(f.clone());
@@ -1701,6 +1733,19 @@ fn run_verify(
         }
     }
 
+    // 2b. Claims about artifacts an entity does not anchor. The same walk the
+    //     coverage leg makes over anchors, made over entity bodies: every
+    //     destination entity whose prose names an artifact of `S(D)` and
+    //     carries no anchor on it. Always the whole of `S(D)` — the walk is
+    //     linear in body size (path tokens are looked up, artifacts are never
+    //     searched for) — so a sampled pass observes mentions exactly as a
+    //     full one does. An artifact the exclusion ledger names raises none:
+    //     the author has said it warrants no entity, and a mention of it is a
+    //     neighbour named for contrast, not a claim owed an anchor.
+    findings.extend(unanchored_mention_findings(
+        engine, resolved, &s_d, &excluded, &key, &facet, &now,
+    ));
+
     // 3. Head-durable merge (the store keys on hash(D) alone): fold the prior
     //    open batch into this pass's findings — re-observed targets take this
     //    pass's outcome; unobserved-but-still-open ones carry forward with
@@ -1751,6 +1796,145 @@ fn run_verify(
         facet_heads,
         hash_backfill,
     })
+}
+
+/// The unanchored-mention walk: one finding per `(entity, artifact)` for every
+/// destination entity whose body names an `S(D)` artifact it carries no anchor
+/// on. Prose only — fenced code blocks are masked before scanning (an inline
+/// code span is the ordinary spelling of a path and stays visible). A path
+/// token matches an artifact under either of the binding's spellings: the
+/// workspace-relative id `S(D)` enumerates, or the source-relative form the
+/// facet's pointer joins onto it (the same rule anchors resolve by). Artifacts
+/// in `excluded` raise nothing. "Carries no anchor" is decided by the engine's
+/// own reference rule ([`Engine::anchors_referencing_artifact`]), so a tree
+/// anchor over the file's directory anchors it.
+fn unanchored_mention_findings(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    s_d: &BTreeSet<String>,
+    excluded: &BTreeSet<String>,
+    key: &FindingKey,
+    facet: &str,
+    now: &str,
+) -> Vec<Finding> {
+    if s_d.is_empty() {
+        return Vec::new();
+    }
+    let pointers: Vec<String> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(p.pointer.clone()),
+            ResolvedSource::Reference { .. } => None,
+        })
+        .collect();
+    // (entity, artifact) → sections naming it, in body order.
+    let mut mentions: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for entity in engine.store().all_entities() {
+        if entity.mem != resolved.destination_mem || entity.stub {
+            continue;
+        }
+        for (section, body) in &entity.sections {
+            let masked = crate::markdown::mask_code_blocks(body);
+            for token in path_tokens(&masked) {
+                let Some(artifact) = resolve_mention(&token, &pointers, s_d) else {
+                    continue;
+                };
+                if excluded.contains(&artifact) {
+                    continue;
+                }
+                let sections = mentions
+                    .entry((entity.id.to_string(), artifact))
+                    .or_default();
+                if !sections.iter().any(|s| s == section) {
+                    sections.push(section.clone());
+                }
+            }
+        }
+    }
+    if mentions.is_empty() {
+        return Vec::new();
+    }
+    // One sidecar read per distinct artifact, not per mention.
+    let mut anchored_by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (_, artifact) in mentions.keys() {
+        anchored_by.entry(artifact.clone()).or_insert_with(|| {
+            engine
+                .anchors_referencing_artifact(artifact)
+                .into_iter()
+                .map(|(eid, _)| eid.as_ref().to_string())
+                .collect()
+        });
+    }
+    mentions
+        .into_iter()
+        .filter(|((entity, artifact), _)| {
+            !anchored_by
+                .get(artifact.as_str())
+                .is_some_and(|holders| holders.contains(entity))
+        })
+        .map(|((entity, artifact), sections)| Finding {
+            key: key.clone(),
+            facet: facet.to_string(),
+            detail: format!(
+                "entity names this in-scope artifact in section{} {} and carries no anchor on \
+                 it; add the anchor (`memstead_update` with `anchors`) so verify watches the \
+                 claim, or exclude the artifact with a rationale (`projection exclude`)",
+                if sections.len() == 1 { "" } else { "s" },
+                sections
+                    .iter()
+                    .map(|s| format!("`{s}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            target: FindingTarget::Mention {
+                entity,
+                artifact,
+                section: sections[0].clone(),
+            },
+            class: FindingClass::UnanchoredMention,
+            created_at: now.to_string(),
+        })
+        .collect()
+}
+
+/// Path-shaped tokens of a prose body: maximal runs of path characters
+/// (alphanumerics, `_`, `.`, `/`, `-`) that carry a `/` or a `.`, with a
+/// leading `./` and trailing sentence punctuation stripped. Lexical and
+/// deterministic; whether a token names an artifact is decided by lookup
+/// against `S(D)`, never by guessing.
+fn path_tokens(text: &str) -> Vec<String> {
+    let is_path_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.' | '/' | '-');
+    let mut out = Vec::new();
+    for run in text.split(|c: char| !is_path_char(c)) {
+        let mut t = run.trim_end_matches(['.', '-']);
+        while let Some(rest) = t.strip_prefix("./") {
+            t = rest;
+        }
+        if t.len() < 3 || !(t.contains('/') || t.contains('.')) {
+            continue;
+        }
+        out.push(t.to_string());
+    }
+    out
+}
+
+/// Which `S(D)` artifact a path token names, if any: the token as written
+/// (the workspace-relative id), or the token joined under a facet pointer
+/// (the source-relative spelling) — the same two readings the anchor
+/// resolver accepts, so one file has one identity however it is spelt.
+fn resolve_mention(token: &str, pointers: &[String], s_d: &BTreeSet<String>) -> Option<String> {
+    if s_d.contains(token) {
+        return Some(token.to_string());
+    }
+    for pointer in pointers {
+        for candidate in crate::engine::query::artifact_candidates(pointer, token) {
+            if s_d.contains(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// The medium type's wire string (`codebase` / `web` / …) — the serde form the
@@ -2504,6 +2688,7 @@ mod tests {
                     && match &f.target {
                         FindingTarget::Anchor { artifact, .. } => artifact == art,
                         FindingTarget::Artifact { artifact } => artifact == art,
+                        FindingTarget::Mention { artifact, .. } => artifact == art,
                     }
             })
         };
@@ -2525,6 +2710,359 @@ mod tests {
         );
         // The covered file is not flagged uncovered.
         assert!(!has(FindingClass::Uncovered, "src/present.rs"));
+    }
+
+    /// A scratch workspace for the mention walk: a folder mem `engine` with a
+    /// codebase binding `engine/graph` whose facet points at `pointer` (empty:
+    /// the workspace root) with scope `**/*.rs`. Source files, entities and
+    /// the anchors sidecar are the caller's to write.
+    fn mention_workspace(root: &Path, pointer: &str) {
+        let mem_dir = root.join("mem");
+        std::fs::create_dir_all(mem_dir.join(".memstead")).unwrap();
+        std::fs::write(
+            mem_dir.join(".memstead").join("config.json"),
+            r#"{"format":1,"schema":"default@1.0.0","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mount = Mount {
+            mem: "engine".to_string(),
+            schema: Some("default@1.0.0".parse().unwrap()),
+            storage: MountStorage::Folder {
+                path: mem_dir.clone(),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: false,
+            migration_target: None,
+        };
+        crate::FileWorkspaceStore::new()
+            .save_state(
+                root,
+                &Workspace {
+                    mounts: vec![mount],
+                    settings: WorkspaceSettings::default(),
+                },
+            )
+            .unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        write_binding(
+            root,
+            "engine",
+            "graph",
+            &Binding {
+                version: BINDING_VERSION,
+                intent: None,
+                sources: vec![crate::pipeline::Source {
+                    name: "graph".to_string(),
+                    medium_type: MediumType::Codebase,
+                    pointer: pointer.to_string(),
+                    change_detection: Some("git".to_string()),
+                    scope: vec![PatternEntry {
+                        path: "**/*.rs".to_string(),
+                        mode: PatternMode::Allow,
+                    }],
+                    engagement: None,
+                    preparation: None,
+                }],
+                reference_mems: Vec::new(),
+                destination_mem: "engine".to_string(),
+                deny_paths: Vec::new(),
+                coverage_semantics: None,
+                rules: None,
+                prune: None,
+                operations: Operations {
+                    build: None,
+                    sync: None,
+                    verify: Some(VerifyOperation {
+                        trigger: IngestTrigger::Manual,
+                        batch_size: 20,
+                        adjudication_cap: DEFAULT_ADJUDICATION_CAP,
+                        full_resync_every: DEFAULT_FULL_RESYNC_EVERY,
+                    }),
+                },
+            },
+        )
+        .unwrap();
+    }
+
+    fn decision_entity(root: &Path, slug: &str, body: &str) {
+        std::fs::write(
+            root.join("mem").join(format!("{slug}.md")),
+            format!("---\ntype: decision\n---\n\n# {slug}\n\n## Decision\n\n{body}\n"),
+        )
+        .unwrap();
+    }
+
+    fn informed_by(artifact: &str) -> Anchor {
+        Anchor {
+            artifact: artifact.to_string(),
+            grain: AnchorGrain::File,
+            class: AnchorProvenanceClass::InformedBy,
+            at_version: None,
+            hash: None,
+            hash_stability: AnchorHashStability::Stable,
+            derived_from: Vec::new(),
+            binding: None,
+            source: None,
+            span_unvalidated: false,
+            hash_source: None,
+            last_observed: None,
+        }
+    }
+
+    fn mentions_of<'a>(findings: &'a [Finding], entity: &str) -> Vec<(&'a str, &'a str)> {
+        let mut out: Vec<(&str, &str)> = findings
+            .iter()
+            .filter(|f| f.class == FindingClass::UnanchoredMention)
+            .filter_map(|f| match &f.target {
+                FindingTarget::Mention {
+                    entity: e,
+                    artifact,
+                    section,
+                } if e == entity => Some((artifact.as_str(), section.as_str())),
+                _ => None,
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// Criterion "verify records an unanchored mention per entity and
+    /// artifact", with its refusal complement: a full verify over a scratch
+    /// binding records one `unanchored-mention` finding for the entity whose
+    /// prose names an in-scope file it does not anchor (naming the section),
+    /// none for the entity that anchors the file, none for one that names it
+    /// inside a fenced code block only, and none for one that names nothing;
+    /// once the entity anchors the file, the next verify records no mention
+    /// for it. The fidelity report carries the count beside `uncovered` with
+    /// the anchors remedy, and health lists each finding as an
+    /// `UNANCHORED_MENTION` warning.
+    #[test]
+    fn verify_records_an_unanchored_mention_per_entity_and_artifact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        mention_workspace(root, "");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("present.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("src").join("other.rs"), "fn b() {}\n").unwrap();
+
+        // A anchors F; B names F (and a second file) without anchoring; C
+        // names F inside a fence only; D names nothing in scope.
+        decision_entity(root, "a", "Anchored: `src/present.rs` is watched.");
+        decision_entity(
+            root,
+            "b",
+            "The reader in src/present.rs refuses empty input, and `src/other.rs` \
+             mirrors it. See also e.g. the docs.",
+        );
+        decision_entity(root, "c", "```rust\n// src/present.rs\nfn a() {}\n```");
+        decision_entity(root, "d", "Nothing named here.");
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set("engine--a", vec![informed_by("src/present.rs")]);
+        std::fs::write(
+            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
+
+        let outcome = verify_binding_full(&engine, root, binding, &resolved).unwrap();
+        let store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        let current = store.current(&outcome.key).to_vec();
+        assert_eq!(
+            mentions_of(&current, "engine--b"),
+            vec![
+                ("src/other.rs", "specifies"),
+                ("src/present.rs", "specifies")
+            ],
+            "one finding per (entity, artifact), naming the section"
+        );
+        assert!(
+            mentions_of(&current, "engine--a").is_empty(),
+            "anchored: no mention"
+        );
+        assert!(
+            mentions_of(&current, "engine--c").is_empty(),
+            "a fenced code block is not a claim"
+        );
+        assert!(mentions_of(&current, "engine--d").is_empty());
+        let detail = current
+            .iter()
+            .find(|f| f.class == FindingClass::UnanchoredMention)
+            .map(|f| f.detail.clone())
+            .unwrap();
+        assert!(detail.contains("`specifies`"), "{detail}");
+
+        // The report: the count beside `uncovered`, with the anchors remedy,
+        // and the heavy list naming each mention.
+        let report = super::super::report::compute_fidelity_report(
+            &engine,
+            root,
+            binding,
+            &resolved,
+            &outcome.key,
+        );
+        assert_eq!(report.coverage.unanchored_mentions.len(), 2);
+        let md = super::super::report::render_fidelity_report(
+            &report,
+            super::super::report::DEFAULT_REPORT_BUDGET,
+            &["unanchored_mentions".to_string()],
+        )
+        .markdown;
+        assert!(
+            md.contains(
+                "- uncovered (no anchor): 1\n- unanchored mentions (an entity names an \
+                         in-scope artifact it does not anchor): 2 — remedy: add the anchor \
+                         (`memstead_update` with `anchors`)"
+            ),
+            "{md}"
+        );
+        assert!(
+            md.contains(
+                "## Unanchored mentions\n\n- `engine--b` names `src/other.rs` in `specifies`"
+            ),
+            "{md}"
+        );
+        assert_eq!(report.findings_by_class.get("unanchored-mention"), Some(&2));
+        let rollup = report.rollup();
+        assert!(
+            rollup
+                .actions
+                .iter()
+                .any(|a| a.starts_with("2 claim(s) name an in-scope artifact")),
+            "{:?}",
+            rollup.actions
+        );
+
+        // Health: one `UNANCHORED_MENTION` warning per finding, naming the
+        // entity, the artifact and the section.
+        let health = engine.health();
+        let mentions: Vec<&crate::ops::WarningHint> = health
+            .warnings
+            .iter()
+            .filter(|w| w.code() == "UNANCHORED_MENTION")
+            .collect();
+        assert_eq!(mentions.len(), 2, "{:?}", health.warnings);
+        assert!(mentions.iter().all(|w| {
+            let msg = w.message();
+            msg.contains("`engine--b` names `src/") && msg.contains("in section `specifies`")
+        }));
+
+        // Refusal complement: B anchors F and the other file is excluded with
+        // a rationale — the next verify records no mention for B, and the
+        // report counts the excluded file under `excluded`.
+        sidecar.set("engine--b", vec![informed_by("src/present.rs")]);
+        std::fs::write(
+            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let exclusions: BTreeMap<String, String> = [(
+            "src/other.rs".to_string(),
+            "a mirror of present.rs, warrants no entity".to_string(),
+        )]
+        .into_iter()
+        .collect();
+        super::super::advance::record_exclusions(&engine, root, &resolved, &exclusions).unwrap();
+        let outcome = verify_binding_full(&engine, root, binding, &resolved).unwrap();
+        let store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        let current = store.current(&outcome.key).to_vec();
+        assert!(
+            mentions_of(&current, "engine--b").is_empty(),
+            "anchored or excluded: no mention stands, and none is carried forward: {current:?}"
+        );
+        let report = super::super::report::compute_fidelity_report(
+            &engine,
+            root,
+            binding,
+            &resolved,
+            &outcome.key,
+        );
+        assert!(report.coverage.unanchored_mentions.is_empty());
+        assert_eq!(
+            report.coverage.excluded, 1,
+            "the excluded file counts under `excluded`"
+        );
+        assert!(
+            engine
+                .health()
+                .warnings
+                .iter()
+                .all(|w| w.code() != "UNANCHORED_MENTION")
+        );
+    }
+
+    /// Path matching follows the binding's source join: under a facet whose
+    /// pointer is `sub`, the artifact `sub/x.rs` is one file whether the
+    /// entity spells it source-relative (`x.rs`) or workspace-relative
+    /// (`sub/x.rs`) — one finding, not two, and a spelling that resolves
+    /// to nothing in `S(D)` raises none.
+    #[test]
+    fn mention_matching_follows_the_source_join() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        mention_workspace(root, "sub");
+        std::fs::create_dir_all(root.join("sub").join("inner")).unwrap();
+        std::fs::write(root.join("sub").join("inner").join("x.rs"), "fn a() {}\n").unwrap();
+        decision_entity(
+            root,
+            "b",
+            "Spelt both ways: inner/x.rs and sub/inner/x.rs. Not in scope: lib/x.rs, x.rs.",
+        );
+        std::fs::write(
+            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            AnchorSidecar::default().to_bytes(),
+        )
+        .unwrap();
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
+        let outcome = verify_binding_full(&engine, root, binding, &resolved).unwrap();
+        let store = read_findings_store(root, "engine", "graph")
+            .unwrap()
+            .unwrap();
+        let current = store.current(&outcome.key).to_vec();
+        assert_eq!(
+            mentions_of(&current, "engine--b"),
+            vec![("sub/inner/x.rs", "specifies")],
+            "one artifact under either spelling: {current:?}"
+        );
+    }
+
+    /// The token scanner: paths survive sentence punctuation and inline code
+    /// spans, a leading `./` is dropped, and words that are not path-shaped
+    /// never reach the lookup.
+    #[test]
+    fn path_tokens_are_lexical_and_punctuation_tolerant() {
+        let toks = path_tokens(
+            "See `src/a.rs`, then (src/b.rs). Also ./src/c.rs; and src/d.rs: line 3. \
+             Not paths: e.g. and hello and v1.",
+        );
+        assert_eq!(
+            toks,
+            vec!["src/a.rs", "src/b.rs", "src/c.rs", "src/d.rs", "e.g"]
+        );
     }
 
     /// Criterion, end-to-end — **findings survive head movement**: a finding

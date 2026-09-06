@@ -187,7 +187,11 @@ of misparsing:
   anchor. Branch on `verdict`, never on the capability fields directly.
 
 `report.findings_by_class` uses a closed vocabulary: `drifted`, `wrong`,
-`uncovered`, `unresolvable-anchor`, `queued-for-adjudication`.
+`uncovered`, `unresolvable-anchor`, `unanchored-mention`,
+`queued-for-adjudication`. An `unanchored-mention` is an entity naming an
+in-scope artifact it carries no anchor on (warn-level: it never turns the
+verdict, and `report.coverage.unanchored_mentions` lists each with its
+section).
 `report.coverage.denominator` is an internally-tagged union on `kind` —
 either `{"kind": "enumerated", "count": N}` or
 `{"kind": "non-enumerable", "reason": "…"}`. Branch on `kind`; a
