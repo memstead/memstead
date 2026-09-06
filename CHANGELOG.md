@@ -129,6 +129,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The sealed rationale is readable through the engine.** On an installed
+  archive, `memstead entity <id> --provenance` and `memstead_entity` with
+  `include_provenance: true` serve the rationale the archive seals for the
+  entity (`.memstead/provenance.json`: rationale, kind, actor, timestamp,
+  history disposition) under the same `mutation_provenance` block a source
+  mem's recorded touches use, in a `sealed` sub-block, where they refused
+  with "archives record no history". Where the archive seals no rationale
+  for the entity, or ships no payload, the block says so (`carried:
+  false`). The archive is read, never modified, and its format is
+  unchanged; the history read on an archive keeps refusing, since an
+  archive records no touches.
 - **The plugin skills and the guides name what exists.** The remodel
   skill's wrong-type branch retypes in place through `memstead_retype`
   (listed in its allowed tools) instead of reporting that no surface can

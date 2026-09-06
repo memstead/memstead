@@ -217,6 +217,40 @@ pub struct EntityProvenance {
     /// The newest `conformance` record, when one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_conformance_check: Option<crate::check::CheckRecord>,
+    /// On an archive mount: the authoring rationale the archive seals
+    /// for this entity (`.memstead/provenance.json`), in place of the
+    /// recorded touches an archive does not carry. Absent on source
+    /// mems.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sealed: Option<SealedProvenance>,
+}
+
+/// The per-entity authoring rationale an installed archive carries,
+/// read from the payload `export` seals; the reader never modifies the
+/// archive. `carried: false` says so explicitly when the archive ships
+/// no payload, or a payload with no entry for this entity: absence is
+/// stated, never substituted.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SealedProvenance {
+    /// Whether the archive carries a rationale for this entity.
+    pub carried: bool,
+    /// The payload's history disposition (`summarised`) when a payload
+    /// exists at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
+    /// The entity's authoring rationale (the most recent mutation note
+    /// sealed for it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// The mutation kind that note rode on (`create` / `update` / ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// When it was recorded, RFC 3339 as sealed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+    /// The actor category recorded with it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
 }
 
 fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
@@ -245,6 +279,15 @@ impl Engine {
         mem: &str,
         entity_id: &str,
     ) -> Result<EntityProvenance, EngineError> {
+        // An archive records no touches at the engine seam, but it
+        // carries the rationale `export` sealed per entity: that is the
+        // provenance an installed mem can answer with.
+        if matches!(
+            self.find_mount(mem)?.mount.storage,
+            MountStorage::Archive { .. }
+        ) {
+            return self.sealed_provenance(mem, entity_id);
+        }
         let mut report = self.entity_history(mem, entity_id, Some(HISTORY_PAGE_MAX), None)?;
         let newest = report.touches.first().cloned();
         // Walk to the last page for the oldest touch.
@@ -267,6 +310,78 @@ impl Engine {
             last_check,
             conformance_state: conformance_state.as_str().to_string(),
             last_conformance_check,
+            sealed: None,
+        })
+    }
+
+    /// The provenance block of an entity on an archive mount: the sealed
+    /// rationale where the payload carries one, `carried: false` where
+    /// it does not, and the check states the workspace ledger holds for
+    /// the id either way. Refuses `ENTITY_NOT_FOUND` for an id the mount
+    /// does not serve, as the history read does.
+    fn sealed_provenance(
+        &self,
+        mem: &str,
+        entity_id: &str,
+    ) -> Result<EntityProvenance, EngineError> {
+        let known = self
+            .store
+            .all_entities()
+            .any(|e| e.mem == mem && e.id.0 == entity_id);
+        if !known {
+            return Err(EngineError::NotFound {
+                id: entity_id.to_string(),
+            });
+        }
+        let id = crate::EntityId(entity_id.to_string());
+        let sealed = match self.archive_provenance_for(mem) {
+            Some(payload) => {
+                let history = Some(
+                    serde_json::to_value(payload.history)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                );
+                match payload.entity(id.path()) {
+                    Some(rec) => SealedProvenance {
+                        carried: rec.rationale.is_some(),
+                        history,
+                        rationale: rec.rationale.clone(),
+                        kind: rec.kind.clone(),
+                        timestamp: rec.timestamp.clone(),
+                        actor: rec.actor.clone(),
+                    },
+                    None => SealedProvenance {
+                        carried: false,
+                        history,
+                        rationale: None,
+                        kind: None,
+                        timestamp: None,
+                        actor: None,
+                    },
+                }
+            }
+            None => SealedProvenance {
+                carried: false,
+                history: None,
+                rationale: None,
+                kind: None,
+                timestamp: None,
+                actor: None,
+            },
+        };
+        let (check_state, last_check) = self.entity_check_state(mem, entity_id)?;
+        let (conformance_state, last_conformance_check) =
+            self.entity_conformance_state(mem, entity_id)?;
+        Ok(EntityProvenance {
+            created_by: None,
+            last_modified_by: None,
+            story_truncated: false,
+            check_state: check_state.as_str().to_string(),
+            last_check,
+            conformance_state: conformance_state.as_str().to_string(),
+            last_conformance_check,
+            sealed: Some(sealed),
         })
     }
 
@@ -852,6 +967,167 @@ mod tests {
             report.story_start,
             super::StoryStart::Truncated { .. }
         ));
+    }
+
+    /// An archive mount answers the provenance read with the rationale
+    /// it seals per entity; where the payload carries no entry, or the
+    /// archive ships no payload, the block says so instead of refusing.
+    /// The history read keeps refusing: an archive records no touches.
+    #[test]
+    fn archive_mounts_serve_the_sealed_rationale_as_provenance() {
+        struct SealedBackend {
+            inner: crate::storage::InMemoryBackend,
+            payload: Option<Vec<u8>>,
+        }
+        impl crate::backend::MemBackend for SealedBackend {
+            fn list_entities(
+                &self,
+            ) -> Result<Vec<std::path::PathBuf>, crate::backend::BackendError> {
+                self.inner.list_entities()
+            }
+            fn read_entity(
+                &self,
+                rel: &std::path::Path,
+            ) -> Result<Option<Vec<u8>>, crate::backend::BackendError> {
+                self.inner.read_entity(rel)
+            }
+            fn write_entity(
+                &self,
+                p: &std::path::Path,
+                b: &[u8],
+            ) -> Result<(), crate::backend::BackendError> {
+                self.inner.write_entity(p, b)
+            }
+            fn delete_entity(
+                &self,
+                p: &std::path::Path,
+            ) -> Result<(), crate::backend::BackendError> {
+                self.inner.delete_entity(p)
+            }
+            fn move_entity(
+                &self,
+                f: &std::path::Path,
+                t: &std::path::Path,
+            ) -> Result<(), crate::backend::BackendError> {
+                self.inner.move_entity(f, t)
+            }
+            fn commit(
+                &self,
+                m: &str,
+                c: &crate::vcs::CommitContext<'_>,
+            ) -> Result<crate::storage::CommitId, crate::backend::BackendError> {
+                self.inner.commit(m, c)
+            }
+            fn append_provenance(
+                &self,
+                r: &crate::provenance::Provenance,
+            ) -> Result<(), crate::backend::BackendError> {
+                self.inner.append_provenance(r)
+            }
+            fn read_provenance(
+                &self,
+                c: Option<&str>,
+            ) -> Result<Vec<crate::provenance::Provenance>, crate::backend::BackendError>
+            {
+                self.inner.read_provenance(c)
+            }
+            fn read_archive_provenance(
+                &self,
+            ) -> Result<Option<Vec<u8>>, crate::backend::BackendError> {
+                Ok(self.payload.clone())
+            }
+        }
+        fn engine_with(payload: Option<Vec<u8>>) -> crate::Engine {
+            let dir = tempfile::TempDir::new().unwrap();
+            let inner = crate::storage::InMemoryBackend::new();
+            crate::backend::MemBackend::write_entity(
+                &inner,
+                std::path::Path::new("seed.md"),
+                SEED.as_bytes(),
+            )
+            .unwrap();
+            crate::backend::MemBackend::write_entity(
+                &inner,
+                std::path::Path::new("bare.md"),
+                SEED.replace("# Seed", "# Bare").as_bytes(),
+            )
+            .unwrap();
+            crate::backend::MemBackend::commit(
+                &inner,
+                "seed",
+                &crate::vcs::CommitContext::internal(),
+            )
+            .unwrap();
+            let mount = crate::Mount {
+                mem: "specs".to_string(),
+                schema: Some(memstead_schema::SchemaRef::new(
+                    "default",
+                    semver::Version::new(1, 0, 0),
+                )),
+                storage: crate::MountStorage::Archive {
+                    path: dir.path().join("sealed.mem"),
+                },
+                capability: crate::MountCapability::Write,
+                lifecycle: crate::MountLifecycle::Eager,
+                cross_linkable: false,
+                migration_target: None,
+            };
+            crate::Engine::from_mounts(vec![(
+                mount,
+                Box::new(SealedBackend { inner, payload }) as Box<dyn crate::MemBackend>,
+            )])
+            .unwrap()
+        }
+        let payload = serde_json::json!({
+            "format": 1,
+            "history": "summarised",
+            "entities": {
+                "seed": {
+                    "rationale": "seeded so the graph starts non-empty",
+                    "kind": "create",
+                    "timestamp": "2026-06-24T11:32:02Z",
+                    "actor": "agent"
+                }
+            }
+        });
+        let engine = engine_with(Some(serde_json::to_vec(&payload).unwrap()));
+        let prov = engine.entity_provenance("specs", "specs--seed").unwrap();
+        let sealed = prov.sealed.expect("archive mount serves the sealed block");
+        assert!(sealed.carried);
+        assert_eq!(
+            sealed.rationale.as_deref(),
+            Some("seeded so the graph starts non-empty")
+        );
+        assert_eq!(sealed.kind.as_deref(), Some("create"));
+        assert_eq!(sealed.actor.as_deref(), Some("agent"));
+        assert_eq!(sealed.history.as_deref(), Some("summarised"));
+        assert!(prov.created_by.is_none() && prov.last_modified_by.is_none());
+        // An entity the payload does not name: stated as not carried.
+        let bare = engine.entity_provenance("specs", "specs--bare").unwrap();
+        let sealed = bare.sealed.unwrap();
+        assert!(!sealed.carried && sealed.rationale.is_none());
+        assert_eq!(sealed.history.as_deref(), Some("summarised"));
+        // An unknown id still refuses, as the history read does.
+        assert_eq!(
+            engine
+                .entity_provenance("specs", "specs--ghost")
+                .unwrap_err()
+                .code(),
+            "ENTITY_NOT_FOUND"
+        );
+        // An archive with no payload at all: not carried, no history word.
+        let engine = engine_with(None);
+        let none = engine.entity_provenance("specs", "specs--seed").unwrap();
+        let sealed = none.sealed.unwrap();
+        assert!(!sealed.carried && sealed.history.is_none());
+        // The history read keeps its refusal.
+        assert_eq!(
+            engine
+                .entity_history("specs", "specs--seed", None, None)
+                .unwrap_err()
+                .code(),
+            "INVALID_INPUT"
+        );
     }
 
     #[test]

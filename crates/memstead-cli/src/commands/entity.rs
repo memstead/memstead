@@ -35,7 +35,11 @@ pub struct Args {
     /// Append the derived mutation-provenance block: created-by and
     /// last-modified-by with actor, client, declared role (or
     /// `unspecified`), and timestamp — read from the append-only
-    /// mutation record, which no verb can edit after the fact.
+    /// mutation record, which no verb can edit after the fact. On an
+    /// installed archive the block carries the rationale the archive
+    /// seals for the entity instead (`sealed`: rationale, kind, actor,
+    /// timestamp, history disposition), and says so when the archive
+    /// carries none; the archive is read, never modified.
     #[arg(long = "provenance")]
     pub provenance: bool,
 }
@@ -277,6 +281,40 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 ## Mutation provenance
 ",
             );
+            let render_sealed = |sealed: &serde_json::Value| -> String {
+                if sealed["carried"].as_bool() != Some(true) {
+                    return match sealed["history"].as_str() {
+                        Some(h) => format!(
+                            "- sealed rationale: the archive carries none for this entity \
+                             (history {h})\n"
+                        ),
+                        None => "- sealed rationale: the archive carries no provenance payload\n"
+                            .to_string(),
+                    };
+                }
+                let mut line = format!(
+                    "- sealed rationale: {}",
+                    sealed["rationale"].as_str().unwrap_or("")
+                );
+                let mut meta: Vec<String> = Vec::new();
+                if let Some(k) = sealed["kind"].as_str() {
+                    meta.push(k.to_string());
+                }
+                if let Some(a) = sealed["actor"].as_str() {
+                    meta.push(format!("by {a}"));
+                }
+                if let Some(t) = sealed["timestamp"].as_str() {
+                    meta.push(format!("at {t}"));
+                }
+                if let Some(h) = sealed["history"].as_str() {
+                    meta.push(format!("history {h}"));
+                }
+                if !meta.is_empty() {
+                    line.push_str(&format!(" ({})", meta.join(", ")));
+                }
+                line.push('\n');
+                line
+            };
             match prov.get("unavailable") {
                 Some(reason) => {
                     text.push_str(&format!(
@@ -284,6 +322,12 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 ",
                         reason.as_str().unwrap_or("")
                     ));
+                }
+                None if prov.get("sealed").is_some() => {
+                    text.push_str(&render_sealed(&prov["sealed"]));
+                    if let Some(state) = prov.get("check_state").and_then(|v| v.as_str()) {
+                        text.push_str(&format!("- check state: {state}\n"));
+                    }
                 }
                 None => {
                     if let Some(l) = render_rec("created by", "created_by") {
