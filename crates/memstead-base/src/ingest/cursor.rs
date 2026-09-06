@@ -1670,6 +1670,319 @@ fn git_baseline_content(
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The text of a changed artifact at the binding's sync baseline, whichever
+/// primary facet holds it: each git-strategy facet is asked in declaration
+/// order with its own `#synced` token, the first retrievable content wins.
+/// `None` when no facet can produce one (a non-git facet, no baseline, an
+/// added file).
+pub(crate) fn baseline_content_for(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    workspace_root: &Path,
+    ws_rel: &str,
+) -> Option<String> {
+    let baseline_map = engine
+        .mem_config_for(&resolved.destination_mem)
+        .map(|c| c.sync_state.clone())
+        .unwrap_or_default();
+    resolved.sources.iter().find_map(|source| match source {
+        ResolvedSource::Primary(p) => {
+            let key = format!("{}/{}#synced", resolved.name, p.name);
+            let baseline = baseline_map.get(&key).map(String::as_str);
+            git_baseline_content(p, workspace_root, baseline, ws_rel)
+        }
+        ResolvedSource::Reference { .. } => None,
+    })
+}
+
+/// The symbols a source text defines, read lexically: the name after a
+/// definition keyword (`fn`, `struct`, `enum`, `trait`, `type`, `const`,
+/// `static`, `mod`, `macro_rules!`, and the `function`, `class`,
+/// `interface`, `def` of other languages), plus the variants of every
+/// `enum` block (a line inside it that opens with a capitalised identifier).
+/// No parser and no language table: a definition is a keyword followed by
+/// an identifier, which is what a reader scanning a diff hunk sees too.
+pub(crate) fn defined_symbols(text: &str) -> BTreeSet<String> {
+    const KEYWORDS: &[&str] = &[
+        "fn",
+        "struct",
+        "enum",
+        "trait",
+        "type",
+        "const",
+        "static",
+        "mod",
+        "function",
+        "class",
+        "interface",
+        "def",
+    ];
+    fn ident(s: &str) -> Option<&str> {
+        let end = s
+            .char_indices()
+            .find(|(_, c)| !(c.is_alphanumeric() || *c == '_'))
+            .map(|(i, _)| i)
+            .unwrap_or(s.len());
+        let name = &s[..end];
+        (!name.is_empty() && !name.starts_with(|c: char| c.is_ascii_digit())).then_some(name)
+    }
+    let mut out = BTreeSet::new();
+    // (indent of the `enum` line) while inside an enum block.
+    let mut enum_indent: Option<usize> = None;
+    for raw in text.lines() {
+        let indent = raw.len() - raw.trim_start().len();
+        let line = raw.trim();
+        if let Some(open) = enum_indent {
+            if line.starts_with('}') && indent <= open {
+                enum_indent = None;
+            } else if indent > open
+                && line.starts_with(|c: char| c.is_ascii_uppercase())
+                && let Some(name) = ident(line)
+                && line[name.len()..]
+                    .trim_start()
+                    .starts_with([',', '{', '(', '='])
+            {
+                out.insert(name.to_string());
+            }
+        }
+        let mut words = line
+            .split(|c: char| c.is_whitespace() || c == '(')
+            .filter(|w| !w.is_empty());
+        while let Some(word) = words.next() {
+            let word = word.trim_end_matches('!');
+            if KEYWORDS.contains(&word)
+                && let Some(next) = words.next()
+                && let Some(name) = ident(next)
+            {
+                out.insert(name.to_string());
+                if word == "enum" && line.ends_with('{') {
+                    enum_indent = Some(indent);
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// The symbols a change to one artifact defines or removes: the defined set
+/// of the current text against the defined set at the baseline (an added
+/// file defines all of its symbols, a deleted file removes all of its
+/// baseline symbols). Empty when neither text is readable.
+fn changed_symbols(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    workspace_root: &Path,
+    ws_rel: &str,
+) -> BTreeSet<String> {
+    let now = read_workspace_file(workspace_root, ws_rel)
+        .map(|t| defined_symbols(&t))
+        .unwrap_or_default();
+    let old = baseline_content_for(engine, resolved, workspace_root, ws_rel)
+        .map(|t| defined_symbols(&t))
+        .unwrap_or_default();
+    now.symmetric_difference(&old).cloned().collect()
+}
+
+/// Symbol names too ubiquitous to steer by: the standard trait methods and
+/// constructor idioms nearly every Rust file defines, which a body names for
+/// its own type and never for the changed file's.
+const GENERIC_SYMBOLS: &[&str] = &[
+    "new",
+    "default",
+    "from",
+    "into",
+    "clone",
+    "fmt",
+    "drop",
+    "hash",
+    "eq",
+    "cmp",
+    "len",
+    "iter",
+    "next",
+    "get",
+    "set",
+    "push",
+    "insert",
+    "remove",
+    "build",
+    "main",
+    "run",
+    "call",
+    "read",
+    "write",
+    "open",
+    "close",
+    "init",
+    "load",
+    "save",
+    "parse",
+    "render",
+    "resolve",
+    "apply",
+    "with",
+    "none",
+    "some",
+    "self",
+    "this",
+    "test",
+    "tests",
+    "error",
+    "kind",
+    "name",
+    "path",
+    "value",
+    "state",
+    "config",
+    "engine",
+    "entity",
+    "id",
+    "code",
+    "message",
+    "text",
+    "body",
+    "title",
+    "section",
+    "sections",
+    "type",
+    "mem",
+    "key",
+    "keys",
+    "as_str",
+    "to_string",
+    "as_ref",
+    "borrow",
+    "deref",
+    "index",
+    "try_from",
+    "try_into",
+    "partial_cmp",
+    "serialize",
+    "deserialize",
+    "display",
+    "debug",
+];
+
+/// The destination entities each changed artifact steers (the claims-in-
+/// sight move): the entities anchoring it, and the entities naming it by
+/// path or by a symbol its change defines or removes without anchoring it.
+/// Built from entity bodies at call time — fenced code masked, the path
+/// tokens resolved under the binding's source join exactly as the verify
+/// pass resolves an unanchored mention, the symbol tokens read from inline
+/// code spans. An entity that anchors the artifact is listed once, under
+/// anchors. Lexical and deterministic: no embedding, no model call.
+pub fn steered_entities(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    workspace_root: &Path,
+    slice: &Slice,
+) -> super::brief::SteeredEntities {
+    use super::brief::{MentionKind, MentionRow};
+    use super::findings::{code_span_symbols, path_tokens, resolve_mention};
+
+    let mut artifacts: Vec<String> = slice
+        .added
+        .iter()
+        .chain(slice.modified.iter())
+        .chain(slice.deleted.iter())
+        .map(|a| crate::preparation::split_unit_id(a).0.to_string())
+        .collect();
+    artifacts.sort();
+    artifacts.dedup();
+    if artifacts.is_empty() {
+        return super::brief::SteeredEntities::new();
+    }
+    let artifact_set: BTreeSet<String> = artifacts.iter().cloned().collect();
+    let pointers: Vec<String> = resolved
+        .sources
+        .iter()
+        .filter_map(|s| match s {
+            ResolvedSource::Primary(p) => Some(p.pointer.clone()),
+            ResolvedSource::Reference { .. } => None,
+        })
+        .collect();
+
+    let mut out = super::brief::SteeredEntities::new();
+    let dest = resolved.destination_mem.as_str();
+    for artifact in &artifacts {
+        let mut anchored: Vec<String> = engine
+            .anchors_referencing_artifact(artifact)
+            .into_iter()
+            .filter(|(eid, _)| eid.mem() == dest)
+            .map(|(eid, _)| eid.as_ref().to_string())
+            .collect();
+        anchored.sort();
+        anchored.dedup();
+        if !anchored.is_empty() {
+            out.entry(artifact.clone()).or_default().anchored = anchored;
+        }
+    }
+
+    // Symbol sets are computed once per artifact, and only when some body
+    // carries an inline code span at all (the common case on a prose mem).
+    let mut symbols: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    for entity in engine.store().all_entities() {
+        if entity.mem != dest || entity.stub {
+            continue;
+        }
+        let eid = entity.id.to_string();
+        for (section, body) in &entity.sections {
+            let masked = crate::markdown::mask_code_blocks(body);
+            let mut hits: Vec<(String, MentionKind)> = Vec::new();
+            for token in path_tokens(&masked) {
+                if let Some(artifact) = resolve_mention(&token, &pointers, &artifact_set) {
+                    hits.push((artifact, MentionKind::Path));
+                }
+            }
+            // A symbol worth steering by is one a reader would recognise as
+            // this change's: the ubiquitous trait and constructor names
+            // (`new`, `default`, `fmt`, …) and anything under four characters
+            // name too many things to point at one.
+            let spans: Vec<String> = code_span_symbols(body)
+                .into_iter()
+                .filter(|s| s.len() >= 4 && !GENERIC_SYMBOLS.contains(&s.as_str()))
+                .collect();
+            if !spans.is_empty() {
+                for artifact in &artifacts {
+                    let defined = symbols.entry(artifact.as_str()).or_insert_with(|| {
+                        changed_symbols(engine, resolved, workspace_root, artifact)
+                    });
+                    for sym in &spans {
+                        if defined.contains(sym) {
+                            hits.push((artifact.clone(), MentionKind::Symbol(sym.clone())));
+                        }
+                    }
+                }
+            }
+            for (artifact, kind) in hits {
+                let entry = out.entry(artifact).or_default();
+                if entry.anchored.contains(&eid) {
+                    continue;
+                }
+                let row = MentionRow {
+                    entity: eid.clone(),
+                    kind,
+                    section: section.clone(),
+                };
+                // One row per (entity, kind): the first section wins.
+                if !entry
+                    .mentioned
+                    .iter()
+                    .any(|r| r.entity == row.entity && r.kind == row.kind)
+                {
+                    entry.mentioned.push(row);
+                }
+            }
+        }
+    }
+    for e in out.values_mut() {
+        e.mentioned.sort();
+    }
+    out.retain(|_, e| !e.anchored.is_empty() || !e.mentioned.is_empty());
+    out
+}
+
 /// The total order of a delivery sequence: the units' own order keys first,
 /// then the path, then the same-stamp ordinal NUMERICALLY (`.2` before
 /// `.10`: an unpadded ordinal compared as text would deliver the tenth entry

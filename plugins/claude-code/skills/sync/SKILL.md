@@ -52,26 +52,25 @@ baseline, no entity writes). Source read-only; refusals verbatim.
    slice, the open findings, and the conservatism rules:
    `memstead --workspace "$WS" projection brief --sync <binding>`.
 
-4. Apply only what the brief calls for, via the MCP mutation tools, inside
-   the destination mem only. Unchanged-meaning drift is an **annotation**,
-   not a rewrite; an ambiguous change is **skipped, finding left open**,
-   never guessed; a removal with no retrievable base is
-   **conflict-flagged** — present both sides, never auto-delete. Four
-   measured disciplines bind here and in steps 7–8: **claim walk on drift**
-   (check a flagged entity assertion by assertion against the source before
-   any re-baseline — never a gestalt "reads fine", the measured top miss
-   cause); **post-edit recheck** (re-read the whole edited entity once
-   against the source); **section-local reconciliation** (when an entity's
-   sections disagree, correct the stale normative text ITSELF, not
-   beside it); **silent correction** (no dated stamps or was-wrong
-   narration in normative sections — git and the check record carry
-   the archaeology; schema-designated history forms exempt).
+4. Apply only what the brief calls for, via the MCP mutation tools, inside the
+   destination mem only; walk a mention-steered entity exactly like an anchored one,
+   and anchor its claim while there. Unchanged-meaning drift is an **annotation**, not
+   a rewrite; an ambiguous change is **skipped, finding left open**, never guessed; a
+   removal with no retrievable base is **conflict-flagged** — present both sides,
+   never auto-delete. Four measured disciplines bind here and in steps 7–8: **claim
+   walk on drift** (check a flagged entity assertion by assertion against the source
+   before any re-baseline — never a gestalt "reads fine", the measured top miss
+   cause); **post-edit recheck** (re-read the whole edited entity once against the
+   source); **section-local reconciliation** (when an entity's sections disagree,
+   correct the stale normative text ITSELF, not beside it); **silent correction** (no
+   dated stamps or was-wrong narration in normative sections — git and the check
+   record carry the archaeology; schema-designated history forms exempt).
 
 5. Record what you did so the baseline advances:
    `memstead --workspace "$WS" projection advance <binding> --dispositions '{"<artifact-id>":"worked", …}'`.
-   Anchored writes count as worked on their own; supply dispositions only
-   for the rest (skipped or out-of-intent), using only ids the brief
-   listed. The baseline advances once the slice is fully dispositioned.
+   Anchored writes count as worked on their own, except an artifact with
+   mention-steered entities; supply dispositions for the rest (skipped, out-of-intent,
+   or walked by mention), using only ids the brief listed. The baseline advances once the slice is fully dispositioned.
 
 6. `--verify <binding>`: run `memstead --workspace "$WS" projection verify
    <binding> --advance` (the flag records the `#verified` baseline; a gate that

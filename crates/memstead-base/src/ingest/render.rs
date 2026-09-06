@@ -17,7 +17,7 @@ use crate::pipeline_store::{BindingConfigs, load_pipeline_configs};
 
 use super::brief::{
     ProcessMemInfo, assemble_discovery_brief, assemble_one_shot_brief, render_changed_slice,
-    render_sync_brief, render_verify_brief,
+    render_sync_brief_with, render_verify_brief,
 };
 use super::check_path::write_active_binding_file;
 use super::cursor::compute_source_cursor;
@@ -250,12 +250,34 @@ pub fn render_sync_brief_for(
     workspace_root: &Path,
     binding_id: &str,
 ) -> Result<String, RenderBriefError> {
+    render_sync_brief_budgeted(
+        engine,
+        workspace_root,
+        binding_id,
+        super::brief::DEFAULT_BRIEF_BUDGET,
+        &[],
+    )
+}
+
+/// [`render_sync_brief_for`] under an explicit token budget for the brief's
+/// heavy content (the mention-steered entity lines) and the include keys
+/// that force a heavy block in past it (`mentions`).
+pub fn render_sync_brief_budgeted(
+    engine: &Engine,
+    workspace_root: &Path,
+    binding_id: &str,
+    budget: usize,
+    include: &[String],
+) -> Result<String, RenderBriefError> {
     let configs = load_pipeline_configs(workspace_root)
         .map_err(|e| RenderBriefError::ConfigLoad(e.to_string()))?;
     let (binding_id, binding) = find_binding(&configs, binding_id)?;
     let resolved = resolve_binding_run(&binding_id, binding)?;
 
     let cursor = compute_source_cursor(engine, &resolved, workspace_root);
+    // The entities the slice steers, anchored and mentioned, from the live
+    // bodies: computed here, once, and never stored in the mem.
+    let steered = super::cursor::steered_entities(engine, &resolved, workspace_root, &cursor.union);
     let (_key, findings) =
         current_findings(engine, workspace_root, binding, &resolved).map_err(|e| {
             RenderBriefError::FindingsRead {
@@ -286,7 +308,17 @@ pub fn render_sync_brief_for(
     );
     Ok(format!(
         "{intent}{}",
-        render_sync_brief(&resolved, &cursor, &findings, &prune, adopt, &exclusions,)
+        render_sync_brief_with(
+            &resolved,
+            &cursor,
+            &findings,
+            &prune,
+            adopt,
+            &exclusions,
+            &steered,
+            budget,
+            include,
+        )
     ))
 }
 

@@ -53,7 +53,8 @@ use memstead_base::ingest::report::{
 use memstead_base::ingest::resolve::{ResolveError, ResolvedSource, resolve_binding_run};
 use memstead_base::ingest::{
     OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
-    render_sync_brief_for, render_verify_brief_for, select_next_due_operation,
+    render_sync_brief_budgeted, render_sync_brief_for, render_verify_brief_for,
+    select_next_due_operation,
 };
 use memstead_base::pipeline::{IngestTrigger, MediumType};
 use memstead_base::pipeline_store::{
@@ -339,6 +340,17 @@ pub struct BriefArgs {
     /// through MCP). Mutually exclusive with `--verify`.
     #[arg(long, conflicts_with = "verify")]
     pub sync: bool,
+    /// Token budget for the sync brief's **heavy** content — the entities
+    /// steered by mention under each changed artifact. When they do not fit,
+    /// the brief states their count and the include hint instead of listing
+    /// them; the anchored entities and the slice always ship. Defaults to the
+    /// house envelope budget. `--sync` only.
+    #[arg(long, requires = "sync")]
+    pub budget: Option<usize>,
+    /// Force a heavy sync-brief block in past the budget (repeatable):
+    /// `mentions`. `--sync` only.
+    #[arg(long = "include", requires = "sync")]
+    pub include: Vec<String>,
 }
 
 /// The `--operation` value for `projection brief --all` — which operations the
@@ -837,7 +849,14 @@ that is not there. Repair the mem, then re-run",
             )
         } else {
             (
-                render_sync_brief_for(engine, &root, &binding_id),
+                render_sync_brief_budgeted(
+                    engine,
+                    &root,
+                    &binding_id,
+                    args.budget
+                        .unwrap_or(memstead_base::ingest::brief::DEFAULT_BRIEF_BUDGET),
+                    &args.include,
+                ),
                 OperationKind::Sync,
             )
         };

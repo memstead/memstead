@@ -674,9 +674,21 @@ pub fn advance_baseline(
     // frozen slice (`printed`) so an anchored write outside the slice
     // fabricates no entry; skips artifacts already carrying an explicit
     // disposition (the agent's judgement wins).
+    // An artifact with mention-steered entities (the claims-in-sight move:
+    // entities naming it, or a symbol its change defines or removes, without
+    // anchoring it) is never auto-worked: its anchoring entity's write says
+    // nothing about the claims the other entities hold, so the pass cannot
+    // close on their behalf. The agent disposes it after walking them.
+    let steered =
+        super::cursor::steered_entities(engine, resolved, workspace_root, &state.frozen_slice);
+    let mention_steered = |art: &str| {
+        let (base, _) = crate::preparation::split_unit_id(art);
+        steered.get(base).is_some_and(|e| !e.mentioned.is_empty())
+    };
     let auto_worked: Vec<String> = printed
         .iter()
         .filter(|art| !state.dispositions.contains_key(art.as_str()))
+        .filter(|art| !mention_steered(art))
         .filter(|art| {
             // A unit id (`<path>#<key>`, touchpoint B) is disposed by an
             // anchor over exactly that unit; a file id by any anchor

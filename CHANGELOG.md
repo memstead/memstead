@@ -9,6 +9,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **The sync brief presents every entity that names a changed artifact.**
+  Under the changed slice, the brief lists for each changed artifact the
+  entities that anchor it and, headed as steered by mention, the entities
+  whose prose names the artifact's path (workspace- or source-relative) or,
+  in an inline code span, a symbol the change defines or removes (a
+  function, type, constant or variant name read lexically from the file
+  against its baseline). The mention lines are the brief's heavy content:
+  `projection brief --sync` takes `--budget` and `--include mentions`, and
+  when the lines do not fit they degrade to a count plus the include hint,
+  never to silence. An artifact with mention-steered entities is no longer
+  auto-disposed by its anchors at `projection advance`; its disposition is
+  the agent's, so a pass cannot close with a mentioned entity unjudged. The
+  index is built from entity bodies at brief time; nothing is stored in
+  the mem.
+
 - **Claims about artifacts an entity does not anchor are a finding.** The
   verify pass walks every destination entity's prose (fenced code masked)
   against the binding's enumerated scope and records one

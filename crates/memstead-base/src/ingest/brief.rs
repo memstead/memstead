@@ -470,6 +470,52 @@ pub struct DeliverySequence {
     pub units: Vec<DeliveredUnit>,
 }
 
+/// How a mention-steered entity names a changed artifact.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MentionKind {
+    /// The body names the artifact's path (workspace- or source-relative).
+    Path,
+    /// The body names, in an inline code span, a symbol the change's diff
+    /// defines or removes.
+    Symbol(String),
+}
+
+/// One destination entity steered at a changed artifact by mention, not by
+/// anchor: it names the artifact (or a symbol the change defines or removes)
+/// in its prose and carries no anchor on the artifact.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MentionRow {
+    /// The entity id (`mem--slug`).
+    pub entity: String,
+    /// What the body names.
+    pub kind: MentionKind,
+    /// The section the mention was found in.
+    pub section: String,
+}
+
+/// The destination entities one changed artifact steers: the ones anchoring
+/// it, and the ones naming it without an anchor. An entity that anchors the
+/// artifact is listed once, under anchors, never under mentions.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtifactEntities {
+    /// Entity ids whose anchors reference the artifact, sorted.
+    pub anchored: Vec<String>,
+    /// Mention-steered rows, sorted by entity then kind.
+    pub mentioned: Vec<MentionRow>,
+}
+
+/// Per changed artifact (workspace-relative id, the spelling the slice
+/// lists), the entities it steers. Built from entity bodies at brief time;
+/// nothing is stored in the mem. Artifacts steering no entity are absent.
+pub type SteeredEntities = std::collections::BTreeMap<String, ArtifactEntities>;
+
+/// The include key that forces the mention lines past the brief budget.
+pub const BRIEF_INCLUDE_MENTIONS: &str = "mentions";
+
+/// The default token budget for the brief's heavy content (the mention
+/// lines): the house envelope budget the fidelity report also uses.
+pub const DEFAULT_BRIEF_BUDGET: usize = super::report::DEFAULT_REPORT_BUDGET;
+
 /// Single-quote a value for the emitted shell command, escaping embedded
 /// single quotes. The digest token is JSON (contains `"` and `:`), so it
 /// must be quoted to survive the shell. Mirrors the plugin's `shellQuote`.
@@ -610,6 +656,105 @@ fn no_signal_reason_text(reason: NoSignalReason, medium: Option<MediumType>) -> 
 /// nothing needs reseeding, and every source is genuinely unchanged (no
 /// no-signal notes) — making the brief byte-identical to a plain roam.
 pub fn render_changed_slice(cursor: &SourceCursor) -> String {
+    render_changed_slice_with(cursor, None, DEFAULT_BRIEF_BUDGET, &[])
+}
+
+/// Render the entities each changed artifact steers, after the slice
+/// classes: the anchoring entities first, then — headed so the agent knows
+/// they are steered by mention, not by anchor — the entities naming the
+/// artifact's path or a symbol its change defines or removes. The mention
+/// lines are the block's heavy content: they greedy-fill under `budget`
+/// (tokens) and degrade to a count plus the `--include mentions` hint when
+/// they do not fit, never to silence; the anchored lines always ship. An
+/// artifact steering nothing is absent; a slice steering nothing renders no
+/// block at all.
+fn render_steered_entities(
+    lines: &mut Vec<String>,
+    steered: &SteeredEntities,
+    budget: usize,
+    include: &[String],
+) {
+    if steered.is_empty() {
+        return;
+    }
+    let row_text = |r: &MentionRow| -> String {
+        let how = match &r.kind {
+            MentionKind::Path => "path".to_string(),
+            MentionKind::Symbol(s) => format!("`{s}`"),
+        };
+        format!("    - `{}` ({how}, in `{}`)", r.entity, r.section)
+    };
+    let mention_entities: std::collections::BTreeSet<&str> = steered
+        .values()
+        .flat_map(|e| e.mentioned.iter().map(|r| r.entity.as_str()))
+        .collect();
+    let mention_artifacts = steered.values().filter(|e| !e.mentioned.is_empty()).count();
+    let mention_text: String = steered
+        .values()
+        .flat_map(|e| e.mentioned.iter().map(row_text))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mention_cost = crate::chunking::estimate_tokens(&mention_text);
+    let show_mentions = mention_entities.is_empty()
+        || mention_cost <= budget
+        || include.iter().any(|k| k == BRIEF_INCLUDE_MENTIONS);
+
+    lines.push("### Entities to walk for each changed artifact\n".to_string());
+    lines.push(
+        "For every changed artifact, the entities that anchor it come first. The entities \
+         under **mentioned by** name the artifact's path, or a symbol the change defines or \
+         removes, in their prose without anchoring it: they are steered by mention, not by \
+         anchor, and the claim walk over them is part of this pass exactly as for the \
+         anchored ones. Read the named section against the artifact, repair what the change \
+         falsifies, and anchor the claim while you are there. An entity that anchors the \
+         artifact is listed once, under anchors. An artifact with mention-steered entities is \
+         not auto-disposed by its anchors: record its disposition yourself after walking \
+         them.\n"
+            .to_string(),
+    );
+    for (artifact, e) in steered {
+        if e.anchored.is_empty() && !show_mentions {
+            continue;
+        }
+        lines.push(format!("- `{artifact}`"));
+        if !e.anchored.is_empty() {
+            let ids: Vec<String> = e.anchored.iter().map(|id| format!("`{id}`")).collect();
+            lines.push(format!("  - anchored by: {}", ids.join(", ")));
+        }
+        if show_mentions && !e.mentioned.is_empty() {
+            lines.push("  - mentioned by:".to_string());
+            lines.extend(e.mentioned.iter().map(row_text));
+        }
+    }
+    if !show_mentions {
+        lines.push(format!(
+            "- _{} mention-steered entit{} over {} changed artifact{} not listed under the \
+             token budget ({mention_cost} tokens; budget {budget}): re-render with \
+             `--include {BRIEF_INCLUDE_MENTIONS}` to list them. They are still part of this \
+             pass, and their artifacts still need a disposition._",
+            mention_entities.len(),
+            if mention_entities.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            mention_artifacts,
+            if mention_artifacts == 1 { "" } else { "s" },
+        ));
+    }
+    lines.push(String::new());
+}
+
+/// [`render_changed_slice`] with the entities each changed artifact steers
+/// (`steered`, from [`super::cursor::steered_entities`]) listed after the
+/// slice classes under `budget` / `include`; `None` renders the classes
+/// alone (the build brief's preface).
+pub fn render_changed_slice_with(
+    cursor: &SourceCursor,
+    steered: Option<&SteeredEntities>,
+    budget: usize,
+    include: &[String],
+) -> String {
     if !cursor.any_changes
         && cursor.reseed.is_empty()
         && cursor.no_signal.is_empty()
@@ -658,6 +803,9 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
                  targeting is coarser this pass only.)_\n"
                     .to_string(),
             );
+        }
+        if let Some(steered) = steered {
+            render_steered_entities(&mut lines, steered, budget, include);
         }
     }
 
@@ -734,11 +882,12 @@ pub fn render_changed_slice(cursor: &SourceCursor) -> String {
         lines.push(
             "Anchored work disposes itself: at advance time, every listed artifact that an \
              anchor in the destination mem references is marked `worked` automatically (an \
-             explicit disposition you pass wins over the auto-mark). Supply dispositions only \
-             for the residue — artifacts you skipped, judged out of intent, or worked without \
-             anchors. The gate accepts only artifact ids listed above — an unknown id refuses \
-             the whole call. When every artifact is disposed, the sync baseline advances \
-             automatically. Run:\n"
+             explicit disposition you pass wins over the auto-mark), except an artifact with \
+             mention-steered entities, which waits for your disposition. Supply dispositions \
+             only for the residue — artifacts you skipped, judged out of intent, worked without \
+             anchors, or walked by mention. The gate accepts only artifact ids listed above — \
+             an unknown id refuses the whole call. When every artifact is disposed, the sync \
+             baseline advances automatically. Run:\n"
                 .to_string(),
         );
         lines.push("```sh".to_string());
@@ -1583,7 +1732,35 @@ pub fn render_sync_brief(
     adopt: bool,
     exclusions: &crate::ingest::advance::ExclusionLedger,
 ) -> String {
-    let preface = render_changed_slice(cursor);
+    render_sync_brief_with(
+        resolved,
+        cursor,
+        findings,
+        prune,
+        adopt,
+        exclusions,
+        &SteeredEntities::new(),
+        DEFAULT_BRIEF_BUDGET,
+        &[],
+    )
+}
+
+/// [`render_sync_brief`] with the entities the slice steers (`steered`, from
+/// [`super::cursor::steered_entities`]) rendered under the changed slice,
+/// their mention lines budgeted by `budget` / `include`.
+#[allow(clippy::too_many_arguments)]
+pub fn render_sync_brief_with(
+    resolved: &ResolvedIngest,
+    cursor: &SourceCursor,
+    findings: &[Finding],
+    prune: &[PruneProposal],
+    adopt: bool,
+    exclusions: &crate::ingest::advance::ExclusionLedger,
+    steered: &SteeredEntities,
+    budget: usize,
+    include: &[String],
+) -> String {
+    let preface = render_changed_slice_with(cursor, Some(steered), budget, include);
     let open_findings = render_open_findings(findings, &resolved.name);
     let prune_block = render_prune_proposals(prune);
     let has_work =
@@ -2176,7 +2353,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
             "",
             "### Recording your dispositions (do this LAST)\n",
             "Only after you have worked the changed artifacts above — and only for the artifacts you actually judged — record a disposition for each, so the next pass targets just what changes next. This advance is resumable and non-stalling: a partial pass is honored, and if the source moves mid-pass the remaining slice re-presents (remaining + new) without losing your recorded work.\n",
-            "Anchored work disposes itself: at advance time, every listed artifact that an anchor in the destination mem references is marked `worked` automatically (an explicit disposition you pass wins over the auto-mark). Supply dispositions only for the residue — artifacts you skipped, judged out of intent, or worked without anchors. The gate accepts only artifact ids listed above — an unknown id refuses the whole call. When every artifact is disposed, the sync baseline advances automatically. Run:\n",
+            "Anchored work disposes itself: at advance time, every listed artifact that an anchor in the destination mem references is marked `worked` automatically (an explicit disposition you pass wins over the auto-mark), except an artifact with mention-steered entities, which waits for your disposition. Supply dispositions only for the residue — artifacts you skipped, judged out of intent, worked without anchors, or walked by mention. The gate accepts only artifact ids listed above — an unknown id refuses the whole call. When every artifact is disposed, the sync baseline advances automatically. Run:\n",
             "```sh",
             r#"memstead projection advance engine/graph --dispositions '{"<artifact>": "<disposition>", ...}'"#,
             "```",

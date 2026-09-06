@@ -1903,7 +1903,7 @@ fn unanchored_mention_findings(
 /// leading `./` and trailing sentence punctuation stripped. Lexical and
 /// deterministic; whether a token names an artifact is decided by lookup
 /// against `S(D)`, never by guessing.
-fn path_tokens(text: &str) -> Vec<String> {
+pub(crate) fn path_tokens(text: &str) -> Vec<String> {
     let is_path_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.' | '/' | '-');
     let mut out = Vec::new();
     for run in text.split(|c: char| !is_path_char(c)) {
@@ -1923,7 +1923,11 @@ fn path_tokens(text: &str) -> Vec<String> {
 /// (the workspace-relative id), or the token joined under a facet pointer
 /// (the source-relative spelling) — the same two readings the anchor
 /// resolver accepts, so one file has one identity however it is spelt.
-fn resolve_mention(token: &str, pointers: &[String], s_d: &BTreeSet<String>) -> Option<String> {
+pub(crate) fn resolve_mention(
+    token: &str,
+    pointers: &[String],
+    s_d: &BTreeSet<String>,
+) -> Option<String> {
     if s_d.contains(token) {
         return Some(token.to_string());
     }
@@ -1935,6 +1939,41 @@ fn resolve_mention(token: &str, pointers: &[String], s_d: &BTreeSet<String>) -> 
         }
     }
     None
+}
+
+/// The symbols a prose body names in inline code spans: the content of every
+/// single-backtick span of a body whose fenced blocks are masked, split into
+/// its path segments (`Type::variant`, `module.function`) with a trailing
+/// call or macro marker (`()`, `!`) dropped, so `` `advance_baseline()` `` and
+/// `` `AdvanceError::UnknownArtifact` `` each name what they spell. Lexical
+/// and deterministic; whether a symbol matters is decided by lookup against
+/// the change's defined-or-removed set, never by guessing.
+pub(crate) fn code_span_symbols(text: &str) -> Vec<String> {
+    let masked = crate::markdown::mask_code_blocks(text);
+    let mut out = Vec::new();
+    let mut rest = masked.as_str();
+    while let Some(open) = rest.find('`') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('`') else { break };
+        let span = &after[..close];
+        if !span.is_empty() && !span.contains('\n') {
+            for seg in span.split("::").flat_map(|s| s.split('.')) {
+                let seg = seg
+                    .trim()
+                    .trim_end_matches("()")
+                    .trim_end_matches('!')
+                    .trim_end_matches("()");
+                let is_ident = !seg.is_empty()
+                    && seg.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && !seg.chars().next().is_some_and(|c| c.is_ascii_digit());
+                if is_ident && !out.iter().any(|o| o == seg) {
+                    out.push(seg.to_string());
+                }
+            }
+        }
+        rest = &after[close + 1..];
+    }
+    out
 }
 
 /// The medium type's wire string (`codebase` / `web` / …) — the serde form the
@@ -3009,6 +3048,227 @@ mod tests {
                 .warnings
                 .iter()
                 .all(|w| w.code() != "UNANCHORED_MENTION")
+        );
+    }
+
+    /// A git-backed scratch binding whose baseline is the first commit: `F`
+    /// (`src/f.rs`) defines `old_name` at the baseline and `new_name` at head,
+    /// `G` (`src/g.rs`) is added at head. The `#synced` token pins the
+    /// baseline, so the slice is `modified [F]`, `added [G]`.
+    fn moved_source(root: &Path) -> (String, String) {
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src").join("f.rs"), "pub fn old_name() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "baseline"]);
+        let baseline = git(&["rev-parse", "HEAD"]);
+        {
+            let mut engine = Engine::from_workspace_root(root).unwrap();
+            engine
+                .set_mem_sync_state("engine", "engine/graph/graph#synced", &baseline, None)
+                .unwrap();
+        }
+        std::fs::write(
+            root.join("src").join("f.rs"),
+            "pub fn new_name() {}\npub struct Kept;\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("g.rs"), "pub fn g_only() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "head"]);
+        (baseline, git(&["rev-parse", "HEAD"]))
+    }
+
+    /// Criterion "a changed file's brief lists the entities that name it
+    /// without anchoring it", with its refusal complement: over a moved
+    /// source, the sync brief lists A (anchors F) under the anchored line
+    /// and B (names F's path) and C (names `new_name`, which F's change
+    /// defines) under the mention lines for F; D (names neither) appears
+    /// nowhere; `projection advance` leaves F pending until an explicit
+    /// disposition (its anchor no longer auto-disposes it) and then accepts
+    /// F's id in one call with the rest of the slice.
+    #[test]
+    fn a_changed_files_brief_lists_the_entities_that_name_it_without_anchoring_it() {
+        use crate::ingest::advance::{DispositionInput, advance_baseline};
+        use crate::ingest::render::render_sync_brief_for;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        mention_workspace(root, "");
+        decision_entity(root, "a", "Anchored on F.");
+        decision_entity(root, "b", "The reader in `src/f.rs` refuses empty input.");
+        decision_entity(root, "c", "Callers reach it through `new_name()` only.");
+        decision_entity(
+            root,
+            "d",
+            "Names nothing of F: `unrelated_symbol` and lib/z.rs.",
+        );
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set("engine--a", vec![informed_by("src/f.rs")]);
+        std::fs::write(
+            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        moved_source(root);
+
+        let engine = Engine::from_workspace_root(root).unwrap();
+        let brief = render_sync_brief_for(&engine, root, "engine/graph").unwrap();
+        let block = brief
+            .split("### Entities to walk for each changed artifact")
+            .nth(1)
+            .expect("the steered block renders on a moved source: {brief}")
+            .split("### Recording your dispositions")
+            .next()
+            .unwrap()
+            .to_string();
+        assert!(
+            block.contains(
+                "- `src/f.rs`\n  - anchored by: `engine--a`\n  - mentioned by:\n    - `engine--b` \
+                 (path, in `specifies`)\n    - `engine--c` (`new_name`, in `specifies`)\n"
+            ),
+            "{block}"
+        );
+        assert!(
+            !block.contains("engine--d") && !block.contains("src/g.rs"),
+            "an entity naming neither the path nor a defined symbol is absent, and an \
+             artifact steering nothing is absent: {block}"
+        );
+
+        // Advance: F is not auto-disposed by A's anchor while B and C are
+        // steered at it; G (no entity at all) stays pending too.
+        let configs = load_pipeline_configs(root).unwrap();
+        let binding = &configs.bindings[0].config;
+        let resolved = resolve_binding_run("engine/graph", binding).unwrap();
+        let mut engine = Engine::from_workspace_root(root).unwrap();
+        let out = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new()).unwrap();
+        assert!(
+            out.remainder.modified == vec!["src/f.rs".to_string()],
+            "F stays pending until the mention-steered entities are judged: {out:?}"
+        );
+        assert!(!out.completed);
+        let dispositions: BTreeMap<String, DispositionInput> =
+            [("src/f.rs", "worked"), ("src/g.rs", "skipped")]
+                .into_iter()
+                .map(|(a, d)| (a.to_string(), DispositionInput::Verdict(d.to_string())))
+                .collect();
+        let out = advance_baseline(&mut engine, root, &resolved, &dispositions).unwrap();
+        assert!(out.completed, "F's id is accepted like any other: {out:?}");
+    }
+
+    /// Criterion "the mention block degrades to a count under the budget,
+    /// never to silence", with its refusal complement: under a budget too
+    /// small for the mention lines the brief keeps the anchored line and
+    /// states the number of mention-steered entities with the include hint;
+    /// with `--include mentions` the full lines return; and a slice no entity
+    /// names renders neither a mention line nor a count line.
+    #[test]
+    fn the_mention_block_degrades_to_a_count_under_the_budget_never_to_silence() {
+        use crate::ingest::render::render_sync_brief_budgeted;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        mention_workspace(root, "");
+        decision_entity(root, "a", "Anchored on F.");
+        decision_entity(root, "b", "The reader in `src/f.rs` refuses empty input.");
+        decision_entity(root, "c", "Callers reach it through `new_name()` only.");
+        let mut sidecar = AnchorSidecar::default();
+        sidecar.set("engine--a", vec![informed_by("src/f.rs")]);
+        std::fs::write(
+            root.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            sidecar.to_bytes(),
+        )
+        .unwrap();
+        moved_source(root);
+        let engine = Engine::from_workspace_root(root).unwrap();
+
+        let tight = render_sync_brief_budgeted(&engine, root, "engine/graph", 1, &[]).unwrap();
+        assert!(
+            tight.contains("- `src/f.rs`\n  - anchored by: `engine--a`\n"),
+            "the anchored line is unchanged under the budget: {tight}"
+        );
+        assert!(!tight.contains("  - mentioned by:"), "{tight}");
+        assert!(
+            tight.contains(
+                "- _2 mention-steered entities over 1 changed artifact not listed under the \
+                 token budget ("
+            ) && tight.contains("re-render with `--include mentions`"),
+            "{tight}"
+        );
+
+        let full =
+            render_sync_brief_budgeted(&engine, root, "engine/graph", 1, &["mentions".to_string()])
+                .unwrap();
+        assert!(
+            full.contains("  - mentioned by:\n    - `engine--b` (path, in `specifies`)"),
+            "{full}"
+        );
+        assert!(!full.contains("mention-steered entities over"), "{full}");
+
+        // Refusal complement: a slice no entity names renders no mention line
+        // and no count line. The same source, a mem whose only entity names
+        // nothing in it.
+        let tmp2 = tempfile::tempdir().unwrap();
+        let root2 = tmp2.path();
+        mention_workspace(root2, "");
+        decision_entity(root2, "d", "Nothing here names the source.");
+        std::fs::write(
+            root2.join("mem").join(crate::anchor::ANCHOR_SIDECAR_PATH),
+            AnchorSidecar::default().to_bytes(),
+        )
+        .unwrap();
+        moved_source(root2);
+        let engine2 = Engine::from_workspace_root(root2).unwrap();
+        let quiet = render_sync_brief_budgeted(&engine2, root2, "engine/graph", 1, &[]).unwrap();
+        assert!(quiet.contains("**Modified:**\n- `src/f.rs`"), "{quiet}");
+        assert!(
+            !quiet.contains("  - mentioned by:")
+                && !quiet.contains("not listed under the token budget")
+                && !quiet.contains("### Entities to walk"),
+            "{quiet}"
+        );
+    }
+
+    /// The symbol scanners are lexical: definitions by keyword and enum
+    /// variants on one side, inline code spans split into their segments on
+    /// the other.
+    #[test]
+    fn symbol_scanners_are_lexical() {
+        use crate::ingest::cursor::defined_symbols;
+        let defined = defined_symbols(
+            "pub fn alpha(x: u8) {}\nstruct Beta;\npub enum Gamma {\n    First,\n    Second { \
+             n: u8 },\n    Third(u8),\n}\nconst DELTA: u8 = 1;\nfn not_enum() {}\nclass Eps:\n    \
+             def eta(self): pass\n",
+        );
+        for s in [
+            "alpha", "Beta", "Gamma", "First", "Second", "Third", "DELTA", "not_enum", "Eps", "eta",
+        ] {
+            assert!(defined.contains(s), "{s} in {defined:?}");
+        }
+        assert!(!defined.contains("self") && !defined.contains("pass"));
+        let spans = code_span_symbols(
+            "Use `advance_baseline()` and `AdvanceError::UnknownArtifact`, not `` or `7up`; \
+             ```\n`fenced_symbol`\n```",
+        );
+        assert_eq!(
+            spans,
+            vec!["advance_baseline", "AdvanceError", "UnknownArtifact"]
         );
     }
 
