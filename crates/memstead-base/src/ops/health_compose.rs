@@ -379,7 +379,12 @@ pub fn compose_health(
         // polices anchor drift when the verify surfaces do. The line now
         // renders straight from the registry, which already declares
         // `anchors` advisory with that reason.
-        "verdict_coverage": crate::ops::coverage::HEALTH_COVERAGE.wire_line(),
+        // The four include-gated verdict axes are examined on the pass that
+        // included them (a `--strict` pass includes each) and named not
+        // examined otherwise: a default report never computed them.
+        "verdict_coverage": crate::ops::coverage::HEALTH_COVERAGE.wire_line_for_includes(
+            &include.iter().map(String::as_str).collect::<Vec<_>>(),
+        ),
         "summary": {
             "total_entities": real_count,
             "total_orphans": orphan_ids.len(),

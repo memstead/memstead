@@ -1567,8 +1567,8 @@ impl fmt::Display for WarningHint {
             WarningHint::NoteMissing { tool } => write!(
                 f,
                 "{tool} called without a `note` while \
-                 `[mutations].require_notes = true` — commit landed, \
-                 body carries no provenance line"
+                 `[mutations].require_notes = true`; the write carries no \
+                 provenance line"
             ),
             WarningHint::IgnoredReadonlyField { field, supplied } => write!(
                 f,
@@ -1665,6 +1665,20 @@ impl fmt::Display for WarningHint {
                  set {}. This write was applied on top of theirs, so nothing of theirs was \
                  lost.",
                 fields.join(", "),
+            ),
+            WarningHint::MemReloaded {
+                mem,
+                old_head,
+                new_head,
+                entities_loaded,
+            } if old_head.is_empty() => write!(
+                f,
+                "mem '{mem}' was reloaded — its branch appeared at {new_head} \
+                 (born, fetched or pushed into place since the engine last \
+                 read the mem, which had loaded it empty). {entities_loaded} \
+                 entities loaded; response carries fresh content. Re-derive \
+                 any conclusions that depended on the prior content of this \
+                 mem before continuing."
             ),
             WarningHint::MemReloaded {
                 mem,

@@ -188,13 +188,57 @@ impl Engine {
                         }
                     }
                 }
-                _ => {
-                    if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name)
-                        && state.last_known_head.is_none()
-                    {
-                        state.last_known_head = new_head;
+                // A head that appears where none was cached is a change
+                // too: the branch was born, fetched or pushed into place
+                // since the engine last looked (a mount whose branch was
+                // missing at boot, an unborn mem that took its first
+                // commit). Adopting the head silently left the store at
+                // the empty load and the boot-time `MOUNT_UNBACKED`
+                // probe standing over entities the branch now holds.
+                (None, Some(new)) => match self.reload_one_mem(&name) {
+                    Ok(report) => {
+                        warnings.push(crate::ops::WarningHint::MemReloaded {
+                            mem: name.clone(),
+                            old_head: String::new(),
+                            new_head: new.clone(),
+                            entities_loaded: report.added.len() + report.changed.len(),
+                        });
+                        if let Some(state) = self.mounts.iter_mut().find(|m| m.mount.mem == name) {
+                            state.last_known_head = Some(new.clone());
+                        }
+                        let changes: Vec<crate::ops::ChangeEnvelope> = report
+                            .added
+                            .iter()
+                            .map(|id| crate::ops::ChangeEnvelope::Added {
+                                id: id.clone(),
+                                title: None,
+                                entity_type: None,
+                            })
+                            .collect();
+                        let notice = crate::ops::MemChangedNotice::from_delta(
+                            name.clone(),
+                            String::new(),
+                            new.clone(),
+                            changes,
+                        );
+                        self.pending_mem_changed.push(notice);
+                        self.emit_mem_changed(&crate::engine::events::MemChangedEvent {
+                            mem: name.clone(),
+                            head: new.clone(),
+                            previous: String::new(),
+                            n_commits: 1,
+                        });
                     }
-                }
+                    Err(e) => {
+                        tracing::warn!(
+                            mem = %name,
+                            error = %e,
+                            "reload of a mem whose branch appeared failed; serving the \
+                             empty snapshot — will retry on the next operation"
+                        );
+                    }
+                },
+                _ => {}
             }
         }
 
@@ -1786,6 +1830,119 @@ mod tests {
         fn current_head(&self) -> Result<Option<String>, BackendError> {
             Ok(self.head.lock().unwrap().clone())
         }
+    }
+
+    /// A `ManualHeadBackend` shared with the test so the head can move
+    /// after the engine took ownership of the mount.
+    struct SharedHeadBackend(std::sync::Arc<ManualHeadBackend>);
+    impl MemBackend for SharedHeadBackend {
+        fn list_entities(&self) -> Result<Vec<PathBuf>, BackendError> {
+            self.0.list_entities()
+        }
+        fn read_entity(&self, rel: &Path) -> Result<Option<Vec<u8>>, BackendError> {
+            self.0.read_entity(rel)
+        }
+        fn write_entity(&self, p: &Path, b: &[u8]) -> Result<(), BackendError> {
+            self.0.write_entity(p, b)
+        }
+        fn delete_entity(&self, p: &Path) -> Result<(), BackendError> {
+            self.0.delete_entity(p)
+        }
+        fn move_entity(&self, f: &Path, t: &Path) -> Result<(), BackendError> {
+            self.0.move_entity(f, t)
+        }
+        fn commit(
+            &self,
+            m: &str,
+            c: &CommitContext<'_>,
+        ) -> Result<crate::storage::CommitId, BackendError> {
+            self.0.commit(m, c)
+        }
+        fn append_provenance(&self, r: &Provenance) -> Result<(), BackendError> {
+            self.0.append_provenance(r)
+        }
+        fn read_provenance(&self, c: Option<&str>) -> Result<Vec<Provenance>, BackendError> {
+            self.0.read_provenance(c)
+        }
+        fn current_head(&self) -> Result<Option<String>, BackendError> {
+            self.0.current_head()
+        }
+    }
+
+    /// A mount whose branch was missing at boot loads empty and warns
+    /// `MOUNT_UNBACKED`; when the branch appears (born, fetched, pushed
+    /// into place by another process) the next probe reloads it, the
+    /// entities the branch holds are served, the warning is gone, and
+    /// the reload names the head the branch appeared at.
+    #[test]
+    fn reload_if_stale_reloads_a_mem_whose_branch_appeared() {
+        let shared = std::sync::Arc::new(ManualHeadBackend::new(None));
+        let mount = Mount {
+            mem: "specs".to_string(),
+            schema: Some(pin("default")),
+            storage: MountStorage::Folder {
+                path: PathBuf::from("/dev/null"),
+            },
+            capability: MountCapability::Write,
+            lifecycle: MountLifecycle::Eager,
+            cross_linkable: true,
+            migration_target: None,
+        };
+        let mut engine =
+            Engine::from_mounts(vec![(mount, Box::new(SharedHeadBackend(shared.clone())))])
+                .unwrap();
+        assert!(
+            engine
+                .load_warnings()
+                .iter()
+                .any(|w| w.code() == "MOUNT_UNBACKED"),
+            "an entity-less mount warns at boot: {:?}",
+            engine.load_warnings()
+        );
+        assert!(engine.reload_if_stale(Some("specs")).is_empty());
+
+        // The branch appears with one entity, written by someone else.
+        shared.entities.lock().unwrap().push((
+            PathBuf::from("first.md"),
+            b"---\ntype: spec\n---\n# First\n\n## Identity\n\nfirst.\n\n## Purpose\n\nexists.\n"
+                .to_vec(),
+        ));
+        shared.set_head(Some("aaa"));
+
+        let warnings = engine.reload_if_stale(Some("specs"));
+        match warnings.as_slice() {
+            [
+                crate::ops::WarningHint::MemReloaded {
+                    mem,
+                    old_head,
+                    new_head,
+                    entities_loaded,
+                },
+            ] => {
+                assert_eq!(mem, "specs");
+                assert!(old_head.is_empty(), "no head was cached: {old_head}");
+                assert_eq!(new_head, "aaa");
+                assert_eq!(*entities_loaded, 1);
+            }
+            other => panic!("expected one MemReloaded, got {other:?}"),
+        }
+        assert!(
+            engine
+                .store()
+                .get(&EntityId::new("specs", "first"))
+                .is_some(),
+            "the appeared branch's entity is served"
+        );
+        assert!(
+            !engine
+                .load_warnings()
+                .iter()
+                .any(|w| w.code() == "MOUNT_UNBACKED"),
+            "the boot-time probe is replaced by the reload's: {:?}",
+            engine.load_warnings()
+        );
+        // Cached now; the next probe is quiet.
+        assert!(engine.reload_if_stale(Some("specs")).is_empty());
     }
 
     #[test]

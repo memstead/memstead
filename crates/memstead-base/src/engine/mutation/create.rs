@@ -7254,6 +7254,31 @@ community:
         );
         assert!(!related.write_id.is_empty(), "relate still commits");
 
+        // --- relate rehearsal, no note: nothing lands, nothing to attribute ---
+        let rehearsed = engine
+            .relate_entity(
+                RelateEntityArgs {
+                    source: updated.id.clone(),
+                    expected_hash: Some(related.content_hash.clone()),
+                    rel_type: "USES".to_string(),
+                    target: target.id.clone(),
+                    remove: true,
+                    description: None,
+                    dry_run: true,
+                },
+                actor,
+                Some(&client),
+                None,
+            )
+            .unwrap();
+        assert!(rehearsed.write_id.is_empty(), "a rehearsal commits nothing");
+        assert_eq!(
+            note_missing(&rehearsed.warnings),
+            0,
+            "a relate rehearsal never demands a note: {:?}",
+            rehearsed.warnings
+        );
+
         // --- with a note: suppressed ---
         let with_note = engine
             .create_entity(

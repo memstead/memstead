@@ -184,13 +184,12 @@ impl Engine {
                 &prepared.source_mem,
             )
             .map_err(|e| EngineError::ParseAfterWrite(e.to_string()))?;
-            // Identical-warnings contract: the real path appends the
-            // `require_notes` nudge after its commit; the rehearsal of
-            // a would-be commit carries the same warning.
-            let mut warnings = prepared.warnings;
-            if let Some(w) = self.note_missing_warning("relate_entity", note) {
-                warnings.push(w);
-            }
+            // A rehearsal demands no note: `NOTE_MISSING` attributes a
+            // write that landed without provenance, and nothing lands
+            // here (create and update rehearse the same way; a relate
+            // rehearsal once carried the nudge and so reported a
+            // provenance gap on a commit that did not exist).
+            let warnings = prepared.warnings;
             return Ok(RelateEntityOutcome {
                 from: prepared.from,
                 to: prepared.to,

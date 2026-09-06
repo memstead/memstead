@@ -129,6 +129,23 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **Health tells the truth about mounts, coverage and rehearsals.** A
+  mem-branch mount whose branch was missing when a long-running engine
+  loaded it (a mount pulled in before its branch, an unborn mem) stayed
+  `MOUNT_UNBACKED` and served nothing after the branch arrived, because a
+  head appearing where none was cached was adopted silently; the next
+  operation now reloads the mem, serves what the branch holds, replaces
+  the probe and reports `MEM_RELOADED` with the head the branch appeared
+  at (a branch that truly holds nothing keeps warning `empty`). The
+  health verdict's coverage line names as examined only the axes the
+  pass computed: `missing_required_outgoing`, `constraints`, `signals`
+  and `integrity` read as not examined until a pass includes them
+  (`--include <axis>`, or `--strict`, which includes each). A relate
+  rehearsal (`dry_run: true`) no longer carries `NOTE_MISSING`, as create
+  and update never did, and the warning's text no longer claims a commit
+  landed. The `include_config` description of `memstead_health` names
+  the fields the projection serves (`storage`, `durable`, `vcs.gitdir`,
+  `vcs.head`, and `vcs.worktree` only where the mem has a working tree).
 - **Six texts now say what the wire serves.** `memstead entity
   --provenance` renders each touch's timestamp as RFC 3339 and an absent
   client or actor as `unrecorded`, where it printed raw epoch seconds and

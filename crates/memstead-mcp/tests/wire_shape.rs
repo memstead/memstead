@@ -3894,3 +3894,127 @@ fn retired_edge_spellings_are_refused_not_aliased() {
         "`to`/`type` must be refused on memstead_create relations: {result}"
     );
 }
+
+/// Write one commit holding `first.md` to `refs/heads/<branch>` in the
+/// workspace's mem-repo: the branch appearing with an entity, as a
+/// `memstead push` / `pull` from another process lands it.
+fn push_branch_with_one_entity(root: &Path, branch: &str) {
+    let gitdir = root.join("mem-repo").join(".git");
+    let repo = gix::open(&gitdir).expect("open mem-repo");
+    let body = "---\ntype: spec\n---\n# First\n\n## Identity\n\nfirst.\n\n## Purpose\n\nexists.\n";
+    let blob = repo.write_blob(body.as_bytes()).unwrap().detach();
+    let mut editor = repo.empty_tree().edit().unwrap();
+    editor
+        .upsert("first.md", gix::objs::tree::EntryKind::Blob, blob)
+        .unwrap();
+    let tree = editor.write().unwrap().detach();
+    let actor = gix::actor::Signature {
+        name: "other-process".into(),
+        email: "other@example.com".into(),
+        time: gix::date::Time {
+            seconds: 0,
+            offset: 0,
+        },
+    };
+    let mut buf = gix::date::parse::TimeBuf::default();
+    let actor_ref = actor.to_ref(&mut buf);
+    repo.commit_as(
+        actor_ref,
+        actor_ref,
+        format!("refs/heads/{branch}").as_str(),
+        "first entity",
+        tree,
+        Vec::<gix::ObjectId>::new(),
+    )
+    .unwrap();
+}
+
+fn unbacked_mems(body: &Value) -> Vec<(String, String)> {
+    body.get("warnings")
+        .and_then(Value::as_array)
+        .map(|ws| {
+            ws.iter()
+                .filter(|w| w["code"] == "MOUNT_UNBACKED")
+                .map(|w| {
+                    (
+                        w["details"]["mem"].as_str().unwrap_or("").to_string(),
+                        w["details"]["reason"].as_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The unbacked-mount probe reads the state the store serves from, on a
+/// long-running server: a mem-branch mount whose branch is missing at
+/// boot warns `MOUNT_UNBACKED` (`missing_ref`); when the branch arrives
+/// with an entity from another process, the next `memstead_health` no
+/// longer lists it, without a restart, and `memstead_search` on the mem
+/// returns the entity. A branch that truly holds nothing keeps warning
+/// (`empty`) in the same call.
+#[test]
+fn full_health_stops_reporting_a_branch_mount_unbacked_once_its_branch_appears() {
+    let tmp = TempDir::new().unwrap();
+    seed_full_workspace(
+        tmp.path(),
+        &[("alpha", "default@1.0.0"), ("beta", "default@1.0.0")],
+    );
+    // The mount is declared, its branch has not arrived yet.
+    {
+        let repo = gix::open(tmp.path().join("mem-repo").join(".git")).unwrap();
+        repo.find_reference("refs/heads/alpha")
+            .expect("seeded alpha branch")
+            .delete()
+            .expect("drop the alpha branch before boot");
+    }
+
+    let mut harness = WireHarness::start(tmp.path());
+    let before = harness.call_tool("memstead_health", json!({}));
+    let _ = assert_success_envelope(&before);
+    let before_body = before.get("structuredContent").expect("structuredContent");
+    let before_unbacked = unbacked_mems(before_body);
+    assert!(
+        before_unbacked.contains(&("alpha".to_string(), "missing_ref".to_string())),
+        "a missing branch warns at boot: {before_unbacked:?}"
+    );
+    assert!(
+        before_unbacked.contains(&("beta".to_string(), "empty".to_string())),
+        "an entity-less branch warns as empty: {before_unbacked:?}"
+    );
+
+    push_branch_with_one_entity(tmp.path(), "alpha");
+
+    let after = harness.call_tool("memstead_health", json!({}));
+    let _ = assert_success_envelope(&after);
+    let after_body = after.get("structuredContent").expect("structuredContent");
+    let after_unbacked = unbacked_mems(after_body);
+    assert!(
+        !after_unbacked.iter().any(|(mem, _)| mem == "alpha"),
+        "a branch that appeared with an entity is not unbacked: {after_unbacked:?}"
+    );
+    assert!(
+        after_unbacked.contains(&("beta".to_string(), "empty".to_string())),
+        "the truly empty branch still warns: {after_unbacked:?}"
+    );
+    let reloaded = after_body["warnings"]
+        .as_array()
+        .map(|ws| {
+            ws.iter()
+                .any(|w| w["code"] == "MEM_RELOADED" && w["details"]["mem"] == "alpha")
+        })
+        .unwrap_or(false);
+    assert!(reloaded, "the probe read the pushed ref: {after_body}");
+
+    let search = harness.call_tool("memstead_search", json!({ "mem": "alpha" }));
+    let _ = assert_success_envelope(&search);
+    let hits: Vec<&str> = search["structuredContent"]["hits"]
+        .as_array()
+        .map(|h| h.iter().filter_map(|x| x["id"].as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        hits,
+        vec!["alpha--first"],
+        "the appeared branch's entity is served"
+    );
+}

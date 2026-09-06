@@ -146,6 +146,23 @@ impl AxisCoverage {
     /// opt-in axis this pass (`--include anchors`) and therefore did
     /// examine it. An axis in neither list is ignored; the static
     /// declaration is untouched.
+    /// The wire line for a pass that included the named axes: an
+    /// axis filed `not_examined` because a default pass never computes
+    /// it moves into the examined set when the pass included it (the
+    /// report walked it and its findings fail `--strict`). Advisory
+    /// axes stay advisory whatever was included: rendering an axis
+    /// beside the verdict is not folding it in (the C10 rule on
+    /// `anchors`, 2026-09-03).
+    pub fn wire_line_for_includes(&self, included: &[&str]) -> String {
+        let promoted: Vec<&str> = self
+            .not_examined
+            .iter()
+            .map(|(a, _)| *a)
+            .filter(|a| included.contains(a))
+            .collect();
+        self.wire_line_promoting(&promoted)
+    }
+
     pub fn wire_line_promoting(&self, promoted: &[&str]) -> String {
         let mut examined: Vec<&str> = self.examined.to_vec();
         let mut advisory: Vec<&str> = Vec::new();
@@ -192,15 +209,14 @@ impl SurfaceCoverage {
 /// statement reads as an all-clear exactly over them. Everything
 /// descriptive or advisory is excluded by name.
 pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
-    examined: &[
-        "dangling_links",
-        "missing_required_outgoing",
-        "constraints",
-        "signals",
-        "integrity",
-        "config",
-        "mounts",
-    ],
+    // The axes every health pass computes. The four include-gated
+    // verdict axes (`missing_required_outgoing`, `constraints`,
+    // `signals`, `integrity`) are filed under `not_examined` below and
+    // promoted into this set by `wire_line_for_includes` on the pass
+    // that included them: a default report does not walk them, and a
+    // coverage line that named them examined told a reader the verdict
+    // had answered for findings it never computed.
+    examined: &["dangling_links", "config", "mounts"],
     // Every axis health renders (always, or on `--include`) without
     // folding it into the defect verdict. `anchors` is promoted into
     // the examined set for the pass that rendered it.
@@ -261,11 +277,25 @@ pub const HEALTH_COVERAGE: AxisCoverage = AxisCoverage {
             "descriptive due brief: what is overdue or due soon by a schema-declared due axis, a reading never a verdict",
         ),
     ],
-    not_examined: &[(
-        "projection",
-        "projection fidelity is answered by status and projection verify",
-    )],
+    not_examined: &[
+        (
+            "projection",
+            "projection fidelity is answered by status and projection verify",
+        ),
+        ("missing_required_outgoing", INCLUDE_GATED),
+        ("constraints", INCLUDE_GATED),
+        ("signals", INCLUDE_GATED),
+        ("integrity", INCLUDE_GATED),
+    ],
 };
+
+/// The reason on a verdict axis a health pass computes only under
+/// `--include <axis>` (`--strict` includes each of them): outside such
+/// a pass the report never walked it, and the line says so; on the
+/// pass that included it, [`AxisCoverage::wire_line_for_includes`]
+/// names it examined.
+const INCLUDE_GATED: &str = "computed only on a pass that includes the axis (`--include <axis>`, \
+                             or `--strict`), which then examines it; a default report does not walk it";
 
 /// The overview surface's coverage claim, shared by every consumer
 /// that renders the composed overview (the CLI command and both MCP
@@ -638,23 +668,79 @@ mod tests {
         );
     }
 
-    /// The health declaration files every axis it can render as
-    /// examined or advisory and only the axis it never renders as not
-    /// examined: the bucket names say what the report did.
+    /// The health declaration files every axis it renders on request
+    /// as advisory, every axis it computes on every pass as examined,
+    /// and the include-gated verdict axes as not examined until a pass
+    /// includes them: the bucket names say what the report did.
     #[test]
     fn health_declaration_buckets_follow_what_the_report_renders() {
         let cov = HEALTH_COVERAGE;
+        const INCLUDE_GATED_VERDICT_AXES: &[&str] = &[
+            "missing_required_outgoing",
+            "constraints",
+            "signals",
+            "integrity",
+        ];
         for key in HEALTH_INCLUDE_KEYS {
             let examined = cov.examined.contains(key);
             let advisory = cov.advisory.iter().any(|(a, _)| a == key);
+            let gated = cov.not_examined.iter().any(|(a, _)| a == key)
+                && INCLUDE_GATED_VERDICT_AXES.contains(key);
             assert!(
-                examined || advisory,
-                "health include `{key}` renders on request, so it is examined or advisory"
+                examined || advisory || gated,
+                "health include `{key}` renders on request, so it is examined, advisory, \
+                 or a verdict axis examined on the pass that includes it"
             );
         }
+        let mut not_examined: Vec<&str> = cov.not_examined.iter().map(|(a, _)| *a).collect();
+        not_examined.sort_unstable();
         assert_eq!(
-            cov.not_examined.iter().map(|(a, _)| *a).collect::<Vec<_>>(),
-            vec!["projection"]
+            not_examined,
+            vec![
+                "constraints",
+                "integrity",
+                "missing_required_outgoing",
+                "projection",
+                "signals"
+            ]
+        );
+    }
+
+    /// A default health pass names only the axes it computed; the pass
+    /// that includes a gated verdict axis names it examined, and an
+    /// included advisory axis stays advisory.
+    #[test]
+    fn health_wire_line_examines_gated_axes_only_when_included() {
+        let default_line = HEALTH_COVERAGE.wire_line_for_includes(&[]);
+        assert!(default_line.starts_with("examined=dangling_links,config,mounts;"));
+        assert!(
+            default_line.contains(
+                "not_examined=projection,missing_required_outgoing,constraints,signals,integrity"
+            ),
+            "{default_line}"
+        );
+        let strict_line = HEALTH_COVERAGE.wire_line_for_includes(&[
+            "integrity",
+            "anchors",
+            "stale",
+            "missing_required_outgoing",
+            "constraints",
+            "signals",
+        ]);
+        assert!(
+            strict_line.starts_with(
+                "examined=dangling_links,config,mounts,missing_required_outgoing,constraints,signals,integrity;"
+            ),
+            "{strict_line}"
+        );
+        assert!(
+            strict_line.ends_with("not_examined=projection"),
+            "{strict_line}"
+        );
+        let (_, rest) = strict_line.split_once("advisory=").unwrap();
+        assert!(
+            rest.contains("anchors") && rest.contains("stale"),
+            "{strict_line}"
         );
     }
 
