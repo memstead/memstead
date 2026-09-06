@@ -187,6 +187,30 @@ describe('hooks.json invocation — command strings as written', () => {
     }
   });
 
+  it('inject-context: falls back to the workspace root when no mem dir carries the file', () => {
+    // The interview skill writes `<workspace-root>/.memstead/interview-active`;
+    // in the `quickstart --repo` layout the mem is a folder of its own, so the
+    // root is not a mem dir and the hook must read it too.
+    writeFileSync(join(ws, '.memstead', 'interview-active'), 'ROOT RULES SENTINEL');
+    try {
+      const res = runCommand(commandFor('inject-context.mjs'), {
+        cwd: ws,
+        stdin: { prompt: 'hello' },
+      });
+      assert.equal(res.status, 0, res.stderr);
+      assert.match(res.stdout, /ROOT RULES SENTINEL/);
+    } finally {
+      rmSync(join(ws, '.memstead', 'interview-active'), { force: true });
+    }
+    // And nothing is injected when neither location carries the file.
+    const quiet = runCommand(commandFor('inject-context.mjs'), {
+      cwd: ws,
+      stdin: { prompt: 'hello' },
+    });
+    assert.equal(quiet.status, 0, quiet.stderr);
+    assert.equal(quiet.stdout, '');
+  });
+
   it('check-realization: runs fail-open on its documented stdin, exit 0', () => {
     const res = runCommand(commandFor('check-realization.mjs'), {
       cwd: ws,

@@ -28,7 +28,7 @@ that the knowledge lands in the main context.
    enumerating morphological variants and synonyms yourself — the search does
    no stemming or semantic expansion.
 
-3. Deduplicate by id, rank by `_score`, and budget by `_tokens`: read the top
+3. Deduplicate by id, rank by `score`, and budget by `tokens`: read the top
    5–8 entities **fully** via `memstead_entity` (search snippets are not
    enough), staying under ~15000 tokens total; skip entities over ~3000 tokens
    unless they are the primary topic.

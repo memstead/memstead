@@ -12,7 +12,7 @@ Capture knowledge from a conversation into Memstead entities. The user is the ex
 
 ## Step 1: Activate interview mode
 
-Create the state file so the UserPromptSubmit hook re-injects interview rules on every turn. The hook reads `<mem-dir>/.memstead/interview-active`, where the mem dir comes from the engine mount list — for the standard single-mem workspace that is the **workspace root** (the directory carrying `.memstead/workspace.toml`). Resolve it first so writer and reader name the same file even when the session cwd is a subdirectory:
+Create the state file so the UserPromptSubmit hook re-injects interview rules on every turn. The hook reads `<mem-dir>/.memstead/interview-active` for every folder mem the mount list names, then `<workspace-root>/.memstead/interview-active`; write it at the **workspace root** (the directory carrying `.memstead/workspace.toml`), which is the mem dir itself in the plain quickstart layout and a sibling of the mem's own folder in the `quickstart --repo` layout. Resolve it first so writer and reader name the same file even when the session cwd is a subdirectory:
 
 ```bash
 WS_ROOT="$(pwd)"; while [ ! -f "$WS_ROOT/.memstead/workspace.toml" ] && [ "$WS_ROOT" != "/" ]; do WS_ROOT="$(dirname "$WS_ROOT")"; done
@@ -40,7 +40,7 @@ memstead_overview
 memstead_health { include_config: true }
 ```
 
-`memstead_health` with `include_config: true` returns counts, the mem list, and each writable mem's `writeGuidance`; `memstead_overview` gives the community clusters. Briefly tell the user what's already in the graph. If entities exist in the writable mem, mention them. The selected mem's `writeGuidance` (granularity, extraction rules, abstraction level) guides what to capture and how to structure entities.
+`memstead_health` with `include_config: true` returns counts, the mem list, and each writable mem's `write_guidance`; `memstead_overview` gives the community clusters. Briefly tell the user what's already in the graph. If entities exist in the writable mem, mention them. The selected mem's `write_guidance` (granularity, extraction rules, abstraction level) guides what to capture and how to structure entities.
 
 ## Step 3: Start the conversation
 
@@ -72,6 +72,6 @@ Show a summary: entities created, relationships established, open questions for 
 
 ## Rules
 
-- **Granularity**: Follow the writable mem's `writeGuidance.granularity` rule. Fallback: one entity per process, concept, or cohesive knowledge unit.
+- **Granularity**: Follow the writable mem's `write_guidance.granularity` rule. Fallback: one entity per process, concept, or cohesive knowledge unit.
 - **Level**: M0 for concrete things, M1 for rules/conventions, M2 for patterns.
 - **Mem**: Use the project's writable mem. Ask if unclear.

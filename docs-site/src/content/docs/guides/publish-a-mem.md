@@ -90,7 +90,7 @@ Every refusal carries a typed code (add `--json` and branch on `.code`):
 - **`INVALID_INPUT`** — `--version` without `--mem` (the bump needs to know which mem to re-version), or `--version` / `--redact-anchors` combined with a pre-built archive path (its content is already baked in — assemble with `--mem` or the bare shape instead).
 - **`INVALID_VERSION`** — `--version` that isn't a semver.
 - **`REGISTRY_VALIDATION_FAILED`** — the registry rejected the archive's content (a 400); the message carries the validation variant, the offending path inside the archive, and the detail.
-- **`ARCHIVE_TOO_LARGE`** — the archive exceeds the 2 MB publisher cap. Slim the mem or split it.
+- **`ARCHIVE_TOO_LARGE`** — the archive exceeds the 2 MiB compressed publisher cap (the unit the validator enforces). Slim the mem or split it.
 - **`RATE_LIMITED`** — too many publishes in a window; the message says how many seconds to wait.
 - **`FORBIDDEN`** — you tried to publish into a scope that isn't yours (`--scope` overrides are reserved for registry admins; normal publishes never need it).
 

@@ -6,17 +6,24 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
+import { findWorkspaceRoot, resolveMemDirsFromCwd } from './workspace-resolve-utils.mjs';
 
 // Consume stdin to avoid EPIPE when Claude Code writes hook input
 process.stdin.resume();
 process.stdin.on('data', () => {});
 
 // Interview rules (only when active). Re-inject from the first folder-backed
-// mem carrying an active interview. Resolution mirrors the guards (walk up
-// for .memstead/workspace.toml); empty on a git-branch workspace.
-for (const memDir of resolveMemDirsFromCwd()) {
-  const interviewFile = join(memDir, '.memstead', 'interview-active');
+// mem carrying an active interview, else from the workspace root: the
+// interview skill writes its state file at `<workspace-root>/.memstead/`,
+// which is the mem dir in the plain quickstart layout and a sibling of it
+// in the `quickstart --repo` layout (the mem takes a folder of its own).
+// Resolution mirrors the guards (walk up for .memstead/workspace.toml);
+// empty on a git-branch workspace.
+const candidates = resolveMemDirsFromCwd();
+const root = findWorkspaceRoot(process.cwd());
+if (root && !candidates.includes(root)) candidates.push(root);
+for (const dir of candidates) {
+  const interviewFile = join(dir, '.memstead', 'interview-active');
   if (existsSync(interviewFile)) {
     process.stdout.write(readFileSync(interviewFile, 'utf-8'));
     process.stdout.write('\n');

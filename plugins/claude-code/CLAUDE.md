@@ -12,9 +12,9 @@ Two **inverse** frontmatter keys control how a skill is invoked. They are not re
 
 - `user-invocable: false` → **model-only**: hidden from the `/` menu, but the model may auto-invoke it. Reserved for internal/power-user skills — none in the current roster.
 - `disable-model-invocation: true` → **human-only**: stays visible in the `/` menu, but the model never auto-triggers it. Used for the front-door skills the human drives (setup, interview).
-- **neither key** → **both**: visible in `/` and model-invocable (learn, ingest, sync, tidy).
+- **neither key** → **both**: visible in `/` and model-invocable (learn, ingest, sync, tidy, remodel).
 
-The front-door / hidden-rest split of the `/` menu is derivable from `user-invocable` alone. Per-skill state files (e.g. `interview`'s mode flag) live at `<mem-dir>/.memstead/<name>` — the same per-mem location the hooks resolve and read; the writer (SKILL) and reader (hook) must name the same path.
+The front-door / hidden-rest split of the `/` menu is derivable from `user-invocable` alone. Per-skill state files (e.g. `interview`'s mode flag) are written at `<workspace-root>/.memstead/<name>`; the hook reads every folder mem's `<mem-dir>/.memstead/<name>` and then the workspace root, so the two coincide in the plain quickstart layout (root is the mem dir) and the root fallback carries the `quickstart --repo` layout (the mem takes a folder of its own); the writer (SKILL) and reader (hook) must keep naming the same path.
 
 ## Subagent safety
 

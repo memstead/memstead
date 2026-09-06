@@ -13,7 +13,7 @@ description: >
   it against the live entities, rebuilds conservatively, and brackets big
   rebuilds with a before/after reconstruction probe. Rare and deliberate by
   design — the refactoring beside /sync's bugfixing.
-allowed-tools: Bash, Read, Grep, Glob, Agent, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_overview, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_rename, mcp__memstead__memstead_delete, mcp__memstead__memstead_check
+allowed-tools: Bash, Read, Grep, Glob, Agent, mcp__memstead__memstead_schema, mcp__memstead__memstead_search, mcp__memstead__memstead_entity, mcp__memstead__memstead_overview, mcp__memstead__memstead_create, mcp__memstead__memstead_update, mcp__memstead__memstead_relate, mcp__memstead__memstead_rename, mcp__memstead__memstead_retype, mcp__memstead__memstead_delete, mcp__memstead__memstead_check
 argument-hint: "[--all | --scan [<mem>] | <mem> [<cluster>]]"
 ---
 # Memstead Remodel
@@ -21,7 +21,7 @@ argument-hint: "[--all | --scan [<mem>] | <mem> [<cluster>]]"
 A mem is a typed model of its subject, measured against its CONTRACT:
 schema (types, section contracts, relationship vocabulary — including
 which section is a type's own definition test), binding intent where a
-binding exists, writeGuidance, and subject. /remodel asks whether the
+binding exists, write_guidance, and subject. /remodel asks whether the
 model still fulfils that contract — the cut itself, not just the
 claims — and rebuilds where it does not. Two storeys, never mixed:
 storey 1 (mem vs contract) is repaired here; storey 2 (the contract no
@@ -67,7 +67,7 @@ around.
 
 3. CONTRACT FIRST. For the chosen cluster's mem, read the full schema
    prose (`memstead_schema`, verbosity full, scoped to the types in
-   play), the binding intent, writeGuidance, and subject. The
+   play), the binding intent, write_guidance, and subject. The
    contract, not taste, decides every judgment below.
 
 4. TARGET INVENTORY, derived blind — by a READ-ONLY SUBAGENT
@@ -105,11 +105,14 @@ around.
    statement has a receiving owner among the successors or is
    demonstrably false — a split that sheds a true statement is the
    one collateral this round can cause, and it was measured once;
-   wrong type → today this branch REPORTS, always: no surface can
-   retype (`type` is read-only and delete+create breaks incoming
-   refs), so a mis-type diagnosis goes to the storey-2 report AND a
-   `memstead_check` failed-verdict on the entity, so the next round
-   inherits it instead of re-deriving it — never fake a retype;
+   wrong type → RETYPE in place through `memstead_retype`: the id,
+   path and every incoming edge stay, the sections and metadata are
+   re-validated against the target type, and a refusal reports every
+   problem at once (`details.proposed_section_map` is the retry
+   shape); a retype the round cannot make legal goes to the storey-2
+   report AND a `memstead_check` failed-verdict on the entity, so the
+   next round inherits it instead of re-deriving it — never fake a
+   retype with delete+create, which breaks incoming refs;
    dissolved subjects → the schema's own history/supersession forms,
    never deletion of recorded knowledge, and never RENAMING or
    rewriting a frozen historical record onto its live successor

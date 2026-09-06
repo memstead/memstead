@@ -129,6 +129,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The plugin skills and the guides name what exists.** The remodel
+  skill's wrong-type branch retypes in place through `memstead_retype`
+  (listed in its allowed tools) instead of reporting that no surface can
+  retype; the interview skill reads `write_guidance`, the key the health
+  projection serves, and the `inject-context` hook reads the interview
+  state file from every folder mem's directory and then from the
+  workspace root, so the file the skill writes at the root is found in the
+  `quickstart --repo` layout too (the mem there is a folder of its own);
+  the learn skill ranks on `score` and budgets by `tokens`, the fields
+  search serves; the plugin's CLAUDE.md names remodel among the skills
+  with neither invocation key and states where state files are written
+  and read. The getting-started guide's sample receipt is the receipt
+  quickstart prints today (workspace-shape block, verify block), its agent
+  list states the `--agent` values beside the display names and says Codex
+  receives a printed command rather than a written file; the publish guide
+  states the cap as 2 MiB compressed, the unit the registry enforces.
 - **The change feed keeps its contract on folder mems.** A folder mem's
   ledger records a rename under the id the entity now carries, and the
   replay served the old id as a bare `added` row no reader could fetch,

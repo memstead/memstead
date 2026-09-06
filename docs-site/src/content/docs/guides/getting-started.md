@@ -61,7 +61,7 @@ mkdir my-graph && cd my-graph
 memstead quickstart
 ```
 
-`quickstart` creates the workspace, registers a mem named after the directory, pins it to the built-in `default` schema, seeds one entity so the graph isn't empty, and writes the MCP wiring for the agent(s) you pick (Claude Code, Codex, Cursor, Gemini CLI). On a terminal it asks which agents to configure; pass `--agent claude-code` (repeatable) to skip the prompt. The output names every artifact it created:
+`quickstart` creates the workspace, registers a mem named after the directory, pins it to the built-in `default` schema, seeds one entity so the graph isn't empty, and writes the MCP wiring for the agent(s) you pick. The `--agent` values are `claude-code` (Claude Code, a project `.mcp.json`), `codex` (OpenAI Codex, which has no project-scoped MCP config file: quickstart prints the `codex mcp add` one-liner for you to run instead of writing a file), `cursor` (Cursor, `.cursor/mcp.json`) and `gemini` (Gemini CLI, `.gemini/settings.json`). On a terminal it asks which agents to configure; pass `--agent claude-code` (repeatable) to skip the prompt. The output names every artifact it created, states the workspace shape you now have, and lists what you can verify before restarting:
 
 ```text
 # Quickstart complete — mem `my-graph`
@@ -71,8 +71,21 @@ memstead quickstart
 - Seed entity: `my-graph--welcome-to-memstead` (remove any time: `memstead delete my-graph--welcome-to-memstead`)
 - Claude Code: wrote `.mcp.json` (server `memstead`)
 
-Next: Restart Claude Code so the `memstead` MCP server registers — then try: memstead overview
+## Workspace shape: filesystem-mem
+
+One mem, plain `.md` files in this folder, no git history — nothing else to set up.
+
+- **It cannot run the atomic `batch-*` commands or `recover`.** Those are mem-repo-only and refuse here with `UNSUPPORTED_WORKSPACE_SHAPE`. `memstead install <scope>/<name>` works on either shape.
+- **The other shape** — mem-repo: many mems, git-backed, every mutation a commit — comes from `memstead mem-repo init` in a fresh folder. Switching later means starting a second workspace, so decide now if you want per-mutation history or the atomic batch commands.
+
+Next: Restart Claude Code so the `memstead` MCP server registers its tools — then try: memstead overview
+
+Verify from this session, no restart needed:
+- the wired binary answers: `memstead-mcp '--version'`
+- the graph is already readable: `memstead overview`
 ```
+
+The receipt prints the binaries as you invoked them: a path if you ran the binary by path, `memstead` when it is on your `PATH`.
 
 Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
 
