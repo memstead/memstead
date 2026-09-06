@@ -1,0 +1,16 @@
+{
+  "winner": "A",
+  "margin": 2,
+  "scores": {
+    "A": {"correctness": 4, "completeness": 5, "usefulness": 5, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 3, "usefulness": 4, "honesty": 5}
+  },
+  "errors_A": [
+    "\"wiki-links without a backing relation refuse\" is stated unconditionally; on schemas with alias_target_rel_type (default@1.3.0 included) the engine synthesises a REFERENCES relation for each body link and auto-stubs the target instead (create.rs synthesise_alias_relations; binary: create with [[probe--elsewhere]] succeeded with INLINE_WIKI_LINK_AUTO_STUBBED and a REFERENCES row). Refusal (WIKILINK_WITHOUT_RELATION) only applies to schemas without the pointer.",
+    "\"trailers for Tool, Actor, Client, Role, Identity and note\": the note is not a trailer; format_commit_message places it as a body paragraph between the subject and the trailer block (binary: commit body shows 'grader note lands here' above 'Tool: create_entity')."
+  ],
+  "errors_B": [
+    "\"the new `content_hash`\": the wire field is `_hash` (outcomes.rs #[serde(rename = \"_hash\")]; binary MCP create response carries `_hash`, no `content_hash` key). `content_hash` is only the internal Rust field name."
+  ],
+  "rationale": "Both answers are substantially correct and were checked against the source and a live folder mem plus git-branch mem. A traces the full path in verified order: MCP handler (note check, role/identity, engine lock), reload-before-operation, the refusal chain, render, git blob/tree/commit with client-derived author and CAS, read-tree worktree sync, folder atomic write plus JSONL ledger, re-parse/upsert/stub/index refresh, and the exact response and read-back fields. B is accurate on what it covers (20 tools, EXPECTED_HASH_REQUIRED, fixed committer, synthetic write_id, MEM_RELOADED) and hedges honestly, but names the hash field wrongly, muddles the wiki-link rule, and omits the post-write steps and the read-back surface."
+}

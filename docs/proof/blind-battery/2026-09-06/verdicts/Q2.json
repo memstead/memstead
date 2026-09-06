@@ -1,0 +1,18 @@
+{
+  "winner": "B",
+  "margin": 2,
+  "scores": {
+    "A": {"correctness": 3, "completeness": 5, "usefulness": 4, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 4, "usefulness": 4, "honesty": 4}
+  },
+  "errors_A": [
+    "\"its embedded schema's prose (system_context, writing_guidance, write_rules) is served as authoring guidance for that mem\": false. render.rs build_schema_payload de-frames a third-party schema to the Lite skeleton regardless of requested verbosity (memstead-base/src/render.rs ~1712, OriginClass docs ~1547; query.rs schema_origin classifies any non-builtin schema not pinned by a writable mount as ThirdParty). The prose-instruction fields never reach the agent; a full request cannot re-admit them.",
+    "\"Containment here is labelling, not filtering\": overstated. Entity bodies are indeed only labelled, but the installed mem's schema prose IS filtered (see above).",
+    "Gap rather than error: \"I could not verify that individual entity or search hits carry that marker\": they do. memstead_entity stamps origin (binary: `entity ext--injected-concept --json` shows \"origin\": \"third-party\") and MCP search hits carry a per-hit origin (server.rs ~2385 and test entity_and_search_stamp_data_origin_by_mount_capability). The CLI search JSON does not show it."
+  ],
+  "errors_B": [
+    "\"Cross-mem relations inside the archive are stripped on load\": wrong mechanism. The strict ingress validator refuses the archive at install (ValidationError::CrossMemRelationship; binary: `install crossmem2.mem` -> ARCHIVE_VALIDATION_FAILED \"cross-mem relationship at injected-concept.md: target probe--local-note\"). Stripping exists only on the export side (make_archive_self_contained), not at load.",
+    "\"Each entity's authoring rationale travels with the archive\": overstated. `.memstead/provenance.json` is an optional member (archive_provenance.rs, validator tolerates its absence); the test export of a folder mem carried none."
+  ],
+  "rationale": "Both answers are well grounded: read-only mount, READ_ONLY_MOUNT on every mutation verb, Sealed backend, shadow-name refusal, strict validator (whitelist, symlink, zip-slip, drive-letter, caps), default-deny cross-mem policy with CROSS_MEM_TARGET_NOT_FOUND for read-only targets, third-party overview labelling, no MCP install tool, all verified by source and binary. A adds correct, useful limits (no download hash check, cross_linkable unenforced, schema staging). But A's central claim that the stranger's schema prose is served as authoring guidance is the opposite of the engine's de-framing, on the exact point the question asks about. B's only substantive slip is calling install-time refusal 'stripped on load'."
+}

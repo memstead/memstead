@@ -1,0 +1,15 @@
+{
+  "winner": "B",
+  "margin": 2,
+  "scores": {
+    "A": {"correctness": 3, "completeness": 4, "usefulness": 4, "honesty": 3},
+    "B": {"correctness": 5, "completeness": 3, "usefulness": 4, "honesty": 5}
+  },
+  "errors_A": [
+    "\"community detection, schema validation at boot and search-index build all degrade non-linearly past that range\": docs/sizing-curve.md states the opposite for the first and third: index rebuild and community detection are \"invisible next to loading the workspace\"; the only cold-path cost that grows super-linearly is entity load.",
+    "\"Beyond about 10,000 the intended model is several small mems federated\": VISION.md/GLOSSARY.md advocate many small federated mems but name no 10,000 threshold; the documented design span is 1,000-5,000 and sizing-curve.md measures 7,500 as working. The number is invented.",
+    "\"the registry ... use the same function\": the registry is not in public/crates, so this is unverifiable from the source given; only the doc comment's \"default matches the published registry limits\" supports it."
+  ],
+  "errors_B": [],
+  "rationale": "Both answers state the seven default caps correctly (ValidatorLimits::DEFAULT; each confirmed by installing crafted archives: 2121892 > 2097152, 1048577 > 1048576, 10015 > 10000, depth 17 > 16, path 513 > 512). B's whitelist, rejection list, tolerated future-meta member, cap+1 bounded reads, deflate-bomb tests, and the three 10k code comments all verify exactly, and B honestly says no justification for the numbers is recorded. A adds the documented 1,000-5,000 design span, the 30 s timeout, ARCHIVE_TOO_LARGE, and the cross-mem/self-contained rule (all verified) but asserts a false degradation claim and an invented 10,000 federation threshold. B omits the documented 1k-5k span, so its completeness is lower; correctness and honesty decide it."
+}

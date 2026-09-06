@@ -23,6 +23,9 @@ Phases, each a subcommand over one run directory::
               the grader prompts
     tally     reads the verdicts, maps A/B back to mem/source, writes
               result.json and result.md
+    record    copies the run into a committable record, with the machine's
+              paths replaced by placeholders (<run>, <memstead>, <source>,
+              <mem>) and the reader workspace and grader scratch left out
 
 Run directory layout: ``index.json`` (questions, order, models, paths),
 ``prompts/<key>-mem.md`` and ``prompts/<key>-src.md`` (reader prompts),
@@ -41,6 +44,7 @@ Invocation::
     python3 ci/blind_battery.py pair --dir RUN
     python3 ci/blind_battery.py run --dir RUN --phase graders
     python3 ci/blind_battery.py tally --dir RUN
+    python3 ci/blind_battery.py record --dir RUN --out docs/proof/blind-battery/<date>
 """
 
 from __future__ import annotations
@@ -154,19 +158,25 @@ def question_text(key: str) -> str:
 # Parentheticals that name a citation: an entity id, a crate path, a Rust
 # file, a function, struct or module name, or a source phrase.
 CITE_PAREN_RE = re.compile(
-    r"\s*\((?:[^()]*?)(?:"
+    r"\s*\((?:(?:[^()]|\(\))*?)(?:"
     r"[a-z0-9-]+--[a-z0-9-]+"  # an entity id
     r"|crates/|\.rs\b|\bfn\s+\w+|\bstruct\s+\w+|\bimpl\s+\w+|\bmod\s+\w+|::\w+"
     r"|\bthe (?:code|source|mem|entity)\b|\bper the\b|\bsee\s+`"
-    r")[^()]*\)"
+    r")(?:[^()]|\(\))*\)"
 )
+# A parenthetical left holding only separators once its citations are gone.
+EMPTY_PAREN_RE = re.compile(r"\s*\((?:\s|[,;:`]|\band\b)*\)")
 # Inline code spans that are file paths or Rust items, and bare path tokens.
 CODE_PATH_RE = re.compile(
-    r"`(?:[\w./-]*(?:crates/|\.rs\b)[\w./:-]*|[a-z0-9-]+--[a-z0-9-]+|"
+    r"`(?:[\w./-]*(?:crates/|\.rs\b)[\w./:-]*|"
     r"[\w:]+::[\w:]+|fn\s+\w+|struct\s+\w+)`"
 )
 BARE_PATH_RE = re.compile(r"(?<![\w`])[\w.-]+(?:/[\w.-]+)*\.rs\b(?::\d+(?:-\d+)?)?")
-ENTITY_ID_RE = re.compile(r"(?<![\w`-])[a-z0-9]+--[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
+def entity_id_re(mem_name: str) -> re.Pattern[str]:
+    """Ids of the mem under test are citations; ids of any other mem (a
+    scratch mem in a command sequence, say) are content and stay."""
+    return re.compile(r"(?<![\w`-])" + re.escape(mem_name) + r"--[a-z0-9]+(?:-[a-z0-9]+)*(?![\w-])")
+
 # Phrases that tell the grader which side wrote the answer.
 LEAK_PHRASES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bper the (?:installed )?mem\b", re.I), "per the material"),
@@ -187,18 +197,18 @@ LEAK_PHRASES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bin the (?:Rust )?source\b", re.I), "in the material"),
     (re.compile(r"\bfrom the (?:Rust )?source\b", re.I), "from the material"),
     (re.compile(r"\bthe Rust source\b", re.I), "the material"),
-    (re.compile(r"\bentity ids?\b", re.I), "references"),
 ]
 SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:)])")
 DOUBLE_SPACE_RE = re.compile(r"[ \t]{2,}")
 
 
-def strip_citations(text: str) -> str:
+def strip_citations(text: str, mem_name: str = "engine") -> str:
     """Remove the traces that would tell a grader which reader wrote this."""
     out = CITE_PAREN_RE.sub("", text)
     out = CODE_PATH_RE.sub("", out)
     out = BARE_PATH_RE.sub("", out)
-    out = ENTITY_ID_RE.sub("", out)
+    out = entity_id_re(mem_name).sub("", out)
+    out = EMPTY_PAREN_RE.sub("", out)
     for pattern, replacement in LEAK_PHRASES:
         out = pattern.sub(replacement, out)
     out = SPACE_BEFORE_PUNCT_RE.sub(r"\1", out)
@@ -350,6 +360,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         "memstead_version": run_cli([memstead, "--version"]).strip(),
         "source": source,
         "mem": install_target,
+        "mem_name": args.mem_name,
         "mem_workspace": str(ws),
         "models": {"large": args.model, "small": args.small_model},
         "questions": {k: {"text": question_text(k), "small_model": small} for k, _t, small in QUESTIONS},
@@ -377,7 +388,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
             if not path.exists():
                 missing.append(path.name)
                 break
-            answers[side] = strip_citations(path.read_text(encoding="utf-8"))
+            answers[side] = strip_citations(path.read_text(encoding="utf-8"), index.get("mem_name", "engine"))
         if len(answers) < 2:
             continue
         order = index["order"][key]
@@ -609,6 +620,75 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- record
+
+RECORD_DIRS = ("prompts", "answers", "pairs", "verdicts")
+RECORD_FILES = ("index.json", "result.json", "result.md")
+
+
+def path_placeholders(index: dict) -> list[tuple[str, str]]:
+    """The machine paths a run carries and the placeholders that replace
+    them in the record, longest path first so a prefix never wins early."""
+    pairs = [
+        (index.get("mem_workspace", ""), "<run>/mem-ws"),
+        (index.get("dir", ""), "<run>"),
+        (index.get("memstead", ""), "<memstead>"),
+        (index.get("source", ""), "<source>"),
+    ]
+    mem = index.get("mem", "")
+    if mem.startswith("/"):
+        pairs.append((mem, "<mem>"))
+    pairs = [(a, b) for a, b in pairs if a]
+    pairs.sort(key=lambda ab: -len(ab[0]))
+    return pairs
+
+
+def replace_paths(text: str, pairs: list[tuple[str, str]]) -> str:
+    for path, placeholder in pairs:
+        text = text.replace(path, placeholder)
+    return text
+
+
+def write_record(run_dir: Path, out_dir: Path, index: dict) -> int:
+    pairs = path_placeholders(index)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for name in RECORD_FILES:
+        src = run_dir / name
+        if src.exists():
+            (out_dir / name).write_text(replace_paths(src.read_text(encoding="utf-8"), pairs), encoding="utf-8")
+            written += 1
+    for sub in RECORD_DIRS:
+        src_dir = run_dir / sub
+        if not src_dir.is_dir():
+            continue
+        (out_dir / sub).mkdir(exist_ok=True)
+        for src in sorted(src_dir.iterdir()):
+            if src.is_file():
+                (out_dir / sub / src.name).write_text(replace_paths(src.read_text(encoding="utf-8"), pairs), encoding="utf-8")
+                written += 1
+    return written
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    run_dir = Path(args.dir).resolve()
+    index = load_index(run_dir)
+    out_dir = Path(args.out).resolve()
+    written = write_record(run_dir, out_dir, index)
+    leftover = []
+    for path in out_dir.rglob("*"):
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            for machine_path, _ in path_placeholders(index):
+                if machine_path in text:
+                    leftover.append(f"{path.name}: {machine_path}")
+    if leftover:
+        print("record still carries a machine path: " + "; ".join(leftover))
+        return 1
+    print(f"recorded {written} file(s) into {out_dir}")
+    return 0
+
+
 # ---------------------------------------------------------------- self-test
 
 
@@ -628,12 +708,16 @@ def self_test() -> int:
     )
     check("strip-entity", "engine--" not in s, s)
     check("strip-path", ".rs" not in s and "crates/" not in s, s)
+    s5 = strip_citations("It must be adopted instead (memstead-base/src/engine/error.rs, `details()`; server.rs, `HashMismatch` mapping). Fine (engine--x, engine--y)!")
+    check("strip-nested-paren", "details()" not in s5 and "HashMismatch" not in s5 and s5 == "It must be adopted instead. Fine!", s5)
     s4 = strip_citations("The check runs first memstead-base/src/engine/mutation/update.rs:409-418 and then commits.")
     check("strip-bare-path", ".rs" not in s4 and "409" not in s4 and "then commits" in s4, s4)
     check("strip-leak", "per the mem" not in s.lower() and "code I read" not in s, s)
     check("strip-keeps", "HASH_MISMATCH" in s and "folder mems are probed too" in s, s)
     s2 = strip_citations("The installed mem does not document the flags; the mem says so itself.")
     check("strip-mem-verb", "installed mem" not in s2 and "the mem says" not in s2, s2)
+    s6 = strip_citations("memstead relate notes--optimistic-locking USES notes--validate-at-the-boundary (engine--relate-mutation)")
+    check("strip-keeps-other-mem-ids", s6 == "memstead relate notes--optimistic-locking USES notes--validate-at-the-boundary", s6)
     s3 = strip_citations("Install a mem with `memstead install`; the mem then loads read-only.")
     check("strip-keeps-mem-noun", "Install a mem" in s3 and "memstead install" in s3, s3)
 
@@ -681,6 +765,28 @@ def self_test() -> int:
     check("grader-other", "grade by execution" not in grader_prompt("Q3", idx, "a", "b"))
     check("extract-json", extract_json('noise {"winner": "A"} trailing') == {"winner": "A"})
 
+    # The record replaces every machine path, longest first.
+    ridx = {"dir": "/tmp/r", "mem_workspace": "/tmp/r/mem-ws", "memstead": "/opt/bin/memstead", "source": "/src/public", "mem": "/tmp/engine.mem"}
+    rec = replace_paths("run /opt/bin/memstead --workspace /tmp/r/mem-ws in /tmp/r over /src/public/crates with /tmp/engine.mem", path_placeholders(ridx))
+    check("record-paths", rec == "run <memstead> --workspace <run>/mem-ws in <run> over <source>/crates with <mem>", rec)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        run = Path(tmp) / "run"
+        (run / "prompts").mkdir(parents=True)
+        (run / "mem-ws").mkdir()
+        (run / "index.json").write_text(json.dumps({"dir": str(run), "memstead": "/opt/bin/memstead", "source": "/src/public", "mem": "x/y", "mem_workspace": str(run / "mem-ws")}), encoding="utf-8")
+        (run / "prompts" / "Q0-mem.md").write_text(f"use /opt/bin/memstead --workspace {run / 'mem-ws'}", encoding="utf-8")
+        (run / "mem-ws" / "secret.md").write_text("never copied", encoding="utf-8")
+        out = Path(tmp) / "out"
+        idx = json.loads((run / "index.json").read_text(encoding="utf-8"))
+        idx["dir"] = str(run)
+        n = write_record(run, out, idx)
+        check("record-count", n == 2, str(n))
+        check("record-prompt", (out / "prompts" / "Q0-mem.md").read_text(encoding="utf-8") == "use <memstead> --workspace <run>/mem-ws")
+        check("record-index", '"<run>"' in (out / "index.json").read_text(encoding="utf-8"))
+        check("record-skips-workspace", not (out / "mem-ws").exists())
+
     if failures:
         for f in failures:
             print(f"FAIL {f}")
@@ -702,6 +808,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mem", required=True, help="a .mem archive path or a registry <scope>/<name> to install")
     p.add_argument("--source", required=True, help="the open engine repository root (crates/ beneath it)")
     p.add_argument("--schema", default="default@1.3.0", help="schema pin of the reader workspace's own mem")
+    p.add_argument("--mem-name", default="engine", help="name of the installed mem under test; its entity ids are the citations the pairing strips")
     p.add_argument("--seed", type=int, default=int(dt.date.today().strftime("%Y%m%d")))
     p.add_argument("--model", default="fable", help="model of the large-model readers and every grader")
     p.add_argument("--small-model", default="haiku", help="model of the two small-model pairs")
@@ -719,6 +826,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("tally", help="map verdicts back to mem/source and write the result")
     p.add_argument("--dir", required=True)
     p.set_defaults(func=cmd_tally)
+    p = sub.add_parser("record", help="copy the run into a committable record with machine paths replaced")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--out", required=True, help="the record directory, e.g. docs/proof/blind-battery/<date>")
+    p.set_defaults(func=cmd_record)
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()

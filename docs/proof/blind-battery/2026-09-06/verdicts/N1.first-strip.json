@@ -1,0 +1,20 @@
+{
+  "winner": "B",
+  "margin": 2,
+  "scores": {
+    "A": {"correctness": 1, "completeness": 3, "usefulness": 2, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 4, "usefulness": 4, "honesty": 4}
+  },
+  "errors_A": [
+    "`memstead create --type principle ... --section statement=...` fails as written: binary refuses MISSING_REQUIRED_SECTION, `scope` is required for principle on default@1.3.0 (A hedged this but the command does not run).",
+    "`memstead relate RELATED_TO` fails: INVALID_INPUT, no FROM/TO given (the lone token is taken as FROM). Even with both ids supplied, RELATED_TO is not in the default schema vocabulary: binary refuses INVALID_REL_TYPE listing 37 allowed types; A's claim that it is 'present in the default-derived vocabulary' is false.",
+    "`memstead export --format mem notes` fails: clap 'unexpected argument notes'; the mem is selected with `--mem <NAME>`, not a positional.",
+    "`memstead mem set-version notes 0.1.0` is redundant: `init` already seeds version 0.1.0 (binary reports old 0.1.0 -> new 0.1.0; source memstead-cli/tests/write_commands.rs confirms). MEM_CONFIG_INCOMPLETE only fires when the version field has been removed, so 'set one first' is misleading for a fresh init.",
+    "Garbled sentence 'references becomes (mem prefix plus title slug)' omits the actual id (`notes--optimistic-locking`)."
+  ],
+  "errors_B": [
+    "`memstead relate USES ` fails as written: INVALID_INPUT, FROM and TO ids are missing (the token is taken as FROM). With `notes--optimistic-locking USES notes--validate-at-the-boundary` the edge is added successfully.",
+    "Truncated sentence 'the id becomes.' never states the id (`notes--optimistic-locking`)."
+  ],
+  "rationale": "Executed both sequences literally under PATH with the 0.18.1 release binary. A: init, type, and the concept create succeed; the principle create (missing required `scope`), relate (no endpoints, and RELATED_TO is not a default rel-type), and export (positional mem refused) all fail, so parts 2b, 3 and 4 do not run. B: init, both creates, and `export --format mem --mem notes -o notes.mem` succeed and produce a 2-entity archive; only the relate line fails because the two entity ids are missing. B's side claims (exact name@version pin, nested-workspace refusal, REFERENCES forbidden, USES allowed, default output notes.mem) all verified; A's RELATED_TO and export-shape claims did not."
+}

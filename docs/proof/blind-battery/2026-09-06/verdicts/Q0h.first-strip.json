@@ -1,0 +1,19 @@
+{
+  "winner": "B",
+  "margin": 1,
+  "scores": {
+    "A": {"correctness": 4, "completeness": 3, "usefulness": 4, "honesty": 3},
+    "B": {"correctness": 3, "completeness": 4, "usefulness": 4, "honesty": 3}
+  },
+  "errors_A": [
+    "Payload described as 'the references, the current hash on disk, and whether the entity is a stub': the actual fields are `id`, `current`, `is_stub` (engine/error.rs details(), verified on the binary: {\"current\":..,\"id\":..,\"is_stub\":false}); no references field.",
+    "Unqualified 'cannot silently overwrite': the CLI offers `--force` (skips the hash check entirely, verified on the binary, exit 0 and content replaced) and `--auto-hash` (accepts a race window); dry_run also skips the check. Not mentioned."
+  ],
+  "errors_B": [
+    "MEM_RELOADED 'with the changed entities listed': the warning carries mem, old_head, new_head and an `entities_loaded` count only (ops/mod.rs WarningHint::MemReloaded), no entity list.",
+    "Payload described as 'the references, the current hash on disk, and whether the entity is a stub': actual fields are `id`, `current`, `is_stub`.",
+    "Conflates the entity-hash compare with the git ref CAS: the `expected_hash` compare runs in the engine (update.rs) for every backend; the git-tree adapter adds a separate commit-tip CAS whose conflict is mapped onto the same HASH_MISMATCH code.",
+    "Unqualified 'no silent clobber is possible': CLI `--force` and `--auto-hash` bypass or weaken the check; not mentioned."
+  ],
+  "rationale": "Both correctly identify optimistic locking via expected_hash and the HASH_MISMATCH refusal (verified: exit 4, details id/current/is_stub, 16-hex SHA-256 hash), and both misname the id field as 'references' and omit the CLI --force/--auto-hash escape hatches. A adds the correct CLI exit code and batch atomicity; B adds reload_if_stale before writes, the folder changelog and git ref-tip probes, and the git commit-level CAS, all verified in drift.rs, filesystem.rs and git_tree.rs, but invents an entity list on MEM_RELOADED and blurs the two check layers. B answers 'what exactly prevents that' more fully; A is tighter but thinner. Narrow B win."
+}

@@ -1,0 +1,22 @@
+{
+  "winner": "B",
+  "margin": 2,
+  "scores": {
+    "A": {"correctness": 3, "completeness": 4, "usefulness": 3, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 5, "usefulness": 5, "honesty": 5}
+  },
+  "errors_A": [
+    "Claims the `workspace` policy commands refuse with UNSUPPORTED_WORKSPACE_SHAPE on a folder workspace. Binary: `workspace allow-create`, `allow-delete`, `set-mutations` and `show` all succeed on the filesystem-mem workspace; only `workspace dump` and `grant-cross-link` (which go through setup::full_engine) refuse.",
+    "Groups fetch/pull/push under the same refusal; they refuse, but with INVALID_INPUT ('mem is not git-backed'), not UNSUPPORTED_WORKSPACE_SHAPE (transport.rs folder_refusal).",
+    "Says the mem-repo has 'no working tree'. mem_repo.rs run_init materialises a working tree with README.md on `main`; only the entity branches are never checked out.",
+    "Offers `memstead export --format markdown` as the credible path out of the folder shape. Binary on a filesystem-mem workspace: INVALID_INPUT '--format markdown is not yet supported on filesystem-mem'. The `.mem` archive route installs only as a read-only mount.",
+    "Presents export-and-reinit as the switching path and says it could not verify a converter, missing that `memstead mem-repo init .` in the existing folder workspace root upgrades it in place: verified with the binary, the folder mem stays mounted with its entities, git-branch mems can be added beside it, and batch-create then succeeds against the folder mem. The engine's own `mem init` refusal says 'Use `memstead mem-repo init` first to migrate'."
+  ],
+  "errors_B": [
+    "`memstead quickstart --repo.` is malformed; the flag is `--repo .` (quickstart --help).",
+    "'A README.md beside the entities is tolerated' holds only for the loader (entity/source.rs skips README.md). `init` and `quickstart` both refuse a pre-existing README.md in the mem folder with TARGET_NOT_EMPTY (quickstart.rs blocking_entries: every `.md` blocks, README.md included).",
+    "The OUTER_REPO_NOT_IGNORING_MEM_REPO health warning fires only when the workspace is nested inside the repo (workspace_root.rs walks from the parent); with the workspace root as the repo root it does not fire. Verified with the binary; a nuance rather than a contradiction.",
+    "The --reattach path additionally needs a `[[mem_management.create]]` allowlist rule; without one `mem init` refuses MEM_PATH_NOT_ALLOWED before reaching reattach. With the rule, reattach works as described (verified)."
+  ],
+  "rationale": "Both pick the folder shape for the right reasons and correctly name batch-*/recover refusing with UNSUPPORTED_WORKSPACE_SHAPE, the JSONL ledger, timestamp cursors and the gitignore guard. A adds a false claim (workspace policy commands refuse; most work), a wrong export route, and misses the real switching path. B's account of switching (in-place `mem-repo init` keeps workspace.toml, folder mem stays mounted, later mems get branches, `--reattach` for an existing folder mem) is what the binary actually does, and B hedged exactly what it had not run. B also surfaces the one gain that matters for in-repo review: git merge conflicts are a supported, resolvable case. B's errors are a typo and nuances."
+}

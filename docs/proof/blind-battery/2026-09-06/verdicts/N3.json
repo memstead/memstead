@@ -1,0 +1,13 @@
+{
+  "winner": "B",
+  "margin": 1,
+  "scores": {
+    "A": {"correctness": 4, "completeness": 5, "usefulness": 5, "honesty": 4},
+    "B": {"correctness": 5, "completeness": 5, "usefulness": 4, "honesty": 5}
+  },
+  "errors_A": [
+    "\"read-only mems currently have no index at all\": the engine builds indexes via build_all(&self.store, &self.schemas) and the boot loop in engine/boot.rs inserts a schema entry for every resolved mount, read-only ones included (only quarantined mounts are skipped), so read-only mems are indexed too; only the build_all docstring says \"writable\"."
+  ],
+  "errors_B": [],
+  "rationale": "Both correctly say there is no vector search or embedding model: no such code path exists under crates, search is a per-mem in-RAM tantivy index ranked by BM25 with schema title_weight/search_weight boosts (default schema: title 100, sections up to 40, metadata text 1.0). Binary runs confirm no stemming (schedule finds nothing, scheduler hits), diacritic folding (hauser finds Häuser), 0.5 expansion decay, proximity-ranked related_to, and warned-but-ignored unknown filters. A offers more routes (Louvain communities, NEIGHBOURHOOD_CAPPED, wasm caveat) but asserts one false fact about read-only mems. B is fully verified, gives concrete tokenizer examples, and honestly states embedding search must live outside the engine."
+}

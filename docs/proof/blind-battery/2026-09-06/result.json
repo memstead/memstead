@@ -1,0 +1,505 @@
+{
+ "graded": 11,
+ "wins": {
+  "mem": 2,
+  "src": 9,
+  "tie": 0
+ },
+ "margins": {
+  "mem": 3,
+  "src": 15
+ },
+ "scores_total": {
+  "mem": {
+   "correctness": 38,
+   "completeness": 42,
+   "usefulness": 42,
+   "honesty": 43
+  },
+  "src": {
+   "correctness": 48,
+   "completeness": 51,
+   "usefulness": 49,
+   "honesty": 48
+  }
+ },
+ "by_model": {
+  "large": {
+   "mem": 1,
+   "src": 8,
+   "tie": 0
+  },
+  "small": {
+   "mem": 1,
+   "src": 1,
+   "tie": 0
+  }
+ },
+ "errors": {
+  "mem": [
+   {
+    "question": "Q0",
+    "error": "Claims memstead_relate must send expected_hash: false. RelateParams/RelateOpInput in memstead-mcp/src/tools/mutation.rs carry no expected_hash field and server.rs memstead_relate builds RelateEntityArgs with expected_hash: None; only update, delete, rename and retype demand the token."
+   },
+   {
+    "question": "Q0",
+    "error": "Says a commit-level CAS loser 'loses the commit with HashMismatch and the live tip', implying the agent sees HASH_MISMATCH: MemWriterError::HashMismatch is lifted transparently into BackendError::MemWriter then EngineError::Backend, whose code is MEM_ERROR (error.rs:1405, server.rs:1761), message 'mem writer cas conflict: current commit is now <sha>'. What the losing agent sees in that case is not stated."
+   },
+   {
+    "question": "Q1",
+    "error": "\"the new `content_hash`\": the wire field is `_hash` (outcomes.rs #[serde(rename = \"_hash\")]; binary MCP create response carries `_hash`, no `content_hash` key). `content_hash` is only the internal Rust field name."
+   },
+   {
+    "question": "Q2",
+    "error": "\"Cross-mem relations inside the archive are stripped on load\": wrong mechanism. The strict ingress validator refuses the archive at install (ValidationError::CrossMemRelationship; binary: `install crossmem2.mem` -> ARCHIVE_VALIDATION_FAILED \"cross-mem relationship at injected-concept.md: target probe--local-note\"). Stripping exists only on the export side (make_archive_self_contained), not at load."
+   },
+   {
+    "question": "Q2",
+    "error": "\"Each entity's authoring rationale travels with the archive\": overstated. `.memstead/provenance.json` is an optional member (archive_provenance.rs, validator tolerates its absence); the test export of a folder mem carried none."
+   },
+   {
+    "question": "Q3",
+    "error": "Prune: 'where a git base is retrievable it can separate a clean removal from a model-side edit' is design intent, not current behaviour. memstead-base/src/ingest/prune.rs states the model-divergence signal 'is not wired this cycle, so prune_proposals supplies None and every candidate conservatively conflict-flags'; the sync brief run in the scratch workspace rendered only a conflict-flag proposal."
+   },
+   {
+    "question": "Q3",
+    "error": "Health: dangling links are described as an opt-in axis, but `memstead health` reports them in the default examined set (verdict coverage: examined=dangling_links,config,mounts) without --include; only the orphan list and derivation baselines are include-gated."
+   },
+   {
+    "question": "Q3",
+    "error": "External-edit detection is stated unconditionally ('handled automatically ... before every operation'); on a folder-backed mem (what `init`/`quickstart` produce) the binary warns OUT_OF_BAND_EDITS_UNDETECTED: edits made by anything other than the engine are not detected and reads keep serving pre-edit content. Verified true only for git-branch mems (MEM_RELOADED observed over MCP after a CLI commit)."
+   },
+   {
+    "question": "N1",
+    "error": "Principle create with only `statement` fails: MISSING_REQUIRED_SECTION, `scope` is required on default@1.3.0 (memstead type principle and the binary confirm); step 3 does not run as written."
+   },
+   {
+    "question": "N1",
+    "error": "`memstead relate FROM TO REL_TYPE` order is wrong: positional grammar is FROM REL_TYPE TO; the binary refuses with INVALID_ENTITY_ID on 'RELATED_TO'."
+   },
+   {
+    "question": "N1",
+    "error": "`RELATED_TO` is not in the default schema's relationship vocabulary; with correct argument order the binary refuses INVALID_REL_TYPE listing 37 types (USES, DEPENDS_ON, ... ), so the relate step cannot succeed at all."
+   },
+   {
+    "question": "N1",
+    "error": "`memstead export --format mem notes` fails: export takes no positional argument (clap: unexpected argument 'notes'); the mem is named with `--mem`. Step 4 does not run as written."
+   },
+   {
+    "question": "N1",
+    "error": "`memstead mem set-version notes 0.1.0` is a no-op: init seeds version 0.1.0 (config.json shows version 0.1.0; binary prints old 0.1.0 -> new 0.1.0), so export never hits MEM_CONFIG_INCOMPLETE on a fresh init."
+   },
+   {
+    "question": "N1",
+    "error": "Init does not write mem config to `.memstead/workspace.toml`; init reports `.memstead/config.json` as the config (workspace.toml exists but only holds the workspace format/persistence-adapter lines, not the mem pin)."
+   },
+   {
+    "question": "N2",
+    "error": "The successful update response over MCP carries the new hash as `_hash`, not `content_hash` (server.rs builds `\"_hash\": outcome.content_hash`; the binary's --json output likewise shows `_hash`). `content_hash` is the engine-internal field name only."
+   },
+   {
+    "question": "N2",
+    "error": "Same `is_stub` issue as A: a stub never yields HASH_MISMATCH from memstead_update; it refuses STUB_NOT_UPDATABLE before the hash check, so branching on is_stub from this error is moot."
+   },
+   {
+    "question": "N3",
+    "error": "\"read-only mems currently have no index at all\": the engine builds indexes via build_all(&self.store, &self.schemas) and the boot loop in engine/boot.rs inserts a schema entry for every resolved mount, read-only ones included (only quarantined mounts are skipped), so read-only mems are indexed too; only the build_all docstring says \"writable\"."
+   },
+   {
+    "question": "N4",
+    "error": "Claims the `workspace` policy commands refuse with UNSUPPORTED_WORKSPACE_SHAPE on a folder workspace. Binary: `workspace allow-create`, `allow-delete`, `set-mutations` and `show` all succeed on the filesystem-mem workspace; only `workspace dump` and `grant-cross-link` (which go through setup::full_engine) refuse."
+   },
+   {
+    "question": "N4",
+    "error": "Groups fetch/pull/push under the same refusal; they refuse, but with INVALID_INPUT ('mem is not git-backed'), not UNSUPPORTED_WORKSPACE_SHAPE (transport.rs folder_refusal)."
+   },
+   {
+    "question": "N4",
+    "error": "Says the mem-repo has 'no working tree'. mem_repo.rs run_init materialises a working tree with README.md on `main`; only the entity branches are never checked out."
+   },
+   {
+    "question": "N4",
+    "error": "Offers `memstead export --format markdown` as the credible path out of the folder shape. Binary on a filesystem-mem workspace: INVALID_INPUT '--format markdown is not yet supported on filesystem-mem'. The `.mem` archive route installs only as a read-only mount."
+   },
+   {
+    "question": "N4",
+    "error": "Presents export-and-reinit as the switching path and says it could not verify a converter, missing that `memstead mem-repo init .` in the existing folder workspace root upgrades it in place: verified with the binary, the folder mem stays mounted with its entities, git-branch mems can be added beside it, and batch-create then succeeds against the folder mem. The engine's own `mem init` refusal says 'Use `memstead mem-repo init` first to migrate'."
+   },
+   {
+    "question": "N5",
+    "error": "\"community detection, schema validation at boot and search-index build all degrade non-linearly past that range\": public/docs/sizing-curve.md states the opposite, that index rebuild, the mutation commit and community detection are invisible next to workspace load, and that load (0.36 to 0.75 ms/entity from 500 to 7,500 entities) is the single super-linear cost on the cold path."
+   },
+   {
+    "question": "N5",
+    "error": "\"Beyond about 10,000 the intended model is several small mems federated by cross-mem edges\": no source states a 10,000 split point; the sizing-curve doc's worked example splits a 7.5k workspace into five mems, and the advertised design span is 1,000 to 5,000. The number is unverifiable."
+   },
+   {
+    "question": "N5",
+    "error": "\"the registry ... use the same function\": the registry is not in the public crates, so this is unverifiable from the source; only the CLI publish path (publish.rs) and the install/export paths were confirmed to call validate_and_normalize_archive, with the struct comment saying the defaults match the registry limits."
+   },
+   {
+    "question": "Q0h",
+    "error": "Implies the git-branch commit-tip CAS feeds the HASH_MISMATCH error. The git_tree.rs doc comment claims that mapping, but no code performs it: MemWriterError::HashMismatch lifts via BackendError::MemWriter into EngineError::Backend, which the MCP layer maps to code MEM_ERROR (server.rs E::Backend arm), not HASH_MISMATCH. The entity-hash compare in prepare_update is what yields HASH_MISMATCH."
+   },
+   {
+    "question": "Q0h",
+    "error": "\"MEM_RELOADED warning with the changed entities listed\": the MEM_RELOADED WarningHint carries mem, old_head, new_head and an entities_loaded count only; the per-entity list rides the separate `mem_changed` notice, and the warning text points to memstead_changes_since for the diff."
+   },
+   {
+    "question": "Q0h",
+    "error": "\"No silent clobber is possible because every mutation ... is gated by the hash\" is overstated for the same reason as A: engine expected_hash=None and CLI `--force` bypass the gate (verified by running the binary)."
+   },
+   {
+    "question": "Q2h",
+    "error": "\"the published mem's mount record persists only in your workspace configuration\": the mount lives in the engine-managed state file `.memstead/state/mounts.json` (install.rs header; verified on disk with capability \"read-only\" and storage type \"archive\"), not in `config.json` or `workspace.toml`."
+   },
+   {
+    "question": "Q2h",
+    "error": "\"Its content is not instructions to your agent; mems are data models, not prompts\" is asserted without any engine mechanism and understates the risk: the binary serves the installed mem's body text verbatim to the agent. B omits the actual containment the engine applies here (third-party `origin` stamping on entity reads, search hits and overview; structural-only schema serving that drops write_rules/writing_guidance/when_to_use for third-party schemas, render.rs ~1547-1720)."
+   }
+  ],
+  "src": [
+   {
+    "question": "Q1",
+    "error": "\"wiki-links without a backing relation refuse\" is stated unconditionally; on schemas with alias_target_rel_type (default@1.3.0 included) the engine synthesises a REFERENCES relation for each body link and auto-stubs the target instead (create.rs synthesise_alias_relations; binary: create with [[probe--elsewhere]] succeeded with INLINE_WIKI_LINK_AUTO_STUBBED and a REFERENCES row). Refusal (WIKILINK_WITHOUT_RELATION) only applies to schemas without the pointer."
+   },
+   {
+    "question": "Q1",
+    "error": "\"trailers for Tool, Actor, Client, Role, Identity and note\": the note is not a trailer; format_commit_message places it as a body paragraph between the subject and the trailer block (binary: commit body shows 'grader note lands here' above 'Tool: create_entity')."
+   },
+   {
+    "question": "Q2",
+    "error": "\"its embedded schema's prose (system_context, writing_guidance, write_rules) is served as authoring guidance for that mem\": false. render.rs build_schema_payload de-frames a third-party schema to the Lite skeleton regardless of requested verbosity (memstead-base/src/render.rs ~1712, OriginClass docs ~1547; query.rs schema_origin classifies any non-builtin schema not pinned by a writable mount as ThirdParty). The prose-instruction fields never reach the agent; a full request cannot re-admit them."
+   },
+   {
+    "question": "Q2",
+    "error": "\"Containment here is labelling, not filtering\": overstated. Entity bodies are indeed only labelled, but the installed mem's schema prose IS filtered (see above)."
+   },
+   {
+    "question": "Q2",
+    "error": "Gap rather than error: \"I could not verify that individual entity or search hits carry that marker\": they do. memstead_entity stamps origin (binary: `entity ext--injected-concept --json` shows \"origin\": \"third-party\") and MCP search hits carry a per-hit origin (server.rs ~2385 and test entity_and_search_stamp_data_origin_by_mount_capability). The CLI search JSON does not show it."
+   },
+   {
+    "question": "Q3",
+    "error": "'Verification re-observes every anchor' overstates: url-grain anchors are never fetched by the engine and stay `unobserved` unless an observer supplies observations via `verify-anchors --observations` (help text and verify_anchors.rs)."
+   },
+   {
+    "question": "Q3",
+    "error": "'Every operation probes the mem's head and reloads' holds for git-branch mems (verified over MCP) but not for folder-backed mems, where the head is the engine's own ledger and out-of-band edits go undetected (OUT_OF_BAND_EDITS_UNDETECTED warning from `memstead health`); the answer does not qualify this."
+   },
+   {
+    "question": "N2",
+    "error": "`details.is_stub` is presented as the signal that the target is a stub, but memstead_update never reaches the hash compare for a stub: the stub guard in prepare_update fires first and refuses STUB_NOT_UPDATABLE (verified with the binary: update on a stub returns STUB_NOT_UPDATABLE, and every HASH_MISMATCH carries is_stub:false). The field exists in the payload but cannot be true on this call."
+   },
+   {
+    "question": "N4",
+    "error": "`memstead quickstart --repo.` is malformed; the flag is `--repo .` (quickstart --help)."
+   },
+   {
+    "question": "N4",
+    "error": "'A README.md beside the entities is tolerated' holds only for the loader (entity/source.rs skips README.md). `init` and `quickstart` both refuse a pre-existing README.md in the mem folder with TARGET_NOT_EMPTY (quickstart.rs blocking_entries: every `.md` blocks, README.md included)."
+   },
+   {
+    "question": "N4",
+    "error": "The OUTER_REPO_NOT_IGNORING_MEM_REPO health warning fires only when the workspace is nested inside the repo (workspace_root.rs walks from the parent); with the workspace root as the repo root it does not fire. Verified with the binary; a nuance rather than a contradiction."
+   },
+   {
+    "question": "N4",
+    "error": "The --reattach path additionally needs a `[[mem_management.create]]` allowlist rule; without one `mem init` refuses MEM_PATH_NOT_ALLOWED before reaching reattach. With the rule, reattach works as described (verified)."
+   },
+   {
+    "question": "Q0h",
+    "error": "\"one agent cannot silently overwrite\" is overstated: the engine treats expected_hash=None as an explicit escape hatch (update.rs doc: '--force-style'), and the CLI offers `--force` (verified: a stale-content `update --force` overwrote the other agent's write with exit 0) and `--auto-hash` (documented race window). MCP does require the hash (EXPECTED_HASH_REQUIRED), so the guarantee holds only on the strict path; A does not mention the opt-outs."
+   },
+   {
+    "question": "Q2h",
+    "error": "\"Your agent can read, search, and link from published mems into your own data\": the direction is wrong and contradicts A's own earlier paragraph. Binary: `relate probe--x RELATES_TO mine--y` (read-only source) refuses with READ_ONLY_MOUNT even after a cross_mem_links grant; only edges FROM your writable mem INTO the published one succeed, and only after an explicit `[cross_mem_links]` grant (relate.rs: source mount must be Write)."
+   },
+   {
+    "question": "Q2h",
+    "error": "\"Its content cannot act as instructions to your agent ... cannot be directed by its embedded guidance\" overstates: entity bodies from the installed mem reach the agent verbatim (binary `entity probe--delete-everything --json` returns the planted instruction text in `sections`); the engine only stamps `origin: \"third-party\"` and strips schema prose. That labelling and de-framing are real (render.rs OriginClass, server.rs), but they are advisory, not a hard block."
+   },
+   {
+    "question": "Q2h",
+    "error": "\"These fields reach the agent only for schemas authored in your workspace\" is a simplification: query.rs `schema_origin` classifies as first-party any built-in schema or any schema pinned by a writable mount, so a third-party schema becomes first-party the moment one of your writable mems adopts it."
+   }
+  ]
+ },
+ "rows": [
+  {
+   "question": "Q0",
+   "graded": true,
+   "winner": "src",
+   "margin": 2,
+   "order": {
+    "A": "src",
+    "B": "mem"
+   },
+   "scores": {
+    "src": {
+     "correctness": 5,
+     "completeness": 5,
+     "usefulness": 5,
+     "honesty": 5
+    },
+    "mem": {
+     "correctness": 3,
+     "completeness": 4,
+     "usefulness": 4,
+     "honesty": 4
+    }
+   },
+   "rationale": "Both answers correctly describe the two layers (surface-enforced expected_hash gate with EXPECTED_HASH_REQUIRED, reload-before-compare, HASH_MISMATCH with details.current, git-tree snapshot plus ref CAS, no folder CAS). Binary run confirmed HASH_MISMATCH with details.id/current/is_stub and the 'modified concurrently' message. A is fully accurate, adds the in-process mutex, retype, --force/--auto-hash, and correctly notes the CAS failure surfaces as MEM_ERROR despite the git_tree.rs doc comment claiming EngineError::HashMismatch. B wrongly lists memstead_relate as hash-guarded and leaves the commit-level failure's wire code misleading, though it usefully adds the MEM_RELOADED text warning and the folder check-to-rename window."
+  },
+  {
+   "question": "Q1",
+   "graded": true,
+   "winner": "src",
+   "margin": 2,
+   "order": {
+    "A": "src",
+    "B": "mem"
+   },
+   "scores": {
+    "src": {
+     "correctness": 4,
+     "completeness": 5,
+     "usefulness": 5,
+     "honesty": 4
+    },
+    "mem": {
+     "correctness": 4,
+     "completeness": 3,
+     "usefulness": 4,
+     "honesty": 5
+    }
+   },
+   "rationale": "Both answers are substantially correct and were checked against the source and a live folder mem plus git-branch mem. A traces the full path in verified order: MCP handler (note check, role/identity, engine lock), reload-before-operation, the refusal chain, render, git blob/tree/commit with client-derived author and CAS, read-tree worktree sync, folder atomic write plus JSONL ledger, re-parse/upsert/stub/index refresh, and the exact response and read-back fields. B is accurate on what it covers (20 tools, EXPECTED_HASH_REQUIRED, fixed committer, synthetic write_id, MEM_RELOADED) and hedges honestly, but names the hash field wrongly, muddles the wiki-link rule, and omits the post-write steps and the read-back surface."
+  },
+  {
+   "question": "Q2",
+   "graded": true,
+   "winner": "mem",
+   "margin": 2,
+   "order": {
+    "A": "src",
+    "B": "mem"
+   },
+   "scores": {
+    "src": {
+     "correctness": 3,
+     "completeness": 5,
+     "usefulness": 4,
+     "honesty": 4
+    },
+    "mem": {
+     "correctness": 4,
+     "completeness": 4,
+     "usefulness": 4,
+     "honesty": 4
+    }
+   },
+   "rationale": "Both answers are well grounded: read-only mount, READ_ONLY_MOUNT on every mutation verb, Sealed backend, shadow-name refusal, strict validator (whitelist, symlink, zip-slip, drive-letter, caps), default-deny cross-mem policy with CROSS_MEM_TARGET_NOT_FOUND for read-only targets, third-party overview labelling, no MCP install tool, all verified by source and binary. A adds correct, useful limits (no download hash check, cross_linkable unenforced, schema staging). But A's central claim that the stranger's schema prose is served as authoring guidance is the opposite of the engine's de-framing, on the exact point the question asks about. B's only substantive slip is calling install-time refusal 'stripped on load'."
+  },
+  {
+   "question": "Q3",
+   "graded": true,
+   "winner": "src",
+   "margin": 1,
+   "order": {
+    "A": "mem",
+    "B": "src"
+   },
+   "scores": {
+    "mem": {
+     "correctness": 4,
+     "completeness": 4,
+     "usefulness": 4,
+     "honesty": 4
+    },
+    "src": {
+     "correctness": 4,
+     "completeness": 5,
+     "usefulness": 4,
+     "honesty": 4
+    }
+   },
+   "rationale": "Both answers are largely accurate against source and binary: anchor grains/classes, the resolves/drifted/recheck/orphaned-or-unresolvable states, mtime/git/graph change strategies, findings classes, proposal-only prune, disposition-gated #synced advance and MEM_RELOADED all verify. A carries one substantive false claim (git-base clean-removal separation is unwired; the engine conflict-flags everything) plus a minor health axis error, though it hedges loop scheduling honestly. B verifies on every checkable specific (check_stale, staleness_threshold_days, stale derivations, full_resync_every, backoff rotation, authored never pruned) and enumerates more failure modes. Both omit the folder-mem out-of-band caveat. B wins narrowly."
+  },
+  {
+   "question": "N1",
+   "graded": true,
+   "winner": "src",
+   "margin": 3,
+   "order": {
+    "A": "mem",
+    "B": "src"
+   },
+   "scores": {
+    "mem": {
+     "correctness": 1,
+     "completeness": 2,
+     "usefulness": 1,
+     "honesty": 4
+    },
+    "src": {
+     "correctness": 5,
+     "completeness": 5,
+     "usefulness": 5,
+     "honesty": 5
+    }
+   },
+   "rationale": "Executed both sequences literally in fresh directories. B ran end to end: init, two creates (principle with the required `scope`), `relate FROM USES TO`, and `export --format mem --mem notes -o notes.mem` produced a 15-file .mem zip. Its side claims (exact name@version pin, TARGET_NOT_EMPTY and nested-workspace refusal, REFERENCES refused from relate, default `./notes.mem`) all verified. A failed at three of four question parts: principle create refused (scope missing), relate had the wrong positional order and a rel-type not in the vocabulary, and export rejected the positional mem name. A hedged honestly about what it had not verified, which earns some honesty credit, but the commands do not run as written."
+  },
+  {
+   "question": "N2",
+   "graded": true,
+   "winner": "src",
+   "margin": 1,
+   "order": {
+    "A": "src",
+    "B": "mem"
+   },
+   "scores": {
+    "src": {
+     "correctness": 4,
+     "completeness": 5,
+     "usefulness": 5,
+     "honesty": 4
+    },
+    "mem": {
+     "correctness": 4,
+     "completeness": 4,
+     "usefulness": 5,
+     "honesty": 4
+    }
+   },
+   "rationale": "Both answers are substantively right and verified: reload-before-operation with MEM_RELOADED and mem_changed on the refusal, the hash gate inside the non-committing prepare step (no commit, on-disk hash unchanged after refusal), details {id,current,is_stub}, dry_run skipping only the hash check and returning on-disk _hash plus a prospective_hash that drifts after a second tick, EXPECTED_HASH_REQUIRED over MCP, PATCH_OLD_NOT_FOUND, and the CLI --auto-hash/--force flags. A answers the shortcut question more completely (CLI escape hatches and when they are unwise); B adds the useful prospective_hash caveat and the sections_unset warning but mislabels the response key as content_hash. Both overstate is_stub. Close call for A."
+  },
+  {
+   "question": "N3",
+   "graded": true,
+   "winner": "src",
+   "margin": 1,
+   "order": {
+    "A": "mem",
+    "B": "src"
+   },
+   "scores": {
+    "mem": {
+     "correctness": 4,
+     "completeness": 5,
+     "usefulness": 5,
+     "honesty": 4
+    },
+    "src": {
+     "correctness": 5,
+     "completeness": 5,
+     "usefulness": 4,
+     "honesty": 5
+    }
+   },
+   "rationale": "Both correctly say there is no vector search or embedding model: no such code path exists under crates, search is a per-mem in-RAM tantivy index ranked by BM25 with schema title_weight/search_weight boosts (default schema: title 100, sections up to 40, metadata text 1.0). Binary runs confirm no stemming (schedule finds nothing, scheduler hits), diacritic folding (hauser finds H\u00e4user), 0.5 expansion decay, proximity-ranked related_to, and warned-but-ignored unknown filters. A offers more routes (Louvain communities, NEIGHBOURHOOD_CAPPED, wasm caveat) but asserts one false fact about read-only mems. B is fully verified, gives concrete tokenizer examples, and honestly states embedding search must live outside the engine."
+  },
+  {
+   "question": "N4",
+   "graded": true,
+   "winner": "src",
+   "margin": 2,
+   "order": {
+    "A": "mem",
+    "B": "src"
+   },
+   "scores": {
+    "mem": {
+     "correctness": 3,
+     "completeness": 4,
+     "usefulness": 3,
+     "honesty": 4
+    },
+    "src": {
+     "correctness": 4,
+     "completeness": 5,
+     "usefulness": 5,
+     "honesty": 5
+    }
+   },
+   "rationale": "Both pick the folder shape for the right reasons and correctly name batch-*/recover refusing with UNSUPPORTED_WORKSPACE_SHAPE, the JSONL ledger, timestamp cursors and the gitignore guard. A adds a false claim (workspace policy commands refuse; most work), a wrong export route, and misses the real switching path. B's account of switching (in-place `mem-repo init` keeps workspace.toml, folder mem stays mounted, later mems get branches, `--reattach` for an existing folder mem) is what the binary actually does, and B hedged exactly what it had not run. B also surfaces the one gain that matters for in-repo review: git merge conflicts are a supported, resolvable case. B's errors are a typo and nuances."
+  },
+  {
+   "question": "N5",
+   "graded": true,
+   "winner": "src",
+   "margin": 2,
+   "order": {
+    "A": "mem",
+    "B": "src"
+   },
+   "scores": {
+    "mem": {
+     "correctness": 3,
+     "completeness": 5,
+     "usefulness": 4,
+     "honesty": 3
+    },
+    "src": {
+     "correctness": 5,
+     "completeness": 4,
+     "usefulness": 4,
+     "honesty": 5
+    }
+   },
+   "rationale": "All seven numeric caps in both answers match ValidatorLimits::DEFAULT and the binary refuses at exactly those thresholds (CompressedArchive, UncompressedArchive, UncompressedEntry, ConfigFile, EntryCount, path depth 18>16, path length 523>512, unknown file type, .md inside .memstead/, unknown meta member tolerated). B's file-type detail, format marker, NFC rule, cap+1 reads, deflate-bomb tests, MAX_HITS_PER_MEM 10_000 \"typical mem\", 50 MiB writer heap and store re-bucketing note all verify. A adds correct detail (413 to ARCHIVE_TOO_LARGE, 30 s timeout, fence refusal, install refuses cross-mem edges) and names the documented 1,000 to 5,000 span, but asserts a degradation claim the sizing doc contradicts and invents a 10,000 federation threshold. B under-states the advertised span but invents nothing."
+  },
+  {
+   "question": "Q0h",
+   "graded": true,
+   "winner": "mem",
+   "margin": 1,
+   "order": {
+    "A": "src",
+    "B": "mem"
+   },
+   "scores": {
+    "src": {
+     "correctness": 5,
+     "completeness": 3,
+     "usefulness": 4,
+     "honesty": 4
+    },
+    "mem": {
+     "correctness": 4,
+     "completeness": 4,
+     "usefulness": 4,
+     "honesty": 4
+    }
+   },
+   "rationale": "Both answers correctly identify optimistic locking on a 16-hex SHA-256 content hash, the HASH_MISMATCH refusal with {id, current, is_stub}, and the re-read-and-retry recovery; the binary confirmed all of it (exit 4 on the CLI, hash equals sha256 of the file truncated). A is fully accurate but thin: it omits the reload-before-operation probe (reload_if_stale, MEM_RELOADED) that makes the check hold across two processes, and never mentions the --force/None escape hatches. B covers the cross-process mechanism, folder-vs-git differences and the git CAS, which better answers 'what exactly prevents that', but misattributes the CAS conflict to HASH_MISMATCH (it surfaces as MEM_ERROR) and overstates the MEM_RELOADED payload. Slight edge to B."
+  },
+  {
+   "question": "Q2h",
+   "graded": true,
+   "winner": "src",
+   "margin": 1,
+   "order": {
+    "A": "src",
+    "B": "mem"
+   },
+   "scores": {
+    "src": {
+     "correctness": 4,
+     "completeness": 4,
+     "usefulness": 4,
+     "honesty": 3
+    },
+    "mem": {
+     "correctness": 4,
+     "completeness": 3,
+     "usefulness": 4,
+     "honesty": 3
+    }
+   },
+   "rationale": "Both correctly describe the read-only mount (READ_ONLY_MOUNT verified on update, delete, rename, retype, relate) and the default-deny `[cross_mem_links]` policy (CROSS_MEM_LINK_NOT_ALLOWED verified; grant then allows only writable-to-published edges). B is richer on install-time integrity: strict ingress validator, content-addressed cache (two archives coexisted in the cache), shadow gate (READ_MEM_SHADOWS_WRITABLE verified), schema staging. A alone answers the question's core, whether content can act as instructions, with the real verified mechanisms: third-party origin stamping and structural-only schema serving. A's one wrong sentence on link direction and its absolute \"cannot\" cost it; B's bare assertion on the instruction question costs more."
+  }
+ ]
+}

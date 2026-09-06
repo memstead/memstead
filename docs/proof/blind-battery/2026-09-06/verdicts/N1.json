@@ -1,0 +1,28 @@
+{
+  "winner": "B",
+  "margin": 3,
+  "scores": {
+    "A": {
+      "correctness": 1,
+      "completeness": 2,
+      "usefulness": 1,
+      "honesty": 4
+    },
+    "B": {
+      "correctness": 5,
+      "completeness": 5,
+      "usefulness": 5,
+      "honesty": 5
+    }
+  },
+  "errors_A": [
+    "Principle create with only `statement` fails: MISSING_REQUIRED_SECTION, `scope` is required on default@1.3.0 (memstead type principle and the binary confirm); step 3 does not run as written.",
+    "`memstead relate FROM TO REL_TYPE` order is wrong: positional grammar is FROM REL_TYPE TO; the binary refuses with INVALID_ENTITY_ID on 'RELATED_TO'.",
+    "`RELATED_TO` is not in the default schema's relationship vocabulary; with correct argument order the binary refuses INVALID_REL_TYPE listing 37 types (USES, DEPENDS_ON, ... ), so the relate step cannot succeed at all.",
+    "`memstead export --format mem notes` fails: export takes no positional argument (clap: unexpected argument 'notes'); the mem is named with `--mem`. Step 4 does not run as written.",
+    "`memstead mem set-version notes 0.1.0` is a no-op: init seeds version 0.1.0 (config.json shows version 0.1.0; binary prints old 0.1.0 -> new 0.1.0), so export never hits MEM_CONFIG_INCOMPLETE on a fresh init.",
+    "Init does not write mem config to `.memstead/workspace.toml`; init reports `.memstead/config.json` as the config (workspace.toml exists but only holds the workspace format/persistence-adapter lines, not the mem pin)."
+  ],
+  "errors_B": [],
+  "rationale": "Executed both sequences literally in fresh directories. B ran end to end: init, two creates (principle with the required `scope`), `relate FROM USES TO`, and `export --format mem --mem notes -o notes.mem` produced a 15-file .mem zip. Its side claims (exact name@version pin, TARGET_NOT_EMPTY and nested-workspace refusal, REFERENCES refused from relate, default `./notes.mem`) all verified. A failed at three of four question parts: principle create refused (scope missing), relate had the wrong positional order and a rel-type not in the vocabulary, and export rejected the positional mem name. A hedged honestly about what it had not verified, which earns some honesty credit, but the commands do not run as written."
+}

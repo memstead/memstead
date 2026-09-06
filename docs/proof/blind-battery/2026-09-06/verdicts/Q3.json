@@ -1,0 +1,18 @@
+{
+  "winner": "B",
+  "margin": 1,
+  "scores": {
+    "A": {"correctness": 4, "completeness": 4, "usefulness": 4, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 5, "usefulness": 4, "honesty": 4}
+  },
+  "errors_A": [
+    "Prune: 'where a git base is retrievable it can separate a clean removal from a model-side edit' is design intent, not current behaviour. memstead-base/src/ingest/prune.rs states the model-divergence signal 'is not wired this cycle, so prune_proposals supplies None and every candidate conservatively conflict-flags'; the sync brief run in the scratch workspace rendered only a conflict-flag proposal.",
+    "Health: dangling links are described as an opt-in axis, but `memstead health` reports them in the default examined set (verdict coverage: examined=dangling_links,config,mounts) without --include; only the orphan list and derivation baselines are include-gated.",
+    "External-edit detection is stated unconditionally ('handled automatically ... before every operation'); on a folder-backed mem (what `init`/`quickstart` produce) the binary warns OUT_OF_BAND_EDITS_UNDETECTED: edits made by anything other than the engine are not detected and reads keep serving pre-edit content. Verified true only for git-branch mems (MEM_RELOADED observed over MCP after a CLI commit)."
+  ],
+  "errors_B": [
+    "'Verification re-observes every anchor' overstates: url-grain anchors are never fetched by the engine and stay `unobserved` unless an observer supplies observations via `verify-anchors --observations` (help text and verify_anchors.rs).",
+    "'Every operation probes the mem's head and reloads' holds for git-branch mems (verified over MCP) but not for folder-backed mems, where the head is the engine's own ledger and out-of-band edits go undetected (OUT_OF_BAND_EDITS_UNDETECTED warning from `memstead health`); the answer does not qualify this."
+  ],
+  "rationale": "Both answers are largely accurate against source and binary: anchor grains/classes, the resolves/drifted/recheck/orphaned-or-unresolvable states, mtime/git/graph change strategies, findings classes, proposal-only prune, disposition-gated #synced advance and MEM_RELOADED all verify. A carries one substantive false claim (git-base clean-removal separation is unwired; the engine conflict-flags everything) plus a minor health axis error, though it hedges loop scheduling honestly. B verifies on every checkable specific (check_stale, staleness_threshold_days, stale derivations, full_resync_every, backoff rotation, authored never pruned) and enumerates more failure modes. Both omit the folder-mem out-of-band caveat. B wins narrowly."
+}

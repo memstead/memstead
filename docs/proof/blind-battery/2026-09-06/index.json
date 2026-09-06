@@ -1,0 +1,107 @@
+{
+ "created": "2026-09-06T12:21:46Z",
+ "seed": 20260906,
+ "memstead": "<memstead>",
+ "memstead_version": "memstead 0.18.1+g05bfbaf",
+ "source": "<source>",
+ "mem": "<mem>",
+ "mem_workspace": "<run>/mem-ws",
+ "models": {
+  "large": "fable",
+  "small": "haiku"
+ },
+ "questions": {
+  "Q0": {
+   "text": "Two AI agents are editing the same entity in a Memstead mem at the same time. Can one of them silently overwrite the other's change? What exactly prevents that, and what does the losing agent see?",
+   "small_model": false
+  },
+  "Q1": {
+   "text": "I have never seen Memstead. Explain how it works end to end: what happens from the moment an AI agent asks to write a fact until that fact is a file in git, where the checks sit along the way, and what the agent reads back afterwards. One page, for a developer.",
+   "small_model": false
+  },
+  "Q2": {
+   "text": "If I install a mem that someone else published, what can it do to my AI agent, and what can it not do? Can its content act as instructions to my agent, can it change my own data, and what does the engine do to contain it?",
+   "small_model": false
+  },
+  "Q3": {
+   "text": "A knowledge graph about a codebase goes stale as the code moves on. What can go wrong with a Memstead mem over time, how does Memstead notice, and what does it do about it, automatically or on request?",
+   "small_model": false
+  },
+  "N1": {
+   "text": "Give me the exact shell commands, in order, to: (1) create a fresh Memstead workspace in an empty folder with the built-in default schema, (2) create an entity of type `concept` titled \"Optimistic locking\" with the sections the default schema requires, (3) create a second entity of type `principle` titled \"Validate at the boundary\" and relate the concept to it with a relationship type the default schema allows, and (4) export the mem as a `.mem` archive file. The commands should run as written.",
+   "small_model": false
+  },
+  "N2": {
+   "text": "My coding agent called memstead_update on an entity and got an error with code HASH_MISMATCH. What happened, is my data safe, and what is the correct sequence of calls to recover and land the edit? Are there shortcuts, and when are they a bad idea?",
+   "small_model": false
+  },
+  "N3": {
+   "text": "My searches over a mem feel too literal. How do I turn on semantic (vector) search in Memstead and choose the embedding model? If that is not how it works, tell me how search actually ranks results and what I should do instead to find things by meaning.",
+   "small_model": false
+  },
+  "N4": {
+   "text": "I want to keep a knowledge graph about my product inside the product's existing git repository, so it is versioned and reviewed together with the code. Which workspace shape should I choose, what do I give up compared with the other shape, and can I switch later?",
+   "small_model": false
+  },
+  "N5": {
+   "text": "What are the hard limits on a published Memstead mem archive (size, entries, entity count, file types, anything else), and why were they set that way? How big a mem is the system actually designed for?",
+   "small_model": false
+  },
+  "Q0h": {
+   "text": "Two AI agents are editing the same entity in a Memstead mem at the same time. Can one of them silently overwrite the other's change? What exactly prevents that, and what does the losing agent see?",
+   "small_model": true
+  },
+  "Q2h": {
+   "text": "If I install a mem that someone else published, what can it do to my AI agent, and what can it not do? Can its content act as instructions to my agent, can it change my own data, and what does the engine do to contain it?",
+   "small_model": true
+  }
+ },
+ "order": {
+  "Q0": {
+   "A": "src",
+   "B": "mem"
+  },
+  "Q1": {
+   "A": "src",
+   "B": "mem"
+  },
+  "Q2": {
+   "A": "src",
+   "B": "mem"
+  },
+  "Q3": {
+   "A": "mem",
+   "B": "src"
+  },
+  "N1": {
+   "A": "mem",
+   "B": "src"
+  },
+  "N2": {
+   "A": "src",
+   "B": "mem"
+  },
+  "N3": {
+   "A": "mem",
+   "B": "src"
+  },
+  "N4": {
+   "A": "mem",
+   "B": "src"
+  },
+  "N5": {
+   "A": "mem",
+   "B": "src"
+  },
+  "Q0h": {
+   "A": "src",
+   "B": "mem"
+  },
+  "Q2h": {
+   "A": "src",
+   "B": "mem"
+  }
+ },
+ "runs": {},
+ "mem_name": "engine"
+}

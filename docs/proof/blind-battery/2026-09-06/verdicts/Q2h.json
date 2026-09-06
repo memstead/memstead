@@ -1,0 +1,18 @@
+{
+  "winner": "A",
+  "margin": 1,
+  "scores": {
+    "A": {"correctness": 4, "completeness": 4, "usefulness": 4, "honesty": 3},
+    "B": {"correctness": 4, "completeness": 3, "usefulness": 4, "honesty": 3}
+  },
+  "errors_A": [
+    "\"Your agent can read, search, and link from published mems into your own data\": the direction is wrong and contradicts A's own earlier paragraph. Binary: `relate probe--x RELATES_TO mine--y` (read-only source) refuses with READ_ONLY_MOUNT even after a cross_mem_links grant; only edges FROM your writable mem INTO the published one succeed, and only after an explicit `[cross_mem_links]` grant (relate.rs: source mount must be Write).",
+    "\"Its content cannot act as instructions to your agent ... cannot be directed by its embedded guidance\" overstates: entity bodies from the installed mem reach the agent verbatim (binary `entity probe--delete-everything --json` returns the planted instruction text in `sections`); the engine only stamps `origin: \"third-party\"` and strips schema prose. That labelling and de-framing are real (render.rs OriginClass, server.rs), but they are advisory, not a hard block.",
+    "\"These fields reach the agent only for schemas authored in your workspace\" is a simplification: query.rs `schema_origin` classifies as first-party any built-in schema or any schema pinned by a writable mount, so a third-party schema becomes first-party the moment one of your writable mems adopts it."
+  ],
+  "errors_B": [
+    "\"the published mem's mount record persists only in your workspace configuration\": the mount lives in the engine-managed state file `.memstead/state/mounts.json` (install.rs header; verified on disk with capability \"read-only\" and storage type \"archive\"), not in `config.json` or `workspace.toml`.",
+    "\"Its content is not instructions to your agent; mems are data models, not prompts\" is asserted without any engine mechanism and understates the risk: the binary serves the installed mem's body text verbatim to the agent. B omits the actual containment the engine applies here (third-party `origin` stamping on entity reads, search hits and overview; structural-only schema serving that drops write_rules/writing_guidance/when_to_use for third-party schemas, render.rs ~1547-1720)."
+  ],
+  "rationale": "Both correctly describe the read-only mount (READ_ONLY_MOUNT verified on update, delete, rename, retype, relate) and the default-deny `[cross_mem_links]` policy (CROSS_MEM_LINK_NOT_ALLOWED verified; grant then allows only writable-to-published edges). B is richer on install-time integrity: strict ingress validator, content-addressed cache (two archives coexisted in the cache), shadow gate (READ_MEM_SHADOWS_WRITABLE verified), schema staging. A alone answers the question's core, whether content can act as instructions, with the real verified mechanisms: third-party origin stamping and structural-only schema serving. A's one wrong sentence on link direction and its absolute \"cannot\" cost it; B's bare assertion on the instruction question costs more."
+}

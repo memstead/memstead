@@ -1,0 +1,16 @@
+{
+  "winner": "A",
+  "margin": 1,
+  "scores": {
+    "A": {"correctness": 4, "completeness": 5, "usefulness": 5, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 4, "usefulness": 5, "honesty": 4}
+  },
+  "errors_A": [
+    "`details.is_stub` is presented as the signal that the target is a stub, but memstead_update never reaches the hash compare for a stub: the stub guard in prepare_update fires first and refuses STUB_NOT_UPDATABLE (verified with the binary: update on a stub returns STUB_NOT_UPDATABLE, and every HASH_MISMATCH carries is_stub:false). The field exists in the payload but cannot be true on this call."
+  ],
+  "errors_B": [
+    "The successful update response over MCP carries the new hash as `_hash`, not `content_hash` (server.rs builds `\"_hash\": outcome.content_hash`; the binary's --json output likewise shows `_hash`). `content_hash` is the engine-internal field name only.",
+    "Same `is_stub` issue as A: a stub never yields HASH_MISMATCH from memstead_update; it refuses STUB_NOT_UPDATABLE before the hash check, so branching on is_stub from this error is moot."
+  ],
+  "rationale": "Both answers are substantively right and verified: reload-before-operation with MEM_RELOADED and mem_changed on the refusal, the hash gate inside the non-committing prepare step (no commit, on-disk hash unchanged after refusal), details {id,current,is_stub}, dry_run skipping only the hash check and returning on-disk _hash plus a prospective_hash that drifts after a second tick, EXPECTED_HASH_REQUIRED over MCP, PATCH_OLD_NOT_FOUND, and the CLI --auto-hash/--force flags. A answers the shortcut question more completely (CLI escape hatches and when they are unwise); B adds the useful prospective_hash caveat and the sections_unset warning but mislabels the response key as content_hash. Both overstate is_stub. Close call for A."
+}

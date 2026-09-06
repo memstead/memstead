@@ -289,7 +289,7 @@ echo "════════════════════════�
 # defects would fail here before it could pass anything.
 if [ -x "$ROOT/target/debug/memstead" ]; then
   PROSE_SET="$( { cd "$ROOT" && ls README.md CONTRIBUTING.md GLOSSARY.md VISION.md examples/README.md 2>/dev/null; \
-      find docs -name '*.md' -not -path 'docs/proof/divergence/*'; \
+      find docs -name '*.md' -not -path 'docs/proof/divergence/*' -not -path 'docs/proof/blind-battery/*/*'; \
       find docs-site/src/content/docs/guides docs-site/src/content/docs/concepts \( -name '*.md' -o -name '*.mdx' \) 2>/dev/null; \
       find plugins/claude-code -name '*.md'; } | sort -u )"
   if (cd "$ROOT" && python3 ci/check_prose.py --self-test ci/fixtures/prose >/dev/null \

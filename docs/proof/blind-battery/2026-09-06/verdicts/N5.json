@@ -1,0 +1,15 @@
+{
+  "winner": "B",
+  "margin": 2,
+  "scores": {
+    "A": {"correctness": 3, "completeness": 5, "usefulness": 4, "honesty": 3},
+    "B": {"correctness": 5, "completeness": 4, "usefulness": 4, "honesty": 5}
+  },
+  "errors_A": [
+    "\"community detection, schema validation at boot and search-index build all degrade non-linearly past that range\": public/docs/sizing-curve.md states the opposite, that index rebuild, the mutation commit and community detection are invisible next to workspace load, and that load (0.36 to 0.75 ms/entity from 500 to 7,500 entities) is the single super-linear cost on the cold path.",
+    "\"Beyond about 10,000 the intended model is several small mems federated by cross-mem edges\": no source states a 10,000 split point; the sizing-curve doc's worked example splits a 7.5k workspace into five mems, and the advertised design span is 1,000 to 5,000. The number is unverifiable.",
+    "\"the registry ... use the same function\": the registry is not in the public crates, so this is unverifiable from the source; only the CLI publish path (publish.rs) and the install/export paths were confirmed to call validate_and_normalize_archive, with the struct comment saying the defaults match the registry limits."
+  ],
+  "errors_B": [],
+  "rationale": "All seven numeric caps in both answers match ValidatorLimits::DEFAULT and the binary refuses at exactly those thresholds (CompressedArchive, UncompressedArchive, UncompressedEntry, ConfigFile, EntryCount, path depth 18>16, path length 523>512, unknown file type, .md inside .memstead/, unknown meta member tolerated). B's file-type detail, format marker, NFC rule, cap+1 reads, deflate-bomb tests, MAX_HITS_PER_MEM 10_000 \"typical mem\", 50 MiB writer heap and store re-bucketing note all verify. A adds correct detail (413 to ARCHIVE_TOO_LARGE, 30 s timeout, fence refusal, install refuses cross-mem edges) and names the documented 1,000 to 5,000 span, but asserts a degradation claim the sizing doc contradicts and invents a 10,000 federation threshold. B under-states the advertised span but invents nothing."
+}

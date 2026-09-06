@@ -1,0 +1,17 @@
+{
+  "winner": "B",
+  "margin": 1,
+  "scores": {
+    "A": {"correctness": 5, "completeness": 3, "usefulness": 4, "honesty": 4},
+    "B": {"correctness": 4, "completeness": 4, "usefulness": 4, "honesty": 4}
+  },
+  "errors_A": [
+    "\"one agent cannot silently overwrite\" is overstated: the engine treats expected_hash=None as an explicit escape hatch (update.rs doc: '--force-style'), and the CLI offers `--force` (verified: a stale-content `update --force` overwrote the other agent's write with exit 0) and `--auto-hash` (documented race window). MCP does require the hash (EXPECTED_HASH_REQUIRED), so the guarantee holds only on the strict path; A does not mention the opt-outs."
+  ],
+  "errors_B": [
+    "Implies the git-branch commit-tip CAS feeds the HASH_MISMATCH error. The git_tree.rs doc comment claims that mapping, but no code performs it: MemWriterError::HashMismatch lifts via BackendError::MemWriter into EngineError::Backend, which the MCP layer maps to code MEM_ERROR (server.rs E::Backend arm), not HASH_MISMATCH. The entity-hash compare in prepare_update is what yields HASH_MISMATCH.",
+    "\"MEM_RELOADED warning with the changed entities listed\": the MEM_RELOADED WarningHint carries mem, old_head, new_head and an entities_loaded count only; the per-entity list rides the separate `mem_changed` notice, and the warning text points to memstead_changes_since for the diff.",
+    "\"No silent clobber is possible because every mutation ... is gated by the hash\" is overstated for the same reason as A: engine expected_hash=None and CLI `--force` bypass the gate (verified by running the binary)."
+  ],
+  "rationale": "Both answers correctly identify optimistic locking on a 16-hex SHA-256 content hash, the HASH_MISMATCH refusal with {id, current, is_stub}, and the re-read-and-retry recovery; the binary confirmed all of it (exit 4 on the CLI, hash equals sha256 of the file truncated). A is fully accurate but thin: it omits the reload-before-operation probe (reload_if_stale, MEM_RELOADED) that makes the check hold across two processes, and never mentions the --force/None escape hatches. B covers the cross-process mechanism, folder-vs-git differences and the git CAS, which better answers 'what exactly prevents that', but misattributes the CAS conflict to HASH_MISMATCH (it surfaces as MEM_ERROR) and overstates the MEM_RELOADED payload. Slight edge to B."
+}
