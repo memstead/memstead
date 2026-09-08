@@ -856,8 +856,7 @@ pub enum EngineError {
         found_in_sections: Vec<String>,
     },
     /// `UNTERMINATED_FENCE_IN_STORED_BODY`: the entity on disk already ends a
-    /// section inside an open code fence, and this write does not resolve it
-    /// (consistency-sweep 04/02, criterion 5).
+    /// section inside an open code fence, and this write does not resolve it.
     ///
     /// The state is not the caller's doing: the generator closes every fence
     /// it emits, so it can only arrive by hand-authoring, a folder mem edited
@@ -2355,8 +2354,8 @@ fn _hash_mismatch_msg(id: &str, current: &str, is_stub: bool) -> String {
     }
 }
 
-/// Errors surfaced by [`Engine::from_workspace_root`] (lean) and its
-/// full counterpart (`memstead_git_branch::engine_from_workspace_root`).
+/// Errors surfaced by [`Engine::from_workspace_root`] (the folder boot
+/// path) and its git-branch counterpart (`memstead_git_branch::engine_from_workspace_root`).
 ///
 /// The boot path layers three error sources: layout detection,
 /// workspace-store load failures, per-mount backend instantiation
@@ -2380,7 +2379,7 @@ pub enum BootError {
     #[error(transparent)]
     Store(#[from] crate::workspace_store::StoreError),
     /// Per-mount backend instantiation failed. Today: a mount
-    /// declared `MountStorage::GitBranch` while the lean boot path
+    /// declared `MountStorage::GitBranch` while the folder boot path
     /// only knows folder + archive.
     #[error(transparent)]
     Instantiate(#[from] crate::workspace_store::InstantiateError),
@@ -2436,12 +2435,12 @@ impl BootError {
                 }
                 StoreError::LegacyProjectionStore { path } => serde_json::json!({
                     "path": path.display().to_string(),
-                    "hint": { "recovery_command": "memstead projection migrate" },
+                    "hint": { "recovery_command": "memstead projection init" },
                 }),
                 StoreError::Other(_) => serde_json::json!({}),
             },
             BootError::Instantiate(
-                crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature { mem },
+                crate::workspace_store::InstantiateError::GitBranchBackendUnavailable { mem },
             ) => serde_json::json!({ "mem": mem }),
             BootError::Engine(e) => e.details(),
         }

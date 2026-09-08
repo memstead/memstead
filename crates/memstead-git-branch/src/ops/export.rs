@@ -68,7 +68,7 @@ pub fn export_markdown(
                 Ok(_) => written += 1,
                 // Writing this entity would bury the sections its open fence
                 // absorbed. Name it and carry on, so one poisoned entity does
-                // not strand the export (04/02, criterion 5).
+                // not strand the export.
                 Err(e @ crate::entity::writer::WriteError::UnterminatedFence { .. }) => {
                     refused.push(crate::ops::RefusedEntity {
                         id: entity.id.to_string(),
@@ -944,7 +944,7 @@ mod tests {
 
         #[test]
         fn export_from_branch_embeds_supplied_anchors_member() {
-            // Export leg (criterion 5, git-branch producer): the engine sources
+            // Export leg (git-branch producer): the engine sources
             // the anchors sidecar from the branch tip and hands it here; the
             // assembler places the recognised `.memstead/anchors.json` member.
             let tmp = TempDir::new().unwrap();

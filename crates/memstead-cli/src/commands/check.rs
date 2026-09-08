@@ -1,5 +1,4 @@
-//! `memstead check` — record a check of one entity (agent-trust
-//! plan 14), or a batch of checks from a file.
+//! `memstead check` — record a check of one entity, or a batch of checks from a file.
 //!
 //! Mirrors the MCP `memstead_check` tool 1:1. A check is the
 //! engine-recorded act of verification: verdict from the closed

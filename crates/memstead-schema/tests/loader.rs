@@ -1244,7 +1244,7 @@ fn cross_mem_relationships_section_loads_well_formed_entries() {
     );
 }
 
-/// Plan 11: `to_schema: "*"` loads when bound to the schema's
+/// `to_schema: "*"` loads when bound to the schema's
 /// `alias_target_rel_type`, and the priority-ordered matcher resolves
 /// it for arbitrary destination names — alongside exact entries.
 #[test]
@@ -1273,7 +1273,7 @@ fn cross_mem_wildcard_bound_to_alias_target_loads_and_matches_any_name() {
     assert!(schema2.cross_mem_entries("stranger").is_empty());
 }
 
-/// Plan 11 refusal complements: a wildcard for a NON-alias rel-type is
+/// Refusal complements: a wildcard for a NON-alias rel-type is
 /// refused naming both rel-types; a schema with no
 /// `alias_target_rel_type` cannot use a wildcard at all.
 #[test]
@@ -2823,7 +2823,7 @@ fn section_format_cross_field_legality() {
 }
 
 /// Reserved heading depths refuse at load through the expression
-/// parser (criterion 4's load half).
+/// parser (the load half).
 #[test]
 fn section_format_heading_depth_one_and_two_refuse_at_load() {
     for depth in ["1", "2"] {
@@ -2842,7 +2842,7 @@ fn section_format_heading_depth_one_and_two_refuse_at_load() {
     }
 }
 
-/// The builtin `planning` bump (plan 08, criterion 8): 0.1.0 stays
+/// The builtin `planning` bump: 0.1.0 stays
 /// untouched; 0.2.0 declares `content: "list(bullet)"` on the
 /// bullet-prescribing sections, compiled at load.
 #[test]

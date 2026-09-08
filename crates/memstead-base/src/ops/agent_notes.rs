@@ -46,12 +46,11 @@ pub struct CommitNote {
     /// Populated from the `Logical-Op:` trailer when present.
     #[serde(skip_serializing_if = "Option::is_none", rename = "logical_op")]
     pub logical_operation_id: Option<String>,
-    /// Caller-declared role from the `Role:` trailer (agent-trust
-    /// plan 13); absent = unspecified.
+    /// Caller-declared role from the `Role:` trailer; absent = unspecified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     /// Caller-declared identity from the `Identity:` trailer
-    /// (agent-trust plan 15); absent = undeclared.
+    ///; absent = undeclared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
     /// Ids a multi-entity commit touched (notably `batch_update`),

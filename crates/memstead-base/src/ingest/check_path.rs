@@ -26,7 +26,7 @@
 //!   the glob alone would let through. A legacy bare name (`dev`) degrades to
 //!   the same prefix block instead of erroring.
 //! - **`..` candidates match.** A candidate outside the workspace resolves to
-//!   a `../…` relative path and is matched verbatim — the dogfood mediums
+//!   a `../…` relative path and is matched verbatim — this project's own mediums
 //!   point at sibling directories, denied by `../…` entries.
 //!
 //! A malformed deny entry never disables enforcement: its glob half is
@@ -343,7 +343,7 @@ mod tests {
         assert!(denied(entries, "dev/notes/*"));
     }
 
-    /// The dogfood `../` cross-medium dialect: deny entries and candidates
+    /// This project's own `../` cross-medium dialect: deny entries and candidates
     /// both resolve against the workspace root, so a `../dev/**` entry blocks
     /// a sibling-directory read while in-workspace files stay readable.
     #[test]

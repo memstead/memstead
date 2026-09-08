@@ -336,7 +336,7 @@ fn operation_due(engine: &Engine, workspace_root: &Path, pair: &Pair<'_>) -> boo
 /// advancing the round-robin cursor and the per-pair backoff state. Returns
 /// the selected binding id and operation, or `None` when nothing eligible is
 /// due (or everything due is backing off) this pass.
-/// `consume: false` is the PEEK form — decision 12 (backlog-sweep plan 03):
+/// `consume: false` is the PEEK form — decision 12:
 /// rendering a brief is a read, so a plain `--all` render must leave cursor
 /// and backoff byte-identical, however often it runs. `consume: true` is the
 /// loop driver taking the rotation slot it is about to act on — the one

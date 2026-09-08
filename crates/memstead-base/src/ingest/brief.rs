@@ -365,7 +365,7 @@ pub fn render_operative_data(
 /// which computes and records the token engine-side — D4/D7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncCommand {
-    /// The sync-state key, `"<binding-id>/<facet>#synced"` (D4).
+    /// The sync-state key, `"<binding-id>/<facet>#synced"`.
     pub key: String,
     /// The opaque new-baseline token.
     pub token: String,
@@ -424,7 +424,7 @@ pub struct SourceCursor {
     pub dead_denies: Vec<String>,
     /// The destination mem whose `sync_state` the baseline tokens live on.
     pub dest_mem: String,
-    /// The canonical binding id `<mem>/<stem>` (D3) — rendered into the
+    /// The canonical binding id `<mem>/<stem>` — rendered into the
     /// `memstead projection advance <binding-id> …` line the changed-slice
     /// preface now emits instead of a raw `mem set-sync-state` command (D4/D7).
     pub binding_id: String,
@@ -862,11 +862,11 @@ pub fn render_changed_slice_with(
     }
 
     // Disposition-record instruction — the agent's FINAL step. The advance is
-    // resumable and non-stalling (D7): a partial pass is honored on disk, and a
+    // resumable and non-stalling: a partial pass is honored on disk, and a
     // source that moves mid-pass re-presents (remaining + new) without losing
     // recorded work. The agent runs `projection advance`, which computes and
     // records the new baseline token engine-side — the brief no longer renders a
-    // raw `mem set-sync-state` command (D4). The block appears whenever there is
+    // raw `mem set-sync-state` command. The block appears whenever there is
     // a baseline to advance (a changed facet or a first-sync reseed).
     let has_baseline_to_advance = !cursor.write_commands.is_empty() || !cursor.reseed.is_empty();
     if has_baseline_to_advance {
@@ -1174,12 +1174,12 @@ pub fn assemble_one_shot_brief(
 }
 
 // ---------------------------------------------------------------------------
-// Verify + sync briefs (group C) — the measure/repair surface beside the build
+// Verify + sync briefs — the measure/repair surface beside the build
 // briefs. Verify MEASURES (no destination mutation of any kind, C1); sync is the
 // SOLE maintenance writer, carrying BOTH the cursor slice and the open findings
 // in one brief (C2) with the whole of `/reconcile`'s absorbed judgment (C3). A
 // rule-by-rule absorption map records where each retired reconcile rule now
-// lives (bundle plan `05-verify-sync-engine`, C4).
+// lives (C4).
 // ---------------------------------------------------------------------------
 
 use super::findings::{Finding, FindingClass, FindingTarget};
@@ -1708,8 +1708,8 @@ fn render_sync_conservatism() -> String {
 /// (C3): the five conservatism rules, edge-removal conservatism,
 /// rationale-not-changelog, the commits-nothing / engine-commits-per-mutation
 /// posture, and — when `adopt` is set — the first-sync/adopt onboarding framing
-/// (E1's brief half). A rule-by-rule absorption map records where each retired
-/// reconcile rule now lives (bundle plan `05-verify-sync-engine`, C4).
+/// (the adopt rule's brief half). A rule-by-rule absorption map records where
+/// each retired reconcile rule now lives (C4).
 ///
 /// A slice that carries actual changed artifacts additionally renders the
 /// bounded **stale-claim search** step ([`render_stale_claim_search`]) — the
@@ -2576,7 +2576,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         ));
     }
 
-    // ---- verify + sync briefs (group C) ----------------------------------
+    // ---- verify + sync briefs ----------------------------------
 
     fn finding(class: FindingClass, target: FindingTarget, detail: &str) -> Finding {
         Finding {
@@ -2759,7 +2759,7 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
         assert!(out.contains("`[commit <hash>]` log-style entries"));
     }
 
-    /// C3 — the first-sync/adopt framing (E1's brief half): a mem predating its
+    /// C3 — the first-sync/adopt framing (the brief half): a mem predating its
     /// binding is onboarding, expected-0%, with the backfill path — never a
     /// failure. The changed-slice reseed carries the per-facet first-sync note.
     #[test]
@@ -2973,8 +2973,8 @@ Sources tagged `(reference)` are read-only context for cross-mem edges — searc
     /// **locked block-by-block** for a representative changed-slice pass: the
     /// heading sequence below is the whole brief, in this order, and nothing
     /// else. The only blocks this plan added to the loop path are the
-    /// stale-claim search (criterion 1) and the head-durable findings
-    /// presentation (criterion 2) — both locked here in place. The inventory
+    /// stale-claim search and the head-durable findings
+    /// presentation — both locked here in place. The inventory
     /// operation (`projection verify --full` + the `/sync --inventory` repair
     /// loop) added NO block and NO line to this render, so a new block
     /// appearing (or one moving) fails this test and must be a deliberate

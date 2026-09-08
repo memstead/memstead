@@ -357,7 +357,7 @@ mod tests {
         );
 
         // Persistence across engine restarts (separate instance, same
-        // workspace) — the sibling-visibility half of criterion 1.
+        // workspace) — the sibling-visibility half.
         drop(engine);
         let mut second = folder_engine(&tmp);
         assert_eq!(
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn published_projection_strips_the_mark() {
         // The PublishedMemConfig allowlist strips everything it does
-        // not name — pin that the mark stays out (criterion 7's
+        // not name — pin that the mark stays out (the
         // structural half; the export round-trip rides the exporter's
         // own tests).
         let mut config = memstead_schema::config::MemConfig {

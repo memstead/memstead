@@ -38,11 +38,11 @@
 //! The adapter produces a [`Workspace`] (mount list + operator
 //! policy). Turning each [`Mount`]'s [`MountStorage`] into a
 //! `Box<dyn MemBackend>` is a separate concern — handled by
-//! [`instantiate_lean_backend`] for folder + archive variants. The
-//! git-branch backend lives in the `memstead-git-branch` crate behind the
-//! `mem-repo` Cargo feature; consumers in the lean flavour cannot
-//! materialise a `MountStorage::GitBranch` mount and surface
-//! [`InstantiateError::GitBranchRequiresMemRepoFeature`].
+//! [`instantiate_local_backend`] for folder + archive variants. The
+//! git-branch backend lives in the `memstead-git-branch` crate and is
+//! injected through the engine's backend factory; an engine without that
+//! factory cannot materialise a `MountStorage::GitBranch` mount and surfaces
+//! [`InstantiateError::GitBranchBackendUnavailable`].
 
 use std::path::{Path, PathBuf};
 
@@ -121,16 +121,17 @@ pub enum StoreError {
          branch tree to mems/ — then retry"
     )]
     LegacyLayout { path: PathBuf, found: String },
-    /// A `projections/` directory holds a pre-v2 config — either a
-    /// version-less (gen-2 four-primitive) projection or a v1 binding of the
-    /// retired three-file store. The loader serves only v2 (one record per
-    /// pipeline); prior generations are migrated once (`memstead projection
-    /// migrate`), never silently served. The message names the one-shot
-    /// migration command; [`StoreError::code`] maps it to the
-    /// `PROJECTION_STORE_LEGACY` token on every surface.
+    /// A `projections/` directory holds a file in a retired binding format:
+    /// either a version-less (gen-2 four-primitive) projection or a v1
+    /// binding of the retired three-file store. The loader serves only v2
+    /// (one record per pipeline) and the engine no longer converts the
+    /// retired formats; the binding is re-authored with `memstead projection
+    /// init`. [`StoreError::code`] maps this to the `PROJECTION_STORE_LEGACY`
+    /// token on every surface.
     #[error(
-        "legacy (pre-v2) projection config at {path}: this workspace predates the single-record \
-         binding format v2 — run `memstead projection migrate` to convert it in place once"
+        "retired binding format at {path}: this file is a gen-2 (version-less) or v1 binding, \
+         a format this engine no longer converts; re-author the binding with \
+         `memstead projection init`"
     )]
     LegacyProjectionStore { path: PathBuf },
     /// A binding file declares a `version` the loader does not understand
@@ -986,7 +987,7 @@ impl MountWire {
     }
 }
 
-/// Errors surfaced by [`instantiate_lean_backend`].
+/// Errors surfaced by [`instantiate_local_backend`].
 #[derive(Debug, thiserror::Error)]
 pub enum InstantiateError {
     /// Mount declares a `MountStorage::GitBranch` storage variant but
@@ -1008,39 +1009,39 @@ pub enum InstantiateError {
          Engine yourself: `engine.set_backend_factory(\
          memstead_git_branch::storage::instantiate_full_backend)` before mounting"
     )]
-    GitBranchRequiresMemRepoFeature { mem: String },
+    GitBranchBackendUnavailable { mem: String },
 }
 
 impl InstantiateError {
     /// Stable, surface-independent error code token (UPPER_SNAKE, per
     /// the [`crate::EngineError::code`] convention). Reuses the CLI's
-    /// existing `UNSUPPORTED_WORKSPACE_SHAPE` token: both fire when a
-    /// lean binary meets a git-branch-shaped workspace, and the
+    /// existing `UNSUPPORTED_WORKSPACE_SHAPE` token: both fire when an
+    /// engine without the git-branch factory meets a git-branch-shaped
+    /// workspace, and the
     /// agent's next step is identical.
     pub fn code(&self) -> &'static str {
         match self {
-            InstantiateError::GitBranchRequiresMemRepoFeature { .. } => {
-                "UNSUPPORTED_WORKSPACE_SHAPE"
-            }
+            InstantiateError::GitBranchBackendUnavailable { .. } => "UNSUPPORTED_WORKSPACE_SHAPE",
         }
     }
 }
 
-/// Materialise a [`MemBackend`] for `mount` using the lean-flavour
+/// Materialise a [`MemBackend`] for `mount` using the local
 /// backends (folder + archive). Returns an error for the git-branch
-/// variant — full consumers handle that with a feature-gated
-/// counterpart in `memstead-git-branch`.
+/// variant; `memstead-git-branch` handles that with its
+/// `instantiate_full_backend` counterpart, installed through the backend
+/// factory.
 ///
 /// Lives in `memstead-base` because both folder and archive backends are
 /// always-on; the function shape (one mount in, one boxed backend
-/// out) stays uniform for both flavours so the engine's
-/// `from_mounts` glue is identical between lean and full.
-pub fn instantiate_lean_backend(mount: &Mount) -> Result<Box<dyn MemBackend>, InstantiateError> {
+/// out) stays uniform for both factories so the engine's
+/// `from_mounts` glue is identical with and without the git-branch crate.
+pub fn instantiate_local_backend(mount: &Mount) -> Result<Box<dyn MemBackend>, InstantiateError> {
     match &mount.storage {
         MountStorage::Folder { path } => Ok(Box::new(FilesystemMemWriter::new(path.clone()))),
         MountStorage::Archive { path } => Ok(Box::new(ArchiveBackend::new(path.clone()))),
         MountStorage::InMemory => Ok(Box::new(InMemoryBackend::new())),
-        MountStorage::GitBranch { .. } => Err(InstantiateError::GitBranchRequiresMemRepoFeature {
+        MountStorage::GitBranch { .. } => Err(InstantiateError::GitBranchBackendUnavailable {
             mem: mount.mem.clone(),
         }),
     }
@@ -1974,7 +1975,7 @@ name = "file-two-layer"
     }
 
     #[test]
-    fn instantiate_lean_backend_handles_folder_archive_and_in_memory() {
+    fn instantiate_local_backend_handles_folder_archive_and_in_memory() {
         let tmp = TempDir::new().unwrap();
         let folder = folder_mount("local", tmp.path().to_path_buf());
         let archive_path = tmp.path().join("ext.mem");
@@ -2004,11 +2005,11 @@ name = "file-two-layer"
             migration_target: None,
         };
 
-        let _: Box<dyn MemBackend> = instantiate_lean_backend(&folder).unwrap();
-        let _: Box<dyn MemBackend> = instantiate_lean_backend(&archive).unwrap();
-        // The in-memory variant is a lean backend — no feature gate,
+        let _: Box<dyn MemBackend> = instantiate_local_backend(&folder).unwrap();
+        let _: Box<dyn MemBackend> = instantiate_local_backend(&archive).unwrap();
+        // The in-memory variant is a local backend: no factory needed,
         // no path, materialises directly.
-        let _: Box<dyn MemBackend> = instantiate_lean_backend(&in_memory).unwrap();
+        let _: Box<dyn MemBackend> = instantiate_local_backend(&in_memory).unwrap();
     }
 
     /// AC3 (plan 01): the in-memory storage variant round-trips through
@@ -2067,7 +2068,7 @@ name = "file-two-layer"
     }
 
     #[test]
-    fn instantiate_lean_backend_rejects_git_branch_with_typed_error() {
+    fn instantiate_local_backend_rejects_git_branch_with_typed_error() {
         let mount = Mount {
             mem: "engine".to_string(),
             schema: Some(pin("default@1.0.0")),
@@ -2083,11 +2084,11 @@ name = "file-two-layer"
         // `unwrap_err()` requires Box<dyn MemBackend> to be Debug;
         // matching on the Result keeps the test gix-free of that
         // bound while still asserting the typed error.
-        match instantiate_lean_backend(&mount) {
-            Err(InstantiateError::GitBranchRequiresMemRepoFeature { mem }) => {
+        match instantiate_local_backend(&mount) {
+            Err(InstantiateError::GitBranchBackendUnavailable { mem }) => {
                 assert_eq!(mem, "engine");
             }
-            Ok(_) => panic!("expected GitBranchRequiresMemRepoFeature, got Ok"),
+            Ok(_) => panic!("expected GitBranchBackendUnavailable, got Ok"),
         }
     }
 

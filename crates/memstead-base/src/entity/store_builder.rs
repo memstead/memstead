@@ -1079,7 +1079,7 @@ mod tests {
     /// there: the warning still fires (nothing resolves) but names the
     /// class honestly, "target missing in mem engine", instead of
     /// calling a well-formed cross-mem reference rename drift. This is
-    /// every one of the eight hits the dogfood graph carried. The
+    /// every one of the eight hits this project's own graph carried. The
     /// complement: the same link with the target present is silent.
     #[test]
     fn mounted_prefix_with_missing_target_is_classed_target_missing() {

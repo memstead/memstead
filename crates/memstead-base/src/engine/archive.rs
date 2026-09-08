@@ -215,7 +215,7 @@ impl Engine {
             MountStorage::GitBranch { gitdir, branch } => {
                 let hook = self.git_branch_ops.as_ref().ok_or_else(|| {
                     EngineError::Backend(crate::backend::BackendError::Other(
-                        "git-branch export hook not installed (full flavour not loaded)"
+                        "git-branch export hook not installed (git-branch ops not wired)"
                             .to_string(),
                     ))
                 })?;
@@ -632,8 +632,7 @@ mod tests {
         out
     }
 
-    /// The format gate has no reader path that bypasses it (backlog-sweep
-    /// plan 05, decision 2): an archive rewritten to `format: 99` used to
+    /// The format gate has no reader path that bypasses it: an archive rewritten to `format: 99` used to
     /// hydrate through the byte path (and hence the wasm package) and
     /// serve every entity. It now refuses typed; the untampered archive
     /// keeps hydrating.
@@ -708,7 +707,7 @@ mod tests {
         assert_eq!(ids[0].artifact, "src/lib.rs");
     }
 
-    /// End-to-end export leg (criterion 5): an entity created with an
+    /// End-to-end export leg: an entity created with an
     /// `anchors[]` payload exports the anchors sidecar *natively* inside the
     /// `.mem` archive (no injection), the canonical re-pack preserves it, and
     /// a fresh engine that installs the bytes reads the anchor back — matching
@@ -909,7 +908,7 @@ mod tests {
         );
     }
 
-    /// Serve sketch-session leg (criterion 5): an anchored write into an
+    /// Serve sketch-session leg: an anchored write into an
     /// in-memory mem round-trips through session export → re-import. The
     /// in-memory backend is exactly what serve mounts, so this proves the
     /// serve session-export path carries anchors without a serve dependency.

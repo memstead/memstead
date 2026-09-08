@@ -37,33 +37,30 @@ source build:
                            # builds the release `memstead-mcp` binary
 ```
 
-See [docs/build.md](docs/build.md) for the details (build flavours, output
-paths, troubleshooting).
+See [docs/build.md](docs/build.md) for the details (which crate produces
+which binary, output paths, troubleshooting).
 
 ## Testing
 
 Run the full suite before opening a PR:
 
 ```bash
-./run-tests.sh             # engine (both build flavours) + plugin
+./run-tests.sh             # lint, guards, engine, docs-site prebuild, plugin
 ```
 
-Or, while iterating on the engine, one flavour at a time:
+Or, while iterating on the engine:
 
 ```bash
-cargo nextest run --workspace --features mem-repo                            # full (git-backed)
-cargo nextest run --workspace --no-default-features --target-dir target/lean  # lean (folder-only)
+cargo build --workspace
+cargo nextest run --workspace
 ```
 
-The engine builds in two flavours from one set of crates — the default
-`mem-repo` build and a lean `--no-default-features` build — and CI runs both.
-The lean run gets its own target directory: sharing `target/` leaves a
-degraded lean binary at `target/debug/memstead` after every lean run (a binary
-that is not what its path says it is), and the separate directory keeps the
-lean artifacts cached across runs.
-If your change touches a generated reference doc, regenerate it rather than
-editing it by hand (CI fails on drift); the generator is `xtask` — see
-[docs/build.md](docs/build.md).
+There is one build: `cargo build` produces the multi-mem, git-backed engine,
+and the same binaries serve folder-only workspaces. No crate declares a
+feature that changes what ships, and CI runs the same `./run-tests.sh`.
+The docs-site reference pages (CLI, MCP tools, error index) are rendered
+from the engine sources at every docs-site build and are never committed:
+change a help string or a tool description and the next build renders it.
 
 ## Opening a pull request
 

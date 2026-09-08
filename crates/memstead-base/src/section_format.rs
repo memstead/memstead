@@ -1,5 +1,5 @@
 //! Section-body reduction — the markdown half of the section-format
-//! vocabulary (agent-toolbox plan 08).
+//! vocabulary.
 //!
 //! Reduces a section body to its **top-level block sequence** with a
 //! real CommonMark parser (`pulldown-cmark`, no default features,
@@ -768,7 +768,7 @@ mod tests {
         );
     }
 
-    /// Divergence pin (plan criterion 3): a lazy-continuation list is
+    /// Divergence pin: a lazy-continuation list is
     /// ONE list, and the continuation joins the item text with a
     /// single space.
     #[test]
@@ -1161,7 +1161,7 @@ mod check_tests {
         assert_eq!(*row_line, Some(3));
     }
 
-    /// The plenum coordinate grammar (plan criterion 9): the
+    /// The plenum coordinate grammar: the
     /// seven-times-duplicated two-halves Belegzeile — machine
     /// coordinate `<quelle>:<dokument>:<von>-<bis>:<hash12>:<hash12>`,
     /// ` | `, then the public Fundstelle — expressed as a declaration,

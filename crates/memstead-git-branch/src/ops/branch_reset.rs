@@ -253,7 +253,7 @@ mod tests {
         writer.commit(subject, &CommitContext::internal()).unwrap()
     }
 
-    /// branch_reset leg (criterion 5): the anchors sidecar is a tree blob on
+    /// branch_reset leg: the anchors sidecar is a tree blob on
     /// the mem branch, so resetting the branch pointer to an earlier commit
     /// rewinds the sidecar coherently with the entities — post-reset the
     /// sidecar matches the reset point exactly.

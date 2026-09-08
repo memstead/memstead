@@ -136,8 +136,8 @@ pub enum ValidationError {
         embedded_heading: String,
     },
     /// `EMPTY_UNDECLARED_HEADING`: caller-supplied content carries a heading
-    /// the type does not declare with NO body under it (consistency-sweep
-    /// 04/01, criterion 7). The catch-all builder skips empty content, so such
+    /// the type does not declare with NO body under it.
+    /// The catch-all builder skips empty content, so such
     /// a heading is dropped on the write that accepts it: the caller is told
     /// now rather than discovering the loss afterwards.
     ///
@@ -158,8 +158,8 @@ pub enum ValidationError {
         entity_type: String,
     },
     /// `UNTERMINATED_FENCE`: caller-supplied section content ends inside a
-    /// fenced code block that never closes (consistency-sweep 04/02,
-    /// criterion 1). Nothing about the parse is wrong: an open fence's range
+    /// fenced code block that never closes.
+    /// Nothing about the parse is wrong: an open fence's range
     /// runs to end of text in CommonMark, so every `## ` line the generator
     /// writes after this section lands inside the fence, is masked, and is
     /// absorbed into this section's body on the next read. The sections then
@@ -818,7 +818,7 @@ fn heading_body_is_empty(body: &str, heading_line: &str) -> bool {
 ///   is.
 ///
 /// `catch_all` names the type's catch-all section and its declared headings,
-/// when the caller knows them (consistency-sweep 04/01, criterion 6). Inside
+/// when the caller knows them. Inside
 /// the CATCH-ALL body only, a `## ` line whose heading the type does not
 /// declare is accepted, because the reparse absorbs it straight back into the
 /// catch-all: the content does not land under a different key, which is the
@@ -1839,7 +1839,7 @@ write_rules: []
         ));
     }
 
-    /// Plan 11: a schema with a `to_schema: "*"` entry (loader-bound to
+    /// A schema with a `to_schema: "*"` entry (loader-bound to
     /// its alias rel-type) plus an exact per-schema entry for
     /// structural edges.
     fn wildcard_source_schema() -> std::sync::Arc<Schema> {
@@ -2399,7 +2399,7 @@ write_rules: []
         }
     }
 
-    /// The refusal complement of criterion 7, which is what keeps it from
+    /// The refusal complement, which is what keeps it from
     /// stranding every read-modify-write: a heading WITH a body is accepted,
     /// because it survives.
     #[test]

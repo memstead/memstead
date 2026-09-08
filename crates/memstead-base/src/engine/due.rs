@@ -513,7 +513,7 @@ mod tests {
         }
     }
 
-    /// The single fixture of criterion 1: overdue / in-window /
+    /// The single fixture: overdue / in-window /
     /// out-of-window / closed-status / undeclared-type entities, plus
     /// a read-only third-party mem. Asserts membership, order, and
     /// entry content, deterministically at an injected date.

@@ -1,4 +1,4 @@
-//! The `open_questions` health axis (agent-trust plan 11): a composed
+//! The `open_questions` health axis: a composed
 //! per-mem worklist of what the holding does not know — stubs,
 //! recheck/unresolvable anchors, unsatisfied constraints, dangling
 //! links, and a paired process mem's entries with negative findings
@@ -389,7 +389,7 @@ fn axis_composes_all_signals_and_matches_per_signal_axes() {
         "unsatisfied_constraint"
     );
 
-    // --- process pairing (criterion 2): the mounted process mem's
+    // --- process pairing: the mounted process mem's
     // entries appear, negative finding under the DISTINCT heading;
     // the unmounted binding is stated unresolvable — never an error.
     let process = hold["process"].as_array().expect("process section");

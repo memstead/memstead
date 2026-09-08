@@ -20,7 +20,7 @@
 //! Load-bearing invariant preserved from the plugin: the new baseline
 //! `token` is only ever *returned* here, never written. It is recorded by the
 //! engine's `set_mem_sync_state` writer when `projection advance` completes a
-//! full pass (D7), so an aborted pass leaves the baseline untouched and the next
+//! full pass, so an aborted pass leaves the baseline untouched and the next
 //! run re-presents the identical slice.
 
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ use super::change_detection::{
 ///
 /// Serde-serializable so the [`super::advance`] durable store can freeze a
 /// presented slice to `.memstead/state/advance/` and re-present its remainder
-/// across process restarts (D7).
+/// across process restarts.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Slice {
     /// Newly present artifacts.

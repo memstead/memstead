@@ -648,7 +648,7 @@ mod tests {
         );
     }
 
-    /// Transport leg (criterion 5): the anchors sidecar rides the mem branch
+    /// Transport leg: the anchors sidecar rides the mem branch
     /// as an ordinary tree blob, so push→pull round-trips it verbatim — no
     /// transport code reads or filters `.memstead/anchors.json`.
     #[test]

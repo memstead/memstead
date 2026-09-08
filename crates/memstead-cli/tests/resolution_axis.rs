@@ -1,6 +1,4 @@
-// `memstead mem set-schema` ships only in the full build.
-
-//! A type's `resolution` declaration (backlog-decisions plan B5): the
+//! A type's `resolution` declaration: the
 //! `open_questions` health axis lists, per mem, the open entities whose
 //! condition section is empty (`resolution_missing`) and the open entities
 //! whose condition nobody has checked under the declared kind

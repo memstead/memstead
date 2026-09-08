@@ -71,7 +71,7 @@ pub use guidance::{
 };
 pub use intent::{
     BINDING_INTENT_UNKNOWN_RELATIONSHIP_CODE, IntentFinding, binding_intent_findings,
-    intent_findings, relationship_vocabulary, render_intent_findings,
+    intent_findings, known_relationship_names, relationship_vocabulary, render_intent_findings,
 };
 pub use prune::{
     PruneDisposition, PruneMerge, PruneMode, PruneProposal, classify_prune_candidate,

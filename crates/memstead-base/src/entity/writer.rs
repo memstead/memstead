@@ -51,7 +51,7 @@ pub fn write_entity(
     // absorbed the sections after it, and the generator appends its closer
     // AFTER those bytes: regenerating the file here would seal them inside a
     // legitimately fenced block, which is the same unrecoverable freeze the
-    // mutation verbs refuse (04/02, criterion 5). Export declines the entity
+    // mutation verbs refuse. Export declines the entity
     // and says so rather than performing that write.
     if let Some((section, fence)) = entity.sections.iter().find_map(|(k, v)| {
         crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
@@ -251,8 +251,8 @@ mod tests {
         assert!(dir.path().join("parent").exists());
     }
 
-    /// The export twin of the mutation guard. The grade that closed 04/02's
-    /// criterion 5 found this path still unguarded: the mutation verbs all
+    /// The export twin of the mutation guard. The grade that closed the
+    /// mutation guard found this path still unguarded: the mutation verbs all
     /// refused, and `export --format markdown` walked past them to the same
     /// freeze. Both export loops reach bytes through this function, so the
     /// guard belongs here rather than in each loop.

@@ -16,7 +16,6 @@
 pub mod anchor;
 pub mod backend;
 pub mod binding;
-pub mod binding_migrate;
 pub mod build_info;
 pub mod check;
 pub mod chunking;
@@ -36,7 +35,6 @@ pub mod ops;
 pub mod overview;
 pub mod pipeline;
 pub mod pipeline_edit;
-pub mod pipeline_migrate;
 pub mod pipeline_store;
 pub mod preparation;
 pub mod provenance;
@@ -66,10 +64,6 @@ pub use anchor::{
     resolve_anchor,
 };
 pub use backend::{BackendError, MemBackend};
-pub use binding_migrate::{
-    BindingMigrateError, LegacyBindingV1, MigratedBinding, check_all_consumed, fold_v1_binding,
-    migrate_gen2_bindings,
-};
 pub use engine::{
     BackendFactory, BootError, CreateEntityArgs, CreateEntityOutcome, DeleteEntityArgs,
     DeleteEntityOutcome, DeleteReferrers, Engine, EngineError, EntityHistoryReport, EntityTouch,
@@ -109,15 +103,9 @@ pub use ops::{
     RelateResult, ReloadReport, ReloadResult, RenameResult, SearchHit, SearchResult, SearchScope,
     SetMemVersionOutcome, UpdateArgs, UpdateResult, WarningHint,
 };
-pub use pipeline::{
-    Facet, IngestTrigger, Medium, MediumType, PatternEntry, PatternMode, Projection,
-};
+pub use pipeline::{IngestTrigger, MediumType, PatternEntry, PatternMode};
 pub use pipeline_edit::PipelineEditError;
-pub use pipeline_migrate::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
-pub use pipeline_store::{
-    BindingConfigs, MemPipelineRecord, PipelineConfigs, PipelineRecord,
-    load_legacy_pipeline_configs, load_pipeline_configs,
-};
+pub use pipeline_store::{BindingConfigs, MemPipelineRecord, load_pipeline_configs};
 pub use provenance::{Provenance, ProvenanceKind};
 pub use store::{Edge, EdgeSource, InEdge, Store};
 pub use workspace::{
@@ -127,7 +115,7 @@ pub use workspace::{
 };
 pub use workspace_store::{
     FileWorkspaceStore, InstantiateError, Layout, StoreError, WORKSPACE_STORE_DIR,
-    WorkspaceStoreAdapter, detect_layout, instantiate_lean_backend, is_mem_repo_shaped,
+    WorkspaceStoreAdapter, detect_layout, instantiate_local_backend, is_mem_repo_shaped,
     is_workspace_root, standalone_workspace, workspace_shape_label,
 };
 

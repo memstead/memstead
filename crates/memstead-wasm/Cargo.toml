@@ -20,10 +20,11 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Explicit path dep (not `workspace = true`) so we can disable
-# default features — the workspace declaration of `memstead-base` does
-# not opt into `default-features = false` overrides, and the WASM
-# build requires the lean tantivy-free feature set.
+# Explicit path dep (not `workspace = true`) so this crate can state
+# `default-features = false` itself. `memstead-base` ships `default = []`
+# and gates tantivy by target, so the flag documents intent (no optional
+# native-only feature may creep into the WASM build) rather than
+# disabling anything today.
 memstead-base = { path = "../memstead-base", default-features = false }
 memstead-schema.workspace = true
 serde.workspace = true

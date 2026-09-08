@@ -819,7 +819,7 @@ impl CliError {
                 )),
             ),
             // The stored body already ends inside an open fence and this
-            // write does not resolve it (04/02, criterion 5). The detail
+            // write does not resolve it. The detail
             // carries the sections it buried, which is what tells the
             // operator what a corrected body has to put back.
             UnterminatedFenceInStoredBody {

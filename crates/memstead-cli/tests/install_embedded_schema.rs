@@ -1,7 +1,3 @@
-// `memstead install` is mem-repo-only; the lean build has no install to
-// exercise, so the whole binary is skipped under
-// `--no-default-features`.
-
 //! A published mem installs on the strength of the schema it carries.
 //!
 //! Every archive embeds the schema it pins. These tests pin the
@@ -397,7 +393,7 @@ fn append_member(src: &Path, dest: &Path, member: &str, bytes: &[u8]) {
     writer.finish().unwrap();
 }
 
-/// Backlog-sweep plan 09a criterion 1: a git-branch mem pinned to a
+/// A git-branch mem pinned to a
 /// builtin whose install staged `mem-template.json` exports as `.mem`
 /// (one representative per template-shipping family), the archive
 /// re-reads cleanly in a fresh receiver, and the scaffolding did not
@@ -927,7 +923,7 @@ fn reinstall_is_a_noop_and_a_shared_schema_installs_in_either_order() {
 }
 
 /// The seal carries the SOURCE package's generation and never invents
-/// one (backlog-sweep plan 05, decision 1). `schema install` of a
+/// one (an earlier plan, decision 1). `schema install` of a
 /// legacy builtin used to stamp the sealed copy with the
 /// current-language marker, silently flipping every bare field from
 /// required to optional the moment the sealed copy was read. Now: a

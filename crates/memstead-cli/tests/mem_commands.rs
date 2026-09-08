@@ -1,8 +1,3 @@
-// `memstead export --format mem` round-trips through `memstead install` here,
-// and `install` is a mem-repo-only subcommand. Skip the whole binary
-// under `--no-default-features` rather than try to project the lean
-// half (which has no `install` to round-trip into).
-
 //! Integration tests for `memstead export` and `memstead install`.
 //!
 //! Exercises the full share-a-mem flow end-to-end:
@@ -1529,8 +1524,8 @@ fn mem_rename_folder_mount() {
     )
     .unwrap();
     // A folder-backed MOUNT inside a mem-repo workspace: the `mem`
-    // subcommand family requires the mem-repo flavour (a folder-only
-    // workspace boots the filesystem flavour, where `mem` refuses), so
+    // subcommand family requires the mem-repo shape (a folder-only
+    // workspace boots the folder shape, where `mem` refuses), so
     // the fixture lays down the bare mem-repo alongside the folder
     // mount.
     memstead_git_branch::test_support::init_real_mem_repo(root, &[]);
@@ -1627,7 +1622,7 @@ fn mem_rename_read_only_mount_refuses() {
 
 // ---------------------------------------------------------------------------
 // Rename pins for grader-verified-but-untested behaviours
-// (backlog-sweep plan 08; agent-toolbox/03 grader advisory 2026-08-06)
+// (grader advisory 2026-08-06)
 // ---------------------------------------------------------------------------
 
 /// Pin 1 — KEY-side `[cross_mem_links]` grant rewrite: renaming the
@@ -1903,7 +1898,7 @@ fn install_registers_workspace_read_only_mount() {
     );
 }
 
-/// Criterion 2 + parity (fresh-install leg of criterion 5): uninstall
+/// Fresh-install leg: uninstall
 /// removes the mount (searchability gone), the cache copy survives, a
 /// re-install re-registers cleanly, and reads against the installed
 /// read-mem work — search hit plus a cross-mem wiki-link into it.
@@ -2033,7 +2028,7 @@ fn uninstall_round_trip_cache_survives_and_reads_have_parity() {
         .stdout(contains("registered as a workspace-level read-only mount"));
 }
 
-/// Criterion 3 + the pre-migration leg of criterion 5: a workspace with
+/// Pre-migration leg: a workspace with
 /// legacy `readMems` entries boots, migrates them to mounts, removes
 /// the legacy key, and surfaces one warning naming the migrated mems; a
 /// second boot is silent; reads (search + cross-mem link) behave
@@ -2297,7 +2292,7 @@ fn make_anchor_workspace(root: &Path) {
     fs::remove_file(root.join("src-d.txt")).unwrap();
 }
 
-/// Anchor dialect (backlog-sweep plan 03a, decisions 26+29): an anchor
+/// Anchor dialect (an earlier plana, decisions 26+29): an anchor
 /// written SOURCE-relative — the dialect every other binding surface
 /// speaks — resolves via the pointer-join; the workspace-relative form
 /// keeps resolving as the fallback; a path existing under BOTH joins
@@ -3098,8 +3093,7 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     assert_eq!(v["recheck"], 1, "{v}");
     // src-d is DELETED: a measured failure. The url anchor was never observed
     // at all: the absence of a measurement. They used to share one bucket, and
-    // the surface a reader reaches without a binding could not tell them apart
-    // (consistency-sweep 03/05, criterion 2).
+    // the surface a reader reaches without a binding could not tell them apart.
     assert_eq!(v["unresolvable"], 1, "{v}");
     assert_eq!(v["unobserved"], 1, "{v}");
     // And the figures never travel without the population they cover.
@@ -3112,7 +3106,7 @@ fn verify_anchors_multi_binding_mem_no_longer_nulls() {
     assert_eq!(v["fully_adjudicated"], false, "{v}");
 }
 
-/// Field feedback on the agent-trust plan 14 gate: transport is not
+/// Field feedback on the independence gate: transport is not
 /// identity. On a FOLDER workspace, an entity authored and ok-checked
 /// through the same CLI binary reads `unconfirmable` — the recorded
 /// (actor, client) pair names the surface, not who acted, so without
@@ -3227,7 +3221,7 @@ fn health_markdown_renders_checks_and_stale_derivations_sections() {
     );
 }
 
-/// Agent-trust plan 14, criterion 3: a binding-less mem's verify
+/// A binding-less mem's verify
 /// findings persist under the mem-scoped standalone key and the next
 /// pass re-serves them as already-seen — observe-and-forget is gone.
 #[test]

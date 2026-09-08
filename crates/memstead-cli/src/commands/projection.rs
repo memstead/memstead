@@ -1,30 +1,29 @@
 //! `memstead projection` — the binding (projection-promotion) command tree.
 //!
-//! The projection is the unit: one versioned binding per source→mem obligation
-//! (bundle plan `03-projection-promotion`). The tree ships nine leaves —
-//! `brief`, `init`, `migrate`, `enable`, `edit`, `advance`, `exclude`,
-//! `verify`, `check-path`:
+//! The projection is the unit: one versioned binding per source→mem obligation.
+//! The tree ships eight leaves —
+//! `brief`, `init`, `enable`, `edit`, `advance`, `exclude`, `verify`,
+//! `check-path`:
 //!
 //! - `brief` renders a binding's run-brief — the Markdown prompt an agent
 //!   consumes — for a canonical binding id `<mem>/<stem>` (D3/D9), or the next
 //!   due binding under `--all` (round-robin + backoff selection).
-//! - `init` scaffolds a fresh v2 single-record binding non-interactively.
-//! - `migrate` converts every prior on-disk generation into v2 records in
-//!   place: gen-1 root folders, the gen-2 four-primitive store, and the v1
-//!   three-file store — folding medium+facet content inline.
+//! - `init` scaffolds a fresh v2 single-record binding non-interactively. A
+//!   binding file in a retired format (gen-2 or v1) quarantines with
+//!   `PROJECTION_STORE_LEGACY` and is re-authored through `init`; the engine
+//!   no longer converts the retired formats.
 //! - `enable` adds a missing `build` / `sync` / `verify` operation block to an
 //!   existing binding (D6 — the remedy a refused mutating op cites).
 //! - `edit` patches an existing binding's author-editable fields in place.
-//! - `advance` records disposition-gated sync-baseline advances (D7).
+//! - `advance` records disposition-gated sync-baseline advances.
 //! - `exclude` records authored exclusions for in-scope source artifacts.
 //! - `verify` measures a binding's fidelity, records durable findings, and
-//!   renders the tier-1 fidelity report (E3b).
+//!   renders the tier-1 fidelity report.
 //! - `check-path` answers deny verdicts: is a path or pattern hidden by a
 //!   binding's `deny_paths`?
 //!
-//! This tree is the sole binding surface: the retired `ingest` and `pipeline`
-//! command trees folded in here (`ingest brief` → `projection brief`,
-//! `pipeline migrate` → `projection migrate`'s gen-1 path).
+//! This tree is the sole binding surface: the retired `ingest` command tree
+//! folded in here (`ingest brief` → `projection brief`).
 //!
 //! Errors carry `PROJECTION_*` wire tokens (D12); the missing-workspace path is
 //! single-sourced through [`crate::setup::workspace_not_initialised_error`].
@@ -35,9 +34,6 @@ use serde_json::json;
 use memstead_base::binding::{
     BuildMode, BuildOperation, CapabilityError, DEFAULT_ADJUDICATION_CAP,
     DEFAULT_FULL_RESYNC_EVERY, ScaffoldParams, SyncOperation, VerifyOperation, validate_binding,
-};
-use memstead_base::binding_migrate::{
-    BindingMigrateError, check_all_consumed, fold_v1_binding, migrate_gen2_bindings,
 };
 use memstead_base::ingest::advance::{
     AdvanceError, DispositionInput, ExcludeError, advance_baseline, record_exclusions,
@@ -50,19 +46,15 @@ use memstead_base::ingest::intent::{IntentFinding, intent_findings};
 use memstead_base::ingest::report::{
     DEFAULT_REPORT_BUDGET, compute_fidelity_report, render_fidelity_report,
 };
-use memstead_base::ingest::resolve::{ResolveError, ResolvedSource, resolve_binding_run};
+use memstead_base::ingest::resolve::{ResolveError, resolve_binding_run};
 use memstead_base::ingest::{
     OperationFilter, OperationKind, RenderBriefError, not_loop_declared, render_ingest_brief,
     render_sync_brief_budgeted, render_sync_brief_for, render_verify_brief_for,
     select_next_due_operation,
 };
 use memstead_base::pipeline::{IngestTrigger, MediumType};
-use memstead_base::pipeline_store::{
-    ProjectionGeneration, delete_ingest, load_legacy_pipeline_configs, load_pipeline_configs,
-    load_projection_generations, read_binding, remove_mediums_and_facets_trees, write_binding,
-};
+use memstead_base::pipeline_store::{load_pipeline_configs, read_binding, write_binding};
 use memstead_base::workspace_store::StoreError;
-use memstead_base::{migrate_legacy_pipeline, read_legacy_pipeline_configs};
 
 use crate::CliError;
 use crate::output::{ExitKind, print_json, print_markdown};
@@ -83,7 +75,7 @@ pub struct Args {
 #[derive(Subcommand, Debug)]
 pub enum ProjectionCommand {
     /// Render a binding's run-brief — the Markdown prompt an agent consumes —
-    /// on stdout. Takes the canonical binding id `<mem>/<stem>` (D3), e.g.
+    /// on stdout. Takes the canonical binding id `<mem>/<stem>`, e.g.
     /// `engine/graph`. Omit the id (or pass `--all`) to select the next due
     /// (binding, operation) pair by round-robin + backoff and render that
     /// operation's brief; `--operation` picks which operations rotate (default
@@ -94,7 +86,7 @@ pub enum ProjectionCommand {
     /// assembly lives in the engine, so every consuming surface renders
     /// byte-identical briefs by construction.
     ///
-    /// `--verify` renders the **verify brief** (group C) for the named binding:
+    /// `--verify` renders the **verify brief** for the named binding:
     /// measurement + capped-adjudication instructions only, with no
     /// destination-mutation instruction. `--sync` renders the **sync brief** —
     /// the sole maintenance-writer prompt, carrying both the cursor slice and the
@@ -113,25 +105,11 @@ pub enum ProjectionCommand {
     /// git-backed source). Refuses `PROJECTION_EXISTS` (without touching disk)
     /// when a binding of the same id already exists — never overwrites.
     Init(InitArgs),
-    /// Migrate every prior on-disk generation into v2 single-record
-    /// bindings, in place. Gen-1 — the root-folder
-    /// `scopes|projections|ingests/` JSON layout — is first materialized
-    /// into the four-primitive store, then folded. Gen-2 — the
-    /// four-primitive store (per-mem `Projection` + flat `Ingest`) — merges
-    /// each ingest into its projection and folds the referenced facets +
-    /// mediums inline. v1 — the three-file store — folds each binding's
-    /// facet references inline the same way, source names preserved
-    /// byte-verbatim (they key sync watermarks). The emptied `mediums/` and
-    /// `facets/` trees are removed; orphan records refuse rather than drop.
-    /// `refinement` mode and dangling refs refuse with a typed error.
-    /// Idempotent on a migrated store. Use `--dry-run` to preview without
-    /// writing.
-    Migrate(MigrateArgs),
     /// Enable a `build` / `sync` / `verify` operation on an existing binding by
     /// adding its block (with sensible defaults) if absent. This is the remedy
-    /// a refused *mutating* operation cites (D6): `projection enable sync
+    /// a refused *mutating* operation cites: `projection enable sync
     /// <binding>`. Before writing, the operation is checked against the
-    /// medium-capability matrix (D6) — enabling `sync`/`verify` over a medium
+    /// medium-capability matrix — enabling `sync`/`verify` over a medium
     /// that cannot support it (e.g. a `web` source) refuses with the capability
     /// gap and writes nothing. Enabling an already-present operation refuses
     /// `PROJECTION_OP_ALREADY_ENABLED`; a missing binding refuses
@@ -155,7 +133,7 @@ pub enum ProjectionCommand {
     /// replaces.
     Edit(EditArgs),
     /// Advance a binding's sync baseline by recording per-artifact
-    /// dispositions (D7). The engine freezes the presented changed slice,
+    /// dispositions. The engine freezes the presented changed slice,
     /// subtracts already-disposed artifacts on re-presentation, appends
     /// new-HEAD deltas when the source moves mid-pass, and — when the
     /// remainder empties — advances the destination mem's `#synced` token via
@@ -163,9 +141,10 @@ pub enum ProjectionCommand {
     /// are durable (`.memstead/state/advance/`), so a partial pass resumes
     /// across process restarts. The gate accepts **only** artifact ids the
     /// engine presented — an unknown id refuses the whole call atomically
-    /// (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). In this cycle the agent supplies
-    /// a disposition for **every** artifact explicitly (auto-derivation lands
-    /// later).
+    /// (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). The agent supplies a
+    /// disposition for every artifact the brief presented; an artifact whose
+    /// anchors all resolve and that no entity mentions is disposed by its
+    /// anchors.
     Advance(AdvanceArgs),
     /// Declare authored **exclusions** for in-scope source artifacts. Unlike
     /// `advance` (whose gate accepts only artifacts in the changed slice), this
@@ -198,7 +177,7 @@ pub enum ProjectionCommand {
     /// destination mem refuses the whole call
     /// (`PROJECTION_EXCLUDE_NOT_DESTINATION_ENTITY`).
     Exclude(ExcludeArgs),
-    /// Measure a binding's fidelity and record durable findings (E3b, group A).
+    /// Measure a binding's fidelity and record durable findings.
     /// Read-only on the destination mem's ENTITIES: verify adjudicates its anchors
     /// against the live source and samples in-scope artifacts, writing findings
     /// keyed by the binding's `hash(D)` alone into the engine-owned findings store
@@ -213,7 +192,7 @@ pub enum ProjectionCommand {
     /// never leaves `recheck`). The `#verified` freshness baseline moves only under
     /// `--advance`, so a gate that verifies in order to read leaves the mem's config
     /// byte-identical. It then renders the
-    /// deterministic, token-budgeted **tier-1 fidelity report** (group B) over
+    /// deterministic, token-budgeted **tier-1 fidelity report** over
     /// the findings just recorded: grain-classed coverage (an artifact ruled out
     /// by `projection exclude` is dropped from `coverage.uncovered` and counted
     /// beside it as `coverage.excluded`, so the uncovered figure is the number
@@ -271,7 +250,7 @@ pub enum ProjectionCommand {
 
 /// The medium type flag for `projection init` — the CLI-facing mirror of
 /// [`MediumType`] (which carries serde, not clap, derives). Decides the
-/// capability matrix (D6) that filters the default binding's operations.
+/// capability matrix that filters the default binding's operations.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum MediumTypeArg {
     /// A source tree of code.
@@ -282,7 +261,7 @@ pub enum MediumTypeArg {
     Git,
     /// Another mem's graph.
     Graph,
-    /// Web sources (build-only this cycle — no change signal).
+    /// Web sources (build only: the medium has no change signal).
     Web,
 }
 
@@ -300,7 +279,7 @@ impl MediumTypeArg {
 
 #[derive(ClapArgs, Debug)]
 pub struct BriefArgs {
-    /// The canonical binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    /// The canonical binding id `<mem>/<stem>` — e.g. `engine/graph`.
     /// Omit (or pass `--all`) to select the next due binding by round-robin +
     /// backoff. Required with `--verify` / `--sync` (those operate on one
     /// binding's live findings/cursor, never a rotation).
@@ -327,13 +306,13 @@ pub struct BriefArgs {
     /// brief passes `--consume`; nothing else should.
     #[arg(long, requires = "all")]
     pub consume: bool,
-    /// Render the **verify brief** (group C) for the named binding instead of
+    /// Render the **verify brief** for the named binding instead of
     /// the build brief: measurement + capped-adjudication instructions only.
     /// It carries no destination-mutation instruction — repairs route through
     /// the sync brief. Read-only on the mem. Mutually exclusive with `--sync`.
     #[arg(long, conflicts_with = "sync")]
     pub verify: bool,
-    /// Render the **sync brief** (group C) for the named binding instead of the
+    /// Render the **sync brief** for the named binding instead of the
     /// build brief: the sole maintenance-writer prompt, carrying both the cursor
     /// slice and the open verify findings in one brief, with the absorbed
     /// reconcile conservatism. Read-only on the mem (the agent's writes route
@@ -389,7 +368,7 @@ pub struct InitArgs {
     /// URL (graph / web). Becomes the scaffolded medium's `pointer`.
     #[arg(long)]
     pub source: String,
-    /// The medium type — decides the capability matrix (D6) that filters which
+    /// The medium type — decides the capability matrix that filters which
     /// operations the default binding declares.
     #[arg(long = "medium-type", value_enum)]
     pub medium_type: MediumTypeArg,
@@ -401,14 +380,6 @@ pub struct InitArgs {
     /// path component of `--source`.
     #[arg(long)]
     pub name: Option<String>,
-}
-
-#[derive(ClapArgs, Debug)]
-pub struct MigrateArgs {
-    /// Preview the produced bindings (and any warnings) without writing them
-    /// to disk or removing the merged ingest files.
-    #[arg(long)]
-    pub dry_run: bool,
 }
 
 /// The operation `projection enable` adds to a binding. Mirror of the binding's
@@ -440,13 +411,13 @@ pub struct EnableArgs {
     /// The operation to enable: `build` | `sync` | `verify`.
     #[arg(value_enum)]
     pub operation: EnableOperationArg,
-    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    /// The binding id `<mem>/<stem>` — e.g. `engine/graph`.
     pub binding: String,
 }
 
 #[derive(ClapArgs, Debug)]
 pub struct EditArgs {
-    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    /// The binding id `<mem>/<stem>` — e.g. `engine/graph`.
     pub binding: String,
     /// The JSON patch over the author-editable record, e.g.
     /// `'{"sources": [ ...the full replacement list... ]}'`. Patch
@@ -458,7 +429,7 @@ pub struct EditArgs {
 
 #[derive(ClapArgs, Debug)]
 pub struct AdvanceArgs {
-    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    /// The binding id `<mem>/<stem>` — e.g. `engine/graph`.
     pub binding: String,
     /// A JSON object mapping each judged artifact id to its disposition, e.g.
     /// `'{"src/lib.rs": "worked", "src/old.rs": "irrelevant"}'`. A value may
@@ -477,7 +448,7 @@ pub struct AdvanceArgs {
 
 #[derive(ClapArgs, Debug)]
 pub struct ExcludeArgs {
-    /// The binding id `<mem>/<stem>` (D3) — e.g. `project/graph`.
+    /// The binding id `<mem>/<stem>` — e.g. `project/graph`.
     pub binding: String,
     /// A JSON object mapping each in-scope source artifact id to the authored
     /// rationale for excluding it, e.g.
@@ -524,7 +495,7 @@ pub struct CheckPathArgs {
 
 #[derive(ClapArgs, Debug)]
 pub struct VerifyArgs {
-    /// The binding id `<mem>/<stem>` (D3) — e.g. `engine/graph`.
+    /// The binding id `<mem>/<stem>` — e.g. `engine/graph`.
     pub binding: String,
     /// Token budget for the tier-1 fidelity report's **heavy** content
     /// (per-artifact lists). Aggregated counts always ship in addition; heavy
@@ -586,7 +557,6 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     match args.command {
         ProjectionCommand::Brief(a) => brief(ctx, a),
         ProjectionCommand::Init(a) => init(ctx, a),
-        ProjectionCommand::Migrate(a) => migrate(ctx, a),
         ProjectionCommand::Enable(a) => enable(ctx, a),
         ProjectionCommand::Edit(a) => edit(ctx, a),
         ProjectionCommand::Advance(a) => advance(ctx, a),
@@ -737,9 +707,9 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
     let engine = cli_engine.base();
 
     // Quarantine consult first: a binding whose stored file failed
-    // the load refuses typed with its reason (naming `projection
-    // migrate` for the legacy generations) instead of reporting
-    // not-found (agent-trust plan 04).
+    // the load refuses typed with its reason (a retired-format file
+    // names `projection init` as the way back) instead of reporting
+    // not-found.
     if let Some(binding_id) = args.binding.as_deref()
         && let Ok(configs) = load_pipeline_configs(&root)
         && configs
@@ -765,7 +735,7 @@ fn brief(ctx: &CliContext, args: BriefArgs) -> anyhow::Result<()> {
                 ),
             )
         })?;
-        // D6/AC4 (backlog-sweep plan 03, decision 13): the sync brief is the
+        // D6/AC4 (an earlier plan, decision 13): the sync brief is the
         // maintenance-writer prompt — rendering it for a binding whose sync
         // operation is not enabled spends a loop's work slot on work the
         // engine will refuse to apply. Gate render exactly like `projection
@@ -901,7 +871,7 @@ that is not there. Repair the mem, then re-run",
                 }
                 return Ok(());
             }
-            // Criterion 4's --all half (backlog-sweep plan 03): the rotation
+            // Criterion 4's --all half: the rotation
             // drops pairs the binding never loop-declared — by design
             // (consent lives in the declaration), but never silently. Say
             // which (binding, op) pairs the requested filter can never
@@ -1161,8 +1131,8 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     {
         let cli_engine = ctx.cli_engine_scoped(&mem)?;
         let engine = cli_engine.base();
-        if let Some((pin, schema)) = engine.destination_schema_for(&mem) {
-            let found = intent_findings(binding.intent.as_deref(), &pin, &schema);
+        if let Some((pin, schema, known)) = engine.destination_schema_for(&mem) {
+            let found = intent_findings(binding.intent.as_deref(), &pin, &schema, &known);
             if !found.is_empty() {
                 return Err(intent_refusal(&binding_id, &found).into());
             }
@@ -1202,112 +1172,11 @@ fn init(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn map_migrate_err(err: BindingMigrateError) -> CliError {
-    // Spell each `PROJECTION_*` token as a literal at its own construction site
-    // so the generated error index (xtask) picks them up — a variable `code`
-    // is invisible to the string-literal scanner.
-    let message = err.to_string();
-    match &err {
-        BindingMigrateError::RefinementModeDeleted { .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_MIGRATE_REFINEMENT",
-            message,
-        ),
-        BindingMigrateError::MalformedProjectionRef { .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_MIGRATE_MALFORMED_REF",
-            message,
-        ),
-        BindingMigrateError::DanglingProjectionRef { .. }
-        | BindingMigrateError::DanglingFacetRef { .. }
-        | BindingMigrateError::DanglingMediumRef { .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_MIGRATE_DANGLING_REF",
-            message,
-        ),
-        BindingMigrateError::OrphanRecords { .. } => CliError::new(
-            ExitKind::Validation,
-            "PROJECTION_MIGRATE_ORPHAN_RECORDS",
-            message,
-        ),
-    }
-}
-
-/// Does the workspace root carry a gen-1 legacy pipeline layout — the
-/// pre-four-primitive `scopes|projections|ingests/` JSON folders at the root
-/// (not under `.memstead/`)? Presence of any of the three marks it. This is the
-/// trigger for folding the retired `pipeline migrate` conversion into
-/// `projection migrate` (D10, gen-1 path).
-fn has_legacy_root_layout(root: &std::path::Path) -> bool {
-    ["scopes", "projections", "ingests"]
-        .iter()
-        .any(|d| root.join(d).is_dir())
-}
-
-/// Map a store load failure during migrate to the typed generic code.
-fn migrate_load_err(err: StoreError) -> CliError {
-    CliError::new(
-        ExitKind::Generic,
-        "PROJECTION_MIGRATE_FAILED",
-        format!("could not load pipeline config: {err}"),
-    )
-    .with_details(json!({ "error": err.to_string() }))
-}
-
-/// Does the binding's `medium_pointer` (resolved against the workspace root)
-/// point at the same location as a `reconcile-cursors.json` absolute key? Uses
-/// canonicalization where both paths exist, else a lexical comparison (D10 —
-/// "the binding whose medium pointer resolves to that path").
-fn pointer_resolves_to(root: &std::path::Path, medium_pointer: &str, abs_path: &str) -> bool {
-    let resolved = if medium_pointer.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(medium_pointer)
-    };
-    match (
-        std::fs::canonicalize(&resolved),
-        std::fs::canonicalize(abs_path),
-    ) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => resolved == std::path::Path::new(abs_path),
-    }
-}
-
-/// Scan `workspace.toml` for retired pipeline/cursor vocabulary. `projection
-/// migrate` **never** writes `workspace.toml` (D10) — if it finds a stale
-/// reference it returns a proposal block for the operator (or the migrating
-/// session) to apply and commit explicitly, rather than rewriting it.
-fn propose_workspace_toml(root: &std::path::Path) -> Option<String> {
-    let path = root.join(".memstead").join("workspace.toml");
-    let content = std::fs::read_to_string(path).ok()?;
-    let hits: Vec<(usize, &str)> = content
-        .lines()
-        .enumerate()
-        .filter(|(_, l)| {
-            let low = l.to_lowercase();
-            low.contains("reconcile-cursors") || low.contains("ingests/") || low.contains("ingest ")
-        })
-        .collect();
-    if hits.is_empty() {
-        return None;
-    }
-    let mut block = String::from(
-        "## Proposal: workspace.toml (NOT applied)\n\n`projection migrate` never edits \
-         `workspace.toml`. It found references to retired pipeline vocabulary — review and \
-         update these lines by hand, then commit:\n\n",
-    );
-    for (i, line) in hits {
-        block.push_str(&format!("- L{}: `{}`\n", i + 1, line.trim()));
-    }
-    Some(block)
-}
-
-/// Binding-miss refusal that honours the quarantine roster
-/// (agent-trust plan 04): a binding whose stored file failed the v2
-/// version gate is QUARANTINED, not unknown — the refusal carries the
-/// typed reason, whose message names `memstead projection migrate`
-/// for the legacy generations. Healthy-miss keeps the historical
-/// `PROJECTION_NOT_FOUND`.
+/// Binding-miss refusal that honours the quarantine roster: a binding
+/// whose stored file failed the v2 version gate is QUARANTINED, not
+/// unknown — the refusal carries the typed reason (a retired-format
+/// file names `memstead projection init` as the way back). Healthy-miss
+/// keeps the historical `PROJECTION_NOT_FOUND`.
 fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str) -> CliError {
     if let Some(q) = configs
         .quarantined
@@ -1334,325 +1203,10 @@ fn binding_miss_error(configs: &memstead_base::BindingConfigs, binding_id: &str)
         ExitKind::NotFound,
         "PROJECTION_NOT_FOUND",
         format!(
-            "no binding `{binding_id}` in this workspace — scaffold one with \
-             `projection init` or migrate a legacy workspace with `projection migrate`"
+            "no binding `{binding_id}` in this workspace — scaffold one with `projection init`"
         ),
     )
     .with_details(json!({ "binding": binding_id }))
-}
-
-/// Consume a skill-written `reconcile-cursors.json` (D10/AC12): each
-/// machine-absolute `"<mem>:<abs-path>": <sha>` entry seeds the `#synced`
-/// baseline of every binding whose medium pointer resolves to that path (via
-/// the engine's `set_mem_sync_state` writer — the engine owns mem-repo state),
-/// then the file is **deleted** regardless of whether anything matched
-/// (cursorless / unmatched bindings stay never-synced). Returns the seeded keys.
-fn consume_reconcile_cursors(
-    ctx: &CliContext,
-    root: &std::path::Path,
-) -> anyhow::Result<(Vec<String>, Option<String>)> {
-    let cursor_path = root.join(".memstead").join("reconcile-cursors.json");
-    if !cursor_path.exists() {
-        return Ok((Vec::new(), None));
-    }
-    let cursors: std::collections::BTreeMap<String, String> = std::fs::read(&cursor_path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-
-    let mut seeded: Vec<String> = Vec::new();
-    if !cursors.is_empty() {
-        let configs = load_pipeline_configs(root).map_err(migrate_load_err)?;
-        // Repair-below-boot rule: cursor seeding needs a booted engine
-        // (`set_mem_sync_state`), but `projection migrate` is itself a
-        // named boot repair — when the workspace still does not boot
-        // (e.g. a schema-pin failure alongside the projection
-        // migration), seeding is explicitly DEFERRED rather than
-        // deadlocking the repair verb or silently dropping the
-        // cursors: the file is kept untouched and the notice names the
-        // follow-up.
-        let mut cli_engine = match ctx.cli_engine_at(root) {
-            Ok(e) => e,
-            Err(boot_err) => {
-                return Ok((
-                    Vec::new(),
-                    Some(format!(
-                        "RECONCILE_CURSORS_DEFERRED: the workspace does not boot yet \
-                         ({boot_err:#}); reconcile-cursors.json was kept — repair the boot, \
-                         then re-run `memstead projection migrate` to seed the sync baselines"
-                    )),
-                ));
-            }
-        };
-        let engine = cli_engine.base_mut();
-        for (cursor_key, sha) in &cursors {
-            // Key is `"<mem>:<abs-path>"` — split on the first ':'.
-            let Some((_cursor_mem, abs_path)) = cursor_key.split_once(':') else {
-                continue;
-            };
-            for record in &configs.bindings {
-                let binding_id = format!("{}/{}", record.mem, record.name);
-                let Ok(resolved) = resolve_binding_run(&binding_id, &record.config) else {
-                    continue;
-                };
-                for source in &resolved.sources {
-                    if let ResolvedSource::Primary(p) = source
-                        && pointer_resolves_to(root, &p.pointer, abs_path)
-                    {
-                        let key = format!("{binding_id}/{}#synced", p.name);
-                        // `.is_ok()` dropped the outcome and with it any
-                        // report that a sibling had moved the config
-                        // (04/03, criterion 3). A seeding pass that silently
-                        // merged over someone is worth one line of output.
-                        if let Ok(outcome) = engine.set_mem_sync_state(
-                            &resolved.destination_mem,
-                            &key,
-                            sha,
-                            Some("projection migrate: seeded from reconcile-cursors.json"),
-                        ) {
-                            for w in &outcome.warnings {
-                                crate::output::print_markdown(&format!("> {w}"));
-                            }
-                            seeded.push(key);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // Consumed — delete regardless of matches (D10: the file is retired here).
-    let _ = std::fs::remove_file(&cursor_path);
-    Ok((seeded, None))
-}
-
-fn migrate(ctx: &CliContext, args: MigrateArgs) -> anyhow::Result<()> {
-    let (_shape, root) = ctx.workspace_shape().ok_or_else(|| {
-        workspace_not_initialised_error(
-            "not inside a Memstead workspace (no `.memstead/workspace.toml` in any ancestor)",
-        )
-    })?;
-
-    // Gen-1 root-folder layout (`scopes|projections|ingests/` at the workspace
-    // root) — the pre-four-primitive generation the retired `pipeline migrate`
-    // command handled. Fold it in: materialize it into the four-primitive
-    // `.memstead/` store first (mediums + facets + projections + ingests),
-    // then fold to v2 below in the same pass. `--dry-run` reads the
-    // root-folder configs directly without writing anything.
-    let gen1 = has_legacy_root_layout(&root);
-    if gen1 && !args.dry_run {
-        migrate_legacy_pipeline(&root).map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                "PROJECTION_MIGRATE_FAILED",
-                format!("could not convert root-folder (gen-1) pipeline layout: {e}"),
-            )
-            .with_details(json!({ "error": e.to_string() }))
-        })?;
-    }
-
-    let configs = if gen1 && args.dry_run {
-        read_legacy_pipeline_configs(&root).map_err(migrate_load_err)?
-    } else {
-        load_legacy_pipeline_configs(&root).map_err(migrate_load_err)?
-    };
-
-    // Pure transforms first: any refusal (refinement / dangling / malformed /
-    // orphan) aborts before a single file is touched — the migration is
-    // all-or-nothing.
-    //
-    // Leg A (gen-2): merge each flat ingest into its projection and fold the
-    // referenced facets + mediums inline — one v2 record per pipeline.
-    let mut migrated = migrate_gen2_bindings(&configs).map_err(map_migrate_err)?;
-
-    // Leg B (v1 → v2): fold every on-disk `version: 1` binding of the
-    // retired three-file store the same way, in place. Source names are the
-    // facet names byte-verbatim, so sync watermarks keep resolving. A
-    // version-less projection file no ingest schedules is inert leftovers —
-    // refused with a remedy rather than silently dropped or left to break
-    // the loader. (Skipped in the gen-1 dry-run, which previews in-memory.)
-    let mut already_v2 = 0usize;
-    if !(gen1 && args.dry_run) {
-        let generations = load_projection_generations(&root).map_err(migrate_load_err)?;
-        for (mem, name, generation) in generations {
-            let binding_id = format!("{mem}/{name}");
-            match generation {
-                ProjectionGeneration::V2 => already_v2 += 1,
-                ProjectionGeneration::V1(v1) => {
-                    let consumed = v1.source_facets.clone();
-                    let binding = fold_v1_binding(&binding_id, &mem, v1.as_ref(), &configs)
-                        .map_err(map_migrate_err)?;
-                    migrated.push(memstead_base::binding_migrate::MigratedBinding {
-                        id: binding_id,
-                        mem,
-                        name,
-                        ingest_name: String::new(),
-                        consumed_facets: consumed,
-                        binding,
-                        notes: Vec::new(),
-                    });
-                }
-                ProjectionGeneration::VersionLess => {
-                    if !migrated.iter().any(|m| m.mem == mem && m.name == name) {
-                        return Err(CliError::new(
-                            ExitKind::Validation,
-                            "PROJECTION_MIGRATE_INERT_PROJECTION",
-                            format!(
-                                "projection `{binding_id}` is a version-less gen-2 file no \
-                                 ingest schedules — inert leftovers the loader refuses; delete \
-                                 .memstead/projections/{mem}/{name}.json (or add an ingest) and \
-                                 re-run `projection migrate`"
-                            ),
-                        )
-                        .with_details(json!({ "binding": binding_id }))
-                        .into());
-                    }
-                }
-            }
-        }
-        migrated.sort_by(|a, b| a.id.cmp(&b.id));
-
-        // Every medium/facet record must have folded into some binding —
-        // an orphan would be silently dropped by the tree removal, so the
-        // whole migration refuses instead, naming each leftover.
-        let consumed: Vec<(String, String)> = migrated
-            .iter()
-            .flat_map(|m| m.consumed_facets.iter().map(|f| (m.mem.clone(), f.clone())))
-            .collect();
-        check_all_consumed(&configs, &consumed).map_err(map_migrate_err)?;
-    }
-
-    // Validate each produced binding against the capability matrix. A
-    // capability refusal reflects a pre-existing config problem the binding
-    // faithfully carries; surface it as a per-binding warning rather than
-    // aborting the promotion. The folded v2 record validates directly — no
-    // external resolution.
-    let mut warnings: Vec<serde_json::Value> = Vec::new();
-    for m in &migrated {
-        if let Err(refusals) = validate_binding(&m.binding) {
-            for r in refusals {
-                warnings.push(json!({
-                    "binding": m.id,
-                    "kind": "capability",
-                    "message": r.to_string(),
-                }));
-            }
-        }
-        for note in &m.notes {
-            warnings.push(json!({
-                "binding": m.id,
-                "kind": "note",
-                "message": note,
-            }));
-        }
-    }
-
-    // Emit to disk unless previewing: promote each projection file to its v2
-    // binding in place, remove each consumed flat ingest, then remove the
-    // emptied `mediums/` and `facets/` trees (every record folded — the
-    // orphan check above guaranteed it).
-    if !args.dry_run {
-        for m in &migrated {
-            write_binding(&root, &m.mem, &m.name, &m.binding).map_err(|e| {
-                CliError::new(
-                    ExitKind::Generic,
-                    "PROJECTION_MIGRATE_FAILED",
-                    format!("could not write binding `{}`: {e}", m.id),
-                )
-                .with_details(json!({ "binding": m.id, "error": e.to_string() }))
-            })?;
-            if !m.ingest_name.is_empty() {
-                delete_ingest(&root, &m.ingest_name).map_err(|e| {
-                    CliError::new(
-                        ExitKind::Generic,
-                        "PROJECTION_MIGRATE_FAILED",
-                        format!("could not remove merged ingest `{}`: {e}", m.ingest_name),
-                    )
-                    .with_details(json!({ "ingest": m.ingest_name, "error": e.to_string() }))
-                })?;
-            }
-        }
-        remove_mediums_and_facets_trees(&root).map_err(|e| {
-            CliError::new(
-                ExitKind::Generic,
-                "PROJECTION_MIGRATE_FAILED",
-                format!("could not remove the emptied mediums/facets trees: {e}"),
-            )
-            .with_details(json!({ "error": e.to_string() }))
-        })?;
-    }
-
-    // AC12/D10: consume `reconcile-cursors.json` (seed `#synced` baselines, then
-    // delete it) and surface a `workspace.toml` proposal for any retired-vocab
-    // references — never rewriting workspace.toml. Both are no-ops in `--dry-run`.
-    let ((seeded, cursors_deferred), proposal) = if args.dry_run {
-        ((Vec::new(), None), None)
-    } else {
-        (
-            consume_reconcile_cursors(ctx, &root)?,
-            propose_workspace_toml(&root),
-        )
-    };
-
-    let bindings: Vec<&str> = migrated.iter().map(|m| m.id.as_str()).collect();
-    if ctx.json {
-        print_json(&json!({
-            "ok": true,
-            "dry_run": args.dry_run,
-            "migrated": migrated.len(),
-            "already_v2": already_v2,
-            "bindings": bindings,
-            "warnings": warnings,
-            "cursors_seeded": seeded,
-            "cursors_deferred": cursors_deferred,
-            "workspace_toml_proposal": proposal,
-        }))?;
-    } else {
-        let verb = if args.dry_run {
-            "Would migrate"
-        } else {
-            "Migrated"
-        };
-        let mut out = format!(
-            "# Projection migration\n\n{verb} {} binding(s) to v2 ({already_v2} already v2):\n",
-            migrated.len()
-        );
-        for id in &bindings {
-            out.push_str(&format!("- `{id}`\n"));
-        }
-        if !warnings.is_empty() {
-            out.push_str("\n## Warnings\n\n");
-            for w in &warnings {
-                out.push_str(&format!(
-                    "- [{}] `{}`: {}\n",
-                    w["kind"].as_str().unwrap_or(""),
-                    w["binding"].as_str().unwrap_or(""),
-                    w["message"].as_str().unwrap_or(""),
-                ));
-            }
-        }
-        if !seeded.is_empty() {
-            out.push_str("\n## Baselines seeded from reconcile-cursors.json\n\n");
-            for key in &seeded {
-                out.push_str(&format!("- `{key}`\n"));
-            }
-        }
-        if let Some(notice) = &cursors_deferred {
-            out.push_str(&format!("\n## Reconcile cursors deferred\n\n{notice}\n"));
-        }
-        if let Some(block) = &proposal {
-            out.push('\n');
-            out.push_str(block);
-        }
-        if !args.dry_run {
-            out.push_str(
-                "\nEach projection file was converted to a v2 single-record binding in place \
-                 (medium + facet content folded inline, source names preserved verbatim); \
-                 merged ingests and the emptied mediums/ and facets/ trees were removed.\n",
-            );
-        }
-        print_markdown(&out);
-    }
-    Ok(())
 }
 
 /// A malformed binding id (not `<mem>/<stem>`, or a half that is not a single
@@ -1719,16 +1273,15 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
             "PROJECTION_NOT_FOUND",
             format!(
                 "no binding `{binding_id}` at .memstead/projections/{mem}/{stem}.json — \
-                 scaffold one with `projection init` or migrate a legacy workspace with \
-                 `projection migrate`"
+                 scaffold one with `projection init`"
             ),
         )
         .with_details(json!({ "binding": binding_id }))
         .into());
     }
-    // Quarantine consult before the raw read: a legacy/corrupt file
-    // refuses with its typed reason (naming `projection migrate` for
-    // the legacy generations) rather than a generic enable failure.
+    // Quarantine consult before the raw read: a retired-format or corrupt
+    // file refuses with its typed reason rather than a generic enable
+    // failure.
     if let Ok(configs) = load_pipeline_configs(&root)
         && configs
             .quarantined
@@ -1798,8 +1351,8 @@ fn enable(ctx: &CliContext, args: EnableArgs) -> anyhow::Result<()> {
     // candidate validates directly — refuse if a source's medium half cannot
     // support the operation being enabled (e.g. `sync`/`verify` over a `web`
     // source). Refusals about *other* operations reflect pre-existing config
-    // and do not block this enable (mirrors `migrate`'s treat-as-warning
-    // posture). No write on refusal — the file stays byte-identical.
+    // and do not block this enable. No write on refusal — the file stays
+    // byte-identical.
     if let Err(refusals) = validate_binding(&binding)
         && let Some(err) = refusals.iter().find(|r| {
             matches!(
@@ -1868,9 +1421,9 @@ fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
     let mem = mem.to_string();
     let stem = stem.to_string();
 
-    // Quarantine consult before the edit: a legacy/corrupt record refuses
-    // with its typed reason (naming `projection migrate`) rather than a
-    // generic not-found or parse failure.
+    // Quarantine consult before the edit: a retired-format or corrupt
+    // record refuses with its typed reason rather than a generic not-found
+    // or parse failure.
     if let Ok(configs) = load_pipeline_configs(&root)
         && configs
             .quarantined
@@ -1891,7 +1444,7 @@ fn edit(ctx: &CliContext, args: EditArgs) -> anyhow::Result<()> {
         &args.patch,
         destination_schema
             .as_ref()
-            .map(|(pin, schema)| (pin.as_str(), &**schema)),
+            .map(|(pin, schema, known)| (pin.as_str(), &**schema, known.as_slice())),
     )
     .map_err(|e| edit_refused(&binding_id, e))?;
 
@@ -1937,10 +1490,7 @@ fn edit_refused(
         E::NotFound { .. } => CliError::new(
             ExitKind::NotFound,
             "PROJECTION_NOT_FOUND",
-            format!(
-                "no binding `{binding_id}` — scaffold one with `projection init` or migrate a \
-                 legacy workspace with `projection migrate`"
-            ),
+            format!("no binding `{binding_id}` — scaffold one with `projection init`"),
         )
         .with_details(json!({ "binding": binding_id })),
         E::InvalidJson { message, .. } => CliError::new(
@@ -2496,7 +2046,7 @@ fn exclude(ctx: &CliContext, args: ExcludeArgs) -> anyhow::Result<()> {
 }
 
 /// Render a one-block human note for the full-enumeration scheduling decision
-/// (D3), prepended to the verify report so the typed signal is never silent: a
+///, prepended to the verify report so the typed signal is never silent: a
 /// scheduled full walk that fired, a not-yet-due countdown, disabled scheduling,
 /// and — critically — any non-enumerable refusal. Empty for the quiet cases
 /// keeps a rotating-sample run byte-clean.
@@ -2524,7 +2074,7 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
             refused,
             ..
         } => {
-            let mut s = String::from("> **Scheduled full resync (D3)** — ");
+            let mut s = String::from("> **Scheduled full resync** — ");
             if walked_facets.is_empty() {
                 s.push_str("no enumerable facet to walk this run.");
             } else {
@@ -2546,7 +2096,7 @@ fn render_full_resync_note(decision: &FullResyncDecision) -> String {
 }
 
 /// `projection verify <binding>` — measure fidelity and record durable findings
-/// (group A). Read-only on the destination mem's *entities*. A completed run
+///. Read-only on the destination mem's *entities*. A completed run
 /// always records two things: the findings store, which is the verify surface's
 /// own state outside the mem, and the prepared-hash backfill onto hash-less
 /// anchors, which is measurement machinery (withhold it and an anchor never
@@ -2729,7 +2279,7 @@ remove the sidecar and re-run",
     );
     let hashes_backfilled = *backfill_result.as_ref().unwrap_or(&0);
 
-    // Assemble + render the tier-1 fidelity report (group B) over the findings
+    // Assemble + render the tier-1 fidelity report over the findings
     // the pass just recorded. Read-only — no destination-mem mutation.
     let budget = args.budget.unwrap_or(DEFAULT_REPORT_BUDGET);
     let report = compute_fidelity_report(engine, &root, &record.config, &resolved, &outcome.key);
@@ -2778,7 +2328,7 @@ remove the sidecar and re-run",
             "recorded": outcome.recorded,
             "superseded": outcome.superseded,
             "backlog": outcome.backlog,
-            // The tier-3 full-enumeration scheduling decision (D3) — surfaced
+            // The tier-3 full-enumeration scheduling decision — surfaced
             // (never a silent skip): whether a scheduled full walk fired, is not
             // yet due, is disabled, and any typed non-enumerable refusals.
             "full_resync": outcome.full_resync,

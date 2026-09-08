@@ -1,5 +1,4 @@
-//! `projection advance` — the disposition-gated, resumable baseline advance
-//! (bundle plan `03-projection-promotion`, decision D7).
+//! `projection advance` — the disposition-gated, resumable baseline advance.
 //!
 //! An ingest/sync agent works the changed slice a brief presented, then records
 //! a **disposition** for every artifact it judged. `advance_baseline` is the
@@ -26,7 +25,7 @@
 //! the engine never presented refuses the **whole call atomically** — validated
 //! before any disk write, so a refused call leaves the store byte-identical.
 //!
-//! ## Auto-`worked` from anchors (E3a — closes plan 03 D7's deferral)
+//! ## Auto-`worked` from anchors
 //!
 //! With anchors live, a mutation that carried `anchors[]` during a run records,
 //! in the destination mem's anchors sidecar, which source artifacts an entity
@@ -65,7 +64,7 @@ const STATE_DIR: &str = "state";
 /// See [`STATE_DIR`].
 const ADVANCE_DIR: &str = "advance";
 
-/// One binding's durable advance state (D7) — the frozen presented slice and
+/// One binding's durable advance state — the frozen presented slice and
 /// the dispositions accumulated against it. Persisted at
 /// `.memstead/state/advance/<mem>/<name>.json`, read fresh per call.
 ///
@@ -75,7 +74,7 @@ const ADVANCE_DIR: &str = "advance";
 /// the advance gate accepts.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AdvanceState {
-    /// The canonical binding id `<mem>/<stem>` (D3) this state belongs to.
+    /// The canonical binding id `<mem>/<stem>` this state belongs to.
     pub binding: String,
     /// The frozen presented slice (union of freeze + appended new-HEAD deltas).
     pub frozen_slice: Slice,
@@ -594,7 +593,7 @@ fn subtract_disposed(frozen: &Slice, dispositions: &BTreeMap<String, String>) ->
     }
 }
 
-/// The disposition-gated baseline advance (D7).
+/// The disposition-gated baseline advance.
 ///
 /// Freezes the currently-presented slice (or reloads a frozen one), appends any
 /// new-HEAD deltas, gates the supplied dispositions against the presented ids
@@ -605,7 +604,7 @@ fn subtract_disposed(frozen: &Slice, dispositions: &BTreeMap<String, String>) ->
 /// piggybacks that write's commit note, adding no new channel — and the durable
 /// store is dropped.
 ///
-/// `resolved.name` must be the canonical binding id `<mem>/<stem>` (D3), as
+/// `resolved.name` must be the canonical binding id `<mem>/<stem>`, as
 /// produced by [`super::resolve::resolve_binding_run`]; `dispositions` maps each
 /// judged artifact id to an agent-supplied [`DispositionInput`] — a bare verdict
 /// or a verdict with an authored rationale (in E2 the agent supplies one for
@@ -679,7 +678,7 @@ pub fn advance_baseline(
         }
     }
 
-    // Auto-`worked` (E3a): mark every frozen-slice artifact that an anchor in
+    // Auto-`worked`: mark every frozen-slice artifact that an anchor in
     // the destination mem now references. Reads the anchors sidecar, never a
     // commit diff (D7's rejected mechanism stays rejected); scoped to the
     // frozen slice (`printed`) so an anchored write outside the slice
@@ -730,7 +729,7 @@ pub fn advance_baseline(
     if completed {
         // Advance the baseline token for every facet that moved (current cursor
         // tokens = the latest HEAD) via the engine writer. Provenance piggybacks
-        // the write's commit note — no new channel (D7).
+        // the write's commit note — no new channel.
         let note = format!(
             "projection advance {binding_id}: {} artifact(s) disposed, baseline advanced",
             state.dispositions.len()
@@ -930,7 +929,7 @@ pub fn record_exclusions(
     // Resolve each requested id to the canonical (workspace-relative) form
     // `S(D)` is keyed by: the canonical form itself, or the source-relative
     // form joined onto a primary source's medium base, the way the anchor
-    // write gate resolves an artifact path (backlog-decisions plan B11).
+    // write gate resolves an artifact path.
     // Stored ids are always canonical, so a ledger written before this
     // resolution keeps working unchanged.
     let bases: Vec<PathBuf> = resolved
@@ -1761,7 +1760,7 @@ mod tests {
         assert_eq!(map["b.rs"].rationale(), Some("generated"));
     }
 
-    /// Criterion 4 (backlog-sweep plan 03a): the auto-`worked` matching
+    /// Criterion 4 (an earlier plana): the auto-`worked` matching
     /// understands the SOURCE dialect — an anchor written source-relative
     /// (`f.rs` + `source` name, decision 26) marks the pointer-joined slice
     /// artifact (`srcdir/f.rs`) worked, exactly as a workspace-relative

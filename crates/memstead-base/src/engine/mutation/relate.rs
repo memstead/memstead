@@ -147,7 +147,7 @@ impl Engine {
         let dry_run = args.dry_run;
         let prepared = match self.prepare_relate(args, drift_warnings)? {
             RelatePrepareOutcome::Done(outcome) => {
-                // Derivation re-baseline (agent-trust plan 12): on a
+                // Derivation re-baseline: on a
                 // derivation-declared rel-type, the duplicate-add
                 // no-op's ONE effect is refreshing the edge's
                 // baseline to the target's current hash — the agent's
@@ -214,7 +214,7 @@ impl Engine {
 
         self.stage_prepared_relate(&prepared)?;
 
-        // Derivation baseline (agent-trust plan 12): an explicit add
+        // Derivation baseline: an explicit add
         // on a declared rel-type records the target's CURRENT content
         // hash ("" for a just-stubbed absent target — deriving from
         // nothing, honestly); a remove prunes the row. Staged into
@@ -344,7 +344,7 @@ impl Engine {
         })
     }
 
-    /// The duplicate-add re-baseline (agent-trust plan 12). Called
+    /// The duplicate-add re-baseline. Called
     /// from the `NoOpAlreadyPresent` path when the rel-type is
     /// derivation-declared: stages a sidecar-only refresh of the
     /// edge's baseline to the target's current hash and commits it
@@ -401,7 +401,7 @@ impl Engine {
         self.record_self_write(mount_idx, &write_id);
         // `relate_entity` returns early into this path, so the stamp call on
         // the ordinary path never runs and its report has to be collected
-        // here (04/03, criterion 3, found by the plan's re-grade).
+        // here (found by the re-grade).
         outcome
             .warnings
             .extend(self.stamp_mutation_versions(mount_idx));
@@ -3607,7 +3607,7 @@ community:
             }
         }
 
-        /// Rehearsal complement (agent-trust plan 07): a rehearsed
+        /// Rehearsal complement: a rehearsed
         /// relate against a read-only boundary refuses EXACTLY as the
         /// real call would — same variant, same payload. Paired with
         /// `relate_to_missing_target_in_readonly_mem_refuses` below.
@@ -3898,7 +3898,7 @@ community:
         assert_eq!(a.relationships[0].target, id("b"));
     }
 
-    /// Rehearsal contract (agent-trust plan 07) — single relate:
+    /// Rehearsal contract — single relate:
     /// `dry_run: true` runs the FULL validation, reports the would-be
     /// edge and the would-be auto-stub (reported, never created) with
     /// the marker form's empty `write_id`, and writes nothing. The

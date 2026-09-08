@@ -64,8 +64,8 @@ pub const RELATIONSHIP_CYCLE_PATH_CAP: usize = 20;
 /// `generate_markdown` directly from a mutation verb bypasses the guard, and
 /// the first version of this fix did exactly that: the check lived in
 /// `update_entity`, so `memstead relate` against the same entity walked
-/// straight past it and froze the absorption anyway (04/02, criterion 5,
-/// found by the plan's grade). A guard a new verb can miss by following the
+/// straight past it and froze the absorption anyway (found by
+/// the grade). A guard a new verb can miss by following the
 /// local idiom is not a guard; making the guarded call BE the idiom is.
 ///
 /// The condition: a section whose stored body ends inside an unterminated
@@ -174,8 +174,8 @@ impl super::Engine {
             .map(|i| i.validate(medium_ref).map_err(EngineError::from))
             .collect::<Result<_, _>>()?;
 
-        // One payload, one row per triple (consistency-sweep 03/03,
-        // criterion 9). `(artifact, grain, class)` is the sidecar's merge
+        // One payload, one row per triple.
+        // `(artifact, grain, class)` is the sidecar's merge
         // identity, so a payload naming it twice used to collapse to the last
         // occurrence and the caller was never told an anchor it wrote had
         // vanished. The unit is THIS payload: the same triple arriving in a
@@ -396,7 +396,7 @@ impl super::Engine {
             for a in anchors {
                 if a.class.is_hash_bearing() && a.hash.is_none() && a.artifact == obs.artifact {
                     a.hash = Some(obs.hash.clone());
-                    // Stamp the origin (consistency-sweep 03/03, criterion 8):
+                    // Stamp the origin:
                     // this baseline is the engine's inference from what it
                     // observed, not something an author pinned, and a reader
                     // comparing drift needs to know which.
@@ -427,7 +427,7 @@ impl super::Engine {
         // Anchor-hash backfill returns a count, not an agent-facing response,
         // so an intervention report has nowhere to ride. Discarded knowingly:
         // the merge itself still happened, so nothing was lost — only the
-        // notice that someone else had written (04/03, criterion 3).
+        // notice that someone else had written.
         let _intervention_has_no_channel_here = self.stamp_mutation_versions(mount_idx);
         Ok(written)
     }
@@ -563,11 +563,11 @@ impl super::Engine {
         else {
             return Vec::new();
         };
-        // Skew at WRITE time, and before the restamp below erases the evidence
-        // (04/04, criterion 9). Boot-only detection meant a long-lived server
+        // Skew at WRITE time, and before the restamp below erases the evidence.
+        // Boot-only detection meant a long-lived server
         // that started under one binary and was written to by another never
         // said so, and the very write that would have revealed it wrote the
-        // stamp that hid it. The write is never refused (criterion 10): a
+        // stamp that hid it. The write is never refused: a
         // deliberate downgrade is the operator's business.
         let mut warnings = Vec::new();
         if let Some(prior) = config.mutation_stamp.as_ref()
@@ -587,8 +587,8 @@ impl super::Engine {
         if config.mutation_stamp.as_ref() == Some(&stamp) {
             return warnings;
         }
-        // Through the shared writer like the seven lifecycle setters
-        // (04/03, criterion 7). This one is why the damage looked
+        // Through the shared writer like the seven lifecycle setters.
+        // This one is why the damage looked
         // spontaneous: it rides ordinary create/update/relate/rename/delete,
         // so an operator saw a config field vanish during an innocuous entity
         // write with no lifecycle call in sight. It stays exactly as dormant
@@ -597,7 +597,7 @@ impl super::Engine {
         // The intervention rides the ENTITY mutation's own response: this
         // writer has no response of its own, and the operator who sees a
         // config field move during an innocuous entity write is owed the
-        // reason there (04/03, criterion 3, found by the plan's grade —
+        // reason there (found by the grade:
         // an earlier draft discarded this with `let _`).
         match self.write_mem_config_merged(
             mount_idx,
@@ -631,7 +631,7 @@ impl super::Engine {
 /// as one atomic commit. Reads honour pending-buffer precedence, so
 /// successive stages within one transaction compose.
 /// Stage a mutation of the engine-owned derivations sidecar
-/// (agent-trust plan 12) so it rides the SAME commit as the edge
+/// so it rides the SAME commit as the edge
 /// write that produced it — the anchors-sidecar atomicity precedent.
 /// The sidecar travels through the backend's normal entity-path
 /// read/write under `.memstead/`, which every backend filters from
@@ -680,7 +680,7 @@ pub(crate) fn stage_anchors_sidecar(
     let mut sidecar = read_sidecar(backend)?;
     // An anchors-only update whose rows restate the stored ones writes
     // nothing: the sidecar bytes stay, and the caller is told the anchors
-    // did not change (backlog-decisions plan B10). `rebaseline` marks the
+    // did not change. `rebaseline` marks the
     // update that also changed the entity's content, where a restated row
     // is rewritten hash-less for the next verify to backfill.
     if !sidecar.merge(entity_id.as_ref(), unsets, anchors, rebaseline) {
@@ -1902,7 +1902,7 @@ mod tests {
         }
     }
 
-    /// Criterion 3 (agent-trust plan 02): a mutation stamps the mem's
+    /// Criterion 3: a mutation stamps the mem's
     /// engine-owned state with the running engine version and resolved
     /// schema; a read-only load writes nothing.
     #[test]
@@ -2200,7 +2200,7 @@ mod tests {
         );
     }
 
-    /// Criterion 3/4 (agent-trust plan 02): boot under a different
+    /// Criterion 3/4: boot under a different
     /// binary version surfaces the warn-tier `ENGINE_VERSION_SKEW`
     /// naming both versions, on load warnings AND in `health()`;
     /// a stamp-less mem and a matching stamp are silent.

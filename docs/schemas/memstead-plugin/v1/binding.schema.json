@@ -11,7 +11,7 @@
   ],
   "properties": {
     "version": {
-      "description": "Binding format version. v2 bindings carry the integer 2; a file without it (or with a prior version) is refused by the loader, which names `memstead projection migrate`.",
+      "description": "Binding format version. v2 bindings carry the integer 2; a file without it (or with a prior version) is quarantined by the loader as a retired format and is re-authored with `memstead projection init`.",
       "type": "integer",
       "const": 2
     },

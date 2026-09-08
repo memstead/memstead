@@ -1,5 +1,4 @@
-//! An anchors-only update replaces the row on folder mems (backlog-decisions
-//! plan B10), exactly as git-branch mems do: a `memstead update --anchor`
+//! An anchors-only update replaces the row on folder mems, exactly as git-branch mems do: a `memstead update --anchor`
 //! naming a stored (artifact, grain, class) triple with a differing field
 //! rewrites the sidecar row hash-less, the response reports
 //! `anchors_changed: true`, and the next verify backfills the hash; a row

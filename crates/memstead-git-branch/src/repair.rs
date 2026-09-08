@@ -1,7 +1,7 @@
 //! Below-boot repair surface — the verbs a boot-failure message names
 //! must run on exactly the workspace whose boot they repair.
 //!
-//! During the 2026-08-06/07 plenum outage both named remedies
+//! During the 2026-08-06/07 outage both named remedies
 //! (`memstead schema install`, `memstead mem set-schema`) booted the
 //! full workspace unconditionally, so they failed on the very boot they
 //! were supposed to fix. This module supplies their below-boot forms:

@@ -1,5 +1,4 @@
-//! `memstead status` projection view (bundle plan `03-projection-promotion`,
-//! decision D11).
+//! `memstead status` projection view.
 //!
 //! The `projections` array the status payload carries alongside the graph
 //! counts: one entry per v2 binding, reporting its declared operations, each
@@ -10,7 +9,7 @@
 //! scheduling.
 //!
 //! The `signal` is the *resolved* change-detection strategy or the literal
-//! `"none"` (E1's visible-NoSignal) — never a fabricated token: a
+//! `"none"` (the visible no-signal rule) — never a fabricated token: a
 //! detection-less source renders `"none"`, not a fake green.
 
 use std::collections::BTreeMap;
@@ -40,7 +39,7 @@ pub struct FacetState {
     /// The `#verified` baseline token, or `None` when never verified.
     pub verified: Option<String>,
     /// The resolved change-detection strategy — `git` / `mtime` / `graph` — or
-    /// `none` (E1's visible-NoSignal). Never a fabricated token.
+    /// `none` (the visible no-signal rule). Never a fabricated token.
     pub signal: String,
 }
 
@@ -81,7 +80,7 @@ pub struct FindingCounts {
 /// The workspace-level lead stays [`Rollup`] / [`projection_rollup`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectionStatus {
-    /// The canonical binding id `<mem>/<stem>` (D3).
+    /// The canonical binding id `<mem>/<stem>`.
     pub binding: String,
     /// The mem this binding writes into.
     pub destination_mem: String,
@@ -253,7 +252,7 @@ pub fn projection_overview(engine: &Engine, workspace_root: &Path) -> Projection
             operations.push("verify".to_string());
         }
 
-        // Baselines live on the destination mem's config `sync_state` (D4).
+        // Baselines live on the destination mem's config `sync_state`.
         let sync_state = engine
             .mem_config_for(&binding.destination_mem)
             .map(|c| c.sync_state.clone())
@@ -297,7 +296,7 @@ pub fn projection_overview(engine: &Engine, workspace_root: &Path) -> Projection
             }
         }
 
-        // Durable advance store (D7) — absent = nothing in flight (0/0).
+        // Durable advance store — absent = nothing in flight (0/0).
         let advance = match read_advance_store(workspace_root, &record.mem, &record.name) {
             Ok(Some(s)) => AdvanceCounts {
                 pending: s.pending(),
@@ -346,7 +345,7 @@ pub enum RollupVerdict {
     /// baseline. Reached only when there was something to examine.
     Clean,
     /// There were no projection bindings to examine, so this rollup asserts
-    /// nothing (04/04, criterion 5). It used to answer `clean` here, which a
+    /// nothing. It used to answer `clean` here, which a
     /// reader takes as a general all-clear over a workspace it never looked
     /// at. A verdict that is only sometimes emitted is still read as general
     /// when it is, so the empty case gets its own word rather than borrowing
@@ -354,7 +353,7 @@ pub enum RollupVerdict {
     NothingDeclared,
     /// Onboarding only: one or more bindings predate their binding (adopt) and
     /// nothing else needs a maintenance pass. **A pre-binding mem is never a red
-    /// verdict** — 0% anchored is expected onboarding, not a defect (E1).
+    /// verdict** — 0% anchored is expected onboarding, not a defect.
     Onboarding,
     /// One or more bindings carry open findings (drift, unresolvable anchors,
     /// uncovered artifacts under exhaustive coverage, adjudication backlog) or
@@ -383,7 +382,7 @@ pub struct Rollup {
     /// The single lead verdict.
     pub verdict: RollupVerdict,
     /// What the verdict answers for, in words, so it cannot be read as a
-    /// claim about the workspace at large (04/04, criterion 5). A verdict
+    /// claim about the workspace at large. A verdict
     /// without its subject is the bundle's own failure class: a surface
     /// stating a fact broader than the one it established.
     pub subject: String,
@@ -427,7 +426,7 @@ struct Candidate {
 /// A binding that predates its binding (no anchors, never synced) contributes an
 /// **onboarding** action, never a red one — its uncovered artifacts are the
 /// expected first-sync backfill worklist, so pre-binding history alone never
-/// drives an `action-needed` verdict (E1).
+/// drives an `action-needed` verdict.
 pub fn projection_rollup(engine: &Engine, workspace_root: &Path) -> Rollup {
     projection_overview(engine, workspace_root).rollup
 }
@@ -450,7 +449,7 @@ fn rollup_from_scans(total: usize, scans: &[(String, Option<BindingResolution>)]
             continue;
         };
 
-        // Adopt (E1): a mem that predates its binding is onboarding, never a red
+        // Adopt: a mem that predates its binding is onboarding, never a red
         // verdict. Its uncovered artifacts are the backfill worklist, so we skip
         // the findings/freshness scan that would otherwise read them as defects.
         if resolution.onboarding {
@@ -825,7 +824,7 @@ mod tests {
     /// G1 + E1 — a binding whose mem predates it (no anchors, never synced)
     /// rolls up to an **onboarding** verdict, never `action-needed`: the
     /// onboarding action is surfaced and pre-binding history alone drives no
-    /// red verdict (E1's refusal at the dashboard level). The per-binding
+    /// red verdict (the dashboard-level refusal). The per-binding
     /// drill-down carries the SAME resolution the rollup
     /// aggregates: an adopt (pre-binding) mem reads `onboarding` on its own
     /// entry — never red, no moved flag, zero finding counts — and the
@@ -874,8 +873,8 @@ mod tests {
 
     /// A workspace with no bindings does NOT roll up to `clean`.
     ///
-    /// It used to (G1's original rule), and that is what 04/04's criterion 5
-    /// changes: a reader takes `clean` as an all-clear over the workspace,
+    /// It used to, and that is what
+    /// changed: a reader takes `clean` as an all-clear over the workspace,
     /// and this rollup never looked at one. The empty case says
     /// `nothing-declared` and names its subject instead.
     #[test]

@@ -125,10 +125,16 @@ impl Engine {
     }
 
     /// Reconcile membership with the roster file: `Ok(None)` when the roster
-    /// did not change since the last reconcile (or the first observation,
-    /// captured silently as the baseline); `Ok(Some(change))` after applying
-    /// a change; `Err` only when the roster could not be read or parsed at
-    /// all (the baseline is kept, so the next operation retries).
+    /// did not change since the last reconcile; `Ok(Some(change))` after
+    /// applying a change; `Err` only when the roster could not be read or
+    /// parsed at all (the baseline is kept, so the next operation retries).
+    ///
+    /// A roster file that did not exist at boot (a workspace whose first
+    /// mem is created by another process after this engine started) is a
+    /// change like any other: the first observation is applied, never
+    /// swallowed as a baseline. Boot captures its own baseline through
+    /// [`Engine::capture_roster_fingerprint`], so an engine that saw the
+    /// file at boot is not re-mounted here.
     ///
     /// Per mem the change is atomic: an unmount that cannot complete leaves
     /// that mem fully served, is reported under `failures`, and keeps the
@@ -146,8 +152,8 @@ impl Engine {
             return Ok(None);
         };
         let Some(cached) = self.roster_fingerprint.clone() else {
-            self.roster_fingerprint = Some(now);
-            return Ok(None);
+            // No baseline: the file appeared after boot. Mount what it names.
+            return self.apply_roster(now).map(Some);
         };
         if cached.hash == now.hash {
             self.roster_fingerprint = Some(now);

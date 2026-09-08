@@ -83,13 +83,12 @@ pub struct EntityTouch {
     /// Correlation id linking commits of one logical operation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logical_op: Option<String>,
-    /// Caller-declared role this touch was performed in (agent-trust
-    /// plan 13). Absent = unspecified — recorded as absence, never
+    /// Caller-declared role this touch was performed in. Absent = unspecified — recorded as absence, never
     /// defaulted to a real role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     /// Caller-declared identity this touch was performed under
-    /// (agent-trust plan 15). Absent = undeclared — recorded as
+    ///. Absent = undeclared — recorded as
     /// absence, never inferred from actor or client.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
@@ -151,8 +150,7 @@ fn parse_rename_pair(field: &str) -> Option<(String, String)> {
 }
 
 /// One derived provenance record — who performed a boundary touch of
-/// an entity's story, in what declared role, when (agent-trust plan
-/// 13). Served by the entity read's opt-in provenance block.
+/// an entity's story, in what declared role, when. Served by the entity read's opt-in provenance block.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProvenanceRecord {
     /// Actor category (`agent` / `cli` / `app` / `external` /
@@ -167,7 +165,7 @@ pub struct ProvenanceRecord {
     /// real role.
     pub role: String,
     /// The caller-declared identity, when one was recorded — the
-    /// independence gate's only comparator (agent-trust plan 15).
+    /// independence gate's only comparator.
     /// Absence downgrades comparisons to `unconfirmable`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
@@ -200,7 +198,7 @@ pub struct EntityProvenance {
     /// not the creation) — `created_by` is then absent.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub story_truncated: bool,
-    /// Derived `verification` check state (agent-trust plan 14):
+    /// Derived `verification` check state:
     /// `never_checked` | `checked_ok` | `check_failed` | `check_stale`
     /// — computed by comparing the newest verification record's
     /// entity-hash against the current one, never stamped. Kind-scoped:
@@ -266,7 +264,7 @@ fn touch_to_record(t: &EntityTouch) -> ProvenanceRecord {
 }
 
 impl Engine {
-    /// Derive an entity's provenance block (agent-trust plan 13):
+    /// Derive an entity's provenance block:
     /// created-by (the oldest recorded touch, only when it IS the
     /// creation) and last-modified-by (the newest touch), each with
     /// actor identity, client, declared role, and timestamp — read

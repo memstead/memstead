@@ -336,7 +336,7 @@ fn tools_call_request(id: i64, name: &str) -> String {
     .unwrap()
 }
 
-/// Criterion 4, partial half (agent-trust plan 04): a workspace with a
+/// Criterion 4, partial half: a workspace with a
 /// broken-pin mem STARTS the server (the mem quarantines inside the
 /// engine) instead of dying into `-32000 Connection closed`.
 #[test]

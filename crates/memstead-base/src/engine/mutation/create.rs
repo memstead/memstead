@@ -871,7 +871,7 @@ impl Engine {
         if !validated_anchors.is_empty() {
             super::stage_anchors_sidecar(backend, &id, &[], validated_anchors, true)?;
         }
-        // Derivation baselines (agent-trust plan 12): each explicitly
+        // Derivation baselines: each explicitly
         // declared relation on a derivation rel-type records the
         // target's current hash ("" for an absent/stubbed target),
         // staged so baseline and entity ride one commit.
@@ -1357,7 +1357,7 @@ impl Engine {
             let count = entity_ids.len();
             let subject = format!("memstead: batch-create ({count} entities)");
             // Per-entry notes ride the ONE batch commit's note record as
-            // `<id>: <note>` lines (decision 3, backlog-sweep plan 05):
+            // `<id>: <note>` lines (decision 3, an earlier plan):
             // `append_provenance` below is a documented no-op on the
             // git-branch backend, so without this the notes survived
             // nowhere exactly where most writes happen. A batch with no
@@ -3723,7 +3723,7 @@ required_outgoing:
 write_rules: []
 "#;
 
-    /// The anker proof (plan 07, criterion 2): the grounding-shaped
+    /// The anker proof: the grounding-shaped
     /// schema answers `pruefe_kette.py`'s check questions 1–3 from
     /// health output alone — no project Python.
     #[test]
@@ -3965,7 +3965,7 @@ staleness_threshold_days: 90
 write_rules: []
 "#;
 
-    /// The plenum proof, uniqueness half (plan 07, criterion 3): a
+    /// The plenum proof, uniqueness half: a
     /// second create with the same declared key tuple refuses with a
     /// typed code naming the colliding entity — the 37-duplicates
     /// scenario bounces at the engine. Health reports a pre-existing
@@ -4058,8 +4058,7 @@ write_rules: []
         );
     }
 
-    /// The plenum proof, enum-from-neighbour half (plan 07,
-    /// criterion 3): renaming a value in the neighbour's section makes
+    /// The plenum proof, enum-from-neighbour half: renaming a value in the neighbour's section makes
     /// every stale holder a health finding.
     #[test]
     fn plenum_proof_enum_from_neighbour_flags_stale_holders_after_rename() {
@@ -4505,7 +4504,7 @@ write_rules: []
         // the store is the observable.)
     }
 
-    /// Rehearsal contract (agent-trust plan 07): `batch_create` with
+    /// Rehearsal contract: `batch_create` with
     /// `dry_run: true` validates the whole batch — intra-batch
     /// references included — and reports the would-be receipt with the
     /// marker form's empty `write_id`, writing NOTHING. The
@@ -4959,7 +4958,7 @@ write_rules: []
         );
     }
 
-    /// Cross-gate pre-announcement (backlog-sweep/09): a first write
+    /// Cross-gate pre-announcement: a first write
     /// failing BOTH the section gate and the metadata gate learns both
     /// demands in the one `MISSING_REQUIRED_SECTION` refusal — the
     /// pre-announced set names exactly what `REQUIRED_FIELD_UNSET`
@@ -5054,7 +5053,7 @@ write_rules: []
             .expect("fixing everything announced must succeed in the second round-trip");
     }
 
-    /// Complement (backlog-sweep/09 criterion 3): a body failing ONLY
+    /// Complement: a body failing ONLY
     /// the section gate — metadata complete — refuses with an empty
     /// pre-announcement, and its `details` payload carries no
     /// `pre_announced` key at all: byte-compatible with the
@@ -6263,8 +6262,8 @@ write_rules: []
         );
     }
 
-    /// Obligation-schema counterpart of the ingest wildcard
-    /// (first-author-path plan 09, criterion 5): an obligation mem
+    /// Obligation-schema counterpart of the ingest wildcard:
+    /// an obligation mem
     /// body-links into a NON-SOFTWARE user-schema destination; the
     /// wildcard alias grant admits the auto-emitted REFERENCES edge.
     #[test]
@@ -6400,7 +6399,7 @@ community:
         );
     }
 
-    /// Plan 11 end-to-end: an `ingest`-schema process mem body-links
+    /// End to end: an `ingest`-schema process mem body-links
     /// into a destination pinning an ARBITRARY user-written schema.
     /// The wildcard (bound to `alias_target_rel_type: REFERENCES`)
     /// admits the auto-emitted alias edge; the edge survives a fresh
@@ -7311,7 +7310,7 @@ community:
         );
     }
 
-    // ---- E3a anchors: create/persist/reload/isolation ------------------
+    // ---- Provenance anchors: create/persist/reload/isolation -----------
 
     fn file_anchor(artifact: &str, hash: &str) -> crate::anchor::AnchorInput {
         crate::anchor::AnchorInput {
@@ -7966,7 +7965,7 @@ write_rules: []
             .unwrap();
     }
 
-    /// Reserved-heading extension (criterion 4): `^# ` now refuses in
+    /// Reserved-heading extension: `^# ` now refuses in
     /// any section body, exactly like `^## ` — free-form sections
     /// included, via the byte-class line guard.
     #[test]

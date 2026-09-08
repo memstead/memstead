@@ -125,8 +125,7 @@ reasoning.
 Between the two sides sits the claim no verify watches: an entity whose prose
 names an in-scope artifact by path and carries no anchor on it. Every anchor
 the entity holds may resolve while a sentence about a file it never anchored
-stands falsified, and until 2026-09-05 nothing measured that. The verify pass
-now records one `unanchored-mention` finding per entity and artifact (prose
+stands falsified. The verify pass records one `unanchored-mention` finding per entity and artifact (prose
 only; a path inside a fenced code block is not a claim), naming the section,
 and the coverage block carries the count beside `uncovered`. Path matching
 follows the binding's source join, so the source-relative and the

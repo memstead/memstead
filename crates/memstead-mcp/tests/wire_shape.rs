@@ -16,7 +16,7 @@
 //!      reuse the empty-mounts fixture below for pure error paths).
 //!   3. Call `harness.call_tool(...)`, assert on `code`, `message`
 //!      contents, and `structured_content` shape.
-//!   4. If the path is flavor-specific, gate on `mem-repo`.
+//!   4. If the path needs git-branch mems, seed them with `seed_full_workspace`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -48,7 +48,7 @@ fn seed_empty_workspace(root: &Path) {
     .unwrap();
 }
 
-/// Seed a full-flavor workspace at `root` with git-branch backed mems.
+/// Seed a mem-repo workspace at `root` with git-branch backed mems.
 /// Each `(mem_name, schema_pin)` produces:
 /// - a branch `refs/heads/<name>` and a config blob on `__SYSTEM` (via
 ///   `init_real_mem_repo`)
@@ -286,11 +286,10 @@ fn assert_error_envelope(result: &Value, expected_code: &str, expected_message: 
 // Pins (McpServer)
 // ---------------------------------------------------------------------------
 
-/// Full pin: same input as the lean test, intentionally separate
-/// assertion because the full mapper (`engine_err_unified` in
-/// `server.rs`) emits a different message string than the lean mapper
-/// for `ENTITY_NOT_FOUND`. These strings DIVERGE — the snapshot suite
-/// captures both as today's truth until the casing is reconciled.
+/// Pin: the mapper (`engine_err_unified` in `server.rs`) emits its own
+/// message string for `ENTITY_NOT_FOUND`, distinct from the engine's
+/// `Display` casing; the snapshot suite captures today's truth until
+/// the casing is reconciled.
 #[test]
 fn full_memstead_entity_emits_typed_envelope_for_missing_id() {
     let tmp = TempDir::new().unwrap();
@@ -301,9 +300,8 @@ fn full_memstead_entity_emits_typed_envelope_for_missing_id() {
 
     let mut harness = WireHarness::start(tmp.path());
     let result = harness.call_tool("memstead_entity", json!({ "id": "specs--does-not-exist" }));
-    // Full mapper formats with capital "Entity not found" — diverges
-    // from lean's "entity not found" (engine Display verbatim).
-    // Recorded as inter-flavor drift; not fixed here.
+    // The mapper formats with capital "Entity not found", unlike the
+    // engine's Display ("entity not found"). Recorded; not fixed here.
     assert_error_envelope(
         &result,
         "ENTITY_NOT_FOUND",
@@ -369,12 +367,12 @@ fn full_memstead_search_succeeds_on_empty_seeded_workspace() {
     }
 }
 
-/// Full pin: full flavor's `memstead_overview` against the proper full seed
+/// Full pin: `memstead_overview` against the proper mem-repo seed
 /// (git-branch refs + matching `mounts.json` entries) emits the
-/// canonical anchors AND lists the seeded mem. Adding the full-only
-/// `## Lifecycle Namespaces` anchor (the lean overview omits it
-/// entirely — lean has no mem-creation rules) is part of the pin so
-/// the test trips if full accidentally drops that section.
+/// canonical anchors AND lists the seeded mem. Adding the
+/// `## Lifecycle Namespaces` anchor (suppressed on surfaces without
+/// lifecycle tools) is part of the pin so
+/// the test trips if the server accidentally drops that section.
 #[test]
 fn full_memstead_overview_succeeds_on_empty_seeded_workspace() {
     let tmp = TempDir::new().unwrap();
@@ -401,17 +399,15 @@ fn full_memstead_overview_succeeds_on_empty_seeded_workspace() {
 }
 
 // ---------------------------------------------------------------------------
-// `memstead_schema` error pin — both flavors emit `ENTITY_NOT_FOUND` for
+// `memstead_schema` error pin: the server emits `ENTITY_NOT_FOUND` for
 // names that don't match the workspace's pinned schema. Helps confirm
 // the pre-extraction message divergence story applies symmetrically
 // across tools, not just `memstead_entity`.
 // ---------------------------------------------------------------------------
 
-/// Full pin: same input on a full-seeded single-mem workspace. Per-flavor
-/// message bytes are recorded independently; the lean flavor appends
-/// `" — workspace pins default@1.0.0"` to the message, the full flavor
-/// emits only `"schema not found: \"<name>\""`. Recorded drift, pending
-/// reconciliation.
+/// Full pin: an unknown name on a mem-repo-seeded single-mem workspace.
+/// The message is `"schema not found: \"<name>\""` with no
+/// workspace-pin suffix.
 #[test]
 fn full_memstead_schema_unknown_name_emits_entity_not_found() {
     let tmp = TempDir::new().unwrap();
@@ -426,7 +422,7 @@ fn full_memstead_schema_unknown_name_emits_entity_not_found() {
     );
 }
 
-/// Plan 06a criterion 1: a full-verbosity request scoped to a small
+/// A full-verbosity request scoped to a small
 /// type selection on the measured large schema (`software@0.4.0` — the
 /// 60.2 KB field spill, 2026-08-18 WOENENN ingest) returns the named
 /// types' complete prose in one under-budget reply, with every
@@ -499,7 +495,7 @@ fn full_schema_type_selection_serves_named_prose_under_budget() {
     );
 }
 
-/// Plan 06a criterion 2: the unscoped full reply on the measured large
+/// The unscoped full reply on the measured large
 /// schema degrades VISIBLY per the budget pattern — reduced mode
 /// stamped, hint steering to per-type retrieval, full roster in
 /// `types_omitted` — no silent truncation and no reliance on harness
@@ -598,8 +594,8 @@ fn assert_create_success_shape(result: &Value, expected_id: &str, expected_mem: 
     );
 }
 
-/// Full pin: same as lean. The slug rule (`<mem>--<lower-kebab>`) is
-/// engine-internal so the expected id matches the lean pin.
+/// Full pin: the slug rule (`<mem>--<lower-kebab>`) is
+/// engine-internal so the expected id is fixed.
 #[test]
 fn full_memstead_create_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
@@ -921,8 +917,8 @@ fn full_memstead_update_succeeds_and_rotates_hash() {
     );
 }
 
-/// Full pin: same flow; full's ENTITY_NOT_FOUND message text uses
-/// capital "Entity" per the previously-recorded inter-flavor drift.
+/// Full pin: the ENTITY_NOT_FOUND message text uses
+/// capital "Entity" (the mapper's spelling, recorded above).
 #[test]
 fn full_memstead_delete_succeeds_and_entity_becomes_unreadable() {
     let tmp = TempDir::new().unwrap();
@@ -949,11 +945,11 @@ fn full_memstead_delete_succeeds_and_entity_becomes_unreadable() {
 // `memstead_relate` success pins
 // ---------------------------------------------------------------------------
 
-/// Full pin: same flow. The two flavours agree on the edge names —
-/// `from`, `to`, `rel_type` inside `results[]` — and full additionally
+/// Full pin: the edge names are
+/// `from`, `to`, `rel_type` inside `results[]`, and the envelope
 /// carries `source: "explicit"`, `_mem_schema` and `write_id`. The
-/// per-flavour divergence this comment used to record (lean saying
-/// `type`, full omitting `action`) is closed on both counts.
+/// divergence this comment used to record (a `type` spelling, an
+/// omitted `action`) is closed on both counts.
 #[test]
 fn full_memstead_relate_returns_typed_success_envelope() {
     let tmp = TempDir::new().unwrap();
@@ -985,8 +981,8 @@ fn full_memstead_relate_returns_typed_success_envelope() {
         Some(to.as_str()),
         "relate `to` drifted: {body}"
     );
-    // `rel_type` is the ONE spelling now — inputs and outputs, both
-    // flavours, since consistency-sweep 05-front-door/08. The bare
+    // `rel_type` is the ONE spelling now — inputs and outputs, every
+    // surface. The bare
     // `type` this once tolerated on the input side is gone; nothing
     // accepts or emits it, and no alias bridges the two. USES (not
     // REFERENCES) — explicit author of REFERENCES is refused under the
@@ -1001,11 +997,9 @@ fn full_memstead_relate_returns_typed_success_envelope() {
         body.get("type").is_none(),
         "no surface carries the bare `type` spelling any more: {body}"
     );
-    // `action` rides the per-entry result, not the top level — the same
-    // place the lean surface puts it. (This assertion once recorded
-    // "full omits `action`, lean carries it"; that drift closed with the
-    // plural relate envelope, and the twin pin in `wire_shape_lean.rs`
-    // now asserts the matching per-entry shape.)
+    // `action` rides the per-entry result, not the top level. (This
+    // assertion once recorded a divergence between two server builds;
+    // that drift closed with the plural relate envelope.)
     assert_eq!(
         entry.get("action").and_then(Value::as_str),
         Some("added"),
@@ -1052,8 +1046,7 @@ fn full_memstead_rename_returns_typed_success_envelope() {
 
 /// Full pin: full renames-to-same-slug succeed but ride a typed
 /// `TITLE_NORMALIZED_TO_SLUG_NOOP` warning on the response so an agent
-/// can detect the degenerate case from `details.warnings[]`. The lean
-/// surface omits the warning entirely (see the lean pin above).
+/// can detect the degenerate case from `details.warnings[]`.
 #[test]
 fn full_memstead_rename_same_slug_emits_typed_warning() {
     let tmp = TempDir::new().unwrap();
@@ -1093,12 +1086,11 @@ fn full_memstead_rename_same_slug_emits_typed_warning() {
 }
 
 // ---------------------------------------------------------------------------
-// `memstead_reload` (full-only) success pin
+// `memstead_reload` (mem-repo) success pin
 // ---------------------------------------------------------------------------
 //
-// The lean filesystem-mem server doesn't expose memstead_reload —
-// drift-reload is a mem-repo concept (sibling writer commits a new
-// HEAD; engine re-derives memo state). Pinning is full-only.
+// Drift-reload is a mem-repo concept (sibling writer commits a new
+// HEAD; engine re-derives memo state), so the pins seed a mem-repo.
 
 /// Full pin: `memstead_reload` on a quiescent workspace returns a success
 /// envelope. The detailed report shape (changes count, etc.) is
@@ -1125,7 +1117,7 @@ fn full_memstead_reload_returns_typed_success_envelope() {
 // The recovery payload contract: `details.referrers[]` carries
 // `{from_id, rel_type, mem, capability: "write"}` for each Write-Mem
 // referrer so the agent can rewrite the offending references without a
-// follow-up `memstead_entity` call. Both flavors emit this shape today.
+// follow-up `memstead_entity` call.
 
 fn assert_has_incoming_refs_envelope(result: &Value, expected_target: &str, expected_source: &str) {
     let is_error = result
@@ -1212,15 +1204,15 @@ fn full_memstead_delete_with_incoming_refs_emits_typed_envelope() {
 // `memstead_changes_since` success pins
 // ---------------------------------------------------------------------------
 //
-// Lean and full use STRUCTURALLY different change-feeds: lean reads
-// timestamp-keyed entries from `.memstead/changes.jsonl`; full reads git
-// commits between `since` and HEAD. The two response envelopes
-// diverge — each pin records its flavor's shape per-flavor.
+// Folder and git-branch mems use STRUCTURALLY different change-feeds: a
+// folder mem reads timestamp-keyed entries from `.memstead/changes.jsonl`;
+// a git-branch mem reads git commits between `since` and HEAD. The two
+// response envelopes diverge; this pin records the git-branch shape.
 
 /// Full pin: `memstead_changes_since` reads git history. Passing the
 /// canonical empty-tree SHA returns every entity as `added`. The
 /// response carries a richer envelope (`changes[]`, head_sha,
-/// changed_files counts) compared to lean's flat `{since, count,
+/// changed_files counts) compared to the folder feed's flat `{since, count,
 /// entries}` shape. **Drift recorded** — neither shape is canonical
 /// yet.
 #[test]
@@ -1241,9 +1233,9 @@ fn full_memstead_changes_since_returns_typed_success_envelope() {
     let body = result
         .get("structuredContent")
         .expect("structuredContent missing on changes_since success");
-    // Full's response shape is distinct from lean — pin presence of
-    // `changes` (the per-entity event list on full) rather than lean's
-    // `entries`. The exact richer fields (head_sha, etc.) are not
+    // The git-branch response shape is distinct from the folder one: pin
+    // presence of `changes` (the per-entity event list) rather than the
+    // folder feed's `entries`. The exact richer fields (head_sha, etc.) are not
     // pinned here so the envelope can evolve under non-extraction
     // plans without tripping this test; the lift cannot drop
     // `changes[]` though.
@@ -1251,11 +1243,11 @@ fn full_memstead_changes_since_returns_typed_success_envelope() {
         body.get("changes").is_some(),
         "full changes_since response missing `changes[]`: {body}"
     );
-    // Lean-style `entries[]` must NOT appear on full — these are
-    // distinct envelopes today.
+    // Folder-style `entries[]` must NOT appear on a git-branch mem: these
+    // are distinct envelopes today.
     assert!(
         body.get("entries").is_none(),
-        "full response unexpectedly carries lean's `entries[]`: {body}"
+        "git-branch response unexpectedly carries the folder feed's `entries[]`: {body}"
     );
 }
 
@@ -2125,7 +2117,7 @@ name = \"file-two-layer\"\n\
     }
 }
 
-/// Item 03 pin: `memstead_mem_create` against a mem-repo workspace
+/// the pinned shape: `memstead_mem_create` against a mem-repo workspace
 /// produces a `mounts.json` whose new git-branch entry carries the
 /// fully-qualified `refs/heads/<leaf>` form for the `branch` field.
 /// Pre-fix the writer already produced the long form; this pin guards
@@ -2326,7 +2318,7 @@ fn full_memstead_update_body_wikilink_auto_synthesises_alias_relation() {
 }
 
 // ---------------------------------------------------------------------------
-// Friction ledger (agent-trust plan 08) — the dual-surface fixture.
+// Friction ledger — the dual-surface fixture.
 // ---------------------------------------------------------------------------
 
 /// One fixture drives both surfaces: a refused MCP call (through the
@@ -2421,7 +2413,7 @@ fn friction_ledger_records_both_surfaces_and_serves_the_axis() {
 }
 
 // ---------------------------------------------------------------------------
-// Negative findings (agent-trust plan 10) — the fourth ingest type.
+// Negative findings — the fourth ingest type.
 // ---------------------------------------------------------------------------
 
 /// ingest@0.5.0's `negative_finding`: a conformant entity writes via
@@ -2546,7 +2538,7 @@ fn negative_finding_writes_on_both_surfaces_and_is_leaf_exempt() {
     assert_eq!(leaf["ingest@0.5.0:negative_finding"], 2, "{health}");
 }
 
-/// The `open_questions` axis over the wire (agent-trust plan 11):
+/// The `open_questions` axis over the wire:
 /// include-gated (absent without the include), an empty workspace
 /// serves an empty axis rather than an error, no leaf is `INTERNAL`,
 /// and an unknown `mem` scope refuses typed.
@@ -2587,7 +2579,7 @@ fn open_questions_axis_is_include_gated_and_refuses_unknown_mem_typed() {
     assert_eq!(ghost["structuredContent"]["code"], "UNKNOWN_MEM", "{ghost}");
 }
 
-/// The `stale_derivations` axis over the wire (agent-trust plan 12):
+/// The `stale_derivations` axis over the wire:
 /// include-gated (absent without the include), a mem with no declared
 /// derivation rel-types serves an empty list rather than an error, no
 /// leaf is `INTERNAL`, and an unknown `mem` scope refuses typed.
@@ -2633,7 +2625,7 @@ fn stale_derivations_axis_is_include_gated_and_refuses_unknown_mem_typed() {
 }
 
 // ---------------------------------------------------------------------------
-// Provenance at mutation (agent-trust plan 13) — the record half.
+// Provenance at mutation — the record half.
 // ---------------------------------------------------------------------------
 
 /// The checks axis serves the four derived states, and the
@@ -3621,7 +3613,7 @@ fn read_hash_of(harness: &mut WireHarness, id: &str) -> Value {
 /// originate in any mem — so that form must take the full lazy-mount
 /// load. The refuted first cut scoped the reload to the target's mem and
 /// silently dropped incoming edges from unloaded lazy mems (14 of 25 on
-/// the dogfood bench). This pins the fix: an incoming cross-mem edge
+/// this project's own graph). This pins the fix: an incoming cross-mem edge
 /// from a LAZY, not-yet-loaded mem appears in the answer.
 #[test]
 fn full_entity_include_relations_sees_incoming_edges_from_lazy_mems() {

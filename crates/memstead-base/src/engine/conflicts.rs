@@ -1,4 +1,4 @@
-//! Merge-conflict resolution for folder mems (backlog-sweep plan 07,
+//! Merge-conflict resolution for folder mems (an earlier plan,
 //! decision 20).
 //!
 //! A hand-committed folder mem lives inside the user's own git
@@ -79,8 +79,8 @@ pub struct ResolveConflictOutcome {
     pub side: &'static str,
     pub write_id: String,
     /// Carries `CONFIG_WRITE_INTERVENED` when the mutation version stamp this
-    /// resolution triggered merged over another writer's config change
-    /// (04/03, criterion 3). Empty on the ordinary path.
+    /// resolution triggered merged over another writer's config change.
+    /// Empty on the ordinary path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<crate::ops::WarningHint>,
 }
@@ -520,7 +520,7 @@ mod tests {
         assert!(engine.get_entity(&EntityId("specs--lore".into())).is_some());
     }
 
-    /// Plan 07 criterion 2: a chosen side that fails entity validation
+    /// A chosen side that fails entity validation
     /// refuses with the validation error and writes nothing. The
     /// fixture is a nested conflict (recursive-merge shape): the
     /// theirs side still carries marker residue after extraction, so

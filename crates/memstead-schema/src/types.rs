@@ -21,7 +21,7 @@ pub struct TypeDefinition {
     #[serde(default)]
     pub boundaries: Vec<String>,
     /// One canonical, ENGINE-VALIDATED exemplar entity for this type
-    /// (agent-trust plan 09) — the few-shot material an authoring
+    /// — the few-shot material an authoring
     /// agent actually learns from. Validated against this very type
     /// through the real create path (`dry_run`) at schema
     /// install/seal time: a package whose exemplar does not conform
@@ -63,7 +63,7 @@ pub struct TypeDefinition {
     /// field's ONLY effect — it propagates nothing, implies no
     /// evidence obligation (real impact propagation is the
     /// `status_propagation` constraint). Renamed from the misleading
-    /// `propagating_relationships` (agent-trust plan 06): the old key
+    /// `propagating_relationships`: the old key
     /// refuses at authoring/install load with a typed error naming
     /// this one; sealed content (built-ins, installed refs) loads
     /// with the old key translated.
@@ -84,7 +84,7 @@ pub struct TypeDefinition {
     /// leaf-typed entity WITH edges stays legal, and every other
     /// health axis, search, and traversal treats leaf entities
     /// exactly like any other. Declarative per-type flag (the sixth
-    /// declarative form the agent-toolbox constraint vocabulary
+    /// declarative form the constraint vocabulary
     /// anticipated), served at both schema verbosity levels.
     #[serde(default, skip_serializing_if = "is_false")]
     pub leaf: bool,
@@ -348,14 +348,14 @@ pub enum ConstraintSeverity {
 
 impl ConstraintSeverity {
     /// Serde default for forms whose default tier is `block`
-    /// (uniqueness — plenum 4's 37 duplicates are the evidence).
+    /// (uniqueness: a field deployment's 37 duplicates are the evidence).
     pub fn block() -> Self {
         Self::Block
     }
 }
 
 /// One declared keep-health constraint on a type — the constraint
-/// vocabulary (agent-toolbox plan 07). Declarations travel sealed with
+/// vocabulary. Declarations travel sealed with
 /// the schema package and are rendered on the `memstead_schema`
 /// response at BOTH verbosity levels (a hidden legality condition is a
 /// defect class of its own). The `kind` tag is closed: an unknown kind
@@ -801,8 +801,7 @@ pub struct TableFormat {
 /// first") a declared section key. The axis is rendering-only: it
 /// never enforces anything (constraints own enforcement) and the
 /// engine never advances a date (the agent loop is the runtime).
-/// A type's declared **resolution condition** (backlog-decisions plan
-/// B5, Plenum finding 23): the section in which an open entity states
+/// A type's declared **resolution condition**: the section in which an open entity states
 /// what would resolve it, and the check kind under which that condition
 /// counts as checked. With it the `open_questions` health axis answers
 /// two questions without reading prose: which open entities have no

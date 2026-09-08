@@ -71,11 +71,11 @@ pub struct ParsedCommit {
     /// Value of the `Logical-Op:` trailer when present. Round-trips
     /// with `memstead_base::vcs::format_commit_message`'s emission.
     pub logical_operation_id: Option<String>,
-    /// Value of the `Role:` trailer (agent-trust plan 13) when
+    /// Value of the `Role:` trailer when
     /// present. Absent trailer = unspecified role — absence recorded
     /// as absence.
     pub role: Option<String>,
-    /// Value of the `Identity:` trailer (agent-trust plan 15) when
+    /// Value of the `Identity:` trailer when
     /// present. Absent trailer = undeclared identity — absence
     /// recorded as absence.
     pub identity: Option<String>,

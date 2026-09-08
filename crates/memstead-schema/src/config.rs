@@ -52,7 +52,7 @@ pub const ARCHIVE_SCHEMA_PREFIX: &str = ".memstead/schema/";
 /// tolerates it as an unknown meta member.
 pub const ARCHIVE_PROVENANCE_PATH: &str = ".memstead/provenance.json";
 /// Member path of the optional engine-owned anchors sidecar inside a
-/// sealed archive (the E3a provenance-anchor payload). Additive: archives
+/// sealed archive (the provenance-anchor payload). Additive: archives
 /// with no anchors omit it. Recognised as a first-class member so the
 /// canonical re-pack threads it through verbatim rather than
 /// silently stripping it (a recognised-but-malformed member is a typed
@@ -415,7 +415,7 @@ pub struct MemConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
 
-    /// Declared process-mem pairing (agent-trust plan 14): the name
+    /// Declared process-mem pairing: the name
     /// of the mem holding this mem's process tier (verification
     /// targets, findings, inquiry entries). Declaration wins over the
     /// binding-name derivation the brief renderer and the

@@ -1,6 +1,3 @@
-// `memstead mem init` is part of the mem-repo subcommand surface; the
-// lean build does not ship it.
-
 //! Integration test for `memstead mem init`.
 //!
 //! The CLI calls the engine in-process via

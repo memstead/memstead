@@ -20,6 +20,7 @@ use crate::setup::CliContext;
 /// probe-from-scratch flow keeps working.
 #[derive(Parser, Debug)]
 pub struct Args {
+    /// The entity type to describe. Omit to list every type the schema declares.
     pub name: Option<String>,
 
     /// Resolve the schema from this mem's pin. Any mounted mem

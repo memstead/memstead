@@ -2,10 +2,10 @@
 //! synchronously (no tokio) for the CLI to call into directly.
 //!
 //! Post-rebuild there is one workspace marker: `.memstead/workspace.toml`
-//! at the workspace root. The `mem-repo` Cargo feature decides
-//! which engine factory consumes it — full routes through
+//! at the workspace root. The workspace shape decides
+//! which engine factory consumes it: a mem-repo workspace routes through
 //! [`memstead_git_branch::workspace_store::engine_from_workspace_root`]
-//! (git-branch backends plus folder + archive), lean routes through
+//! (git-branch backends plus folder + archive), a folder workspace through
 //! [`memstead_base::Engine::from_workspace_root`] (folder + archive
 //! only).
 //!
@@ -58,7 +58,7 @@ pub fn workspace_not_initialised_error(message: &str) -> CliError {
 /// Lift a [`memstead_base::BootError`] into the typed CLI envelope.
 /// The boot seam previously flattened these through `anyhow`, so the
 /// `main` downcast missed them and every boot failure surfaced as
-/// `code: INTERNAL` with no next step (plenum 2026-08-06/07, expertise
+/// `code: INTERNAL` with no next step (the 2026-08-06/07 outage, expertise
 /// 2026-08-07). The typed material lives on
 /// [`memstead_base::BootError::code`]; this function only wraps it in
 /// the CLI's exit shape. The message is
@@ -85,18 +85,18 @@ pub struct CliContext {
     /// engine in-process and never installs a `tracing_subscriber`,
     /// so the flag is informational.
     pub quiet: bool,
-    /// The invocation-level declared role (`--role`, agent-trust
-    /// plan 13), already validated at parse time. Stamped onto every
+    /// The invocation-level declared role (`--role`), already validated
+    /// at parse time. Stamped onto every
     /// engine this context constructs so mutations record it.
     pub role: memstead_base::vcs::Role,
     /// The invocation-level declared identity (`--identity` /
-    /// `MEMSTEAD_IDENTITY`, agent-trust plan 15), already normalised
-    /// and length-checked at parse time. Stamped onto every engine
+    /// `MEMSTEAD_IDENTITY`), already normalised and length-checked at
+    /// parse time. Stamped onto every engine
     /// this context constructs so mutations and checks record it.
     pub identity: Option<String>,
 }
 
-/// Workspace flavour resolved from cwd. Subcommands dispatch on this
+/// Workspace shape resolved from cwd. Subcommands dispatch on this
 /// to pick the right engine accessor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceShape {
@@ -336,9 +336,9 @@ pub fn shape_disclosure_lines_in(shape: WorkspaceShape, mem_folder: Option<&str>
     shape_disclosure_in(shape, mem_folder).lines()
 }
 
-/// Engine instance + the workspace flavour it serves. Subcommands
+/// Engine instance + the workspace shape it serves. Subcommands
 /// match on the variant to call the right engine API; the read-side
-/// store accessor (`engine.store()`) lives on both flavours so simple
+/// store accessor (`engine.store()`) lives on both shapes so simple
 /// read commands can share most of their bodies.
 ///
 /// The variant names the workspace shape that booted, not a build
@@ -382,7 +382,7 @@ impl CliEngine {
 }
 
 impl CliContext {
-    /// Resolve the workspace flavour by walking up from cwd. Returns
+    /// Resolve the workspace shape by walking up from cwd. Returns
     /// `None` when no `.memstead/workspace.toml` is found in any ancestor.
     ///
     /// Post-rebuild the marker is shape-neutral — the same
@@ -441,7 +441,7 @@ impl CliContext {
     }
 
     /// Build a [`CliEngine`] rooted at an explicit workspace directory,
-    /// skipping the cwd walk-up. The flavour is still derived from
+    /// skipping the cwd walk-up. The shape is still derived from
     /// whether `<root>/mem-repo/.git/` is present, so callers that
     /// already know the root (e.g. `memstead publish --workspace`) get
     /// the same factory selection as [`Self::cli_engine`]. The split
@@ -460,7 +460,7 @@ impl CliContext {
         Ok(engine)
     }
 
-    /// The boot half of [`Self::cli_engine_at`]: flavour detection and
+    /// The boot half of [`Self::cli_engine_at`]: shape detection and
     /// engine construction, with NO deferred-mem load — every caller
     /// decides the load scope explicitly (full for the correct-by-
     /// default path, one mem for the scoped path).
@@ -486,9 +486,8 @@ impl CliContext {
     /// handles layout detection, mount enumeration, schema resolution,
     /// and readMems hydration in one pass.
     ///
-    /// Only compiled into the full build — the lean build never sees a
-    /// mem-repo workspace because `cli_engine()` rejects it before
-    /// reaching here.
+    /// Mem-repo shape only: a folder workspace is refused below with
+    /// `UNSUPPORTED_WORKSPACE_SHAPE` before any engine boots.
     pub fn engine(&self) -> anyhow::Result<BaseEngine> {
         let cwd = std::env::current_dir().context("Could not determine current directory")?;
 
@@ -563,7 +562,7 @@ pub fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 
 /// Compatibility alias for `find_workspace_root` — kept so existing
 /// CLI subcommands (export, changes, …) that historically routed
-/// through the lean-flavour walker continue to compile. Both walkers
+/// through the folder-workspace walker continue to compile. Both walkers
 /// now find the same marker; the alias is intentional for
 /// call-site clarity (`find_workspace_root` reads as the canonical
 /// surface; `find_filesystem_workspace_root` documents the
@@ -589,8 +588,8 @@ pub fn cli_ctx() -> CommitContext<'static> {
 /// path so the trailer is uniform across `create` / `update` / `relate`
 /// / `rename`. Un-gated (unlike [`cli_ctx_with_note`]) because the
 /// `relate` path passes the client to `relate_entity` directly rather
-/// than through a `CommitContext`, and that path compiles on both
-/// flavours.
+/// than through a `CommitContext`, and that path serves both
+/// workspace shapes.
 pub fn cli_client_id() -> ClientId {
     ClientId {
         name: "memstead-cli".to_string(),
@@ -661,7 +660,7 @@ pub fn full_engine(_ctx: &CliContext) -> anyhow::Result<BaseEngine> {
     // every deferred mem up front, so no consumer of this seam (`mem
     // list` counts, `recover`, the batch commands, install/uninstall)
     // computes an answer over a partial store. `full_engine` names the
-    // FullEngine flavour, not this posture — without this call an
+    // mem-repo engine shape, not this posture — without this call an
     // unloaded lazy mem rendered as entity count 0 (fifth lazy-mount
     // grade).
     engine.ensure_mems_loaded(None);

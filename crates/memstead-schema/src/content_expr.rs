@@ -1,5 +1,5 @@
 //! Content expressions — the compiled half of the section-format
-//! vocabulary (agent-toolbox plan 08).
+//! vocabulary.
 //!
 //! A section can declare its markdown shape as a flat expression over
 //! the mdast block-node vocabulary, verbatim: `paragraph`, `list`,

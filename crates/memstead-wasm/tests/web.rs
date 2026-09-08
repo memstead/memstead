@@ -1,5 +1,5 @@
 //! Smoke tests for the crate's JS bindings, run in Node
-//! (decision 10, backlog-sweep plan 04): the assertions cover the
+//! (decision 10, an earlier plan): the assertions cover the
 //! bundle's API surface (hydration, `getEntity`, `entityIds`, commit
 //! application, typed refusals) and none of them needs a browser API —
 //! a nodejs-target run executes them on every CI push with no

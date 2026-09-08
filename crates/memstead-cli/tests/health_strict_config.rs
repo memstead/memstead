@@ -1,5 +1,5 @@
 //! `memstead health --strict` on the configuration axes widened on
-//! 2026-08-23: a strict run exited 0 on a dogfood workspace with three
+//! 2026-08-23: a strict run exited 0 on this project's own workspace with three
 //! schema-pin mismatches, two rotted schema packages, two mounts whose
 //! branches did not exist, seven stubs and ten dangling links, because
 //! none of those participated. Each class gets its fixture here, the
@@ -160,9 +160,9 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
     // Storage that is GONE now quarantines rather than serving empty
     // (04/05): the mount is configured and cannot serve, which is what
     // quarantine means, and all three backends reach the same outcome for the
-    // same condition (criterion 9). It is reported there, not as an unbacked
+    // same condition. It is reported there, not as an unbacked
     // warning, and the quarantine roster is rendered wherever mems are listed
-    // so the mount does not simply vanish (criterion 7).
+    // so the mount does not simply vanish.
     let quarantined: Vec<(&str, &str)> = json["quarantined"]
         .as_array()
         .map(|a| {
@@ -179,7 +179,7 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
     // `ghost` is git-branch backed and stays a WARNING, not a quarantine: a
     // ref that does not exist is also the normal state of a mem never pushed
     // or never cloned, and quarantining it strands push, fetch and pull. This
-    // departs from criterion 9's literal parity; the session log records what
+    // departs from literal backend parity; the session log records what
     // the attempt at parity found.
     assert!(
         unbacked.contains(&("ghost", "missing_ref")),
@@ -204,9 +204,9 @@ fn strict_refuses_unbacked_mounts_with_the_right_reason_each() {
     );
     // One, not three: the two gone-storage mounts moved to quarantine, and
     // `hollow` (present but holding nothing) is the only genuine unbacked
-    // case left. A legitimately empty mem is never quarantined (criterion 5).
+    // case left. A legitimately empty mem is never quarantined.
     // The empty-but-present folder and the never-created branch. A
-    // legitimately empty mem is never quarantined (criterion 5).
+    // legitimately empty mem is never quarantined.
     assert_eq!(unbacked.len(), 2);
     assert_eq!(code, 1, "strict refuses with no include needed\n{envelope}");
     assert!(
@@ -358,8 +358,8 @@ propagating_relationships: []
 /// own policy file had stopped describing its graph and no surface noticed.
 ///
 /// The revocation names the edges it orphans at the moment it happens
-/// (criterion 5) and is never refused (criterion 6), and a strict run
-/// afterwards does not exit clean (criterion 3).
+/// and is never refused, and a strict run
+/// afterwards does not exit clean.
 #[test]
 fn revoking_a_grant_names_the_edges_it_orphans_and_strict_then_refuses() {
     let tmp = TempDir::new().unwrap();

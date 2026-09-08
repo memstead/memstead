@@ -55,7 +55,7 @@ pub struct OverviewArgs<'a> {
     pub operator_mode: bool,
     /// Force-suppress the `## Lifecycle Namespaces` section regardless of the
     /// writable roster. Set by an embedder whose surface categorically carries
-    /// no mem-lifecycle tools (the lean `memstead-mcp` build and the per-session
+    /// no mem-lifecycle tools (such as the per-session
     /// sketch endpoint): naming `memstead_mem_create` / `memstead_mem_delete`
     /// there would describe tools the surface does not expose. This is embedder
     /// configuration, not response-shape polymorphism — the section is a truthful
@@ -92,7 +92,7 @@ pub enum ComposeOverviewError {
 
     /// `args.mem` names a QUARANTINED mem — scoping refuses with the
     /// typed quarantine reason rather than reporting the mem unknown
-    /// (agent-trust plan 04). Carries the ready-made engine error so
+    ///. Carries the ready-made engine error so
     /// both surfaces map it through their ordinary engine-error path.
     #[error("mem \"{0}\" is quarantined")]
     MemQuarantined(String),
@@ -809,7 +809,7 @@ pub fn compose_overview(
     // all-clear answers for, in the markdown's OWN frontmatter so the
     // single-chunk path of every consumer serves it (the
     // extra_frontmatter copy below only reaches chunked heads, and
-    // the lean server returns the markdown verbatim).
+    // a consumer without chunking returns the markdown verbatim).
     md.push_str(&format!(
         "_verdict_coverage: {}\n",
         crate::ops::coverage::OVERVIEW_COVERAGE.wire_line()
@@ -826,7 +826,7 @@ pub fn compose_overview(
     }
     // Full build version of the serving binary (semver + git build
     // sha for dev builds) — the session-start "which version am I
-    // talking to" answer (agent-trust plan 05); a returning agent
+    // talking to" answer; a returning agent
     // that sees a changed value re-reads the tool roster in the
     // server instructions. The sha component is what makes the signal
     // fire between releases.
@@ -1268,8 +1268,7 @@ pub fn compose_overview(
             let from = link["from"].as_str().unwrap_or("?");
             let target = link["target_id"].as_str().unwrap_or("?");
             let section = link["section"].as_str();
-            // The condition is named, not implied by an absent section field
-            // (04/06, criterion 4).
+            // The condition is named, not implied by an absent section field.
             let kind = link["kind"].as_str().unwrap_or("?");
             if let Some(s) = section {
                 md.push_str(&format!("- [{kind}] `{from}` → `{target}` (in `{s}`)\n"));

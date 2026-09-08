@@ -151,17 +151,6 @@ impl LouvainIndex {
         }
     }
 
-    #[allow(dead_code)] // Part of the Louvain interface, used by non-fast paths
-    fn compute_node_degree(&self, i: usize) -> f64 {
-        let mut degree = 0.0;
-        let start = self.starts[i];
-        let end = self.starts[i + 1];
-        for o in start..end {
-            degree += self.weights[o];
-        }
-        degree
-    }
-
     fn isolate(&mut self, i: usize, degree: f64) -> usize {
         let current_community = self.belongings[i];
 
@@ -392,11 +381,6 @@ impl SparseQueueSet {
             }
         }
         None
-    }
-
-    #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
-        self.count == 0
     }
 }
 

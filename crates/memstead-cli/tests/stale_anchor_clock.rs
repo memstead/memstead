@@ -1,4 +1,4 @@
-//! The stale axis defers to anchor state (backlog-decisions plan B7): with
+//! The stale axis defers to anchor state: with
 //! the clock pinned 120 days ahead over a 90-day threshold, an entity whose
 //! anchor resolves is absent from the stale list and named under
 //! `anchor_fresh` with the anchor clock; an entity whose anchor drifted is

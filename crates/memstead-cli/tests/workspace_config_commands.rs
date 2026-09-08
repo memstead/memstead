@@ -1,10 +1,7 @@
-// `memstead workspace ...` config commands ship only in the full build.
-
 //! Integration tests for the `memstead workspace` write-side subcommand
 //! family.
 //!
-//! Full flavour only — lean CLIs don't expose `memstead workspace`. Each
-//! test seeds a fresh workspace (the minimum-viable `workspace.toml`
+//! Each test seeds a fresh mem-repo workspace (the minimum-viable `workspace.toml`
 //! that `memstead mem-repo init` materialises), runs one or more
 //! subcommands, and asserts on the resulting TOML and the engine's
 //! parse of it.
@@ -189,7 +186,7 @@ fn revoke_cross_link_drops_key_when_empty() {
     assert!(!body.contains("plugin = "), "got:\n{body}");
 }
 
-/// 04/07, criterion 7: the ordinary case gains no noise. Revoking a grant
+/// The ordinary case gains no noise. Revoking a grant
 /// that backs no existing edge reports nothing beyond the pre-existing
 /// not-found warning — the orphan scan is what an operator needs when it has
 /// something to say, and silence otherwise is the whole point of adding it.

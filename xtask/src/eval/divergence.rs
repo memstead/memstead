@@ -164,7 +164,7 @@ pub struct Prompts {
     pub reader_skeleton: String,
     pub writer_substrate: ArmText,
     pub reader_substrate: ArmText,
-    /// The arm-neutral integrity-auditor skeleton (criterion 10): a single
+    /// The arm-neutral integrity-auditor skeleton: a single
     /// skeleton with a `{CORPUS}` placeholder, no per-arm block — the auditor is
     /// never told which arm it audits, so the same prompt drives both arms and
     /// only the (tell-stripped) corpus differs. Machine-encodes `rubrics.md`'s
@@ -196,7 +196,7 @@ impl Prompts {
     /// Assemble the integrity-auditor prompt, with the arm's tell-stripped corpus
     /// substituted in. There is deliberately no `arm` parameter: the skeleton is
     /// arm-neutral, so the auditor cannot learn which arm it is scoring from its
-    /// prompt (criterion 10's blinding guarantee — the corpus is stripped
+    /// prompt (the blinding guarantee — the corpus is stripped
     /// separately, exactly like the judge path).
     pub fn auditor(&self, corpus: &str) -> String {
         self.auditor_skeleton.replace("{CORPUS}", corpus)
@@ -520,7 +520,7 @@ pub struct EntropyCounts {
 }
 
 /// Count the vocabulary entropy of a substrate directory, mechanically and with
-/// no judge (criterion 6). Both substrates are markdown on disk — Arm A a loose
+/// no judge. Both substrates are markdown on disk — Arm A a loose
 /// directory, Arm B the mem's rendered entity files — so one pure function serves
 /// both: it walks every `.md` file, reads the distinct `type:` and `status:`
 /// values from each file's leading YAML frontmatter, and counts distinct
@@ -584,8 +584,8 @@ pub fn vocabulary_entropy(dir: &Path) -> Result<EntropyCounts> {
 /// corpus is tell-stripped exactly like a reader answer.
 pub const CORPUS_ITEM_DELIM: &str = "<<<ITEM_BOUNDARY>>>";
 
-/// Read a substrate directory into `(corpus, item_count)` for the integrity audit
-/// (criterion 10): every `.md` file's full contents, concatenated in sorted
+/// Read a substrate directory into `(corpus, item_count)` for the integrity audit:
+/// every `.md` file's full contents, concatenated in sorted
 /// filename order (deterministic, arm-neutral) and joined by [`CORPUS_ITEM_DELIM`],
 /// and the number of items (files for Arm A, rendered entities for Arm B — the
 /// normalisation base the rubric divides defects by). Filenames are used only to
@@ -815,7 +815,7 @@ pub struct LedgerSummary {
 /// What a writer session produced: the tokens it spent, the tools it called, and
 /// the model it actually ran on. The tool calls are the criterion-5 evidence that
 /// Arm B's writes really crossed the MCP mutation surface; `executed_model` is
-/// criterion 3's refusal complement — the driver invalidates the round if the
+/// the model-pin refusal complement — the driver invalidates the round if the
 /// session ran on a model other than the pin ([`ensure_model_honored`]).
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
@@ -829,7 +829,7 @@ pub struct WriterOutcome {
 
 /// What a reader session produced: the answer text (blinded before the judge
 /// sees it), the tokens spent, the tools called, and the model it ran on
-/// (criterion 3's refusal complement, as for [`WriterOutcome`]).
+/// (the model-pin refusal complement, as for [`WriterOutcome`]).
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct ReaderOutcome {
@@ -841,8 +841,8 @@ pub struct ReaderOutcome {
     pub executed_model: String,
 }
 
-/// What a judge session produced: the score, its token cost (criterion 7), and
-/// the model it ran on. `executed_model` carries criterion 3's refusal complement
+/// What a judge session produced: the score, its token cost, and
+/// the model it ran on. `executed_model` carries the model-pin refusal complement
 /// onto the judge session too — a judge that silently ran on an ambient model
 /// invalidates the round ([`ensure_model_honored`]).
 #[allow(dead_code)]
@@ -855,7 +855,7 @@ pub struct JudgeOutcome {
     pub executed_model: String,
 }
 
-/// What one integrity-auditor trial produced (criterion 10): the two defect counts
+/// What one integrity-auditor trial produced: the two defect counts
 /// under the package's counting rubric, the tokens it spent (charged to
 /// [`Role::Auditor`]), and the model it ran on. `executed_model` carries criterion
 /// 3's refusal complement onto the auditor session too — an auditor that ran on an
@@ -1042,7 +1042,7 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
 /// `budget_usd`, when set, adds `--max-budget-usd` — the proportional cost budget
 /// that operationalises the pre-registered token allowance (amendment A1). Both
 /// arms receive the flag identically per round; only the substrate access surface
-/// differs (criterion 5), so the budget is not an arm-distinguishing variable.
+/// differs, so the budget is not an arm-distinguishing variable.
 /// The prompt is NOT among these args — it is fed to the session over **stdin** by
 /// [`spawn_claude_session`]. Passing a large prompt as a command-line argument hit
 /// the OS `ARG_MAX` limit (`E2BIG`/"Argument list too long", observed at round 9
@@ -1073,7 +1073,7 @@ pub(super) fn base_session_args(model: &str, budget_usd: Option<f64>) -> Vec<Str
 /// The only difference between the arms is the substrate access surface — the
 /// treatment under test: Arm A writes markdown files with the filesystem tools;
 /// Arm B mutates the mem through `mcp__memstead__*` over the supplied MCP config.
-/// The pinned `model` is passed explicitly in every case (criterion 3). The
+/// The pinned `model` is passed explicitly in every case. The
 /// writer allowance is operationalised as `budget_usd` (amendment A1) — a
 /// proportional `--max-budget-usd` cap computed by the caller via
 /// [`Campaign::budget_usd`]; `claude -p` cannot cap a session's output tokens
@@ -1150,7 +1150,7 @@ fn build_reader_args(
 #[allow(dead_code)]
 pub trait DivergenceRunner {
     /// One writer session for `arm`, invoked with the pinned `model` explicitly
-    /// (criterion 3) and the round's token allowance. The session mutates the
+    /// and the round's token allowance. The session mutates the
     /// arm's substrate as a side effect; the return value reports its cost and
     /// tool calls.
     fn write(
@@ -1179,10 +1179,10 @@ pub trait DivergenceRunner {
 }
 
 /// Scores a blinded answer against a reference and reports its own token cost, so
-/// the judge's tokens enter the ledger (criterion 7). The mount/substrate modes'
+/// the judge's tokens enter the ledger. The mount/substrate modes'
 /// [`super::Judge`] reports no tokens; the divergence campaign needs them, hence
 /// this parallel trait. The judge is invoked with the pinned `model` explicitly
-/// (criterion 3) and reports the model it ran on in [`JudgeOutcome`], so a judge
+/// and reports the model it ran on in [`JudgeOutcome`], so a judge
 /// that could not honor the pin invalidates its round like any other session.
 #[allow(dead_code)]
 pub trait DivergenceJudge {
@@ -1190,12 +1190,12 @@ pub trait DivergenceJudge {
 }
 
 /// Scores one arm's whole corpus for internal defects under the package's counting
-/// rubric and reports its own token cost (criterion 10, the integrity co-primary
+/// rubric and reports its own token cost (the integrity co-primary
 /// endpoint). Like [`DivergenceJudge`], it is a parallel trait to the mount-mode
 /// judge because it reports tokens and an executed model. The `auditor_prompt` it
 /// receives is the arm-neutral auditor skeleton assembled around the arm's
 /// already-tell-stripped corpus (no arm label anywhere), so the auditor scores
-/// blind — it is invoked with the pinned `model` explicitly (criterion 3) and
+/// blind — it is invoked with the pinned `model` explicitly and
 /// reports the model it ran on so a trial that could not honor the pin invalidates
 /// rather than counting as zero.
 #[allow(dead_code)]
@@ -1309,7 +1309,7 @@ pub struct Checkpoint {
     pub results: Vec<super::TaskResult>,
 }
 
-/// One integrity-audit checkpoint's scored result (criterion 10): `trials`
+/// One integrity-audit checkpoint's scored result: `trials`
 /// blinded auditor sessions per arm score the corpus for defects, normalised to
 /// `defects per 100 items`, aggregated with the same mean/stderr treatment as the
 /// reader battery. The delta orientation is **A − B** (tolerant minus engine-gated,
@@ -1344,7 +1344,7 @@ pub struct RoundEntropy {
 #[derive(Clone, Debug)]
 pub struct CampaignResult {
     pub checkpoints: Vec<Checkpoint>,
-    /// The integrity co-primary endpoint (criterion 10): one entry per audit
+    /// The integrity co-primary endpoint: one entry per audit
     /// checkpoint. Every entry is produced by real auditor sessions — there is no
     /// code path that fabricates a zero-filled integrity delta, so a scheduled
     /// audit that produced no result refuses the whole campaign rather than
@@ -1389,7 +1389,7 @@ impl CampaignResult {
 /// Resume state, persisted between rounds so a killed campaign continues without
 /// re-running finished writer rounds. It pins the package by the content hash
 /// recorded at campaign start: a resume against an edited package refuses
-/// (criterion 2's refusal complement) rather than silently mixing two designs.
+/// (the design-drift refusal complement) rather than silently mixing two designs.
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CampaignState {
@@ -1502,7 +1502,7 @@ fn with_retries<T>(label: &str, attempts: usize, mut f: impl FnMut() -> Result<T
 /// battery runs `trials` blinded, judged reader sessions per arm per query. One
 /// ledger spans writers, readers, and judges; the cost cap is checked between
 /// sessions throughout. Fully driven by the runner/judge traits, so a stub
-/// exercises the whole loop without a network call (criterion 1).
+/// exercises the whole loop without a network call.
 /// `state_path`, when given, makes the campaign resumable: the **full result**
 /// (checkpoints, integrity, entropy, ledger) is persisted after every round, and a
 /// restart with the same path rebuilds those accumulators and continues after the
@@ -1526,12 +1526,12 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
     state_path: Option<&Path>,
 ) -> Result<Option<CampaignResult>> {
     let model = package.single_model()?.to_string();
-    // The judge is pinned to its own model id from the package (criterion 3:
-    // every subprocess is invoked with its pinned model explicitly). It happens
+    // The judge is pinned to its own model id from the package (every
+    // subprocess is invoked with its pinned model explicitly). It happens
     // to equal the writer/reader pin in the committed package, but it is read
     // from `models.judge` rather than assumed equal.
     let judge_model = package.models.judge.clone();
-    // The auditor is pinned likewise (criterion 10 reuses criterion 3's posture).
+    // The auditor is pinned likewise.
     let auditor_model = package.models.auditor.clone();
     let schedule = package.campaign.schedule();
     require_slice_count(slices.len(), schedule.len())?;
@@ -1601,7 +1601,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
             &mut ledger,
         )?;
         // Vocabulary entropy from each arm's substrate bytes, after this round's
-        // writers ran — the secondary divergence signal (criterion 6).
+        // writers ran — the secondary divergence signal.
         entropy_series.push(RoundEntropy {
             round: rp.round,
             arm_a: vocabulary_entropy(runner.substrate_dir(Arm::A))?,
@@ -1642,7 +1642,7 @@ pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAudito
             });
         }
         if rp.integrity_audit {
-            // Blinded integrity audit (criterion 10, co-primary endpoint). Per
+            // Blinded integrity audit (co-primary endpoint). Per
             // arm: read the corpus once, tell-strip it exactly like the judge
             // path (so arm identity never reaches the auditor), then run `trials`
             // auditor sessions and normalise each to defects-per-100-items.
@@ -1747,7 +1747,7 @@ const SOURCE_LEDGER_PATH: &str = "docs/bug-ledger.jsonl";
 /// repository, reading the boundary commits from the package's `slices.json`.
 /// Returns one digest per slice in `index` order — round `i`'s writer input. The
 /// same string feeds both arms, so the digest is never an arm-distinguishing
-/// variable (criterion 5's parity contract, preserved at the call site).
+/// variable (the parity contract, preserved at the call site).
 pub fn extract_round_slices(repo: &Path, manifest_path: &Path) -> Result<Vec<String>> {
     #[derive(serde::Deserialize)]
     struct Manifest {
@@ -1778,7 +1778,7 @@ pub fn extract_round_slices(repo: &Path, manifest_path: &Path) -> Result<Vec<Str
     Ok(out)
 }
 
-/// Parse the auditor's two defect counts from its answer text (criterion 10). The
+/// Parse the auditor's two defect counts from its answer text. The
 /// auditor skeleton pins the format to `DUPLICATES: <n>` and `CONTRADICTIONS: <n>`,
 /// each on its own line; this reads the first integer on the marker's line,
 /// case-insensitively. A missing marker is an error, never a silent zero — an
@@ -1984,8 +1984,8 @@ impl DivergenceRunner for ClaudeDivergenceRunner {
 }
 
 /// The real blind judge: shells to `claude -p` with the label-free grading prompt
-/// and the pinned model, reporting its tokens (criterion 7) and executed model
-/// (criterion 3). No tools; runs from an empty sandbox.
+/// and the pinned model, reporting its tokens and executed model.
+/// No tools; runs from an empty sandbox.
 pub struct ClaudeDivergenceJudge {
     pub executable: String,
     pub sandbox_dir: PathBuf,
@@ -2010,7 +2010,7 @@ impl DivergenceJudge for ClaudeDivergenceJudge {
     }
 }
 
-/// The real blind integrity auditor (criterion 10): shells to `claude -p` with the
+/// The real blind integrity auditor: shells to `claude -p` with the
 /// arm-neutral auditor prompt (skeleton + tell-stripped corpus, assembled by the
 /// harness) and the pinned model, parsing the two defect counts and reporting its
 /// tokens and executed model. No tools; runs from an empty sandbox.
@@ -2348,7 +2348,7 @@ mod tests {
         // The prompt is never an argv entry (it goes over stdin) — no ARG_MAX risk.
         assert!(a.iter().any(|x| x == "-p") && !a.iter().any(|x| x == "PROMPT"));
 
-        // Arm A writes files, no MCP; Arm B mutates the mem over MCP (criterion 5).
+        // Arm A writes files, no MCP; Arm B mutates the mem over MCP.
         let a_tools = arg_pairs(&a).get("--allowedTools").unwrap().clone();
         assert!(
             a_tools.contains("Write") && a_tools.contains("Edit"),
@@ -2924,7 +2924,7 @@ not-json-skip-me
         reader_emits_tells: bool,
         /// When set, writer sessions plant arm-identifying tells into the substrate
         /// they write, so the integrity-audit corpus carries them and the blinder
-        /// must strip them before the auditor sees the corpus (criterion 10's
+        /// must strip them before the auditor sees the corpus (the
         /// blinding complement).
         writer_emits_tells: bool,
         /// When set, every writer/reader session reports this model instead of the
@@ -3233,7 +3233,7 @@ not-json-skip-me
 
         let seen = runner.seen.borrow();
         assert_eq!(seen.len(), 20);
-        // Every session was invoked with the pinned model (criterion 3).
+        // Every session was invoked with the pinned model.
         assert!(seen.iter().all(|(_, m, _)| m == "claude-opus-4-8"));
         // Hurry rounds 3/6/9 carry the 4000 allowance, full rounds 8000.
         let arm_a_allowances: Vec<usize> = seen

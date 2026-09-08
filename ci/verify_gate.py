@@ -84,7 +84,7 @@ DOCUMENTED_JOB_LINES = [
     # load-bearing, not decoration.
     "fetch-depth: 0",
     "https://memstead.io/install.sh",
-    'echo "$HOME/.memstead/bin" >> "$GITHUB_PATH"',
+    'echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"',
     # Step 1 pipes through `tee`; without pipefail the step's status is
     # tee's, so exit 6 is swallowed and the gate silently stops failing.
     "set -o pipefail",

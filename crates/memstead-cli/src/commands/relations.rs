@@ -56,10 +56,10 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 }
 
 /// Resolve outgoing/incoming edge lists for `id` from a `&Store`.
-/// Engine-agnostic — both flavours expose the same store accessor.
+/// Engine-agnostic: both workspace shapes expose the same store accessor.
 /// Returns `Err(NotFound)` when the entity is not in the store; the
 /// not-found check is here so the CLI exit code is uniform across
-/// flavours.
+/// workspace shapes.
 fn relations_from_store(
     id: &EntityId,
     id_for_err: &str,

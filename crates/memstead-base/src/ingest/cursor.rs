@@ -75,7 +75,7 @@
 //! Load-bearing invariant: the new baseline `token` is only *collected* here
 //! (into `write_commands` / `reseed`); it is recorded by the engine's
 //! `set_mem_sync_state` writer when `projection advance` completes a full pass
-//! (D7). The driver never writes it.
+//!. The driver never writes it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -169,7 +169,7 @@ pub fn relative_to(from: &Path, to: &Path) -> PathBuf {
 /// layout decision, in the same terms everywhere.
 ///
 /// The shape is supported: enumeration, change detection, sync, and anchor
-/// resolution all work on it (measured on the dogfood's own out-of-root
+/// resolution all work on it (measured on this project's own out-of-root
 /// bindings, where zero anchors orphan). What degrades rides the message —
 /// `../…` artifact ids and a layout that must stay fixed — together with the
 /// recipe that avoids it. Only path-namespace mediums can be out-of-root;
@@ -2329,7 +2329,7 @@ mod tests {
 
     /// A git-shaped baseline the repo does NOT contain reseeds at HEAD
     /// instead of degrading to `GitUnavailable` forever. Regression for the
-    /// dogfood plugin/graph binding, whose stored baseline was a commit of a
+    /// this project's own plugin/graph binding, whose stored baseline was a commit of a
     /// *different* repo (seeded before the source moved into the submodule):
     /// every pass diffed against a foreign sha, fataled, and the baseline
     /// never seated.
@@ -2370,7 +2370,7 @@ mod tests {
 
     /// A real git diff with a cross-repo deny present must still succeed (the
     /// out-of-repo pathspec is dropped, not fataled), and the in-repo scope is
-    /// honoured. Regression for the dogfood dialect (`../dev/**` under a
+    /// honoured. Regression for this project's own dialect (`../dev/**` under a
     /// sub-medium): git must not degrade the whole slice.
     #[test]
     fn git_slice_survives_cross_repo_deny() {
@@ -3541,8 +3541,8 @@ mod tests {
         );
         assert_eq!(plain, Some(AnchorState::Drifted));
         // The unknown-preparation anchor yields NO observation, so it is
-        // `unobserved`, not `unresolvable` (consistency-sweep 03/05,
-        // criterion 2). Before the split this assertion read `(1, 1)` on
+        // `unobserved`, not `unresolvable`.
+        // Before the split this assertion read `(1, 1)` on
         // `unresolvable`, which is the collapse itself: the pass not reaching
         // an artifact was reported as the artifact being gone.
         assert_eq!(

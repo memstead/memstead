@@ -108,7 +108,7 @@ fn status_markdown() {
 /// workspace. Pre-CLI-parity, this command would error out with the
 /// "No mems found. Run `memstead mem-repo init`" message; post the
 /// `CliEngine` foundation the command dispatches into the unified
-/// `memstead_base::Engine` (lean path) and emits the same shape the
+/// `memstead_base::Engine` (folder boot path) and emits the same shape the
 /// mem-repo path produces.
 #[test]
 fn status_works_on_filesystem_mem_workspace() {
@@ -508,11 +508,11 @@ fn overview_with_include_renders_rich_content_without_full_only_warning() {
         .success()
         .stdout(contains("## Schemas"))
         .stdout(contains("## Mems"))
-        // The lean CLI's pre-lift output would have included this
-        // warning code; the full CLI's shared-composer path does NOT.
+        // The pre-lift folder-path output would have included this
+        // warning code; the shared-composer path does NOT.
         .stdout(predicates::str::contains("OVERVIEW_RICH_CONTENT_FULL_ONLY").not())
-        // Full CLI uses `memstead type <name>` for the schema-lookup hint,
-        // not the MCP-flavour `memstead_schema(name=...)`.
+        // The CLI uses `memstead type <name>` for the schema-lookup hint,
+        // not the MCP tool's `memstead_schema(name=...)`.
         .stdout(contains("`memstead type <name>`"));
 }
 

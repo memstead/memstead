@@ -171,10 +171,6 @@ name = "projection-init"
 cli = "projection init"
 
 [[operation]]
-name = "projection-migrate"
-cli = "projection migrate"
-
-[[operation]]
 name = "projection-advance"
 cli = "projection advance"
 

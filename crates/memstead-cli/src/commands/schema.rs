@@ -31,11 +31,11 @@
 //! comments and key order preserved. It never bumps `version` and never
 //! touches a sealed copy.
 //!
-//! `validate` and `migrate` are flavour-agnostic and touch no workspace. `install`
-//! never boots the workspace on either flavour — it is a named remedy
+//! `validate` and `migrate` are shape-agnostic and touch no workspace. `install`
+//! never boots the workspace on either shape — it is a named remedy
 //! for boot-blocking states (repair-below-boot rule), so it operates on
-//! configuration and schema storage only: the folder flavour writes
-//! `.memstead/schemas/` directly, the mem-repo flavour writes the
+//! configuration and schema storage only: the folder shape writes
+//! `.memstead/schemas/` directly, the mem-repo shape writes the
 //! engine-owned `__MEMSTEAD` ref through the engine's own repair
 //! surface.
 
@@ -538,7 +538,7 @@ fn scaffold_next_steps(ctx: &CliContext, name: &str) -> Vec<Step> {
         .as_ref()
         .filter(|(_, root)| root.join("welcome-to-memstead.md").is_file())
         .map(|(mem, _)| format!("{mem}--welcome-to-memstead"));
-    // Full flavour: install into the current workspace, then re-pin the
+    // Mem-repo shape: install into the current workspace, then re-pin the
     // mem in place.
     {
         let mut steps = vec![
@@ -1075,9 +1075,9 @@ fn install(ctx: &CliContext, args: InstallArgs) -> anyhow::Result<()> {
 /// boots the workspace: `schema install` is a named remedy for
 /// boot-blocking states (an unresolvable pin whose package was never
 /// installed), so it must work on exactly the workspace whose boot it
-/// repairs — the plenum outage's failed escape route. Only present in
-/// the `mem-repo`-featured build; the lean binary refuses (it has no
-/// git-branch ref writer).
+/// repairs — the 2026-08-06/07 outage's failed escape route. Reached only on
+/// the mem-repo workspace shape; the folder shape has no git-branch
+/// ref to write to.
 fn install_to_git_branch(
     ctx: &CliContext,
     schema_ref: &SchemaRef,

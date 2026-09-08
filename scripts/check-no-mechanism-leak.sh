@@ -97,8 +97,7 @@ PATTERNS=(
 ALT=$(IFS='|'; echo "${PATTERNS[*]}")
 
 # Agent-facing strings: `description = "..."` and `instructions = "..."`
-# on the MCP tool/param attributes in the single memstead-mcp crate
-# (both flavours via the `mem-repo` feature).
+# on the MCP tool/param attributes in the memstead-mcp crate.
 desc_lines=$(grep -rnE '(description|instructions)[[:space:]]*=' \
   "$ENGINE/crates/memstead-mcp/src" 2>/dev/null || true)
 

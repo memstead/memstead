@@ -21,7 +21,7 @@ Listing prior art is also a defensive measure: similarities to other tools in th
 ## Schema validation
 
 - **[JSON Schema](https://json-schema.org)** ([RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259) for the JSON substrate, draft 2020-12 for the schema dialect) — Memstead uses [schemars](https://github.com/GREsau/schemars) to derive JSON Schema from Rust types for MCP tool parameter schemas. The schema-validates-the-data pattern itself is decades old.
-- **[OpenAPI](https://www.openapis.org)** / **[Swagger](https://swagger.io)** — model for declaratively describing HTTP APIs so machine readers can consume them. Memstead uses [utoipa](https://github.com/juhaku/utoipa) for the registry HTTP surface's OpenAPI document.
+- **[OpenAPI](https://www.openapis.org)** / **[Swagger](https://swagger.io)** — model for declaratively describing HTTP APIs so machine readers can consume them. Memstead uses [utoipa](https://github.com/juhaku/utoipa) for the OpenAPI document of the registry HTTP surface (the private registry server, not part of this repository).
 - **[Protocol Buffers](https://protobuf.dev)** / **[Cap'n Proto](https://capnproto.org)** — schema-first system design. Memstead's schema-first stance for entities echoes this.
 
 ## AI-agent integration
@@ -105,7 +105,7 @@ How Memstead differs: this is the approach Memstead's own VISION names as its or
 ## Rust ecosystem patterns
 
 - **Open-core projects in Rust** — **[swc](https://swc.rs)**, **[Polars](https://www.pola.rs)**, **[Pydantic-core](https://github.com/pydantic/pydantic-core)**, **[Lightning CSS](https://lightningcss.dev)**, **[Tantivy](https://github.com/quickwit-oss/tantivy)**, **[Tauri](https://tauri.app)**. All apply the "Rust engine + language-specific FFI wrappers" architecture Memstead uses. None invented the pattern; they each refined it for their domain.
-- **[axum](https://github.com/tokio-rs/axum)** + **[tower](https://github.com/tower-rs/tower)** — the standard Rust web-server pattern. memstead-registry follows it conventionally.
+- **[axum](https://github.com/tokio-rs/axum)** + **[tower](https://github.com/tower-rs/tower)** — the standard Rust web-server pattern. memstead-registry, the private registry server outside this repository, follows it conventionally.
 - **[gix](https://github.com/Byron/gitoxide)** — pure-Rust git implementation. Replaces libgit2/cgo dependency chains. Memstead's mem-repo backend uses it.
 - **[clap](https://github.com/clap-rs/clap)** + **[clap-markdown](https://github.com/ConnorGray/clap-markdown)** — the standard derive-based CLI parser plus its Markdown docs renderer. memstead-cli is conventional usage; the docs site's CLI reference is mechanically generated.
 
@@ -115,8 +115,7 @@ The following components were originally written for Memstead without reference 
 
 - The schema vocabulary (`software`, `default`, plus the `alias_target_rel_type` mechanism for body wiki-link auto-relations)
 - The MCP tool naming convention (`memstead_*`)
-- The lean/full architecture split and the engine-as-only-git-consumer principle
-- The probe skill (exploratory engine testing via agent reasoning, with protocol files)
+- The engine-as-only-git-consumer principle
 - The Surface Parity Matrix as a first-class documentation artefact
 - The mem-repo branch-per-mem layout
 - The `.mem` archive format

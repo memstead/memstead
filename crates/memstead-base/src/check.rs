@@ -1,5 +1,5 @@
 //! Check records — the engine-recorded act of verification
-//! (agent-trust plan 14).
+//!.
 //!
 //! A check is an agent recording "entity E checked, verdict ok |
 //! failed, via method M". It is engine state, never entity content:
@@ -263,7 +263,7 @@ pub struct CheckRecord {
     /// honestly; downstream gates treat unspecified as
     /// cannot-confirm, never as any real role.
     pub role: String,
-    /// The caller-declared identity (agent-trust plan 15): an opaque
+    /// The caller-declared identity: an opaque
     /// caller-chosen string, the ONLY comparator the independence
     /// gate uses. Absent on ledger lines written before identities
     /// existed and on identity-less callers — both downgrade every
@@ -530,7 +530,7 @@ mod tests {
         assert!(!line.contains("schema_ref"));
         // An identity-less record carries no identity key either —
         // pre-plan-15 lines and identity-less callers stay
-        // byte-identical (agent-trust plan 15, criterion 3).
+        // byte-identical.
         assert!(!line.contains("identity"));
     }
 

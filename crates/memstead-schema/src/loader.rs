@@ -1132,7 +1132,7 @@ fn load_with_context(
             }
         }
 
-        // Retired `examples:` list (agent-trust plan 09): dead
+        // Retired `examples:` list: dead
         // vocabulary — never validated, never served. Authoring
         // contexts refuse with the pointer at `exemplar:`; sealed
         // contexts tolerate and drop (nothing consumed it, so

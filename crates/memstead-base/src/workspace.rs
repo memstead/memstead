@@ -206,8 +206,8 @@ impl MountStorage {
     /// answer to a narrow question (does a write survive process restart)
     /// and is routinely read as a broader one (is the write recorded
     /// somewhere it could be recovered from). Callers cannot tell the two
-    /// apart from a bare boolean, so the basis travels with it (04/04,
-    /// criterion 7). The marker itself is unchanged and stays.
+    /// apart from a bare boolean, so the basis travels with it.
+    /// The marker itself is unchanged and stays.
     pub fn durability_basis(&self, head: Option<&str>) -> DurabilityBasis {
         match self {
             // A real commit object, named by a backend that HAS commits. The

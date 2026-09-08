@@ -137,7 +137,7 @@ pub struct ValidatedMem {
     /// expose provenance without re-extracting the archive.
     pub provenance_bytes: Option<Vec<u8>>,
     /// Raw bytes of the archive's engine-owned anchors sidecar
-    /// (`.memstead/anchors.json`, E3a), or `None` when the archive carries
+    /// (`.memstead/anchors.json`), or `None` when the archive carries
     /// none. Structurally validated at extract time and threaded verbatim
     /// through the canonical re-pack so publish/normalize does not strip
     /// provenance anchors.
@@ -315,7 +315,7 @@ pub struct SelfContainedArchive {
 /// `DANGLING_CROSS_MEM_EDGE_IN_EXPORT` and still produces the archive),
 /// while `install` refuses them, so a mem that references its sibling
 /// mems could be exported but never installed anywhere, not even back
-/// into the workspace it came from. The dogfood workspace's retired
+/// into the workspace it came from. This project's own workspace's retired
 /// `features` mem carried fifty such rows, every one an alias row
 /// synthesised from a body wiki-link, so dropping the rows loses
 /// nothing the body does not still say. Rows that are NOT backed by a

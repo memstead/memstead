@@ -72,7 +72,7 @@ jobs:
       # it. memstead-wasm pulls
       # memstead-base with default-features off; the ingest/pipeline
       # modules sit ungated in that closure — this run is the dependency
-      # gate AND, since backlog-sweep plan 04, the executed
+      # gate AND the executed
       # test surface: the crate's assertions (hydration, getEntity, the
       # entityIds stability contract, commit application, typed refusals)
       # run in Node on every push and fail the job on assertion failure.

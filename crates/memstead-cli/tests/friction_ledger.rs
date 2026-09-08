@@ -1,4 +1,4 @@
-//! The friction ledger's CLI leg (agent-trust plan 08): a refused CLI
+//! The friction ledger's CLI leg: a refused CLI
 //! call appends one content-free entry, a successful one appends
 //! nothing, `health --include friction` serves the summary and its
 //! absence leaves health untouched, the distinctive refusal payload
@@ -76,7 +76,7 @@ fn cli_refusals_append_successes_do_not_and_health_serves_the_axis() {
     assert_eq!(entries[0].code, "UNKNOWN_SECTION");
     assert!(entries[0].ts > 0, "entry carries a timestamp");
 
-    // Privacy (criterion 4): no ledger byte contains the payload.
+    // Privacy: no ledger byte contains the payload.
     let raw = fs::read_to_string(friction_ledger_path(&ws)).unwrap_or_default();
     assert!(
         !raw.contains(distinctive),

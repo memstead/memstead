@@ -1,12 +1,12 @@
-//! The **tier-1 fidelity report** (bundle plan `05-verify-sync-engine`, group
-//! B) — deterministic, engine-rendered, token-budgeted.
+//! The **tier-1 fidelity report**: deterministic, engine-rendered,
+//! token-budgeted.
 //!
-//! Verify (group A) records durable findings; this module *renders* a
+//! Verify records durable findings; this module *renders* a
 //! measurement over them plus the live anchor / capability / freshness state.
 //! It performs **no LLM call** and **no destination-mem mutation** — it reads
 //! the engine, the findings store, the advance store, and the capability
 //! matrix, and formats a report. Any repair instruction is the sync brief's job
-//! (group C), never this report's.
+//!, never this report's.
 //!
 //! ## What the report states honestly (B1–B5)
 //!
@@ -83,7 +83,7 @@ pub enum DenominatorBasis {
         /// `|S(D)|` — the enumerated source-artifact count.
         count: usize,
     },
-    /// The medium is non-enumerable (or its type is not enumerated this cycle):
+    /// The medium is non-enumerable (its type has no enumeration):
     /// no `S(D)`, so coverage is reported over anchors only and the denominator
     /// is stated unavailable.
     NonEnumerable {
@@ -352,7 +352,7 @@ pub struct FidelityReport {
     /// The destination mem.
     pub destination_mem: String,
     /// Whether the destination mem predates its binding — the adopt / onboarding
-    /// case (E1). When `true`, the report leads with the expected-0%-anchored
+    /// case. When `true`, the report leads with the expected-0%-anchored
     /// onboarding framing and the concrete backfill path, and the coverage
     /// section frames uncovered artifacts as the backfill worklist rather than
     /// as defects: no failure/error framing and no red verdict is produced
@@ -588,8 +588,8 @@ impl FidelityReport {
                     .to_string(),
             );
         }
-        // Rows the axis could not adjudicate (consistency-sweep 03/05,
-        // criterion 4). These EXTEND the existing blind-spot mechanism rather
+        // Rows the axis could not adjudicate.
+        // These EXTEND the existing blind-spot mechanism rather
         // than adding a parallel one, so an axis that measured only part of
         // its population reaches the inconclusive verdict the three-valued
         // rollup already provides.
@@ -597,7 +597,7 @@ impl FidelityReport {
         // EXCLUSIONS ARE DELIBERATELY ABSENT from this list. An out-of-scope
         // or other-binding anchor is legal, excluded and named: a complete,
         // correct answer about a row this binding does not answer for. Folding
-        // it in here would be the same collapse criterion 2 repairs on the
+        // it in here would be the same collapse repaired on the
         // standalone surface, treating a known exclusion as an unknown.
         if self.anchors.unobserved > 0 {
             blind_spots.push(format!(
@@ -686,7 +686,7 @@ impl FidelityReport {
             }
         }
 
-        // The adopt case (E1): a mem that predates its binding is expected to
+        // The adopt case: a mem that predates its binding is expected to
         // be 0% anchored, so uncovered findings there are the backfill
         // worklist, not drift. A red verdict must never be produced SOLELY by
         // pre-binding history — but the pass is not clean either, so it lands
@@ -823,7 +823,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         }
     ));
 
-    // --- Adopt / onboarding framing (E1) ---
+    // --- Adopt / onboarding framing ---
     // When the mem predates its binding, the report LEADS with onboarding
     // framing: the expected-0%-anchored statement plus the concrete backfill
     // path. REFUSAL: this is never a failure/error framing and the report never
@@ -1025,7 +1025,7 @@ fn render_hard_required(report: &FidelityReport) -> String {
         ));
     }
 
-    // Coverage-semantics framing (B4). REFUSAL (E1): under adopt, the exhaustive
+    // Coverage-semantics framing (B4). REFUSAL: under adopt, the exhaustive
     // branch must NOT frame the uncovered artifacts as defect findings — they are
     // the expected backfill worklist of a mem that predates its binding, never a
     // red verdict caused solely by pre-binding history.
@@ -1119,8 +1119,8 @@ fn render_hard_required(report: &FidelityReport) -> String {
         report.anchors.recheck,
         report.anchors.orphaned,
     ));
-    // What the denominator counted, stated rather than left to be assumed
-    // (consistency-sweep 03/01, criterion 5). Rows and artifacts differ
+    // What the denominator counted, stated rather than left to be assumed.
+    // Rows and artifacts differ
     // whenever one artifact carries several legitimate rows at different
     // grains or classes, and a reader reads the figures above as being about
     // artifacts.
@@ -1617,7 +1617,7 @@ pub fn compute_fidelity_report(
         DenominatorBasis::Enumerated { count: s_d.len() }
     } else if enumerable_facets == 0 {
         DenominatorBasis::NonEnumerable {
-            reason: "the medium type(s) are not enumerable this cycle".to_string(),
+            reason: "the medium type(s) are not enumerable".to_string(),
         }
     } else if !legacy_patterns.is_empty() {
         // The walk came up empty and the scope is still in the retired
@@ -1648,16 +1648,16 @@ pub fn compute_fidelity_report(
     let mut tree_fanout: BTreeMap<(String, String), usize> = BTreeMap::new();
     let entity_end_reconciled = engine.entity_set_is_reconcilable(dest.as_str()).is_ok();
     for file in &s_d {
-        // Filtered by BINDING, not merely by mem (consistency-sweep 03/01,
-        // criterion 7). The mem filter alone let an anchor written by one
+        // Filtered by BINDING, not merely by mem.
+        // The mem filter alone let an anchor written by one
         // binding mark a file covered for another, which is the same
         // population defect the resolution figures had, one axis over. An
         // anchor with no recorded binding still counts, by the same
         // pre-provenance fallback the population uses: a mem whose anchors
         // predate the field must not read as wholly uncovered on upgrade.
         //
-        // An anchor whose ENTITY is gone covers nothing either (03/02,
-        // criterion 5): the artifact would otherwise read as covered on the
+        // An anchor whose ENTITY is gone covers nothing either:
+        // the artifact would otherwise read as covered on the
         // strength of a row no entity stands behind. Only applied when the
         // entity end could be reconciled at all, so an unreconcilable mem
         // keeps its old coverage rather than reading as wholly uncovered.
@@ -1953,8 +1953,7 @@ pub fn compute_fidelity_report(
             ));
         }
     }
-    // The figure closes here, with the population it was computed over
-    // (consistency-sweep 03/05, criteria 1 and 3; 03/01, criterion 5): rows
+    // The figure closes here, with the population it was computed over: rows
     // and artifacts differ whenever one artifact carries several legitimate
     // rows, and a reader reads the figure as being about artifacts.
     anchors.figure = crate::anchor::AnchorResolutionFigure::new(
@@ -1981,7 +1980,7 @@ pub fn compute_fidelity_report(
         ));
     }
 
-    // Adopt / onboarding signal (E1) — the single canonical predicate shared with
+    // Adopt / onboarding signal — the single canonical predicate shared with
     // the sync brief and the status rollup: a mem with no anchors and no recorded
     // `#synced` baseline predates its binding, so 0% anchored is expected.
     let adopt = super::render::mem_predates_binding(engine, resolved);
@@ -2018,7 +2017,7 @@ pub fn compute_fidelity_report(
 /// not its previous bytes, and `none` detects nothing — both leave prune with
 /// no base leg, so it degrades to conflict-flagging regardless of the medium
 /// type's static base-retrievability ceiling. This is why filesystem+mtime —
-/// a common non-git dogfood binding — must surface the conflict-flag
+/// a common non-git binding in this project's own workspace — must surface the conflict-flag
 /// degradation even though `MediumType::Filesystem` advertises retrievability.
 fn strategy_retrieves_base(strategy: ChangeStrategy) -> bool {
     matches!(strategy, ChangeStrategy::Git | ChangeStrategy::Graph)
@@ -2522,11 +2521,11 @@ mod tests {
 
         let mut non = base_report();
         non.coverage.denominator = DenominatorBasis::NonEnumerable {
-            reason: "the medium type(s) are not enumerable this cycle".to_string(),
+            reason: "the medium type(s) are not enumerable".to_string(),
         };
         let md2 = render_fidelity_report(&non, 8_000, &[]).markdown;
         assert!(md2.contains("No `S(D)` denominator"));
-        assert!(md2.contains("not enumerable this cycle"));
+        assert!(md2.contains("not enumerable"));
     }
 
     /// E1 (report half) — a mem that predates its binding renders the onboarding
@@ -2795,10 +2794,10 @@ mod tests {
         let binding = &configs.bindings[0].config;
         let resolved = resolve_binding_run("engine/graph", binding).unwrap();
 
-        // Populate the durable findings store (group A) — read-only on the mem.
+        // Populate the durable findings store — read-only on the mem.
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
 
-        // Assemble the tier-1 report (group B) under the same key.
+        // Assemble the tier-1 report under the same key.
         let report = compute_fidelity_report(&engine, root, binding, &resolved, &outcome.key);
         let md = render_fidelity_report(&report, 8_000, &[]).markdown;
         (report, outcome, md)
@@ -2956,7 +2955,7 @@ mod tests {
         let outcome = verify_binding(&engine, root, binding, &resolved).unwrap();
         let report = compute_fidelity_report(&engine, root, binding, &resolved, &outcome.key);
 
-        // No anchors + no baseline → the mem predates its binding (E1).
+        // No anchors + no baseline → the mem predates its binding.
         assert!(
             report.adopt,
             "a no-anchor, never-synced mem predates its binding"

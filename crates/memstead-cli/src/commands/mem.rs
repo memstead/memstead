@@ -1,5 +1,5 @@
-//! `memstead mem init` / `memstead mem delete` — full-only mem-lifecycle
-//! CLI front-ends.
+//! `memstead mem init` / `memstead mem delete` — the mem-repo-only
+//! mem-lifecycle CLI front-ends.
 //!
 //! Both subcommands call the
 //! engine in-process via `memstead_base::mem_management::create_mem` /
@@ -907,7 +907,7 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// Lift a `FullEngineError` into a typed `CliError`. The lift sources
 /// every field from the engine error directly — `err.code()` for the
 /// wire token, `err.details()` for the structured payload,
-/// `err.prose_render()` for the text message. Wrapped lean errors
+/// `err.prose_render()` for the text message. Wrapped base-engine errors
 /// delegate to [`crate::CliError::from_engine_op`] so the per-variant
 /// exit-kind mapping (`NotFound` → exit 3, `HashMismatch` → exit 4,
 /// validation → exit 5, generic → exit 1) is consumed in one place;
@@ -921,7 +921,7 @@ fn render_mem_delete_markdown(r: &MemDeleteResponse, verb: &str) -> String {
 /// translation table to update.
 fn full_engine_err_to_cli(err: memstead_base::FullEngineError) -> anyhow::Error {
     match err {
-        memstead_base::FullEngineError::Lean(inner) => CliError::from_engine_op(inner).into(),
+        memstead_base::FullEngineError::Engine(inner) => CliError::from_engine_op(inner).into(),
         lifecycle => {
             let code = lifecycle.code();
             let details = lifecycle.details();
@@ -1089,7 +1089,7 @@ pub struct SetInternalArgs {
 ///
 /// Shared because three setters rendered warnings in `--json` only and stayed
 /// silent in human mode, which is where an operator would actually read
-/// `CONFIG_WRITE_INTERVENED` (04/03, criterion 3, found by the plan's
+/// `CONFIG_WRITE_INTERVENED` (found by the
 /// re-grade). One renderer, so the next setter cannot forget it.
 fn warning_block(warnings: &[memstead_base::ops::WarningHint]) -> String {
     if warnings.is_empty() {
@@ -1288,7 +1288,7 @@ pub fn run_set_schema(ctx: &CliContext, args: SetSchemaArgs) -> anyhow::Result<(
             .map_err(crate::CliError::from_engine_op)?,
         // Below-boot repair: this verb is the named remedy for an
         // unresolvable schema pin, so a failing boot must not block it
-        // (plenum 2026-08-06/07: both named remedies failed on the very
+        // (the 2026-08-06/07 outage: both named remedies failed on the very
         // boot they were supposed to repair). Requires a workspace root
         // to exist — with none, the boot error (typically
         // WORKSPACE_NOT_INITIALISED) stands.
@@ -1460,8 +1460,8 @@ pub fn run_list(ctx: &CliContext, _args: ListArgs) -> anyhow::Result<()> {
         }));
     }
 
-    // The quarantine roster, on the surface that names itself a mem list
-    // (04/05, criterion 7). A quarantined mount is held out of the mounted
+    // The quarantine roster, on the surface that names itself a mem list.
+    // A quarantined mount is held out of the mounted
     // set, so before this it did not degrade here — it vanished, and a fix
     // that quarantines without rendering this would trade a mount that looks
     // healthy for one that is simply gone, which is the worse failure.
@@ -1575,7 +1575,7 @@ mod tests {
     /// `VALIDATION_FAILED`.
     #[test]
     fn mem_has_incoming_refs_keeps_typed_code_and_carries_details() {
-        let err = FullEngineError::Lean(EngineError::MemHasIncomingRefs {
+        let err = FullEngineError::Engine(EngineError::MemHasIncomingRefs {
             mem: "other".to_string(),
             referrers: vec![ReferrerInfo {
                 from_id: "test--source".to_string(),
@@ -1594,7 +1594,7 @@ mod tests {
         assert_eq!(referrers[0]["mem"], "test");
     }
 
-    /// Lifecycle refusal (a full-only variant) is
+    /// Lifecycle refusal (a `FullEngineError` lifecycle variant) is
     /// promoted through with the same code + structured details the
     /// MCP wire ships. `MEM_PATH_NOT_ALLOWED` carries the candidate,
     /// the patterns list, and the typed reason discriminator.
@@ -1666,14 +1666,14 @@ mod tests {
         }
     }
 
-    /// Wrapped lean errors keep the
+    /// Wrapped base-engine errors keep the
     /// per-variant exit-kind mapping (`NotFound` → exit 3,
     /// `HashMismatch` → exit 4, etc.) by delegating to
     /// `CliError::from_engine_op`. The lift doesn't flatten every
-    /// lean variant to `Validation`.
+    /// base-engine variant to `Validation`.
     #[test]
-    fn wrapped_lean_error_preserves_per_variant_exit_kind() {
-        let err = FullEngineError::Lean(EngineError::NotFound {
+    fn wrapped_base_engine_error_preserves_per_variant_exit_kind() {
+        let err = FullEngineError::Engine(EngineError::NotFound {
             id: "specs--missing".to_string(),
         });
         let cli = lifted_cli_error(err);

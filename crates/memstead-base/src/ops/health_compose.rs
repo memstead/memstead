@@ -66,7 +66,7 @@ pub enum ComposeHealthError {
     },
     /// `args.mem` names a QUARANTINED mem — the scope refuses with the
     /// typed quarantine reason rather than reporting the mem unknown
-    /// (agent-trust plan 04). The wrapper maps it through its ordinary
+    ///. The wrapper maps it through its ordinary
     /// engine-error path via `Engine::unknown_mem_error`.
     #[error("mem \"{0}\" is quarantined")]
     MemQuarantined(String),
@@ -425,7 +425,7 @@ pub fn compose_health(
         obj.insert("warnings".into(), serde_json::json!(warnings));
     }
     // Quarantine roster — a boot-honesty fact, present whenever
-    // non-empty, never behind an include gate (agent-trust plan 04).
+    // non-empty, never behind an include gate.
     if !health.quarantined.is_empty() {
         obj.insert(
             "quarantined".into(),
@@ -435,7 +435,7 @@ pub fn compose_health(
     // Per-file load failures — same boot-honesty class: each entry's
     // message names the remedy (the merge-conflict refusal names
     // `memstead conflicts resolve`), so the composed report must carry
-    // them for the failure mode to name its door (backlog-sweep 07).
+    // them for the failure mode to name its door.
     if !health.load_errors.is_empty() {
         obj.insert(
             "load_errors".into(),
@@ -446,7 +446,7 @@ pub fn compose_health(
         obj.insert("boot_diagnosis".into(), diag.clone());
     }
     // Leaf populations — visible beside the orphan axis they exempt
-    // (agent-trust plan 06); omitted when no type declares leaf.
+    //; omitted when no type declares leaf.
     if !health.leaf_entities_by_type.is_empty() {
         obj.insert(
             "leaf_entities_by_type".into(),
@@ -627,8 +627,8 @@ pub fn compose_health(
     }
     if include.iter().any(|s| s == "signals") {
         // Declared aggregate signals above `none`, with per-level
-        // counts — the same composer the CLI and the filesystem
-        // flavour serve.
+        // counts — the same composer the CLI and the
+        // MCP server serve.
         obj.insert("signals".into(), engine.health_signals_axis(args.mem));
     }
     if include.iter().any(|s| s == "labelling") {
@@ -644,7 +644,7 @@ pub fn compose_health(
         );
     }
     if include.iter().any(|s| s == "vital_signs") {
-        // The model-truth signals the remodel skill reads (A6): counts
+        // The model-truth signals the remodel skill reads: counts
         // and capped lists, never a verdict.
         obj.insert(
             "vital_signs".into(),
@@ -676,7 +676,7 @@ pub fn compose_health(
         );
     }
     if include.iter().any(|s| s == "friction") {
-        // The friction ledger's read surface (agent-trust plan 08):
+        // The friction ledger's read surface:
         // counts per code / per verb over the workspace-local refusal
         // ledger, whole-ledger plus a recent 24h window. A workspace
         // without a root (in-memory boots) or without a ledger yet
@@ -786,7 +786,7 @@ pub fn compose_health(
     // rewritten or removed and no file is touched, because writing lines for
     // edits the engine did not author would fabricate provenance for a change
     // it cannot attribute. Git-branch mems are absent from the map rather than
-    // present and clean (criterion 4).
+    // present and clean.
     if include.iter().any(|s| s == "ledger") {
         let mut ledger = engine.ledger_reconciliation();
         if let Some(v) = vf {
@@ -906,7 +906,7 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
     // Body observations — their own section, not a row in the table above:
     // `summarize_health_item` prints an entity id and stops, and an
     // observation whose fate is not stated says nothing at all. This is the
-    // MCP text channel, so it is what a cold agent reads (04/01, criterion 1).
+    // MCP text channel, so it is what a cold agent reads.
     if let Some(arr) = v.get("body_observations").and_then(|x| x.as_array()) {
         let _ = writeln!(s, "\n## Body observations ({})", arr.len());
         for item in arr {
@@ -1011,7 +1011,7 @@ pub fn render_health_markdown(v: &serde_json::Value) -> String {
         }
     }
 
-    // Vital signs — per mem, the five model-truth signal counts (A6);
+    // Vital signs — per mem, the five model-truth signal counts;
     // the lists stay in the structured payload.
     if let Some(obj) = v.get("vital_signs").and_then(|x| x.as_object()) {
         let mems: Vec<(&String, &serde_json::Value)> =

@@ -3847,7 +3847,9 @@ mod tests {
         );
 
         // The envelope projects the anchor section, not the `—` fallback.
-        let envelope = crate::render::build_search_envelope(&result, 0);
+        let envelope = crate::render::build_search_envelope(&result, 0, &|_| {
+            crate::render::OriginClass::FirstParty
+        });
         assert_eq!(envelope.hits[0].summary_heading, "Statement");
         assert!(
             envelope.hits[0]

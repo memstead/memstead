@@ -1299,7 +1299,7 @@ fn batch_update_commit_note_names_entities_via_include_notes() {
 
 // -----------------------------------------------------------------------------
 // Filesystem-mem write-side dispatch — proves Bug 2 closure for `create`,
-// `update`, `delete`, `relate`, `rename` on the filesystem flavour. Each test
+// `update`, `delete`, `relate`, `rename` on the folder workspace shape. Each test
 // initialises a fresh filesystem-mem workspace via `memstead init`, then
 // exercises the relevant subcommand via the CLI subprocess (no engine
 // shortcuts, no hand-shaped .md seeds).
@@ -1672,11 +1672,7 @@ fn export_markdown_on_filesystem_rejects() {
 /// optimistic-locking `expected_hash` over a mem-repo commit graph.
 /// On a filesystem-mem workspace the CLI surfaces the
 /// "mem-repo-only" message so the operator knows to either move
-/// flavours or replay the updates one by one through `memstead update`.
-///
-/// Only meaningful in the full build — under `--no-default-features`
-/// the `batch-update` subcommand is gated out at the clap layer, so
-/// the bail-on-filesystem behaviour can't be exercised.
+/// to a mem-repo workspace or replay the updates one by one through `memstead update`.
 #[test]
 fn batch_update_on_filesystem_surfaces_mem_repo_only() {
     let tmp = TempDir::new().unwrap();
@@ -1703,9 +1699,6 @@ fn batch_update_on_filesystem_surfaces_mem_repo_only() {
 /// mems have no git history, so the command surfaces the same
 /// "mem-repo-only" message that the legacy `engine()` fallback
 /// produces.
-///
-/// Only meaningful in the full build — see the `batch_update_on_filesystem_*`
-/// twin for the rationale.
 #[test]
 fn workspace_dump_on_filesystem_surfaces_mem_repo_only() {
     let tmp = TempDir::new().unwrap();

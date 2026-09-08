@@ -1,9 +1,7 @@
-// `memstead mem init` (git-branch mems) ships only in the full build.
-
 //! `memstead export --format mem` redacts private-pattern spans in the
 //! archive's authoring provenance to `[redacted:<class>]`, never strips
 //! the record, counts redactions per class in the report, and leaves
-//! entity bodies alone (backlog-decisions plan B1). Proven on a folder mem
+//! entity bodies alone. Proven on a folder mem
 //! and on a git-branch mem, and the unpacked archive passes
 //! `scripts/leak-scan.sh` with no allowlist.
 

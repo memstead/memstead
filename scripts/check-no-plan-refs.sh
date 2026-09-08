@@ -12,10 +12,9 @@
 #
 # Scope (the surfaces, deliberately narrow):
 #   * CLI `///` doc comments — clap renders these into `memstead <sub> --help`.
-#     The single `memstead-cli` crate carries both flavours (lean/full via
-#     the `mem-repo` feature). ALL `///` are scanned, not only clap-rendered
-#     ones: CLAUDE.md bans plan references in *all* code, so an internal
-#     helper doc carrying a plan tag is a leak too.
+#     ALL `///` are scanned, not only clap-rendered ones: CLAUDE.md bans
+#     plan references in *all* code, so an internal helper doc carrying a
+#     plan tag is a leak too.
 #   * MCP `description = "..."` strings — the agent-facing tool/param
 #     descriptions on `#[tool]` / `#[schemars]` attributes.
 # Engine-emitted error/warning message strings were audited clean and
@@ -26,15 +25,23 @@
 # links — CLAUDE.md permits the latter, and the former is a grey zone
 # this gate deliberately leaves alone.
 #
-# Exit 0 when clean, 1 (with the offending lines) when a leak is found.
+# Usage: check-no-plan-refs.sh [<tree-root>]
+#   With no argument the script scans the repository it lives in. An
+#   explicit root scans any tree with the same `crates/<crate>/src` layout
+#   (a scratch copy, a fixture), which is how the guard itself is proved
+#   to still refuse.
+#
+# Exit 0 when clean, 1 (with the offending lines) when a leak is found,
+# 2 when the root carries no engine crates.
 
 set -u
 
 # This guard lives in the public engine repo (public/scripts/) and scans
 # the engine crates directly. The repo is root-hoisted (Cargo.toml +
-# crates/ at the repo root — no engine/ subdir), so ENGINE is the repo root.
+# crates/ at the repo root — no engine/ subdir), so ENGINE is the repo root
+# unless an explicit tree root is given.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-ENGINE="$ROOT"
+ENGINE="${1:-$ROOT}"
 
 if [ ! -d "$ENGINE/crates/memstead-cli/src" ]; then
   echo "check-no-plan-refs: $ENGINE/crates/memstead-cli/src not found — wrong ENGINE path?" >&2
@@ -50,6 +57,10 @@ PATTERNS=(
   '`[0-9][0-9]-[a-z0-9-]+\.md'      # backtick plan file, e.g. `05-cli-surface-policy.md`
   'dev/(plans|archive)/'            # plan-tree path
   '(^|[^A-Za-z0-9])F[0-9]+([^A-Za-z0-9]|$)'  # probe finding number, e.g. "F25." or bare "F18"/"(F9)"
+  'agent-trust plan'                # named plan, e.g. "(agent-trust plan 13)"
+  '\(D[0-9]\)'                      # decision label, e.g. "(D6)"
+  '\(E[0-9][ab]?'                   # engine-plan label, e.g. "(E3b, group A)"
+  'group [ABC]\)'                   # the group half of the same label
 )
 
 # Build one alternation for a single grep pass.
@@ -57,9 +68,8 @@ ALT=$(IFS='|'; echo "${PATTERNS[*]}")
 
 hits=""
 
-# 1. CLI `///` doc comments — the single memstead-cli crate (both
-#    flavours). All `///` are in scope (plan refs are banned everywhere,
-#    not just in help text).
+# 1. CLI `///` doc comments in the memstead-cli crate. All `///` are in
+#    scope (plan refs are banned everywhere, not just in help text).
 cli_doc_lines=$(grep -rnE '^[[:space:]]*///' \
   "$ENGINE/crates/memstead-cli/src" 2>/dev/null || true)
 cli_hits=$(printf '%s\n' "$cli_doc_lines" | grep -E "$ALT" || true)

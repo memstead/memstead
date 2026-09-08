@@ -266,8 +266,8 @@ mod tests {
     /// empty brief — never an empty string, never an invented section.
     /// The substantive standing logic is covered by
     /// `ops::health::tests::transition_requires_checks_gates_on_derived_state`
-    /// (shared enumeration), and the rendered shape by the live
-    /// dogfood workspace.
+    /// (shared enumeration), and the rendered shape by this project's
+    /// own live workspace.
     #[test]
     fn brief_names_the_no_gates_case() {
         let tmp = tempfile::TempDir::new().unwrap();

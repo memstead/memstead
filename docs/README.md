@@ -43,10 +43,10 @@ You know what you want; these get you there.
 
 ## 📖 Reference — *looking something up*
 
-Complete, generated, and kept honest by CI (regenerated from source; a drift
-check fails the build if the committed copy lags).
+Complete and generated: rendered from the engine sources at every docs-site
+build, never committed, so the pages describe the commit being built.
 
-- **[CLI / MCP reference + parity matrix](../docs-site/src/content/docs/reference/)** (rendered at docs-site build, not in the tree)
+- **[CLI / MCP reference + parity matrix](https://memstead.com/dev/reference/)**
   — every command, tool, and binding, plus the cross-surface parity matrix and
   the error-code index.
 - **[Sizing curve](sizing-curve.md)** — measured operating limits by

@@ -58,7 +58,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "memstead_retype",
     "memstead_update",
     // Process tier (1) — the bundle's single deliberate tool
-    // addition (agent-trust plan 14): the check operation.
+    // addition: the check operation.
     "memstead_check",
     // Admin (3)
     "memstead_changes_since",
@@ -1050,7 +1050,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Warning codes referenced literally in the description for
             // the search filter family.
             "STUB_FILTER_EXCLUDES_ALL",
-            // The mem-filter refusal (backlog-sweep plan 05): a filter
+            // The mem-filter refusal: a filter
             // naming no visible mem refuses typed.
             "UNKNOWN_MEM",
             "UNKNOWN_FILTER_KEY",
@@ -1163,7 +1163,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "community",
             "ref",
             "types",
-            // Type-scoped serving (backlog-sweep plan 06a): the
+            // Type-scoped serving (an earlier plana): the
             // unserved-types roster, the visible-degrade stamp/steer,
             // and the unknown-selection refusal code.
             "types_omitted",
@@ -1267,7 +1267,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.type_write_rules",
             "details.stubs",
             // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION
-            // (backlog-sweep/09): still-unset required metadata rides the
+            //: still-unset required metadata rides the
             // section refusal so one retry clears both gates.
             "details.pre_announced",
             "details.pre_announced.required_field_unset.missing[]",
@@ -1315,7 +1315,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             "details.type_write_rules",
             "details.stubs",
             // Cross-gate pre-announcement block on MISSING_REQUIRED_SECTION
-            // (backlog-sweep/09): still-unset required metadata rides the
+            //: still-unset required metadata rides the
             // section refusal so one retry clears both gates.
             "details.pre_announced",
             "details.pre_announced.required_field_unset.missing[]",
@@ -1337,7 +1337,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // lists it here (shared shape with relate / delete).
             "orphan_stubs_removed",
             // Whether an update that carried anchors changed the sidecar
-            // (backlog-decisions plan B10); absent without anchors.
+            //; absent without anchors.
             "anchors_changed",
             // Read-only field list: error code + the engine-stamped
             // metadata fields named alongside mem/id/type.
@@ -1550,8 +1550,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // literally.
             "x-<name>",
             "INVALID_CHECK_FINDING",
-            // Response field + derived-state vocabulary (agent-trust
-            // plan 14).
+            // Response field + derived-state vocabulary.
             "check_state",
             "never_checked",
             "checked_ok",
@@ -1582,23 +1581,22 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // necessary (04/04). This surface serves folder mems, so it is
             // the one where both matter.
             "OUT_OF_BAND_EDITS_UNDETECTED",
-            // Open-questions axis (include=open_questions) — agent-trust
-            // plan 11's composed what-don't-we-know worklist; `more` is
+            // Open-questions axis (include=open_questions): the composed
+            // what-don't-we-know worklist; `more` is
             // its explicit-truncation field.
             "open_questions",
             "more",
-            // Derivation-staleness axis (include=stale_derivations) —
-            // agent-trust plan 12.
+            // Derivation-staleness axis (include=stale_derivations).
             "stale_derivations",
             "unbaselined",
-            // Checks axis (include=checks) — agent-trust plan 14's
-            // derived check states + the independence gate.
+            // Checks axis (include=checks): derived check states + the
+            // independence gate.
             "checks",
             "self_checked",
             "confirmed_independent",
             "unconfirmable",
-            // Friction-ledger axis (include=friction) — agent-trust
-            // plan 08's refusal-ledger summary.
+            // Friction-ledger axis (include=friction): the refusal-ledger
+            // summary.
             "friction",
             // Vital-signs axis (include=vital_signs, A6).
             "vital_signs",
@@ -1668,9 +1666,8 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // Warning codes referenced literally in the description.
             "UNKNOWN_INCLUDE_KEY",
             "LIMIT_CLAMPED",
-            // The mem-scope refusal (backlog-sweep plan 06): the lean
-            // flavour's description names the typed refusal for a `mem`
-            // filter matching no visible mem.
+            // The mem-scope refusal: the description names the typed
+            // refusal for a `mem` filter matching no visible mem.
             "UNKNOWN_MEM",
             "details",
             // Config projection: the `config` include key (catalogue
@@ -1852,7 +1849,7 @@ fn response_shape_refs(tool_name: &str) -> &'static [&'static str] {
             // configs).
             "memstead_ref",
             "__MEMSTEAD",
-            // Honour-or-refuse posture (backlog-sweep 09b): the refusal
+            // Honour-or-refuse posture: the refusal
             // code for an unknown mem, the notes[] element fields, and
             // the up-front rename_similarity refusal.
             "UNKNOWN_MEM",
@@ -2338,7 +2335,7 @@ const STRUCTURED_ERROR_CODES: &[&str] = &[
     "TOOL_DISABLED",
     // memstead_changes_since cursor resolution
     "INVALID_CURSOR",
-    // E3a anchors: malformed anchors[] element on create/update
+    // Provenance anchors: malformed anchors[] element on create/update
     "INVALID_ANCHOR",
 ];
 
@@ -2360,7 +2357,7 @@ fn server_instructions_text() -> &'static str {
     // The live const the handler serves — no duplicated copy to drift
     // (the historical SERVER_INSTRUCTIONS_COPY + its extraction-based
     // match test were replaced by this direct read as a deliberate
-    // act, agent-trust plan 05).
+    // act).
     memstead_mcp::server::SERVER_INSTRUCTIONS
 }
 
@@ -2809,56 +2806,6 @@ fn memstead_overview_carries_always_load_meta() {
     }
 }
 
-/// Ad-hoc measurement printout for the Item-D trim audit. Run with:
-///
-///     cargo test --features mem-repo -p memstead-mcp --test tool_surface \
-///         print_description_sizes -- --nocapture --ignored
-///
-/// Reports per-tool word/byte sizes plus the server-instructions block
-/// so an implementing agent can quantify the cold-start `tools/list`
-/// surface and watch the trim's effect. `#[ignore]` keeps it out of the
-/// default `cargo nextest` sweep — measurement, not regression.
-#[test]
-#[ignore]
-fn print_description_sizes() {
-    let mut tools = descriptions();
-    tools.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-    let mut total_bytes = 0usize;
-    let mut total_words = 0usize;
-    println!("\n{:<28} {:>6} {:>6}", "tool", "words", "bytes");
-    println!("{}", "-".repeat(46));
-    for (surface, name, desc) in &tools {
-        let words = desc.split_whitespace().count();
-        let bytes = desc.len();
-        total_bytes += bytes;
-        total_words += words;
-        println!(
-            "{:<28} {:>6} {:>6}",
-            format!("{surface}/{name}"),
-            words,
-            bytes
-        );
-    }
-    println!("{}", "-".repeat(40));
-    println!(
-        "{:<22} {:>6} {:>6}",
-        "TOOLS_SUBTOTAL", total_words, total_bytes
-    );
-    let instr = server_instructions_text();
-    let instr_words = instr.split_whitespace().count();
-    let instr_bytes = instr.len();
-    println!(
-        "{:<22} {:>6} {:>6}",
-        "instructions", instr_words, instr_bytes
-    );
-    println!(
-        "{:<22} {:>6} {:>6}",
-        "GRAND_TOTAL",
-        total_words + instr_words,
-        total_bytes + instr_bytes
-    );
-}
-
 /// The title-grammar rule in the `memstead_create` / `memstead_rename`
 /// descriptions is the validator's own sentence — asserted verbatim
 /// against `memstead_base::TITLE_GRAMMAR_RULE`, whose conformance test
@@ -2883,7 +2830,7 @@ fn title_taking_descriptions_carry_the_validator_grammar_rule() {
 }
 
 // ==========================================================================
-// Surface honesty (agent-trust plan 05): the instructions tell the whole
+// Surface honesty: the instructions tell the whole
 // truth about the surface — complete roster, real version, bounded length.
 // ==========================================================================
 
@@ -2910,7 +2857,7 @@ fn registered_tools(tools: &[rmcp::model::Tool]) -> std::collections::BTreeSet<S
     tools.iter().map(|t| t.name.to_string()).collect()
 }
 
-/// Criterion 1 (full flavour): the instruction text can neither lag nor
+/// The instruction text can neither lag nor
 /// lead the registry — every registered tool is named, and every
 /// `memstead_*` token in the text names a registered tool.
 #[test]

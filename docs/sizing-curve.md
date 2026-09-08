@@ -8,8 +8,8 @@ motivated this measurement ran on different hardware and saw ~0.5 ms/entity;
 this machine sits in the same band.
 
 The engine's MCP instructions describe a mem as "designed for 1,000–5,000
-entities". Until this document, that span was advertised, not measured
-(plenum channel, finding 10). This page states what the four everyday
+entities". Until this document, that span was advertised, not measured.
+This page states what the four everyday
 operations actually cost across workspace sizes, so the deferred redesigns
 that wait for numbers (incremental derived-structure maintenance — and
 lazy mounts plus deferred cross-mem targets, since landed and recorded
@@ -43,7 +43,7 @@ Synthetic corpora, self-contained: `spec` entities under the builtin
 the binary's default is (`default@1.3.0` today) — three prose sections each, rotating `level`
 metadata, two explicit edges (USES / DEPENDS_ON) to earlier entities plus
 one body wiki-link (alias-emitting REFERENCES) — edge density ~3/entity,
-following the flavour of the largest real deployment without depending on
+following the shape of the largest real deployment without depending on
 it. Backend: git-branch (mem-repo), the backend the field pain was
 measured on. Each operation is a fresh `memstead` process — the **cold
 CLI path**, where cost was reported; a warm MCP server pays boot once at
@@ -88,19 +88,19 @@ boot ~0.5 ms/entity at a 7,414-entity workspace; a 6,900-entity ingest at
 
 Generation context: one `batch-create` call lands 7,500 entities in
 ~4.7 s — the batch path exists precisely because per-call cold boots made
-per-entity creation scale to hours (plenum finding 1).
+per-entity creation scale to hours.
 
 ## What the numbers imply for the deferred redesigns
 
 Data, not decisions — each paragraph states what the curve says, the
 backlog items decide.
 
-**Real lazy mounts (plenum 7) — landed 2026-08-21, measured.** The curve
+**Real lazy mounts (landed 2026-08-21, measured).** The curve
 says load is the only cold-path cost and it grows super-linearly with
 loaded entities. Every mounted mem used to add its full entity count to
 every cold command, needed or not. `"lifecycle": "lazy"` now defers a
 mem's entity load to first read, cutting cold-path cost proportionally to
-the unread share. Measured on the dogfood workspace (9 mounts, 687
+the unread share. Measured on the project's own workspace (9 mounts, 687
 entities, release build, median of 10 cold runs): a single-mem read
 (`memstead entity`, target mem eager, the other 8 mounts lazy) dropped
 from 237 ms to 106 ms — the remaining cost is the process spawn plus the
@@ -111,8 +111,7 @@ workspaces: at 0.6–0.75 ms/entity above 5k, splitting a 7.5k workspace
 into five mems and touching one turns a ~5.6 s command into roughly a
 ~0.8 s one.
 
-**Incremental maintenance of derived structures (plenum 9) — landed
-2026-08-22.** The cold path cannot see this cost: search-after-mutation
+**Incremental maintenance of derived structures (landed 2026-08-22).** The cold path cannot see this cost: search-after-mutation
 equals boot within noise at every size, because the full index rebuild
 is dwarfed by the full workspace load that precedes it. The decision
 therefore ran on the **warm path** (a long-lived engine absorbing
@@ -124,7 +123,7 @@ finding alongside: the per-query cost grows with store size in BOTH
 modes, so query-side work (not the rebuild) is the warm path's next
 lever.
 
-**Deferred cross-mem target resolution (plenum 8) — landed 2026-08-22.**
+**Deferred cross-mem target resolution (landed 2026-08-22).**
 The curve priced the forced mount this redesign removes: each
 additionally mounted mem added its entities × 0.6–0.75 ms to **every**
 cold command, permanently — a dossier citing 20 small mems of 350

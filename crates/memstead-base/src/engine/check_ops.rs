@@ -1,4 +1,4 @@
-//! The check operation and derived check state (agent-trust plan 14).
+//! The check operation and derived check state.
 //!
 //! `record_check` is the engine-recorded act of verification: it
 //! appends one [`crate::check::CheckRecord`] — verdict, method note,

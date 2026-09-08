@@ -7,10 +7,9 @@
 //! receive an event on every commit.
 //!
 //! The Core (this module + the `Engine` wiring) is **std-only**: no
-//! tokio, no notify, no async runtime dependency. Tokio-broadcast and
-//! filesystem-watcher conveniences live behind opt-in feature flags
-//! (`tokio`, `file-watcher`) so WASM / sync consumers are not
-//! forced to drag async runtimes into their dependency graph.
+//! tokio, no async runtime dependency. The tokio-broadcast convenience
+//! lives behind the opt-in `tokio` feature flag so WASM / sync consumers
+//! are not forced to drag an async runtime into their dependency graph.
 //!
 //! Consumer-side contract: transport / routing / filtering are *not*
 //! the engine's job — it only emits the events.
@@ -173,9 +172,7 @@ impl super::Engine {
     /// Consumers that cannot block the writer must decouple inside the
     /// callback (channel send, dedicated thread, async runtime
     /// queue). The opt-in `tokio` feature lifts this into a
-    /// `broadcast::Receiver` for tokio-resident consumers; the
-    /// `file-watcher` feature provides a cross-process variant for
-    /// readers without a writer engine.
+    /// `broadcast::Receiver` for tokio-resident consumers.
     ///
     /// Read-only mounts (archive or `ReadOnly` capability) accept the
     /// subscription but never emit — no mutations land in those mems

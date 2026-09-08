@@ -73,7 +73,7 @@ impl Schema {
     /// `acyclic` flag (which governs longer cycles, a different
     /// concern). That refusal is the declaration's only effect —
     /// nothing propagates (the historical "weight-bomb" rationale was
-    /// backed by no weight code anywhere; agent-trust plan 06 renamed
+    /// backed by no weight code anywhere; the 2026-08 rename
     /// the field and this predicate to match reality). Unknown
     /// `source_type` returns `false` (permissive — the type's
     /// existence is checked elsewhere).

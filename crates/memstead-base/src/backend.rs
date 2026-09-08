@@ -275,7 +275,7 @@ pub trait MemBackend: Send + Sync {
     /// compare-and-set against the observed tip, so a sibling's commit
     /// survives. The folder backend had no such protection, and a plain
     /// `fs::write` between another writer's read and its write is silent loss
-    /// with no history to recover from (consistency-sweep 04/03, criterion 5).
+    /// with no history to recover from.
     /// Closing that needs the check and the write to be one indivisible step,
     /// which only the backend can arrange.
     ///

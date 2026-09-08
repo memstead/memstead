@@ -40,7 +40,7 @@
       "default": {}
     },
     "exemplar": {
-      "description": "One canonical, ENGINE-VALIDATED exemplar entity for this type\n(agent-trust plan 09) — the few-shot material an authoring\nagent actually learns from. Validated against this very type\nthrough the real create path (`dry_run`) at schema\ninstall/seal time: a package whose exemplar does not conform\nrefuses with a typed error naming the type and the defect —\nthere is no warn-and-carry mode, so an exemplar can never\ndrift into teaching the wrong shape. Served at\n`verbosity: full` only (the lite skeleton stays unchanged).\nOptional per type; the built-in reference schemas are complete.",
+      "description": "One canonical, ENGINE-VALIDATED exemplar entity for this type\n— the few-shot material an authoring\nagent actually learns from. Validated against this very type\nthrough the real create path (`dry_run`) at schema\ninstall/seal time: a package whose exemplar does not conform\nrefuses with a typed error naming the type and the defect —\nthere is no warn-and-carry mode, so an exemplar can never\ndrift into teaching the wrong shape. Served at\n`verbosity: full` only (the lite skeleton stays unchanged).\nOptional per type; the built-in reference schemas are complete.",
       "anyOf": [
         {
           "$ref": "#/$defs/Exemplar"
@@ -65,7 +65,7 @@
       "default": false
     },
     "leaf": {
-      "description": "Terminal-by-construction marker: entities of this type are\nleaves — they carry no edges BY DESIGN, so health's orphan\naxis exempts their edge-less entities and reports them as a\nseparate leaf population instead (visible, never vanished).\nLeaf means \"no edges required\", not \"edges forbidden\": a\nleaf-typed entity WITH edges stays legal, and every other\nhealth axis, search, and traversal treats leaf entities\nexactly like any other. Declarative per-type flag (the sixth\ndeclarative form the agent-toolbox constraint vocabulary\nanticipated), served at both schema verbosity levels.",
+      "description": "Terminal-by-construction marker: entities of this type are\nleaves — they carry no edges BY DESIGN, so health's orphan\naxis exempts their edge-less entities and reports them as a\nseparate leaf population instead (visible, never vanished).\nLeaf means \"no edges required\", not \"edges forbidden\": a\nleaf-typed entity WITH edges stays legal, and every other\nhealth axis, search, and traversal treats leaf entities\nexactly like any other. Declarative per-type flag (the sixth\ndeclarative form the constraint vocabulary\nanticipated), served at both schema verbosity levels.",
       "type": "boolean"
     },
     "metadata_fields": {
@@ -85,7 +85,7 @@
       "type": "string"
     },
     "no_self_loop_relationships": {
-      "description": "Rel-types on which `memstead_relate` refuses a SELF-LOOP\n(from == to) when this type is the source. That refusal is this\nfield's ONLY effect — it propagates nothing, implies no\nevidence obligation (real impact propagation is the\n`status_propagation` constraint). Renamed from the misleading\n`propagating_relationships` (agent-trust plan 06): the old key\nrefuses at authoring/install load with a typed error naming\nthis one; sealed content (built-ins, installed refs) loads\nwith the old key translated.",
+      "description": "Rel-types on which `memstead_relate` refuses a SELF-LOOP\n(from == to) when this type is the source. That refusal is this\nfield's ONLY effect — it propagates nothing, implies no\nevidence obligation (real impact propagation is the\n`status_propagation` constraint). Renamed from the misleading\n`propagating_relationships`: the old key\nrefuses at authoring/install load with a typed error naming\nthis one; sealed content (built-ins, installed refs) loads\nwith the old key translated.",
       "type": "array",
       "items": {
         "type": "string"
@@ -177,7 +177,7 @@
   ],
   "$defs": {
     "ConstraintDef": {
-      "description": "One declared keep-health constraint on a type — the constraint\nvocabulary (agent-toolbox plan 07). Declarations travel sealed with\nthe schema package and are rendered on the `memstead_schema`\nresponse at BOTH verbosity levels (a hidden legality condition is a\ndefect class of its own). The `kind` tag is closed: an unknown kind\nfails deserialization, so no declaration can load and be silently\nignored. Forms land vertically — a form is only declarable once the\nengine evaluates it.",
+      "description": "One declared keep-health constraint on a type — the constraint\nvocabulary. Declarations travel sealed with\nthe schema package and are rendered on the `memstead_schema`\nresponse at BOTH verbosity levels (a hidden legality condition is a\ndefect class of its own). The `kind` tag is closed: an unknown kind\nfails deserialization, so no declaration can load and be silently\nignored. Forms land vertically — a form is only declarable once the\nengine evaluates it.",
       "oneOf": [
         {
           "description": "Form 1 — conditional requirement: `field` (a metadata field or\nsection key of this type) is required whenever `when_field`\nholds `when_value` (\"`status: checked` requires `checked_by`\").",
@@ -721,7 +721,7 @@
       ]
     },
     "ResolutionAxis": {
-      "description": "A type's declared **due axis** (first-author-path plan 08): which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).\nA type's declared **resolution condition** (backlog-decisions plan\nB5, Plenum finding 23): the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
+      "description": "A type's declared **due axis** (first-author-path plan 08): which\nof its fields carry deadline semantics, so the engine's due-brief\n(`memstead due`) can render \"what is due next\" without knowing any\ndomain vocabulary. Validated at schema load: `date_field` must be\na date-typed metadata field of the type, `status_field` an\nenum-typed one, every `open_values` entry a member of that enum,\nand `lead_section` (optional — rendered as \"what must happen\nfirst\") a declared section key. The axis is rendering-only: it\nnever enforces anything (constraints own enforcement) and the\nengine never advances a date (the agent loop is the runtime).\nA type's declared **resolution condition**: the section in which an open entity states\nwhat would resolve it, and the check kind under which that condition\ncounts as checked. With it the `open_questions` health axis answers\ntwo questions without reading prose: which open entities have no\ncondition written (`resolution_missing`), and which have one nobody\nhas checked (`resolution_unchecked`, from the check ledger). The\ndeclaration is a reading, not a rule: the write path refuses nothing\nnew, the section's own `required` flag stays the author's choice, and\nthe engine never judges whether a condition is well-formed. Validated\nat schema load: `condition_section` must name a declared section;\n`status_field` (optional) an enum-typed metadata field with every\n`open_values` entry in its enum, and without it every entity of the\ntype counts as open; `check_kind` (optional, default `verification`)\nan engine kind or a well-formed `x-` kind.",
       "type": "object",
       "properties": {
         "check_kind": {

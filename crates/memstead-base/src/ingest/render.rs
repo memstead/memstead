@@ -49,7 +49,7 @@ pub enum RenderBriefError {
         binding: String,
     },
     /// The durable findings store could not be read while rendering a verify /
-    /// sync brief (group C). The brief needs the open findings; a malformed
+    /// sync brief. The brief needs the open findings; a malformed
     /// store surfaces here rather than silently rendering an empty findings set.
     #[error("could not read findings store for '{binding}': {detail}")]
     FindingsRead {
@@ -97,7 +97,7 @@ pub fn mode_name(mode: BuildMode) -> &'static str {
 }
 
 /// Locate a binding by the CLI argument. The canonical form is the
-/// binding id `<mem>/<stem>` (D3) — the shape `projection brief` / `--all`
+/// binding id `<mem>/<stem>` — the shape `projection brief` / `--all`
 /// selection use. As a transition bridge, a slash-free legacy argument (the
 /// old flat ingest stem, e.g. `engine-graph`) is also matched against each
 /// binding's `<mem>-<stem>` dashed form, so `memstead projection brief engine-graph`
@@ -139,7 +139,7 @@ fn find_binding<'a>(
 /// the canonical binding id (or a legacy flat-ingest stem — see [`find_binding`]).
 ///
 /// `consume` mirrors the scheduler's peek/consume split (decision 12,
-/// backlog-sweep plan 03) onto derived caches: a peek (`false`) is a
+/// an earlier plan) onto derived caches: a peek (`false`) is a
 /// pure read that leaves every cache byte-identical, while a consuming
 /// render (`true`) additionally publishes this binding as the ACTIVE
 /// one for deny enforcement (`projection check-path`). Without this, a
@@ -242,7 +242,7 @@ pub fn render_verify_brief_for(
 /// point behind the CLI (`projection brief --sync`). It assembles both
 /// inputs in one render: the live cursor slice ([`compute_source_cursor`]) and
 /// the open findings the verify pass recorded (`current(key)`), plus the adopt
-/// framing when the mem predates its binding (E1). Read-only on the destination
+/// framing when the mem predates its binding. Read-only on the destination
 /// mem (shared `&Engine`) — every repair happens only when an agent acts on this
 /// brief through the normal MCP mutation surface.
 pub fn render_sync_brief_for(
@@ -323,7 +323,7 @@ pub fn render_sync_brief_budgeted(
 }
 
 /// Whether the destination mem predates its binding — the adopt / onboarding
-/// signal (E1). True when the mem carries **no** anchors and the binding has
+/// signal. True when the mem carries **no** anchors and the binding has
 /// **no** recorded `#synced` baseline for any facet: there is nothing to diff
 /// against and nothing anchored yet, so 0% anchored is expected (a first sync),
 /// not drift. A genuinely-fresh mem legitimately gets the same first-sync
@@ -608,7 +608,7 @@ fn render_one_shot(engine: &Engine, resolved: &ResolvedIngest) -> String {
 /// belongs to the orchestration layer, not brief rendering).
 fn build_process_mem(engine: &Engine, resolved: &ResolvedIngest) -> ProcessMemInfo {
     let skipped = resolved.mode == BuildMode::OneShot;
-    // One resolution mechanism (agent-trust plan 14): the
+    // One resolution mechanism: the
     // destination's declaration wins, the ingest-name convention is
     // the fallback. A declared-but-unmounted process mem is a stated
     // notice, never a silent fallback to derivation.

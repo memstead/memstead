@@ -383,7 +383,7 @@ fn heading_has_body(
 /// (`Engine::cross_mem_link_allowed`) and it is the same one the write gate
 /// consults; a second implementation here would answer a subtly different
 /// question from the gate it exists to mirror, and would drift the moment the
-/// create-rule default union changed (04/07, criterion 8). It is a closure
+/// create-rule default union changed. It is a closure
 /// because this module has no `Engine`, and the single Engine-side funnel
 /// supplies it for every caller.
 /// The consistency finding for a stub that is still referenced but never
@@ -491,7 +491,7 @@ pub fn consistency_findings(
                     "to_mem": to_mem,
                     // The cause, stated: this is NOT a missing target. The
                     // target may be perfectly present; what is absent is the
-                    // workspace's permission for the pair (criterion 1).
+                    // workspace's permission for the pair.
                     "cause": "no cross-mem grant permits this pair",
                     "repair": "grant the pair with `memstead workspace grant-cross-link`, \
                                or remove the edge with `memstead relate --remove` \

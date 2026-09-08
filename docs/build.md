@@ -27,7 +27,8 @@ The engine workspace is root-hoisted: `Cargo.toml` + `crates/` + `xtask/` live a
 |---|---|---|---|
 | `crates/memstead-cli/` | `memstead` CLI binary | Cargo | `target/<profile>/memstead` |
 | `crates/memstead-mcp/` | MCP server binary | Cargo | `target/<profile>/memstead-mcp` |
-| `crates/memstead-git-branch/` | Engine library (no binary, used by CLI/MCP) | Cargo | `target/<profile>/libmemstead_git_branch.rlib` |
+| `crates/memstead-base/` | Engine kernel: store, parser, validators, mem lifecycle, workspace policy (library, no binary) | Cargo | linked into others |
+| `crates/memstead-git-branch/` | Git-backed storage backend: multi-mem mem-repo, history, packaging, search index (library, no binary) | Cargo | linked into others |
 | `crates/memstead-schema/` | Schema layer (library, no binary) | Cargo | linked into others |
 | `crates/memstead-wasm/` | WASM bindings | Cargo (wasm target) | wasm module + JS glue |
 | `plugins/claude-code/` | Claude Code plugin | none — plain `.mjs`/`.json` | runs as-is |
@@ -46,7 +47,7 @@ On macOS, before running the test suite the first time, follow [docs/macos-dev-s
 
 ## One engine
 
-There is one build: `cargo build` produces the multi-mem, git-backed engine, and the same binaries serve folder-only workspaces (the shape `memstead quickstart` produces). No crate declares a feature that changes what ships; `--no-default-features` builds the same binaries. The kernel (`memstead-base`) still compiles without `gix` for wasm32, which the wasm CI job proves.
+There is one build: `cargo build` produces the multi-mem, git-backed engine, and the same binaries serve folder-only workspaces (the shape `memstead quickstart` produces). No crate declares a feature that changes what ships. The kernel (`memstead-base`) still compiles without `gix` for wasm32, which the wasm CI job proves.
 
 `./run-tests.sh` runs the engine suite, the plugin architecture gate, and the plugin `node --test` suite; CI runs the same script plus the smoke lane and the wasm job.
 
@@ -85,7 +86,7 @@ Cargo's incremental compiler reuses cached artifacts whenever possible. What inv
 
 | Change | Triggers rebuild of |
 |---|---|
-| Edit a file in `memstead-git-branch/src/` | `memstead-git-branch` and every crate depending on it (~all of them) |
+| Edit a file in `memstead-base/src/` | `memstead-base` and every crate depending on it (~all of them) |
 | Edit a file in a leaf crate (e.g. `memstead-cli/src/`) | only that crate |
 | `Cargo.toml` workspace edit (deps, profiles) | every crate |
 | `Cargo.lock` change (after `cargo update` or `git pull`) | dependencies that changed |
@@ -93,7 +94,7 @@ Cargo's incremental compiler reuses cached artifacts whenever possible. What inv
 | `cargo clean` | everything |
 | Cutting a `--features` set differently | the affected crate and its tree |
 
-Practical implication: edits to `memstead-git-branch` are slower than edits to `memstead-mcp` or `memstead-cli` because `memstead-git-branch` is at the bottom of the dependency graph. Plan your iteration to stay in leaf crates when possible. `./build-engine.sh` is incremental — it'll notice if nothing changed and finish in seconds.
+Practical implication: edits to `memstead-base` are slower than edits to `memstead-mcp` or `memstead-cli` because `memstead-base` is at the bottom of the dependency graph. Plan your iteration to stay in leaf crates when possible. `./build-engine.sh` is incremental — it'll notice if nothing changed and finish in seconds.
 
 ## Cargo profiles
 
@@ -102,7 +103,7 @@ Defined in the root `Cargo.toml`:
 ```toml
 [profile.dev]
 debug = "line-tables-only"           # smaller debug binaries → faster linking
-split-debuginfo = "unpacked"
+split-debuginfo = "packed"
 
 [profile.dev.package."*"]
 opt-level = 1                        # dependencies compile with light optimisation
@@ -164,4 +165,4 @@ Common after a client crashes or aborts a session. Stale processes can deadlock 
 Read the failure summary at the bottom (`Failed: <step-name>`). Each step's stdout is shown above it — scroll up to find the actual error. Common cases:
 - `workspace-build`: Rust compile error in your edits, not a build-system issue. Fix the code.
 - `cli-install` / `mcp-install`: usually a `--locked` Cargo.lock mismatch resolved by pulling main.
-- `mcp-build`: same root causes as `workspace-build`, since memstead-mcp depends on memstead-git-branch.
+- `mcp-build`: same root causes as `workspace-build`, since memstead-mcp depends on the engine crates.

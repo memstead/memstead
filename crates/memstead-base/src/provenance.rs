@@ -102,11 +102,11 @@ pub struct Provenance {
     /// mutations may carry an id too (a logical-op with one commit),
     /// or `None` — both are valid wire shapes.
     pub logical_operation_id: Option<String>,
-    /// The caller-declared role (agent-trust plan 13).
+    /// The caller-declared role.
     /// `Unspecified` records as absence on both backends (no trailer,
     /// no ledger field) — old records read back as `Unspecified`.
     pub role: crate::vcs::Role,
-    /// The caller-declared identity (agent-trust plan 15): an opaque
+    /// The caller-declared identity: an opaque
     /// caller-chosen string, same trust model as the role
     /// (caller-declared, unverified, tamper-evident). `None` records
     /// as absence on both backends (no trailer, no ledger field) —
@@ -146,14 +146,13 @@ impl Provenance {
         }
     }
 
-    /// Builder: attach the caller-declared role (agent-trust plan 13).
+    /// Builder: attach the caller-declared role.
     pub fn with_role(mut self, role: crate::vcs::Role) -> Self {
         self.role = role;
         self
     }
 
-    /// Builder: attach the caller-declared identity (agent-trust plan
-    /// 15). Callers pass an already-normalised value
+    /// Builder: attach the caller-declared identity. Callers pass an already-normalised value
     /// ([`crate::vcs::normalise_identity`]); `None` stays absence.
     pub fn with_identity(mut self, identity: Option<String>) -> Self {
         self.identity = identity;

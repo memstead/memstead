@@ -1,6 +1,5 @@
 //! Repair-below-boot: the verbs a boot-failure message names must run
-//! on exactly the workspace whose boot they repair (agent-trust plan
-//! 03). Fixtures follow the plenum outage shape — a mem-repo workspace
+//! on exactly the workspace whose boot they repair. Fixtures follow the 2026-08-06/07 outage shape — a mem-repo workspace
 //! whose boot fails on an unresolvable schema pin — and drive
 //! failure → repair → green end to end.
 
@@ -223,78 +222,6 @@ fn repair_refuses_typed_on_corrupt_store_bad_package_and_bad_ref() {
             "corrupt store must refuse typed for {args:?}: {env}"
         );
     }
-}
-
-/// Criterion 5: `projection migrate` with pending reconcile cursors on
-/// a workspace that (still) does not boot — under plan 04 that means
-/// a workspace-LEVEL failure (here: a corrupt store; mem-level
-/// failures now quarantine instead of blocking boot) — completes
-/// without deadlocking: cursors are explicitly deferred with a typed
-/// notice naming the follow-up, and the file survives (silent loss is
-/// the refused shape). Complement: on a bootable workspace the
-/// cursors are consumed and the file deleted, as today.
-#[test]
-fn projection_migrate_defers_cursor_seeding_when_boot_fails() {
-    let tmp = TempDir::new().unwrap();
-    let ws = tmp.path().join("ws");
-    memstead()
-        .args(["mem-repo", "init", ws.to_str().unwrap(), "--no-gitignore"])
-        .assert()
-        .success();
-    let mounts = ws.join(".memstead").join("state").join("mounts.json");
-    std::fs::create_dir_all(mounts.parent().unwrap()).unwrap();
-    std::fs::write(&mounts, "this is not json {").unwrap();
-    let cursor_path = ws.join(".memstead").join("reconcile-cursors.json");
-    std::fs::write(&cursor_path, r#"{"plenum:/abs/somewhere": "abc123"}"#).unwrap();
-
-    let out = memstead()
-        .current_dir(&ws)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env = parse_envelope(&out);
-    let notice = env["cursors_deferred"]
-        .as_str()
-        .expect("deferral notice must be present");
-    assert!(
-        notice.contains("RECONCILE_CURSORS_DEFERRED"),
-        "typed notice: {notice}"
-    );
-    assert!(
-        notice.contains("projection migrate"),
-        "notice names the follow-up: {notice}"
-    );
-    assert!(
-        cursor_path.exists(),
-        "deferral keeps the cursor file — silent loss is the refused shape"
-    );
-
-    // Complement: bootable workspace consumes and deletes.
-    let tmp2 = TempDir::new().unwrap();
-    let ws2 = tmp2.path().join("ws");
-    memstead()
-        .args(["mem-repo", "init", ws2.to_str().unwrap(), "--no-gitignore"])
-        .assert()
-        .success();
-    let cursor_path2 = ws2.join(".memstead").join("reconcile-cursors.json");
-    std::fs::write(&cursor_path2, r#"{"m:/abs/x": "abc123"}"#).unwrap();
-    let out = memstead()
-        .current_dir(&ws2)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env = parse_envelope(&out);
-    assert!(env["cursors_deferred"].is_null(), "no deferral: {env}");
-    assert!(
-        !cursor_path2.exists(),
-        "bootable workspace consumes and retires the cursor file as today"
-    );
 }
 
 /// Criteria 1 and 4: a workspace whose only mem is quarantined no longer

@@ -244,7 +244,7 @@ fn scope_matcher(resolved: &ResolvedIngest) -> Option<ScopeMatcher> {
     // scope patterns are source-relative (they join onto its `pointer`), so
     // pooling every source's raw patterns into one set — which is what this
     // did until 2026-08-27 — answers membership in a namespace no source
-    // speaks. The observable cost was real: after the dogfood bindings were
+    // speaks. The observable cost was real: after this project's own bindings were
     // migrated to the source-relative dialect, `project/graph`'s five anchors
     // moved from in-population to `excluded_out_of_scope` with no report, and
     // the same run's coverage denominator still counted the files those
@@ -654,7 +654,7 @@ mod tests {
             resolve_binding_run("engine/src", &binding).unwrap()
         };
 
-        // The shape the dogfood bindings actually have: pointer `../dev`,
+        // The shape this project's own bindings actually have: pointer `../dev`,
         // scope source-relative, anchor stored workspace-relative.
         let r = resolved_with(scope_source("../dev", "**/*.md"));
         let m = scope_matcher(&r).expect("a scoped source yields a matcher");
@@ -672,7 +672,7 @@ mod tests {
 
         // The case the first attempt at this fix masked, and the one the
         // grade refuted on: a SIBLING tree whose path does not begin with
-        // `../`. The dogfood layout hides it, because its mem sits one level
+        // `../`. This project's own layout hides it, because its mem sits one level
         // below the workspace, so every workspace-relative path there escapes
         // with `../` and the old `..` guard appeared to work.
         let r2 = resolved_with(scope_source("src", "**/*"));

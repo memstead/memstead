@@ -217,7 +217,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         .map_err(|e| anyhow::Error::from(CliError::from_engine_op(e)))?;
 
     // Persist the flagged findings under the mem-scoped standalone
-    // key (agent-trust plan 14): a binding-less mem's verification no
+    // key: a binding-less mem's verification no
     // longer observes-and-forgets — the next pass re-serves what the
     // previous one recorded as `already_seen`. Binding-backed stores
     // (keyed by hash(D), own files) are untouched. An engine without

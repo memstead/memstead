@@ -443,7 +443,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // template may carry `title` / `entity_type` / `mem`. Update can
     // change none of them, so each present value must match the
     // entity id's mem (checkable here) — the title/type compare runs
-    // against the live entity below, per engine flavour.
+    // against the live entity below, per workspace shape.
     if let Some(m) = payload.mem.as_deref()
         && m != entity_id.mem()
     {
@@ -703,7 +703,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     "file_path": outcome.file_path,
                     "_hash": outcome.content_hash,
                     // Backend write identity — response-shape parity with
-                    // the MCP filesystem flavour and the CLI's own
+                    // the MCP server and the CLI's own
                     // relate/conflicts commands.
                     "write_id": outcome.write_id,
                     "modified_sections": outcome.modified_sections.replaced,
@@ -720,7 +720,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                         .collect::<Vec<_>>(),
                 });
                 // Present only when the update carried anchors or unsets
-                // (backlog-decisions plan B10).
+                //.
                 if let Some(changed) = outcome.anchors_changed {
                     payload["anchors_changed"] = serde_json::json!(changed);
                 }

@@ -158,7 +158,7 @@ pub fn assemble_archive(workspace_root: &Path) -> Result<Vec<u8>, AssembleError>
 
         // .memstead/anchors.json — the engine-owned anchors sidecar,
         // when the mem carries one. The engine exporters have always
-        // threaded it (E3a: anchors travel in published archives, by
+        // threaded it (anchors travel in published archives, by
         // contract); this walker previously did not, so a bare
         // `memstead publish` of a folder mem silently shipped without
         // its anchors — the publish-strip failure the contract exists

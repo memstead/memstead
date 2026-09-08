@@ -169,7 +169,7 @@ pub struct RelationshipDef {
     #[serde(default)]
     pub acyclic: bool,
     /// When true, edges of this rel-type declare that the SOURCE
-    /// derives from the TARGET (agent-trust plan 12). Exactly three
+    /// derives from the TARGET. Exactly three
     /// effects, warn-tier forever: (1) explicitly writing such an
     /// edge records the target's current content hash as the edge's
     /// baseline in the engine-owned derivations sidecar (never in the

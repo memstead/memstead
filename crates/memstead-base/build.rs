@@ -1,7 +1,7 @@
 //! Build identity: best-effort capture of the git commit the binary
 //! is built from, so dev builds between releases are distinguishable
-//! (the plan-05 "version changed → re-read roster" signal and the
-//! plan-02 ENGINE_VERSION_SKEW stamp comparison can fire in dogfood
+//! (the "version changed → re-read roster" signal and the
+//! ENGINE_VERSION_SKEW stamp comparison can fire in this project's own
 //! use, where every build otherwise reports the same crate semver).
 //!
 //! `MEMSTEAD_BUILD_SHA` is ALWAYS emitted — the short HEAD sha (plus

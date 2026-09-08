@@ -115,7 +115,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     // Identity: `--identity` beats `MEMSTEAD_IDENTITY`; either is
     // normalised (trim, empty = absent) and length-checked typed —
     // the record is append-only, so an over-length value refuses
-    // before anything touches disk (agent-trust plan 15).
+    // before anything touches disk.
     let identity_raw = cli
         .identity
         .clone()

@@ -40,8 +40,6 @@ pub mod error;
 pub mod events;
 pub mod export_html;
 pub mod export_llms_txt;
-#[cfg(feature = "file-watcher")]
-pub mod file_watcher;
 pub mod gates;
 pub mod history;
 pub mod independence;
@@ -60,10 +58,6 @@ pub use error::{
 #[cfg(feature = "tokio")]
 pub use events::DEFAULT_BROADCAST_CAPACITY;
 pub use events::{EventCallback, MemChangedEvent, SubscriptionHandle};
-#[cfg(feature = "file-watcher")]
-pub use file_watcher::{
-    FileWatcherError, MemRepoWatcher, RosterFileChanged, watch_mem_repo, watch_roster,
-};
 pub use history::{
     EntityHistoryReport, EntityTouch, HISTORY_PAGE_DEFAULT, HISTORY_PAGE_MAX, StoryStart,
 };
@@ -98,10 +92,11 @@ pub(crate) struct MountedBackend {
     /// `write_guidance` / `extra` (`memstead_health
     /// { include_config: true }`'s per-mem detail block).
     ///
-    /// Loaded at construction for folder backends (read from
-    /// `<path>/.memstead/config.json`). Git-branch + archive backends
-    /// carry `None` for now — the read-from-storage-backend path
-    /// lifts in a follow-up session.
+    /// Read at construction through the backend's `read_mem_config`,
+    /// whatever the storage kind (folder: `<path>/.memstead/config.json`;
+    /// archive: the zip member; git-branch: the metadata branch's
+    /// `mems/<leaf>/config.json`). `None` when the backend has no config
+    /// or the payload does not parse.
     mem_config: Option<memstead_schema::config::MemConfig>,
     /// Per-mem authoring-provenance payload read from the archive's
     /// `.memstead/provenance.json` at construction (via
@@ -335,8 +330,8 @@ pub struct Engine {
     /// [`crate::mem_management::create_mem`] (and future runtime
     /// mount-add paths) to materialise a [`MemBackend`] from a
     /// [`Mount`] declaration. Defaults to
-    /// [`crate::workspace_store::instantiate_lean_backend`] so lean
-    /// (folder + archive only) consumers work out of the box. Full
+    /// [`crate::workspace_store::instantiate_local_backend`] so
+    /// folder + archive only consumers work out of the box. Git-branch
     /// consumers swap in `memstead_git_branch::storage::instantiate_full_backend`
     /// via [`Self::set_backend_factory`] after constructing the engine —
     /// `engine_from_workspace_root` does this once at boot. Function
@@ -345,8 +340,8 @@ pub struct Engine {
     /// hot path matters for the multi-mem pattern this engine is
     /// designed around.
     backend_factory: BackendFactory,
-    /// Storage discovery for UNMOUNTED mems (flywheel W7/02) — set by
-    /// full boot, `None` in lean/embedded engines (which keep the
+    /// Storage discovery for UNMOUNTED mems: set by
+    /// the git-branch boot, `None` in embedded engines (which keep the
     /// forward-reference mechanic unchanged for unmounted targets).
     pub(crate) unmounted_storage_prober: Option<UnmountedStorageProber>,
     /// Git-branch ops bundle — function pointers for the per-mount
@@ -354,7 +349,7 @@ pub struct Engine {
     /// (and therefore can't sit on the `MemBackend` trait without
     /// inverting the crate dependency). Full boot
     /// (`memstead_git_branch::engine_from_workspace_root`) installs the
-    /// bundle via [`Self::set_git_branch_ops`]; lean consumers leave
+    /// bundle via [`Self::set_git_branch_ops`]; consumers without it leave
     /// it `None` and `Engine::changes_since` / `Engine::export_mem`
     /// fall through to the folder/archive-only branches.
     git_branch_ops: Option<GitBranchOps>,
@@ -404,7 +399,7 @@ pub struct Engine {
     /// `mutation::iso_from_system_time`) is unchanged.
     mutation_clock: MutationClock,
     /// The caller-declared role for mutations in this session
-    /// (agent-trust plan 13). Set by the surface before each mutation
+    ///. Set by the surface before each mutation
     /// (per-call parameter wins over the surface's session default);
     /// `Unspecified` records as absence. Session state on the engine
     /// — the `mutation_clock` precedent — so the role travels into
@@ -412,7 +407,7 @@ pub struct Engine {
     /// every mutation signature.
     current_role: crate::vcs::Role,
     /// The caller-declared identity for mutations and checks in this
-    /// session (agent-trust plan 15). Same session-state pattern as
+    /// session. Same session-state pattern as
     /// `current_role`: set by the surface before each operation
     /// (per-call parameter wins over the surface's session default);
     /// `None` records as absence. An opaque caller-chosen string —
@@ -425,7 +420,7 @@ pub struct Engine {
 /// line: `engine.set_mutation_clock(Arc::new(|| some_time))`.
 pub type MutationClock = Arc<dyn Fn() -> std::time::SystemTime + Send + Sync>;
 
-/// Backend factory function pointer. Both flavours' existing
+/// Backend factory function pointer. Both crates' existing
 /// `instantiate_*_backend` functions match this signature, so the
 /// type alias is what bridges the dependency direction (memstead-base
 /// can't depend on memstead-git-branch) without an extra trait.

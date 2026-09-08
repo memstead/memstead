@@ -114,7 +114,7 @@ impl From<MutationKind> for ProvenanceKind {
 }
 
 /// A single mutation event. Built at the call site in the filesystem
-/// engine (criterion 1's wiring) and passed to [`append_change`].
+/// engine and passed to [`append_change`].
 pub struct ChangeEntry<'a> {
     pub kind: MutationKind,
     /// Mem-relative entity id, or `None` for batch mutations.
@@ -131,10 +131,10 @@ pub struct ChangeEntry<'a> {
     /// correlation. Round-trips through the JSONL wire shape; reader
     /// reconstructs the same value on `read_provenance`.
     pub logical_operation_id: Option<&'a str>,
-    /// Caller-declared role (agent-trust plan 13); `Unspecified`
+    /// Caller-declared role; `Unspecified`
     /// omits the field — absence recorded as absence.
     pub role: crate::vcs::Role,
-    /// Caller-declared identity (agent-trust plan 15); `None` omits
+    /// Caller-declared identity; `None` omits
     /// the field — absence recorded as absence, same as the role.
     pub identity: Option<&'a str>,
 }
@@ -473,7 +473,7 @@ mod tests {
         // 2024-05-06T12:53:20 UTC + 1ms == seconds=1_715_000_000, ms=1.
         assert_eq!(ts_str, "2024-05-06T12:53:20.001Z");
         // An identity-less entry carries no identity key — absence
-        // recorded as absence (agent-trust plan 15, criterion 3).
+        // recorded as absence.
         assert!(value.get("identity").is_none());
     }
 
@@ -793,7 +793,7 @@ impl LedgerReconciliation {
 /// **Reads only.** No ledger line is written, rewritten or removed, and no
 /// file is touched. Writing lines for edits the engine did not author would
 /// fabricate provenance for a change it cannot attribute, which is why this
-/// reports rather than tidies (criterion 2).
+/// reports rather than tidies.
 ///
 /// Called on demand, never on the staleness probe: that runs before every
 /// operation, and turning it into a directory walk would change the cost
@@ -882,7 +882,7 @@ mod reconcile_tests {
         std::fs::write(meta.join("changes.jsonl"), lines).unwrap();
     }
 
-    /// 04/04, criterion 1: both directions of disagreement are named, and
+    /// Both directions of disagreement are named, and
     /// named apart. A ledger line with no file and a file with no ledger line
     /// are different problems for the reader.
     #[test]

@@ -215,8 +215,7 @@ mod tests {
 
     /// The `--include` help text names every known overview include
     /// key — mirrors the `health` surface's `help_lists_every_include_key`
-    /// test. The full build locks against the engine composer's
-    /// allowlist; the lean build against `memstead-base`'s constant.
+    /// test. Locks against `memstead-base`'s allowlist constant.
     #[test]
     fn help_lists_every_overview_include_key() {
         let keys: &[&str] = memstead_base::overview::ALLOWED_OVERVIEW_INCLUDE_KEYS;

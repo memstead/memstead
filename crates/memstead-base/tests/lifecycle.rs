@@ -6,7 +6,7 @@
 //! Imported wholesale from `memstead-base/src/engine/lifecycle.rs` when the
 //! orchestrators moved to this crate. The test bodies are unchanged
 //! beyond the import-path rewrites; the on-disk shapes and assertion
-//! invariants are exactly what lean ran before the lift.
+//! invariants are exactly what the base engine ran before the lift.
 
 use std::path::PathBuf;
 
@@ -71,7 +71,7 @@ fn create_mem_rejects_overlong_note() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Engine(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("note exceeds"))
         }
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -158,7 +158,7 @@ fn create_mem_rejects_name_collision() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::MemNameCollision { name, .. }) => {
+        FullEngineError::Engine(EngineError::MemNameCollision { name, .. }) => {
             assert_eq!(name, "alpha")
         }
         other => panic!("expected MemNameCollision, got {other:?}"),
@@ -625,7 +625,7 @@ fn create_mem_rejects_basename_mismatch() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Engine(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("does not match the basename"));
         }
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -665,7 +665,7 @@ fn create_mem_rejects_explicit_git_branch_without_mem_repo() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Engine(EngineError::InvalidInput(msg)) => {
             assert!(
                 msg.contains("mem-repo/.git"),
                 "refusal must name the missing mem-repo/.git, got: {msg}"
@@ -740,7 +740,7 @@ fn delete_mem_rejects_unknown_name() {
     .unwrap_err();
     assert!(matches!(
         err,
-        FullEngineError::Lean(EngineError::UnknownMem(v)) if v == "missing"
+        FullEngineError::Engine(EngineError::UnknownMem(v)) if v == "missing"
     ));
 }
 
@@ -769,7 +769,7 @@ fn delete_mem_rejects_overlong_note() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Engine(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("note exceeds"))
         }
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -1165,7 +1165,7 @@ fn create_mem_operator_mode_still_enforces_input_validation() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::InvalidInput(msg)) => {
+        FullEngineError::Engine(EngineError::InvalidInput(msg)) => {
             assert!(msg.contains("note exceeds"));
         }
         other => panic!("expected InvalidInput from operator-mode, got {other:?}"),
@@ -1480,7 +1480,7 @@ fn delete_mem_refuses_when_cross_mem_incoming_edges_remain() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::MemHasIncomingRefs { mem, referrers }) => {
+        FullEngineError::Engine(EngineError::MemHasIncomingRefs { mem, referrers }) => {
             assert_eq!(mem, "b");
             assert_eq!(referrers.len(), 1, "exactly one Write-Mem referrer");
             assert_eq!(referrers[0].from_id, "a--source");
@@ -1708,7 +1708,7 @@ fn a_revoked_grant_surfaces_its_edges_and_a_live_grant_surfaces_none() {
         f.detail
     );
     // The target is present. A reader must not be able to mistake this for a
-    // dangling reference (criterion 1).
+    // dangling reference.
     assert!(
         engine
             .store()
@@ -1879,7 +1879,7 @@ fn a_deferred_mems_ungranted_edges_are_found_not_silently_skipped() {
     assert_eq!(found[0].code, "CROSS_MEM_EDGE_UNGRANTED");
 }
 
-/// 04/07, criterion 9: the reported condition is resolvable through the
+/// The reported condition is resolvable through the
 /// engine. Remove-shaped writes deliberately skip the write gate, so an edge
 /// that lost its grant can still be removed — otherwise the report would name
 /// a condition with no remedy.
@@ -2111,7 +2111,7 @@ fn delete_mem_router_only_refuses_when_cross_mem_incoming_edges_remain() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::MemHasIncomingRefs { mem, referrers }) => {
+        FullEngineError::Engine(EngineError::MemHasIncomingRefs { mem, referrers }) => {
             assert_eq!(mem, "b");
             assert_eq!(referrers.len(), 1);
             assert_eq!(referrers[0].from_id, "a--source");
@@ -2729,7 +2729,7 @@ fn delete_mem_guard_sees_referrers_in_deferred_mems() {
     )
     .unwrap_err();
     match err {
-        FullEngineError::Lean(EngineError::MemHasIncomingRefs { mem, referrers }) => {
+        FullEngineError::Engine(EngineError::MemHasIncomingRefs { mem, referrers }) => {
             assert_eq!(mem, "b");
             assert_eq!(referrers.len(), 1, "the deferred mem's referrer is seen");
             assert_eq!(referrers[0].from_id, "a--source");

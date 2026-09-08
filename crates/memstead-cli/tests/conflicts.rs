@@ -1,5 +1,5 @@
 //! Integration tests for `memstead conflicts` — the sanctioned door
-//! for git merge conflicts in folder mems (backlog-sweep plan 07).
+//! for git merge conflicts in folder mems.
 //! Runs the real binary; the conflicted file is written raw to disk,
 //! simulating exactly the damage an ordinary `git merge` does to a
 //! hand-committed folder mem.

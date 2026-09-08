@@ -24,7 +24,7 @@ history, diffing, optimistic locking via content hashes, packaging
 (`.mem` export/import), and the tantivy-backed search index.
 
 This is the backend the shipped `memstead` and `memstead-mcp` binaries
-compile in by default (their `mem-repo` feature).
+compile in; there is one build, and it always carries it.
 
 ## Use
 

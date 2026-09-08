@@ -25,8 +25,8 @@ use crate::graph::query;
 use crate::store::Store;
 
 /// Allowed `include` keys for `memstead_health` — the single source of
-/// truth shared across the lean MCP server, full MCP server, and the
-/// lean CLI's `health` command. Adding a new include key here lights
+/// truth shared across the MCP server and the
+/// CLI's `health` command. Adding a new include key here lights
 /// it up uniformly; agents see the same `UNKNOWN_INCLUDE_KEY` warning
 /// shape whether they reach health via MCP or CLI.
 pub const HEALTH_INCLUDE_KEYS: &[&str] = &[
@@ -325,12 +325,12 @@ pub fn health_vital_signs_axis(
 /// The `include=["anchors"]` axis — per-mem counts of the four
 /// standalone-verification states, computed through the same
 /// per-anchor mechanism `verify-anchors` and the binding verify use.
-/// Shared by the full composer, the CLI health command, and the lean
+/// Shared by the health composer, the CLI health command, and the
 /// MCP server so the axis cannot drift between surfaces.
-/// The `include=["checks"]` axis (agent-trust plan 14): per mem,
+/// The `include=["checks"]` axis: per mem,
 /// counts of the four derived check states plus the author≠checker
 /// independence gate over ok-checked entities. The gate compares
-/// caller-declared IDENTITIES and nothing else (agent-trust plan 15):
+/// caller-declared IDENTITIES and nothing else:
 /// the entity's created-by record against its newest ok-check record
 /// — both carry an identity and they are equal → `self_checked`
 /// ("twice-asserted, not verified"); both carry one and they differ →
@@ -564,7 +564,7 @@ pub fn health_checks_axis(
     serde_json::Value::Object(out)
 }
 
-/// One derivation-staleness finding (agent-trust plan 12): an
+/// One derivation-staleness finding: an
 /// explicit edge on a derivation-declared rel-type whose baseline
 /// differs from the target's current hash (`stale`), or that has no
 /// recorded baseline at all (`unbaselined`). Fresh edges are never
@@ -585,7 +585,7 @@ pub struct DerivationFinding {
 
 /// The `include=["stale_derivations"]` axis: per-mem findings from
 /// [`crate::engine::Engine::derivation_report`], shared by the CLI
-/// and both MCP flavours. A mem whose schema declares no derivation
+/// and the MCP server. A mem whose schema declares no derivation
 /// rel-types contributes an empty list — never an error.
 pub fn health_stale_derivations_axis(
     engine: &crate::engine::Engine,
@@ -614,7 +614,7 @@ pub fn health_stale_derivations_axis(
 /// truncation is always explicit via each list's `more` count.
 pub const OPEN_QUESTIONS_ITEM_CAP: usize = 20;
 
-/// The `include=["open_questions"]` axis (agent-trust plan 11): per
+/// The `include=["open_questions"]` axis: per
 /// mem, a composed worklist of what the holding does not know — its
 /// stubs, its never-confirmed (`recheck`) and `unresolvable` anchors,
 /// its unsatisfied constraints, its dangling links, and, when a
@@ -750,8 +750,8 @@ pub fn health_open_questions_axis(
         );
 
         // Dangling links — same collector as the overview include, and the
-        // SAME three names rather than a parallel vocabulary of its own
-        // (04/06, criterion 2). This axis emitted one `dangling_link` kind
+        // SAME three names rather than a parallel vocabulary of its own.
+        // This axis emitted one `dangling_link` kind
         // over all three conditions, which is the fused code by another
         // spelling; a second vocabulary is the one that drifts first.
         let dangling = capped(
@@ -771,7 +771,7 @@ pub fn health_open_questions_axis(
         // Paired process mems: open entries are work; negative
         // findings are the opposite — already searched, keep off.
         // Pairing runs through the ONE resolution function the brief
-        // renderer uses (agent-trust plan 14): a destination's
+        // renderer uses: a destination's
         // declaration wins regardless of naming — and pairs even
         // with no binding at all (the process tier stands without
         // one); the binding-name convention remains the fallback. A
@@ -991,7 +991,7 @@ pub fn health_anchors_axis(
                 "condition": condition,
                 "drifted": report.drifted,
                 "recheck": report.recheck,
-                // Split from `unresolvable` (03/05, criterion 2): the artifact
+                // Split from `unresolvable`: the artifact
                 // being gone is a measurement, the pass not reaching it is the
                 // absence of one, and this is the surface a reader arrives at
                 // without a binding in hand.
@@ -2855,7 +2855,7 @@ mod tests {
         );
     }
 
-    /// Agent-trust plan 14, criterion 4: a destination config
+    /// A destination config
     /// declaring its process mem resolves the pairing regardless of
     /// naming — with no binding at all — and a declaration naming a
     /// missing mem surfaces as the typed finding, never a silent
@@ -2928,8 +2928,8 @@ mod tests {
         assert_eq!(process[0]["resolvable"], false, "{axis}");
     }
 
-    /// Agent-trust plan 15: the independence gate compares
-    /// caller-declared identities and nothing else (criterion 2 with
+    /// The independence gate compares
+    /// caller-declared identities and nothing else (with
     /// the transport complement): equal identities read
     /// `self_checked` even across DIFFERING `(actor, client)` pairs,
     /// differing identities read `confirmed_independent` even on the
@@ -3036,7 +3036,7 @@ mod tests {
         );
 
         // The recorded identity is served by the provenance block and
-        // the check record (criterion 1's engine half).
+        // the check record (the engine half of the gate).
         let prov = engine.entity_provenance("gate", &a).unwrap();
         assert_eq!(
             prov.created_by.as_ref().and_then(|r| r.identity.as_deref()),
@@ -3596,7 +3596,7 @@ write_rules: []
         assert_eq!(repairs.len(), 3, "{found:?}");
     }
 
-    /// 04/06, criterion 5: the relationships row keeps its tolerance.
+    /// The relationships row keeps its tolerance.
     /// A row whose target is a stub is a legitimate forward reference —
     /// the alias machinery auto-stubs absent targets by design — and the
     /// split must not start reporting them. The body scan treats the
@@ -3633,7 +3633,7 @@ write_rules: []
         assert_eq!(found[0].kind, DanglingLinkKind::LinkTargetMissing);
     }
 
-    /// Decision 18 (backlog-sweep plan 06): dangling-links and stubs
+    /// Decision 18: dangling-links and stubs
     /// output is deterministic — the store iterates a HashMap, so the
     /// collectors sort before serving. Two independently built
     /// identical stores must produce byte-identical lists, in the

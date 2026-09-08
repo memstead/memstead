@@ -38,8 +38,11 @@ pub const CACHE_OVERRIDE_ENV: &str = "MEMSTEAD_MEM_CACHE";
 /// Windows), so the CLI and the Memstead app resolve to the same path
 /// without per-platform branching.
 ///
-/// `dirs::data_dir()` is infallible on Tier-1 platforms; `expect` is
-/// fine for an engine that only runs on systems with a resolvable home.
+/// When the platform reports no data directory (no `HOME`, no
+/// `XDG_DATA_HOME`: a bare container, a service unit), the cache falls
+/// back to `memstead/mems` under the process's temporary directory, so a
+/// boot never panics on a missing home; the override env var wins over
+/// both.
 pub fn mem_cache_dir() -> PathBuf {
     if let Ok(override_path) = std::env::var(CACHE_OVERRIDE_ENV)
         && !override_path.is_empty()
@@ -47,7 +50,7 @@ pub fn mem_cache_dir() -> PathBuf {
         return PathBuf::from(override_path);
     }
     dirs::data_dir()
-        .expect("platform provides a data directory")
+        .unwrap_or_else(std::env::temp_dir)
         .join("memstead")
         .join("mems")
 }

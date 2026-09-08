@@ -286,7 +286,7 @@ impl Engine {
     }
 
     /// Git-branch ops bundle currently installed on this engine.
-    /// `None` on lean-flavor engines that don't see mem-repo
+    /// `None` on engines without the git-branch crate, which see no mem-repo
     /// mounts. Returned by value because [`super::GitBranchOps`] is
     /// `Copy`. `create_mem` reaches for
     /// the bundle to drive `prune_residue` against an unmounted
@@ -306,11 +306,12 @@ impl Engine {
     /// The stored provenance anchors for `id`, read from its mem's
     /// anchors sidecar. Empty for an entity with none, an unknown mem, or
     /// a backend that does not persist anchors (a pre-anchor archive / any
-    /// sealed read-only mount). Additive read surface (E3a): the
+    /// sealed read-only mount). Additive read surface: the
     /// resolution *model* lives in [`crate::anchor`]
     /// ([`crate::anchor::resolve_anchor`] / [`crate::anchor::compose_entity_anchors`]);
     /// the live per-anchor *state* (which requires observing the source
-    /// artifacts through the medium/preparation pipeline) is E3b's concern.
+    /// artifacts through the medium/preparation pipeline) is the anchor
+    /// observation pass's concern.
     /// The anchors sidecar's parse error for `mem`, if it has one.
     ///
     /// The anchor readers below degrade a malformed sidecar to "no anchors",
@@ -462,7 +463,7 @@ impl Engine {
     /// (`entity_anchors_resolved`), and the standalone
     /// `verify_mem_anchors` operation. Path-shaped grains
     /// (`span`/`file`/`tree`) observe under the **decision-29 candidate
-    /// priority** (backlog-sweep plan 03a): the anchor's artifact path is
+    /// priority** (an earlier plana): the anchor's artifact path is
     /// SOURCE-relative first — when its `source` name resolves through
     /// `source_roots` to a declared pointer, the pointer-joined path is
     /// authoritative — and workspace-relative only as the fallback, tried
@@ -1045,7 +1046,7 @@ impl Engine {
                     report.unresolvable += 1;
                     crate::anchor::AnchorState::Orphaned.as_wire()
                 }
-                // Split from `unresolvable` (03/05, criterion 2): the artifact
+                // Split from `unresolvable`: the artifact
                 // being GONE is a measurement; the pass not reaching the
                 // artifact at all is the absence of one, and the repairs
                 // differ.
@@ -1082,7 +1083,7 @@ impl Engine {
         self.mounts.iter().map(|m| m.mount.mem.as_str()).collect()
     }
 
-    /// Derivation-staleness report for one mem (agent-trust plan 12):
+    /// Derivation-staleness report for one mem:
     /// every EXPLICIT edge whose rel-type the mem's schema declares
     /// `derivation: true`, compared against its recorded baseline.
     /// Baseline differs from the target's current hash → `stale`;
@@ -1913,7 +1914,7 @@ impl Engine {
     /// counts per label, the defeated list with its accepted
     /// attackers, the undecided list with its open attacker set, and
     /// the excluded cross-mem attack-edge count. One composer shared
-    /// by the CLI health command and both MCP flavours.
+    /// by the CLI health command and the MCP server.
     pub fn health_labelling_axis(&self, mem_filter: Option<&str>) -> serde_json::Value {
         use crate::ops::labelling::Label;
         let mut mems = serde_json::Map::new();
@@ -2050,7 +2051,7 @@ impl Engine {
 
     /// The `signals` health axis payload — the entity roster plus
     /// per-level counts. One composer shared by the CLI health
-    /// command and both MCP flavours so the axis cannot drift
+    /// command and the MCP server so the axis cannot drift
     /// between surfaces.
     pub fn health_signals_axis(&self, mem_filter: Option<&str>) -> serde_json::Value {
         use memstead_schema::SignalLevel;
@@ -2129,7 +2130,7 @@ impl Engine {
     ///
     /// A folder mem's ledger set against its file set, per mem.
     ///
-    /// **Folder mems only, and that is the point** (04/04, criterion 4). On a
+    /// **Folder mems only, and that is the point.** On a
     /// git-branch mem the change set is a real two-tree diff against the
     /// committed tree, so ledger-versus-files divergence is structurally
     /// impossible; emitting an always-clean version of this check there would
@@ -2243,7 +2244,7 @@ impl Engine {
             &|from, to| self.cross_mem_link_allowed(from, to),
             // The mount set, so an edge into a mem that is not mounted is
             // reported as the dangling finding it is and never as a grant
-            // the table still names (backlog-decisions plan B8).
+            // the table still names.
             &|target| self.mount(target).is_some(),
         );
         // The provenance layer's own consistency: a sidecar the engine cannot
@@ -2271,8 +2272,7 @@ impl Engine {
     /// A projection of [`Self::consistency_findings`] filtered to the one
     /// code, not a second scan: the revoke path and the health axis must
     /// never be able to answer differently about the same edge, and the
-    /// surest way to guarantee that is for one of them to BE the other
-    /// (04/07, criterion 8).
+    /// surest way to guarantee that is for one of them to BE the other.
     ///
     /// Call it after the grant edit has landed and the settings have been
     /// reloaded — the answer is "what does the CURRENT policy leave
@@ -2302,7 +2302,7 @@ impl Engine {
     ///
     /// A revocation that reported the whole standing set would blame this
     /// edit for every edge some earlier unrelated revocation left behind,
-    /// which is a different and less useful claim (04/07, criterion 5).
+    /// which is a different and less useful claim.
     pub fn newly_ungranted(
         before: &[crate::ops::integrity::IntegrityFinding],
         after: Vec<crate::ops::integrity::IntegrityFinding>,
@@ -2362,9 +2362,9 @@ impl Engine {
         // folder mem's drift cursor is its own ledger, which only the engine
         // writes, so an edit made to its files by anything else is invisible
         // and reads keep serving the pre-edit content. Silence about that is
-        // the one outcome 04/04's criterion 3 forbids. Git-branch mems are
+        // the one outcome this forbids. Git-branch mems are
         // absent: their change set is a real two-tree diff, so the condition
-        // cannot arise (criterion 4).
+        // cannot arise.
         for m in &self.mounts {
             if matches!(
                 m.mount.storage,
@@ -2448,7 +2448,7 @@ impl Engine {
         // Under a mem scope, mem-attributable warnings narrow to the
         // scoped mem; workspace- and request-scoped warnings return
         // `None` from `source_mem()` and stay visible regardless.
-        // Mirrors the full flavour's compose filter.
+        // Mirrors the health composer's filter.
         if let Some(v) = mem {
             summary
                 .warnings
@@ -2815,7 +2815,7 @@ impl Engine {
     /// where no index exists; the method stays present so mutation
     /// hooks can call it unconditionally.
     /// Incrementally maintain the search-index memo for a known
-    /// touched-id set (flywheel W8/01, criterion 1): replace or remove
+    /// touched-id set: replace or remove
     /// exactly the touched documents in place and advance the memo's
     /// key, instead of dropping the whole map. Semantics:
     ///
@@ -3155,7 +3155,7 @@ pub struct MemAnchorVerification {
     /// not there.
     pub unresolvable: usize,
     /// The anchor could not be observed at all this pass, so nothing about it
-    /// was measured (consistency-sweep 03/05, criterion 2). Its own count,
+    /// was measured. Its own count,
     /// because `unresolvable` used to swallow it: a reader on the surface you
     /// reach WITHOUT a binding could not tell a measured failure from an
     /// absent measurement, which is the one distinction that surface exists to
@@ -5712,5 +5712,5 @@ community:
         );
     }
 
-    // ---- Engine::from_workspace_root (lean boot path) --------------
+    // ---- Engine::from_workspace_root (folder boot path) ------------
 }

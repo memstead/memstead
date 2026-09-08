@@ -3,7 +3,7 @@
 //! inside a mem-repo (git-branch) workspace. The mount loader and
 //! runtime already dispatch per-mount (`MountStorageWire` handles
 //! `type: "folder"`, `instantiate_full_backend` routes folder mounts
-//! through the lean backend) — this test covers the creation surface
+//! through the local backend) — this test covers the creation surface
 //! that used to be heuristic-only, plus the reboot round-trip that
 //! proves both backends coexist in one workspace.
 

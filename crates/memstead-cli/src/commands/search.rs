@@ -16,9 +16,11 @@ pub struct Args {
     /// Free-text query. Omit for a pure structural filter.
     pub text: Option<String>,
 
+    /// Only entities in this mem. Omit to search every mounted mem.
     #[arg(long)]
     pub mem: Option<String>,
 
+    /// Only entities of this type (e.g. `spec`, `decision`).
     #[arg(long = "type")]
     pub entity_type: Option<String>,
 
@@ -59,18 +61,23 @@ pub struct Args {
     #[arg(long)]
     pub related_to: Option<String>,
 
+    /// Max hops from `--related-to` (default: 1; ignored without it).
     #[arg(long)]
     pub depth: Option<usize>,
 
+    /// Max results to return (default: all, max 200).
     #[arg(long)]
     pub limit: Option<usize>,
 
+    /// Skip the first N results; page with `--limit`.
     #[arg(long)]
     pub offset: Option<usize>,
 
+    /// Shortcut for `--filter level=<VALUE>` on schemas that declare a `level` field.
     #[arg(long)]
     pub level: Option<String>,
 
+    /// Shortcut for `--filter status=<VALUE>` on schemas that declare a `status` field.
     #[arg(long)]
     pub status: Option<String>,
 
@@ -229,12 +236,13 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         token_budget: None,
     };
 
-    let result = match ctx.cli_engine()? {
+    let cli_engine = ctx.cli_engine()?;
+    let result = match &cli_engine {
         CliEngine::MemRepo(engine) => {
             if let Some(name) = scope.mem.as_deref()
                 && engine.mount(name).is_none()
             {
-                return Err(super::list::unknown_mem_error(name, &engine).into());
+                return Err(super::list::unknown_mem_error(name, engine).into());
             }
             engine.search(&scope)?
         }
@@ -242,7 +250,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(name) = scope.mem.as_deref()
                 && engine.mount(name).is_none()
             {
-                return Err(super::list::unknown_mem_error(name, &engine).into());
+                return Err(super::list::unknown_mem_error(name, engine).into());
             }
             engine.search(&scope)?
         }
@@ -250,7 +258,9 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     let offset = scope.offset.unwrap_or(0);
 
     if ctx.json {
-        let envelope = render::build_search_envelope(&result, offset);
+        let engine = cli_engine.base();
+        let envelope =
+            render::build_search_envelope(&result, offset, &|m| engine.mem_origin_class(m));
         print_json(&envelope)?;
     } else {
         print_markdown(&render::render_search_markdown(&result, offset));

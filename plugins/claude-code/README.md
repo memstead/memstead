@@ -98,7 +98,7 @@ changes. Everything in this loop is operable today:
    honest "did not converge" report instead of looping.
 
 The engine records every mutation with provenance (and, on the git-backed mem
-flavour, commits it to the mem's own history). Your project repo stays yours:
+backend, commits it to the mem's own history). Your project repo stays yours:
 the plugin never commits to it — a mem folder living inside your repo is
 versioned like any other files, by you, on your terms.
 

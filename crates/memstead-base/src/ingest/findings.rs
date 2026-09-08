@@ -1,5 +1,5 @@
 //! The engine-owned durable **findings store** and the thin `projection verify`
-//! write path that populates it (bundle plan `05-verify-sync-engine`, group A).
+//! write path that populates it.
 //!
 //! Verify **measures** fidelity and records durable findings; it mutates no
 //! entity in the destination mem (though a completed run does write this
@@ -50,7 +50,7 @@
 //! the `next_batch` rotation machinery, consumed here solely to **schedule**
 //! verify samples. [`verify_binding`] takes `&Engine` (shared, not mutable): it
 //! is structurally incapable of a destination-mem mutation. Any repair routes
-//! through the sync brief (group C), never through findings recording/reading.
+//! through the sync brief, never through findings recording/reading.
 //! Two sanctioned post-run writes exist, both explicit separate steps the
 //! caller performs only after a pass returns `Ok` (so an aborted or failed
 //! run never records either), and both measurement bookkeeping — never entity
@@ -355,7 +355,7 @@ pub fn findings_store_path(workspace_root: &Path, mem: &str, name: &str) -> Path
 }
 
 /// The mem-scoped findings key for binding-less (standalone) anchor
-/// verification (agent-trust plan 14). A distinguished constant that
+/// verification. A distinguished constant that
 /// can never collide with a real `hash(D)` (which is always 64 hex
 /// chars): a hand-authored mem with no binding persists its verify
 /// findings under this key, in its own store file
@@ -406,7 +406,7 @@ pub fn record_standalone_findings(
             // A finding asserts a MEASURED condition, and an unobserved row is
             // the absence of a measurement: recording it as
             // `UnresolvableAnchor` claimed the artifact was gone when nobody
-            // had looked, which is the collapse criterion 2 removes. It is not
+            // had looked, which is the collapse this removes. It is not
             // dropped silently either — the population statement and
             // `fully_adjudicated` on this same surface report it, and the
             // binding report raises it as a blind spot that blocks a clean
@@ -600,7 +600,7 @@ pub struct VerifyOutcome {
     pub superseded: usize,
     /// The tier-3 backlog depth — findings queued for adjudication.
     pub backlog: usize,
-    /// The full-enumeration scheduling decision for this run (D3) — whether a
+    /// The full-enumeration scheduling decision for this run — whether a
     /// scheduled full walk fired, is not yet due, is disabled, and any typed
     /// non-enumerable refusals. Surfaced (never a silent skip) to the caller.
     pub full_resync: FullResyncDecision,
@@ -792,7 +792,7 @@ fn current_key(
 }
 
 /// The current `(hash(D), source_head)` key plus the open findings under the
-/// key's `hash(D)` for a binding — the read the **sync brief** (group C)
+/// key's `hash(D)` for a binding — the read the **sync brief**
 /// consumes. It resolves the current key exactly as [`verify_binding`] does,
 /// reads the durable store, and returns the `current(key)` slice cloned —
 /// which presents **all open findings regardless of the head they were
@@ -904,7 +904,7 @@ pub fn adjudicate_anchor(
 // ---------------------------------------------------------------------------
 
 /// One source facet's enumerability — the input the full-resync scheduler
-/// reasons over (D3). Built from the capability matrix per primary facet.
+/// reasons over. Built from the capability matrix per primary facet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FacetEnumerability {
     /// The source facet.
@@ -915,7 +915,7 @@ pub struct FacetEnumerability {
     pub enumerable: bool,
 }
 
-/// A typed refusal from the scheduled full-enumeration walk (D3): a source facet
+/// A typed refusal from the scheduled full-enumeration walk: a source facet
 /// whose medium the capability matrix marks **non-enumerable**, which the walk
 /// cannot cover. Emitted instead of a silent skip or a fabricated full-coverage
 /// claim.
@@ -929,7 +929,7 @@ pub struct FullResyncRefusal {
     pub reason: String,
 }
 
-/// The full-enumeration scheduling decision for a verify run (D3). A closed,
+/// The full-enumeration scheduling decision for a verify run. A closed,
 /// serialized vocabulary so the caller (and the fidelity report) can render the
 /// outcome without inferring it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -987,7 +987,7 @@ impl FullResyncDecision {
     }
 }
 
-/// Decide the `full_resync_every` scheduling outcome for a verify run (D3) —
+/// Decide the `full_resync_every` scheduling outcome for a verify run —
 /// pure and level-triggered on the persisted run counter. `every == 0` disables
 /// scheduled walks; otherwise the walk is **due** when `run_count` is a multiple
 /// of `every`. When due, enumerable facets are walked and non-enumerable facets
@@ -1033,17 +1033,17 @@ pub fn schedule_full_resync(
     }
 }
 
-/// The rotation item key a drift-adjudication candidate is selected under (D2) —
+/// The rotation item key a drift-adjudication candidate is selected under —
 /// stable across runs for a given `(entity, artifact)` so the rotating window
 /// covers a reproducible sequence.
 fn candidate_key(entity: &str, anchor: &Anchor) -> String {
     format!("{entity}\u{1f}{}", anchor.artifact)
 }
 
-/// Adjudicate the hash-drift **candidates** under the per-run cap (D1). Each
+/// Adjudicate the hash-drift **candidates** under the per-run cap. Each
 /// candidate is an anchor observation that hash-drift adjudication applies to
 /// (a hash-bearing anchor in a `drifted` / `recheck` state). `window` is the
-/// rotation-selected key set this run adjudicates (D2); a candidate whose
+/// rotation-selected key set this run adjudicates; a candidate whose
 /// [`candidate_key`] is **not** in the window is **queued** as
 /// `queued-for-adjudication` (the tier-3 backlog remainder) rather than
 /// adjudicated. `window = None` means uncapped — every candidate is adjudicated.
@@ -1067,8 +1067,8 @@ fn adjudicate_candidates(
                 out.push(f);
             }
         } else {
-            // Beyond the per-run cap: queue the remainder (D1) — it re-presents
-            // in a later run's rotation window (D2), so the whole candidate set
+            // Beyond the per-run cap: queue the remainder — it re-presents
+            // in a later run's rotation window, so the whole candidate set
             // is covered over a full rotation.
             out.push(Finding {
                 key: key.clone(),
@@ -1197,7 +1197,7 @@ fn merge_with_prior(
     fresh
 }
 
-/// The thin `projection verify` write path (group A). Measures a binding's
+/// The thin `projection verify` write path. Measures a binding's
 /// fidelity and records durable findings under the current `(hash(D),
 /// source_head)` key; **read-only on the destination mem** — the `&Engine`
 /// (shared, not `&mut`) makes a mem mutation structurally impossible (A5).
@@ -1424,9 +1424,9 @@ fn run_verify(
     let facet = source_facet_label(resolved);
     let cache_root = workspace_root.join(".memstead.cache").join("ingest");
 
-    // Tier-3 operations knobs (group D): the per-run adjudication cap (D1), the
-    // scheduled full-walk cadence (D3), and the sample window size. All come off
-    // the `verify` block, defaulting to the dogfood-tuned engine defaults when it
+    // Tier-3 operations knobs (group D): the per-run adjudication cap, the
+    // scheduled full-walk cadence, and the sample window size. All come off
+    // the `verify` block, defaulting to the engine defaults (tuned on this project's own bindings) when it
     // is absent (verify has no mutating operation to gate — an absent block is
     // defaults, never a refusal).
     let verify_op = binding.operations.verify.as_ref();
@@ -1436,7 +1436,7 @@ fn run_verify(
         .map_or(resolved.batch_size, |v| v.batch_size)
         .max(1) as usize;
 
-    // Level-trigger clock + full-resync schedule (D3) — the counter ticks every
+    // Level-trigger clock + full-resync schedule — the counter ticks every
     // run (even a non-enumerable one) so the schedule can refuse on time. An
     // explicit full measurement ticks the same clock (it is a verify run) but
     // its walk decision is `Forced`, not schedule-derived: the every-facet-
@@ -1534,7 +1534,7 @@ fn run_verify(
     let mut findings: Vec<Finding> = Vec::new();
 
     // 1. Adjudicate the destination mem's anchors against the live source, under
-    //    the per-run cap (D1) with a rotating window (D2). Existence failures
+    //    the per-run cap with a rotating window. Existence failures
     //    (orphaned) are cheap and always reported; hash-drift candidates are
     //    bounded — the cap-sized rotation window is adjudicated, the remainder
     //    queued, and successive runs rotate the window so the whole anchor set is
@@ -1639,9 +1639,9 @@ fn run_verify(
     ));
 
     // 2. Sample in-scope source artifacts for coverage. When a full walk is due
-    //    (D3) or explicitly requested (`Forced`), enumerate the WHOLE source of
+    // or explicitly requested (`Forced`), enumerate the WHOLE source of
     //    every enumerable facet — guaranteeing complete coverage this run;
-    //    otherwise sample a bounded rotating window (D2). Non-enumerable facets
+    //    otherwise sample a bounded rotating window. Non-enumerable facets
     //    are refused (scheduled: the typed refusal rides on `full_resync`;
     //    explicit: the whole run refused before observing), never silently
     //    claimed as covered.
@@ -1677,15 +1677,15 @@ fn run_verify(
             .unwrap_or_default()
     };
     sample_files.retain(|f| s_d.contains(f));
-    // Filtered by BINDING, not merely by mem (consistency-sweep 03/01,
-    // criterion 7). The report's coverage lookup was scoped first and this one
+    // Filtered by BINDING, not merely by mem.
+    // The report's coverage lookup was scoped first and this one
     // was missed, which is the worse of the two: this decides whether an
     // `Uncovered` finding is RECORDED and whether a prior one stays open, so a
     // mem filter here let another binding's anchor mark a file covered in the
     // durable store. An anchor with no recorded binding still counts, by the
     // same pre-provenance fallback the population uses.
     let this_binding = binding_hash_of(binding, resolved);
-    // An anchor whose ENTITY is gone covers nothing (03/02, criterion 5),
+    // An anchor whose ENTITY is gone covers nothing,
     // guarded on the reconciliation having been possible at all so an
     // unreconcilable mem keeps its coverage rather than reading as wholly
     // uncovered.
@@ -2202,7 +2202,7 @@ mod tests {
     }
 
     /// Migration/compat — a store written by the pre-re-key engine (batches
-    /// keyed `(hash(D), source_head)`; the exact on-disk shape live dogfood
+    /// keyed `(hash(D), source_head)`; the exact on-disk shape this project's own live
     /// workspaces carry) loads without loss: the other-hash batch stays
     /// segregated as superseded, the current-hash batch presents at ANY head,
     /// and a legacy same-hash pair collapses to its latest-recorded batch —

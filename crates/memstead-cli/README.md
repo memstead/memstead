@@ -13,17 +13,17 @@ mems.
 
 ## Install
 
-From the GitHub release (installer script or Homebrew — see the
-[repo README](../../README.md#quickstart)), or from this repo:
+From the GitHub release (installer script or Homebrew, see the
+[repo README](../../README.md#quickstart)), or from crates.io:
 
 ```bash
-cargo install --path crates/memstead-cli
+cargo install memstead-cli
 ```
 
-Once the crate is published to crates.io, `cargo install memstead-cli`
-will work too. Either way this installs the `memstead` binary. The default build is the full
-surface (multi-mem, git-backed via the `mem-repo` feature);
-`--no-default-features` builds the lean folder-only surface.
+From a repo checkout, `cargo install --path crates/memstead-cli --locked`
+does the same. Each installs the `memstead` binary. There is one build:
+the multi-mem, git-backed engine, which also serves folder-only
+workspaces.
 
 ## Start
 
@@ -44,9 +44,6 @@ memstead quickstart --repo .
 `--repo` adds a source binding over that repository, with the mem in a
 folder of its own so none of your files are adopted as entities. Nothing
 is ingested — the receipt names the command that starts the ingest loop.
-
-(On the v0.1.0 release binaries, which predate `quickstart`, use
-`memstead init --name my-graph --schema default@1.3.0` instead.)
 
 One run leaves a working graph: a workspace, a mem pinned to the built-in
 `default` schema, a seed entity, and MCP wiring for the agent targets you

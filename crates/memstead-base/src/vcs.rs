@@ -17,8 +17,7 @@
 /// local-part is a sanitised client name (or `external`), never a user.
 const PROVENANCE_EMAIL_DOMAIN: &str = "memstead.io";
 
-/// Maximum length (in chars) of a caller-declared identity (agent-trust
-/// plan 15). Length-bounded like the provenance note: the engine
+/// Maximum length (in chars) of a caller-declared identity. Length-bounded like the provenance note: the engine
 /// neither generates, interprets, nor enriches the value — it is an
 /// opaque caller-chosen string (an agent name, a session handle, a
 /// person's chosen tag), and the bound only keeps the append-only
@@ -96,8 +95,7 @@ pub struct ClientId {
     pub version: String,
 }
 
-/// The caller-declared ROLE a mutation was performed in (agent-trust
-/// plan 13) — a closed vocabulary recorded immutably alongside every
+/// The caller-declared ROLE a mutation was performed in — a closed vocabulary recorded immutably alongside every
 /// mutation (commit trailer / ledger field). Caller-declared but
 /// tamper-evident: bound to specific operations in append-only
 /// history, so it cannot be edited after the fact and identities can
@@ -166,12 +164,12 @@ pub struct CommitContext<'a> {
     /// callers must not feed unbounded input to this field.
     pub note: Option<String>,
     /// The caller-declared role this mutation is performed in
-    /// (agent-trust plan 13). `Unspecified` (the default) emits no
+    ///. `Unspecified` (the default) emits no
     /// trailer — absence recorded as absence; declared roles emit
     /// `Role: <value>` in the trailer block.
     pub role: Role,
     /// The caller-declared identity performing this mutation
-    /// (agent-trust plan 15): an opaque caller-chosen string — an
+    ///: an opaque caller-chosen string — an
     /// agent name, a session handle, a person's tag. Same trust model
     /// as the role: caller-declared, unverified, tamper-evident
     /// (bound into append-only history). `None` emits no trailer —

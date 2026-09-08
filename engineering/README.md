@@ -2,11 +2,12 @@
 
 A live [memstead](../README.md) mem: the engine's and Claude Code plugin's
 **decisions, principles, and memos** — the durable WHY behind the code in
-this repository, kept as a typed, queryable graph and dogfooded in the
-open. The files here are engine-written markdown entities; the project's
-maintainers curate them through manual commits.
+this repository, kept as a typed, queryable graph in the open. The files
+here are engine-written markdown entities; the project's maintainers
+curate them through manual commits.
 
-- **Schema:** the builtin [`engineering@0.1.0`](crates/memstead-schema/builtins/schemas/engineering/) —
+- **Schema:** the builtin `engineering` schema, newest generation
+  (`engineering@0.4.0`, at [`crates/memstead-schema/builtins/schemas/engineering-0.4/`](../crates/memstead-schema/builtins/schemas/engineering-0.4/)):
   knowledge-only types; current-state types refuse at write time.
 - **Mount it yourself:** from a workspace, add a folder mount pointing at
   this directory (or copy it) — the schema ships with the engine, so a

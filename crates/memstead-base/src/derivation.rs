@@ -1,5 +1,5 @@
 //! Derivation baselines — "my source changed" computed, never stamped
-//! (agent-trust plan 12).
+//!.
 //!
 //! When a schema declares a rel-type `derivation: true`, explicitly
 //! writing such an edge records the TARGET's content hash at write

@@ -1,7 +1,5 @@
-// `memstead mem set-schema` ships only in the full build.
-
 //! `memstead health` composes its report through the engine's
-//! `compose_health` (backlog-engine plan A7): the JSON output is
+//! `compose_health`: the JSON output is
 //! byte-identical to the MCP `memstead_health` `structuredContent` for every
 //! include key and under a `--mem` filter, and the CLI's markdown rendering
 //! is unchanged against the fixtures recorded before the composer took

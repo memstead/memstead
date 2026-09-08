@@ -63,16 +63,15 @@ fn status_error_envelope(ws: &std::path::Path) -> serde_json::Value {
     parse_envelope(&output)
 }
 
-/// Criterion 1, both trail shapes — re-routed by agent-trust plan 04
-/// (quarantine boot), exactly as this plan's Relationships section
-/// anticipated: an unresolvable schema pin no longer fails the boot;
+/// Both trail shapes, re-routed through quarantine boot: an
+/// unresolvable schema pin no longer fails the boot;
 /// the mem QUARANTINES with the same typed `SCHEMA_NOT_FOUND` reason,
 /// whose final clause still names the repair command the source trail
 /// calls for. Typed-ness per class is asserted via the health
 /// quarantine roster.
 #[test]
 fn unresolvable_pin_quarantines_typed_with_repair_command_for_both_trails() {
-    // Trail shape 1: right name, wrong version (the plenum outage's
+    // Trail shape 1: right name, wrong version (the 2026-08-06/07 outage's
     // disappeared-built-in class).
     let tmp = TempDir::new().unwrap();
     let ws = filesystem_workspace_with_pin(&tmp, "default@99.0.0");
@@ -142,14 +141,15 @@ fn health_markdown_renders_quarantine_roster_when_present() {
     );
 }
 
-/// Criterion 2 — re-routed by agent-trust plan 04 (binding
-/// quarantine): a legacy pre-v2 projection config no longer fails the
+/// Re-routed through binding
+/// quarantine: a legacy pre-v2 projection config no longer fails the
 /// workspace; the affected binding quarantines and its projection
-/// verbs refuse typed with the reason naming `memstead projection
-/// migrate`, while the workspace itself serves (the previously
-/// `INTERNAL`-leaking, then boot-blocking, backlog item).
+/// verbs refuse typed with the reason naming the retired format and
+/// `memstead projection init` as the way back, while the workspace
+/// itself serves (the previously `INTERNAL`-leaking, then
+/// boot-blocking, backlog item).
 #[test]
-fn legacy_projection_config_quarantines_binding_typed_naming_migrate() {
+fn legacy_projection_config_quarantines_binding_typed_as_retired_format() {
     let tmp = TempDir::new().unwrap();
     let ws = tmp.path().join("ws");
     memstead()
@@ -168,7 +168,7 @@ fn legacy_projection_config_quarantines_binding_typed_naming_migrate() {
         .assert()
         .success();
 
-    // The binding's verbs refuse typed, naming the migrate command.
+    // The binding's verbs refuse typed, naming the retired format.
     let out = memstead()
         .current_dir(&ws)
         .args(["--json", "projection", "brief", "engine/graph"])
@@ -181,8 +181,16 @@ fn legacy_projection_config_quarantines_binding_typed_naming_migrate() {
     assert_eq!(env["code"], "PROJECTION_QUARANTINED", "got: {env}");
     let msg = env["message"].as_str().unwrap();
     assert!(
-        msg.contains("memstead projection migrate"),
-        "reason must name the migrate command: {msg}"
+        msg.contains("retired binding format"),
+        "reason must name the retired format: {msg}"
+    );
+    assert!(
+        msg.contains("memstead projection init"),
+        "reason must name the way back: {msg}"
+    );
+    assert!(
+        !msg.contains("projection migrate"),
+        "the removed verb must not be named: {msg}"
     );
     assert_eq!(env["details"]["reason_code"], "PROJECTION_STORE_LEGACY");
 }
@@ -279,7 +287,7 @@ fn unparseable_workspace_store_refuses_typed_and_states_no_remedy() {
     );
 }
 
-/// Complement (criterion 5): a healthy workspace still boots — the
+/// Complement: a healthy workspace still boots — the
 /// typed-boot-error seam changes failure output only.
 #[test]
 fn healthy_workspace_boots_successfully() {
@@ -296,7 +304,7 @@ fn healthy_workspace_boots_successfully() {
         .success();
 }
 
-/// Retention complement (agent-trust plan 02): a workspace pinning the
+/// Retention complement: a workspace pinning the
 /// restored `ingest@0.1.0` — the version the 2026-08-06 in-place bump
 /// deleted from every binary built after it — boots green again.
 #[test]

@@ -389,7 +389,7 @@ impl crate::backend::MemBackend for FilesystemMemWriter {
     }
 
     /// Compare-and-set under an exclusive lock file, which is what makes the
-    /// check and the write one step (04/03, criterion 5). `create_new` on the
+    /// check and the write one step. `create_new` on the
     /// lock is the atomic primitive: exactly one process wins it, so no other
     /// engine can slip a write between this one's compare and its write.
     ///

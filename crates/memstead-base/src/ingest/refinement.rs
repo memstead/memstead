@@ -1,5 +1,5 @@
 //! Rotation / batch-order scheduling — the deterministic substrate the verify
-//! sampler (E3b) reuses. The refinement-as-writer *brief* (the scout/writer
+//! sampler reuses. The refinement-as-writer *brief* (the scout/writer
 //! two-phase flow and its temp findings file) is **deleted** (D1/D9/AC10):
 //! `refinement` mode is gone from the vocabulary and no renderer remains. What
 //! survives, unrendered, is the rotation machinery — a `batch_size`-at-a-time
@@ -32,7 +32,7 @@ use crate::Engine;
 /// their own rotation cursor within one binding's state without interfering.
 pub const ROTATION_UNCOVERED_FILES: &str = "uncovered-files";
 
-/// The rotation key the verify anchor-adjudication sampler walks under (D2) — a
+/// The rotation key the verify anchor-adjudication sampler walks under — a
 /// distinct cursor from [`ROTATION_UNCOVERED_FILES`], so the cap-sized
 /// adjudication window rotates over the anchor set independently of the
 /// uncovered-file sample.
@@ -53,7 +53,7 @@ struct RotationCursor {
 
 /// Per-binding verify-scheduling state (persisted as JSON under the engine cache
 /// tier). Holds the level-trigger run clock (`verify_runs`, for `full_resync_every`,
-/// D3) and the set of named rotation cursors the verify samplers walk (D2).
+/// D3) and the set of named rotation cursors the verify samplers walk.
 ///
 /// The prior flat single-rotation shape (a bare `rotation`/`cursor`/`file_order`
 /// triple) is superseded by `rotations`; because this lives under the recomputable
@@ -61,7 +61,7 @@ struct RotationCursor {
 /// and reseeds — no migration needed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RefinementState {
-    /// The verify-run counter — the `full_resync_every` level-trigger clock (D3).
+    /// The verify-run counter — the `full_resync_every` level-trigger clock.
     /// Ticks every verify run, including a run whose source enumerates to nothing
     /// (a non-enumerable medium), so the schedule refuses *on time* rather than
     /// silently never firing.
@@ -151,7 +151,7 @@ fn save_state(cache_root: &Path, binding_name: &str, state: &RefinementState) {
 }
 
 /// Increment and return the persisted verify-run counter for a binding — the
-/// level-trigger clock the `full_resync_every` schedule reads (D3). Independent
+/// level-trigger clock the `full_resync_every` schedule reads. Independent
 /// of the rotation cursors: it ticks every verify run, including a run whose
 /// source enumerates to nothing (a non-enumerable medium), so the schedule can
 /// **refuse on time** rather than silently never firing. Returns the new
@@ -206,7 +206,7 @@ fn reconcile_order(cursor: &mut RotationCursor, items: &[String]) {
 }
 
 /// Advance one **named** rotation over an arbitrary item set — the generalized
-/// rotation core the verify samplers (D2) repurpose. `items` is the full set to
+/// rotation core the verify samplers repurpose. `items` is the full set to
 /// cover (sorted + de-duplicated by the caller for determinism); `rotation_key`
 /// namespaces this rotation within the binding's state file so independent
 /// samples rotate on their own cursor. One rotation walks the whole set once in
@@ -257,7 +257,7 @@ pub fn next_rotation_batch(
     })
 }
 
-/// Advance the uncovered-artifact file sample (D2) — the retained rotation over
+/// Advance the uncovered-artifact file sample — the retained rotation over
 /// a source facet's enumerated files, one `batch_size` window at a time. A thin
 /// wrapper over [`next_rotation_batch`] keyed [`ROTATION_UNCOVERED_FILES`].
 /// `None` when the binding has no source files (e.g. a non-enumerable medium).

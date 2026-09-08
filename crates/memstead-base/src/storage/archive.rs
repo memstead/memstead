@@ -250,7 +250,7 @@ impl crate::backend::MemBackend for ArchiveBackend {
     }
 
     fn read_anchors_sidecar(&self) -> Result<Option<Vec<u8>>, BackendError> {
-        // The optional engine-owned anchors sidecar (E3a) lives at
+        // The optional engine-owned anchors sidecar lives at
         // `.memstead/anchors.json` inside the zip. Same shape as
         // `read_archive_provenance`: raw bytes on hit, Ok(None) on miss (an
         // anchor-free archive omits the member). Read-only mounts serve

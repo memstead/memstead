@@ -12,7 +12,7 @@ keywords = ["agent-memory", "knowledge-graph", "markdown", "graph", "agents"]
 categories = ["database-implementations"]
 
 # docs.rs: build with all features so the opt-in `tokio` broadcast surface
-# and the `file-watcher` cross-process event surface are documented.
+# is documented.
 [package.metadata.docs.rs]
 all-features = true
 
@@ -43,11 +43,6 @@ zip.workspace = true
 # The Core engine surface (callback-based subscribe) stays
 # runtime-agnostic; tokio is opt-in for axum-resident consumers.
 tokio = { version = "1", default-features = false, features = ["sync"], optional = true }
-# Optional — only pulled in when the `file-watcher` feature is enabled.
-# Used by `watch_mem_repo` to surface `MemChangedEvent`s for
-# cross-process consumers (bridge HEAD-watcher, UI live-update,
-# audit-log workers) that don't share the writer's `Engine` instance.
-notify = { version = "8", optional = true }
 
 # Tantivy (full-text search) and its native-only transitive chain
 # (getrandom 0.2.x without the `js` feature, memmap2, rayon, zstd-sys)
@@ -73,12 +68,6 @@ default = []
 # wiring the boilerplate themselves. Adds tokio (broadcast / sync only)
 # to the dependency graph; consumers that don't need it keep tokio out.
 tokio = ["dep:tokio"]
-# Opt-in cross-process change-event surface: `watch_mem_repo` returns
-# a `(handle, mpsc::Receiver<MemChangedEvent>)` pair that fires on
-# every `refs/heads/<mem>` mutation in a mem-repo gitdir. Adds
-# `notify` to the dependency graph; consumers that only need the
-# in-process `Engine::subscribe_mem_changes` keep it out.
-file-watcher = ["dep:notify"]
 
 [dev-dependencies]
 tempfile.workspace = true

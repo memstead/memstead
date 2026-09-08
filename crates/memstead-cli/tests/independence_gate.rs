@@ -1,5 +1,3 @@
-// `memstead mem set-schema` ships only in the full build.
-
 //! The checks-axis independence reading compares a check's identity with
 //! every identity that mutated the verified plan, its criteria or its
 //! session-log notes since the criterion was written — never with the

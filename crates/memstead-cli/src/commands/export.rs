@@ -252,8 +252,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 /// parsing so a future shape change fails loudly instead of silently.
 const JSON_EXPORT_FORMAT: &str = "memstead-export/v1";
 
-/// `--format json` — the bulk read. Backend-uniform (both engine
-/// flavours serve it via [`CliEngine::base`]) and observably read-only:
+/// `--format json` — the bulk read. Backend-uniform (both workspace
+/// shapes serve it via [`CliEngine::base`]) and observably read-only:
 /// pure store iteration, no engine mutation path is touched. Each
 /// entity rides as the same structured envelope `memstead entity --json`
 /// emits (plus mem-level grouping), so a consumer parses one entity
@@ -515,9 +515,8 @@ fn run_mem(ctx: &CliContext, engine: &memstead_base::Engine, args: Args) -> anyh
     let mem_name = resolve_mem_name(engine, args.mem_name)?;
     // Deliberately the config-keyed query: a mem-archive export cannot be
     // built without the config it packages, so "no config" is a genuine
-    // refusal here rather than a mount to enumerate (04/05, criterion 8 —
-    // the criterion is that no consumer SILENTLY skips, and this one refuses
-    // by name).
+    // refusal here rather than a mount to enumerate (the rule is
+    // that no consumer SILENTLY skips, and this one refuses by name).
     let config = engine
         .mem_configs_named()
         .find(|(name, _)| *name == mem_name)
@@ -697,7 +696,7 @@ fn resolve_mem_name(
     if let Some(name) = explicit {
         return Ok(name);
     }
-    // Every mount (04/05, criterion 8): a broken mem is still a writable mem
+    // Every mount: a broken mem is still a writable mem
     // for the purpose of "is the target unambiguous", and omitting it turns an
     // ambiguous workspace into a silently-resolved one.
     let writable: Vec<String> = engine

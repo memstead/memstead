@@ -1,7 +1,7 @@
 # Workspace format schemas
 
 JSON Schema (draft 2020-12) documents that pin the on-disk shape of the
-workspace config files the engine reads (`.memstead/{mediums,facets,projections}/`).
+workspace config files the engine reads (`.memstead/projections/`).
 
 These are **dev/docs tooling, not a runtime surface**: the authoritative
 loader and validator is the engine's Rust side (`memstead-base` — serde
@@ -19,10 +19,7 @@ schemas earn their keep as:
 
 They deliberately live under `docs/`, not inside the Claude Code plugin:
 a marketplace install copies the entire plugin directory, and these files
-are not needed at plugin runtime. (The former `memstead-plugin/v0` tree —
-the retired projection + ingest pair — and the unwired `format`-key
-version-negotiation layer were removed 2026-07-11; pre-v1 workspace
-migration is handled by the engine's own Rust migrate path.)
+are not needed at plugin runtime.
 
 ## Layout
 
@@ -31,29 +28,26 @@ docs/schemas/
   README.md                              # this file
   memstead-plugin/
     v1/
-      memstead-toml.schema.json          # `.memstead.toml` (legacy marker file; union of engine/plugin keys)
-      binding.schema.json                # `.memstead/projections/<mem>/<name>.json` — the v2
-                                         # single-record binding (sources inline; the retired
-                                         # medium/facet record schemas died with their records)
+      memstead-toml.schema.json          # `.memstead.toml` (workspace-root marker the plugin's
+                                         # hooks recognise beside `.memstead/workspace.toml`;
+                                         # union of engine/plugin keys)
+      binding.schema.json                # `.memstead/projections/<mem>/<name>.json`, the
+                                         # single-record binding (sources inline)
       examples/
         binding.minimal.json
         binding.full.json
         binding.from-init.json           # the `projection init` golden (round-trip pin)
-        medium.minimal.json
-        facet.minimal.json / facet.full.json
         memstead-toml.minimal.json / memstead-toml.full.json
       validator.mjs                      # hand-rolled validator (Node built-ins only)
       validator.test.mjs                 # `node --test` suite (examples + round-trip pin + refusals)
 ```
 
-**v1: the binding replaces the projection + ingest pair.** The retired
-four-primitive `projection` + flat-`ingest` split collapses into one versioned
-`binding` file at `.memstead/projections/<mem>/<name>.json` — the declaration
-(`intent`, `source_facets`, `reference_mems`, `destination_mem`, `deny_paths`,
+**One binding, one file.** A binding is one versioned file at
+`.memstead/projections/<mem>/<name>.json`: the declaration (`intent`,
+`source_facets`, `reference_mems`, `destination_mem`, `deny_paths`,
 `coverage_semantics`, `rules`) plus an `operations { build, sync, verify }`
-block. There is no `ingests/` directory and no `ingest` schema in v1. The
-retired `mode: refinement` value is not accepted. The engine gates on the
-`version: 1` integer inside each binding file, not on any schema-layer key.
+block. The engine gates on the `version: 1` integer inside each binding
+file, not on any schema-layer key.
 
 ## Engine vs. plugin ownership
 
@@ -64,9 +58,8 @@ is retired and ignored by the engine (workspace schemas load from the
 fixed `.memstead/schemas/` path); the namespaced `[clients.*]` and `[plugin.*]`
 tables are plugin-owned. Engine accepts plugin-owned keys as typed
 pass-throughs (so `#[serde(deny_unknown_fields)]` does not reject them)
-but does not consume them. The config files live at fixed
-`.memstead/{mediums,facets,projections}/` paths — there are no
-directory-pointer keys.
+but does not consume them. The binding files live at the fixed
+`.memstead/projections/` path — there are no directory-pointer keys.
 
 ## Test wiring
 

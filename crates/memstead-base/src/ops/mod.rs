@@ -54,8 +54,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// Allowed `include` keys for `memstead_overview` — single source of
-/// truth shared across the lean MCP server, full MCP server, and the
-/// lean CLI's `overview` command. Mirrors `HEALTH_INCLUDE_KEYS` for
+/// truth shared across the MCP server and the
+/// CLI's `overview` command. Mirrors `HEALTH_INCLUDE_KEYS` for
 /// the `health` surface. The CLI `--include` flag validates against
 /// this list and surfaces `UNKNOWN_INCLUDE_KEY` warnings, matching the
 /// MCP tool's behaviour.
@@ -480,7 +480,7 @@ pub enum WarningHint {
         /// happened); `false` means the prefix only resembles a mem
         /// (it matches a roster member's last name segment), the
         /// classic mem-rename drift. The message says which, instead
-        /// of calling every case rename drift: on the dogfood graph all
+        /// of calling every case rename drift: on this project's own graph all
         /// eight recorded hits were missing targets in mounted mems.
         prefix_mounted: bool,
     },
@@ -659,7 +659,7 @@ pub enum WarningHint {
     },
     /// `OUT_OF_BAND_EDITS_UNDETECTED`: this folder mem's drift cursor is its
     /// own change ledger, which only the engine writes, so an edit made to the
-    /// files by anything else advances nothing (04/04, criterion 3).
+    /// files by anything else advances nothing.
     ///
     /// The engine keeps serving pre-edit content and `changes_since` reports
     /// the edit as never having happened. It is not fixable cheaply: the
@@ -686,8 +686,7 @@ pub enum WarningHint {
         section: String,
     },
     /// A config write found the stored config had moved on from what this
-    /// engine last observed: another writer changed it in between
-    /// (consistency-sweep 04/03, criterion 3).
+    /// engine last observed: another writer changed it in between.
     ///
     /// The write still lands. It is applied to the CONFIG THAT IS THERE, not
     /// to the engine's cached copy, so the intervening writer's fields
@@ -720,7 +719,7 @@ pub enum WarningHint {
     /// rehearsed response never claims a performed effect.
     AutoStubCreated { stub_id: EntityId, pending: bool },
     /// A duplicate-add `memstead_relate` on a derivation-declared
-    /// rel-type refreshed the edge's baseline (agent-trust plan 12) —
+    /// rel-type refreshed the edge's baseline —
     /// the agent's explicit "I have reviewed the target's change; the
     /// derivation still holds". Sidecar-only: `_hash` unchanged, the
     /// edge unchanged; the response carries this warning so the
@@ -858,7 +857,7 @@ pub enum WarningHint {
         /// Which way the versions differ. Present because "they differ" left
         /// the reader to work out whether their binary was ahead of the mem
         /// or behind it, which is the only part that changes what they should
-        /// do (04/04, criterion 8).
+        /// do.
         direction: crate::build_info::SkewDirection,
     },
     /// Generation-behind hint: the mem's pinned schema resolved from
@@ -1003,7 +1002,7 @@ pub enum WarningHint {
     /// archive mount whose path is gone) or exists and holds no
     /// entity (`empty`). Before this warning a mount pointing at a
     /// nonexistent branch sat in the writable roster with zero
-    /// entities and nothing said so (the dogfood workspace carried two
+    /// entities and nothing said so (this project's own workspace carried two
     /// such mounts for weeks). Emitted at boot and on reload; a mount
     /// that resolves to at least one entity is silent. Lazy mounts are
     /// probed for storage presence only (the entity walk is deferred),
@@ -3140,7 +3139,7 @@ fn is_zero(n: &usize) -> bool {
 pub struct BatchResult {
     /// Batch-level warnings. Today this carries `CONFIG_WRITE_INTERVENED`
     /// when the mutation version stamp merged over another writer's config
-    /// change (04/03, criterion 3): the batch is the operation, so the batch
+    /// change: the batch is the operation, so the batch
     /// result is where its report belongs. Empty on the ordinary path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningHint>,
@@ -3591,7 +3590,7 @@ pub struct HealthSummary {
     pub boot_diagnosis: Option<serde_json::Value>,
     /// Real-entity count per leaf-declared type (`<schema_ref>:<type>`
     /// keys) — the population the orphan axis exempts because those
-    /// types are terminal by construction (agent-trust plan 06).
+    /// types are terminal by construction.
     /// Visible, never vanished. Empty (and omitted from the wire) for
     /// schemas that declare nothing, keeping default output
     /// byte-unchanged.
@@ -3707,7 +3706,7 @@ pub struct UntaggedStats {
 ///
 /// The prose this replaces described only the first condition, which is how
 /// the fusion survived: the type read as if it had one subject while
-/// producing three (04/06, criterion 6).
+/// producing three.
 #[derive(Debug, Clone, Serialize)]
 pub struct DanglingLink {
     /// Which of the three conditions this is, and therefore which repair
@@ -3737,7 +3736,7 @@ pub struct DanglingLink {
     /// the auto-managed relationships block rather than a body section. That
     /// absence used to be the ONLY way to tell that condition apart, which is
     /// why `kind` exists: a reader should not have to inspect a payload for
-    /// nulls to learn which repair applies (04/06, criterion 4).
+    /// nulls to learn which repair applies.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub section: Option<String>,
 }
@@ -3787,7 +3786,7 @@ impl DanglingLinkKind {
 
     /// Every code this family can emit. The strict counter and any other
     /// consumer filtering on the literal string reads THIS rather than
-    /// keeping its own copy (04/06, criterion 3).
+    /// keeping its own copy.
     ///
     /// Kept honest by `all_codes_covers_every_variant`, whose exhaustive
     /// match stops compiling when a variant is added — without it this is
@@ -3839,7 +3838,7 @@ pub struct ExportResult {
     pub skipped_mounts: Vec<SkippedMount>,
     /// Entities the export declined to regenerate because their stored body
     /// ends inside an unterminated code fence: writing them would seal the
-    /// sections that fence absorbed (04/02, criterion 5). Skipping one entity
+    /// sections that fence absorbed. Skipping one entity
     /// is the non-stranding half of that refusal — the rest of the export
     /// still lands, and the entity is named rather than silently passed over.
     /// Empty on the happy path.
@@ -4030,8 +4029,7 @@ pub enum Direction {
 // ---------------------------------------------------------------------------
 
 /// Graph status — node / edge counts and schema distribution. Renamed from
-/// the former `Stats` when the `stats` command became `status` (bundle plan
-/// `03-projection-promotion`, D11); the fields are unchanged so every caller's
+/// the former `Stats` when the `stats` command became `status`; the fields are unchanged so every caller's
 /// payload stays byte-compatible.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
@@ -4127,7 +4125,7 @@ mod tests {
     /// failing a gate — silently, since nothing else would break. The
     /// exhaustive match below is the enforcement: add a variant and this
     /// stops COMPILING, which is the only moment anyone would otherwise
-    /// have to remember (04/06, criterion 3).
+    /// have to remember.
     #[test]
     fn all_codes_covers_every_variant() {
         let every = [
@@ -4431,7 +4429,7 @@ mod write_id_doc_gloss_tests {
     ///
     /// Two earlier versions of this check were too narrow and each let a
     /// real defect through. The first read only `ops/mod.rs`, so five
-    /// copies of the gloss in `engine/outcomes.rs` — the lean flavour's
+    /// copies of the gloss in `engine/outcomes.rs` — the base engine's
     /// public outcome types, on a crates.io-published crate, hence
     /// docs.rs — were invisible. The second was a phrase-exact banned
     /// list built for "Per-mem commit SHA", which "Per-mem commit

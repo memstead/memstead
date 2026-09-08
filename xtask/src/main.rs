@@ -631,8 +631,8 @@ fn run_divergence_eval(args: &EvalArgs) -> Result<()> {
         pkg.tell_lists.combined().len()
     );
     // Prompt parity self-check: the two arms' assembled writer prompts (and
-    // reader prompts) must differ only where the substrate block is substituted
-    // (criterion 5). A violation would mean the skeleton is not shared.
+    // reader prompts) must differ only where the substrate block is substituted.
+    // A violation would mean the skeleton is not shared.
     use eval::divergence::Arm;
     let prompts = &pkg.prompts;
     let writer_parity = prompts.writer(Arm::A, false, "").replace(

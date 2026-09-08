@@ -91,7 +91,7 @@ fn anchor_only_args(id: EntityId, expected_hash: String, anchor_json: &str) -> U
 
 #[test]
 fn anchor_only_update_commits_with_distinct_anchor_verb() {
-    // Third clause of projection-pipeline/04 criterion 4: an anchor-only
+    // An anchor-only
     // commit produces zero entity deltas, its SHA is a valid `since`
     // cursor, AND — with notes surfaced (`include_notes`) — it appears as
     // a note entry carrying a DISTINCT `tool_verb` ("anchor"). The verb
@@ -628,7 +628,7 @@ fn advance_store_is_reload_independent() {
 }
 
 /// Batch per-entry notes survive on the git-branch backend
-/// (backlog-sweep plan 05, decision 3): each batch family's ONE commit
+/// (an earlier plan, decision 3): each batch family's ONE commit
 /// carries the notes as `<id>: <note>` lines in its note record,
 /// retrievable via `changes_since(...).notes` — where they previously
 /// survived nowhere (the per-entry `append_provenance` route is a
@@ -793,7 +793,7 @@ fn batch_per_entry_notes_survive_on_git_branch() {
     );
 }
 
-/// Rot axis for UNSTAMPED seals (backlog-sweep plan 06, decision 19):
+/// Rot axis for UNSTAMPED seals (an earlier plan, decision 19):
 /// a schema sealed under an older engine — retired
 /// `propagating_relationships` key, no install-provenance stamp —
 /// keeps its mem running on the tolerant seal, and health surfaces a

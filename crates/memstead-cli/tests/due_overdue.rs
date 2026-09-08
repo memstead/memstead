@@ -1,6 +1,4 @@
-// `memstead mem set-schema` ships only in the full build.
-
-//! The due brief reads `overdue` (backlog-decisions plan B4): with the
+//! The due brief reads `overdue`: with the
 //! clock pinned, an open entity dated before today lists under `overdue`
 //! with the days past, one dated inside the window under `due_soon` with
 //! the days until, a closed one under neither; a type without a `due`

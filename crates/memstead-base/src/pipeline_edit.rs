@@ -115,7 +115,7 @@ pub enum PipelineEditError {
 /// destination mem is not mounted or carries no schema — there is no
 /// vocabulary to read, so the intent rule cannot apply and the write goes
 /// through (the brief's absent-destination note carries that case).
-pub type DestinationSchema<'a> = Option<(&'a str, &'a memstead_schema::Schema)>;
+pub type DestinationSchema<'a> = Option<(&'a str, &'a memstead_schema::Schema, &'a [String])>;
 
 /// The intent rule at a write front door: the intent about to be written,
 /// checked against the destination schema when one is at hand.
@@ -124,10 +124,10 @@ fn refuse_unknown_intent(
     intent: Option<&str>,
     schema: DestinationSchema<'_>,
 ) -> Result<(), PipelineEditError> {
-    let Some((pin, schema)) = schema else {
+    let Some((pin, schema, known)) = schema else {
         return Ok(());
     };
-    let findings = crate::ingest::intent::intent_findings(intent, pin, schema);
+    let findings = crate::ingest::intent::intent_findings(intent, pin, schema, known);
     if findings.is_empty() {
         Ok(())
     } else {
@@ -492,10 +492,11 @@ impl Engine {
     pub fn destination_schema_for(
         &self,
         mem: &str,
-    ) -> Option<(String, std::sync::Arc<memstead_schema::Schema>)> {
+    ) -> Option<(String, std::sync::Arc<memstead_schema::Schema>, Vec<String>)> {
         let pin = self.schema_pin(mem)?.as_display();
         let schema = self.schema_for(mem)?;
-        Some((pin, schema))
+        let known = crate::ingest::intent::known_relationship_names(self);
+        Some((pin, schema, known))
     }
 
     /// Create a binding from a JSON [`BindingPatch`] applied to the default
@@ -519,7 +520,7 @@ impl Engine {
             projection_json,
             self.destination_schema_for(mem)
                 .as_ref()
-                .map(|(p, s)| (p.as_str(), &**s)),
+                .map(|(p, s, k)| (p.as_str(), &**s, k.as_slice())),
         )?;
         self.record_binding_edit(mem, name, &binding, &root, note, "add")
     }
@@ -545,7 +546,7 @@ impl Engine {
             projection_json,
             self.destination_schema_for(mem)
                 .as_ref()
-                .map(|(p, s)| (p.as_str(), &**s)),
+                .map(|(p, s, k)| (p.as_str(), &**s, k.as_slice())),
         )?;
         self.record_binding_edit(mem, name, &binding, &root, note, "update")
     }
@@ -752,7 +753,7 @@ mod tests {
         }
     }
 
-    /// REFUSAL (plan criterion 3) — a malformed source (duplicate name)
+    /// REFUSAL: a malformed source (duplicate name)
     /// blocks a create with a typed validation error; nothing lands on disk.
     #[test]
     fn add_binding_json_refuses_duplicate_source_names() {
@@ -1085,11 +1086,11 @@ mod tests {
         rename_binding(root, "v", "a", "a").unwrap();
     }
 
-    /// REFUSAL (plan criterion 1) — editing an unmigrated (pre-v2) store
-    /// surfaces the loader's migrate-naming refusal — the edit layer never
-    /// writes over a legacy store.
+    /// REFUSAL: editing a store that holds a
+    /// retired-format (pre-v2) file surfaces the loader's typed refusal —
+    /// the edit layer never writes over a legacy store.
     #[test]
-    fn editing_a_pre_v2_store_refuses_with_migrate_pointer() {
+    fn editing_a_pre_v2_store_refuses_as_legacy() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let dir = root.join(".memstead/projections/v");

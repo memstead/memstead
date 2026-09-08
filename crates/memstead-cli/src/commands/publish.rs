@@ -189,7 +189,7 @@ fn run_with_root(
                     .map_err(CliError::from_engine_op)?;
                 // Publish is about to ship this mem outward, so a config that
                 // moved under us is exactly what the operator needs to see
-                // before the archive leaves (04/03, criterion 3).
+                // before the archive leaves.
                 for w in &bumped.warnings {
                     crate::output::print_markdown(&format!("> {w}"));
                 }
@@ -225,7 +225,7 @@ fn run_with_root(
                     Ok(cli_engine) => {
                         let engine = cli_engine.into_base();
                         let writable: Vec<String> = engine
-                            // Every mount (04/05, criterion 8). Counting only
+                            // Every mount. Counting only
                             // config-readable mems could report exactly one
                             // writable mem while a second, broken one exists,
                             // and silently publish the wrong one.

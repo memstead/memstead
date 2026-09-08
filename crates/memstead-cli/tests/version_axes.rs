@@ -1,4 +1,4 @@
-//! `software@0.5.0` (backlog-decisions plan B6): a `contract` with
+//! `software@0.5.0`: a `contract` with
 //! `protocol: engine_state` validates with and without `version_axes`
 //! (the field is optional); a `version_axes` member that is not a
 //! `name=constant` pair refuses `INVALID_FIELD_VALUE` naming the member

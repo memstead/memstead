@@ -297,7 +297,7 @@ mod tests {
         );
     }
 
-    /// Recover leg (criterion 5): `apply_parse_recovery` re-renders the
+    /// Recover leg: `apply_parse_recovery` re-renders the
     /// source entity but leaves its anchors sidecar bit-intact — the
     /// re-render is an anchorless update, which never stages the sidecar.
     #[test]

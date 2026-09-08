@@ -2,12 +2,13 @@
 
 ## Supported versions
 
-Memstead is currently in **pre-1.0** development. Until a stable 1.0 release is tagged, only the latest commit on `main` is supported. Earlier commits, branches, and tagged `0.x` releases do not receive security fixes.
+Memstead is currently in **pre-1.0** development. Until a stable 1.0 release is tagged, the latest release and `main` are supported. Earlier tagged `0.x` releases, other commits and branches do not receive security fixes.
 
 | Version | Supported |
 |---|---|
 | `main` (HEAD) | yes |
-| Tagged `0.x` releases (e.g. `v0.1.0`) | no |
+| The latest tagged release | yes |
+| Earlier tagged `0.x` releases | no |
 | Forks | by the fork maintainer |
 
 ## Reporting a vulnerability

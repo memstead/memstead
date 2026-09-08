@@ -1,7 +1,7 @@
 //! Mem-lifecycle orchestrator: the multi-mem create and delete
 //! pipelines. The matcher primitives
 //! ([`crate::CreateRuleSet`], [`crate::DeleteRuleSet`],
-//! [`crate::MatcherSet`]) stay in lean because the lean engine's
+//! [`crate::MatcherSet`]) stay in the base engine because its
 //! `cross_mem_link_allowed` synthesises a [`crate::CreateRuleSet`]
 //! on multi-folder workspaces. Only the lifecycle orchestrators —
 //! `create_mem`, `delete_mem`, their param/response types, the
@@ -9,19 +9,19 @@
 //! live here.
 //!
 //! Functions take `&mut crate::Engine` directly rather than going
-//! through a `FullEngine` wrapper struct: the lean engine is a single
+//! through a `FullEngine` wrapper struct: the base engine is a single
 //! polymorphic `Engine` parameterised by `Box<dyn MemBackend>` and
 //! already carries every state field the orchestrators need
 //! (`mem_router`, `settings`, `backend_factory`, `workspace_root`,
 //! `git_branch_ops`). Full contributes lifecycle as free functions over
 //! that engine; no separate engine type, no policy-provider trait.
 //!
-//! Return type is `Result<_, crate::FullEngineError>`. Lean-side
+//! Return type is `Result<_, crate::FullEngineError>`. Base-engine
 //! failures (`InvalidInput`, `UnknownMem`, `SchemaResolverInit`,
 //! `SchemaNotFound`, `MemNameCollision`, `Mem(_)`, `Backend(_)`)
-//! propagate verbatim through `FullEngineError::Lean(_)` via the
+//! propagate verbatim through `FullEngineError::Engine(_)` via the
 //! `#[from] crate::EngineError` conversion — the `?` operator on
-//! `engine.persist_state()?` and similar lean calls does the wrap
+//! `engine.persist_state()?` and similar base-engine calls does the wrap
 //! automatically. The four lifecycle-only variants
 //! (`MemPathNotAllowed`, `MemReferencedByPolicy`, `MemSchemaNotAllowed`,
 //! `ConfigAlreadyExists`) are constructed as `FullEngineError::*`
@@ -139,7 +139,7 @@ fn residue_probe_for_workspace(
 /// http://howardhinnant.github.io/date_algorithms.html — same one
 /// `crate::entity::generator::days_to_ymd` uses; replicated here
 /// to keep the function private to the orchestrator without
-/// re-exporting from lean.
+/// re-exporting it from the entity generator.
 fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;
@@ -958,8 +958,8 @@ fn classify_invalid_mem_name(name: &str) -> Option<&'static str> {
 ///      location's basename.
 /// 2. Name collision probe against the current mem_router
 ///    snapshot. The rich tree-walk collision detector (with
-///    `colliding_paths` envelope payload) is full-only; unified
-///    surfaces collisions through the snapshot probe with the
+///    `colliding_paths` envelope payload) belongs to the git-branch
+///    ops; this path surfaces collisions through the snapshot probe with the
 ///    same `EngineError::MemNameCollision` discriminant.
 /// 3. Build [`memstead_schema::config::MemConfig`] bytes.
 ///    - 3b. Pick the storage variant: `params.storage` when set
@@ -1511,13 +1511,13 @@ pub fn create_mem(
     // `params.storage` override when set, else the workspace-shape
     // heuristic (git-branch when `<workspace_root>/mem-repo/.git/`
     // exists, folder otherwise — gix-free, so the heuristic works in
-    // lean builds, which never have a mem-repo).
+    // an engine without the git-branch crate, which never has a mem-repo).
     //
     // The git-branch storage requires the engine to have the full
     // backend factory installed (`engine_from_workspace_root` does
-    // this at boot). When the factory is the default lean one, the
+    // this at boot). When the factory is the default local one, the
     // factory call below returns
-    // [`crate::workspace_store::InstantiateError::GitBranchRequiresMemRepoFeature`]
+    // [`crate::workspace_store::InstantiateError::GitBranchBackendUnavailable`]
     // — wrapped as `EngineError::Mem` in the seed-commit step.
     // The branch leaf IS `params.name` — no separate composition step.
     // Hierarchical identity lives directly in the mem name.

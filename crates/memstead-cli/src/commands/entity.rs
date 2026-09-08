@@ -72,7 +72,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     // authoritative `EdgeSource` discriminator (`Explicit` /
     // `BodyLink` / `Hierarchy`); the entity's `relationships` vec
     // doesn't encode it.
-    // Derived mutation-provenance block (agent-trust plan 13), only
+    // Derived mutation-provenance block, only
     // when `--provenance` asked for it — default output stays
     // byte-unchanged. Unavailability (an archive seam with no
     // history) is stated, never fabricated.
@@ -356,7 +356,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
 /// Render an entity's markdown body and, when `--include-relations` is
 /// set, append the outgoing/incoming JSON block. Engine-agnostic: both
-/// flavours expose a `&Store`.
+/// workspace shapes expose a `&Store`.
 fn render_with_optional_relations(
     entity: &Entity,
     id: &EntityId,

@@ -203,8 +203,8 @@ impl SurfaceCoverage {
 }
 
 /// The health surface's coverage claim, shared by every consumer
-/// that renders a health report (the CLI command, the full MCP
-/// server's composer, and the lean server's own assembly): the axes
+/// that renders a health report (the CLI command and the MCP
+/// server's composer): the axes
 /// whose findings the report treats as defects, so an empty defect
 /// statement reads as an all-clear exactly over them. Everything
 /// descriptive or advisory is excluded by name.

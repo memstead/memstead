@@ -223,7 +223,7 @@ impl UpdateEntityArgs {
     /// hash. Anchors are deliberately absent from the list: the sidecar lives
     /// outside the hash.
     ///
-    /// WHY it lives here rather than on each surface: MCP (both flavours), the
+    /// WHY it lives here rather than on each surface: MCP, the
     /// CLI and the HTTP layer all gate an update on a compare-and-swap token,
     /// and on an anchors-only payload that token compares a value the write
     /// provably cannot move. Exempting the shape is right; exempting it four
@@ -237,7 +237,7 @@ impl UpdateEntityArgs {
     /// token: that refusal names the recognised keys, which is what a caller
     /// who typo'd a mutation key actually needs. A first version asked
     /// "is this anchors-only" instead, and turned every empty payload into a
-    /// hash complaint; the plan's criterion 5 caught it.
+    /// hash complaint; the grade of that change caught it.
     pub fn changes_content(&self) -> bool {
         !self.sections.is_empty()
             || !self.append_sections.is_empty()
@@ -306,7 +306,7 @@ pub struct UpdateEntityOutcome {
     /// MissingRequiredOutgoing yet). Wire-equivalent to full's
     /// `UpdateResult.warnings`; the field shape parity matters for
     /// the upcoming handler migration so callers see the same
-    /// `warnings: []` envelope position across flavours.
+    /// `warnings: []` envelope position across surfaces.
     pub warnings: Vec<WarningHint>,
     /// Batched relation declarations applied by this call (per the
     /// optional `declare_relations` request param). Empty `[]`
@@ -403,7 +403,7 @@ pub struct RelateEntityArgs {
     /// `None` before validation. Ignored on the remove path (`None`
     /// keeps the existing behaviour intact).
     pub description: Option<String>,
-    /// Rehearsal mode (agent-trust plan 07): run the FULL validation
+    /// Rehearsal mode: run the FULL validation
     /// stage — identical refusals, identical warnings (including the
     /// would-be `AUTO_STUB_CREATED`) — then stop before any write.
     /// The response carries the marker form: empty `write_id` with

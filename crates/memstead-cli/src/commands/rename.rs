@@ -109,7 +109,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
                     "new_path": outcome.new_path,
                     "_hash": outcome.content_hash,
                     // Backend write identity — response-shape parity with
-                    // the MCP filesystem flavour.
+                    // the MCP server.
                     "write_id": outcome.write_id,
                     // Engine-emitted warnings (e.g. `NOTE_MISSING` under
                     // `[mutations].require_notes`).

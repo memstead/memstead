@@ -15,8 +15,7 @@ How did you verify this? Every change ships with a test plan:
 - a bug fix → a test that fails before and passes after
 -->
 
-- [ ] `./run-tests.sh` passes (engine both flavours + plugin)
-- [ ] If a generated reference doc changed, it was regenerated with `xtask` (not hand-edited)
+- [ ] `./run-tests.sh` passes (engine + plugin)
 
 ## Checklist
 

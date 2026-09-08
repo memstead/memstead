@@ -11,11 +11,11 @@
   "mem_management": {
     "create": [
       { "pattern": "exec-*", "schemas": ["default@1.0.0"] },
-      { "pattern": "planning/plan-*", "schemas": ["default@1.0.0"] }
+      { "pattern": "notes/*", "schemas": ["default@1.0.0"] }
     ],
     "delete": [
       { "pattern": "exec-*" },
-      { "pattern": "planning/plan-*" }
+      { "pattern": "notes/*" }
     ]
   },
   "plugin": {

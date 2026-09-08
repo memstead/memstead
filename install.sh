@@ -21,8 +21,8 @@
 # Usage:
 #
 #   curl -sSf https://memstead.io/install.sh | sh
-#   curl -sSf https://memstead.io/install.sh | sh -s -- --version v0.10.0
-#   MEMSTEAD_VERSION=v0.10.0 sh -c 'curl -sSf https://memstead.io/install.sh | sh'
+#   curl -sSf https://memstead.io/install.sh | sh -s -- --version <tag>
+#   MEMSTEAD_VERSION=<tag> sh -c 'curl -sSf https://memstead.io/install.sh | sh'
 #
 # Defaults: latest tag, ~/.cargo/bin install dir (cargo-dist's default).
 # `--version <tag>` (or `--version=<tag>`, or the MEMSTEAD_VERSION
@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --version)
             if [ $# -lt 2 ]; then
-                echo "--version needs a tag, e.g. --version v0.10.0" >&2
+                echo "--version needs a tag: --version <tag>" >&2
                 exit 1
             fi
             RELEASE="$2"

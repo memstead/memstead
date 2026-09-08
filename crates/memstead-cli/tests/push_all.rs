@@ -1,5 +1,3 @@
-// `memstead push --all` ships only in the full build.
-
 //! Integration tests for `memstead push --all`: every mounted
 //! git-branch mem's branch plus `__MEMSTEAD`, fast-forward only,
 //! silent when in sync, one line per ref moved, a refused ref named

@@ -125,8 +125,8 @@ struct MemDurability {
 /// be sitting outside any version control and nothing said so. It still does
 /// not shell out to git: a folder mem's root may not be in a repository, and
 /// a missing repository is not a defect. The reportable fact is that the
-/// engine cannot ESTABLISH durability there, which is true either way
-/// (04/04, criterion 6). It never claims debt it did not observe.
+/// engine cannot ESTABLISH durability there, which is true either way.
+/// It never claims debt it did not observe.
 fn mem_durability(engine: &memstead_base::Engine) -> Vec<MemDurability> {
     engine
         .mounts()
@@ -266,7 +266,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
     lines.push(String::new());
     // The subject rides with the verdict, never apart from it: a bare
     // "clean" is read as a claim about the workspace, and this one answers
-    // for projection bindings only (04/04, criterion 5).
+    // for projection bindings only.
     lines.push(format!(
         "**Verdict:** {} — for {}",
         rollup.verdict.as_wire(),
@@ -280,7 +280,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
 
     // What the engine could not establish, named rather than left to the
     // reader's assumption. A mem whose durability IS established says so and
-    // adds no caveat (04/04, criterion 6 and its complement).
+    // adds no caveat.
     let unestablished: Vec<&MemDurability> =
         mems.iter().filter(|m| m.unestablished.is_some()).collect();
     if !unestablished.is_empty() {
@@ -443,8 +443,8 @@ fn remote_exit(remote: Option<&memstead_base::ops::RemoteStatusOutcome>) -> anyh
     .into())
 }
 
-/// Count real (non-stub) entities by `entity_type`. Both engine
-/// flavours expose a `&Store`, so this helper is engine-agnostic.
+/// Count real (non-stub) entities by `entity_type`. Both workspace
+/// shapes expose a `&Store`, so this helper is engine-agnostic.
 fn count_by_type(store: &Store) -> BTreeMap<String, usize> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for e in store.all_entities().filter(|e| !e.stub) {

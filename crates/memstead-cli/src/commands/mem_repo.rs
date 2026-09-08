@@ -24,7 +24,7 @@ const README_TEMPLATE: &str = include_str!("../../templates/mem-repo-readme.md")
 /// the only mandatory keys; everything else (mem_management,
 /// cross_mem_links, mutations, plugin.*) is operator-opt-in and
 /// defaults to deny/empty. Matches the same baseline `memstead init`
-/// writes for filesystem-mem — keeping the two flavours symmetric.
+/// writes for filesystem-mem, keeping the two workspace shapes symmetric.
 const DEFAULT_WORKSPACE_TOML: &str = "\
 format = \"memstead-git-branch-2\"\n\
 \n\

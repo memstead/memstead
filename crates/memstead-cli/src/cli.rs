@@ -90,15 +90,14 @@ pub struct Cli {
     pub workspace: Option<std::path::PathBuf>,
 
     /// Declare the role this invocation's mutations are performed in
-    /// (agent-trust plan 13): `author` | `checker` | `verifier`.
+    ///: `author` | `checker` | `verifier`.
     /// Recorded immutably alongside each mutation (commit trailer /
     /// ledger). Omit to record mutations as unspecified — legal
     /// forever, never refused.
     #[arg(long = "role", global = true)]
     pub role: Option<String>,
 
-    /// Declare WHO is acting in this invocation (agent-trust plan
-    /// 15): an opaque identity string of your choosing — an agent
+    /// Declare WHO is acting in this invocation: an opaque identity string of your choosing — an agent
     /// name, a session handle, a person's tag. Recorded immutably
     /// alongside each mutation and check (commit trailer / ledger);
     /// the author≠checker independence gate compares identities and
@@ -314,7 +313,7 @@ pub enum Command {
     /// outcomes. Read-only-origin drops surface as skipped.
     Recover(commands::recover::Args),
 
-    /// Read provenance anchors (E3a): `memstead anchors <id>` lists an
+    /// Read provenance anchors: `memstead anchors <id>` lists an
     /// entity's anchors + composition; `memstead anchors --artifact <path>`
     /// reverse-looks-up every entity whose anchor references that path
     /// (the query the check-realization hook consumes); `memstead anchors
@@ -418,11 +417,9 @@ pub enum Command {
     Schema(commands::schema::Args),
 
     /// Pipeline tooling — one versioned v2 binding per pipeline, sources
-    /// inline. Nine verbs: `brief` renders a binding's run-brief (the
+    /// inline. Eight verbs: `brief` renders a binding's run-brief (the
     /// Markdown prompt an agent consumes); `init` scaffolds a fresh v2
-    /// record non-interactively; `migrate` converts every prior on-disk
-    /// generation (gen-1 root folders, the four-primitive store, the v1
-    /// three-file store) into v2 records in place; `enable
+    /// record non-interactively; `enable
     /// <build|sync|verify> <binding>` adds a missing operation block;
     /// `edit` patches a binding's author-editable fields; `advance`
     /// records disposition-gated sync-baseline advances; `exclude`

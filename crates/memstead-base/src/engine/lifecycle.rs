@@ -68,7 +68,7 @@ impl Engine {
     /// (`engine_from_workspace_root`) to install
     /// `memstead_git_branch::storage::instantiate_full_backend` so the engine
     /// can materialise git-branch backends on top of folder + archive.
-    /// Lean consumers leave the default in place.
+    /// Consumers without the git-branch crate leave the default in place.
     pub fn set_backend_factory(&mut self, factory: BackendFactory) {
         self.backend_factory = factory;
     }
@@ -116,7 +116,7 @@ impl Engine {
     }
 
     /// Set the caller-declared role for subsequent mutations
-    /// (agent-trust plan 13). The surface calls this before every
+    ///. The surface calls this before every
     /// mutation with the per-call parameter resolved against its
     /// session default (per-call wins); `Role::Unspecified` records
     /// as absence.
@@ -130,7 +130,7 @@ impl Engine {
     }
 
     /// Set the caller-declared identity for subsequent mutations and
-    /// checks (agent-trust plan 15). The surface calls this before
+    /// checks. The surface calls this before
     /// every operation with the per-call parameter resolved against
     /// its session default (per-call wins); `None` records as
     /// absence. Callers pass an already-normalised value
@@ -154,9 +154,9 @@ impl Engine {
 
     /// Install the git-branch ops bundle. Full boot
     /// (`memstead_git_branch::engine_from_workspace_root`) calls this once
-    /// at construction. Lean consumers leave it unset and the
-    /// git-branch dispatch branches collapse to typed errors / empty
-    /// reports — lean has no git-branch mounts.
+    /// at construction. Consumers without the git-branch crate leave it unset
+    /// and the git-branch dispatch branches collapse to typed errors / empty
+    /// reports; such an engine serves no git-branch mounts.
     pub fn set_git_branch_ops(&mut self, ops: GitBranchOps) {
         self.git_branch_ops = Some(ops);
     }
@@ -171,8 +171,8 @@ impl Engine {
     /// Folder workspaces install schemas by writing under
     /// `<workspace>/.memstead/schemas/` directly; this is the git-branch
     /// path, where the engine owns the mem-repo and the write must
-    /// route through it. Errors when no git-branch ops are wired (lean
-    /// flavour) or no git-branch mount exists to resolve the shared
+    /// route through it. Errors when no git-branch ops are wired
+    /// or no git-branch mount exists to resolve the shared
     /// mem-repo gitdir from. The caller reloads (or restarts) to pick
     /// the new schema into the resolution catalogue.
     pub fn install_schema(
@@ -219,7 +219,7 @@ impl Engine {
         // arrives unmarked, and absence IS its legacy claim). Stamping
         // here mis-labelled legacy content as current and flipped every
         // bare field's meaning in the sealed copy — the manufacturing
-        // defect backlog-sweep plan 05 removed.
+        // defect an earlier plan removed.
         (ops.write_schema)(&gitdir, name, version, files).map_err(EngineError::Backend)
     }
 
@@ -419,7 +419,7 @@ impl Engine {
     }
 
     /// Validate every type exemplar a schema carries by running it
-    /// through the REAL create validation stage (agent-trust plan 09):
+    /// through the REAL create validation stage:
     /// an in-memory engine is booted with the candidate schema pinned
     /// on a virtual mem, and each exemplar is submitted as a
     /// `dry_run` create — the same gates a real write runs (sections,
@@ -1319,8 +1319,8 @@ impl Engine {
             self.schemas_insert(mem.to_string(), target_schema);
             self.invalidate_communities();
             // The index field set derives from the pinned schema — the
-            // schema-switch staleness the whole-map drop used to mask
-            // (flywheel W8/01, criterion 2): this mem's index must be
+            // schema-switch staleness the whole-map drop used to mask:
+            // this mem's index must be
             // rebuilt against the new field set.
             self.invalidate_search_indexes();
             self.persist_state()?;
@@ -1450,9 +1450,9 @@ impl Engine {
 
         let stored = read(backend)?;
         // What the intervening writer changed, if anyone did. Compared against
-        // the engine's cached copy, never against a clock: criterion 6 forbids
+        // the engine's cached copy, never against a clock: the rule forbids
         // reacting to cache age, and a single-writer workspace has an
-        // identical cache, so this is empty there (criterion 4).
+        // identical cache, so this is empty there.
         let intervened = match self.mounts[mount_idx].mem_config.as_ref() {
             Some(cached) => changed_config_fields(cached, &stored),
             None => Vec::new(),
@@ -1474,7 +1474,7 @@ impl Engine {
 
         // Compare-and-set, done by the backend so the check and the write are
         // one step. An earlier draft re-read here and then wrote, which is
-        // check-then-write and leaves exactly the window criterion 5 names
+        // check-then-write and leaves exactly the lost-update window
         // open. On a mismatch the loop re-reads, re-applies onto what is
         // there, and retries: the intervening writer's change is merged, never
         // overwritten. Bounded, because an unbounded retry against a hot
@@ -1677,8 +1677,8 @@ impl Engine {
     /// schema-source resolution chain.
     /// Resolve the mem's pinned schema from the workspace's
     /// `__MEMSTEAD:schemas/` ref (git-branch schema store) for the
-    /// export paths of NON-git-branch mounts. `None` when the full
-    /// flavour is not loaded, the workspace has no mem-repo, or the
+    /// export paths of NON-git-branch mounts. `None` when the git-branch
+    /// ops are not wired, the workspace has no mem-repo, or the
     /// package is not on the ref — callers then fall through to the
     /// disk/builtin chain unchanged. Without this, a folder mem whose
     /// schema `memstead schema install` sealed on the ref LOADS but
@@ -1722,7 +1722,7 @@ impl Engine {
                 missing_fields: vec!["version".to_string()],
             });
         }
-        // Collected before the backend split so both storage flavours report
+        // Collected before the backend split so both storage kinds report
         // it. `install` refuses the archive for each of these; naming them at
         // export time is the same courtesy the dangling cross-mem edges get,
         // and for the same reason: an operator who learns at install time has
@@ -1757,7 +1757,7 @@ impl Engine {
             MountStorage::GitBranch { gitdir, branch } => {
                 let hook = self.git_branch_ops.as_ref().ok_or_else(|| {
                     EngineError::Backend(BackendError::Other(
-                        "git-branch export hook not installed (full flavour not loaded)"
+                        "git-branch export hook not installed (git-branch ops not wired)"
                             .to_string(),
                     ))
                 })?;
@@ -2106,8 +2106,8 @@ impl Engine {
             },
         )?;
         // This one used to return a bare `bool` and so had nowhere to put the
-        // intervention report: it was dropped, not even logged (04/03,
-        // criterion 3, found by the plan's grade). A writer whose signature
+        // intervention report: it was dropped, not even logged.
+        // A writer whose signature
         // cannot carry a warning is a writer that silently will not.
         let mut warnings = Vec::new();
         if !intervened.is_empty() {
@@ -2222,7 +2222,7 @@ impl Engine {
     /// `content_hash`).
     ///
     /// Operator-triggered: useful when an external writer modified
-    /// disk while this engine instance was alive (the lean flavour
+    /// disk while this engine instance was alive (the folder backend
     /// assumes single-writer; this primitive is the escape hatch when
     /// that assumption breaks). On the happy path the diff is empty.
     ///
@@ -2231,7 +2231,7 @@ impl Engine {
     /// changed" must compare `added.is_empty() && changed.is_empty()
     /// && removed.is_empty()` against the result. Backend-specific
     /// drift signals (git HEAD comparison, mtime check) live in the
-    /// full-flavour engine where they have meaning.
+    /// backends where they have meaning.
     ///
     /// Invalidates community + search-index memos on success.
     /// Load every DEFERRED (lazy, not-yet-loaded) mem matching `mem`
@@ -3262,7 +3262,7 @@ write_rules: []
         ]
     }
 
-    /// The exemplar gate (agent-trust plan 09): a package whose type
+    /// The exemplar gate: a package whose type
     /// carries a CONFORMANT exemplar installs; the same package broken
     /// three ways — wrong section key, illegal enum value, relationship
     /// shape violation — refuses with a typed error naming the type
@@ -5225,7 +5225,7 @@ community:
         assert!(out.findings.is_empty());
     }
 
-    /// Schema-switch invalidation (flywheel W8/01, criterion 2): a
+    /// Schema-switch invalidation: a
     /// schema switch changes NO store content — the store generation
     /// stays put — yet both derived memos depend on the schema
     /// (community weights, the index field set), so the switch must

@@ -1,5 +1,4 @@
-//! The integrity axis blames no grant after an unmount (backlog-decisions
-//! plan B8): a cross-mem edge whose target mem is no longer mounted is
+//! The integrity axis blames no grant after an unmount: a cross-mem edge whose target mem is no longer mounted is
 //! reported exactly once, as the dangling finding, and never as
 //! `CROSS_MEM_EDGE_UNGRANTED` while the grant table still names the pair;
 //! CLI JSON and MCP `structured_content` agree byte for byte. The refusal

@@ -2,8 +2,8 @@
 //!
 //! `from_mounts` is the in-process constructor every test, in-process
 //! embedder, and the MCP filesystem server reach through.
-//! `from_workspace_root` is the lean boot helper that produces the
-//! same engine from a workspace root; the full counterpart lives in
+//! `from_workspace_root` is the folder boot path that produces the
+//! same engine from a workspace root; the git-branch counterpart lives in
 //! `memstead_git_branch::engine_from_workspace_root` and follows the same
 //! shape with the git-branch backend added to the factory.
 //!
@@ -221,11 +221,11 @@ impl Engine {
             // construction. Read-only: the stamp is only ever
             // rewritten by the next mutation.
             //
-            // Compared as SEMVER, not as full strings (04/04, criterion 8).
+            // Compared as SEMVER, not as full strings.
             // The old rule fired on any difference including the `+g<sha>`
             // build metadata, so every rebuild between releases read as
             // skew — noise on any workspace whose binary is built from
-            // source, which is every dogfood workspace. Semver ordering
+            // source, which is every one of this project's own workspaces. Semver ordering
             // ignores build metadata, so what survives is a real version
             // difference, and it now carries its direction.
             if let Some(stamp) = m
@@ -416,8 +416,8 @@ impl Engine {
             // is what keeps this from trading a mount that looks healthy for a
             // mount that is simply gone.
             //
-            // SCOPED TO PATH-BACKED STORAGE, and the exception is a dispute
-            // with the plan's own criterion 9 rather than an oversight. For a
+            // SCOPED TO PATH-BACKED STORAGE, and the exception is a deliberate
+            // departure from backend parity rather than an oversight. For a
             // git-branch mount, "the ref does not exist" is ALSO the normal
             // state of a mem never pushed or never cloned, and quarantine
             // removes the mount from the serving set. Parity was attempted
@@ -457,7 +457,7 @@ impl Engine {
             }
             // A mount that is PRESENT but holds nothing still only warns: an
             // empty mem is a legitimate state and must never be reported as
-            // unbacked or quarantined (criterion 5).
+            // unbacked or quarantined.
             if let Some(w) =
                 unbacked_mount_warning(&m.mount, m.backend.as_ref(), Some(entries.len()))
             {
@@ -589,7 +589,7 @@ impl Engine {
             boot_diagnosis: None,
             pipeline_configs: crate::pipeline_store::BindingConfigs::default(),
             mem_router: Arc::new(mem_router),
-            backend_factory: crate::workspace_store::instantiate_lean_backend,
+            backend_factory: crate::workspace_store::instantiate_local_backend,
             unmounted_storage_prober: None,
             schemas_epoch: 0,
             git_branch_ops: None,
@@ -608,27 +608,27 @@ impl Engine {
         })
     }
 
-    /// Boot an engine from a workspace root using only lean-flavour
-    /// backends (folder + archive). The MCP filesystem server and the
-    /// CLI's lean dispatcher reach the new engine through this entry
-    /// point — replacing per-flavour init code with one call.
+    /// Boot an engine from a workspace root using only the local
+    /// backends (folder + archive): the folder boot path. The CLI's
+    /// folder-workspace path reaches the engine through this entry
+    /// point; git-branch mounts quarantine unless a backend factory is set.
     ///
     /// Loads the workspace through [`crate::FileWorkspaceStore`],
     /// instantiates each mount's backend via
-    /// [`crate::instantiate_lean_backend`], and constructs the
+    /// [`crate::instantiate_local_backend`], and constructs the
     /// engine via [`Engine::from_mounts`].
     ///
     /// Errors:
     /// - [`Layout::Empty`](crate::Layout) → [`BootError::NotInitialised`]
     /// - any mount declaring [`crate::workspace::MountStorage::GitBranch`]
     ///   → [`BootError::Instantiate`] wrapping
-    ///   [`crate::InstantiateError::GitBranchRequiresMemRepoFeature`]
+    ///   [`crate::InstantiateError::GitBranchBackendUnavailable`]
     /// - underlying store / engine failures lift through the
     ///   `#[from]` conversions
     pub fn from_workspace_root(workspace_root: &Path) -> Result<Self, BootError> {
         use crate::workspace_store::{
             FileWorkspaceStore, Layout, WorkspaceStoreAdapter, detect_layout,
-            instantiate_lean_backend,
+            instantiate_local_backend,
         };
 
         let workspace = match detect_layout(workspace_root) {
@@ -652,7 +652,7 @@ impl Engine {
         // entry lands on the engine after construction.
         let mut instantiate_quarantine: Vec<crate::engine::QuarantinedMem> = Vec::new();
         for mount in workspace.mounts {
-            match instantiate_lean_backend(&mount) {
+            match instantiate_local_backend(&mount) {
                 Ok(backend) => mounts.push((mount, backend)),
                 Err(e) => instantiate_quarantine.push(crate::engine::QuarantinedMem {
                     reason_code: e.code().to_string(),
@@ -667,7 +667,7 @@ impl Engine {
         // `__MEMSTEAD:schemas/` ref. Read them through the folder
         // `SchemaSource` (which no-ops when the directory is absent, so a
         // workspace that authored no schemas resolves exactly as before —
-        // built-ins only). This is the lean flavour's schema-authoring
+        // built-ins only). This is the folder boot path's schema-authoring
         // path, which it lacked.
         let fixed_dir = workspace_root.join(".memstead").join("schemas");
         let (local, failed) = load_workspace_schemas_with_failures(Some(fixed_dir.as_path()));
@@ -683,12 +683,10 @@ impl Engine {
         // binding store — and expose them read-only. A malformed config
         // surfaces a typed `StoreError::Parse` naming the file (early
         // validation of operator-edited configs); an absent `projections/`
-        // directory resolves to empty. A pre-v2 store refuses boot with
-        // `StoreError::LegacyProjectionStore` naming `memstead projection
-        // migrate` — the engine never reads a prior generation (2026-07-18
-        // consolidation, no compatibility layer). The migrate command itself
-        // operates below engine boot, so an unmigrated workspace can still
-        // run it.
+        // directory resolves to empty. A file in a retired binding format
+        // quarantines its binding with `StoreError::LegacyProjectionStore`
+        // (the engine never reads a prior generation and no longer converts
+        // one; the binding is re-authored with `memstead projection init`).
         engine.set_pipeline_configs(crate::pipeline_store::load_pipeline_configs(
             workspace_root,
         )?);
@@ -1989,11 +1987,11 @@ community:
 
     /// The engine-side pipeline loader: with a workspace store carrying one
     /// v2 binding, the engine on boot enumerates it through its read-only
-    /// queryable surface; a pre-v2 store refuses boot with the
-    /// migrate-naming error (the loader never reads a prior generation).
+    /// queryable surface; a retired-format file quarantines its binding
+    /// with the typed reason (the loader never reads a prior generation).
     #[test]
     fn from_workspace_root_loads_pipeline_configs_into_queryable_surface() {
-        use crate::pipeline::{MediumType, Projection};
+        use crate::pipeline::MediumType;
         let tmp = TempDir::new().unwrap();
         let mem_dir = tmp.path().join("mem");
         std::fs::create_dir_all(&mem_dir).unwrap();
@@ -2036,23 +2034,15 @@ community:
             MediumType::Codebase
         );
 
-        // QUARANTINE (agent-trust plan 04 re-routing of the historical
-        // wholesale refusal): a pre-v2 (version-less gen-2) projection
+        // QUARANTINE: a pre-v2 (version-less gen-2) projection
         // file no longer fails the boot — the affected binding
-        // quarantines with the migrate-naming reason, still never
+        // quarantines with the retired-format reason, still never
         // read, still never tolerated; the workspace and the healthy
-        // binding keep serving.
-        crate::pipeline_store::write_projection(
-            tmp.path(),
-            "specs",
-            "legacy",
-            &Projection {
-                intent: None,
-                source_facets: vec!["view".to_string()],
-                reference_mems: Vec::new(),
-                destination_mem: "specs".to_string(),
-                rules: None,
-            },
+        // binding keep serving. Written raw: the engine has no type
+        // for the retired shape.
+        std::fs::write(
+            tmp.path().join(".memstead/projections/specs/legacy.json"),
+            br#"{"source_facets": ["view"], "reference_mems": [], "destination_mem": "specs"}"#,
         )
         .unwrap();
         let engine = Engine::from_workspace_root(tmp.path()).unwrap();
@@ -2064,8 +2054,15 @@ community:
         assert!(
             pc.quarantined[0]
                 .reason_message
-                .contains("memstead projection migrate"),
-            "quarantine reason names the migrate command, got: {}",
+                .contains("retired binding format"),
+            "quarantine reason names the retired format, got: {}",
+            pc.quarantined[0].reason_message
+        );
+        assert!(
+            pc.quarantined[0]
+                .reason_message
+                .contains("memstead projection init"),
+            "quarantine reason names the way back, got: {}",
             pc.quarantined[0].reason_message
         );
     }
@@ -2762,7 +2759,7 @@ community:
         assert!(engine.pipeline_configs().bindings.is_empty());
     }
 
-    /// The lean folder authoring path: a schema package authored at the
+    /// The folder authoring path: a schema package authored at the
     /// fixed `<workspace>/.memstead/schemas/<name>@<version>/` location
     /// is resolved at boot, so a folder mem can pin a non-built-in
     /// schema. Before this wiring `from_workspace_root` loaded only
@@ -2985,7 +2982,7 @@ community:
         assert_eq!(drift_codes(&engine), Vec::<String>::new());
     }
 
-    /// Plan 12: `full_refresh` makes an out-of-band schema install and
+    /// `full_refresh` makes an out-of-band schema install and
     /// an out-of-band mem registration usable warm — additively.
     /// Removals are skipped and reported; a failed mount is reported
     /// per-item and does not abort the rest.
@@ -3210,8 +3207,8 @@ pattern = "exec-*"
     }
 
     /// Deliberate replacement of the historical wholesale-abort test
-    /// (`from_mounts_rejects_unknown_schema_pin_with_typed_error`,
-    /// agent-trust plan 04): an unresolvable pin no longer fails the
+    /// (`from_mounts_rejects_unknown_schema_pin_with_typed_error`):
+    /// an unresolvable pin no longer fails the
     /// workspace — the mem is QUARANTINED with the same typed
     /// `SCHEMA_NOT_FOUND` reason (nothing is weakened, the blast
     /// radius shrinks), operations naming it refuse `MEM_QUARANTINED`,
@@ -3262,7 +3259,7 @@ pattern = "exec-*"
         assert_eq!(health.quarantined[0].reason_code, "SCHEMA_NOT_FOUND");
     }
 
-    /// Criterion 5 (agent-trust plan 04): quarantine → repair →
+    /// Criterion 5: quarantine → repair →
     /// reload returns the mem to service in the same engine instance;
     /// the roster entry disappears. The repair here is the same
     /// value-level config-pin rewrite `memstead mem set-schema`
@@ -3324,7 +3321,7 @@ pattern = "exec-*"
             .expect("reattached mem serves writes");
     }
 
-    /// Criterion 2 complement (agent-trust plan 04): a healthy mem
+    /// Criterion 2 complement: a healthy mem
     /// whose entity body wiki-links INTO a quarantined mem loads
     /// normally — the link degrades like any dangling cross-mem link
     /// (stub target), no cascade failure.
@@ -3376,7 +3373,7 @@ pattern = "exec-*"
         );
     }
 
-    /// Agent-trust plan 06, criterion 3 complement: a workspace where
+    /// Complement: a workspace where
     /// one mem pins an authored schema still on the retired
     /// `propagating_relationships` key boots — that mem quarantines
     /// with the rename error as its reason (never workspace-fatal),
@@ -3434,7 +3431,7 @@ pattern = "exec-*"
         );
     }
 
-    /// Agent-trust plan 06, criterion 2: a mem pinned to the new
+    /// A mem pinned to the new
     /// ingest@0.3.0 reports its edge-less entry entities as leaf
     /// population, zero false orphans; the prior version (0.2.0) is
     /// unchanged — the same entity still counts as an orphan there.
@@ -3658,7 +3655,7 @@ pattern = "exec-*"
     }
 
     #[test]
-    fn from_workspace_root_quarantines_git_branch_mount_on_lean() {
+    fn from_workspace_root_quarantines_git_branch_mount_without_factory() {
         let tmp = TempDir::new().unwrap();
         let memstead = tmp.path().join(".memstead");
         std::fs::create_dir_all(&memstead).unwrap();
@@ -3668,7 +3665,7 @@ pattern = "exec-*"
         )
         .unwrap();
         // Hand-craft a state/mounts.json carrying a git-branch mount —
-        // the lean boot path can't instantiate that backend.
+        // the folder boot path can't instantiate that backend.
         let state_dir = memstead.join("state");
         std::fs::create_dir_all(&state_dir).unwrap();
         std::fs::write(
@@ -3689,14 +3686,14 @@ pattern = "exec-*"
         )
         .unwrap();
         // Deliberate replacement of the historical wholesale-abort
-        // assertion (agent-trust plan 04): the lean binary meeting a
+        // assertion: an engine without the git-branch factory meeting a
         // git-branch mount QUARANTINES that mem (typed
         // UNSUPPORTED_WORKSPACE_SHAPE reason) instead of refusing the
         // whole workspace — the judgment is unchanged, the blast
-        // radius shrinks to the one mount the lean flavour cannot
+        // radius shrinks to the one mount the folder boot path cannot
         // serve.
         let engine = Engine::from_workspace_root(tmp.path())
-            .expect("lean boot quarantines the git-branch mount, never fails the workspace");
+            .expect("folder boot quarantines the git-branch mount, never fails the workspace");
         let roster = engine.quarantined_mems();
         assert_eq!(roster.len(), 1);
         assert_eq!(roster[0].mount.mem, "specs");
@@ -4111,7 +4108,7 @@ write_rules: []
     /// quarantined mem keeps its established typed refusal and a VALID
     /// mem with no matches still returns success with 0 hits. Absence of
     /// mem and absence of matches are never the same answer
-    /// (backlog-sweep plan 05, decision 4).
+    /// (an earlier plan, decision 4).
     #[test]
     fn search_mem_filter_gates_against_visible_roster() {
         use crate::vcs::Actor;

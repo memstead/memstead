@@ -325,7 +325,7 @@ pub struct Anchor {
     /// derived from. Empty for every other class.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub derived_from: Vec<String>,
-    /// `hash(D)` of the binding that produced this anchor (E2), when a
+    /// `hash(D)` of the binding that produced this anchor, when a
     /// binding produced it. `None` for a manually-authored anchor with no
     /// producing binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -382,8 +382,7 @@ pub struct AnchorObservation {
     pub state: AnchorState,
 }
 
-/// Who established an anchor's hash baseline (consistency-sweep 03/03,
-/// criterion 8). A baseline that resets with no trace makes drift
+/// Who established an anchor's hash baseline. A baseline that resets with no trace makes drift
 /// unfalsifiable, so the origin is recorded rather than inferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -456,7 +455,7 @@ pub enum SpanLocator<'a> {
 /// `span`-grain reference naming a bare path addresses its whole file, which
 /// is what a span's hash covers anyway with no preparation declared, and such
 /// anchors are written today. Refusing them would be a new wall across a
-/// working flow, which the plan's own criterion 4 forbids.
+/// working flow, which the no-new-walls rule forbids.
 ///
 /// The refusals are the shapes that can never address anything: an EMPTY
 /// locator (`path#`, which announces a span and then names none), and a
@@ -1682,7 +1681,7 @@ pub fn resolve_anchor(anchor: &Anchor, observation: &ArtifactObservation) -> Anc
 /// entity's anchor list. Tree-grain fan-out is surfaced distinctly so a
 /// single entity anchored to a large tree is never laundered into
 /// full per-file credit — the count of tree anchors is visible on its own
-/// axis, and downstream (E3b) reads the fan-out counts from resolution.
+/// axis, and downstream reads the fan-out counts from resolution.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityAnchorComposition {
     /// Anchor count keyed by provenance-class wire string.
@@ -1690,7 +1689,7 @@ pub struct EntityAnchorComposition {
     /// Anchor count keyed by grain wire string.
     pub by_grain: BTreeMap<String, usize>,
     /// The `derived_from` input lists of every `derived` anchor, in
-    /// anchor order — E3b's derived-input provenance.
+    /// anchor order: the derived-input provenance.
     pub derived_inputs: Vec<Vec<String>>,
     /// Artifact refs of every `tree`-grain anchor — the fan-out axis. A
     /// tree anchor is one row here regardless of how many files the tree
@@ -1842,8 +1841,7 @@ impl AnchorSidecar {
                 e.artifact == anchor.artifact && e.grain == anchor.grain && e.class == anchor.class
             }) {
                 Some(existing) => {
-                    // The same triple replaces the row (backlog-decisions
-                    // plan B10). A row identical to the stored one on every
+                    // The same triple replaces the row. A row identical to the stored one on every
                     // caller-supplied field is a no-op: nothing is written
                     // and the caller hears so. Otherwise the stored row goes,
                     // baseline included: a re-pin that names no hash is

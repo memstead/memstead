@@ -442,7 +442,7 @@ fn revoke_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()
 
     // What was ALREADY unbacked before this edit. Reported without it, the
     // revocation would blame itself for every edge some earlier unrelated
-    // revocation left behind (04/07, criterion 5).
+    // revocation left behind.
     let before = ctx
         .cli_engine()
         .map(|mut e| e.base_mut().ungranted_cross_mem_edges())
@@ -462,7 +462,7 @@ fn revoke_cross_link(ctx: &CliContext, args: CrossLinkArgs) -> anyhow::Result<()
     //
     // Booted AFTER the edit, so the scan answers against the policy as it now
     // stands. The engine is not booted at all when the revoke was a no-op, so
-    // the ordinary case pays nothing and gains no noise (criterion 7).
+    // the ordinary case pays nothing and gains no noise.
     let orphaned: Vec<String> = if warnings.is_empty() {
         match ctx.cli_engine() {
             Ok(mut engine) => memstead_base::Engine::newly_ungranted(
@@ -741,7 +741,7 @@ const DUMP_FORMAT: &str = "workspace-dump/v1";
 
 /// Why an enumerated mount serves nothing, or `None` when it serves.
 ///
-/// The dump had no warnings channel at all (04/05, criterion 3), so even an
+/// The dump had no warnings channel at all, so even an
 /// enumerated broken mount would have been a bare row the reader had to
 /// interpret. This is per-mem rather than a workspace-level list, because the
 /// reader's question is about the row in front of them.

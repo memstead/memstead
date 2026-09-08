@@ -1,7 +1,4 @@
-// `memstead projection init` and the MCP counterpart ship only in the
-// full build.
-
-//! The `vital_signs` health axis (A6): five model-truth signals per mem,
+//! The `vital_signs` health axis: five model-truth signals per mem,
 //! each a count plus a capped list with a `more` remainder, never a
 //! verdict; byte-identical between the CLI JSON and the MCP
 //! `structured_content`; the last-resort type read from the schema's

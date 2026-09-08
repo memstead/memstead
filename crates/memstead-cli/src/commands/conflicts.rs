@@ -1,5 +1,5 @@
 //! `memstead conflicts` — the sanctioned door for git merge conflicts
-//! in folder mems (backlog-sweep plan 07, decision 20).
+//! in folder mems (an earlier plan, decision 20).
 //!
 //! A hand-committed folder mem lives in the user's own git repository,
 //! so an ordinary merge can write conflict markers into entity files —

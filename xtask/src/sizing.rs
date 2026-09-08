@@ -241,7 +241,7 @@ fn generate_workspace(binary: &Path, ws: &Path, n: usize) -> Result<()> {
 /// two-to-three prose sections, rotating `level` metadata, two explicit
 /// edges to earlier entities (USES / DEPENDS_ON), and one body
 /// wiki-link (which alias-emits REFERENCES). The shape follows the
-/// plenum field deployment's flavour (typed prose + edge density ~3
+/// a field deployment's shape (typed prose + edge density ~3
 /// per entity) without depending on it.
 fn corpus_json(n: usize) -> String {
     let levels = ["M0", "M0", "M0", "M1", "M2"]; // mostly concrete, like real mems

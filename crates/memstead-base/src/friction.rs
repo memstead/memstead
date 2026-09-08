@@ -1,5 +1,5 @@
 //! Friction ledger — the engine's record of its own surface's
-//! learnability (agent-trust plan 08).
+//! learnability.
 //!
 //! Every typed refusal a surface returns is appended as one JSONL line
 //! to a workspace-local, gitignored, size-bounded ledger under
@@ -237,7 +237,7 @@ impl FrictionLedger {
 
     /// The `include=["friction"]` health axis: counts per code and per
     /// verb over the whole ledger, plus the same for the recent 24h
-    /// window. Shared by the CLI health command and both MCP flavours
+    /// window. Shared by the CLI health command and the MCP server
     /// so the axis cannot drift between surfaces.
     pub fn summarize(&self) -> serde_json::Value {
         let entries = self.entries();

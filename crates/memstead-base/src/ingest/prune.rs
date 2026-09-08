@@ -1,5 +1,4 @@
-//! Prune — deletion **proposal** machinery (bundle plan `05-verify-sync-engine`,
-//! group F).
+//! Prune — deletion **proposal** machinery.
 //!
 //! Prune answers "the source removed this artifact entirely — should the entity
 //! describing it be deleted?". It **never** mutates the destination mem: it
@@ -74,7 +73,7 @@ impl PruneMode {
 /// retrieved: did the model side diverge from the retrieved base?
 ///
 /// The model-divergence signal (comparing the current entity against the base
-/// leg) is not wired this cycle, so [`prune_proposals`] supplies `None` and
+/// leg) is not wired, so [`prune_proposals`] supplies `None` and
 /// every candidate conservatively conflict-flags. The [`PruneMerge::Clean`]
 /// branch is the reachable, tested seam a future model-divergence check drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,7 +261,7 @@ pub fn prune_proposals(
             AnchorProvenanceClass::InformedBy
         };
 
-        // Merge outcome is unwired this cycle → None → conservative conflict-flag.
+        // Merge outcome is unwired → None → conservative conflict-flag.
         let Some(disposition) =
             classify_prune_candidate(dominant, mode, acc.base_retrievable, None)
         else {
@@ -507,9 +506,9 @@ mod tests {
             // The entity each row is keyed to. Written, because it exists: a
             // row whose entity does not is DANGLING and is partitioned out of
             // the population before prune sees it (consistency-sweep 03/02),
-            // which is exactly the phantom-entity proposal criterion 6 bans.
+            // which is exactly the phantom-entity proposal prune bans.
             // A `!` prefix on the id means "seed the row but NOT the entity",
-            // which is the phantom-entity condition criterion 6 is about.
+            // which is the phantom-entity condition the ban is about.
             let (write_entity, eid) = match eid.strip_prefix('!') {
                 Some(rest) => (false, rest),
                 None => (true, *eid),
@@ -761,7 +760,7 @@ mod tests {
     /// A `never-clobber` binding whose anchor IS git-pinned has a retrievable
     /// base leg — the proposal reports it (the never-clobber posture), while
     /// still degrading to conflict-flag until the model-divergence merge signal
-    /// is wired (the gatherer supplies no merge outcome this cycle).
+    /// is wired (the gatherer supplies no merge outcome).
     #[test]
     fn git_pinned_anchor_reports_a_retrievable_base_leg() {
         let tmp = tempfile::tempdir().unwrap();

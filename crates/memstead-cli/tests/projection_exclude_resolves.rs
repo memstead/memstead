@@ -1,5 +1,5 @@
 //! `projection exclude` resolves the artifact id and refuses an unknown one
-//! (backlog-decisions plan B11): on a bound fixture whose source pointer is
+//!: on a bound fixture whose source pointer is
 //! a sub-tree (and a second whose pointer lies outside the workspace root,
 //! the flagship's shape), the source-relative id and the workspace-relative
 //! one resolve to the same canonical id, the ledger holds that one form, the

@@ -107,7 +107,7 @@ pub enum WorkspaceEditWarning {
     /// delete user data — but they are now in a state the default-deny
     /// write gate would refuse to create, so they are named at the moment
     /// the operator can act on them cheapest rather than left for a later
-    /// gate run (04/07, criterion 5).
+    /// gate run.
     ///
     /// Rides the warning channel deliberately: every revoke surface
     /// already renders these, so the CLI operator, the HTTP client and the

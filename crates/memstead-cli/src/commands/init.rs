@@ -39,9 +39,8 @@ use crate::setup::CliContext;
 
 /// Recovery hint for the nested-workspace refusal. Every printed
 /// alternative must exist and be able to succeed in the binary that
-/// prints it: `memstead mem init` is the full (mem-repo) verb; the
-/// lean binary has no `mem` subcommand group, so it points outside
-/// the existing workspace instead.
+/// prints it: `memstead mem init` adds a mem inside a mem-repo
+/// workspace; a separate graph goes outside the existing workspace.
 const NESTED_WORKSPACE_HINT: &str = "If you meant to add a mem inside the existing \
      workspace, run `memstead mem init` instead; for a separate graph, initialise in a \
      folder outside the existing workspace.";
@@ -90,8 +89,8 @@ pub fn run(ctx: &CliContext, args: InitArgs) -> anyhow::Result<()> {
     // A pin that resolves to no built-in schema is loudly flagged, not
     // refused: a fresh workspace has no `.memstead/schemas/` yet, and
     // `memstead schema install` only works *inside* a workspace, so
-    // init-with-pin followed by install is the designed (and, on the
-    // lean build, the only) custom-schema flow. Without the warning the
+    // init-with-pin followed by install is the designed
+    // custom-schema flow. Without the warning the
     // command reports success and every later engine-booting command
     // dies on `SCHEMA_NOT_FOUND` with no hint how the workspace got
     // into that state. (`memstead mem init` / MCP `memstead_mem_create`
@@ -428,8 +427,8 @@ mod tests {
     }
 
     /// A well-formed pin that resolves to no built-in schema still
-    /// initialises (init-then-`schema install` is the designed — and on
-    /// the lean build the only — custom-schema flow), but never
+    /// initialises (init-then-`schema install` is the designed
+    /// custom-schema flow), but never
     /// silently: the run emits the `SCHEMA_NOT_FOUND` warning whose
     /// text names the recovery command.
     #[test]

@@ -192,8 +192,8 @@ fn no_verdict(surface: &'static str, reason: &'static str) -> SurfaceCoverage {
 
 /// Every CLI surface's coverage row. Names are the clap path exactly
 /// as the walk below produces it ("workspace dump", not "dump").
-/// Feature-gated commands carry the same gate as their clap variant,
-/// so the lean build's registry matches the lean build's walk.
+/// Feature-gated commands (`registry-ops`) carry the same gate as their
+/// clap variant, so a build's registry matches that build's walk.
 pub fn surface_registry() -> Vec<SurfaceCoverage> {
     let mut rows = vec![
         STATUS,
@@ -255,7 +255,6 @@ pub fn surface_registry() -> Vec<SurfaceCoverage> {
         no_verdict("init", MUTATION),
         no_verdict("quickstart", MUTATION),
         no_verdict("projection init", MUTATION),
-        no_verdict("projection migrate", MUTATION),
         no_verdict("projection enable", MUTATION),
         no_verdict("projection edit", MUTATION),
         no_verdict("projection advance", MUTATION),

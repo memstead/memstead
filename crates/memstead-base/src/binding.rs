@@ -122,16 +122,16 @@ pub struct SyncOperation {
     pub batch_size: u32,
 }
 
-/// Default per-run tier-3 adjudication cap (bundle plan `05-verify-sync-engine`,
-/// D1/D4). Dogfood-tuned against the live `engine/graph` binding (524 source
+/// Default per-run tier-3 adjudication cap. Tuned against this project's own
+/// live `engine/graph` binding (524 source
 /// artifacts): a fully-drifted mem of that scale clears its adjudication backlog
 /// in ~11 verify runs while each run's asserted-drift work stays bounded and its
 /// token cost predictable. `0` disables the cap (adjudicate every candidate).
 pub const DEFAULT_ADJUDICATION_CAP: u32 = 50;
 
-/// Default `full_resync_every` (bundle plan `05-verify-sync-engine`, D3/D4):
+/// Default `full_resync_every`:
 /// fire a guaranteed full-enumeration coverage sweep every N verify runs.
-/// Dogfood-tuned against `engine/graph` (524 artifacts, sample batch 20 → a
+/// Tuned against this project's own `engine/graph` (524 artifacts, sample batch 20 → a
 /// rotation completes in ~27 runs): a sweep every 20 runs guarantees a complete
 /// coverage picture without waiting on the rotation to happen to finish. `0`
 /// disables scheduled full walks (rotating sample only).
@@ -150,12 +150,12 @@ fn default_full_resync_every() -> u32 {
 /// operation to gate). Mutates no entity, but records findings, backfills
 /// observed anchor hashes and writes a `#verified` baseline. Carries no mode.
 ///
-/// `adjudication_cap` and `full_resync_every` are the tier-3 operations knobs
-/// (bundle plan `05-verify-sync-engine`, group D): scheduling attributes on the
+/// `adjudication_cap` and `full_resync_every` are the tier-3 operations knobs:
+/// scheduling attributes on the
 /// measurement side only — like `trigger` / `batch_size`, they never change what
 /// the mem claims, so they are excluded from [`hash_binding`] (the whole
 /// `verify` block is). Both are additive: an older `verify` block without them
-/// deserializes to the dogfood-tuned defaults.
+/// deserializes to the defaults above.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifyOperation {
     /// What sets a verify running.
@@ -183,8 +183,7 @@ pub struct VerifyOperation {
     pub full_resync_every: u32,
 }
 
-/// The prune guarantee a binding **requests** (bundle plan
-/// `05-verify-sync-engine`, F1). Prune produces deletion **proposals** surfaced
+/// The prune guarantee a binding **requests**. Prune produces deletion **proposals** surfaced
 /// in the sync brief (it never mutates the mem); the guarantee governs how a
 /// prune proposal treats a model-side edit that races a source removal.
 ///
@@ -288,7 +287,7 @@ pub const DEFAULT_SCAFFOLD_DENY_PATHS: &[&str] = &[
 pub struct Binding {
     /// Format version — required. v2 is [`BINDING_VERSION`]. A projection file
     /// without it (or with a prior version) is refused by the loader with a
-    /// typed error naming `memstead projection migrate`.
+    /// typed error (`PROJECTION_STORE_LEGACY`).
     pub version: u32,
     /// What the binding is trying to accomplish — prose for the agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,7 +317,7 @@ pub struct Binding {
     /// Opaque to the engine — consumed only by the one-shot brief renderer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<serde_json::Value>,
-    /// The **prune** policy (bundle plan `05-verify-sync-engine`, F1) — additive,
+    /// The **prune** policy — additive,
     /// optional. Absent = prune disabled (no deletion proposals). Present = prune
     /// produces deletion proposals in the sync brief under the requested
     /// [`PruneGuarantee`], validated against the medium's base-leg
@@ -515,7 +514,7 @@ pub fn medium_capabilities(medium_type: MediumType) -> MediumCapabilities {
         },
         MediumType::Web => MediumCapabilities {
             // Web enumeration / change detection / base retrieval are all
-            // deferred this cycle (operator decision 7).
+            // not supported: a web source has no change signal.
             enumerable: false,
             change_signal: false,
             base_version_retrievable: false,
@@ -634,11 +633,11 @@ pub enum CapabilityError {
         name: String,
     },
     /// A `sync` / `verify` operation is declared over a medium that cannot
-    /// support it this cycle (a `web` source — operator decision 7). The
+    /// support it (a `web` source has no change signal). The
     /// out-of-scope statement is said out loud, never a silent mtime-over-URL.
     #[error(
         "operation '{operation}' is out of scope for source '{source_name}' over a '{medium_type}' \
-         medium: this medium has no change signal this cycle (deferred — operator decision 7)"
+         medium: this medium has no change signal"
     )]
     OperationOutOfScope {
         /// The offending operation.
@@ -1417,7 +1416,7 @@ mod tests {
     }
 
     /// The tier-3 knobs are additive: a `verify` block without them
-    /// deserializes to the dogfood-tuned defaults, and a block that sets them
+    /// deserializes to the engine defaults, and a block that sets them
     /// round-trips its values.
     #[test]
     fn verify_tier3_knobs_default_and_round_trip() {

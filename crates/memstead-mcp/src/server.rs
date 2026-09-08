@@ -40,11 +40,11 @@ pub struct McpServer {
     /// `EffectiveSettings::token_budget` (config file `[mcp] token_budget`,
     /// or `DEFAULT_TOKEN_BUDGET` when absent).
     token_budget: usize,
-    /// Session-level default role (agent-trust plan 13), from the
+    /// Session-level default role, from the
     /// binary's `--role` flag. Per-call `role` params win; when both
     /// are absent, mutations record unspecified.
     default_role: memstead_base::vcs::Role,
-    /// Session-level default identity (agent-trust plan 15), from the
+    /// Session-level default identity, from the
     /// binary's `--identity` flag or the `MEMSTEAD_IDENTITY`
     /// environment variable (flag wins). Per-call `identity` params
     /// win over this default; when both are absent, operations record
@@ -190,7 +190,7 @@ impl McpServer {
     }
 
     /// Resolve a per-call `identity` parameter against the session
-    /// default (agent-trust plan 15). Per-call wins; an over-length
+    /// default. Per-call wins; an over-length
     /// value refuses typed (`INVALID_IDENTITY`) — the record is
     /// append-only, so nothing over the cap may reach it. An absent
     /// or whitespace-only value falls back to the session default;
@@ -226,7 +226,7 @@ impl McpServer {
 
     /// Resolve a per-call `role` parameter against the session
     /// default. An unknown value refuses typed with the declarable
-    /// vocabulary named (agent-trust plan 13).
+    /// vocabulary named.
     fn resolve_role(
         &self,
         raw: Option<&str>,
@@ -565,8 +565,7 @@ fn attach_durability(body: &mut serde_json::Value, engine: &memstead_base::Engin
         .map(|m| m.storage.is_durable())
         .unwrap_or(false);
     // The marker stays; what travels with it is what it was derived from, so
-    // a caller cannot read the mount-kind answer as a stronger one (04/04,
-    // criterion 7).
+    // a caller cannot read the mount-kind answer as a stronger one.
     let basis = engine
         .mounts()
         .iter()
@@ -846,7 +845,7 @@ fn engine_err_unified(
         // Block-tier declared-constraint refusals — code and recovery
         // payload come from the error itself (`code()` / `details()`),
         // so the envelope stays aligned with the CLI `--json` shape.
-        // 04/02, criterion 5: code and payload from the error itself, so the
+        // Code and payload from the error itself, so the
         // buried-section list reaches the agent identically on both surfaces.
         E::UnterminatedFenceInStoredBody { .. } => tool_error_with_payload(
             "UNTERMINATED_FENCE_IN_STORED_BODY",
@@ -1849,7 +1848,7 @@ fn engine_err_unified(
 }
 
 /// Typed-envelope translator for `FullEngineError`. Delegates wrapped
-/// lean errors to [`engine_err_unified`]; constructs the lifecycle-
+/// base-engine errors to [`engine_err_unified`]; constructs the lifecycle-
 /// specific envelopes (`MEM_PATH_NOT_ALLOWED`,
 /// `MEM_REFERENCED_BY_POLICY`, `MEM_SCHEMA_NOT_ALLOWED`,
 /// `CONFIG_ERROR`) here. The wire shape is
@@ -1872,9 +1871,9 @@ fn full_engine_err_unified(
     // the same `details()`.
     let shared_details = e.details();
     match e {
-        // #55: thread the engine so the wrapped-lean path enriches
+        // #55: thread the engine so the wrapped base-engine path enriches
         // not-found envelopes the same as every other call site.
-        PE::Lean(inner) => engine_err_unified(inner, engine),
+        PE::Engine(inner) => engine_err_unified(inner, engine),
         PE::MemPathNotAllowed { .. } => tool_error_with_payload(
             "MEM_PATH_NOT_ALLOWED",
             &message,
@@ -2222,7 +2221,7 @@ impl McpServer {
                 }
                 obj.insert("provenance".into(), serde_json::Value::Object(block));
             }
-            // Mutation provenance (agent-trust plan 13), opt-in:
+            // Mutation provenance, opt-in:
             // created-by / last-modified-by with actor, client,
             // declared role, and timestamp — derived from the
             // append-only mutation record, which no verb can edit.
@@ -2240,8 +2239,8 @@ impl McpServer {
                 };
                 obj.insert("mutation_provenance".into(), block);
             }
-            // Provenance anchors (E3a). Additive, emitted only when the
-            // entity has anchors so a pre-E3a reader is unaffected. Carries
+            // Provenance anchors. Additive, emitted only when the
+            // entity has anchors so a reader that predates anchors is unaffected. Carries
             // the stored anchor records plus their class/grain composition
             // (derived inputs; tree-grain fan-out on its own axis) and, for a
             // path-medium mem, each anchor's live resolution `state`
@@ -2382,33 +2381,12 @@ impl McpServer {
         // channel. Search results have a useful human-readable
         // canonical form (the rendered prose with score lines) and
         // a typed branching shape — both ship in one call.
-        let envelope = render::build_search_envelope(&result, offset);
-        let mut structured = serde_json::to_value(&envelope).unwrap_or(serde_json::Value::Null);
-        // Data-origin label per hit: a snippet from a read-only mount (a
-        // registry-installed read-mem or an adopted foreign folder/
-        // clone) is third-party — the consuming agent/host should treat
-        // it as quoted, untrusted data. Each hit already carries `mem`;
-        // stamp `origin` from its mount's class. Additive per-hit field.
-        if let Some(hits) = structured.get_mut("hits").and_then(|h| h.as_array_mut()) {
-            let mut class_of: std::collections::HashMap<String, &'static str> =
-                std::collections::HashMap::new();
-            for hit in hits.iter_mut() {
-                let Some(obj) = hit.as_object_mut() else {
-                    continue;
-                };
-                let Some(mem) = obj
-                    .get("mem")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                else {
-                    continue;
-                };
-                let wire = *class_of
-                    .entry(mem.clone())
-                    .or_insert_with(|| engine.mem_origin_class(&mem).as_wire());
-                obj.insert("origin".into(), serde_json::json!(wire));
-            }
-        }
+        // Every hit carries `origin` (first-party / third-party), stamped
+        // by the shared envelope builder so the CLI's `--json` and this
+        // `structured_content` agree key for key.
+        let envelope =
+            render::build_search_envelope(&result, offset, &|m| engine.mem_origin_class(m));
+        let structured = serde_json::to_value(&envelope).unwrap_or(serde_json::Value::Null);
         attach_mem_changed_to_result(
             md_with_structured(prepend_drift_warnings_md(md, &drift_warnings), structured),
             mem_changed_notices,
@@ -2713,7 +2691,7 @@ impl McpServer {
         // structural-only regardless of the requested `verbosity` (the
         // prose-instruction fields never reach the agent as instructions).
         let origin = engine.schema_origin(&schema);
-        // Serving-shape controls (backlog-sweep plan 06a): `types`
+        // Serving-shape controls (an earlier plana): `types`
         // scopes the per-type prose; the token budget guards the
         // unscoped full reply with a visible degrade instead of a
         // response-cap overflow.
@@ -2983,7 +2961,7 @@ impl McpServer {
         // An EMPTY token is no token on an anchors-only write, where the CLI
         // already discards it: leaving it Some("") sent it to the engine,
         // which compared "" against a real hash and refused HASH_MISMATCH for
-        // a write the CLI accepted (consistency-sweep 03/04, criterion 4).
+        // a write the CLI accepted.
         //
         // Narrowed to that shape on purpose. Normalizing unconditionally made
         // this gate fire BEFORE the engine's existence and stub gates, so an
@@ -3046,7 +3024,7 @@ impl McpServer {
                 }
                 // Present only when the update carried anchors or unsets:
                 // whether the sidecar changed (a restated row writes
-                // nothing and says so; backlog-decisions plan B10).
+                // nothing and says so; an earlier plan).
                 if let Some(changed) = outcome.anchors_changed {
                     body["anchors_changed"] = serde_json::json!(changed);
                 }
@@ -4674,7 +4652,7 @@ impl ServerHandler for McpServer {
     /// `list_tools` omission: this tool is not available here.
     ///
     /// This is also the friction ledger's one recording seam for the
-    /// whole tool surface (agent-trust plan 08): every dispatched
+    /// whole tool surface: every dispatched
     /// result that is a typed refusal appends one ledger entry whose
     /// values all come from closed engine-defined vocabularies (the
     /// module's privacy hard line — never parameters or payload text)
@@ -4830,7 +4808,7 @@ mod tests {
                 cross_linkable: true,
                 migration_target: None,
             };
-            let backend = memstead_base::instantiate_lean_backend(&mount).unwrap();
+            let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
             mounts.push((mount, backend));
         }
         let mut engine = memstead_base::Engine::from_mounts(mounts).unwrap();
@@ -4840,8 +4818,8 @@ mod tests {
         // fires. Test fixtures auto-seed a mem-repo
         // (`auto_seeded_settings`) so the heuristic always picks
         // `MountStorage::GitBranch` for runtime-created mems — the
-        // lean default factory would reject with
-        // `GitBranchRequiresMemRepoFeature`.
+        // default local factory would reject with
+        // `GitBranchBackendUnavailable`.
         engine.set_backend_factory(memstead_git_branch::storage::instantiate_full_backend);
         engine
     }
@@ -6751,7 +6729,7 @@ community:
             cross_linkable: true,
             migration_target: None,
         };
-        let backend = memstead_base::instantiate_lean_backend(&mount).unwrap();
+        let backend = memstead_base::instantiate_local_backend(&mount).unwrap();
         let mut unified = memstead_base::Engine::from_mounts_with_schemas_dir(
             vec![(mount, backend)],
             Some(&schemas_dir),
@@ -7182,12 +7160,12 @@ community:
         let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
             {
                 let m = mk("local", writable_dir, MountCapability::Write);
-                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
+                let b = memstead_base::instantiate_local_backend(&m).unwrap();
                 (m, b)
             },
             {
                 let m = mk("external", readonly_dir, MountCapability::ReadOnly);
-                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
+                let b = memstead_base::instantiate_local_backend(&m).unwrap();
                 (m, b)
             },
         ];
@@ -7286,12 +7264,12 @@ community:
         let mounts: Vec<(Mount, Box<dyn memstead_base::backend::MemBackend>)> = vec![
             {
                 let m = mk("local", writable_dir, MountCapability::Write);
-                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
+                let b = memstead_base::instantiate_local_backend(&m).unwrap();
                 (m, b)
             },
             {
                 let m = mk("external", readonly_dir, MountCapability::ReadOnly);
-                let b = memstead_base::instantiate_lean_backend(&m).unwrap();
+                let b = memstead_base::instantiate_local_backend(&m).unwrap();
                 (m, b)
             },
         ];
@@ -8122,7 +8100,7 @@ community:
         assert_eq!(envelope["code"], "INVALID_INPUT");
     }
 
-    /// Plan 12 end-to-end: the EXACT sequence the plenum channel
+    /// End to end: the EXACT sequence a user
     /// reported blocked — install a new schema out of band, create a
     /// mem pinned to it in-band, write an entity into it — completes
     /// warm, with `memstead_reload full=true` as the only extra step
@@ -8851,7 +8829,7 @@ write_rules: []
         );
     }
 
-    /// E3a: create with `anchors[]` persists them, `memstead_entity`
+    /// Create with `anchors[]` persists them, `memstead_entity`
     /// surfaces them additively on `structured_content`, a malformed
     /// anchor refuses `INVALID_ANCHOR` without writing the entity, and
     /// `memstead_relate` rejects an `anchors` field (deny_unknown_fields).
@@ -11266,8 +11244,7 @@ write_rules: []
             parsed.text
         );
         // The condition, not only the two ids: this doc comment claims the
-        // fixture raises target-missing, so the rendering must say so
-        // (04/06, criterion 4).
+        // fixture raises target-missing, so the rendering must say so.
         assert!(
             parsed.text.contains("[DANGLING_LINK_TARGET_MISSING]"),
             "Dangling Links must name which of the three conditions:\n{}",
@@ -14631,7 +14608,7 @@ write_rules: []
     #[test]
     fn memstead_mem_delete_with_delete_files_true_on_folder_mount_removes_dir() {
         let tmp = TempDir::new().unwrap();
-        // Build a lean-flavour engine: folder backend only, no
+        // Build an engine without the git-branch factory: folder backend only, no
         // mem-repo seeded. The create orchestrator's heuristic then
         // picks `MountStorage::Folder { path }` so `dir_for_mem`
         // returns Some on the registered mem.
@@ -15530,7 +15507,7 @@ write_rules: []
             );
         }
 
-        /// Rehearsal marker form (agent-trust plan 07), single-op path:
+        /// Rehearsal marker form, single-op path:
         /// `dry_run: true` reports the would-be edge and would-be stub
         /// with an EMPTY `write_id`, creates nothing, and the
         /// follow-up real call succeeds with a non-empty one.
@@ -15916,7 +15893,7 @@ write_rules: []
                 .expect("structured_content present")
         }
 
-        /// Plan-05 criterion 2 (create half): curation params applied
+        /// Create half: curation params applied
         /// at creation are visible on the loaded config and the
         /// configure tool's stable response.
         #[test]
@@ -15966,7 +15943,7 @@ write_rules: []
             assert_eq!(body["subject"]["exclusions"][0], "History.");
         }
 
-        /// Plan-05 criterion 2 (configure half): set, overwrite, and
+        /// Configure half: set, overwrite, and
         /// clear each field on an existing mem; unknown mem refuses.
         #[test]
         fn mem_configure_sets_overwrites_and_clears() {
@@ -16051,7 +16028,7 @@ write_rules: []
             assert_eq!(err["code"], "UNKNOWN_MEM", "{err}");
         }
 
-        /// Plan-05 criterion 3 (the operator's permission complement):
+        /// The operator's permission complement:
         /// curation params change nothing about the create allowlist
         /// gate — a rejected name refuses with the same typed code and
         /// detail shape; and configure against a read-only mount
@@ -17152,7 +17129,7 @@ write_rules: []
             );
         }
 
-        /// Cross-gate pre-announcement (backlog-sweep/09) through the
+        /// Cross-gate pre-announcement through the
         /// MCP envelope: a create failing BOTH the section gate and the
         /// metadata gate carries
         /// `details.pre_announced.required_field_unset.missing[]` in

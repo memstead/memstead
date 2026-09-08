@@ -243,7 +243,7 @@ fn build_update_args(
     // update surface exempts one (consistency-sweep 03/04): the token would
     // compare a value the write cannot move. Left in, this path refused an
     // entry that `memstead update` accepts, which is the surface divergence
-    // the plan's criterion 4 is about.
+    // this closes.
     // Hand-rolled rather than `UpdateEntityArgs::changes_content()` only
     // because the args do not exist yet at this point: the hash mode has to be
     // resolved before they can be built. `batch_entry_content_matches_the_engine_predicate`
@@ -307,10 +307,9 @@ fn build_update_args(
         engine.get_entity(&id).map(|e| e.content_hash.clone())
     } else if anchors_only {
         // An EMPTY token is no token on an anchors-only entry, as on
-        // `memstead update` and both MCP flavours: passed through, `""` reaches
+        // `memstead update` and the MCP server: passed through, `""` reaches
         // the engine and can never match a real hash, so the identical payload
-        // that the other three surfaces write refused HASH_MISMATCH here
-        // (consistency-sweep 03/04, criterion 4).
+        // that the other three surfaces write refused HASH_MISMATCH here.
         entry.expected_hash.filter(|h| !h.is_empty())
     } else {
         entry.expected_hash

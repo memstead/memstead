@@ -72,7 +72,7 @@ pub struct ArchiveEntries {
     /// surfaced here, never an error).
     pub provenance_bytes: Option<Vec<u8>>,
     /// Raw bytes of the optional engine-owned anchors sidecar
-    /// (`.memstead/anchors.json`, E3a), or `None` when the archive carries
+    /// (`.memstead/anchors.json`), or `None` when the archive carries
     /// none. Recognised as a first-class member so the canonical re-pack
     /// threads it through verbatim rather than dropping it; a
     /// recognised-but-structurally-invalid payload is a typed validation
@@ -273,7 +273,7 @@ pub fn extract_entries(
             // Strict, unlike provenance: a recognised anchors member that
             // does not parse as an `AnchorSidecar` is corruption, not
             // forward-compat — silently dropping it is exactly the
-            // publish-strip failure E3a exists to close. Validate the
+            // publish-strip failure the anchors member exists to close. Validate the
             // structure here; thread the verbatim bytes through the
             // canonical re-pack on success.
             let sidecar = crate::anchor::AnchorSidecar::from_bytes(&buf).map_err(|e| {
@@ -424,7 +424,7 @@ mod tests {
     }
 
     /// A recognised-but-structurally-invalid anchors member is a typed
-    /// failure — silent drop is exactly the publish-strip failure E3a
+    /// failure — silent drop is exactly the publish-strip failure this
     /// closes. (Unknown OTHER meta members keep tolerate-and-ignore.)
     #[test]
     fn rejects_malformed_anchors_member() {

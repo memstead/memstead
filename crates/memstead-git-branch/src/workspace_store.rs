@@ -1,6 +1,6 @@
-//! Full-flavour workspace boot helper.
+//! Git-branch workspace boot helper.
 //!
-//! Provides [`engine_from_workspace_root`] — the full counterpart to
+//! Provides [`engine_from_workspace_root`] — the git-branch counterpart to
 //! [`memstead_base::Engine::from_workspace_root`]. Loads the workspace via
 //! [`memstead_base::FileWorkspaceStore`], hydrates read-only archive mounts
 //! from each writable mem's `readMems` field, instantiates each
@@ -175,9 +175,9 @@ pub(crate) fn load_workspace_description(
 ) -> Result<memstead_base::Workspace, BootError> {
     match detect_layout(workspace_root) {
         // Standalone collapse: a bare folder mem (`.memstead/config.json`,
-        // no `workspace.toml`) roots as a one-mount workspace. Full-flavour
-        // embedders boot through this entry, so the unified lone-mem
-        // experience must hold here too, not only in the lean boot path.
+        // no `workspace.toml`) roots as a one-mount workspace. The product
+        // binaries boot through this entry, so the unified lone-mem
+        // experience must hold here too, not only in the folder boot path.
         memstead_base::Layout::Empty => match memstead_base::standalone_workspace(workspace_root) {
             Some(ws) => Ok(ws),
             None => Err(BootError::NotInitialised(workspace_root.to_path_buf())),
@@ -320,9 +320,8 @@ pub fn engine_from_workspace_root(workspace_root: &Path) -> Result<Engine, BootE
     }
     // Load the workspace store's pipeline configs — the v2 single-record
     // binding store — into the read-only queryable surface, matching the
-    // lean boot path. A malformed config surfaces a typed parse error; a
-    // pre-v2 store refuses boot with the migrate-naming error (`memstead
-    // projection migrate` is the only path from old-shape configs).
+    // folder boot path. A malformed config surfaces a typed parse error; a
+    // retired-format file quarantines its binding.
     engine.set_pipeline_configs(memstead_base::load_pipeline_configs(workspace_root)?);
     if migration_happened {
         engine.push_load_warning(memstead_base::ops::WarningHint::ReadMemsMigratedToMounts {

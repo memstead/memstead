@@ -5,7 +5,7 @@
 //! splitting and wiki-link scanning ran on a hand-rolled line scanner
 //! that recognised exactly one shape of code block (a column-0 backtick
 //! fence, closed by any backtick-prefixed line); section *content*
-//! validation ([`crate::section_format`], agent-toolbox plan 08) ran on
+//! validation ([`crate::section_format`]) ran on
 //! `pulldown-cmark`. They disagreed in six verified ways, and the
 //! disagreement sat on the write path — the validator judged content the
 //! splitter had already mis-partitioned:

@@ -189,7 +189,7 @@ pub fn parse_entries(
         // Git merge-conflict markers: refuse the file with the remedy
         // named, before the parser can either fail confusingly or —
         // worse — "succeed" and load BOTH sides' content as one body.
-        // The failure mode must name the door (backlog-sweep plan 07):
+        // The failure mode must name the door:
         // the guards correctly block git verbs and raw edits against
         // mem content, so the engine-side resolve operation is the one
         // sanctioned repair, and this message is where an agent finds

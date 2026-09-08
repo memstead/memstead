@@ -375,7 +375,7 @@ impl Engine {
     ///      [`crate::ops::folder_changes_since`].
     ///    - Git-branch mounts call the registered
     ///      [`GitBranchOps::changes_since`] hook (real tree-diff with
-    ///      rename detection); missing hook = full flavour not loaded
+    ///      rename detection); missing hook = git-branch ops not wired
     ///      and the report comes back empty.
     ///    - Archive mounts return an empty report.
     /// 4. Enriches each envelope's `title` / `entity_type` from the
@@ -588,7 +588,7 @@ impl Engine {
                     other => EngineError::Backend(other),
                 }),
                 None => Err(EngineError::Backend(BackendError::Other(
-                    "git-branch fetch hook not installed (full flavour not loaded)".to_string(),
+                    "git-branch fetch hook not installed (git-branch ops not wired)".to_string(),
                 ))),
             },
         }
@@ -629,7 +629,7 @@ impl Engine {
         // just like a standalone `memstead_fetch` call.
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch pull hook not installed (full flavour not loaded)".to_string(),
+                "git-branch pull hook not installed (git-branch ops not wired)".to_string(),
             ))
         })?;
         (hook.fetch)(&gitdir, remote, &[]).map_err(|e| match e {
@@ -714,7 +714,7 @@ impl Engine {
         };
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch push hook not installed (full flavour not loaded)".to_string(),
+                "git-branch push hook not installed (git-branch ops not wired)".to_string(),
             ))
         })?;
 
@@ -782,7 +782,7 @@ impl Engine {
     /// plus the remote's branches nothing mounts (a notice, whether or
     /// not a local ref of that name exists) and the mounted branches the
     /// remote lacks (a notice). Moves no ref and never refuses: no git-branch mount, no
-    /// hook (lean flavour), no remote configured or one that cannot be
+    /// hook (git-branch ops not wired), no remote configured or one that cannot be
     /// reached each become a notice and the outcome stands as not stale,
     /// so a network blip never blocks a session. The mount table the
     /// classification reads is this engine's own, so a remote branch with
@@ -812,7 +812,7 @@ impl Engine {
         }
         let Some(hook) = self.git_branch_ops.as_ref() else {
             outcome.notices.push(
-                "git-branch hooks not installed (lean flavour): the remote was not compared"
+                "git-branch hooks not installed (git-branch ops not wired): the remote was not compared"
                     .to_string(),
             );
             return outcome;
@@ -949,7 +949,7 @@ impl Engine {
 
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch push hook not installed (full flavour not loaded)".to_string(),
+                "git-branch push hook not installed (git-branch ops not wired)".to_string(),
             ))
         })?;
 
@@ -1119,7 +1119,7 @@ impl Engine {
             })?;
         let hook = self.git_branch_ops.ok_or_else(|| {
             EngineError::Backend(BackendError::Other(
-                "git-branch remote_add hook not installed (full flavour not loaded)".to_string(),
+                "git-branch remote_add hook not installed (git-branch ops not wired)".to_string(),
             ))
         })?;
         (hook.remote_add)(&gitdir, name, url).map_err(EngineError::Backend)
@@ -1332,7 +1332,7 @@ impl Engine {
                     })?,
                 None => {
                     return Err(EngineError::Backend(BackendError::Other(
-                        "git-branch branch_reset hook not installed (full flavour not loaded)"
+                        "git-branch branch_reset hook not installed (git-branch ops not wired)"
                             .to_string(),
                     )));
                 }
@@ -1432,7 +1432,7 @@ impl Engine {
     /// mem's storage. Folder and archive backends carry no git
     /// refs and refuse via [`EngineError::InvalidInput`]; the
     /// git-branch backend routes through [`GitBranchOps::diff`] when
-    /// the full flavour is loaded.
+    /// the git-branch ops are wired.
     ///
     /// `mem` selects the storage context (the gitdir, for
     /// git-branch mounts). `ref_a` / `ref_b` are arbitrary refs the
@@ -1492,7 +1492,7 @@ impl Engine {
                     })
                 }
                 None => Err(EngineError::Backend(BackendError::Other(
-                    "git-branch diff hook not installed (full flavour not loaded)".to_string(),
+                    "git-branch diff hook not installed (git-branch ops not wired)".to_string(),
                 ))),
             },
         }

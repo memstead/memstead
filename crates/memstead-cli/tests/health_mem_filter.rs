@@ -1,5 +1,5 @@
 //! The health mem filter applies to every section and warning
-//! (backlog-decisions plan B9): on two mounted mems that each carry one
+//!: on two mounted mems that each carry one
 //! anchor row and one warning of their own, `health --mem alpha` lists
 //! only alpha's anchor row, only alpha's config entry and only alpha's
 //! warning, and no section names beta except the mem rosters; CLI JSON and

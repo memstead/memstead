@@ -21,11 +21,11 @@ pub fn git_tree_mem_writer(gitdir: PathBuf, ref_name: String) -> Box<dyn MemWrit
     Box::new(git_tree::GitTreeMemWriter::new(gitdir, ref_name))
 }
 
-/// Full counterpart of [`memstead_base::instantiate_lean_backend`]: turns
-/// any [`memstead_base::Mount`] into a `Box<dyn MemBackend>`, including
-/// the git-branch variant that the lean flavour cannot construct.
+/// Git-branch counterpart of [`memstead_base::instantiate_local_backend`]:
+/// turns any [`memstead_base::Mount`] into a `Box<dyn MemBackend>`, including
+/// the git-branch variant that the local factory cannot construct.
 ///
-/// Folder and Archive variants delegate to the lean function so the
+/// Folder and Archive variants delegate to the local function so the
 /// instantiation paths share one implementation. The git-branch
 /// variant constructs a [`git_tree::GitTreeMemWriter`] using the
 /// mount's `gitdir` + `branch`, fully-qualifying the ref-name as
@@ -38,7 +38,7 @@ pub fn instantiate_full_backend(
     use memstead_base::MountStorage;
     match &mount.storage {
         MountStorage::Folder { .. } | MountStorage::Archive { .. } | MountStorage::InMemory => {
-            memstead_base::instantiate_lean_backend(mount)
+            memstead_base::instantiate_local_backend(mount)
         }
         MountStorage::GitBranch { gitdir, branch } => Ok(Box::new(
             git_tree::GitTreeMemWriter::new(gitdir.clone(), memstead_base::branch_full_ref(branch)),

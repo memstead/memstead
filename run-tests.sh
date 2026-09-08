@@ -169,7 +169,7 @@ else
   echo "  ✗ doctests FAILED"
 fi
 
-# Decision 9: the Rust gate must not hard-depend on node. Every node leg
+# The Rust gate must not hard-depend on node. Every node leg
 # below shares this check; a node-less environment skips each one LOUDLY
 # (a degraded green that names what was not checked), never silently.
 HAS_NODE=0
@@ -187,8 +187,8 @@ echo "════════════════════════�
 # directories, asserts the roster is exactly the expected set, and
 # throws on drift. Before this leg the guard ran only in the post-merge
 # deploy workflow — a guard that can only fail AFTER the tree merged.
-# Node-free environments skip loudly (decision 9): a skip is a degraded
-# mode, not a silent pass.
+# Node-free environments skip loudly: a skip is a degraded mode, not a
+# silent pass.
 if [ "$HAS_NODE" = 1 ]; then
   if (cd "$ROOT" && node docs-site/scripts/prebuild.mjs); then
     echo "  ✓ docs-site guard prebuild passed"
@@ -209,7 +209,7 @@ echo "  Gate: plugin must not call git against mem-repo"
 echo "══════════════════════════════════"
 # Plugin code must reach mem-repo via memstead-cli (subprocess) or
 # memstead-mcp (MCP); writes go through MCP. No carve-outs — plugin code
-# runs no git at all (outer-repo auto-commit retired 2026-07-11).
+# runs no git at all.
 if "$ROOT/scripts/check-plugin-architecture.sh"; then
   echo "  ✓ plugin architecture guard passed"
 else
@@ -284,8 +284,9 @@ echo "════════════════════════�
 # the README, the guides and the plugin described flags no published
 # binary accepted. The checker (ci/check_prose.py) hard-codes no path:
 # the file set is computed here, the binary is an argument, and
-# xtask release runs the same checker over the flagship at whole-file
-# scope. Its own fixtures run first, so a checker that stopped seeing
+# xtask release runs the same checker at whole-file scope over the
+# top-level markdown of the site that documents the release. Its own
+# fixtures run first, so a checker that stopped seeing
 # defects would fail here before it could pass anything.
 if [ -x "$ROOT/target/debug/memstead" ]; then
   PROSE_SET="$( { cd "$ROOT" && ls README.md CONTRIBUTING.md GLOSSARY.md VISION.md examples/README.md 2>/dev/null; \

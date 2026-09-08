@@ -225,7 +225,7 @@ impl Engine {
                 prepared.content_changed,
             )?;
         }
-        // Derivation baselines (agent-trust plan 12): declared
+        // Derivation baselines: declared
         // relations on a derivation rel-type record the target's
         // current hash, riding the same commit as the entity write.
         if let Some(schema) = self.schemas.get(prepared.id.mem()) {
@@ -948,7 +948,7 @@ impl Engine {
         // Whether the anchors merge would change the sidecar, decided on a
         // copy before any write so the answer can steer the no-op guard:
         // an anchors-only update that restates the stored rows is a no-op
-        // like any other (backlog-decisions plan B10).
+        // like any other.
         let anchors_changed: Option<bool> =
             if validated_anchors.is_empty() && validated_anchor_unsets.is_empty() {
                 None
@@ -2338,7 +2338,7 @@ mod tests {
         );
     }
 
-    /// Rehearsal contract (agent-trust plan 07): `batch_update` with
+    /// Rehearsal contract: `batch_update` with
     /// `dry_run: true` runs the full per-item validation, reports the
     /// would-be receipt with the marker form's empty `write_id`, and
     /// persists NOTHING — on-disk bodies and hashes stay untouched.
@@ -3312,7 +3312,7 @@ mod tests {
         let (mut engine, id) = engine_with_open_fence(&tmp);
         let (actor, client) = cli_actor();
         // The absorption is real before the write is attempted, and this is
-        // the exact shape criterion 4 names: `purpose` is present and EMPTY
+        // the exact absorption shape: `purpose` is present and EMPTY
         // while its content sits verbatim inside `identity`. A surface that
         // reports "empty section" here is telling the truth about the parse
         // and a lie about the entity.

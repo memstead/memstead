@@ -71,7 +71,8 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let result = match ctx.cli_engine()? {
+    let cli_engine = ctx.cli_engine()?;
+    let result = match &cli_engine {
         CliEngine::MemRepo(engine) => {
             // Validate `--mem` upfront so unknown names error
             // typed instead of silently returning `_total: 0` — matches
@@ -79,7 +80,7 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(name) = scope.mem.as_deref()
                 && engine.mount(name).is_none()
             {
-                return Err(unknown_mem_error(name, &engine).into());
+                return Err(unknown_mem_error(name, engine).into());
             }
             engine.list(&scope)
         }
@@ -87,14 +88,15 @@ pub fn run(ctx: &CliContext, args: Args) -> anyhow::Result<()> {
             if let Some(name) = scope.mem.as_deref()
                 && engine.mount(name).is_none()
             {
-                return Err(unknown_mem_error(name, &engine).into());
+                return Err(unknown_mem_error(name, engine).into());
             }
             engine.list(&scope)
         }
     };
 
     if ctx.json {
-        let envelope = render::build_list_envelope(&result);
+        let engine = cli_engine.base();
+        let envelope = render::build_list_envelope(&result, &|m| engine.mem_origin_class(m));
         print_json(&envelope)?;
     } else {
         print_markdown(&render::render_list_markdown(&result));

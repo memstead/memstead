@@ -1,8 +1,8 @@
 //! Integration tests for the `memstead projection` command tree.
 //!
 //! Leaves covered: `brief` (D9 — render a binding's run-brief, and its
-//! typed-refusal paths), `init` (D8 — non-interactive v1 scaffold), `migrate`
-//! (D10 — four-primitive → v1 bindings), `enable`, and `advance`.
+//! typed-refusal paths), `init` (D8 — non-interactive v2 scaffold), `enable`,
+//! `edit`, and `advance`.
 //!
 //! `init` tests assert: a codebase/filesystem source scaffolds all three files
 //! (`mediums`/`facets`/`projections`) with `operations:[build,sync,verify]` and
@@ -10,12 +10,6 @@
 //! deferral warning; the `--json` output matches D8's pinned byte-shape; and a
 //! re-run on an existing id refuses `PROJECTION_EXISTS` without touching disk
 //! (the three files are byte-identical after the refused second run).
-//!
-//! `migrate` tests build a fixture gen-2 workspace on disk, run the migration,
-//! and assert: the produced v1 binding round-trips and carries the merged build
-//! operations; the merged ingest is removed; `refinement` mode and a dangling
-//! ingest→projection ref each refuse with a typed `PROJECTION_*` code (exit 5);
-//! and `--dry-run` writes nothing.
 
 use assert_cmd::Command;
 use memstead_base::binding::{Binding, BuildMode};
@@ -56,264 +50,28 @@ fn bare_workspace() -> TempDir {
     tmp
 }
 
-/// A minimal gen-2 workspace: the workspace marker plus one codebase medium,
-/// one source facet, one projection, and one flat ingest naming it. `mode` and
-/// `deny` parameterise the ingest.
-fn fixture(mode: &str, deny: &str) -> TempDir {
+/// A workspace holding one build-only v2 binding `engine/graph` over a
+/// codebase source `source-tree` (pointer `../public`, scope `**/*.rs`),
+/// written raw. The substrate for the `enable` and `edit` tests.
+fn build_only_workspace() -> TempDir {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     write_store(root, "workspace.toml", BARE_WORKSPACE_TOML);
     write_store(
         root,
-        "mediums/engine/src.json",
-        r#"{"name":"src","type":"codebase","pointer":"../public"}"#,
-    );
-    write_store(
-        root,
-        "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"src","scope":[{"path":"**/*.rs","mode":"allow"}]}"#,
-    );
-    write_store(
-        root,
         "projections/engine/graph.json",
-        r#"{"intent":"the engine graph","source_facets":["source-tree"],"reference_mems":["plugin"],"destination_mem":"engine","rules":{"routing":"r"}}"#,
-    );
-    write_store(
-        root,
-        "ingests/engine-graph.json",
-        &format!(
-            r#"{{"projection":"engine/graph","mode":"{mode}","trigger":"loop","batch_size":20,"deny_paths":[{deny}],"post_actions":{{"archive_source":true}}}}"#
-        ),
+        r#"{"version":2,"intent":"the engine graph","sources":[{"name":"source-tree","type":"codebase","pointer":"../public","scope":[{"path":"**/*.rs","mode":"allow"}]}],"reference_mems":["plugin"],"destination_mem":"engine","deny_paths":[],"rules":{"routing":"r"},"operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20}}}"#,
     );
     tmp
 }
 
 fn read_binding(root: &Path) -> Binding {
     let bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
-    serde_json::from_slice(&bytes).expect("promoted projection file must parse as a v1 binding")
-}
-
-/// A discovery ingest migrates: the projection file is promoted to a v1
-/// binding carrying the merged build operation, and the merged ingest is gone.
-#[test]
-fn migrate_promotes_projection_to_v2_binding() {
-    let tmp = fixture("discovery", r#""dev","**/VISION.md""#);
-    let root = tmp.path();
-
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).expect("--json migrate must emit JSON");
-    assert_eq!(env["ok"], true);
-    assert_eq!(env["migrated"], 1);
-    assert_eq!(env["bindings"][0], "engine/graph");
-
-    // The projection file now parses as a v2 binding with the merged build
-    // op and the medium+facet folded inline under the facet's name verbatim.
-    let b = read_binding(root);
-    assert_eq!(b.version, 2);
-    assert_eq!(b.destination_mem, "engine");
-    assert_eq!(b.intent.as_deref(), Some("the engine graph"));
-    assert_eq!(b.reference_mems, vec!["plugin".to_string()]);
-    assert_eq!(b.sources.len(), 1);
-    assert_eq!(b.sources[0].name, "source-tree");
-    assert_eq!(b.sources[0].pointer, "../public");
-    assert_eq!(b.sources[0].scope.len(), 1);
-    assert_eq!(
-        b.operations.build.as_ref().unwrap().mode,
-        BuildMode::Discovery
-    );
-    assert_eq!(
-        b.operations.build.as_ref().unwrap().trigger,
-        IngestTrigger::Loop
-    );
-    assert_eq!(b.operations.build.as_ref().unwrap().batch_size, 20);
-    assert_eq!(
-        b.operations.build.as_ref().unwrap().post_actions,
-        Some(serde_json::json!({ "archive_source": true }))
-    );
-    // Build-only: sync/verify are enabled later, never fabricated by migrate.
-    assert!(b.operations.sync.is_none());
-    assert!(b.operations.verify.is_none());
-    // deny_paths moved up; the bare `dev` segment converted to the glob dialect.
-    assert_eq!(
-        b.deny_paths,
-        vec!["dev/**".to_string(), "**/VISION.md".to_string()]
-    );
-
-    // Serde round-trip is lossless.
-    let json = serde_json::to_string(&b).unwrap();
-    let back: Binding = serde_json::from_str(&json).unwrap();
-    assert_eq!(back, b);
-
-    // The merged flat ingest was removed, along with the emptied
-    // mediums/ and facets/ trees (their content folded inline).
-    assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
-    assert!(!root.join(".memstead/mediums").exists());
-    assert!(!root.join(".memstead/facets").exists());
-
-    // A dialect-rewrite warning was reported.
-    let warnings = env["warnings"].as_array().unwrap();
-    assert!(
-        warnings
-            .iter()
-            .any(|w| w["kind"] == "note" && w["message"].as_str().unwrap_or("").contains("dev/**")),
-        "expected a deny-dialect note, got {warnings:?}"
-    );
-}
-
-/// `--dry-run` reports the migration but writes nothing.
-#[test]
-fn migrate_dry_run_writes_nothing() {
-    let tmp = fixture("discovery", "");
-    let root = tmp.path();
-
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate", "--dry-run"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(env["dry_run"], true);
-    assert_eq!(env["migrated"], 1);
-
-    // Disk untouched: the flat ingest survives and the projection file is still
-    // the gen-2 shape (no `version` / `operations` keys).
-    assert!(root.join(".memstead/ingests/engine-graph.json").exists());
-    let raw =
-        std::fs::read_to_string(root.join(".memstead/projections/engine/graph.json")).unwrap();
-    assert!(
-        !raw.contains("\"version\""),
-        "gen-2 shape must be untouched"
-    );
-    assert!(!raw.contains("operations"), "gen-2 shape must be untouched");
-}
-
-/// A codebase binding validates clean — no capability warnings.
-#[test]
-fn migrate_legal_codebase_binding_validates_clean() {
-    let tmp = fixture("discovery", "");
-    let root = tmp.path();
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate", "--dry-run"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    let warnings = env["warnings"].as_array().unwrap();
-    assert!(
-        warnings.iter().all(|w| w["kind"] != "capability"),
-        "a legal codebase binding must not surface a capability refusal: {warnings:?}"
-    );
-}
-
-/// A facet declaring a preparation surfaces the D6 capability refusal as a
-/// migrate warning (the format still carries it faithfully).
-#[test]
-fn migrate_surfaces_preparation_capability_warning() {
-    let tmp = fixture("discovery", "");
-    let root = tmp.path();
-    // Overwrite the facet to declare a preparation the registry does not know.
-    write_store(
-        root,
-        "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"src","scope":[{"path":"**/*.rs","mode":"allow"}],"preparation":"pdf-to-markdown"}"#,
-    );
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate", "--dry-run"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    let warnings = env["warnings"].as_array().unwrap();
-    assert!(
-        warnings.iter().any(|w| w["kind"] == "capability"
-            && w["message"]
-                .as_str()
-                .unwrap_or("")
-                .contains("pdf-to-markdown")),
-        "expected a preparation capability warning, got {warnings:?}"
-    );
-}
-
-/// `refinement` mode refuses with the typed `PROJECTION_MIGRATE_REFINEMENT`
-/// code (exit 5) and writes nothing.
-#[test]
-fn migrate_refinement_mode_refuses_typed() {
-    let tmp = fixture("refinement", "");
-    let root = tmp.path();
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .failure()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(env["code"], "PROJECTION_MIGRATE_REFINEMENT");
-    // All-or-nothing: the ingest survives untouched.
-    assert!(root.join(".memstead/ingests/engine-graph.json").exists());
-}
-
-/// A dangling ingest→projection ref refuses with the typed
-/// `PROJECTION_MIGRATE_DANGLING_REF` code (exit 5).
-#[test]
-fn migrate_dangling_ref_refuses_typed() {
-    let tmp = fixture("discovery", "");
-    let root = tmp.path();
-    // Repoint the ingest at a projection that does not exist.
-    write_store(
-        root,
-        "ingests/engine-graph.json",
-        r#"{"projection":"engine/missing","mode":"discovery","trigger":"loop","batch_size":20,"deny_paths":[]}"#,
-    );
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .failure()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(env["code"], "PROJECTION_MIGRATE_DANGLING_REF");
-}
-
-/// Running outside a workspace refuses with the shared, single-sourced
-/// `WORKSPACE_NOT_INITIALISED` code — never a generic/internal leak.
-#[test]
-fn migrate_outside_workspace_is_typed() {
-    let tmp = TempDir::new().unwrap();
-    let output = memstead()
-        .current_dir(tmp.path())
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .failure()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
-    assert_ne!(env["code"], "INTERNAL");
+    serde_json::from_slice(&bytes).expect("binding file must parse as a v2 binding")
 }
 
 // ---------------------------------------------------------------------------
-// projection init (D8)
+// projection init
 // ---------------------------------------------------------------------------
 
 /// Read the scaffolded binding file's raw bytes.
@@ -620,7 +378,7 @@ fn init_web_source_scaffolds_build_only_with_warning() {
         warnings
             .iter()
             .any(|w| w.as_str().unwrap_or("").contains("out of scope")
-                && w.as_str().unwrap_or("").contains("operator decision 7")),
+                && w.as_str().unwrap_or("").contains("no change signal")),
         "expected a deferral warning, got {warnings:?}"
     );
 
@@ -710,24 +468,12 @@ fn init_outside_workspace_is_typed() {
 // projection enable (D6 — the remedy a refused mutating op cites)
 // ---------------------------------------------------------------------------
 
-/// A gen-2 fixture migrated to a build-only v1 `engine/graph` binding — the
-/// substrate for `enable` tests (migrate produces no sync/verify block).
-fn migrated_build_only_workspace() -> TempDir {
-    let tmp = fixture("discovery", "");
-    memstead()
-        .current_dir(tmp.path())
-        .args(["projection", "migrate"])
-        .assert()
-        .success();
-    tmp
-}
-
 /// Enabling `sync` on a codebase binding that lacked it adds the block (with
 /// sensible defaults) and round-trips; every other field is untouched, and
 /// `verify` stays absent.
 #[test]
 fn enable_sync_adds_block_to_codebase_binding() {
-    let tmp = migrated_build_only_workspace();
+    let tmp = build_only_workspace();
     let root = tmp.path();
 
     let before = read_binding(root);
@@ -833,7 +579,7 @@ fn enable_sync_on_web_refuses_and_leaves_file_identical() {
 /// always lands here.
 #[test]
 fn enable_already_present_op_refuses() {
-    let tmp = migrated_build_only_workspace();
+    let tmp = build_only_workspace();
     let root = tmp.path();
 
     // `build` is always present on any binding.
@@ -936,7 +682,7 @@ fn enable_outside_workspace_is_typed() {
 }
 
 // ---------------------------------------------------------------------------
-// projection advance (D7)
+// projection advance
 // ---------------------------------------------------------------------------
 
 /// Run `git` in `repo`, panicking on failure (deterministic committer identity).
@@ -976,8 +722,8 @@ fn git_head(repo: &Path) -> String {
 /// tree at `<root>/src`, and the source moved from a base commit to `head1`
 /// (a.rs modified, b.rs deleted). The base commit's sha is pre-seeded into the
 /// mem's `syncState` so `advance` sees a real changed slice. Written directly
-/// into the mem config (not via `mem set-sync-state`) so the test is
-/// flavour-independent — the lean CLI has no `mem` subcommand.
+/// into the mem config (not via `mem set-sync-state`) so the test
+/// needs no mem-repo workspace.
 fn advance_workspace() -> TempDir {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
@@ -1314,7 +1060,7 @@ fn advance_outside_workspace_is_typed() {
     assert_ne!(env["code"], "INTERNAL");
 }
 
-// ── brief (D9) ───────────────────────────────────────────────────────────────
+// ── brief ───────────────────────────────────────────────────────────────
 
 /// `projection brief <mem>/<stem>` renders a binding's discovery run-brief,
 /// headed by the canonical binding id (D3/D9). Scaffold a binding with
@@ -1363,7 +1109,7 @@ fn brief_renders_for_scaffolded_binding() {
     );
 }
 
-/// Backlog-sweep plan 09a criterion 2, re-expressed against the pointer
+/// Re-expressed against the pointer
 /// channel: the ACTIVE-BINDING pointer derives only from CONSUMING renders.
 /// A peek-only brief (any named render — the `--consume` flag requires
 /// `--all`, so named briefs are peeks by construction) leaves every cache
@@ -1498,7 +1244,7 @@ fn check_path_answers_single_and_batch() {
         .assert()
         .success();
     // The author adds denies to the scaffolded record: a subtree and a
-    // workspace-escaping entry (the dogfood cross-medium dialect).
+    // workspace-escaping entry (this project's own cross-medium dialect).
     let record_path = ws
         .join(".memstead")
         .join("projections")
@@ -1792,7 +1538,7 @@ fn brief_all_empty_store_reports_no_bindings() {
     );
 }
 
-/// `projection brief <binding> --verify` renders the verify brief (group C):
+/// `projection brief <binding> --verify` renders the verify brief:
 /// measurement + capped-adjudication instructions only, with the explicit
 /// no-mutation refusal and NO repair block. Read-only on the mem.
 #[test]
@@ -1848,7 +1594,7 @@ fn brief_verify_renders_measurement_only() {
     assert!(!brief.contains("## Open findings to repair"));
 }
 
-/// `projection brief <binding> --sync` renders the sync brief (group C): the
+/// `projection brief <binding> --sync` renders the sync brief: the
 /// sole-maintenance-writer prompt with the absorbed reconcile conservatism. A
 /// fresh mem (no anchors, never synced) triggers the adopt / first-sync framing.
 #[test]
@@ -1888,7 +1634,7 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
     assert!(brief.contains("## Sync — repair the graph to match the source"));
     assert!(brief.contains("sole maintenance writer"));
     assert!(brief.contains("Sync commits nothing."));
-    // Fresh mem → adopt / first-sync framing (E1 brief half).
+    // Fresh mem → adopt / first-sync framing (the brief half).
     assert!(
         brief.contains("## First sync — adopting `ws`"),
         "fresh mem gets adopt framing; got:\n{brief}"
@@ -1902,7 +1648,7 @@ fn brief_sync_renders_sole_writer_with_conservatism() {
 /// `projection brief <binding> --sync` against a binding whose sync operation
 /// is not enabled refuses typed with the enable remedy in details — a loop
 /// must not spend a work slot rendering a brief the engine will refuse to
-/// apply (backlog-sweep plan 03, decision 13). Complement: `projection
+/// apply (an earlier plan, decision 13). Complement: `projection
 /// enable sync` makes the identical call succeed.
 #[test]
 fn brief_sync_refuses_sync_disabled_binding_with_remedy() {
@@ -2022,7 +1768,7 @@ fn brief_missing_binding_refuses() {
 
 /// `projection brief` outside a workspace refuses with the shared,
 /// single-sourced `WORKSPACE_NOT_INITIALISED` code — never a generic/internal
-/// leak. Runs on both build flavours (no engine is built before the check).
+/// leak. No engine is built before the check.
 #[test]
 fn brief_outside_workspace_is_typed() {
     let tmp = TempDir::new().unwrap();
@@ -2037,242 +1783,6 @@ fn brief_outside_workspace_is_typed() {
     let env: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(env["code"], "WORKSPACE_NOT_INITIALISED");
     assert_ne!(env["code"], "INTERNAL");
-}
-
-// ── migrate: gen-1 root-folder path (folded from the retired `pipeline migrate`) ──
-
-/// A gen-1 root-folder workspace (`scopes|projections|ingests/` at the root)
-/// migrates straight to a v1 binding in one `projection migrate` pass (D10,
-/// gen-1 path — folded from the retired `pipeline migrate` command).
-#[test]
-fn migrate_gen1_root_folder_promotes_to_v2_binding() {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path();
-    write_store(root, "workspace.toml", "");
-
-    let write_root = |rel: &str, contents: &str| {
-        let path = root.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, contents).unwrap();
-    };
-    write_root(
-        "scopes/engine/src.json",
-        r#"{"type":"codebase","scope":{"tree":[{"path":"../public/**/*.rs","mode":"allow"}]}}"#,
-    );
-    write_root(
-        "projections/engine/graph.json",
-        r#"{"intent":"the engine graph","sources":[{"scope_ref":"src"}],"destinations":[{"mem":"engine"}]}"#,
-    );
-    write_root(
-        "ingests/engine-graph.json",
-        r#"{"projection":"engine/graph","mode":"discovery","trigger":"loop","batch_size":20,"deny_paths":[]}"#,
-    );
-
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(env["migrated"], 1);
-    assert_eq!(env["bindings"][0], "engine/graph");
-
-    // The projection was promoted to a v2 binding in the `.memstead/` store,
-    // the split scope folded inline (medium half from the derived pointer,
-    // facet half from the tree).
-    let b = read_binding(root);
-    assert_eq!(b.version, 2);
-    assert_eq!(b.destination_mem, "engine");
-    assert_eq!(b.sources.len(), 1);
-    assert_eq!(b.sources[0].name, "src");
-    assert_eq!(b.sources[0].pointer, "../public");
-    assert_eq!(
-        b.operations.build.as_ref().unwrap().mode,
-        BuildMode::Discovery
-    );
-    // The merged flat ingest was consumed; the intermediate mediums/facets
-    // materialization was folded inline and its trees removed.
-    assert!(!root.join(".memstead/ingests/engine-graph.json").exists());
-    assert!(!root.join(".memstead/mediums").exists());
-    assert!(!root.join(".memstead/facets").exists());
-}
-
-/// Criterion-2 fixture proofs, end to end through the CLI: a genuine v1
-/// THREE-FILE store (medium + facet + `version:1` binding) with a live
-/// `#synced` watermark migrates to one v2 record — medium+facet content
-/// folded under the facet's name byte-verbatim, trees removed — the status
-/// surface reports the SAME synced state before-keyed and after, and a
-/// second migrate run changes zero bytes.
-#[test]
-fn migrate_v1_three_file_store_preserves_watermark_and_is_byte_idempotent() {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path();
-
-    // Workspace adapter + destination folder mount (status needs a real mem).
-    write_store(
-        root,
-        "workspace.toml",
-        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
-    );
-    write_store(
-        root,
-        "state/mounts.json",
-        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
-    );
-
-    // The v1 THREE-FILE store: standalone medium + facet, and a version-1
-    // binding referencing the facet by name.
-    write_store(
-        root,
-        "mediums/engine/source-tree.json",
-        r#"{"name":"source-tree","type":"codebase","pointer":"src","change_detection":"git"}"#,
-    );
-    write_store(
-        root,
-        "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"source-tree","scope":[{"path":"**/*.rs","mode":"allow"}]}"#,
-    );
-    write_store(
-        root,
-        "projections/engine/graph.json",
-        r#"{"version":1,"intent":"model the engine","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine","deny_paths":[],"coverage_semantics":"exhaustive","operations":{"build":{"mode":"discovery","trigger":"loop","batch_size":20},"sync":{"trigger":"loop","batch_size":20}}}"#,
-    );
-
-    // The fixture declares git change-detection, so give it a real git root:
-    // since 2026-08-21 a declared `git` is probed rather than trusted, and a
-    // tree with no `.git` resolves to `none` (a declaration cannot conjure a
-    // signal the checkout does not have). Without this the source renders
-    // `signal none` and the assertion below reads as a migration failure when
-    // the watermark is in fact preserved.
-    let src = root.join("src");
-    std::fs::create_dir_all(&src).unwrap();
-    git(&src, &["init", "-q", "."]);
-
-    // A live watermark keyed `<binding>/<source>#synced` in the destination
-    // mem's config — the load-bearing key migration must keep resolving.
-    let watermark = "0123456789abcdef0123456789abcdef01234567";
-    let mem_meta = root.join("engine-mem").join(".memstead");
-    std::fs::create_dir_all(&mem_meta).unwrap();
-    std::fs::write(
-        mem_meta.join("config.json"),
-        format!(
-            r#"{{"format":1,"schema":"default@1.0.0","syncState":{{"engine/graph/source-tree#synced":"{watermark}"}}}}"#
-        ),
-    )
-    .unwrap();
-    std::fs::create_dir_all(root.join("src")).unwrap();
-
-    // Migrate: the v1 leg folds the three files into one v2 record.
-    let out = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(env["migrated"], 1);
-    assert_eq!(env["bindings"][0], "engine/graph");
-
-    // One v2 record: facet name preserved byte-verbatim as the source name,
-    // medium half + facet half folded in, no invented fields.
-    let b = read_binding(root);
-    assert_eq!(b.version, 2);
-    assert_eq!(b.sources.len(), 1);
-    assert_eq!(b.sources[0].name, "source-tree");
-    assert_eq!(b.sources[0].pointer, "src");
-    assert_eq!(b.sources[0].change_detection.as_deref(), Some("git"));
-    assert_eq!(b.sources[0].scope.len(), 1);
-    assert!(
-        b.operations.sync.is_some(),
-        "operations block carried whole"
-    );
-    // The emptied trees are gone.
-    assert!(!root.join(".memstead/mediums").exists());
-    assert!(!root.join(".memstead/facets").exists());
-
-    // The watermark resolves identically after migration: the status surface
-    // reports the recorded token under the preserved source name.
-    let status = memstead()
-        .current_dir(root)
-        .args(["status"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let status = String::from_utf8_lossy(&status).to_string();
-    assert!(
-        status.contains(&format!("source-tree: signal git, synced {watermark}")),
-        "watermark must resolve under the preserved source name, got:\n{status}"
-    );
-
-    // A second migrate run changes zero bytes and reports nothing to do.
-    let before_bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
-    let out = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(env["migrated"], 0);
-    assert_eq!(env["already_v2"], 1);
-    let after_bytes = std::fs::read(root.join(".memstead/projections/engine/graph.json")).unwrap();
-    assert_eq!(before_bytes, after_bytes, "re-run must be byte-idempotent");
-    let mem_config = std::fs::read_to_string(mem_meta.join("config.json")).unwrap();
-    assert!(mem_config.contains(watermark), "mem syncState untouched");
-}
-
-/// `--dry-run` on a gen-1 root-folder workspace previews the promotion without
-/// materializing the gen-2 store or touching the root-folder layout.
-#[test]
-fn migrate_gen1_dry_run_writes_nothing() {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path();
-    write_store(root, "workspace.toml", "");
-    let write_root = |rel: &str, contents: &str| {
-        let path = root.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, contents).unwrap();
-    };
-    write_root(
-        "scopes/engine/src.json",
-        r#"{"type":"codebase","scope":{"tree":[{"path":"**/*.rs","mode":"allow"}]}}"#,
-    );
-    write_root(
-        "projections/engine/graph.json",
-        r#"{"intent":"the engine graph","sources":[{"scope_ref":"src"}],"destinations":[{"mem":"engine"}]}"#,
-    );
-    write_root(
-        "ingests/engine-graph.json",
-        r#"{"projection":"engine/graph","mode":"discovery","trigger":"loop","batch_size":20,"deny_paths":[]}"#,
-    );
-
-    let output = memstead()
-        .current_dir(root)
-        .args(["--json", "projection", "migrate", "--dry-run"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let env: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(env["dry_run"], true);
-    assert_eq!(env["migrated"], 1);
-    // Nothing materialized under `.memstead/` (no gen-2 store written).
-    assert!(
-        !root
-            .join(".memstead/projections/engine/graph.json")
-            .exists()
-    );
-    assert!(!root.join(".memstead/mediums/engine/src.json").exists());
 }
 
 /// The absent-destination remedy must work in the workspace the reader is
@@ -2471,7 +1981,7 @@ fn an_undeclared_anchor_source_refuses_on_the_path_but_is_tolerated_when_it_reso
 /// to mutate that mem; discovering its absence on the first create means the
 /// surface that sent it said something untrue.
 ///
-/// Fixture needs `mem-repo init`, which the lean build does not carry.
+/// Fixture needs a mem-repo workspace (`mem-repo init`).
 #[test]
 fn brief_names_a_destination_mem_that_does_not_exist_yet() {
     let tmp = TempDir::new().unwrap();
@@ -2805,109 +2315,12 @@ fn advance_refuses_absent_sync_then_enable_sync_remedy_succeeds() {
 #[test]
 fn brief_succeeds_with_no_verify_block() {
     let tmp = advance_workspace();
-    // The migrated binding is build-only (no verify). Its brief renders.
+    // The binding is build-only (no verify). Its brief renders.
     memstead()
         .current_dir(tmp.path())
         .args(["projection", "brief", "engine/graph"])
         .assert()
         .success();
-}
-
-// ── AC12: `projection migrate` consumes reconcile-cursors.json (D10) ─────────
-
-/// D10/AC12: `projection migrate` seeds the destination binding's `#synced`
-/// token from a `reconcile-cursors.json` entry whose absolute-keyed path
-/// resolves to the binding's medium pointer, then deletes the cursor file.
-#[test]
-fn migrate_consumes_reconcile_cursors_seeds_synced_and_deletes_it() {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path();
-
-    // Workspace adapter + a folder-mounted `engine` mem (so set_mem_sync_state
-    // has a writable mem with a loaded config).
-    write_store(
-        root,
-        "workspace.toml",
-        "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
-    );
-    write_store(
-        root,
-        "state/mounts.json",
-        r#"{"format":"memstead-mounts-3","mounts":[{"mem":"engine","schema":"default@1.0.0","storage":{"type":"folder","path":"engine-mem"},"capability":"write","lifecycle":"eager","cross_linkable":false}]}"#,
-    );
-    let mem_meta = root.join("engine-mem").join(".memstead");
-    std::fs::create_dir_all(&mem_meta).unwrap();
-    std::fs::write(
-        mem_meta.join("config.json"),
-        br#"{"format":1,"schema":"default@1.0.0"}"#,
-    )
-    .unwrap();
-
-    // A real source dir the medium pointer resolves to.
-    let src = root.join("src");
-    std::fs::create_dir_all(&src).unwrap();
-    std::fs::write(src.join("a.rs"), "x").unwrap();
-
-    // Gen-2 store: medium (codebase → `src`), facet, projection, flat ingest.
-    write_store(
-        root,
-        "mediums/engine/src.json",
-        r#"{"name":"src","type":"codebase","pointer":"src"}"#,
-    );
-    write_store(
-        root,
-        "facets/engine/source-tree.json",
-        r#"{"name":"source-tree","medium":"src","scope":[{"path":"**/*.rs","mode":"allow"}]}"#,
-    );
-    write_store(
-        root,
-        "projections/engine/graph.json",
-        r#"{"intent":"engine graph","source_facets":["source-tree"],"reference_mems":[],"destination_mem":"engine"}"#,
-    );
-    write_store(
-        root,
-        "ingests/engine-graph.json",
-        r#"{"projection":"engine/graph","mode":"discovery","trigger":"loop","batch_size":20}"#,
-    );
-
-    // A skill-written reconcile-cursors.json keyed to `src`'s absolute path.
-    let src_abs = std::fs::canonicalize(&src).unwrap();
-    write_store(
-        root,
-        "reconcile-cursors.json",
-        &format!(r#"{{"engine:{}":"cafebabe0000"}}"#, src_abs.display()),
-    );
-
-    // Migrate.
-    memstead()
-        .current_dir(root)
-        .args(["projection", "migrate"])
-        .assert()
-        .success();
-
-    // The `#synced` baseline was seeded from the cursor's sha, on the mem config.
-    let cfg: Value =
-        serde_json::from_slice(&std::fs::read(mem_meta.join("config.json")).unwrap()).unwrap();
-    assert_eq!(
-        cfg["syncState"]["engine/graph/source-tree#synced"], "cafebabe0000",
-        "migrate seeded #synced from the absolute-keyed cursor sha: {cfg}",
-    );
-
-    // The cursor file was consumed (deleted).
-    assert!(
-        !root.join(".memstead/reconcile-cursors.json").exists(),
-        "reconcile-cursors.json must be deleted by the migration",
-    );
-}
-
-/// A cursorless migrate leaves the binding never-synced and writes no baseline.
-#[test]
-fn migrate_without_cursor_leaves_never_synced() {
-    let tmp = migrated_build_only_workspace();
-    let root = tmp.path();
-    // No reconcile-cursors.json existed → no #synced token anywhere. The
-    // migrate succeeded (asserted by the helper) and left no cursor artifact.
-    assert!(!root.join(".memstead/reconcile-cursors.json").exists());
 }
 
 // ── `brief --all --operation` (operation-aware rotation) ────────────────────
@@ -3463,8 +2876,8 @@ fn bare_verify_leaves_the_mem_config_untouched_and_advance_moves_the_token() {
     // measurement runs: "unchanged" must not be able to pass by the key
     // simply being absent on both sides. Written into the config directly,
     // the way this fixture writes its store and its anchors sidecar — the
-    // `mem set-sync-state` verb belongs to the mem-repo feature and this
-    // file's workspace is the filesystem flavour, which the lean build runs.
+    // `mem set-sync-state` verb needs a mem-repo workspace and this
+    // file's workspace is the folder shape.
     let seeded = {
         let mut cfg: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
         cfg["syncState"]["engine/graph/source-tree#verified"] =
@@ -4744,9 +4157,8 @@ fn a_web_facet_cannot_carry_scope_either() {
 /// changed slice names the modified source entity in the sync brief, and
 /// `advance` writes the baseline forward.
 ///
-/// Gated on `mem-repo`: `--storage git-branch` refuses without it, so the
-/// true-lean flavour (which omits the feature) cannot host this fixture. The
-/// folder-mem graph tests above run in every flavour and carry the coverage
+/// `--storage git-branch` needs a mem-repo workspace. The
+/// folder-mem graph tests above carry the coverage
 /// and drift criteria; this one adds the git-backed change-detection half.
 #[test]
 fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
@@ -5010,7 +4422,7 @@ fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
 /// all three names.
 #[test]
 fn edit_replaces_the_source_list_and_preserves_the_rest() {
-    let tmp = migrated_build_only_workspace();
+    let tmp = build_only_workspace();
     let root = tmp.path();
     let before = read_binding(root);
 
@@ -5054,7 +4466,7 @@ fn edit_replaces_the_source_list_and_preserves_the_rest() {
 /// refuses typed and writes nothing — the file stays byte-identical.
 #[test]
 fn edit_refuses_an_introduced_refusal_and_writes_nothing() {
-    let tmp = migrated_build_only_workspace();
+    let tmp = build_only_workspace();
     let root = tmp.path();
     let raw_before =
         std::fs::read_to_string(root.join(".memstead/projections/engine/graph.json")).unwrap();
@@ -5088,7 +4500,7 @@ fn edit_refuses_an_introduced_refusal_and_writes_nothing() {
 /// PROJECTION_EDIT_INVALID_JSON.
 #[test]
 fn edit_refusals_are_typed() {
-    let tmp = migrated_build_only_workspace();
+    let tmp = build_only_workspace();
     let root = tmp.path();
 
     let out = memstead()

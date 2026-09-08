@@ -25,7 +25,7 @@ binding exists, write_guidance, and subject. /remodel asks whether the
 model still fulfils that contract — the cut itself, not just the
 claims — and rebuilds where it does not. Two storeys, never mixed:
 storey 1 (mem vs contract) is repaired here; storey 2 (the contract no
-longer fits the source) is REPORTED to the operator, never repaired
+longer fits the source) is REPORTED to the user, never repaired
 around.
 
 ## Steps
@@ -143,14 +143,14 @@ around.
 8. REPORT AND GATE. Close with: the signal evidence, the inventory
    with adjudication verdicts, every write one line each with its
    derivation, the bracket scores where run, deliberate leaves with
-   grounds, and the storey-2 findings routed to the operator.
+   grounds, and the storey-2 findings routed to the user.
    Git-branch mems are committed by the engine per write;
    FOLDER-BACKED mems land as files plus ledger rows and stay
    uncommitted — and a rename in ANY mem can rewrite incoming
    cross-mem links in a folder mem the round never targeted. Name
    every repo left with uncommitted changes explicitly in the
    report; PUSHING, committing folder-mem state, and any cross-repo
-   adoption stay with the operator — present, never push.
+   adoption stay with the user — present, never push.
    Record a `memstead_check` verdict on every entity you verified or
    rebuilt so /sync's sweep prioritizes correctly afterwards.
 

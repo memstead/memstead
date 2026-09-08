@@ -53,7 +53,7 @@ pub fn canonical_bytes(
     }
 
     // Preserve the optional engine-owned anchors sidecar verbatim so
-    // publish/normalize round-trips E3a provenance anchors (the whole point
+    // publish/normalize round-trips provenance anchors (the whole point
     // of recognising the member — silent strip is the failure this closes).
     // The member was structurally validated at extract time.
     if let Some(anchors) = anchors_bytes {
@@ -88,8 +88,8 @@ pub fn canonical_bytes(
         // the export writer, and it is the worst place to freeze an
         // absorption: the archive travels, gets installed elsewhere, and reads
         // clean on the far side because the buried sections are inside a
-        // legitimately closed fence by then (04/02, criterion 5, found by the
-        // plan's final grade via `export --format mem` then `install`).
+        // legitimately closed fence by then (found by the
+        // final grade via `export --format mem` then `install`).
         if let Some((section, fence)) = entity.sections.iter().find_map(|(k, v)| {
             crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
         }) {

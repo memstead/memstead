@@ -1,14 +1,14 @@
 //! Build identity of the running binary.
 //!
 //! Between releases every dev build reports the same crate semver, so
-//! version-keyed signals — the plan-05 "engine version changed →
-//! re-read the tool roster" hint and the plan-02 mutation-stamp /
-//! `ENGINE_VERSION_SKEW` comparison — could never fire in dogfood or
-//! field use. `build.rs` captures the git commit at build time
+//! version-keyed signals — the "engine version changed →
+//! re-read the tool roster" hint and the mutation-stamp /
+//! `ENGINE_VERSION_SKEW` comparison — could never fire in this project's
+//! own workspaces or in the field. `build.rs` captures the git commit at build time
 //! (`MEMSTEAD_BUILD_SHA`, empty outside a git checkout and for a
 //! clean release build); this module
 //! renders the full build version every version-carrying surface
-//! serves: CLI `--version`, both MCP flavours' `serverInfo.version`,
+//! serves: CLI `--version`, the MCP server's `serverInfo.version`,
 //! the overview's `_engine_version`, and the per-mem mutation stamp.
 
 /// The short git sha of the commit this binary was built from, with a
@@ -70,8 +70,7 @@ pub enum SkewDirection {
 /// Compared as semver, which ignores build metadata, so two builds of the same
 /// release differ in their `+g<sha>` suffix and are NOT skew: the stamp writer
 /// still restamps (the sha is provenance worth keeping current) but nobody is
-/// told their engine disagrees when it does not (consistency-sweep 04/04,
-/// criterion 8). The previous rule was raw string inequality, which called
+/// told their engine disagrees when it does not. The previous rule was raw string inequality, which called
 /// every rebuild between releases a skew.
 ///
 /// `None` also when either side fails to parse. A stamp this binary cannot
@@ -116,9 +115,9 @@ mod tests {
         );
     }
 
-    /// 04/04, criterion 8. The build-metadata case is the one the old raw
+    /// The build-metadata case is the one the old raw
     /// string comparison got wrong: every rebuild between releases read as
-    /// skew, which is why the warning was noise on a dogfood workspace.
+    /// skew, which is why the warning was noise on this project's own workspace.
     #[test]
     fn skew_is_semver_difference_and_never_a_build_hash() {
         use super::{SkewDirection, skew_direction};

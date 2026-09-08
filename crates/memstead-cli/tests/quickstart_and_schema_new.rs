@@ -390,8 +390,8 @@ fn schema_new_scaffold_validates_unmodified() {
 
 /// Follow-up AC: the printed three-command sequence, executed verbatim
 /// from a workspace, ends with the mem pinned to `acme@0.1.0` and
-/// accepting a `memstead create --type note`. (`mem set-schema` lives
-/// in the mem-repo-featured binary; the lean flavour covers the
+/// accepting a `memstead create --type note`. (`mem set-schema` needs
+/// a mem-repo workspace; the folder shape covers the
 /// scaffold/validate/install prefix in the test above and below.)
 #[test]
 fn schema_new_follow_up_commands_end_in_pinned_mem_accepting_create() {
@@ -623,7 +623,7 @@ fn quickstart_malformed_agent_config_refuses_before_any_write() {
 }
 
 /// `schema install` accepts the scaffolded package on the folder
-/// backend regardless of binary flavour (the lean prefix of the
+/// backend (the folder-shape prefix of the
 /// follow-up flow).
 #[test]
 fn schema_new_package_installs_into_folder_workspace() {
@@ -966,7 +966,7 @@ fn mem_repo_init_json_carries_the_whole_disclosure() {
 /// the source-layout hint — the out-of-root trade-off and the
 /// common-parent recipe — at the moment the layout decision is made,
 /// and names `.memstead/` as intentionally trackable next to the
-/// `.gitignore` append (backlog-sweep plan 06, decisions 14/15).
+/// `.gitignore` append (an earlier plan, decisions 14/15).
 /// Complement: under no git repo at all, neither line appears.
 #[test]
 fn mem_repo_init_inside_git_repo_hints_layout_and_trackability() {
@@ -1016,15 +1016,10 @@ fn mem_repo_init_inside_git_repo_hints_layout_and_trackability() {
     );
 }
 
-/// A verb the receipt names must either exist in the binary that
-/// printed it, or be named together with the statement that this build
-/// does not carry it. Anything else sends the reader to
-/// `unrecognized subcommand`.
-///
-/// Both halves are live. The lean build's "cannot" clause no longer
-/// borrows `memstead install` (it has none), while its pointer at the
-/// other shape still names `memstead mem-repo init` — legitimately,
-/// because the same sentence says a different build is needed first.
+/// A verb the receipt names must exist in the binary that printed it;
+/// anything else sends the reader to `unrecognized subcommand`. One
+/// binary carries every verb, including the `memstead mem-repo init`
+/// the receipt's pointer at the other workspace shape names.
 #[test]
 fn every_verb_the_receipt_names_is_runnable_or_flagged_as_absent() {
     let tmp = TempDir::new().unwrap();
@@ -1037,8 +1032,6 @@ fn every_verb_the_receipt_names_is_runnable_or_flagged_as_absent() {
     );
 
     let help = stdout_of(memstead().arg("--help").assert().success());
-    let disowned =
-        out.contains("this lean build has no") || out.contains("this lean build does not carry");
     for verb in ["install", "mem-repo", "quickstart", "overview", "delete"] {
         if !out.contains(&format!("memstead {verb}")) {
             continue;
@@ -1046,10 +1039,9 @@ fn every_verb_the_receipt_names_is_runnable_or_flagged_as_absent() {
         // `--help` lists subcommands one per line, name first.
         let listed = help.lines().any(|l| l.trim_start().starts_with(verb));
         assert!(
-            listed || disowned,
-            "the receipt names `memstead {verb}`, this build's help does not list it, and the \
-             receipt never says the build lacks it \u{2014} the reader would hit `unrecognized \
-             subcommand`.\n--- receipt ---\n{out}\n--- help ---\n{help}",
+            listed,
+            "the receipt names `memstead {verb}` and this build's help does not list it: the \
+             reader would hit `unrecognized subcommand`.\n--- receipt ---\n{out}\n--- help ---\n{help}",
         );
     }
 }
@@ -1289,16 +1281,10 @@ fn the_receipts_printed_commands_run_verbatim_from_the_callers_cwd() {
             .assert()
             .success();
         let out = stdout_of(assert);
-        // The lean receipt names `mem-repo init` while stating that this
-        // build does not carry it — a pointer at another build, not an
-        // instruction for here. `every_verb_the_receipt_names_is_runnable_
-        // or_flagged_as_absent` is what holds that case honest.
-        let disowned = out.contains("this lean build has no")
-            || out.contains("this lean build does not carry");
+        // Every command the receipt names runs here; one binary carries
+        // them all. `every_verb_the_receipt_names_is_runnable_or_flagged_
+        // as_absent` is what holds the receipt's roster honest.
         for command in commands_in_markdown(&out) {
-            if disowned && command.contains("mem-repo") {
-                continue;
-            }
             run(&command, &outer, on_path);
         }
     }
@@ -2557,7 +2543,7 @@ fn llms_txt_export_works_on_a_filesystem_mem() {
 // ---------------------------------------------------------------------
 
 /// Every mutation's `--json` response carries a non-empty `write_id` on
-/// a folder workspace — the same field the MCP filesystem flavour
+/// a folder workspace — the same field the MCP server
 /// returns. The standing reason the token exists at all is that
 /// omitting it anywhere would make the response shape depend on the
 /// backend; before this test, `create`/`update`/`rename`/`delete`

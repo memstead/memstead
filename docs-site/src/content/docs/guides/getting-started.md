@@ -5,13 +5,13 @@ sidebar:
   order: 1
 ---
 
-Memstead gives AI agents a typed, validated model of a project. Knowledge lives as plain markdown in a **mem** — a typed graph of interconnected entities, validated on every write against a **schema** you control. This tutorial takes you from nothing to a working, agent-connected graph.
+Memstead gives AI agents a typed, validated model of a project. Knowledge lives as plain markdown in a **mem**, a typed graph of interconnected entities, validated on every write against a **schema** you control. This tutorial takes you from nothing to a working, agent-connected graph.
 
-Terms like *mem*, *schema*, *workspace*, and *entity* have precise meanings — the [Glossary](../../glossary/) is the normative reference; this page uses its vocabulary.
+Terms like *mem*, *schema*, *workspace*, and *entity* have precise meanings: the [Glossary](../../glossary/) is the normative reference, and this page uses its vocabulary.
 
 ## 1. Install the binaries
 
-The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries — `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
+The install script fetches the latest [release](https://github.com/memstead/memstead/releases) binaries: `memstead` (the CLI) and `memstead-mcp` (the MCP server agents connect to):
 
 ```bash
 curl -sSf https://memstead.io/install.sh | sh
@@ -23,13 +23,13 @@ Or via Homebrew (macOS / Linux):
 brew install memstead/memstead/memstead-cli memstead/memstead/memstead-mcp
 ```
 
-Or manually, checksum-verified — for any environment where piping to a
+Or manually, checksum-verified, for any environment where piping to a
 shell is unwanted or disallowed. Every release ships per-target archives
-with published checksums (the same artifacts the install script fetches —
+with published checksums (the same artifacts the install script fetches;
 the script is convenience, not a requirement). From the
 [latest release](https://github.com/memstead/memstead/releases/latest)
 fetch `memstead-cli-<target>.tar.xz` and `memstead-mcp-<target>.tar.xz`
-plus their `.sha256` companions — targets follow Rust naming, e.g.
+plus their `.sha256` companions; targets follow Rust naming, e.g.
 `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`. Then verify, unpack,
 and place both binaries anywhere on your `PATH`:
 
@@ -38,7 +38,7 @@ sha256sum -c memstead-cli-<target>.tar.xz.sha256   # → OK
 tar -xJf memstead-cli-<target>.tar.xz
 ```
 
-Or build from source. You need the [Rust toolchain](https://rustup.rs) — `rustc --version` should print a version. Then, from a clone of the repository:
+Or build from source. You need the [Rust toolchain](https://rustup.rs); `rustc --version` should print a version. Then, from a clone of the repository:
 
 ```bash
 git clone https://github.com/memstead/memstead
@@ -87,7 +87,7 @@ Verify from this session, no restart needed:
 
 The receipt prints the binaries as you invoked them: a path if you ran the binary by path, `memstead` when it is on your `PATH`.
 
-Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0` — also the path on the v0.1.0 release binaries, which predate `quickstart`.
+Prefer the strict, script-safe variant with no side effects beyond `.memstead/`? That's `memstead init --name my-graph --schema default@1.3.0`.
 
 ### …or start from the repository you already have
 
@@ -98,7 +98,7 @@ cd my-existing-repo
 memstead quickstart --repo .
 ```
 
-The repository becomes the workspace root — `.memstead/` and the agent wiring land where an agent working in the repo will find them — and the mem takes a folder of its own inside it. That folder is the whole graph: your repository's own `.md` files are *not* adopted as entities, and because a mount's storage location is excluded from every binding's input set unconditionally, the mem's own entities never come back round as source artifacts either. (This is why the mem gets a folder of its own whenever the workspace lands inside the repository: the exclusion is skipped for a mem that *is* the workspace root, since excluding it there would empty every denominator.)
+The repository becomes the workspace root (`.memstead/` and the agent wiring land where an agent working in the repo will find them) and the mem takes a folder of its own inside it. That folder is the whole graph: your repository's own `.md` files are *not* adopted as entities, and because a mount's storage location is excluded from every binding's input set unconditionally, the mem's own entities never come back round as source artifacts either. (This is why the mem gets a folder of its own whenever the workspace lands inside the repository: the exclusion is skipped for a mem that *is* the workspace root, since excluding it there would empty every denominator.)
 
 The extra artifact is a **source binding**: the standing "this repository belongs in that mem" obligation, scaffolded with the same defaults `memstead projection init` writes. The receipt adds a brief that states what you actually have:
 
@@ -116,15 +116,15 @@ The extra artifact is a **source binding**: the standing "this repository belong
   `memstead projection brief my-app/my-app`
 ```
 
-Quickstart itself ingests nothing: it is a scaffold, not a batch job. What fills the mem is the ingest loop — see [Bind a source and grow the mem](#5-bind-a-source-and-grow-the-mem) below.
+Quickstart itself ingests nothing: it is a scaffold, not a batch job. What fills the mem is the ingest loop; see [Bind a source and grow the mem](#5-bind-a-source-and-grow-the-mem) below.
 
 Pass a target path as well (`memstead quickstart ./graph --repo ./my-existing-repo`) to keep the workspace *outside* the repository instead. That shape is fully supported; the receipt names its one cost, which is the same one the next paragraph describes.
 
-**Choosing where to root the workspace.** If you plan to bind source repositories into the graph later (`memstead projection init`), pick the workspace root with them in mind: a source *inside* the workspace root gets clean relative artifact ids; a source *outside* it is fully supported — enumeration, change detection, and anchor resolution all work — but its artifact ids render as `../…` chains, and the workspace-to-source relative layout must stay fixed. To model several sibling repositories, root the workspace at their **common parent directory** (e.g. `~/projects/graph/` next to `~/projects/app/` and `~/projects/lib/` works, but `~/projects/` containing all three is cleaner). Inside a git repository, `mem-repo init` prints this same hint and adds `mem-repo/` to the repo's `.gitignore` — `.memstead/` itself is intentionally trackable.
+**Choosing where to root the workspace.** If you plan to bind source repositories into the graph later (`memstead projection init`), pick the workspace root with them in mind: a source *inside* the workspace root gets clean relative artifact ids; a source *outside* it is fully supported (enumeration, change detection, and anchor resolution all work) but its artifact ids render as `../…` chains, and the workspace-to-source relative layout must stay fixed. To model several sibling repositories, root the workspace at their **common parent directory** (e.g. `~/projects/graph/` next to `~/projects/app/` and `~/projects/lib/` works, but `~/projects/` containing all three is cleaner). Inside a git repository, `mem-repo init` prints this same hint and adds `mem-repo/` to the repo's `.gitignore`; `.memstead/` itself is intentionally trackable.
 
 ## 3. Create your first entities
 
-The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …) — run `memstead type` to list them. Each type declares which sections an entity must carry; the engine refuses writes that don't conform. Create a `concept` (it requires a definition and an explanation):
+The `default` schema ships ten general-purpose types (`concept`, `assertion`, `memo`, `spec`, `inquiry`, …); run `memstead type` to list them. Each type declares which sections an entity must carry; the engine refuses writes that don't conform. Create a `concept` (it requires a definition and an explanation):
 
 ```bash
 memstead create --type concept \
@@ -177,7 +177,7 @@ memstead entity my-graph--idempotency  # read one entity as markdown
 
 `search` returns scored hits with matched-term snippets; `entity` prints the full markdown, including the `_hash` token that mutation commands use for optimistic locking.
 
-Everything you just created is plain markdown on disk — open `idempotency.md` in the workspace and you'll see exactly what the engine sees. Human-readable, diffable, no database.
+Everything you just created is plain markdown on disk: open `idempotency.md` in the workspace and you'll see exactly what the engine sees. Human-readable, diffable, no database.
 
 ## 5. Bind a source and grow the mem
 
@@ -187,7 +187,7 @@ Typing entities by hand is one way to fill a mem. The other is a **binding**: a 
 memstead projection init --mem my-graph --source ../some-repo --medium-type codebase
 ```
 
-Creating a binding reads nothing — it records the obligation. What fills the mem is the **ingest loop**: an agent session that asks the engine what to work on, works one batch, and stops.
+Creating a binding reads nothing; it records the obligation. What fills the mem is the **ingest loop**: an agent session that asks the engine what to work on, works one batch, and stops.
 
 ```bash
 memstead projection brief my-graph/some-repo    # the batch instruction an agent executes
@@ -196,21 +196,21 @@ memstead projection verify my-graph/some-repo   # coverage, drift, freshness
 
 The brief is written for the agent, not for you: it names the source slice, the destination mem, and the anchoring rules that let `verify` measure the result. Hand it to an agent session and repeat until `verify` reports the coverage you want. The Claude Code plugin's ingest skill runs exactly this loop for you.
 
-[Grow a mem from a source](../grow-a-mem-from-a-source/) walks the whole loop end to end — declaring the binding, working a batch, measuring what landed, and stopping and resuming without losing your place.
+[Grow a mem from a source](../grow-a-mem-from-a-source/) walks the whole loop end to end: declaring the binding, working a batch, measuring what landed, and stopping and resuming without losing your place.
 
-Entities created this way go through the same validated write path as the ones you typed — a binding changes who does the writing, not what the engine accepts.
+Entities created this way go through the same validated write path as the ones you typed; a binding changes who does the writing, not what the engine accepts.
 
 ## 6. Connect your AI agent
 
-`quickstart` already wrote the MCP config for the agent targets you selected — for Claude Code that's a project `.mcp.json` pointing at `memstead-mcp`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs. Once it is back, the same graph is readable and writable through the `memstead_*` MCP tools, with the same schema validation on every write.
+`quickstart` already wrote the MCP config for the agent targets you selected; for Claude Code that's a project `.mcp.json` pointing at `memstead-mcp`. Restart the agent session afterwards: a session that is already running does not attach an MCP server added while it runs. Once it is back, the same graph is readable and writable through the `memstead_*` MCP tools, with the same schema validation on every write.
 
 An agent session you cannot restart (a headless or long-running one) needs its wiring in place *before* it launches: `quickstart` writes `.mcp.json` before the agent starts, and Claude Code's `--mcp-config` (plus `--plugin-dir` for the plugin) loads both at startup.
 
-Ask your agent to call `memstead_overview` — that's the agent's cold-start entry point, returning the schema catalogue, mem inventory, and community clusters. From there, [Agent recipes](../../guides/agent-recipes/) shows the worked tool-call sequences (orientation, search → read, create with recovery) with real request and response payloads.
+Ask your agent to call `memstead_overview`; that's the agent's cold-start entry point, returning the schema catalogue, mem inventory, and community clusters. From there, [Agent recipes](../../guides/agent-recipes/) shows the worked tool-call sequences (orientation, search → read, create with recovery) with real request and response payloads.
 
 ## Where next
 
-- **Model your own domain** — [Author a schema](../../guides/author-a-schema/) scaffolds a custom schema and pins a mem to it.
-- **Share your graph** — [Publish a mem](../../guides/publish-a-mem/) walks the registry flow, dry-run first.
-- **Drive it from an agent** — [Agent recipes](../../guides/agent-recipes/), then the full [MCP tools reference](../../reference/mcp/).
-- **Look something up** — the [CLI reference](../../reference/cli/cli/) covers every subcommand; the [Glossary](../../glossary/) defines every term.
+- **Model your own domain:** [Author a schema](../../guides/author-a-schema/) scaffolds a custom schema and pins a mem to it.
+- **Share your graph:** [Publish a mem](../../guides/publish-a-mem/) walks the registry flow, dry-run first.
+- **Drive it from an agent:** [Agent recipes](../../guides/agent-recipes/), then the full [MCP tools reference](../../reference/mcp/).
+- **Look something up:** the [CLI reference](../../reference/cli/cli/) covers every subcommand; the [Glossary](../../glossary/) defines every term.

@@ -12,8 +12,8 @@ only to substrate quality.
 
 ## Run a real B-vs-C comparison end-to-end (single command)
 
-Needs a live `claude` CLI on `$PATH` and the two full binaries built
-(`cargo build --features mem-repo -p memstead-mcp` and `cargo build -p memstead`).
+Needs a live `claude` CLI on `$PATH` and the two binaries built
+(`cargo build -p memstead-cli -p memstead-mcp`).
 The harness **self-provisions** the empty destination mem for the schema-forced
 arm — no manual setup. Run from the repo root:
 

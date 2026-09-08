@@ -257,7 +257,7 @@ pub fn resolve_change_strategy(source: &Source, workspace_root: &Path) -> Change
     if source.medium_type == MediumType::Graph {
         return ChangeStrategy::Graph;
     }
-    // A detection-less medium (per the capability matrix — `web` this cycle)
+    // A detection-less medium (per the capability matrix: `web`)
     // has no change signal: it resolves to the visible NoSignal (`none`), never
     // a fabricated `mtime`/`git` token. This mirrors the graph special case
     // above — the medium type overrides any declared value.
@@ -558,8 +558,7 @@ mod tests {
     }
 }
 
-/// How a destination mem's process mem was resolved (agent-trust
-/// plan 14): by explicit declaration (`MemConfig.process_mem` on the
+/// How a destination mem's process mem was resolved: by explicit declaration (`MemConfig.process_mem` on the
 /// destination — wins where present) or by the binding-name
 /// convention (the fallback, byte-identical to the pre-declaration
 /// behaviour). One resolution function for every consumer — the

@@ -1,4 +1,4 @@
-//! `memstead anchors` — read provenance anchors (E3a).
+//! `memstead anchors` — read provenance anchors.
 //!
 //! Two read modes, no mutation:
 //!

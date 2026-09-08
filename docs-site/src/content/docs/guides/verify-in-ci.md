@@ -90,7 +90,7 @@ jobs:
       - name: Install memstead
         run: |
           curl -fsSL https://memstead.io/install.sh | sh
-          echo "$HOME/.memstead/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Verify the mem against its source
         run: |

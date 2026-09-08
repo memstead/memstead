@@ -278,7 +278,7 @@ pub fn find_orphans(store: &Store) -> Vec<EntityId> {
 /// Schema-aware orphan scan: like [`find_orphans`], but entities whose
 /// type declares `leaf: true` in their mem's schema are exempt — a
 /// leaf is edge-less BY CONSTRUCTION, so counting it as an orphan is
-/// noise that masks real orphans (agent-trust plan 06). The exempted
+/// noise that masks real orphans. The exempted
 /// population stays visible through [`leaf_population`]. An empty
 /// schema map (tests, ad-hoc callers) reproduces the schema-blind
 /// behaviour exactly.
@@ -1037,7 +1037,7 @@ mod tests {
         );
     }
 
-    /// Agent-trust plan 06 (criterion 1): leaf-declared types are
+    /// Leaf-declared types are
     /// exempt from the orphan scan — visible instead through
     /// `leaf_population` — while non-leaf types count exactly as
     /// before, a leaf WITH edges stays legal, and an empty schema map

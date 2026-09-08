@@ -173,6 +173,34 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **`memstead search --json` and `memstead list --json` hits carry `origin`.**
+  The MCP `memstead_search` envelope stamped the data-origin label
+  (`first-party` / `third-party`) on every hit after building the envelope;
+  the CLI's `--json` printed the same envelope without it, so a consumer
+  branching on the documented key read a missing field. The shared envelope
+  builder now takes the origin resolver and stamps the key once, so the two
+  surfaces carry one hit shape by construction.
+- **The binding-intent check reads relationship-shaped tokens only.** Every
+  all-caps word of three or more letters in a binding's intent was read as
+  a relationship claim, so ordinary prose (`README`, `MCP`, `JSON`, `API`,
+  `CLAUDE`) raised `BINDING_INTENT_UNKNOWN_RELATIONSHIP` on five of six
+  bindings in this project's own workspace, and two exemption lists patched
+  the symptom. A token is now a claim only when it carries an underscore or
+  is a relationship name some schema the engine knows declares; the
+  exemption lists are gone. `PROVIDED_BY` against a schema that lacks it is
+  still reported.
+- **A server booted over a workspace without a mount roster mounts the first
+  mem another process creates.** The roster reconciliation stored the first
+  observation of a `mounts.json` that did not exist at boot as its baseline
+  and mounted nothing, so a `memstead-mcp` started before `memstead mem init`
+  answered `UNKNOWN_MEM` until a restart. The first observation is now
+  applied like any other change.
+- **The mem cache directory never panics on a machine without a data
+  directory.** `dirs::data_dir()` returning `None` (no `HOME`, no
+  `XDG_DATA_HOME`) hit an `expect` on the MCP boot path; the cache now falls
+  back to `memstead/mems` under the temporary directory, and
+  `MEMSTEAD_MEM_CACHE` still overrides both.
+
 - **Entity exclusions survive a completed sync pass.** The advance store
   is dropped when a pass completes with nothing durable in it; the two
   guards that decide this tested the artifact exclusion ledger alone, so a
@@ -284,6 +312,30 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   fallback when it names none).
 
 ### Changed
+
+- **The names left from the retired two-build split say what holds.**
+  `memstead_base::instantiate_lean_backend` is `instantiate_local_backend`,
+  `InstantiateError::GitBranchRequiresMemRepoFeature` is
+  `GitBranchBackendUnavailable`, and `FullEngineError::Lean` is
+  `FullEngineError::Engine`; the doc comments and the two product READMEs
+  describe one build with the git-branch backend injected through the
+  backend factory. Internal plan labels left the help texts and the MCP
+  parameter descriptions, and every `memstead search` and `memstead type`
+  flag carries a description.
+
+- **The `projection migrate` verb and the gen-1/v1 binding migration are
+  removed.** The engine no longer converts a binding file written in a
+  retired format (the version-less gen-2 projection, the `version: 1`
+  three-file store); the only bindings that ever existed in those formats
+  were this project's own. Such a file still quarantines its binding with
+  `PROJECTION_STORE_LEGACY`, never loads and never panics; its message
+  names the retired format and `memstead projection init`, through which
+  the binding is re-authored.
+
+- **The `file-watcher` Cargo feature of `memstead-base` is removed**, with
+  the `notify` dependency and the `watch_mem_repo` / `watch_roster`
+  surface behind it. In-process change events (`Engine::subscribe_mem_changes`,
+  the opt-in `tokio` broadcast) are unchanged.
 
 - **The search envelope is one stable shape.** `memstead_search` and
   `memstead search --json` now serialise every key the tool description

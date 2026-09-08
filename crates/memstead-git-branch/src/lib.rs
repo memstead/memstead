@@ -25,20 +25,19 @@
 //!   ([`workspace_store::engine_from_workspace_root`]) so the
 //!   factory can materialise git-branch backends in addition to
 //!   folder + archive.
-//! - [`workspace_store::engine_from_workspace_root`] — full-flavour
+//! - [`workspace_store::engine_from_workspace_root`] — the git-branch
 //!   workspace boot path that loads the two-layer file adapter
 //!   (`.memstead/workspace.toml` + `.memstead/state/mounts.json`).
-//! - Full-side helpers consumed by the unified surface:
+//! - Git-branch helpers consumed by the unified surface:
 //!   `mem_repo_config::commit_config_at_gitdir` (per-mem config
 //!   writes into `__MEMSTEAD` for git-branch mounts),
 //!   `ops::agent_notes::agent_notes_since`,
 //!   `ops::changes::changes_since`, and `ops::export::export_mem`
 //!   (consumed through the trait or directly by `memstead_base::Engine`).
 //!
-//! Built only with the `mem-repo` Cargo feature on `memstead-mcp` /
-//! `memstead-cli` (or via the workspace-level `--features mem-repo`).
-//! Lean builds skip this crate entirely; the lean MCP / CLI
-//! binaries link only `memstead-base`.
+//! Always linked into `memstead-mcp` and `memstead-cli`. An engine
+//! embedded without this crate (tests, the wasm build) keeps the folder
+//! and archive backends and quarantines git-branch mounts.
 
 pub use memstead_base::chunking;
 pub use memstead_base::graph;

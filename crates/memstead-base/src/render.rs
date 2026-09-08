@@ -107,7 +107,7 @@ pub fn render_entity_markdown_with_signals(
     // the structured block; a reader on this channel sees the same sections
     // rendered blank and, without this line, has nothing to tell them apart
     // from sections the author left empty. This is the channel a cold agent
-    // reads, so it cannot be the one that stays quiet (04/02, criterion 4).
+    // reads, so it cannot be the one that stays quiet.
     if let Some((absorbing, _)) = entity.sections.iter().find_map(|(k, v)| {
         crate::markdown::closing_fence_if_unterminated(v.trim()).map(|f| (k.clone(), f))
     }) {
@@ -739,6 +739,11 @@ pub struct SearchHitEnvelope<'a> {
     pub hit: &'a SearchHit,
     pub summary_heading: String,
     pub summary_value: String,
+    /// Data-origin label of the hit's mem: `first-party` for a writable
+    /// workspace mem, `third-party` for a read-only mount (an installed
+    /// read-mem, an adopted foreign folder). Stamped here, once, so the
+    /// CLI `--json` and the MCP `structured_content` carry the same key.
+    pub origin: &'static str,
 }
 
 /// Envelope for a full `SearchResult`:
@@ -883,7 +888,7 @@ pub fn build_entity_envelope(
     // shared envelope layer for the same reason `origin` is: it was first
     // written on the conformance axis alone, which is opt-in, so the plain
     // read — the one an agent actually makes — still reported them as merely
-    // empty (04/02, criterion 4, found by the plan's final grade).
+    // empty (found by the final grade of that fix).
     //
     // A marker, not a repair: the bytes are unchanged and no fence is closed.
     // `_unread_sections` names the keys whose content is really sitting in
@@ -1109,40 +1114,60 @@ pub fn build_entity_envelope(
     serde_json::Value::Object(envelope)
 }
 
-/// Build a `SearchResultEnvelope` borrowing from `result`.
+/// Build a `SearchResultEnvelope` borrowing from `result`. `origin_of`
+/// resolves a mem name to its data-origin class (`Engine::mem_origin_class`
+/// on a live engine); every hit carries the resolved label, so the two
+/// surfaces that serialise this envelope never diverge on the key.
 pub fn build_search_envelope<'a>(
     result: &'a SearchResult,
     offset: usize,
+    origin_of: &dyn Fn(&str) -> OriginClass,
 ) -> SearchResultEnvelope<'a> {
     SearchResultEnvelope {
         total: result.total,
         returned: result.returned,
         offset,
         total_tokens: result.total_tokens,
-        hits: result.hits.iter().map(build_hit_envelope).collect(),
+        hits: result
+            .hits
+            .iter()
+            .map(|h| build_hit_envelope(h, origin_of))
+            .collect(),
         facets: result.facets.as_ref(),
         warnings: &result.warnings,
     }
 }
 
-/// Build a `ListResultEnvelope` borrowing from `result`.
-pub fn build_list_envelope(result: &ListResult) -> ListResultEnvelope<'_> {
+/// Build a `ListResultEnvelope` borrowing from `result`; `origin_of` as on
+/// [`build_search_envelope`].
+pub fn build_list_envelope<'a>(
+    result: &'a ListResult,
+    origin_of: &dyn Fn(&str) -> OriginClass,
+) -> ListResultEnvelope<'a> {
     ListResultEnvelope {
         total: result.total,
         returned: result.returned,
         offset: result.offset,
         total_tokens: result.total_tokens,
-        hits: result.hits.iter().map(build_hit_envelope).collect(),
+        hits: result
+            .hits
+            .iter()
+            .map(|h| build_hit_envelope(h, origin_of))
+            .collect(),
         warnings: &result.warnings,
     }
 }
 
-fn build_hit_envelope(hit: &SearchHit) -> SearchHitEnvelope<'_> {
+fn build_hit_envelope<'a>(
+    hit: &'a SearchHit,
+    origin_of: &dyn Fn(&str) -> OriginClass,
+) -> SearchHitEnvelope<'a> {
     let (heading, value) = hit_summary_pair(hit);
     SearchHitEnvelope {
         hit,
         summary_heading: heading,
         summary_value: value,
+        origin: origin_of(&hit.mem).as_wire(),
     }
 }
 
@@ -1424,7 +1449,7 @@ pub fn render_type_info_markdown_in(
         lines.push(String::new());
     }
 
-    // Canonical exemplar (agent-trust plan 09) — the engine-validated
+    // Canonical exemplar — the engine-validated
     // few-shot entity, rendered in the mem markdown shape. The CLI's
     // full-depth type view matches `memstead_schema verbosity: full`.
     if let Some(ex) = &schema.exemplar {
@@ -1585,8 +1610,8 @@ impl OriginClass {
 }
 
 /// Build the transport-neutral, rmcp-free JSON payload for a schema read
-/// (`memstead_schema`). Shared by the MCP server, the HTTP surface, and
-/// the filesystem-mem MCP flavour so every surface emits identical
+/// (`memstead_schema`). Shared by the MCP server and the HTTP surface
+/// so every surface emits identical
 /// schema-read bytes from one source. `used_by` lists the writable mems
 /// whose pinned schema resolves to this one; `verbosity` toggles the full
 /// payload versus the lightweight skeleton (see [`SchemaVerbosity`]).
@@ -1669,7 +1694,7 @@ pub fn build_schema_payload(
 }
 
 /// [`build_schema_payload`] with the serving-shape controls
-/// (backlog-sweep plan 06a): `type_selection` scopes the heavy per-type
+/// (an earlier plana): `type_selection` scopes the heavy per-type
 /// prose to the named types — the reply carries the full package-level
 /// context, the selected types in full, and a `types_omitted` roster
 /// naming what was not served (visible scope, never silent truncation).
@@ -1769,7 +1794,7 @@ pub fn build_schema_payload_scoped(
                 "allowed_sources": d.source_types,
                 "allowed_targets": d.target_types,
             });
-            // Derivation declaration (agent-trust plan 12) — a
+            // Derivation declaration — a
             // behaviour-bearing flag (baseline recording, the
             // stale_derivations axis, duplicate-add re-baseline), so
             // it must be visible at introspection time. Emitted only
@@ -2055,7 +2080,7 @@ pub fn build_schema_payload_scoped(
             if td.last_resort {
                 obj["last_resort"] = serde_json::json!(true);
             }
-            // The type's canonical exemplar (agent-trust plan 09) —
+            // The type's canonical exemplar —
             // engine-validated at install/seal, so what it teaches is
             // exactly what the validator accepts. Rides FULL mode only
             // (this array); the lite projection below drops it by
@@ -3324,7 +3349,7 @@ write_rules: []
             &[("claim", "Memos matter.")],
         );
         let result = search_result(vec![hit]);
-        let envelope = build_search_envelope(&result, 0);
+        let envelope = build_search_envelope(&result, 0, &|_| OriginClass::FirstParty);
         let value = serde_json::to_value(&envelope).expect("envelope must serialize");
 
         // The top-level counters use the `_-prefixed` engine-emitted
@@ -3366,7 +3391,7 @@ write_rules: []
         );
         let memo_hit = make_hit("memos--m1", "Memo One", "memo", &[("claim", "Memo claim.")]);
         let result = search_result(vec![spec_hit, memo_hit]);
-        let envelope = build_search_envelope(&result, 0);
+        let envelope = build_search_envelope(&result, 0, &|_| OriginClass::FirstParty);
         let value = serde_json::to_value(&envelope).expect("envelope must serialize");
 
         let hits = value["hits"].as_array().expect("hits must be array");
@@ -3386,7 +3411,7 @@ write_rules: []
             &[("definition", "A thing.")],
         );
         let result = list_result(vec![hit]);
-        let envelope = build_list_envelope(&result);
+        let envelope = build_list_envelope(&result, &|_| OriginClass::FirstParty);
         let value = serde_json::to_value(&envelope).expect("envelope must serialize");
 
         // `_`-prefixed engine-meta keys, matching the search envelope.
@@ -3405,7 +3430,7 @@ write_rules: []
         result.warnings = vec![crate::ops::WarningHint::FieldNotFilterable {
             field: "foo".to_string(),
         }];
-        let envelope = build_search_envelope(&result, 0);
+        let envelope = build_search_envelope(&result, 0, &|_| OriginClass::FirstParty);
         let value = serde_json::to_value(&envelope).expect("envelope must serialize");
         assert_eq!(value["warnings"][0]["code"], "FIELD_NOT_FILTERABLE");
         assert_eq!(value["warnings"][0]["details"]["field"], "foo");
@@ -4076,7 +4101,7 @@ write_rules: []
         assert_eq!(SchemaVerbosity::default(), SchemaVerbosity::Full);
     }
 
-    /// Exemplar serving (agent-trust plan 09): `verbosity: full`
+    /// Exemplar serving: `verbosity: full`
     /// carries each type's exemplar (title, metadata, sections,
     /// relations with placeholder targets); the lite skeleton is
     /// BYTE-unchanged between the same schema with and without an

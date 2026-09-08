@@ -74,7 +74,7 @@ fn a_long_lived_engine_does_not_revert_a_siblings_config_write() {
     );
 }
 
-/// 04/04, criterion 4: a git-branch mem gains no ledger check and no
+/// A git-branch mem gains no ledger check and no
 /// undetected-edits warning.
 ///
 /// Its change set is a real two-tree diff against the committed tree, so

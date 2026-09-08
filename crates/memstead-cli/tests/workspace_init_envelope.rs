@@ -10,8 +10,7 @@
 //! - Typed envelope: a workspace-affecting command run from a
 //!   directory without `.memstead/workspace.toml` surfaces a JSON envelope
 //!   carrying `code: "WORKSPACE_NOT_INITIALISED"` and a structured
-//!   `hint.recovery_command` pointing at the right bootstrap command
-//!   for this binary's flavour.
+//!   `hint.recovery_command` pointing at the bootstrap command.
 
 use std::fs;
 
@@ -125,7 +124,7 @@ fn missing_workspace_emits_typed_envelope_json() {
     let expected_command = "memstead mem-repo init";
     assert_eq!(
         parsed["details"]["hint"]["recovery_command"], expected_command,
-        "details.hint.recovery_command must name the bootstrap command for this flavour, got: {parsed}",
+        "details.hint.recovery_command must name the bootstrap command, got: {parsed}",
     );
     assert!(
         parsed["message"]

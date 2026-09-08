@@ -1,5 +1,3 @@
-// `memstead workspace dump` ships only in the full build.
-
 //! Integration tests for `memstead workspace dump`.
 //!
 //! Each test seeds a mem-repo-git workspace under a temp dir, runs

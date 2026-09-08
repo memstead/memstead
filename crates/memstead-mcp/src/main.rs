@@ -55,14 +55,14 @@ struct Args {
     operator_mode: bool,
 
     /// Session-level default role for every mutation this server
-    /// performs (agent-trust plan 13): `author` | `checker` |
+    /// performs: `author` | `checker` |
     /// `verifier`. Per-call `role` parameters win. Omit to record
     /// mutations as unspecified unless a call declares otherwise.
     #[arg(long = "role")]
     role: Option<String>,
 
     /// Session-level default identity for every mutation and check
-    /// this server performs (agent-trust plan 15): an opaque identity
+    /// this server performs: an opaque identity
     /// string — an agent name, a session handle. Also settable via
     /// the `MEMSTEAD_IDENTITY` environment variable; the flag wins.
     /// Per-call `identity` parameters win over either. Omit to record
@@ -73,7 +73,7 @@ struct Args {
 
 /// Resolve the session-level default identity from the `--identity`
 /// flag or the `MEMSTEAD_IDENTITY` environment variable (flag wins),
-/// normalised and length-checked (agent-trust plan 15). Over-length
+/// normalised and length-checked. Over-length
 /// refuses at boot — the record is append-only.
 fn default_identity_from(flag: Option<&str>) -> anyhow::Result<Option<String>> {
     let raw = flag
@@ -113,8 +113,8 @@ async fn main() -> anyhow::Result<()> {
 /// typed shape the CLI prints (`ERROR [<CODE>]: <message>`, message
 /// from [`memstead_base::BootError::surface_message`]), then build the
 /// mem-less diagnostic-shell engine that serves in its place — the
-/// server STARTS regardless (degrade, never disappear; agent-trust
-/// plan 04): overview/health answer with this diagnosis instead of
+/// server STARTS regardless (degrade, never disappear):
+/// overview/health answer with this diagnosis instead of
 /// the historical `-32000 Connection closed` exit, so a session can
 /// always ask why the graph is gone. Mem-level failures never reach
 /// here — they quarantine inside a normally-booted engine.

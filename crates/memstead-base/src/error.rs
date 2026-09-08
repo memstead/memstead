@@ -18,23 +18,24 @@ use crate::EngineError;
 
 /// Errors surfaced by the full engine extension.
 ///
-/// `Lean(EngineError)` wraps any failure that originates in the
-/// underlying lean engine — full orchestrators that delegate to
-/// `crate::Engine` propagate lean errors verbatim through this
-/// variant (`#[from]`), so the wire-rendering layer at the full MCP
-/// surface can recover the lean `code()` for any wrapped variant.
+/// `Engine(EngineError)` wraps any failure that originates in the
+/// underlying base engine (`memstead_base::Engine`): the lifecycle
+/// orchestrators that delegate to `crate::Engine` propagate base-engine
+/// errors verbatim through this variant (`#[from]`), so the wire-rendering
+/// layer at the MCP surface can recover the base engine's `code()` for any
+/// wrapped variant.
 ///
 /// The remaining variants are **lifecycle-only**: they fire from the
 /// full mem management orchestrator (`create_mem` / `delete_mem`)
-/// and have no lean-side fire conditions. They live in this crate
+/// and have no base-engine fire conditions. They live in this crate
 /// alongside their orchestrator.
 #[derive(Debug, thiserror::Error)]
 pub enum FullEngineError {
-    /// Wrapped lean-engine error. Use this variant whenever a full
-    /// code path delegates to `crate::Engine` and a lean-side
+    /// Wrapped base-engine error. Use this variant whenever a lifecycle
+    /// code path delegates to `crate::Engine` and a base-engine
     /// failure should surface unchanged.
     #[error(transparent)]
-    Lean(#[from] EngineError),
+    Engine(#[from] EngineError),
 
     /// `create_mem` / `delete_mem` rejected because the mem
     /// path is not covered by an allowlist rule. `reason` is one of
@@ -203,12 +204,12 @@ impl FullEngineError {
     /// text channel. Closes the asymmetry where structured `details.X`
     /// fields stayed off the agent's text channel. Each lifecycle
     /// variant with a structured list (`patterns`, `referring_mems`,
-    /// `allowed_schemas`) inlines the full payload; lean wraps
-    /// delegate to [`EngineError::prose_render`]; trivial variants
+    /// `allowed_schemas`) inlines the full payload; wrapped base-engine
+    /// errors delegate to [`EngineError::prose_render`]; trivial variants
     /// fall back to `Display`.
     pub fn prose_render(&self) -> String {
         match self {
-            FullEngineError::Lean(inner) => inner.prose_render(),
+            FullEngineError::Engine(inner) => inner.prose_render(),
             FullEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
@@ -294,13 +295,13 @@ impl FullEngineError {
     /// `err.details()` directly without hand-maintaining each per-
     /// variant payload at the CLI surface.
     ///
-    /// `Lean(inner)` delegates to `EngineError::details()`. Lifecycle
+    /// `Engine(inner)` delegates to `EngineError::details()`. Lifecycle
     /// variants return the same JSON object shape `full_engine_err_unified`
     /// builds on the MCP wire — both surfaces share the payload here
     /// so they cannot drift.
     pub fn details(&self) -> serde_json::Value {
         match self {
-            FullEngineError::Lean(inner) => inner.details(),
+            FullEngineError::Engine(inner) => inner.details(),
             FullEngineError::MemPathNotAllowed {
                 attempted,
                 candidate,
@@ -365,13 +366,13 @@ impl FullEngineError {
     /// Stable, surface-independent error code token.
     ///
     /// Matches `crate::EngineError::code()` for every variant —
-    /// wrapped lean errors delegate to the lean mapping, lifecycle
-    /// variants return the exact strings the lean enum returned for
+    /// wrapped base-engine errors delegate to the base mapping, lifecycle
+    /// variants return the exact strings the base enum returned for
     /// them today. This is load-bearing: the wire-shape pins in
     /// `memstead-mcp/tests/wire_shape.rs` assert these exact code strings.
     pub fn code(&self) -> &'static str {
         match self {
-            FullEngineError::Lean(e) => e.code(),
+            FullEngineError::Engine(e) => e.code(),
             FullEngineError::MemPathNotAllowed { .. } => "MEM_PATH_NOT_ALLOWED",
             FullEngineError::InvalidMemName { .. } => "INVALID_MEM_NAME",
             FullEngineError::MemReferencedByPolicy { .. } => "MEM_REFERENCED_BY_POLICY",
@@ -424,11 +425,11 @@ mod tests {
         assert_eq!(e.code(), "CONFIG_ERROR");
     }
 
-    /// Wrapped lean errors delegate `code()` to the lean mapping.
-    /// Any drift in the lean enum's code strings rolls through this
+    /// Wrapped base-engine errors delegate `code()` to the base mapping.
+    /// Any drift in the base enum's code strings rolls through this
     /// path automatically — the full layer never re-stringifies.
     #[test]
-    fn wrapped_lean_error_delegates_code() {
+    fn wrapped_base_engine_error_delegates_code() {
         let e: FullEngineError = EngineError::UnknownMem("specs".into()).into();
         assert_eq!(e.code(), "UNKNOWN_MEM");
     }
