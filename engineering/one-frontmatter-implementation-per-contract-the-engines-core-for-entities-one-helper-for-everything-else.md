@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-09-05T16:00:34Z
-last_modified: 2026-09-05T16:00:34Z
+last_modified: 2026-09-08T21:09:00Z
 authority: proposed
 universality: contextual
 tags: frontmatter, parser, core, scripts
@@ -14,6 +14,10 @@ The frontmatter delimiter contract has exactly one implementation per document c
 
 ## Scope
 Both repositories: the engine crates, the private serve crate, the public tree's scripts and docs-site build, and the workspace scripts. Sites that leave with other bundles (the filesystem server, the eval harness under xtask) are outside it until they do.
+
+## Relationships
+- **GOVERNS**: [[engine:markdown-to-entity-parser]]
+- **MOTIVATED_BY**: [[frontmatter-is-not-markdown-trim-it-before-any-markdown-reader]]
 
 ## Justification
 

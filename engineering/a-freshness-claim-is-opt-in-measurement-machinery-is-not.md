@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:46:41Z
-last_modified: 2026-09-03T12:46:41Z
+last_modified: 2026-09-08T21:08:57Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C6 executing session
@@ -22,6 +22,9 @@ Filed after a grader verified a binding in order to READ it, bumped the freshnes
 - The tradeoff accepted, stated rather than buried: "a bare verify writes nothing into the mem" is still not literally true, because a run with hashes to backfill commits the anchors sidecar. What holds is narrower and honest: it does not move the freshness token, and on a settled mem it writes nothing at all.
 - A caller that wants the baseline current must ask for it; a workflow that never does keeps re-verifying a binding the selection loop sees as never verified. The maintenance recipes therefore pass the flag, and a gate does not.
 - Any future surface that both measures and records must ask, per write, whether it asserts a claim or does the measurement, and gate only the first.
+
+## Relationships
+- **GOVERNS**: [[engine:projection-verify-and-findings-store]]
 
 ## Options
 

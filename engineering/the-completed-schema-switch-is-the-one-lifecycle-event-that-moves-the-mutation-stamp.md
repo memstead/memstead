@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:47:32Z
-last_modified: 2026-09-03T12:47:32Z
+last_modified: 2026-09-08T21:09:02Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C3 executing session
@@ -22,6 +22,10 @@ Entity mutations stamped the config with the engine version and the resolved sch
 - The stamp writer's warnings have no channel on the set-schema outcome and are dropped there; an entity write surfaces them.
 - The overview mem entry carries a last-mutation line for every stamped mem, a small token cost on the cold-start surface accepted for the marker's readability.
 - Any future lifecycle setter that changes what a write validates against must call the stamp writer too.
+
+## Relationships
+- **GOVERNS**: [[engine:mem-schema-pin-migration-surface]]
+- **MOTIVATED_BY**: [[built-in-schema-versions-are-append-only-and-mems-stamp-their-mutating-engine-version]]
 
 ## Options
 

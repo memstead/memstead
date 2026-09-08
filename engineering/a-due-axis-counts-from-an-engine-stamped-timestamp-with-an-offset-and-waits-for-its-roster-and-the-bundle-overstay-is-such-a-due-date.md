@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-05T17:24:10Z
-last_modified: 2026-09-05T17:24:10Z
+last_modified: 2026-09-08T21:08:56Z
 status: accepted
 decided_on: 2026-09-05
 deciders: engine-moves plan (census posture C, 2026-09-04); agent decision under the engine-changes and delegated schema-change rules
@@ -19,3 +19,7 @@ Two workspace scripts guarded the plan-mem lifecycle from outside the engine: on
 
 ## Consequences
 Any schema can declare a deadline relative to an entity's own timestamps and gate it on a roster; the planning schema's six mounted mems declare the overstay reading today and none is overdue. Two scripts and a fixture set retired; the walker lost its step 0 and gained an enforcement-map row naming the grader as the carrier, with the 2026-09-02 evidence-engine cost that had produced the lint. The health include vocabulary grew by due (coverage: advisory, a reading never a verdict), the CLI reference and the MCP tool description name it, and the type-definition meta-schema carries the new due keys. Left open: an engine-side reading of the state the roster gate depends on is only as honest as the members' status fields, which is the planning schema's own discipline.
+
+## Relationships
+- **GOVERNS**: [[engine:due-brief]]
+- **MOTIVATED_BY**: [[a-schema-declares-what-is-due-and-what-would-resolve-an-open-entity-and-health-reads-both]]

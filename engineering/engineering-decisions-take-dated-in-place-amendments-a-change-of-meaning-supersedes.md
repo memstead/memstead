@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T20:10:20Z
-last_modified: 2026-09-02T20:10:20Z
+last_modified: 2026-09-08T21:08:59Z
 status: accepted
 decided_on: 2026-09-02
 deciders: coordinating session (bundle B), implementing agent, operator directive 2026-09-02
@@ -19,6 +19,9 @@ Bundle B plan 3 (2026-09-02). Amendments landed as untraceable in-place edits or
 
 ## Consequences
 A reader of a decision sees its history inside it, dated, and the SUPERSEDES chain carries meaning changes; the bundle close of the same day used the rule to amend the anchors-merge decision in place.
+
+## Relationships
+- **INFORMED_BY**: [[a-built-in-schema-version-is-minted-for-meaning-never-for-spelling]]
 
 ## Options
 

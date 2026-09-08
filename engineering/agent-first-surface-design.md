@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-07-13T16:43:02Z
-last_modified: 2026-08-30T00:33:18Z
+last_modified: 2026-09-08T21:08:39Z
 authority: established
 universality: domain-wide
 tags: agent-first, mcp, surface-design, ergonomics, primary-consumer, wire-surface, engine
@@ -13,7 +13,7 @@ tags: agent-first, mcp, surface-design, ergonomics, primary-consumer, wire-surfa
 The engine's machine-facing surfaces are designed from the primary consumer's perspective first, and that primary consumer is the LLM agent. Formats, tool shapes, parameter names, defaults, and error payloads are evaluated for how an agent reads them, queries with them, and recovers from them — before any human-readability consideration. Human-facing projections (the web app, rendered documentation, mem summaries) are a deliberately separate layer, designed separately for human ergonomics over the same substrate.
 
 ## Scope
-Governs every surface an agent consumes directly: the [[engine--mcp-tool-surface]] (full and lean), the [[engine--schema-describe-projection-surface]] and the relationship vocabulary, the [[engine--typed-error-and-warning-envelope]], and the read/search/entity projections — plus the CLI text. It does NOT govern the human projection layer (the web app's UI, the docs-site rendering, prose summaries), which optimises for human reading on the same files. Two consumer profiles, one shared markdown-in-git substrate.
+Governs every surface an agent consumes directly: the [[engine--mcp-tool-surface]] (corrected 2026-09-08: one server since the one-flavour fold of 2026-09-05; it was full and lean), the [[engine--schema-describe-projection-surface]] and the relationship vocabulary, the [[engine--typed-error-and-warning-envelope]], and the read/search/entity projections — plus the CLI text. It does NOT govern the human projection layer (the web app's UI, the docs-site rendering, prose summaries), which optimises for human reading on the same files. Two consumer profiles, one shared markdown-in-git substrate.
 
 ## Relationships
 - **REFERENCES**: [[engine:mcp-tool-surface]]

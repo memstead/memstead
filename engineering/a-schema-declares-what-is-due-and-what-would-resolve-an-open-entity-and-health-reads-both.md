@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T20:10:21Z
-last_modified: 2026-09-02T20:10:21Z
+last_modified: 2026-09-08T21:08:57Z
 status: accepted
 decided_on: 2026-09-02
 deciders: coordinating session (bundle B), implementing agent, operator directive 2026-09-02
@@ -19,6 +19,10 @@ Bundle B plans 4 and 5 (2026-09-02). The engine could not say what was overdue o
 
 ## Consequences
 A criterion's assertion is its own resolution condition (no status field means open in every entity), so a plan's unchecked criteria enumerate themselves; a milestone past its target date reads overdue with its blockers quoted. The `MEMSTEAD_TODAY` pin and the `--today` flag inject the clock for fixtures.
+
+## Relationships
+- **GOVERNS**: [[engine:due-brief]]
+- **GOVERNS**: [[engine:graph-health-report-surface]]
 
 ## Options
 

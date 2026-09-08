@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T12:41:02Z
-last_modified: 2026-09-02T12:41:02Z
+last_modified: 2026-09-08T21:08:58Z
 status: accepted
 decided_on: 2026-09-02
 deciders: operator (backlog-engine bundle A, go of 2026-09-02), implementing agent
@@ -19,6 +19,10 @@ Before 2026-09-02 an unreadable sidecar degraded to no anchors everywhere except
 
 ## Consequences
 Under `--strict` the condition counts once, through the finding under `--include integrity` and through the axis under `--include anchors`, so a strict run never passes clean over an unmeasured mem. The MCP tool description names `resolves` but not the condition: the payload's `condition` key is self-describing and adding it broke the 2048-byte client cap on descriptions.
+
+## Relationships
+- **GOVERNS**: [[engine:anchors-sidecar-document]]
+- **GOVERNS**: [[engine:standalone-anchor-verification-surface]]
 
 ## Options
 

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:46:41Z
-last_modified: 2026-09-03T12:46:41Z
+last_modified: 2026-09-08T21:08:56Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C10 executing session
@@ -22,6 +22,10 @@ The composer promoted `anchors` into `examined` whenever the axis was included, 
 - The tradeoff accepted: the composer's "rendered this pass, therefore examined" rule is gone. This axis was its only instance, so no behaviour is lost, but a generalisation that appeared to exist did not survive contact with a surface whose verdict is narrower than its render.
 - A reader still needs two commands to police structure and drift. That division is deliberate and now stated in one place instead of contradicted in another.
 - The rule generalises: any surface that renders more than its verdict answers for must file the difference as advisory.
+
+## Relationships
+- **GOVERNS**: [[engine:no-clean-verdict-over-an-unexamined-axis]]
+- **MOTIVATED_BY**: [[a-verdict-surface-files-every-axis-as-examined-advisory-or-not-examined]]
 
 ## Options
 

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T20:10:21Z
-last_modified: 2026-09-02T20:10:21Z
+last_modified: 2026-09-08T21:09:02Z
 status: accepted
 decided_on: 2026-09-02
 deciders: coordinating session (bundle B), implementing agent, operator directive 2026-09-02
@@ -19,6 +19,10 @@ Bundle B plan 7 (2026-09-02). `staleness_threshold_days` ran a second clock besi
 
 ## Consequences
 One reading per entity; the overlay runs on every health call at the cost of one anchor verification per in-scope mem, the same work the anchors axis does. The health clock is pinnable with `MEMSTEAD_TODAY`.
+
+## Relationships
+- **GOVERNS**: [[engine:graph-health-report-surface]]
+- **MOTIVATED_BY**: [[the-anchor-resolution-figure-is-a-type-that-carries-its-population-and-the-anchor-state-vocabulary-is-the-enum-alone]]
 
 ## Options
 

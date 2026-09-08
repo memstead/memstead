@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:03Z
-last_modified: 2026-07-13T16:44:00Z
+last_modified: 2026-09-08T21:08:41Z
 status: accepted
 decided_on: 2026-07-01
 deciders: memstead maintainers
@@ -22,7 +22,7 @@ The open-source launch needed a license for the engine crates, CLI, MCP server, 
 - The Apache-2.0 option's patent grant protects downstream users from patent-litigation risk; the MIT option preserves simplicity for those who want it.
 - Third parties may embed Memstead in their own products, including commercial ones, keeping notices intact — which is the point, since adoption is the moat.
 - Accepted tradeoff: a large distributor could legally bundle the open engine; this residual risk is answered by execution speed and registry/brand ownership, not by the license.
-- The dual-license terms propagate to the published artifacts — crates.io packages and the `@memstead/wasm` npm package both carry `MIT OR Apache-2.0`, as recorded on [[engine--binary-release-and-installer-packaging]].
+- The dual-license terms propagate to the published artifacts — crates.io packages carry `MIT OR Apache-2.0` (corrected 2026-09-08: the `@memstead/wasm` npm package did too until the npm channel closed on 2026-09-05), as recorded on [[engine--binary-release-and-installer-packaging]].
 
 ## Relationships
 - **REFERENCES**: [[open-closed-boundary-runs-by-trust-not-engine-capability]]

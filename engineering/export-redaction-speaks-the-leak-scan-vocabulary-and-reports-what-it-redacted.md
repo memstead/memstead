@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T20:10:20Z
-last_modified: 2026-09-02T20:10:20Z
+last_modified: 2026-09-08T21:09:58Z
 status: accepted
 decided_on: 2026-09-02
 deciders: coordinating session (bundle B), implementing agent, operator directive 2026-09-02
@@ -19,6 +19,9 @@ Bundle B plan 1 (2026-09-02). The memstead.ai seal carried an allowlist line exc
 
 ## Consequences
 One vocabulary, two consumers: the leak scan and the export refuse the same classes, and the seal's allowlist lost its two provenance lines. An archive that redacted something says so in its result rather than passing as clean.
+
+## Relationships
+- **GOVERNS**: [[engine:mem-archive-export-surface]]
 
 ## Options
 

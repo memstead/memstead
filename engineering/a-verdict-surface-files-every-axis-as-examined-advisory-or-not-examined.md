@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:47:32Z
-last_modified: 2026-09-03T12:47:32Z
+last_modified: 2026-09-08T21:08:58Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C2 executing session
@@ -23,6 +23,9 @@ The earlier coverage rule stamped a two-bucket line where not_examined meant 'no
 - Every verdict line carries the advisory field even when empty, so a parser reads one shape on every surface.
 - A new surface must file every axis in one of the three lists or the registry gate fails it.
 - Amended 2026-09-03 by the sibling decision that a coverage line reports the verdict and never the render: this decision's original revisit clause anticipated a surface folding an advisory axis in on request, and named the anchors promotion as the one such case. That promotion has since been removed as the defect it was, so the clause now has no instance.
+
+## Relationships
+- **GOVERNS**: [[engine:no-clean-verdict-over-an-unexamined-axis]]
 
 ## Options
 

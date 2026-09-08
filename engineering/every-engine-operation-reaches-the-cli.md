@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-18T19:34:17Z
-last_modified: 2026-08-18T19:34:17Z
+last_modified: 2026-09-08T21:08:42Z
 authority: established
 universality: domain-wide
 tags: invariant, surface-parity, cli, consumers, engine
@@ -13,7 +13,7 @@ tags: invariant, surface-parity, cli, consumers, engine
 Every operation reachable through the engine SHOULD be reachable via the CLI (`memstead`) in addition to MCP (`memstead-mcp`). An operation exposed on one surface but not the other requires explicit justification — typically that the operation is composition-layer-specific (e.g. CLI-only workspace bootstrap ergonomics, or MCP abstentions recorded in the tool-surface policy).
 
 ## Scope
-Governs the engine's programmatic consumer surfaces: the [[engine--cli-command-surface]] (human/script consumers) alongside the MCP agent contract. Applies whenever a new operation lands on the engine (`memstead-base` / `memstead-engine`). MCP exposure itself is governed separately by [[engineering--mcp-tool-surface-stays-small]] — this principle does not force an MCP tool; it forces the asymmetry to be stated. `fetch`/`pull`/`push` stay deliberately CLI-only (remote contact is a human/script operation).
+Governs the engine's programmatic consumer surfaces: the [[engine--cli-command-surface]] (human/script consumers) alongside the MCP agent contract. Applies whenever a new operation lands on the engine (`memstead-base`; corrected 2026-09-08: `memstead-engine` folded into it on 2026-09-04). MCP exposure itself is governed separately by [[engineering--mcp-tool-surface-stays-small]] — this principle does not force an MCP tool; it forces the asymmetry to be stated. `fetch`/`pull`/`push` stay deliberately CLI-only (remote contact is a human/script operation).
 
 ## Relationships
 - **SUPERSEDES**: [[every-engine-operation-reaches-uniffi-and-cli]]

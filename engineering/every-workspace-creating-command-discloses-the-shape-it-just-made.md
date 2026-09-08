@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-14T21:35:13Z
-last_modified: 2026-08-14T21:35:13Z
+last_modified: 2026-09-08T21:08:43Z
 status: accepted
 decided_on: 2026-08-14
 deciders: operator, implementing agent
@@ -12,7 +12,7 @@ tags: onboarding, workspace-shape, cli, mcp, cold-start, disclosure
 # Every workspace-creating command discloses the shape it just made
 
 ## Decision
-`memstead quickstart`, `memstead init`, and `memstead mem-repo init` each close their success output with the same three-part block: which of the two workspace shapes they just created, at least one concrete thing that shape cannot do, and the exact command that produces the other shape. The block is symmetric — the mem-repo verb states its own cost (a git repository, every mutation a commit) and points at `memstead quickstart`, exactly as the filesystem verbs state the registry refusal and point at `memstead mem-repo init`. One renderer serves all three, and the command it names is feature-gated so a lean binary never advertises a verb it lacks.
+`memstead quickstart`, `memstead init`, and `memstead mem-repo init` each close their success output with the same three-part block: which of the two workspace shapes they just created, at least one concrete thing that shape cannot do, and the exact command that produces the other shape. The block is symmetric — the mem-repo verb states its own cost (a git repository, every mutation a commit) and points at `memstead quickstart`, exactly as the filesystem verbs state the registry refusal and point at `memstead mem-repo init`. One renderer serves all three. Corrected 2026-09-08: the command it names was feature-gated so a lean binary never advertised a verb it lacked; since the one-flavour fold of 2026-09-05 every binary carries the verb and that gate is gone.
 
 Two supporting changes land with it. `memstead-mcp`'s boot line names the shape it actually opened (`boot: filesystem-mem workspace at …` / `boot: mem-repo workspace at …`) instead of naming its build config; the full binary serves both shapes and previously logged `mem-repo` for either. And the shape probe itself becomes one engine primitive — `memstead_base::is_mem_repo_shaped` / `workspace_shape_label` — that the CLI's shape resolution and the MCP boot line both route through, so no surface can name a shape another surface contradicts. See [[engine--workspace-root-discovery-and-shape-detection]].
 

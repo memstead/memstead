@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-05T16:51:55Z
-last_modified: 2026-09-05T16:51:55Z
+last_modified: 2026-09-08T21:09:01Z
 status: accepted
 decided_on: 2026-09-05
 deciders: engine-moves plan (census posture C, 2026-09-04); agent decision under the engine-changes rule
@@ -19,3 +19,7 @@ Every W3 finding of the 2026-08 consistency sweep was a resolution figure that m
 
 ## Consequences
 The two scripts and their manifests retired with their hygiene job. The fidelity report's resolution line leads with the ratio and its population (the bare resolves count that opened it is inside the ratio); the verify-anchors markdown carries the population on the Resolves line instead of a separate Population bullet; the health markdown puts the population in the resolves clause instead of after a dash. JSON shapes are unchanged except for two additive keys on the fidelity report's anchors object (population, fully_adjudicated) and the row state orphaned where unresolvable stood. Rejected: dropping the statement (every W3 finding was a bare figure), and keeping the site list and adding sites as they appear (the list is what kept missing them). Left as a known second name: the summary count key unresolvable and the finding class UnresolvableAnchor for the state the enum calls orphaned; renaming them is a wire change across the health axis, verify-anchors, the open-questions axis and the findings store, a decision of its own.
+
+## Relationships
+- **GOVERNS**: [[engine:anchor-population-a-binding-answers-for]]
+- **GOVERNS**: [[engine:anchor-primitive]]

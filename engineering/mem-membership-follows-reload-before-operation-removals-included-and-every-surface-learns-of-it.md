@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T12:41:03Z
-last_modified: 2026-09-02T12:41:03Z
+last_modified: 2026-09-08T21:09:00Z
 status: accepted
 decided_on: 2026-09-02
 deciders: operator (backlog-engine bundle A, go of 2026-09-02), implementing agent
@@ -19,6 +19,9 @@ Until 2026-09-02 a long-running MCP server or ui-api kept serving a mem another 
 
 ## Consequences
 Two engines on one workspace agree on the roster within one operation of each other. A quarantined-only roster change carries the SSE event but not yet the MCP marker line (observation left open at close). The probe benchmark reads 2.3 times the content-only reload's cost; accepted for correctness.
+
+## Relationships
+- **GOVERNS**: [[engine:reload-before-operation-coherence]]
 
 ## Options
 

@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-27T19:26:52Z
-last_modified: 2026-08-30T00:33:19Z
+last_modified: 2026-09-08T21:08:45Z
 authority: accepted
 universality: domain-wide
 tags: wire-surface, naming, mcp, cli, ui-api, migration, engine
@@ -13,7 +13,7 @@ tags: wire-surface, naming, mcp, cli, ui-api, migration, engine
 One concept carries one field name on every surface that speaks it, inputs and outputs alike; when a name is retired, the old one is refused rather than accepted as a synonym. Testable two ways: a grep for the retired name returns nothing outside history, and a call using it fails with a typed refusal rather than succeeding.
 
 ## Scope
-Every machine-facing surface over the engine: the MCP tools on both flavours, the CLI (flag and batch-payload shapes alike), the private HTTP layer and the contract it generates, and the tool descriptions that teach any of them. Prose and generated docs are in scope because a name that survives only in an example is still a name an agent will copy. Out of scope: values (a `type` field naming an entity type or a content-block kind is a different concept that legitimately owns that word), and history — changelogs, protocols, run captures and superseded plans keep the spelling they were written with.
+Every machine-facing surface over the engine: the MCP tools (corrected 2026-09-08: one server since the one-flavour fold of 2026-09-05), the CLI (flag and batch-payload shapes alike), the private HTTP layer and the contract it generates, and the tool descriptions that teach any of them. Prose and generated docs are in scope because a name that survives only in an example is still a name an agent will copy. Out of scope: values (a `type` field naming an entity type or a content-block kind is a different concept that legitimately owns that word), and history — changelogs, protocols, run captures and superseded plans keep the spelling they were written with.
 
 ## Relationships
 - **REFERENCES**: [[agent-first-surface-design]]

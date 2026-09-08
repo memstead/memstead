@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-15T03:19:33Z
-last_modified: 2026-08-20T07:27:27Z
+last_modified: 2026-09-08T21:08:37Z
 authority: accepted
 universality: domain-wide
 tags: cli, output, shell-quoting, surfaces, instructions, onboarding
@@ -40,7 +40,7 @@ That exemption does NOT extend to a remedy. When a surface tells a reader how to
 
 The extract-and-run guard meets the mention/instruction line in reverse: a remedy that names a bare verb to say it refuses on its own ("`memstead mem init` alone refuses: …") and then gives the full invocation puts both in code spans. A span that is a proper prefix of another extracted span is the mention, not the command — running it proves nothing and fails on missing arguments.
 
-A command may also be named while explicitly disowned: the lean build points at `memstead mem-repo init` while stating in the same sentence that this build does not carry it. That is honest, and the guard recognises the disowning.
+A command may also be named while explicitly disowned: the lean build pointed at `memstead mem-repo init` while stating in the same sentence that that build did not carry it. Corrected 2026-09-08: the lean build left with the one-flavour fold of 2026-09-05; the example is historical, the rule stands for any surface naming a command it does not carry. That is honest, and the guard recognises the disowning.
 
 ## Consequences
 

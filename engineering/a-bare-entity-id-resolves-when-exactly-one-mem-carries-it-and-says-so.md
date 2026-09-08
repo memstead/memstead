@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:46:41Z
-last_modified: 2026-09-03T12:46:41Z
+last_modified: 2026-09-08T21:08:56Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C5 executing session
@@ -22,6 +22,10 @@ Before this rule a bare slug reached the verbs as an id whose mem was the empty 
 - The tradeoff accepted: a bare slug that resolves today can refuse tomorrow when a second mem gains the slug. The announcement says so, and a caller needing a fixed target writes the full id.
 - A bare-slug mutation forces the deferred mems to load, so the first such call on a lazily mounted workspace pays a load it would otherwise defer.
 - Announcing through a warning obliges every response renderer to render warnings; two markdown branches did not, and hid the announcement until they were fixed.
+
+## Relationships
+- **GOVERNS**: [[engine:cli-command-surface]]
+- **GOVERNS**: [[engine:mcp-tool-surface]]
 
 ## Options
 

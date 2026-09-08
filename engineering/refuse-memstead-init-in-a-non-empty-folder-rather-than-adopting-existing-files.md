@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-07-13T16:43:06Z
-last_modified: 2026-07-13T16:44:06Z
+last_modified: 2026-09-08T21:08:48Z
 status: accepted
 decided_on: 2026-05-08
 deciders: memstead-core
@@ -15,7 +15,7 @@ tags: cli, init, filesystem-mem, bootstrap, strict-mode, engine
 We chose strict mode for `memstead init`: a non-empty target folder errors out cleanly (`ensure_empty`), forcing the user to explicitly clear or move files before initialising a filesystem mem — rather than adopting whatever the folder already contains. `memstead init` never silently ingests pre-existing `.md` files into a fresh mem.
 
 ## Context
-`memstead init` bootstraps the lean filesystem-mem product surface ([[engine--cli-command-surface]]): it writes `.memstead/config.json` with the mem name and [[engine--schema]] pin into a folder that becomes the mem root. Folders users run `init` in often already contain markdown — notes, READMEs, exports from other tools. Whatever the folder holds at init time becomes mem content on the next load, parsed against the pinned schema, so the bootstrap posture decides whether unrelated files silently become (probably schema-invalid) entities.
+`memstead init` bootstraps the folder-workspace surface (corrected 2026-09-08: called the lean filesystem-mem surface until the one-flavour fold of 2026-09-05) ([[engine--cli-command-surface]]): it writes `.memstead/config.json` with the mem name and [[engine--schema]] pin into a folder that becomes the mem root. Folders users run `init` in often already contain markdown — notes, READMEs, exports from other tools. Whatever the folder holds at init time becomes mem content on the next load, parsed against the pinned schema, so the bootstrap posture decides whether unrelated files silently become (probably schema-invalid) entities.
 
 ## Consequences
 - A user can never accidentally turn a notes folder into a half-broken mem: the failure is explicit, at init time, before any state is written.

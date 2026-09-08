@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-08-19T04:11:32Z
-last_modified: 2026-08-19T04:11:32Z
+last_modified: 2026-09-08T21:08:38Z
 authority: accepted
 universality: domain-wide
 tags: testing, ci, gates, honesty
@@ -20,7 +20,7 @@ The public engine repo's test surface ([[engine--engine-ci-gate]]): `run-tests.s
 
 ## Justification
 
-Backlog-sweep plan 04 removed four such gates in one pass, each found live: doctests ran in no leg anywhere; the wasm tests — asserting the one published-surface guarantee a consumer cannot check for themselves — had never executed; the docs-site guards could only fail after merge; and a green local run left a silently degraded lean binary at `target/debug/memstead` (two sessions paid a false-negative probe round each). The same pass diagnosed `app-ci`: a lane red on every run for a month, blocking nothing and warning nobody — the docs-drift gate recorded the identical pattern before its enforcement moved to the push boundary. Skipping is permitted only as a LOUD degraded mode that names what was not checked (the node-less docs-guard skip), never as a silent pass.
+Backlog-sweep plan 04 removed four such gates in one pass, each found live: doctests ran in no leg anywhere; the wasm tests — asserting the one published-surface guarantee a consumer cannot check for themselves — had never executed; the docs-site guards could only fail after merge; and a green local run left a silently degraded lean binary at `target/debug/memstead` (two sessions paid a false-negative probe round each; corrected 2026-09-08: the lean binary itself left with the one-flavour fold of 2026-09-05, the lesson stands). The same pass diagnosed `app-ci`: a lane red on every run for a month, blocking nothing and warning nobody — the docs-drift gate recorded the identical pattern before its enforcement moved to the push boundary. Skipping is permitted only as a LOUD degraded mode that names what was not checked (the node-less docs-guard skip), never as a silent pass.
 
 ## Exceptions
 

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T12:41:02Z
-last_modified: 2026-09-02T12:56:37Z
+last_modified: 2026-09-08T21:09:00Z
 status: accepted
 decided_on: 2026-09-02
 deciders: operator (backlog-engine bundle A, go of 2026-09-02), implementing agent
@@ -19,6 +19,10 @@ Until 2026-09-02 the single-mem `push` verb had no route for the schema-and-conf
 
 ## Consequences
 A pushed workspace commit that touched the graph is accompanied by the mem branches it describes, or the push is refused with the exact command to run. The remote holds the schema-and-config ref, so a second machine reconstructs the workspace. Deleting a remote branch stays a human decision: `push --all` never deletes.
+
+## Relationships
+- **GOVERNS**: [[engine:git-transport-and-history-surface]]
+- **MOTIVATED_BY**: [[engine-owns-mem-repo-state]]
 
 ## Options
 

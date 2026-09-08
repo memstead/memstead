@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T12:41:03Z
-last_modified: 2026-09-02T12:41:03Z
+last_modified: 2026-09-08T21:08:57Z
 status: accepted
 decided_on: 2026-09-02
 deciders: operator (backlog-engine bundle A, go of 2026-09-02), implementing agent
@@ -19,6 +19,10 @@ The model-truth campaign (2026-08) found that a mem's health said nothing about 
 
 ## Consequences
 The axis is byte-identical between CLI and MCP (pinned by test). A quiet fixture's type-share signal carries one row per community with a zero share: the signal's shape, not a finding. The unclaimed-file signal carries sizes and no threshold; the remodel skill holds its own (8 kB).
+
+## Relationships
+- **GOVERNS**: [[engine:graph-health-report-surface]]
+- **INFORMED_BY**: [[software050-says-what-a-code-projected-mem-can-hold-and-a-field-declares-the-shape-of-its-values]]
 
 ## Options
 

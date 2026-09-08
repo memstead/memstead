@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:47:32Z
-last_modified: 2026-09-03T12:47:32Z
+last_modified: 2026-09-08T21:08:59Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C4 executing session
@@ -21,6 +21,10 @@ The server instructions promise that the skeleton carries every legality flag ne
 - An agent planning a write from the lite reply sees the pattern a field enforces and which type the schema names as its fallback.
 - A schema declaring neither renders byte-identical to before at both levels.
 - Adding a new legality declaration to the schema language now carries an obligation: project it into the lite allowlist in the same change.
+
+## Relationships
+- **GOVERNS**: [[engine:schema-describe-projection-surface]]
+- **MOTIVATED_BY**: [[the-schema-serves-by-the-types-you-will-write-and-an-oversized-full-reply-steers-instead-of-spilling]]
 
 ## Options
 

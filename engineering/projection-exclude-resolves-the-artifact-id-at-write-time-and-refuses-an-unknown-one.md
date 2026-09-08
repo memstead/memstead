@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T20:10:22Z
-last_modified: 2026-09-02T20:10:22Z
+last_modified: 2026-09-08T21:09:01Z
 status: accepted
 decided_on: 2026-09-02
 deciders: coordinating session (bundle B), implementing agent, operator directive 2026-09-02
@@ -19,6 +19,10 @@ Bundle B plan 11 (2026-09-02). The flagship sync found only the joined form took
 
 ## Consequences
 Exclusion files written before keep working (one canonical spelling); an agent sees the spelling that took effect and, on a typo, the ids it meant.
+
+## Relationships
+- **GOVERNS**: [[engine:projection-verify-and-findings-store]]
+- **MOTIVATED_BY**: [[anchor-artifact-paths-speak-the-source-dialect-and-write-time-resolves-or-refuses]]
 
 ## Options
 

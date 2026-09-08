@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T03:03:02Z
-last_modified: 2026-09-02T03:03:02Z
+last_modified: 2026-09-08T21:08:36Z
 status: accepted
 decided_on: 2026-09-02
 deciders: execute-graph-plan loop, evidence-engine bundle
@@ -38,4 +38,4 @@ The check ledger recorded a verdict, a method note, the entity hash and the call
 
 ## Notes
 
-Landed in the engine's 0.15.0 line: `check.rs` (`CheckFinding`, `RecordKind`, the `finding` field, `resolved_kind` returning `None` for foreign kinds), `record_check_with`, the health checks axis (`findings`, `foreign_kinds`), the CLI `--finding` flag and batch entry field, the `memstead_check` `finding` parameter on both MCP flavours, the changelog and regenerated references. Tests cover the shape validation, the kind grammar, the pre-finding ledger fixture, the foreign kind moving no state, and the conformance pin.
+Landed in the engine's 0.15.0 line: `check.rs` (`CheckFinding`, `RecordKind`, the `finding` field, `resolved_kind` returning `None` for foreign kinds), `record_check_with`, the health checks axis (`findings`, `foreign_kinds`), the CLI `--finding` flag and batch entry field, the `memstead_check` `finding` parameter on the MCP server (corrected 2026-09-08: one server since the one-flavour fold of 2026-09-05), the changelog and regenerated references. Tests cover the shape validation, the kind grammar, the pre-finding ledger fixture, the foreign kind moving no state, and the conformance pin.

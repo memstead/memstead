@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-05T18:25:09Z
-last_modified: 2026-09-05T18:25:09Z
+last_modified: 2026-09-08T21:08:57Z
 status: accepted
 decided_on: 2026-09-05
 deciders: engine-moves plan (census posture C, 2026-09-04); agent decision under the engine-changes rule
@@ -19,3 +19,7 @@ The claims sweep (`scripts/claims-sweep.py`, 364 lines) re-implemented anchor ad
 
 ## Consequences
 The sweep's 54 directives became 31 anchor rows (28 anchored, 3 existence-only) on 16 claims plus 2 declared entity exclusions; `projection verify exec-launch-claims/claims --full --fail-on-findings --fail-on-inconclusive` is the referee, clean on the tip, red when a surface loses its phrase, inconclusive when the observation step is skipped on a fresh sidecar. The claims binding's exclusion ledger is versioned (the advance store's ignore rule carries one negation) because it holds authored decisions the CI verify must read. A recorded url observation ages visibly on every anchor surface but does not expire; whether an observation should have a shelf life is an open question, not decided here. The sweep script itself retires with the bundle's terminal plan.
+
+## Relationships
+- **GOVERNS**: [[engine:preparation-registry]]
+- **MOTIVATED_BY**: [[a-freshness-claim-is-opt-in-measurement-machinery-is-not]]

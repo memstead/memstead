@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-03T12:47:32Z
-last_modified: 2026-09-03T12:47:32Z
+last_modified: 2026-09-08T21:08:59Z
 status: accepted
 decided_on: 2026-09-03
 deciders: backlog-repairs bundle, C1 executing session
@@ -22,6 +22,10 @@ The long-tier fuzzer found an input whose second parse-generate pass dropped two
 - A stored section that ended inside an unclosed HTML block gains one closer line on its first re-save, the same one-round normalisation fence closers already perform.
 - What the parser refuses is unchanged.
 - Any future concatenation site in the engine must call the combined context oracle, not the fence oracle alone.
+
+## Relationships
+- **GOVERNS**: [[engine:markdown-to-entity-parser]]
+- **MOTIVATED_BY**: [[one-commonmark-parser-is-the-referee-for-every-content-reader]]
 
 ## Options
 

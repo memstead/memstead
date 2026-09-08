@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-15T06:14:17Z
-last_modified: 2026-09-05T09:45:33Z
+last_modified: 2026-09-08T21:08:46Z
 status: accepted
 decided_on: 2026-08-15
 deciders: operator, implementing agent
@@ -12,7 +12,7 @@ tags: release, versioning, npm, distribution, compatibility
 # Published libraries ride the engine's version line
 
 ## Decision
-A published library that reads what the engine writes carries the engine's version number. `@memstead/wasm` published at `0.7.0` — matching the engine crate version rather than continuing its own `0.1.x` line — and `release-verify.sh` compares it like every other channel instead of printing it as a bare number under "own track".
+A published library that reads what the engine writes carries the engine's version number. Corrected 2026-09-08: the npm channel closed on 2026-09-05, so the rule binds the crates alone. `@memstead/wasm` published at `0.7.0` — matching the engine crate version rather than continuing its own `0.1.x` line — and `release-verify.sh` compares it like every other channel instead of printing it as a bare number under "own track".
 
 The package README states the rule where an installer will read it: this version is built from that engine generation, and reads the archives that generation's CLI writes. One number answers "will this read my file?".
 

@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-06T00:35:32Z
-last_modified: 2026-09-06T00:35:32Z
+last_modified: 2026-09-08T21:08:58Z
 status: accepted
 decided_on: 2026-09-06
 deciders: reader-walks bundle session 2026-09-06, under the descriptions-and-help-texts plan
@@ -22,6 +22,10 @@ The reader walks of 2026-09-04 found the `memstead_search` description listing e
 - A roster of many hits carries three `null` fields per hit it did not carry before; the bytes are the accepted cost of the stable shape.
 - Adding a new envelope key follows the same rule: always present, described with its null case, never conditional on emptiness.
 - Fields a description does not name (`last_modified`, `sections` on a hit) keep their serde omission; the promise binds what is named.
+
+## Relationships
+- **GOVERNS**: [[engine:typed-error-and-warning-envelope]]
+- **GOVERNS**: [[engine:search-projection-surface]]
 
 ## Options
 

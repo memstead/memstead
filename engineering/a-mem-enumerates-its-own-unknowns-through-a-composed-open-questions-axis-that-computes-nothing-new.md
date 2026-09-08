@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-08-08T21:23:49Z
-last_modified: 2026-08-08T21:23:49Z
+last_modified: 2026-09-08T21:08:38Z
 status: accepted
 decided_on: 2026-08-08
 deciders: operator (agent-trust plan 11)
@@ -12,7 +12,7 @@ tags: health, open-questions, composition, agent-orientation, worklist
 # A mem enumerates its own unknowns through a composed open-questions axis that computes nothing new
 
 ## Decision
-`memstead health --include open_questions` (identical on both MCP flavours and the CLI, one shared composer) serves per mem a worklist of what the holding does not know: its stubs, its never-confirmed (`recheck`) and `unresolvable` anchors, its unsatisfied constraints, its dangling links, and — when a paired process mem resolves for the destination via the ingest-name convention — that process mem's open entries, with negative findings under a DISTINCT `already_searched` heading whose operational meaning is "done, keep off". Binding rules: the axis is COMPOSITION ONLY — no new detection logic, no new stored state; every signal is read from the same source its own axis serves, so the composition can structurally never disagree with the per-signal axes (and the tests assert counts against those axes in the same response, never against fixture constants). Include-gated with byte-unchanged health otherwise; per-kind item cap (20) stated in the output with an explicit `more` remainder — silent truncation is the named anti-pattern; an unresolvable process pairing is stated per mem, never silent and never an error.
+`memstead health --include open_questions` (identical on the MCP server and the CLI, one shared composer; corrected 2026-09-08: one server since the one-flavour fold of 2026-09-05) serves per mem a worklist of what the holding does not know: its stubs, its never-confirmed (`recheck`) and `unresolvable` anchors, its unsatisfied constraints, its dangling links, and — when a paired process mem resolves for the destination via the ingest-name convention — that process mem's open entries, with negative findings under a DISTINCT `already_searched` heading whose operational meaning is "done, keep off". Binding rules: the axis is COMPOSITION ONLY — no new detection logic, no new stored state; every signal is read from the same source its own axis serves, so the composition can structurally never disagree with the per-signal axes (and the tests assert counts against those axes in the same response, never against fixture constants). Include-gated with byte-unchanged health otherwise; per-kind item cap (20) stated in the output with an explicit `more` remainder — silent truncation is the named anti-pattern; an unresolvable process pairing is stated per mem, never silent and never an error.
 
 ## Context
 A fresh agent arriving at a mem asked the operator "what should I work on?" while the engine knew most of the answer — scattered across five axes an agent would have to know to ask for (stub flags, the anchors include, constraint findings, the dangling-links include, and the process-mem entry types behind ingest pairing). Each is a hole the holding knows about itself. Composing them turns a mem into a self-directing work source — "where are your holes" becomes one query — which is the most direct content-level lever the operator-obsolescence directive has. The negative-finding type supplied the already-searched category; flattening it into the todo pile would cause exactly the re-searching it exists to prevent.

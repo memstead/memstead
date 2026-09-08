@@ -1,7 +1,7 @@
 ---
 type: decision
 created_date: 2026-09-02T20:10:21Z
-last_modified: 2026-09-02T20:10:21Z
+last_modified: 2026-09-08T21:09:01Z
 status: accepted
 decided_on: 2026-09-02
 deciders: coordinating session (bundle B), implementing agent, operator directive 2026-09-02
@@ -19,6 +19,9 @@ Bundle B plan 6 (2026-09-02), the storey-2 model-truth findings the operator del
 
 ## Consequences
 The three software mems run on 0.5.0 conformance-clean; the anchors sidecar is modelled as an `engine_state` contract; four frozen specs carry their historical marker in Notes. `value_pattern` is generic, the `version_axes` shape check being its first use.
+
+## Relationships
+- **GOVERNS**: [[engine:schema-constraint-vocabulary]]
 
 ## Options
 
