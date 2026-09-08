@@ -173,6 +173,19 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **The catch-all merge no longer closes an HTML block that the next
+  section closes itself.** Two adjacent non-schema sections, the first
+  ending inside a `<!X` block whose `>` line sits in the second, were
+  merged with a synthesised `>` between them; the second section was then
+  read under a context it never had in the document (a `<!--` inside the
+  block became a live comment, a tilde fence went dead, and a `## ` line
+  the fence had masked surfaced as a heading), so the first parse and the
+  second disagreed and an extra `-->` appeared. A closer is now written
+  between two pieces only when the next piece still reads as exactly one
+  section with it; otherwise the pieces are joined as they stood and the
+  open context is judged again after the next piece. Parse and generate
+  are a fixpoint for this class (fuzz finding, CI run 2026-09-08, corpus
+  member `crash-c9e7bbf7…`).
 - **`memstead search --json` and `memstead list --json` hits carry `origin`.**
   The MCP `memstead_search` envelope stamped the data-origin label
   (`first-party` / `third-party`) on every hit after building the envelope;
