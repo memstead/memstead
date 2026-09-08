@@ -47,3 +47,13 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Astro 7.2 made a new Markdown processor the default and drops the
+      # remark plugin chain astro.config.mjs uses (remark-gfm with
+      # singleTilde off); the docs build fails on the bump (2026-09-08).
+      # Held at 7.0/0.41.3 until the config is migrated to the new
+      # processor; that migration lifts these two lines.
+      - dependency-name: astro
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "@astrojs/starlight"
+        update-types: ["version-update:semver-minor"]
