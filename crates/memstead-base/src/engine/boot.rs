@@ -5059,6 +5059,68 @@ write_rules: []
             .unwrap();
     }
 
+    /// A workspace whose roster file does not exist at boot (the first mem
+    /// is created by another process after this engine started) mounts
+    /// that mem on the next operation, with `MEM_ROSTER_CHANGED` naming it,
+    /// and never needs a restart; the same file unchanged afterwards is
+    /// quiet.
+    #[test]
+    fn roster_file_that_appears_after_boot_mounts_its_mems() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".memstead")).unwrap();
+        std::fs::write(
+            root.join(".memstead").join("workspace.toml"),
+            "format = \"memstead-git-branch-2\"\n\n[persistence_adapter]\nname = \"file-two-layer\"\n",
+        )
+        .unwrap();
+        let mut engine = Engine::from_workspace_root(root).expect("an empty workspace boots");
+        assert!(engine.mem_names().is_empty(), "nothing is mounted at boot");
+        assert!(
+            !root
+                .join(".memstead")
+                .join("state")
+                .join("mounts.json")
+                .exists(),
+            "the fixture has no roster file yet"
+        );
+        assert!(
+            engine.reload_if_stale(None).is_empty(),
+            "no roster, no warning"
+        );
+
+        // Another process creates the first mem: folder plus roster entry.
+        let dir = root.join("alpha");
+        std::fs::create_dir_all(dir.join(".memstead")).unwrap();
+        std::fs::write(
+            dir.join(".memstead").join("config.json"),
+            br#"{"format":1,"schema":"default@1.0.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("one.md"),
+            "---\ntype: spec\ncreated_date: 2026-01-01\nlast_modified: 2026-01-01\nlevel: M0\n---\n# One\n\n## Identity\n\nalpha one\n\n## Purpose\n\nseed\n",
+        )
+        .unwrap();
+        save_roster(root, &[("alpha", &dir)]);
+
+        let warnings = engine.reload_if_stale(None);
+        let (added, removed) = roster_change(&warnings).expect("the first roster is a change");
+        assert_eq!(added, vec!["alpha".to_string()]);
+        assert!(removed.is_empty());
+        assert_eq!(engine.mem_names(), vec!["alpha"]);
+        assert!(
+            engine
+                .get_entity(&crate::EntityId("alpha--one".into()))
+                .is_some(),
+            "the mem's entity is served without a restart"
+        );
+        assert!(
+            engine.reload_if_stale(None).is_empty(),
+            "the unchanged roster is quiet"
+        );
+    }
+
     /// A4 AC1 (engine half): a mem that leaves the roster is gone on the
     /// next operation with `MEM_ROSTER_CHANGED` naming it, its entities are
     /// not searchable, an operation naming it refuses `MEM_UNMOUNTED`; a mem
