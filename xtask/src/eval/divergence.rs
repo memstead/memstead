@@ -36,7 +36,7 @@ pub struct Campaign {
     pub reader_budget_tokens: usize,
     /// The pinned model's list output price in USD per token, recorded in
     /// `campaign.json` (amendment A1). The conversion constant behind
-    /// [`Campaign::budget_usd`] — for `claude-opus-4-8` this is `$25 / 1M =
+    /// the campaign's proportional dollar budget — for `claude-opus-4-8` this is `$25 / 1M =
     /// 0.000025`.
     pub usd_per_output_token: f64,
     pub contamination_threshold: f64,
@@ -111,17 +111,6 @@ impl Campaign {
         in_range(&self.reader_checkpoints, "reader_checkpoints")?;
         in_range(&self.integrity_audit_rounds, "integrity_audit_rounds")?;
         Ok(())
-    }
-
-    /// The dollar budget for a session with `token_allowance` tokens (amendment
-    /// A1): allowances are enforced as proportional cost budgets via
-    /// `claude -p --max-budget-usd`, `budget_usd = allowance_tokens *
-    /// usd_per_output_token` — the pinned model's list output price recorded in
-    /// `campaign.json`. Hurry rounds carry half the token allowance, so they
-    /// receive literally half the budget.
-    #[allow(dead_code)]
-    pub fn budget_usd(&self, token_allowance: usize) -> f64 {
-        token_allowance as f64 * self.usd_per_output_token
     }
 }
 
@@ -392,7 +381,6 @@ fn read_json<T: serde::de::DeserializeOwned>(dir: &Path, name: &str) -> Result<T
 /// and are ignored here.
 ///
 /// Staged ahead of the CLI wiring that feeds it to `run_campaign`.
-#[allow(dead_code)]
 pub fn load_queries(dir: &Path) -> Result<Vec<super::TaskSpec>> {
     #[derive(serde::Deserialize)]
     struct QueryFile {
@@ -432,7 +420,6 @@ pub fn load_queries(dir: &Path) -> Result<Vec<super::TaskSpec>> {
 /// the full ancestry of `last_commit`. kara's history is linear, so this
 /// ancestry range equals the author-date window `slices.json` defines. Staged
 /// ahead of the CLI wiring that feeds it to the round loop.
-#[allow(dead_code)]
 pub fn slice_digest(
     repo: &Path,
     first_commit: &str,
@@ -508,7 +495,6 @@ fn hex(bytes: &[u8]) -> String {
 
 /// Vocabulary-entropy counts over a substrate — a secondary, judge-free metric
 /// (reported, never band-moving). Higher counts mean a richer typed vocabulary.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EntropyCounts {
     /// Distinct frontmatter `type:` values.
@@ -527,7 +513,6 @@ pub struct EntropyCounts {
 /// relationship labels as the ALL-CAPS relation-type tokens in the body (the
 /// typed vocabulary Arm B emits and the untyped Arm A directory does not — so the
 /// count is itself a divergence signal).
-#[allow(dead_code)]
 pub fn vocabulary_entropy(dir: &Path) -> Result<EntropyCounts> {
     use std::collections::BTreeSet;
     let mut types = BTreeSet::new();
@@ -592,7 +577,6 @@ pub const CORPUS_ITEM_DELIM: &str = "<<<ITEM_BOUNDARY>>>";
 /// order the items, never emitted into the corpus, so the auditor cannot infer the
 /// arm from a naming convention. The corpus is tell-stripped by the caller before
 /// it reaches the auditor, exactly as the judge path blinds a reader answer.
-#[allow(dead_code)]
 pub fn read_corpus(dir: &Path) -> Result<(String, usize)> {
     let mut items: Vec<(String, String)> = Vec::new();
     for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
@@ -629,7 +613,6 @@ fn defects_per_100_items(defects: usize, items: usize) -> f64 {
 
 /// The role a session played, for cost attribution in the [`Ledger`]. Staged
 /// with the ledger ahead of the round-loop driver that constructs these.
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Role {
     Writer,
@@ -648,19 +631,16 @@ pub enum Role {
 /// takes an `arm` and a `role`, so no token source can enter the ledger
 /// unattributed.
 ///
-/// Staged ahead of its consumer: the round-loop driver records into this ledger
-/// and checks the cap between sessions. Until that driver lands and the CLI wires
-/// it, the ledger has no production caller, hence `allow(dead_code)`.
+/// The campaign driver records into this ledger and checks the cap between
+/// sessions.
 ///
 /// [`record`]: Ledger::record
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct Ledger {
     cap_tokens: u64,
     charges: Vec<Charge>,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct Charge {
     arm: Arm,
@@ -673,7 +653,6 @@ struct Charge {
     non_cache_tokens: u64,
 }
 
-#[allow(dead_code)]
 impl Ledger {
     pub fn new(cap_tokens: u64) -> Self {
         Self {
@@ -722,15 +701,6 @@ impl Ledger {
         self.charges.iter().map(|c| c.non_cache_tokens).sum()
     }
 
-    /// Every token recorded for one arm.
-    pub fn total_for(&self, arm: Arm) -> u64 {
-        self.charges
-            .iter()
-            .filter(|c| c.arm == arm)
-            .map(|c| c.tokens)
-            .sum()
-    }
-
     /// Tokens recorded for one arm in one role (e.g. Arm B's writer cost, which
     /// includes its refusal-repair retries).
     pub fn total_role(&self, arm: Arm, role: Role) -> u64 {
@@ -739,14 +709,6 @@ impl Ledger {
             .filter(|c| c.arm == arm && c.role == role)
             .map(|c| c.tokens)
             .sum()
-    }
-
-    /// Would recording `next` more non-cache tokens push the running non-cache
-    /// total past the cap? Checked *before* a session so the campaign can abort
-    /// cleanly with its state intact for resume, rather than overspending the cap.
-    /// The cap counts non-cache tokens only (amendment A4).
-    pub fn would_exceed(&self, next: u64) -> bool {
-        self.total_non_cache().saturating_add(next) > self.cap_tokens
     }
 
     /// Refuse once the recorded non-cache total has passed the cap — the
@@ -790,7 +752,6 @@ impl Ledger {
 /// The published, serialisable form of the cost book: totals against the cap and
 /// the per-arm/role breakdown, including Arm B's refusal-repair retries inside
 /// `arm_b_writer`.
-#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct LedgerSummary {
     /// Raw grand total across both arms and all roles (all four token categories).
@@ -817,7 +778,6 @@ pub struct LedgerSummary {
 /// Arm B's writes really crossed the MCP mutation surface; `executed_model` is
 /// the model-pin refusal complement — the driver invalidates the round if the
 /// session ran on a model other than the pin ([`ensure_model_honored`]).
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct WriterOutcome {
     pub tokens: u64,
@@ -830,14 +790,12 @@ pub struct WriterOutcome {
 /// What a reader session produced: the answer text (blinded before the judge
 /// sees it), the tokens spent, the tools called, and the model it ran on
 /// (the model-pin refusal complement, as for [`WriterOutcome`]).
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct ReaderOutcome {
     pub answer: String,
     pub tokens: u64,
     /// The non-cache portion of `tokens` — what the cost cap counts (amendment A4).
     pub non_cache_tokens: u64,
-    pub tool_calls: Vec<String>,
     pub executed_model: String,
 }
 
@@ -845,7 +803,6 @@ pub struct ReaderOutcome {
 /// the model it ran on. `executed_model` carries the model-pin refusal complement
 /// onto the judge session too — a judge that silently ran on an ambient model
 /// invalidates the round ([`ensure_model_honored`]).
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct JudgeOutcome {
     pub score: f64,
@@ -861,7 +818,6 @@ pub struct JudgeOutcome {
 /// 3's refusal complement onto the auditor session too — an auditor that ran on an
 /// ambient model invalidates its trial ([`ensure_model_honored`]) rather than
 /// contributing a silent count.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct AuditOutcome {
     pub duplicates: usize,
@@ -876,7 +832,6 @@ pub struct AuditOutcome {
 /// answer text, the tools it called, the tokens it spent, and the model it ran
 /// on. The real runner maps this onto a [`WriterOutcome`] (tokens + tool calls +
 /// model), a [`ReaderOutcome`] (all four), or a [`JudgeOutcome`].
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionOutput {
     pub text: String,
@@ -906,7 +861,6 @@ pub struct SessionOutput {
 /// `system` and rate-limit events.
 ///
 /// Staged ahead of the real runner that calls it on each session's output.
-#[allow(dead_code)]
 pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
     let mut texts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<String> = Vec::new();
@@ -1048,7 +1002,6 @@ pub fn parse_session(stdout: &str) -> Result<SessionOutput> {
 /// the OS `ARG_MAX` limit (`E2BIG`/"Argument list too long", observed at round 9
 /// where an accumulated corpus / slice digest grew large); stdin has no such limit.
 /// `claude -p` with no positional prompt reads it from stdin (verified 2026-07-15).
-#[allow(dead_code)]
 pub(super) fn base_session_args(model: &str, budget_usd: Option<f64>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
@@ -1076,10 +1029,9 @@ pub(super) fn base_session_args(model: &str, budget_usd: Option<f64>) -> Vec<Str
 /// The pinned `model` is passed explicitly in every case. The
 /// writer allowance is operationalised as `budget_usd` (amendment A1) — a
 /// proportional `--max-budget-usd` cap computed by the caller via
-/// [`Campaign::budget_usd`]; `claude -p` cannot cap a session's output tokens
+/// the campaign's proportional dollar budget; `claude -p` cannot cap a session's output tokens
 /// directly (confirmed 2026-07-14). Pass `None` to omit the cap (the documentary
 /// fallback of amendment A1).
-#[allow(dead_code)]
 fn build_writer_args(
     arm: Arm,
     model: &str,
@@ -1113,8 +1065,7 @@ fn build_writer_args(
 /// Write/Edit); Arm B gets only the memstead *read* tools (overview / search /
 /// entity — never the mutation tools). Pinned `model` explicit, as for writers;
 /// `budget_usd` is the reader's proportional `--max-budget-usd` cap (from the
-/// fixed reader budget via [`Campaign::budget_usd`]), or `None` to omit it.
-#[allow(dead_code)]
+/// fixed reader budget via the campaign's proportional dollar budget), or `None` to omit it.
 fn build_reader_args(
     arm: Arm,
     model: &str,
@@ -1147,7 +1098,6 @@ fn build_reader_args(
 /// markdown directory (Arm A) or a throwaway mem over MCP (Arm B); tests use a
 /// deterministic stub, so the loop, the evidence guard, the ledger, and the cost
 /// cap are all verified without a network call.
-#[allow(dead_code)]
 pub trait DivergenceRunner {
     /// One writer session for `arm`, invoked with the pinned `model` explicitly
     /// and the round's token allowance. The session mutates the
@@ -1184,7 +1134,6 @@ pub trait DivergenceRunner {
 /// this parallel trait. The judge is invoked with the pinned `model` explicitly
 /// and reports the model it ran on in [`JudgeOutcome`], so a judge
 /// that could not honor the pin invalidates its round like any other session.
-#[allow(dead_code)]
 pub trait DivergenceJudge {
     fn score(&self, model: &str, reference: &str, blinded_answer: &str) -> Result<JudgeOutcome>;
 }
@@ -1198,7 +1147,6 @@ pub trait DivergenceJudge {
 /// blind — it is invoked with the pinned `model` explicitly and
 /// reports the model it ran on so a trial that could not honor the pin invalidates
 /// rather than counting as zero.
-#[allow(dead_code)]
 pub trait DivergenceAuditor {
     fn audit(&self, model: &str, auditor_prompt: &str) -> Result<AuditOutcome>;
 }
@@ -1208,7 +1156,6 @@ pub trait DivergenceAuditor {
 /// contributing an ambient-model result. Applied to every writer, reader, and
 /// judge session after it returns, comparing the model it reported running on
 /// (`executed`) against the pin the subprocess was invoked with.
-#[allow(dead_code)]
 fn ensure_model_honored(role: &str, requested: &str, executed: &str) -> Result<()> {
     if executed != requested {
         bail!(
@@ -1222,7 +1169,6 @@ fn ensure_model_honored(role: &str, requested: &str, executed: &str) -> Result<(
 /// mutation call — proof its write crossed the engine's gate rather than touching
 /// disk directly. A round where Arm B wrote without any mutation call is invalid.
 /// Arm A (the tolerant directory) carries no such requirement.
-#[allow(dead_code)]
 pub fn validate_writer_evidence(arm: Arm, tool_calls: &[String]) -> Result<()> {
     if arm == Arm::B {
         let mutated = tool_calls.iter().any(|t| {
@@ -1238,37 +1184,6 @@ pub fn validate_writer_evidence(arm: Arm, tool_calls: &[String]) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Drive every writer round of the campaign: for each round in the schedule, run
-/// one writer session per arm with that round's slice and allowance, validate the
-/// MCP-mutation evidence, record the cost, and check the cap between sessions.
-/// Returns the accumulated ledger (writer costs). The substrates are mutated in
-/// place by the runner; `slices[i]` is round `i+1`'s source content.
-///
-/// Staged ahead of the reader battery and the CLI wiring; the full campaign
-/// driver composes this with the reader checkpoints.
-#[allow(dead_code)]
-pub fn run_writer_rounds<R: DivergenceRunner>(
-    runner: &R,
-    package: &Package,
-    slices: &[String],
-) -> Result<Ledger> {
-    let model = package.single_model()?.to_string();
-    let schedule = package.campaign.schedule();
-    require_slice_count(slices.len(), schedule.len())?;
-    let mut ledger = Ledger::new(package.campaign.cost_cap_tokens);
-    for rp in &schedule {
-        drive_writers(
-            runner,
-            package,
-            &model,
-            rp,
-            &slices[rp.round - 1],
-            &mut ledger,
-        )?;
-    }
-    Ok(ledger)
 }
 
 fn require_slice_count(got: usize, want: usize) -> Result<()> {
@@ -1302,7 +1217,6 @@ fn drive_writers<R: DivergenceRunner>(
 
 /// One reader checkpoint's scored results: per query, `trials` reader sessions per
 /// arm, blinded and judged, aggregated into a signed `B − A` delta per query.
-#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Checkpoint {
     pub round: usize,
@@ -1316,7 +1230,6 @@ pub struct Checkpoint {
 /// so a positive delta means Arm A is dirtier — enforcement kept Arm B cleaner),
 /// mirroring the package's integrity band, and opposite the accuracy checkpoint's
 /// `B − A`. `arm_a_items` / `arm_b_items` publish the normalisation base.
-#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct IntegrityCheckpoint {
     pub round: usize,
@@ -1329,7 +1242,6 @@ pub struct IntegrityCheckpoint {
 /// One round's vocabulary-entropy sample for both arms — the secondary,
 /// judge-free divergence signal, computed from substrate bytes after the round's
 /// writers ran.
-#[allow(dead_code)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RoundEntropy {
     pub round: usize,
@@ -1340,7 +1252,6 @@ pub struct RoundEntropy {
 /// The whole campaign's output: the per-checkpoint scored results, the per-round
 /// entropy series, and the cost ledger. The per-query delta orientation is
 /// `B − A` (engine-gated minus tolerant), matching the package's accuracy band.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct CampaignResult {
     pub checkpoints: Vec<Checkpoint>,
@@ -1357,7 +1268,6 @@ pub struct CampaignResult {
 /// The published, serialisable campaign artifact: the per-checkpoint scored
 /// results, the per-round entropy series, and the cost book. `Ledger` itself is
 /// not serialisable (private fields), so it enters as its [`LedgerSummary`].
-#[allow(dead_code)]
 #[derive(serde::Serialize)]
 pub struct CampaignReport<'a> {
     pub checkpoints: &'a [Checkpoint],
@@ -1368,7 +1278,6 @@ pub struct CampaignReport<'a> {
 
 impl CampaignResult {
     /// The serialisable view of this result.
-    #[allow(dead_code)]
     pub fn report(&self) -> CampaignReport<'_> {
         CampaignReport {
             checkpoints: &self.checkpoints,
@@ -1380,7 +1289,6 @@ impl CampaignResult {
 
     /// Serialise the result to pretty JSON — the campaign artifact plan 03
     /// publishes.
-    #[allow(dead_code)]
     pub fn to_json(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.report())?)
     }
@@ -1390,7 +1298,6 @@ impl CampaignResult {
 /// re-running finished writer rounds. It pins the package by the content hash
 /// recorded at campaign start: a resume against an edited package refuses
 /// (the design-drift refusal complement) rather than silently mixing two designs.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CampaignState {
     pub pinned_hash: String,
@@ -1413,7 +1320,6 @@ pub struct CampaignState {
     charges: Vec<Charge>,
 }
 
-#[allow(dead_code)]
 impl CampaignState {
     fn load(path: &Path) -> Result<Self> {
         serde_json::from_slice(&std::fs::read(path)?)
@@ -1450,7 +1356,6 @@ pub struct PartialReport<'a> {
 /// shape a full run emits, wrapped in the partial marker. No band verdict is
 /// computed here (or anywhere for a partial) — the caller publishes this under a
 /// `partial/` path per the pre-registration.
-#[allow(dead_code)]
 pub fn partial_report_json(state_path: &Path, cap_tokens: u64) -> Result<String> {
     let state = CampaignState::load(state_path)?;
     let ledger = Ledger::from_state(cap_tokens, state.charges);
@@ -1515,7 +1420,6 @@ fn with_retries<T>(label: &str, attempts: usize, mut f: impl FnMut() -> Result<T
 /// returns `Ok(None)` — a clean pause (never an error, never a partial result), safe
 /// because the substrate then reflects exactly the completed rounds. Re-running the
 /// same command resumes. A full completion returns `Ok(Some(result))`.
-#[allow(dead_code)]
 pub fn run_campaign<R: DivergenceRunner, J: DivergenceJudge, A: DivergenceAuditor>(
     runner: &R,
     judge: &J,
@@ -1970,7 +1874,6 @@ impl DivergenceRunner for ClaudeDivergenceRunner {
             answer: out.text,
             tokens: out.tokens,
             non_cache_tokens: out.non_cache_tokens,
-            tool_calls: out.tool_calls,
             executed_model: out.model,
         })
     }
@@ -2408,44 +2311,6 @@ mod tests {
         assert!(!arg_pairs(&rb).get("--allowedTools").unwrap().contains('*'));
     }
 
-    #[test]
-    fn allowance_maps_to_a_proportional_max_budget_usd_flag() {
-        // Amendment A1: the writer allowance is enforced as a proportional
-        // `--max-budget-usd` cap, budget_usd = allowance_tokens * usd_per_output_token.
-        let dir = tmp();
-        write_fixture_package(&dir);
-        let campaign = Package::load(&dir).unwrap().campaign;
-
-        // claude-opus-4-8 output price (0.000025 USD/token) turns the pinned
-        // allowances into $0.20 (full) and $0.10 (hurry) — hurry is literally half.
-        let full = campaign.budget_usd(campaign.writer_allowance_full_tokens);
-        let hurry = campaign.budget_usd(campaign.writer_allowance_hurry_tokens);
-        assert!((full - 0.20).abs() < 1e-9, "full budget: {full}");
-        assert!((hurry - 0.10).abs() < 1e-9, "hurry budget: {hurry}");
-        assert!(
-            (full - 2.0 * hurry).abs() < 1e-9,
-            "hurry is half the full budget"
-        );
-
-        // The flag is emitted only when a budget is supplied; the value is the
-        // dollar figure to four decimals. Both arms carry it identically — it is
-        // not an arm-distinguishing variable.
-        let with = build_writer_args(Arm::A, "m", Some(full), None);
-        assert_eq!(arg_pairs(&with).get("--max-budget-usd").unwrap(), "0.2000");
-        let with_b = build_writer_args(
-            Arm::B,
-            "m",
-            Some(full),
-            Some(std::path::Path::new("/tmp/mem.json")),
-        );
-        assert_eq!(
-            arg_pairs(&with_b).get("--max-budget-usd").unwrap(),
-            "0.2000"
-        );
-        let without = build_writer_args(Arm::A, "m", None, None);
-        assert!(!without.iter().any(|x| x == "--max-budget-usd"));
-    }
-
     /// Build a tiny fixture git repo with three commits touching a changelog, a
     /// JSONL bug ledger, and a source file. Returns the repo dir and the three
     /// commit SHAs (root first). No timestamps reach the digest (the git
@@ -2816,42 +2681,6 @@ not-json-skip-me
     }
 
     #[test]
-    fn ledger_attributes_tokens_by_arm_and_role() {
-        let mut led = Ledger::new(1_000);
-        led.record(Arm::A, Role::Writer, 100, 40);
-        led.record(Arm::B, Role::Writer, 120, 50);
-        // Arm B's refusal-repair retry is charged to Arm B's writer cost.
-        led.record(Arm::B, Role::Writer, 30, 10);
-        led.record(Arm::A, Role::Reader, 50, 20);
-        led.record(Arm::A, Role::Judge, 10, 5);
-
-        assert_eq!(led.total(), 310);
-        // The cap-counted figure is the non-cache sum, always ≤ the raw total.
-        assert_eq!(led.total_non_cache(), 40 + 50 + 10 + 20 + 5);
-        assert_eq!(led.total_for(Arm::B), 150);
-        assert_eq!(led.total_for(Arm::A), 160);
-        assert_eq!(led.total_role(Arm::B, Role::Writer), 150);
-        assert_eq!(led.total_role(Arm::A, Role::Reader), 50);
-        assert_eq!(led.total_role(Arm::A, Role::Auditor), 0);
-    }
-
-    #[test]
-    fn ledger_cost_cap_guards_before_and_after() {
-        let mut led = Ledger::new(1_000);
-        led.record(Arm::A, Role::Writer, 900, 900);
-        // Before a session: a 200-token session would exceed; a 100-token one fits.
-        assert!(led.would_exceed(200));
-        assert!(!led.would_exceed(100));
-        // Still within cap after 900.
-        assert!(led.check_cap().is_ok());
-        // Overspend, then the between-sessions check refuses.
-        led.record(Arm::B, Role::Writer, 200, 200);
-        assert_eq!(led.total(), 1_100);
-        let err = led.check_cap().unwrap_err().to_string();
-        assert!(err.contains("cost cap exceeded"), "{err}");
-    }
-
-    #[test]
     fn with_retries_takes_the_first_success_and_gives_up_after_all_fail() {
         use std::cell::Cell;
         // Fails twice, succeeds on the third attempt → the success is returned and
@@ -2879,34 +2708,6 @@ not-json-skip-me
             err.unwrap_err().to_string().contains("always 3"),
             "last error propagates"
         );
-    }
-
-    #[test]
-    fn cost_cap_counts_non_cache_only() {
-        // Amendment A4: the brake counts fresh input + output, never cache reads —
-        // a session that is almost all cache is cheap in real money and must not
-        // trip a cap sized for real cost.
-        let mut led = Ledger::new(1_000);
-        // Raw 5,000 tokens but only 500 non-cache (the other 4,500 are cache reads).
-        led.record(Arm::A, Role::Writer, 5_000, 500);
-        assert_eq!(led.total(), 5_000, "raw total published as-is");
-        assert_eq!(
-            led.total_non_cache(),
-            500,
-            "cap counts the non-cache portion"
-        );
-        assert!(
-            led.check_cap().is_ok(),
-            "5,000 raw but only 500 non-cache is well under the 1,000 cap"
-        );
-        assert!(!led.would_exceed(400), "500 + 400 = 900 fits");
-        assert!(led.would_exceed(600), "500 + 600 = 1,100 exceeds");
-        // The published summary carries the raw total, the cap-counted non-cache
-        // figure, and the cache split.
-        let s = led.summary();
-        assert_eq!(s.total_tokens, 5_000);
-        assert_eq!(s.non_cache_tokens, 500);
-        assert_eq!(s.cache_tokens, 4_500);
     }
 
     /// A deterministic runner stub. Writers record the (arm, model, allowance) of
@@ -3040,7 +2841,6 @@ not-json-skip-me
                 answer,
                 tokens: self.reader_tokens,
                 non_cache_tokens: self.reader_tokens,
-                tool_calls: vec![],
                 executed_model: self.reported_model(model),
             })
         }
@@ -3216,73 +3016,6 @@ not-json-skip-me
 
     fn ten_slices() -> Vec<String> {
         (1..=10).map(|i| format!("round {i} source")).collect()
-    }
-
-    #[test]
-    fn writer_rounds_drive_both_arms_and_bill_the_ledger() {
-        let dir = tmp();
-        write_fixture_package(&dir);
-        let pkg = Package::load(&dir).unwrap();
-        let runner = StubRunner::new(100);
-        let ledger = run_writer_rounds(&runner, &pkg, &ten_slices()).unwrap();
-
-        // 10 rounds x 2 arms = 20 sessions x 100 tokens.
-        assert_eq!(ledger.total(), 2_000);
-        assert_eq!(ledger.total_role(Arm::B, Role::Writer), 1_000);
-        assert_eq!(ledger.total_role(Arm::A, Role::Writer), 1_000);
-
-        let seen = runner.seen.borrow();
-        assert_eq!(seen.len(), 20);
-        // Every session was invoked with the pinned model.
-        assert!(seen.iter().all(|(_, m, _)| m == "claude-opus-4-8"));
-        // Hurry rounds 3/6/9 carry the 4000 allowance, full rounds 8000.
-        let arm_a_allowances: Vec<usize> = seen
-            .iter()
-            .filter(|(a, _, _)| *a == Arm::A)
-            .map(|(_, _, al)| *al)
-            .collect();
-        assert_eq!(
-            arm_a_allowances,
-            vec![8000, 8000, 4000, 8000, 8000, 4000, 8000, 8000, 4000, 8000]
-        );
-    }
-
-    #[test]
-    fn writer_rounds_refuse_arm_b_without_a_mutation_call() {
-        let dir = tmp();
-        write_fixture_package(&dir);
-        let pkg = Package::load(&dir).unwrap();
-        let mut runner = StubRunner::new(100);
-        runner.arm_b_omits_mutation = true;
-        let err = run_writer_rounds(&runner, &pkg, &ten_slices())
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("did not cross the MCP gate"), "{err}");
-    }
-
-    #[test]
-    fn writer_rounds_abort_on_the_cost_cap() {
-        let dir = tmp();
-        write_fixture_package(&dir);
-        let pkg = Package::load(&dir).unwrap();
-        // Fixture cap is 20,000,000; 11M per session exceeds it within round 1.
-        let runner = StubRunner::new(11_000_000);
-        let err = run_writer_rounds(&runner, &pkg, &ten_slices())
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("cost cap exceeded"), "{err}");
-    }
-
-    #[test]
-    fn writer_rounds_refuse_a_slice_count_mismatch() {
-        let dir = tmp();
-        write_fixture_package(&dir);
-        let pkg = Package::load(&dir).unwrap();
-        let runner = StubRunner::new(100);
-        let err = run_writer_rounds(&runner, &pkg, &["only one".to_string()])
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("expected 10 round slices, got 1"), "{err}");
     }
 
     #[test]
