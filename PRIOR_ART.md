@@ -21,7 +21,7 @@ Listing prior art is also a defensive measure: similarities to other tools in th
 ## Schema validation
 
 - **[JSON Schema](https://json-schema.org)** ([RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259) for the JSON substrate, draft 2020-12 for the schema dialect) — Memstead uses [schemars](https://github.com/GREsau/schemars) to derive JSON Schema from Rust types for MCP tool parameter schemas. The schema-validates-the-data pattern itself is decades old.
-- **[OpenAPI](https://www.openapis.org)** / **[Swagger](https://swagger.io)** — model for declaratively describing HTTP APIs so machine readers can consume them. Memstead uses [utoipa](https://github.com/juhaku/utoipa) for the OpenAPI document of the registry HTTP surface (the private registry server, not part of this repository).
+- **[OpenAPI](https://www.openapis.org)** / **[Swagger](https://swagger.io)** — model for declaratively describing HTTP APIs so machine readers can consume them. The model Memstead's registry HTTP surface follows (the private registry server, not part of this repository).
 - **[Protocol Buffers](https://protobuf.dev)** / **[Cap'n Proto](https://capnproto.org)** — schema-first system design. Memstead's schema-first stance for entities echoes this.
 
 ## AI-agent integration
