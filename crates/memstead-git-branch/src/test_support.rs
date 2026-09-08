@@ -450,8 +450,7 @@ pub fn init_real_mem_repo_from_disk_with_paths(
     // For each mem, lift the schema pin from `<mem_dir>/.memstead/config.json`
     // (the same source the just-written `__SYSTEM` blob used). When the
     // file is missing or the field is absent we fall back to the
-    // sentinel "default" pin — matches the pre-deletion `LegacyProStore`
-    // behaviour and keeps the test surface stable.
+    // sentinel "default" pin, which keeps the test surface stable.
     let owned: Vec<(String, String, String)> = mems
         .iter()
         .map(|(mem_dir, leaf, full)| {

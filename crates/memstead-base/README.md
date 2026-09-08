@@ -24,10 +24,8 @@ orchestrators and the workspace-policy writer. One layer builds on it:
 
 ## Features
 
-- `tokio` — opt-in broadcast adapter (`subscribe_mem_changes_broadcast`)
+- `tokio`: opt-in broadcast adapter (`subscribe_mem_changes_broadcast`)
   for axum-style consumers; the core callback API stays runtime-agnostic.
-- `file-watcher` — cross-process `MemChangedEvent`s via `watch_mem_repo`
-  for consumers that don't share the writer's `Engine` instance.
 
 On `wasm32` targets the tantivy-backed search index is compiled out and
 `Engine::search` returns a typed `SearchUnavailable` refusal, keeping the

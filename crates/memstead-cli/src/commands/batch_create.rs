@@ -83,6 +83,7 @@ struct EntryPayload {
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
+    // Accepted on the wire for parity with update payloads; a create has no hash to check.
     #[allow(dead_code)]
     expected_hash: Option<String>,
 }

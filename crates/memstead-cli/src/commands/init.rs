@@ -57,9 +57,9 @@ pub struct InitArgs {
     pub name: String,
 
     /// Schema pin in exact `<name>@<version>` form (e.g.
-    /// `default@1.3.0`). Bare-name pins are rejected. filesystem-mem v1
-    /// resolves against the engine's builtin schema set;
-    /// registry-resolved schemas land in a follow-up.
+    /// `default@1.3.0`). Bare-name pins are rejected. The pin resolves
+    /// against the engine's built-in schemas and the schemas installed
+    /// in the workspace.
     #[arg(long)]
     pub schema: String,
 }

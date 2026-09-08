@@ -36,6 +36,7 @@ pub struct ApiErrorBody {
 /// Outcome of a successful `/api/publish` POST.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PublishResponse {
+    // Wire field the server sends; deserialised for shape fidelity, not read.
     #[allow(dead_code)]
     pub ok: bool,
     pub scope: String,
@@ -178,6 +179,7 @@ pub fn publish(
 /// Outcome of a successful `DELETE /api/mem/<scope>/<name>`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UnpublishResponse {
+    // Wire field the server sends; deserialised for shape fidelity, not read.
     #[allow(dead_code)]
     pub ok: bool,
     pub scope: String,
@@ -265,6 +267,7 @@ pub fn admin_takedown(
 #[cfg(feature = "registry-ops")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct DenylistResponse {
+    // Wire field the server sends; deserialised for shape fidelity, not read.
     #[allow(dead_code)]
     pub ok: bool,
     pub content_sha256: String,

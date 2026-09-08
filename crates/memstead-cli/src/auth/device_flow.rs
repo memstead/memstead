@@ -72,12 +72,14 @@ enum TokenResponse {
         #[serde(default)]
         scope: String,
         #[serde(default)]
+        // Wire field the server sends; deserialised for shape fidelity, not read.
         #[allow(dead_code)]
         token_type: String,
     },
     Error {
         error: String,
         #[serde(default)]
+        // Wire field the server sends; deserialised for shape fidelity, not read.
         #[allow(dead_code)]
         error_description: String,
     },

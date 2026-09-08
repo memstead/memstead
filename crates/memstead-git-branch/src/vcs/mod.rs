@@ -63,7 +63,9 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+#[cfg(test)]
+use std::sync::MutexGuard;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use gix::objs::tree::EntryKind;
 
@@ -146,7 +148,7 @@ pub(crate) fn acquire_branch_mutex(ref_name: &str) -> Arc<Mutex<()>> {
 /// storage; in debug builds it also pops the held-keys bookkeeping on
 /// drop. The 'static `MutexGuard` lifetime is sound because the `Arc`
 /// keeps the inner `Mutex` alive for the guard's full lifetime.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) struct BranchMutexGuard {
     // SAFETY-via-construction: `_arc` outlives `_guard`; the guard's
     // `Mutex<()>` is reachable via the Arc, and the Arc is held by the
@@ -158,6 +160,7 @@ pub(crate) struct BranchMutexGuard {
 }
 
 #[cfg(debug_assertions)]
+#[cfg(test)]
 impl Drop for BranchMutexGuard {
     fn drop(&mut self) {
         HELD_BRANCH_KEYS.with(|held| {
@@ -178,7 +181,7 @@ impl Drop for BranchMutexGuard {
 /// Holding the returned `Vec` keeps every branch locked; dropping it
 /// releases every guard. Order is guaranteed deterministic regardless
 /// of input order.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn acquire_branch_mutexes_in_order(refs: &[&str]) -> Vec<BranchMutexGuard> {
     let mut sorted: Vec<&str> = refs.to_vec();
     sorted.sort_unstable();
