@@ -389,12 +389,39 @@ pub enum AdvanceError {
         /// the slice DID present. The remedy — never an acceptance.
         suggestions: Vec<(String, String)>,
     },
+    /// A `worked` disposition (explicit or auto-derived) names an artifact
+    /// whose anchor rows on the destination mem still resolve `drifted`:
+    /// the sidecar says the entities describe an older version of the
+    /// artifact than the one the pass presents, so "worked" would advance
+    /// the baseline over a lie. Refused atomically before any write; the
+    /// remedy is to re-pin (or rewrite) every named entity's anchor on the
+    /// artifact, in the same update call that repairs its claims.
+    #[error(
+        "{} worked artifact(s) still carry drifted anchor rows on the destination mem: {}; \
+         re-pin the named entities' anchors (or rewrite their claims) before disposing the \
+         artifact as worked",
+        artifacts.len(),
+        fmt_drifted(artifacts)
+    )]
+    AnchorsStillDrifted {
+        /// Each offending artifact with the entity ids whose rows drift (sorted).
+        artifacts: Vec<(String, Vec<String>)>,
+    },
     /// Reading or writing the durable advance store failed.
     #[error("advance store error: {0}")]
     Store(#[source] StoreError),
     /// The `set_mem_sync_state` baseline write failed on completion.
     #[error("could not advance baseline token: {0}")]
     Engine(String),
+}
+
+/// Render `artifact (entity, entity)` pairs for the drifted-anchors refusal.
+fn fmt_drifted(items: &[(String, Vec<String>)]) -> String {
+    items
+        .iter()
+        .map(|(art, ents)| format!("{art} ({})", ents.join(", ")))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Render an id list for an error message: `a, b, c` or `(none)`.
@@ -719,6 +746,19 @@ pub fn advance_baseline(
         state.dispositions.insert(art, "worked".to_string());
     }
 
+    // Gate two (atomic, before any write): a `worked` artifact whose anchor
+    // rows on the destination mem still resolve `drifted` is not worked. The
+    // rows say the entities describe the artifact as it was before this
+    // slice; advancing over them would record the change as absorbed while
+    // the sidecar keeps the old hash, which is exactly how a graph-health
+    // lane later reports drift for a change the sync had "absorbed"
+    // (measured 2026-09-09 on the flagship binding: two of sixteen rows
+    // re-pinned, the baseline advanced, fourteen rows left drifted).
+    let drifted = drifted_worked_artifacts(engine, resolved, &state.dispositions, &printed);
+    if !drifted.is_empty() {
+        return Err(AdvanceError::AnchorsStillDrifted { artifacts: drifted });
+    }
+
     // Re-present the remainder (disposed absent).
     let remainder = subtract_disposed(&state.frozen_slice, &state.dispositions);
     let pending = remainder.added.len() + remainder.modified.len() + remainder.deleted.len();
@@ -776,6 +816,54 @@ pub fn advance_baseline(
         tokens_written,
         warnings,
     })
+}
+
+/// The `worked` artifacts among `dispositions` (restricted to the presented
+/// slice) that still have at least one anchor row on the destination mem
+/// resolving [`crate::anchor::AnchorState::Drifted`], each with the entity ids
+/// whose rows drift. One sidecar read and one observation pass per call; a
+/// unit id (`<path>#<key>`) matches rows over exactly that unit, a file id any
+/// row referencing the path, mirroring the auto-`worked` rule.
+fn drifted_worked_artifacts(
+    engine: &Engine,
+    resolved: &ResolvedIngest,
+    dispositions: &BTreeMap<String, String>,
+    printed: &BTreeSet<String>,
+) -> Vec<(String, Vec<String>)> {
+    let worked: Vec<&String> = dispositions
+        .iter()
+        .filter(|(art, verdict)| verdict.as_str() == "worked" && printed.contains(art.as_str()))
+        .map(|(art, _)| art)
+        .collect();
+    if worked.is_empty() {
+        return Vec::new();
+    }
+    let dest = resolved.destination_mem.as_str();
+    let supplied = crate::engine::query::SuppliedObservations::default();
+    let states: BTreeMap<(String, String), Option<crate::anchor::AnchorState>> = engine
+        .mem_anchors_resolved_with(dest, &supplied)
+        .into_iter()
+        .map(|(eid, r)| ((eid.to_string(), r.anchor.artifact.clone()), r.state))
+        .collect();
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for art in worked {
+        let (base, key) = crate::preparation::split_unit_id(art);
+        let mut entities: BTreeSet<String> = BTreeSet::new();
+        for (eid, a) in engine.anchors_referencing_artifact(base) {
+            if eid.mem() != dest || !(key.is_none() || a.artifact == *art) {
+                continue;
+            }
+            if let Some(Some(crate::anchor::AnchorState::Drifted)) =
+                states.get(&(eid.to_string(), a.artifact.clone()))
+            {
+                entities.insert(eid.to_string());
+            }
+        }
+        if !entities.is_empty() {
+            out.push((art.clone(), entities.into_iter().collect()));
+        }
+    }
+    out
 }
 
 /// The outcome of a [`record_exclusions`] call.
@@ -1860,7 +1948,7 @@ mod tests {
                             artifact: Some("f.rs".to_string()),
                             grain: Some("file".to_string()),
                             class: Some("anchored".to_string()),
-                            hash: Some("h".to_string()),
+                            content: Some("fn f() {}".to_string()),
                             hash_stability: Some("stable".to_string()),
                             source: Some("source-tree".to_string()),
                             ..Default::default()
@@ -1924,11 +2012,13 @@ mod tests {
         // An anchored write into the destination mem `engine`: entity
         // `covers-a` file-anchors `a.rs` (inside the slice) AND `zzz.rs`
         // (outside it — must fabricate nothing).
-        let make_anchor = |artifact: &str| crate::anchor::AnchorInput {
+        // Pin the true prepared-content hash (the engine computes it from
+        // `content`): a fake hash would read as drifted and trip gate two.
+        let make_anchor = |artifact: &str, content: &str| crate::anchor::AnchorInput {
             artifact: Some(artifact.to_string()),
             grain: Some("file".to_string()),
             class: Some("anchored".to_string()),
-            hash: Some("h".to_string()),
+            content: Some(content.to_string()),
             hash_stability: Some("stable".to_string()),
             ..Default::default()
         };
@@ -1946,7 +2036,7 @@ mod tests {
                         sections,
                         metadata: IndexMap::new(),
                         relations: Vec::new(),
-                        anchors: vec![make_anchor("a.rs"), make_anchor("zzz.rs")],
+                        anchors: vec![make_anchor("a.rs", "one"), make_anchor("zzz.rs", "")],
                         dry_run: false,
                     },
                     Actor::Agent,
@@ -1991,6 +2081,127 @@ mod tests {
                 "still only a.rs auto-worked; c.rs unanchored"
             );
             assert!(!out.completed);
+        }
+    }
+
+    /// Gate two: a `worked` disposition on an artifact whose anchor rows on
+    /// the destination mem still resolve `drifted` refuses atomically (the
+    /// store stays absent), naming the artifact and the entities; once the
+    /// rows are re-pinned to the current content the same advance completes.
+    /// Pins the 2026-09-09 flagship case: the change absorbed in prose, the
+    /// sidecar left on the old hash, the baseline advanced over it.
+    #[test]
+    fn advance_refuses_a_worked_artifact_whose_anchor_rows_still_drift() {
+        use crate::vcs::Actor;
+        use indexmap::IndexMap;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("a.rs"), "one").unwrap();
+        git(root, &["add", "a.rs"]);
+        git(root, &["commit", "-qm", "head1"]);
+        let head1 = head_sha(root);
+        let resolved = resolved_engine_graph();
+
+        // The entity anchors a.rs at its head1 content; `#synced` sits at head1.
+        let anchor = |content: &str| crate::anchor::AnchorInput {
+            artifact: Some("a.rs".to_string()),
+            grain: Some("file".to_string()),
+            class: Some("anchored".to_string()),
+            content: Some(content.to_string()),
+            hash_stability: Some("stable".to_string()),
+            ..Default::default()
+        };
+        let mut sections = IndexMap::new();
+        sections.insert("identity".to_string(), "Covers a.".to_string());
+        sections.insert("purpose".to_string(), "Track a.rs.".to_string());
+        {
+            let mut engine = engine_at(root);
+            engine
+                .create_entity(
+                    crate::CreateEntityArgs {
+                        mem: "engine".to_string(),
+                        title: "Covers A".to_string(),
+                        entity_type: "spec".to_string(),
+                        sections,
+                        metadata: IndexMap::new(),
+                        relations: Vec::new(),
+                        anchors: vec![anchor("one")],
+                        dry_run: false,
+                    },
+                    Actor::Agent,
+                    None,
+                    Some("anchored write"),
+                )
+                .unwrap();
+            engine
+                .set_mem_sync_state("engine", synced_key(), &head1, None)
+                .unwrap();
+        }
+
+        // head2 changes a.rs: the slice presents it as modified, the row drifts.
+        std::fs::write(root.join("a.rs"), "two").unwrap();
+        git(root, &["add", "a.rs"]);
+        git(root, &["commit", "-qm", "head2"]);
+
+        {
+            let mut engine = engine_at(root);
+            engine.set_workspace_root(root.to_path_buf());
+            let err = advance_baseline(&mut engine, root, &resolved, &input(&[("a.rs", "worked")]))
+                .expect_err("a worked artifact with a drifted row is refused");
+            match err {
+                AdvanceError::AnchorsStillDrifted { artifacts } => {
+                    assert_eq!(
+                        artifacts,
+                        vec![("a.rs".to_string(), vec!["engine--covers-a".to_string()])]
+                    );
+                }
+                other => panic!("expected AnchorsStillDrifted, got {other:?}"),
+            }
+            assert!(
+                read_advance_store(root, "engine", "graph")
+                    .unwrap()
+                    .is_none(),
+                "a refused advance leaves no store behind"
+            );
+            // Auto-derivation is gated the same way: with no explicit
+            // disposition the anchored artifact would be auto-worked, and the
+            // drifted row refuses that too.
+            let err = advance_baseline(&mut engine, root, &resolved, &BTreeMap::new())
+                .expect_err("auto-worked over a drifted row is refused");
+            assert!(matches!(err, AdvanceError::AnchorsStillDrifted { .. }));
+        }
+
+        // Re-pin the row to the current content: the same advance completes.
+        {
+            let mut engine = engine_at(root);
+            engine.set_workspace_root(root.to_path_buf());
+            engine
+                .update_entity(
+                    crate::UpdateEntityArgs {
+                        id: crate::EntityId("engine--covers-a".into()),
+                        expected_hash: None,
+                        sections: IndexMap::new(),
+                        append_sections: IndexMap::new(),
+                        patch_sections: IndexMap::new(),
+                        sections_unset: Vec::new(),
+                        metadata: IndexMap::new(),
+                        metadata_unset: Vec::new(),
+                        dry_run: false,
+                        declare_relations: Vec::new(),
+                        anchors: vec![anchor("two")],
+                        relations_unset: Vec::new(),
+                        anchors_unset: Vec::new(),
+                    },
+                    Actor::Agent,
+                    None,
+                    Some("re-pin"),
+                )
+                .unwrap();
+            let out = advance_baseline(&mut engine, root, &resolved, &input(&[("a.rs", "worked")]))
+                .expect("re-pinned rows admit the worked disposition");
+            assert!(out.completed, "{out:?}");
         }
     }
 

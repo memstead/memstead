@@ -7,6 +7,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **`projection advance` refuses a `worked` artifact whose anchor rows still
+  drift.** A pass could repair some of the entities anchored to a changed
+  artifact, dispose it as worked (explicitly or through the auto-derivation
+  from a fresh anchored write) and advance the baseline while the other
+  rows on the destination mem kept the pre-change hash; the graph-health
+  lane then reported drift for a change the sync had recorded as absorbed
+  (measured 2026-09-09 on the flagship binding: two of sixteen README rows
+  re-pinned, fourteen left). The advance gate now resolves the destination
+  mem's anchors once per call and refuses, atomically before any write,
+  with `PROJECTION_ADVANCE_ANCHORS_DRIFTED` naming each artifact and the
+  entities whose rows drift; re-pinning those rows (or rewriting the claim)
+  admits the disposition.
+
 ## [0.19.0] - 2026-09-09
 
 ### Added

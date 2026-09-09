@@ -4357,14 +4357,18 @@ fn graph_binding_over_a_git_backed_source_pins_token_slice_and_baseline() {
     );
 
     // (4) ADVANCE: disposing the whole slice completes the pass and writes the
-    //     baseline forward to the source's new head.
+    //     baseline forward to the source's new head. The mirror entity's anchor
+    //     on `srcmem--alpha` still carries the pre-change hash (this leg never
+    //     re-anchored it), so `worked` would be refused by the drifted-anchor
+    //     gate; `skipped` is the honest verdict for a pass that judged the
+    //     change and left the claim alone.
     let env: Value = serde_json::from_slice(&run(&[
         "--json",
         "projection",
         "advance",
         "dest/mirror",
         "--dispositions",
-        r#"{"srcmem--alpha": "worked"}"#,
+        r#"{"srcmem--alpha": "skipped"}"#,
     ]))
     .unwrap();
     assert_eq!(

@@ -141,10 +141,12 @@ pub enum ProjectionCommand {
     /// are durable (`.memstead/state/advance/`), so a partial pass resumes
     /// across process restarts. The gate accepts **only** artifact ids the
     /// engine presented — an unknown id refuses the whole call atomically
-    /// (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`). The agent supplies a
-    /// disposition for every artifact the brief presented; an artifact whose
-    /// anchors all resolve and that no entity mentions is disposed by its
-    /// anchors.
+    /// (`PROJECTION_ADVANCE_UNKNOWN_ARTIFACT`), and a `worked` artifact whose
+    /// anchor rows on the destination mem still drift refuses the same way
+    /// (`PROJECTION_ADVANCE_ANCHORS_DRIFTED`): the rows are re-pinned first.
+    /// The agent supplies a disposition for every artifact the brief
+    /// presented; an artifact whose anchors all resolve and that no entity
+    /// mentions is disposed by its anchors.
     Advance(AdvanceArgs),
     /// Declare authored **exclusions** for in-scope source artifacts. Unlike
     /// `advance` (whose gate accepts only artifacts in the changed slice), this
@@ -1700,6 +1702,25 @@ fn map_advance_err(binding_id: &str, err: AdvanceError) -> CliError {
                 "binding": binding_id,
                 "unknown_artifacts": artifacts,
                 "corrected_artifacts": corrected,
+            }))
+        }
+        AdvanceError::AnchorsStillDrifted { artifacts } => {
+            // The machine-readable half: artifact -> the entities whose rows
+            // still carry the pre-change hash, so the agent knows exactly
+            // which anchors to re-pin before disposing the artifact again.
+            let drifted: serde_json::Map<String, serde_json::Value> = artifacts
+                .iter()
+                .map(|(art, ents)| (art.clone(), serde_json::json!(ents)))
+                .collect();
+            CliError::new(
+                ExitKind::Validation,
+                "PROJECTION_ADVANCE_ANCHORS_DRIFTED",
+                message,
+            )
+            .with_details(json!({
+                "binding": binding_id,
+                "drifted": drifted,
+                "remedy": "re-pin each named entity's anchor on the artifact (anchors_unset the row and write it fresh in the same update, or supply the current content) or rewrite the claim, then advance again",
             }))
         }
         AdvanceError::Store(_) | AdvanceError::Engine(_) => {
