@@ -1,7 +1,7 @@
 ---
 type: principle
 created_date: 2026-09-05T16:00:34Z
-last_modified: 2026-09-08T21:09:00Z
+last_modified: 2026-09-09T00:07:00Z
 authority: proposed
 universality: contextual
 tags: frontmatter, parser, core, scripts
@@ -13,7 +13,7 @@ tags: frontmatter, parser, core, scripts
 The frontmatter delimiter contract has exactly one implementation per document contract. Entity frontmatter (schema-validated, the engine's) is split by memstead-base's core alone: split_frontmatter_core with its Frontmatter verdict, and the borrowed views frontmatter_parts and body_after_frontmatter, exported at the crate root so every Rust reader in either tree calls it, and a workspace script that needs an entity's fields reads the CLI's JSON output rather than a file. Non-entity frontmatter (a skill's SKILL.md, a generated docs page: a YAML block, no schema) has one helper in the public tree's scripts, frontmatter.mjs, with a reader, a writer and a command line for shell callers, and its own tests. Nothing else in either repository tests a document's first line for a fence or searches a document for one.
 
 ## Scope
-Both repositories: the engine crates, the private serve crate, the public tree's scripts and docs-site build, and the workspace scripts. Sites that leave with other bundles (the filesystem server, the eval harness under xtask) are outside it until they do.
+Both repositories: the engine crates, the private serve crate, the public tree's scripts and docs-site build, and the workspace scripts. The eval harness under xtask is outside it until it leaves (corrected 2026-09-08: the filesystem server this sentence also named was deleted on 2026-09-05).
 
 ## Relationships
 - **GOVERNS**: [[engine:markdown-to-entity-parser]]
